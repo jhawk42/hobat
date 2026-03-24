@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Thread Network Topology</title>
+
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+    <style type="text/css">
+      #mynetwork {
+        width: 100%;
+        height: 80vh;
+        border: 1px solid lightgray;
+      }
+
+      body {
+        margin: 0;
+        font-family: sans-serif;
+      }
+
+      .page {
+        padding: 12px;
+      }
+
+      h1 {
+        margin: 0 0 12px 0;
+        font-size: 18px;
+      }
+
+      #status {
+        margin-bottom: 8px;
+        color: #555;
+        font-size: 14px;
+      }
+
+      .controls {
+        margin-bottom: 8px;
+      }
+
+      .main-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 12px;
+        align-items: start;
+      }
+
+      #node-filter {
+        padding: 4px 6px;
+        font-size: 14px;
+      }
+
+      #diagnostic-filter {
+        margin-left: 10px;
+        padding: 4px 6px;
+        font-size: 14px;
+      }
+
+      #details {
+        margin-top: 0;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        padding: 10px;
+        background: #fafafa;
+        max-height: 80vh;
+        overflow: auto;
+      }
+
+      #details h2 {
+        margin: 0 0 8px 0;
+        font-size: 16px;
+      }
+
+      #details-list {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      #details-list li {
+        margin: 3px 0;
+      }
+
+      @media (max-width: 1000px) {
+        .main-layout {
+          grid-template-columns: 1fr;
+        }
+
+        #details {
+          margin-top: 12px;
+          max-height: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="page">
+      <h1>Thread Network Topology: MeshDiag, NetworkDiagnostic</h1>
+      <div class="controls">
+        <label for="node-filter">Node Filter:</label>
+        <select id="node-filter">
+          <option value="all">All Nodes</option>
+          <option value="border-routers">Border Routers (rloc16 ends with 00, br=true)</option>
+          <option value="main-routers">Main Routers (rloc16 ends with 00)</option>
+          <option value="routers-with-children">Routers with Children Nodes</option>
+          <option value="routers-without-children">Routers without Children Nodes</option>
+        </select>
+
+        <label for="diagnostic-filter">Diagnostic Filter:</label>
+        <select id="diagnostic-filter">
+          <option value="all">All Nodes</option>
+          <option value="medium-discard-error">Medium Discard and Error Packets (>= 15%)</option>
+        </select>
+      </div>
+      <div id="status">Loading topology...</div>
+      <div class="main-layout">
+        <div id="mynetwork"></div>
+        <div id="details">
+          <h2>Node Details</h2>
+          <ul id="details-list">
+            <li>Click a node to view its properties.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    function toText(value) {
+      return value === undefined || value === null ? '' : String(value).trim();
+    }
+
+    function chooseNodeId(node, fallbackPrefix, index) {
+      const rloc16 = toText(node.rloc16);
+      if (rloc16) {
+        return rloc16;
+      }
+
+      const idField = toText(node.id);
+      if (idField) {
+        return idField;
+      }
+
+      const extAddr = toText(node.ext_addr);
+      if (extAddr) {
+        return extAddr;
+      }
+
+      return `${fallbackPrefix}-${index}`;
+    }
+
+    function buildLabel(node, resolvedId) {
+      const nodeName = toText(node.node_name) || 'Unknown node';
+      const rloc16 = toText(node.rloc16) || 'rloc16:n/a';
+      const idField = toText(node.id) || resolvedId;
+      // return `${nodeName}\n${rloc16}\nid:${idField}`;
+      return `${nodeName}\n${rloc16}`;
+    }
+
+    function isUnknownNodeName(nodeName) {
+      return toText(nodeName).toLowerCase().startsWith('unknown');
+    }
+
+    function formatValue(value) {
+      if (Array.isArray(value)) {
+        return value.length === 0 ? '[]' : value.join(', ');
+      }
+
+      if (typeof value === 'boolean') {
+        return value ? 'true' : 'false';
+      }
+
+      return toText(value) || 'n/a';
+    }
+
+    function addEdge(edgeMap, edgeData, from, to, style) {
+      if (!from || !to || from === to) {
+        return;
+      }
+
+      const key = [from, to].sort().join('|');
+      const existingEdge = edgeMap.get(key);
+      if (existingEdge) {
+        if (Number.isFinite(style.width)) {
+          existingEdge.width = Math.max(existingEdge.width || 0, style.width);
+        }
+        return;
+      }
+
+      const edge = { from, to, ...style };
+      edge.id = key;
+      edge.baseHidden = style.hidden === true;
+      edgeMap.set(key, edge);
+      edgeData.push(edge);
+    }
+
+    async function fetchJson(path) {
+      const response = await fetch(path);
+      if (!response.ok) {
+        throw new Error(`${path} returned HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    async function loadAndRenderTopology() {
+      const container = document.getElementById('mynetwork');
+      const status = document.getElementById('status');
+      const detailsList = document.getElementById('details-list');
+      const nodeFilter = document.getElementById('node-filter');
+      const diagnosticFilter = document.getElementById('diagnostic-filter');
+
+      try {
+        const [meshResult, ndResult] = await Promise.allSettled([
+          fetchJson('./thread-meshdiag-topology.json'),
+          fetchJson('./thread-networkdiagnostic-topology.json')
+        ]);
+
+        const meshdiag = meshResult.status === 'fulfilled' && Array.isArray(meshResult.value)
+          ? meshResult.value
+          : [];
+        const networkDiag = ndResult.status === 'fulfilled' && Array.isArray(ndResult.value)
+          ? ndResult.value
+          : [];
+
+        if (meshdiag.length === 0 && networkDiag.length === 0) {
+          throw new Error('Could not load either topology JSON file.');
+        }
+
+        const nodeMap = new Map();
+        const meshIdToUnifiedId = new Map();
+        const edgeMap = new Map();
+        const edgeData = [];
+        const routerIdsWithChildren = new Set();
+
+        function upsertNode(nodeId, rawNode, style) {
+          const existing = nodeMap.get(nodeId);
+          const rawIpv6 = Array.isArray(rawNode['ip6-addrs'])
+            ? rawNode['ip6-addrs']
+            : (Array.isArray(rawNode.ipv6_addrs) ? rawNode.ipv6_addrs : []);
+
+          const existingIpv6 = existing && Array.isArray(existing.ipv6_addrs)
+            ? existing.ipv6_addrs
+            : [];
+
+          const mergedIpv6 = rawIpv6.length > 0 ? rawIpv6 : existingIpv6;
+
+          const rawChildren = Array.isArray(rawNode.children) ? rawNode.children : [];
+          const rawChildrenCount = rawChildren.length;
+          const rawPacketErrorDiscardPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotalpktserrorsdiscards_pct)
+            ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct
+            : undefined;
+
+          const merged = {
+            id: nodeId,
+            node_name: toText(rawNode.node_name) || (existing ? existing.node_name : ''),
+            rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
+            source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
+            ext_addr: toText(rawNode.ext_addr) || (existing ? existing.ext_addr : ''),
+            type: toText(rawNode.type) || (existing ? existing.type : ''),
+            thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
+            ipv6_addrs: mergedIpv6,
+            ipv6_count: mergedIpv6.length,
+            total_children: Number.isFinite(rawNode.total_children)
+              ? rawNode.total_children
+              : (rawChildrenCount || (existing ? existing.total_children : 0)),
+            total_links: Number.isFinite(rawNode.total_links)
+              ? rawNode.total_links
+              : (existing ? existing.total_links : 0),
+            iftotalpktserrorsdiscards_pct: Number.isFinite(rawPacketErrorDiscardPct)
+              ? rawPacketErrorDiscardPct
+              : (existing && Number.isFinite(existing.iftotalpktserrorsdiscards_pct)
+                ? existing.iftotalpktserrorsdiscards_pct
+                : undefined),
+            br: rawNode.br === true || (existing ? existing.br === true : false),
+            from_meshdiag: (style.source === 'meshdiag') || (existing ? existing.from_meshdiag === true : false),
+            from_networkdiagnostic: (style.source === 'networkdiagnostic') || (existing ? existing.from_networkdiagnostic === true : false),
+            shape: style.shape || (existing ? existing.shape : 'box'),
+            color: style.color || (existing ? existing.color : { background: '#d9ecff', border: '#1565c0' })
+          };
+
+          if (merged.br) {
+            merged.color = { background: '#ffd9d9', border: '#c62828' };
+          }
+
+          nodeMap.set(nodeId, merged);
+        }
+
+        meshdiag.forEach((node, index) => {
+          const unifiedId = chooseNodeId(node, 'meshdiag-node', index + 1);
+          const meshRawId = toText(node.id);
+          if (meshRawId) {
+            meshIdToUnifiedId.set(meshRawId, unifiedId);
+          }
+
+          upsertNode(unifiedId, node, {
+            source: 'meshdiag',
+            shape: 'box',
+            color: node.br
+              ? { background: '#ffd9d9', border: '#c62828' }
+              : { background: '#d9ecff', border: '#1565c0' }
+          });
+        });
+
+        networkDiag.forEach((node, index) => {
+          const unifiedId = chooseNodeId(node, 'netdiag-node', index + 1);
+          upsertNode(unifiedId, node, {
+            source: 'networkdiagnostic',
+            shape: 'box',
+            color: { background: '#d9ecff', border: '#1565c0' }
+          });
+        });
+
+        for (const node of meshdiag) {
+          const fromId = chooseNodeId(node, 'meshdiag-parent', 0);
+
+          const children = Array.isArray(node.children) ? node.children : [];
+          children.forEach((child, childIndex) => {
+            const childId = toText(child.rloc16) || `${fromId}-child-${childIndex + 1}`;
+            upsertNode(childId, {
+              node_name: toText(child.node_name),
+              rloc16: toText(child.rloc16),
+              id: childId
+            }, {
+              source: 'meshdiag',
+              shape: 'ellipse',
+              color: { background: '#fff4cc', border: '#d9a400' }
+            });
+
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true });
+            routerIdsWithChildren.add(fromId);
+          });
+
+          const linkStyleByField = {
+            '1-links': { width: 1 },
+            '2-links': { width: 2 },
+            '3-links': { width: 4 }
+          };
+
+          ['3-links', '2-links', '1-links'].forEach((field) => {
+            const links = Array.isArray(node[field]) ? node[field] : [];
+            links.forEach((link) => {
+              const linkMeshId = toText(link.id);
+              const toId = meshIdToUnifiedId.get(linkMeshId) || toText(link.rloc16) || linkMeshId;
+              if (!toId) {
+                return;
+              }
+
+              if (!nodeMap.has(toId)) {
+                upsertNode(toId, {
+                  node_name: toText(link.node_name),
+                  rloc16: toText(link.rloc16),
+                  id: linkMeshId || toId
+                }, {
+                  source: 'meshdiag',
+                  shape: 'box',
+                  color: { background: '#e8f5e9', border: '#2e7d32' }
+                });
+              }
+
+              addEdge(edgeMap, edgeData, fromId, toId, linkStyleByField[field] || {});
+            });
+          });
+        }
+
+        for (const node of networkDiag) {
+          const fromId = chooseNodeId(node, 'netdiag-parent', 0);
+          const children = Array.isArray(node.children) ? node.children : [];
+
+          children.forEach((child, childIndex) => {
+            const childId = toText(child.rloc16) || `${fromId}-child-${childIndex + 1}`;
+            upsertNode(childId, {
+              node_name: toText(child.node_name),
+              rloc16: toText(child.rloc16),
+              id: childId
+            }, {
+              source: 'networkdiagnostic',
+              shape: 'ellipse',
+              color: { background: '#fff4cc', border: '#d9a400' }
+            });
+
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true });
+            routerIdsWithChildren.add(fromId);
+          });
+        }
+
+        const nodeData = Array.from(nodeMap.values()).map((node) => {
+          const unknown = isUnknownNodeName(node.node_name);
+          const rloc16Text = toText(node.rloc16).toLowerCase();
+          const isRouter = node.shape !== 'ellipse';
+          const hasChildren = routerIdsWithChildren.has(node.id);
+          const isMainRouter = rloc16Text.endsWith('00');
+          const isBorderRouter = isMainRouter && node.br === true;
+          const isHighDiscardError = Number.isFinite(node.iftotalpktserrorsdiscards_pct)
+            && node.iftotalpktserrorsdiscards_pct >= 50;
+
+          return {
+            id: node.id,
+            label: buildLabel(node, node.id),
+            shape: node.shape,
+            color: node.color,
+            group: unknown ? 'unknown' : 'known',
+            isRouter,
+            hasChildren,
+            isMainRouter,
+            isBorderRouter,
+            isHighDiscardError,
+            iftotalpktserrorsdiscards_pct: node.iftotalpktserrorsdiscards_pct
+          };
+        });
+
+        const nodeDegree = new Map();
+        for (const edge of edgeData) {
+          nodeDegree.set(edge.from, (nodeDegree.get(edge.from) || 0) + 1);
+          nodeDegree.set(edge.to, (nodeDegree.get(edge.to) || 0) + 1);
+        }
+
+        const unknownNodeIds = nodeData
+          .filter((node) => node.group === 'unknown' && (nodeDegree.get(node.id) || 0) === 0)
+          .map((node) => node.id);
+
+        if (unknownNodeIds.length > 1) {
+          const anchorId = unknownNodeIds[0];
+
+          for (let i = 1; i < unknownNodeIds.length; i += 1) {
+            addEdge(edgeMap, edgeData, anchorId, unknownNodeIds[i], {
+              hidden: true,
+              physics: true,
+              length: 60,
+              color: { opacity: 0 }
+            });
+          }
+        }
+
+        if (unknownNodeIds.length > 0) {
+          const knownAnchorCandidates = nodeData.filter((node) => {
+            return node.group !== 'unknown' && (nodeDegree.get(node.id) || 0) > 0;
+          });
+
+          if (knownAnchorCandidates.length > 0) {
+            knownAnchorCandidates.sort((a, b) => {
+              return (nodeDegree.get(b.id) || 0) - (nodeDegree.get(a.id) || 0);
+            });
+
+            addEdge(edgeMap, edgeData, unknownNodeIds[0], knownAnchorCandidates[0].id, {
+              hidden: true,
+              physics: true,
+              length: 180,
+              color: { opacity: 0 }
+            });
+          }
+        }
+
+        const nodesDataset = new vis.DataSet(nodeData);
+        const edgesDataset = new vis.DataSet(edgeData);
+
+        const data = {
+          nodes: nodesDataset,
+          edges: edgesDataset
+        };
+
+        const options = {
+          layout: {
+            improvedLayout: true,
+            randomSeed: 7
+          },
+          nodes: {
+            font: { size: 13, face: 'monospace', multi: 'md' },
+            margin: 10,
+            widthConstraint: { maximum: 260 }
+          },
+          groups: {
+            unknown: {
+              color: { background: '#f2f2f2', border: '#808080' }
+            }
+          },
+          edges: {
+            color: '#8a8a8a',
+            width: 1.5,
+            smooth: false
+          },
+          physics: {
+            barnesHut: {
+              gravitationalConstant: -9500,
+              centralGravity: 0.15,
+              springLength: 300,
+              springConstant: 0.01,
+              damping: 0.22,
+              avoidOverlap: 1
+            },
+            stabilization: {
+              enabled: true,
+              iterations: 1500,
+              updateInterval: 25
+            }
+          },
+          interaction: {
+            hover: true,
+            navigationButtons: true
+          }
+        };
+
+        const network = new vis.Network(container, data, options);
+
+        function isNodeVisibleByFilter(node, filterMode) {
+          if (filterMode === 'main-routers') {
+            return node.isMainRouter === true;
+          }
+
+          if (filterMode === 'border-routers') {
+            return node.isBorderRouter === true;
+          }
+
+          if (filterMode === 'routers-with-children') {
+            return node.isRouter === true && node.hasChildren === true;
+          }
+
+          if (filterMode === 'routers-without-children') {
+            return node.isRouter === true && node.hasChildren !== true;
+          }
+
+          return true;
+        }
+
+        function isNodeVisibleByDiagnosticFilter(node, filterMode) {
+          if (filterMode === 'medium-discard-error') {
+            return Number.isFinite(node.iftotalpktserrorsdiscards_pct)
+              && node.iftotalpktserrorsdiscards_pct >= 15;
+          }
+
+          return true;
+        }
+
+        function applyFilters(nodeFilterMode, diagnosticFilterMode) {
+          const visibleNodeIds = new Set();
+
+          nodesDataset.forEach((node) => {
+            const visible = isNodeVisibleByFilter(node, nodeFilterMode)
+              && isNodeVisibleByDiagnosticFilter(node, diagnosticFilterMode);
+            if (visible) {
+              visibleNodeIds.add(node.id);
+            }
+          });
+
+          if (nodeFilterMode === 'routers-with-children') {
+            edgesDataset.forEach((edge) => {
+              if (edge.isParentChild === true && visibleNodeIds.has(edge.from)) {
+                visibleNodeIds.add(edge.to);
+              }
+            });
+          }
+
+          nodesDataset.forEach((node) => {
+            nodesDataset.update({ id: node.id, hidden: !visibleNodeIds.has(node.id) });
+          });
+
+          edgesDataset.forEach((edge) => {
+            const endpointsVisible = visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
+            edgesDataset.update({
+              id: edge.id,
+              hidden: edge.baseHidden === true || !endpointsVisible
+            });
+          });
+        }
+
+        function renderNodeDetails(selectedNodeId) {
+          const node = nodeMap.get(selectedNodeId);
+          detailsList.innerHTML = '';
+
+          if (!node) {
+            detailsList.innerHTML = '<li>No details available for selected node.</li>';
+            return;
+          }
+
+          const sourceList = [];
+          if (node.from_meshdiag) {
+            sourceList.push('meshdiag');
+          }
+          if (node.from_networkdiagnostic) {
+            sourceList.push('networkdiagnostic');
+          }
+
+          const details = [
+            ['node_name', node.node_name],
+            ['rloc16', node.rloc16],
+            ['id', node.id],
+            ['source_id', node.source_id],
+            ['ext_addr', node.ext_addr],
+            ['type', node.type],
+            ['thread_stack_version', node.thread_stack_version],
+            ['from_sources', sourceList.join(', ')],
+            ['br', node.br],
+            ['total_links', node.total_links],
+            ['total_children', node.total_children],
+            ['ipv6_count', node.ipv6_count],
+            ['ipv6_addrs', node.ipv6_addrs],
+            ['iftotalpktserrorsdiscards_pct', node.iftotalpktserrorsdiscards_pct],
+            ['graph_link_count', nodeDegree.get(node.id) || 0]
+          ];
+
+          details.forEach(([key, value]) => {
+            const item = document.createElement('li');
+            item.textContent = `${key}: ${formatValue(value)}`;
+            detailsList.appendChild(item);
+          });
+        }
+
+        network.on('click', (params) => {
+          if (params.nodes.length === 0) {
+            detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+            return;
+          }
+
+          renderNodeDetails(params.nodes[0]);
+        });
+
+        nodeFilter.addEventListener('change', (event) => {
+          applyFilters(event.target.value, diagnosticFilter.value);
+          detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+        });
+
+        diagnosticFilter.addEventListener('change', (event) => {
+          applyFilters(nodeFilter.value, event.target.value);
+          detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+        });
+
+        applyFilters(nodeFilter.value, diagnosticFilter.value);
+
+        const loadedSources = [];
+        if (meshdiag.length > 0) {
+          loadedSources.push('meshdiag');
+        }
+        if (networkDiag.length > 0) {
+          loadedSources.push('networkdiagnostic');
+        }
+
+        status.textContent = `Loaded ${nodeData.length} nodes and ${edgeData.length} links from ${loadedSources.join(' + ')}`;
+      } catch (error) {
+        status.textContent = `Error: ${error.message}`;
+      }
+    }
+
+    loadAndRenderTopology();
+    </script>
+  </body>
+</html>
