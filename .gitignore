@@ -1,0 +1,37 @@
+# Environments
+.venv/
+venv/
+.vscode/
+
+# Cache compliled files
+__pycache__/
+
+# History files
+history_data/
+history_src/
+
+
+# Ignore comments start with a hash (#)
+
+# # Ignore specific files
+# my_secret_file.txt
+# config.local.json
+
+# # Ignore all files with a specific extension
+# *.log
+# *.tmp
+# *.backup
+
+# # Ignore an entire directory (trailing slash is optional, but recommended)
+# /node_modules
+# /build
+# /dist
+# .vscode/
+# .idea/
+
+# # Use the "!" operator to un-ignore a specific file that would otherwise be ignored
+# # Ignore all log files, but NOT the important.log file
+# /logs/*.log
+# !/logs/important.log
+
+
