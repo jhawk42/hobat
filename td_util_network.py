@@ -86,7 +86,7 @@ def format_prefix_omr_into_ipv6adrr_prefix(omr_prefix):
     return omr_prefix.split("/")[0].rstrip(":")
 
 
-def get_dataset_active():
+def get_dataset_active(hideSensitiveInfo=True):
     """
     Retrieves the active Thread dataset from the network.
     Runs: ot-ctl dataset active
@@ -105,7 +105,12 @@ def get_dataset_active():
             - pskc: Pre-Shared Key for the Commissioner (hex)
             - security_policy: Security policy info
     """
-    dataset_output = td_util_ot_ctl.run_ot_ctl("dataset active").strip()
+    
+    # hideSensitiveInfo set to True to exclude sensitive info like network key and PSKc in the output
+    command = "dataset active"
+    if hideSensitiveInfo:
+        command += " -ns"  # Add -ns flag to hide sensitive info in the output
+    dataset_output = td_util_ot_ctl.run_ot_ctl(command).strip()
     print(f"[DEBUG] Dataset Active Output:\n{dataset_output}\n")
     
     dataset_info = {}
