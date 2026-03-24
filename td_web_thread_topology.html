@@ -98,6 +98,8 @@
         <label for="node-filter">Node Filter:</label>
         <select id="node-filter">
           <option value="all">All Nodes</option>
+          <option value="ftd-devices">Full Thread Devices (FTD)</option>
+          <option value="mtd-devices">Minimal Thread Devices (MTD)</option>
           <option value="border-routers">Border Routers (rloc16 ends with 00, br=true)</option>
           <option value="main-routers">Main Routers (rloc16 ends with 00)</option>
           <option value="routers-with-children">Routers with Children Nodes</option>
@@ -108,6 +110,12 @@
         <select id="diagnostic-filter">
           <option value="all">All Nodes</option>
           <option value="medium-discard-error">Medium Discard and Error Packets (>= 15%)</option>
+          <option value="medium-total-errors-pct">Medium Total Error Packets % (>= 5%)</option>
+          <option value="medium-total-errors-high">Medium Total Error Packets (>= 10%)</option>
+          <option value="medium-partition-changes">Medium Partition Changes (>= 2)</option>
+          <option value="high-partition-changes">High Partition Changes (>= 5)</option>
+          <option value="medium-parent-changes">Medium Parent Changes (>= 2)</option>
+          <option value="high-parent-changes">High Parent Changes (>= 5)</option>
         </select>
       </div>
       <div id="status">Loading topology...</div>
@@ -163,11 +171,149 @@
         return value.length === 0 ? '[]' : value.join(', ');
       }
 
+      if (value && typeof value === 'object') {
+        try {
+          return JSON.stringify(value);
+        } catch (_error) {
+          return '[object]';
+        }
+      }
+
       if (typeof value === 'boolean') {
         return value ? 'true' : 'false';
       }
 
       return toText(value) || 'n/a';
+    }
+
+    function isPlainObject(value) {
+      return value !== null && typeof value === 'object' && !Array.isArray(value);
+    }
+
+    function mergeForDisplay(primary, secondary) {
+      if (primary === undefined || primary === null) {
+        return secondary;
+      }
+
+      if (secondary === undefined || secondary === null) {
+        return primary;
+      }
+
+      if (Array.isArray(primary) && Array.isArray(secondary)) {
+        return secondary.length > 0 ? secondary : primary;
+      }
+
+      if (isPlainObject(primary) && isPlainObject(secondary)) {
+        const merged = {};
+        const keys = new Set([...Object.keys(primary), ...Object.keys(secondary)]);
+        keys.forEach((key) => {
+          merged[key] = mergeForDisplay(primary[key], secondary[key]);
+        });
+        return merged;
+      }
+
+      return secondary;
+    }
+
+    function flattenObjectEntries(value, path = '', entries = []) {
+      if (isPlainObject(value)) {
+        const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
+        if (keys.length === 0 && path) {
+          entries.push([path, {}]);
+          return entries;
+        }
+
+        keys.forEach((key) => {
+          const nextPath = path ? `${path}.${key}` : key;
+          flattenObjectEntries(value[key], nextPath, entries);
+        });
+        return entries;
+      }
+
+      if (Array.isArray(value)) {
+        if (value.length === 0) {
+          entries.push([path, []]);
+          return entries;
+        }
+
+        const allObjects = value.every((item) => isPlainObject(item));
+        if (allObjects) {
+          value.forEach((item, index) => {
+            const itemPath = `${path}[${index}]`;
+            flattenObjectEntries(item, itemPath, entries);
+          });
+          return entries;
+        }
+
+        entries.push([path, value]);
+        return entries;
+      }
+
+      entries.push([path || 'value', value]);
+      return entries;
+    }
+
+    function shouldExcludeDetailPath(path) {
+      const normalizedPath = toText(path);
+      if (!normalizedPath) {
+        return false;
+      }
+
+      if (normalizedPath === '1-links' || normalizedPath.startsWith('1-links[')) {
+        return true;
+      }
+
+      if (normalizedPath === '2-links' || normalizedPath.startsWith('2-links[')) {
+        return true;
+      }
+
+      if (normalizedPath === '3-links' || normalizedPath.startsWith('3-links[')) {
+        return true;
+      }
+
+      if (normalizedPath === 'children' || normalizedPath.startsWith('children[')) {
+        return true;
+      }
+
+      return false;
+    }
+
+    function sortDetailsWithPriority(details) {
+      const priorityKeys = [
+        'rloc16',
+        'ext_addr',
+        'node_name',
+        'type',
+        'br',
+        'mode.device',
+        'thread_stack_version',
+        'ver',
+        'total_links',
+        'total_children',
+        'mac_counters.ifindiscards_pct',
+        'mac_counters.iftotalerrors_pct',
+        'mle_counters.partitionidchanges',
+        'mle_counters.betterpartitionattachattempts',
+        'mle_counters.parentchanges'
+      ];
+
+      const priorityIndex = new Map();
+      priorityKeys.forEach((key, index) => {
+        priorityIndex.set(key, index);
+      });
+
+      return [...details].sort((a, b) => {
+        const aKey = a[0];
+        const bKey = b[0];
+        const aPriority = priorityIndex.has(aKey) ? priorityIndex.get(aKey) : Number.POSITIVE_INFINITY;
+        const bPriority = priorityIndex.has(bKey) ? priorityIndex.get(bKey) : Number.POSITIVE_INFINITY;
+
+        if (aPriority !== bPriority) {
+          return aPriority - bPriority;
+        }
+
+        return aKey.localeCompare(bKey);
+      });
     }
 
     function addEdge(edgeMap, edgeData, from, to, style) {
@@ -224,6 +370,8 @@
         }
 
         const nodeMap = new Map();
+        const meshdiagNodeById = new Map();
+        const networkDiagNodeById = new Map();
         const meshIdToUnifiedId = new Map();
         const edgeMap = new Map();
         const edgeData = [];
@@ -245,6 +393,18 @@
           const rawChildrenCount = rawChildren.length;
           const rawPacketErrorDiscardPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotalpktserrorsdiscards_pct)
             ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct
+            : undefined;
+          const rawTotalErrorsPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotalerrors_pct)
+            ? rawNode.mac_counters.iftotalerrors_pct
+            : undefined;
+          const rawModeDevice = rawNode.mode && toText(rawNode.mode.device)
+            ? toText(rawNode.mode.device)
+            : '';
+          const rawPartitionIdChanges = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.partitionidchanges)
+            ? rawNode.mle_counters.partitionidchanges
+            : undefined;
+          const rawParentChanges = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.parentchanges)
+            ? rawNode.mle_counters.parentchanges
             : undefined;
 
           const merged = {
@@ -268,6 +428,22 @@
               : (existing && Number.isFinite(existing.iftotalpktserrorsdiscards_pct)
                 ? existing.iftotalpktserrorsdiscards_pct
                 : undefined),
+            iftotalerrors_pct: Number.isFinite(rawTotalErrorsPct)
+              ? rawTotalErrorsPct
+              : (existing && Number.isFinite(existing.iftotalerrors_pct)
+                ? existing.iftotalerrors_pct
+                : undefined),
+            mode_device: rawModeDevice || (existing ? existing.mode_device : ''),
+            partitionidchanges: Number.isFinite(rawPartitionIdChanges)
+              ? rawPartitionIdChanges
+              : (existing && Number.isFinite(existing.partitionidchanges)
+                ? existing.partitionidchanges
+                : undefined),
+            parentchanges: Number.isFinite(rawParentChanges)
+              ? rawParentChanges
+              : (existing && Number.isFinite(existing.parentchanges)
+                ? existing.parentchanges
+                : undefined),
             br: rawNode.br === true || (existing ? existing.br === true : false),
             from_meshdiag: (style.source === 'meshdiag') || (existing ? existing.from_meshdiag === true : false),
             from_networkdiagnostic: (style.source === 'networkdiagnostic') || (existing ? existing.from_networkdiagnostic === true : false),
@@ -284,6 +460,7 @@
 
         meshdiag.forEach((node, index) => {
           const unifiedId = chooseNodeId(node, 'meshdiag-node', index + 1);
+          meshdiagNodeById.set(unifiedId, node);
           const meshRawId = toText(node.id);
           if (meshRawId) {
             meshIdToUnifiedId.set(meshRawId, unifiedId);
@@ -300,6 +477,7 @@
 
         networkDiag.forEach((node, index) => {
           const unifiedId = chooseNodeId(node, 'netdiag-node', index + 1);
+          networkDiagNodeById.set(unifiedId, node);
           upsertNode(unifiedId, node, {
             source: 'networkdiagnostic',
             shape: 'box',
@@ -401,7 +579,11 @@
             isMainRouter,
             isBorderRouter,
             isHighDiscardError,
-            iftotalpktserrorsdiscards_pct: node.iftotalpktserrorsdiscards_pct
+            iftotalpktserrorsdiscards_pct: node.iftotalpktserrorsdiscards_pct,
+            iftotalerrors_pct: node.iftotalerrors_pct,
+            mode_device: node.mode_device,
+            partitionidchanges: node.partitionidchanges,
+            parentchanges: node.parentchanges
           };
         });
 
@@ -499,6 +681,14 @@
         const network = new vis.Network(container, data, options);
 
         function isNodeVisibleByFilter(node, filterMode) {
+          if (filterMode === 'ftd-devices') {
+            return toText(node.mode_device).toUpperCase() === 'FTD';
+          }
+
+          if (filterMode === 'mtd-devices') {
+            return toText(node.mode_device).toUpperCase() === 'MTD';
+          }
+
           if (filterMode === 'main-routers') {
             return node.isMainRouter === true;
           }
@@ -522,6 +712,36 @@
           if (filterMode === 'medium-discard-error') {
             return Number.isFinite(node.iftotalpktserrorsdiscards_pct)
               && node.iftotalpktserrorsdiscards_pct >= 15;
+          }
+
+          if (filterMode === 'medium-total-errors-pct') {
+            return Number.isFinite(node.iftotalerrors_pct)
+              && node.iftotalerrors_pct >= 5;
+          }
+
+          if (filterMode === 'medium-total-errors-high') {
+            return Number.isFinite(node.iftotalerrors_pct)
+              && node.iftotalerrors_pct > 10;
+          }
+
+          if (filterMode === 'medium-partition-changes') {
+            return Number.isFinite(node.partitionidchanges)
+              && node.partitionidchanges >= 2;
+          }
+
+          if (filterMode === 'high-partition-changes') {
+            return Number.isFinite(node.partitionidchanges)
+              && node.partitionidchanges >= 5;
+          }
+
+          if (filterMode === 'medium-parent-changes') {
+            return Number.isFinite(node.parentchanges)
+              && node.parentchanges >= 2;
+          }
+
+          if (filterMode === 'high-parent-changes') {
+            return Number.isFinite(node.parentchanges)
+              && node.parentchanges >= 5;
           }
 
           return true;
@@ -568,31 +788,30 @@
             return;
           }
 
-          const sourceList = [];
-          if (node.from_meshdiag) {
-            sourceList.push('meshdiag');
-          }
-          if (node.from_networkdiagnostic) {
-            sourceList.push('networkdiagnostic');
-          }
+          const meshdiagRaw = meshdiagNodeById.get(selectedNodeId) || {};
+          const networkDiagRaw = networkDiagNodeById.get(selectedNodeId) || {};
 
-          const details = [
-            ['node_name', node.node_name],
-            ['rloc16', node.rloc16],
-            ['id', node.id],
-            ['source_id', node.source_id],
-            ['ext_addr', node.ext_addr],
-            ['type', node.type],
-            ['thread_stack_version', node.thread_stack_version],
-            ['from_sources', sourceList.join(', ')],
-            ['br', node.br],
-            ['total_links', node.total_links],
-            ['total_children', node.total_children],
-            ['ipv6_count', node.ipv6_count],
-            ['ipv6_addrs', node.ipv6_addrs],
-            ['iftotalpktserrorsdiscards_pct', node.iftotalpktserrorsdiscards_pct],
-            ['graph_link_count', nodeDegree.get(node.id) || 0]
-          ];
+          const mergedSourceDetails = mergeForDisplay(meshdiagRaw, networkDiagRaw);
+          const graphDetails = {
+            graph: {
+              unified_id: node.id,
+              graph_link_count: nodeDegree.get(node.id) || 0,
+              from_meshdiag: node.from_meshdiag === true,
+              from_networkdiagnostic: node.from_networkdiagnostic === true,
+              has_children_in_graph: routerIdsWithChildren.has(node.id)
+            }
+          };
+
+          const mergedDetails = mergeForDisplay(mergedSourceDetails, graphDetails);
+          const details = sortDetailsWithPriority(
+            flattenObjectEntries(mergedDetails)
+              .filter(([key]) => !shouldExcludeDetailPath(key))
+          );
+
+          if (details.length === 0) {
+            detailsList.innerHTML = '<li>No details available for selected node.</li>';
+            return;
+          }
 
           details.forEach(([key, value]) => {
             const item = document.createElement('li');
