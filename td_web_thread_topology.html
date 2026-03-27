@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <title>Thread Network Topology</title>
+    <title>Thread Mesh Network Topology</title>
 
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 
@@ -93,7 +93,7 @@
 
   <body>
     <div class="page">
-      <h1>Thread Network Topology: MeshDiag, NetworkDiagnostic</h1>
+      <h1>Thread Mesh Network Topology: MeshDiag, NetworkDiagnostic</h1>
       <div class="controls">
         <label for="node-filter">Node Filter:</label>
         <select id="node-filter">
@@ -849,7 +849,7 @@
           loadedSources.push('networkdiagnostic');
         }
 
-        status.textContent = `Loaded ${nodeData.length} nodes and ${edgeData.length} links from ${loadedSources.join(' + ')}`;
+        status.textContent = `Loaded ${nodeData.length} nodes and ${edgeData.length} links from: ${loadedSources.join(', ')}`;
       } catch (error) {
         status.textContent = `Error: ${error.message}`;
       }
