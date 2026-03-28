@@ -21,7 +21,7 @@ def get_ipv6_addresses():
     Runs: ot-ctl meshdiag topology ip6-addrs
     Returns a dictionary mapping RLOC16 to IPv6 addresses.
     """
-    output = td_util_ot_ctl.run_ot_ctl("meshdiag topology ip6-addrs")
+    output = td_util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs")
     print(f"[DEBUG] Output of 'meshdiag topology ip6-addrs':\n{output}\n")
 
     ipv6_map = {}
@@ -448,7 +448,7 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     # TLV 16 = Child Table, 
     # TLV 9 = MAC Counters, TLV 34 = MLE Counters
     
-    output = td_util_ot_ctl.run_ot_ctl(f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}")
+    output = td_util_ot_ctl.run_ot_ctl_stdio(f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}")
     print(f"[DEBUG] Diagnostic for RLOC {rloc} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
 
     # Extract Ext Address (TLV 0)

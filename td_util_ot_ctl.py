@@ -2,7 +2,7 @@ import subprocess
 import re
 import json
 
-def run_ot_ctl_command(container_name, ot_command):
+def run_ot_ctl_command_stdio(container_name:None, ot_command):
     """
     Executes an ot-ctl command inside a running OTBR Docker container.
     """
@@ -19,8 +19,11 @@ def run_ot_ctl_command(container_name, ot_command):
         f"ot-ctl {ot_command}"
     ]
     
-    # Use the docker command for now
-    full_command = full_command_docker_container  
+    if container_name is not None:
+        # Use the docker command for now, but this can be extended to support non-docker execution in the future
+        full_command = full_command_docker_container
+    else:   
+        full_command = full_command_no_docker  
 
     # Debug: Print the command being executed
     print(f"[DEBUG] {full_command}")
@@ -37,12 +40,15 @@ def run_ot_ctl_command(container_name, ot_command):
     except subprocess.CalledProcessError as e:
         return f"Error: {e.stderr.strip()}"
 
-def run_ot_ctl(command):
+# Helper to inject docker container name and run ot-ctl command
+# This allows us to keep the container name management in one place and easily switch between docker and non-docker execution in the future.
+# TODO add command line option support to run ot-ctl command without docker exec
+def run_ot_ctl_stdio(command):
     """
     Wrapper to execute ot-ctl command and return output.
     """
 
     ##TODO expose container name as a parameter or environment variable
     container = "border-router"  # Ensure this matches your container's name
-    output = run_ot_ctl_command(container, command)
+    output = run_ot_ctl_command_stdio(container, command)
     return output

@@ -8,7 +8,7 @@ import td_util_ot_ctl
 def get_thread_router_table():
     try:
         # Executes the command: ot-ctl router table
-        output = td_util_ot_ctl.run_ot_ctl("router table")
+        output = td_util_ot_ctl.run_ot_ctl_stdio("router table")
         return output
     except subprocess.CalledProcessError as e:
         print(f"Error running ot-ctl: {e}")

@@ -10,7 +10,7 @@ def get_meshdiag_topology_ip6addrs_children():
     try:
         # Executes the command: ot-ctl meshdiag topology ip6-addrs children
         # This command provides IPv6 addresses and children info for all routers
-        output = td_util_ot_ctl.run_ot_ctl("meshdiag topology ip6-addrs children")
+        output = td_util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs children")
         return output
     except subprocess.CalledProcessError as e:
         print(f"Error running ot-ctl: {e}")

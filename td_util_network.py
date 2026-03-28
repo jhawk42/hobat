@@ -7,7 +7,7 @@ def get_prefix_meshlocal():
     Runs: ot-ctl prefix meshlocal
     Returns: mesh-local prefix string (e.g., "fdde:ad00:beef:0::/64")
     """
-    meshlocal_prefix = td_util_ot_ctl.run_ot_ctl("prefix meshlocal").strip()
+    meshlocal_prefix = td_util_ot_ctl.run_ot_ctl_stdio("prefix meshlocal").strip()
     # exctract just the prefix part (before the priority info)
     meshlocal_prefix = meshlocal_prefix.split()[0] if meshlocal_prefix else ""
     print(f"[DEBUG] Mesh-Local Prefix: {meshlocal_prefix}\n")
@@ -63,7 +63,7 @@ def get_prefix_omr():
     Runs: ot-ctl br omrprefix favored
     Returns: OMR prefix string (e.g., "fda5:494c:9a12:0::/64")
     """
-    omr_output = td_util_ot_ctl.run_ot_ctl("br omrprefix favored").strip()
+    omr_output = td_util_ot_ctl.run_ot_ctl_stdio("br omrprefix favored").strip()
     # Extract just the prefix part (before the priority info)
     omr_prefix = omr_output.split()[0] if omr_output else ""
     print(f"[DEBUG] OMR Prefix: {omr_prefix}\n")
@@ -110,7 +110,7 @@ def get_dataset_active(hideSensitiveInfo=True):
     command = "dataset active"
     if hideSensitiveInfo:
         command += " -ns"  # Add -ns flag to hide sensitive info in the output
-    dataset_output = td_util_ot_ctl.run_ot_ctl(command).strip()
+    dataset_output = td_util_ot_ctl.run_ot_ctl_stdio(command).strip()
     print(f"[DEBUG] Dataset Active Output:\n{dataset_output}\n")
     
     dataset_info = {}
