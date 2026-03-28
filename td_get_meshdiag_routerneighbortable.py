@@ -4,7 +4,7 @@ import re
 
 from td_get_router_table import get_router_table_data
 from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
-from td_util_ot_ctl import run_ot_ctl
+from td_util_ot_ctl import run_ot_ctl_stdio
 
 def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
     """ 
@@ -13,13 +13,13 @@ def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
     such as high link error counts, etc
     """
 
-    output = run_ot_ctl(f"meshdiag routerneighbortable {rloc16}")
+    output = run_ot_ctl_stdio(f"meshdiag routerneighbortable {rloc16}")
 
     timeout_match = re.search(r"Error\s+(\d+):\s+ResponseTimeout", output)
     if timeout_match:
         return {
             "rloc16": rloc16,
-            "node_name": extaddr_map.get(router.get("ext_addr"), "Unknown") if router and extaddr_map else "Unknown",
+            "device_label": extaddr_map.get(router.get("extaddr"), "Unknown") if router and extaddr_map else "Unknown",
             "router_neighbor_table": [],
             "_error": {
                 "type": "ResponseTimeout"
@@ -30,12 +30,12 @@ def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
         }
 
     # store router rloc16
-    # lookup rloc16 in router_table_data to get ext-addr and node name if available
+    # lookup rloc16 in router_table_data to get ext-addr and device label if available
 
     router_neighbor_table = {}
-    # store router rloc16 and node_name in router_neighbor_table for reference
+    # store router rloc16 and device_label in router_neighbor_table for reference
     router_neighbor_table["rloc16"] = rloc16
-    router_neighbor_table["node_name"] = extaddr_map.get(router.get("extaddr"), "Unknown") if router and extaddr_map else "Unknown"    
+    router_neighbor_table["device_label"] = extaddr_map.get(router.get("extaddr"), "Unknown") if router and extaddr_map else "Unknown"    
     router_neighbor_table_data = []
 
     current_neighbor = None
@@ -63,8 +63,8 @@ def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
 
             current_neighbor = {
                 "rloc16": match.group(1),
-                "ext_addr": match.group(2).lower(),
-                "node_name": extaddr_map.get(match.group(2).lower(), "Unknown") if extaddr_map else "Unknown",
+                "extaddr": match.group(2).lower(),
+                "device_label": extaddr_map.get(match.group(2).lower(), "Unknown") if extaddr_map else "Unknown",
                 "ver": int(match.group(3)),
             }
             continue
@@ -117,9 +117,9 @@ def get_meshdiag_routerneighbortables(extaddr_map:None):
     for rloc16 in router_rlocs:
         router = next((r for r in router_table_data if r.get('RLOC16') == rloc16), None)
         if router:
-            ext_addr = router.get('ext_addr')
-            node_name = extaddr_map.get(ext_addr, "Unknown")
-            print(f"Getting meshdiag routerneighbortable for router RLOC16 {rloc16} (Node: {node_name}, ExtAddr: {ext_addr})...")
+            extaddr = router.get('extaddr')
+            device_label = extaddr_map.get(extaddr, "Unknown")
+            print(f"Getting meshdiag routerneighbortable for router RLOC16 {rloc16} (Node: {device_label}, ExtAddr: {extaddr})...")
         else:
             print(f"Getting meshdiag routerneighbortable for router RLOC16 {rloc16} (Node: Unknown, ExtAddr: Unknown)...")  
 
