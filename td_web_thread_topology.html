@@ -155,7 +155,7 @@
     }
 
     function buildLabel(node, resolvedId) {
-      const nodeName = toText(node.node_name) || 'Unknown node';
+      const nodeName = toText(node.device_label) || 'Unknown node';
       const rloc16 = toText(node.rloc16) || 'rloc16:n/a';
       const idField = toText(node.id) || resolvedId;
       // return `${nodeName}\n${rloc16}\nid:${idField}`;
@@ -282,7 +282,7 @@
       const priorityKeys = [
         'rloc16',
         'ext_addr',
-        'node_name',
+        'device_label',
         'type',
         'br',
         'mode.device',
@@ -409,7 +409,7 @@
 
           const merged = {
             id: nodeId,
-            node_name: toText(rawNode.node_name) || (existing ? existing.node_name : ''),
+            device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
             rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
             source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
             ext_addr: toText(rawNode.ext_addr) || (existing ? existing.ext_addr : ''),
@@ -492,7 +492,7 @@
           children.forEach((child, childIndex) => {
             const childId = toText(child.rloc16) || `${fromId}-child-${childIndex + 1}`;
             upsertNode(childId, {
-              node_name: toText(child.node_name),
+              device_label: toText(child.device_label),
               rloc16: toText(child.rloc16),
               id: childId
             }, {
@@ -522,7 +522,7 @@
 
               if (!nodeMap.has(toId)) {
                 upsertNode(toId, {
-                  node_name: toText(link.node_name),
+                  device_label: toText(link.device_label),
                   rloc16: toText(link.rloc16),
                   id: linkMeshId || toId
                 }, {
@@ -544,7 +544,7 @@
           children.forEach((child, childIndex) => {
             const childId = toText(child.rloc16) || `${fromId}-child-${childIndex + 1}`;
             upsertNode(childId, {
-              node_name: toText(child.node_name),
+              device_label: toText(child.device_label),
               rloc16: toText(child.rloc16),
               id: childId
             }, {
@@ -559,7 +559,7 @@
         }
 
         const nodeData = Array.from(nodeMap.values()).map((node) => {
-          const unknown = isUnknownNodeName(node.node_name);
+          const unknown = isUnknownNodeName(node.device_label);
           const rloc16Text = toText(node.rloc16).toLowerCase();
           const isRouter = node.shape !== 'ellipse';
           const hasChildren = routerIdsWithChildren.has(node.id);

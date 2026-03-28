@@ -86,14 +86,14 @@ def parse_router_table_output(output, extaddr_map=None):
                 except ValueError:
                     router[field_name] = value
             
-            # Get node_name from extaddr_map if available
+            # Get device_label from extaddr_map if available
             ext_mac = router.get('Extended MAC', '').lower()
             # Normalize to extaddr field name
             if ext_mac:
                 router['extaddr'] = ext_mac
-            # Add node_name from extaddr_map if available
+            # Add device_label from extaddr_map if available
             if ext_mac and ext_mac in extaddr_map:
-                router['node_name'] = extaddr_map[ext_mac]
+                router['device_label'] = extaddr_map[ext_mac]
             
             routers.append(router)
     

@@ -9,7 +9,7 @@ def parse_extaddr_nodename_mapping(path):
         path: Path to threadstatic-extaddr.json file
     
     Returns:
-        Dictionary mapping extaddr (lowercase) to node_name
+        Dictionary mapping extaddr (lowercase) to device_label
     """
 
     mapping = {}
@@ -17,8 +17,8 @@ def parse_extaddr_nodename_mapping(path):
         data = json.load(f)
     for item in data:
         extaddr = item.get("extaddr", "").lower()
-        node_name = item.get("node_name", "")
+        device_label = item.get("device_label", "")
         if extaddr:
-            mapping[extaddr] = node_name
+            mapping[extaddr] = device_label
 
     return mapping

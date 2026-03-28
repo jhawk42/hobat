@@ -52,11 +52,11 @@ def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr
             # Check for BR (border router) flag
             router["br"] = "- br" in first_line or "br -" in first_line
             
-            # Enhance with node name from extaddr_map if available
-            # Add node_name from extaddr_map if available
+            # Enhance with device label from extaddr_map if available
+            # Add device_label from extaddr_map if available
             ext_addr_lower = router["ext_addr"].lower()
             if ext_addr_lower in extaddr_map:
-                router['node_name'] = extaddr_map[ext_addr_lower]
+                router['device_label'] = extaddr_map[ext_addr_lower]
             
             # Initialize link counters and children
             router["3-links"] = []
@@ -162,19 +162,19 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data):
         enhanced_router["total_link_2"] = len(router.get("2-links", []))
         enhanced_router["total_link_1"] = len(router.get("1-links", []))
 
-        # Helper function to decode link ids to objects with id and node_name
+        # Helper function to decode link ids to objects with id and device_label
         def decode_links_to_objects(link_ids, topology_data):
-            """Decode link ids to objects with id and node_name"""
+            """Decode link ids to objects with id and device_label"""
             link_objects = []
             for link_id in link_ids:
                 for linked_router in topology_data:
                     if linked_router.get("id") == link_id:
-                        node_name = linked_router.get("node_name", "Unknown")
+                        device_label = linked_router.get("device_label", "Unknown")
                         link_rloc16 = linked_router.get("rloc16", "Unknown")
                         link_objects.append({
                             "id": link_id,
                             "rloc16": link_rloc16,
-                            "node_name": node_name
+                            "device_label": device_label
                         })
                         break
             return link_objects
@@ -203,7 +203,7 @@ def get_meshdiag_topology_ip6addrs_children_data(extaddr_map=None):
     if output:
         topology_data_enhanced = parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr_map)
     
-    # enhance links by decoding link IDs to objects with id and node_name
+    # enhance links by decoding link IDs to objects with id and device_label
     topology_data_enhanced_links = meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data_enhanced) 
     
     return topology_data_enhanced_links

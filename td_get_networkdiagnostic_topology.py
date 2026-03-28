@@ -458,10 +458,10 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     if not ext_addr:
         return None
     
-    # Try resolve node_name from extaddr_map, if not found use "Unknown-{rloc}"
-    node_name = extaddr_map.get(ext_addr.group(1))   
-    if not node_name:
-        node_name = f"Unknown-{rloc}"
+    # Try resolve device_label from extaddr_map, if not found use "Unknown-{rloc}"
+    device_label = extaddr_map.get(ext_addr.group(1))   
+    if not device_label:
+        device_label = f"Unknown-{rloc}"
                                                               
     # Extract Rloc16 (TLV 1)
     rloc16 = re.search(r"Rloc16: (0x[0-9a-fA-F]{4})", output)
@@ -480,7 +480,7 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     network_topology_node = {
         "ext_addr": ext_addr.group(1) if ext_addr else "Unknown",
         "rloc16": rloc16.group(1) if rloc16 else rloc,
-        "node_name": node_name,
+        "device_label": device_label,
         "thread_stack_version": thread_version.group(1).strip() if thread_version else "Unknown",
         "mode": mode_flags,
         "ipv6_addrs": ipv6_list if ipv6_list else ipv6_addresses.get(rloc, []),
@@ -498,8 +498,8 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
     # Set to True to also query and include child nodes in the topology map (will increase runtime significantly)
     # Set to False to only get parent nodes without expanding children
 
-    expand_children = True  
-    #expand_children = False  
+    #expand_children = True  
+    expand_children = False  
 
     # 1. Get mesh-local prefix
     meshlocal_prefix = get_prefix_meshlocal()
@@ -549,7 +549,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
             network_topology_map[rloc16] = {
                 "ext_addr": f"Unknown-{rloc16}",
                 "rloc16": rloc16,
-                "node_name": f"Unknown-{rloc16}",
+                "device_label": f"Unknown-{rloc16}",
                 "thread_stack_version": "Unknown",
                 "mode": {},
                 "ipv6_addrs": ipv6_addresses.get(rloc16, []),
@@ -595,7 +595,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
                             network_topology_map[child_rloc] = {
                             "ext_addr": f"Unknown-{child_rloc}",
                             "rloc16": child_rloc,
-                            "node_name": f"Unknown-{child_rloc}",
+                            "device_label": f"Unknown-{child_rloc}",
                             "thread_stack_version": "Unknown",
                             "mode": {},
                             "ipv6_addrs": ipv6_addresses.get(child_rloc, []),
@@ -670,7 +670,7 @@ def save_networkdiagnostic_topology_to_json_list(data, filename="thread-networkd
         network_node = {
             "rloc16": rloc,
             "ext_addr": data['ext_addr'],
-            "node_name": data.get('node_name', f"Unknown-{rloc}"),
+            "device_label": data.get('device_label', f"Unknown-{rloc}"),
             "thread_stack_version": data.get('thread_stack_version', 'Unknown'),
             "mode": data.get('mode', {}),
             "ipv6_addrs": data.get('ipv6_addrs', []),
