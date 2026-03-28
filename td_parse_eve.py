@@ -9,27 +9,34 @@ def parse_eve_process_id_mappings(path):
     Parses Eve JSON file and preserves all node fields.
 
     Convert each node's rloc16 (eve json has decimal) in hex string format for consistent mapping.
-    Converts base64 extended addresses to hex strings for consistent mapping.
+    Converts base64 extended addresses to canonical extaddr hex strings for consistent mapping.
 
     Args:
         path: Path to thread JSON file
 
     Returns:
-        Dictionary mapping RLOC16 (hex format) to all node fields with extAddress_hex added
+        Dictionary mapping rloc16 (hex format) to all node fields with extaddr_hex added
     """
     
-    rloc16_missing_start = 65535  # Default RLOC16 value when missing (0xffff)
+    rloc16_missing_start = 65535  # Default rloc16 value when missing (0xffff)
 
     with open(path) as f:
         j = json.load(f)
     out = {}
 
     for node in j.get("nodes", []):
-        # Convert rloc16 to hex string for consistent mapping
+        # Conform rloc16 to hex string for consistent mapping
         rloc16_decimal = node.get("rloc16")
         if rloc16_decimal is None:
             rloc16_decimal = rloc16_missing_start  # Default to 0xffff if rloc16 is missing
             rloc16_missing_start -= 1  # Decrement for next missing rloc16
+
+        # Conform from 'ip_addresses' to "ipv6_addrs" for consistent naming and mapping
+        ipv6_addrs = node.get("ip_addresses", [])
+        node["ipv6_addrs"] = ipv6_addrs
+        # remove original 'ip_addresses' to avoid confusion since we have 'ipv6_addrs' now
+        if "ip_addresses" in node:
+            del node["ip_addresses"]
 
         # Enrich node with hex rloc16 and short rloc for easier mapping
         rloc16_hex = f"0x{rloc16_decimal:04x}"
@@ -50,7 +57,11 @@ def parse_eve_process_id_mappings(path):
                 extAddress_hex = convert_from_base64_to_ext_address_hexnumber(extAddress_b64)
                 
                 # store enhanced hex extAddress for reference
-                threadNetworks[0]["extAddress_hex"] = extAddress_hex  # Add hex extAddress to threadNetworks for reference
+                # Add hex extAddress to threadNetworks for reference
+                threadNetworks[0]["extAddress_hex"] = extAddress_hex  
+                
+                # Add extaddr in hex format for consistent mapping
+                threadNetworks[0]["extaddr"] = extAddress_hex  
 
         # Preserve all fields from the node
         out[rloc16_hex] = node
@@ -62,7 +73,7 @@ def parse_eve_process_route_mappings(eve_network_enhanced_data):
 
     - Preserves all fields from original nodes.
     - Keys output by each node's rloc16_hex.
-    - Adds route field "to-name" by resolving each route["to"] to a node name
+        - Adds route field "to_name" by resolving each route["to"] to a node name
       using the original eve_network_enhanced_data structure.
     """
     
@@ -98,7 +109,7 @@ def parse_eve_process_route_mappings(eve_network_enhanced_data):
         node_copy = copy.deepcopy(original_node)
         rloc16_hex = node_copy.get("rloc16_hex", original_key)
 
-        # Enrich route entries with "to-name" by resolving route["to"] to node names using the original data maps
+        # Enrich route entries with "to_name" by resolving route["to"] to node names using the original data maps
         routes = node_copy.get("routes")
         if isinstance(routes, list):
             for route in routes:
@@ -107,12 +118,10 @@ def parse_eve_process_route_mappings(eve_network_enhanced_data):
                 destination = route.get("to")
 
                 # Resolve by direct dataset key first, then by node id.
-                #route["to-name"] = key_to_name.get(destination)
-                #if route["to-name"] is None:
-                route["to-name"] = id_to_name.get(destination)
-                if route["to-name"] is None:    
-                    route["to-name"] = f"Unknown({destination})"
-                route["to-rloc16"] = id_to_rloc16_hex.get(destination, f"Unknown({destination})")
+                route["to_name"] = id_to_name.get(destination)
+                if route["to_name"] is None:
+                    route["to_name"] = f"Unknown({destination})"
+                route["to_rloc16"] = id_to_rloc16_hex.get(destination, f"Unknown({destination})")
         
         output[rloc16_hex] = node_copy
 

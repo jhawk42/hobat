@@ -82,7 +82,11 @@ def parse_router_table_output(output, extaddr_map=None):
                     if field_name in ['ID', 'Path Cost', 'LQ In', 'LQ Out', 'Age', 'Link']:
                         router[field_name] = int(value)
                     else:
-                        router[field_name] = value
+                        # Conform RLOC16 key and value are stored in lowercase for consistent mapping
+                        if field_name == 'RLOC16':
+                            router["rloc16"] = value.lower()  # Normalize RLOC16 to lowercase for consistent mapping
+                        else:
+                            router[field_name] = value
                 except ValueError:
                     router[field_name] = value
             

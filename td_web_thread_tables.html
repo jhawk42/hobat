@@ -166,7 +166,7 @@
       const tbodyEl = document.querySelector("#data-table tbody");
       const priorityColumns = [
         "rloc16",
-        "ext_addr",
+        "extaddr",
         "device_label",
         "type",
         "name",
@@ -211,16 +211,12 @@
 
               const nestedTo = isObject(route.to) ? route.to : null;
               const toName =
-                route["to-name"] ??
                 route.to_name ??
-                route.toName ??
-                (nestedTo ? nestedTo.name ?? nestedTo["to-name"] : "") ??
+                (nestedTo ? nestedTo.name ?? nestedTo.to_name : "") ??
                 "";
               const toRloc16 =
-                route["to-rloc16"] ??
                 route.to_rloc16 ??
-                route.toRloc16 ??
-                (nestedTo ? nestedTo.rloc16 ?? nestedTo["to-rloc16"] : "") ??
+                (nestedTo ? nestedTo.rloc16 ?? nestedTo.to_rloc16 : "") ??
                 "";
 
               if (!toName && !toRloc16) {

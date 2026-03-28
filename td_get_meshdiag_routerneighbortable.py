@@ -30,7 +30,7 @@ def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
         }
 
     # store router rloc16
-    # lookup rloc16 in router_table_data to get ext-addr and device label if available
+    # lookup rloc16 in router_table_data to get extaddr and device label if available
 
     router_neighbor_table = {}
     # store router rloc16 and device_label in router_neighbor_table for reference
@@ -110,18 +110,18 @@ def get_meshdiag_routerneighbortables(extaddr_map:None):
 
     # 1. Get all active routers (potential parents)
     router_table_data = get_router_table_data(extaddr_map)
-    router_rlocs = [router.get('RLOC16') for router in router_table_data if router.get('RLOC16')]
+    router_rlocs = [router.get('rloc16') for router in router_table_data if router.get('rloc16')]
    
     router_neighbor_tables = []
     
     for rloc16 in router_rlocs:
-        router = next((r for r in router_table_data if r.get('RLOC16') == rloc16), None)
+        router = next((r for r in router_table_data if r.get('rloc16') == rloc16), None)
         if router:
             extaddr = router.get('extaddr')
             device_label = extaddr_map.get(extaddr, "Unknown")
-            print(f"Getting meshdiag routerneighbortable for router RLOC16 {rloc16} (Node: {device_label}, ExtAddr: {extaddr})...")
+            print(f"Getting meshdiag routerneighbortable for router rloc16 {rloc16} (Node: {device_label}, ExtAddr: {extaddr})...")
         else:
-            print(f"Getting meshdiag routerneighbortable for router RLOC16 {rloc16} (Node: Unknown, ExtAddr: Unknown)...")  
+            print(f"Getting meshdiag routerneighbortable for router rloc16 {rloc16} (Node: Unknown, ExtAddr: Unknown)...")  
 
         router_neighbor_table = get_meshdiag_routerneighbortable_one(rloc16, router, extaddr_map)
         router_neighbor_tables.append(router_neighbor_table)

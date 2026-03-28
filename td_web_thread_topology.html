@@ -146,7 +146,7 @@
         return idField;
       }
 
-      const extAddr = toText(node.ext_addr);
+      const extAddr = toText(node.extaddr);
       if (extAddr) {
         return extAddr;
       }
@@ -259,15 +259,15 @@
         return false;
       }
 
-      if (normalizedPath === '1-links' || normalizedPath.startsWith('1-links[')) {
+      if (normalizedPath === '1_links' || normalizedPath.startsWith('1_links[')) {
         return true;
       }
 
-      if (normalizedPath === '2-links' || normalizedPath.startsWith('2-links[')) {
+      if (normalizedPath === '2_links' || normalizedPath.startsWith('2_links[')) {
         return true;
       }
 
-      if (normalizedPath === '3-links' || normalizedPath.startsWith('3-links[')) {
+      if (normalizedPath === '3_links' || normalizedPath.startsWith('3_links[')) {
         return true;
       }
 
@@ -281,7 +281,7 @@
     function sortDetailsWithPriority(details) {
       const priorityKeys = [
         'rloc16',
-        'ext_addr',
+        'extaddr',
         'device_label',
         'type',
         'br',
@@ -379,9 +379,7 @@
 
         function upsertNode(nodeId, rawNode, style) {
           const existing = nodeMap.get(nodeId);
-          const rawIpv6 = Array.isArray(rawNode['ip6-addrs'])
-            ? rawNode['ip6-addrs']
-            : (Array.isArray(rawNode.ipv6_addrs) ? rawNode.ipv6_addrs : []);
+          const rawIpv6 = Array.isArray(rawNode.ipv6_addrs) ? rawNode.ipv6_addrs : [];
 
           const existingIpv6 = existing && Array.isArray(existing.ipv6_addrs)
             ? existing.ipv6_addrs
@@ -412,7 +410,7 @@
             device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
             rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
             source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
-            ext_addr: toText(rawNode.ext_addr) || (existing ? existing.ext_addr : ''),
+            extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
             type: toText(rawNode.type) || (existing ? existing.type : ''),
             thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
             ipv6_addrs: mergedIpv6,
@@ -506,12 +504,12 @@
           });
 
           const linkStyleByField = {
-            '1-links': { width: 1 },
-            '2-links': { width: 2 },
-            '3-links': { width: 4 }
+            '1_links': { width: 1 },
+            '2_links': { width: 2 },
+            '3_links': { width: 4 }
           };
 
-          ['3-links', '2-links', '1-links'].forEach((field) => {
+          ['3_links', '2_links', '1_links'].forEach((field) => {
             const links = Array.isArray(node[field]) ? node[field] : [];
             links.forEach((link) => {
               const linkMeshId = toText(link.id);

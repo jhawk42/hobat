@@ -16,9 +16,9 @@ def get_prefix_meshlocal():
 
 def format_prefix_meshlocal_into_ipv6adrr_prefix(meshlocal_prefix):
     """
-    Converts a mesh-local prefix into an IPv6 RLOC address prefix.
+    Converts a mesh-local prefix into an IPv6 rloc16 address prefix.
     
-    Mesh-Local-Prefix + 0000:00ff:fe00: + RLOC16
+    Mesh-Local-Prefix + 0000:00ff:fe00: + rloc16
     Example: fde5:8dba:82e1:1::/64 + 0x401 = fde5:8dba:82e1:1:0:ff:fe00:0401
     
     Args:
@@ -32,10 +32,10 @@ def format_prefix_meshlocal_into_ipv6adrr_prefix(meshlocal_prefix):
 
 def conform_rloc_hex_strip(rloc):
     """
-    Strips the '0x' prefix from an RLOC16 value.
+    Strips the '0x' prefix from an rloc16 value.
     
     Args:
-        rloc: RLOC16 value string (e.g., "0x5000")
+        rloc: rloc16 value string (e.g., "0x5000")
     
     Returns:
         Hex string without '0x' prefix (e.g., "5000")
@@ -45,11 +45,11 @@ def conform_rloc_hex_strip(rloc):
 
 def merge_ipv6_rloc_prefix_rloc_hex(ipv6_rloc_prefix, rloc_hex):
     """
-    Merges IPv6 RLOC prefix with RLOC hex value to form complete IPv6 RLOC address.
+    Merges IPv6 RLOC prefix with rloc16 hex value to form complete IPv6 RLOC address.
     
     Args:
         ipv6_rloc_prefix: IPv6 RLOC prefix string (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
-        rloc_hex: RLOC hex value without '0x' prefix (e.g., "5000")
+        rloc_hex: rloc16 hex value without '0x' prefix (e.g., "5000")
     
     Returns:
         Complete IPv6 RLOC address (e.g., "fdde:ad00:beef:0:0:ff:fe00:5000")

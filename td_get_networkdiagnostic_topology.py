@@ -142,7 +142,7 @@ def parse_child_table(output, parent_rloc16):
     in_child_section = False
     current_child = None
     
-    # Get parent prefix for child RLOC16s    
+    # Get parent prefix for child rloc16s    
     parent_rloc16_int = int(parent_rloc16, 0)  # Auto-detect base (handles both 0xNNNN and decimal)
     
     for i, line in enumerate(lines):
@@ -415,7 +415,7 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
         ipv6_addresses: Dictionary of IPv6 addresses by RLOC
         
     Returns:
-        Dictionary containing parsed diagnostic data for the router, or None if ext_addr not found
+        Dictionary containing parsed diagnostic data for the router, or None if extaddr is not found
     """
     if extaddr_map is None:
         extaddr_map = {}
@@ -452,14 +452,14 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     print(f"[DEBUG] Diagnostic for RLOC {rloc} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
 
     # Extract Ext Address (TLV 0)
-    ext_addr = re.search(r"Ext Address: ([0-9a-fA-F]{16})", output)
+    extaddr_match = re.search(r"Ext Address: ([0-9a-fA-F]{16})", output)
     
-    # If ext_addr not found, return None (caller will handle with default values)
-    if not ext_addr:
+    # If extaddr is not found, return None (caller will handle with default values)
+    if not extaddr_match:
         return None
     
     # Try resolve device_label from extaddr_map, if not found use "Unknown-{rloc}"
-    device_label = extaddr_map.get(ext_addr.group(1))   
+    device_label = extaddr_map.get(extaddr_match.group(1))
     if not device_label:
         device_label = f"Unknown-{rloc}"
                                                               
@@ -478,7 +478,7 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     time_stats = parse_time_statistics(output)
 
     network_topology_node = {
-        "ext_addr": ext_addr.group(1) if ext_addr else "Unknown",
+        "extaddr": extaddr_match.group(1) if extaddr_match else "Unknown",
         "rloc16": rloc16.group(1) if rloc16 else rloc,
         "device_label": device_label,
         "thread_stack_version": thread_version.group(1).strip() if thread_version else "Unknown",
@@ -498,8 +498,8 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
     # Set to True to also query and include child nodes in the topology map (will increase runtime significantly)
     # Set to False to only get parent nodes without expanding children
 
-    #expand_children = True  
-    expand_children = False  
+    expand_children = True  
+    #expand_children = False  
 
     # 1. Get mesh-local prefix
     meshlocal_prefix = get_prefix_meshlocal()
@@ -507,7 +507,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
 
     # 2. Get all active routers (potential parents)
     router_table_data = get_router_table_data(extaddr_map)
-    router_rlocs = [router.get('RLOC16') for router in router_table_data if router.get('RLOC16')]
+    router_rlocs = [router.get('rloc16') for router in router_table_data if router.get('rloc16')]
     
     # 3. Get IPv6 addresses for all routers
     ## need this if nodes don't reponse to networkdiagnostic get with TLV 8 for IPv6 address list, then we can at least populate the topology map with known IPv6 addresses for each RLOC16 from this separate query. This way we can still have some reference to IPv6 addresses in the topology even if some nodes don't respond to the full diagnostic query.
@@ -545,9 +545,9 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
             time.sleep(delay)
         
         if network_topology_node is None:
-            # ext_addr not found, use default values
+            # extaddr not found, use default values
             network_topology_map[rloc16] = {
-                "ext_addr": f"Unknown-{rloc16}",
+                "extaddr": f"Unknown-{rloc16}",
                 "rloc16": rloc16,
                 "device_label": f"Unknown-{rloc16}",
                 "thread_stack_version": "Unknown",
@@ -593,7 +593,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
                             
                         if child_node is None:
                             network_topology_map[child_rloc] = {
-                            "ext_addr": f"Unknown-{child_rloc}",
+                            "extaddr": f"Unknown-{child_rloc}",
                             "rloc16": child_rloc,
                             "device_label": f"Unknown-{child_rloc}",
                             "thread_stack_version": "Unknown",
@@ -615,7 +615,7 @@ def print_networkdiagnostic_topology(topology):
     """Prints the network topology to console in tree format."""
     print("\n--- Thread Network Topology ---\n")
     for rloc, data in topology.items():
-        print(f"Parent [RLOC: {rloc}] (Ext: {data['ext_addr']})")
+        print(f"Parent [RLOC: {rloc}] (Ext: {data['extaddr']})")
         print(f"  Thread Stack Version: {data.get('thread_stack_version', 'Unknown')}")
         
         if data.get('ipv6_addrs'):
@@ -669,7 +669,7 @@ def save_networkdiagnostic_topology_to_json_list(data, filename="thread-networkd
     for rloc, data in data.items():
         network_node = {
             "rloc16": rloc,
-            "ext_addr": data['ext_addr'],
+            "extaddr": data['extaddr'],
             "device_label": data.get('device_label', f"Unknown-{rloc}"),
             "thread_stack_version": data.get('thread_stack_version', 'Unknown'),
             "mode": data.get('mode', {}),
@@ -739,7 +739,7 @@ def main():
         print(f"Unknown format '{output_format}'")
         print("Usage: python td_dump_thread_topology_3_merged.py [console|json-dict|json-list|all]")
         print("  console:  Print topology to console (tree format)")
-        print("  json-dict: Save as JSON dict with RLOC16 keys")
+        print("  json-dict: Save as JSON dict with rloc16 keys")
         print("  json-list: Save as JSON list with parent nodes")
         print("  all:      Print to console + save both JSON formats (default)")
     """

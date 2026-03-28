@@ -20,7 +20,7 @@ def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr
     """
     Parses the meshdiag topology ip6-addrs children output into a list of router dictionaries.
     
-    Extracts: id, rloc16, ext-addr, ver, br flag, 3-links, 2-links, 1-links, ip6-addrs, children
+    Extracts: id, rloc16, extaddr, ver, br flag, 3_links, 2_links, 1_links, ipv6_addrs, children
     
     Args:
         output: meshdiag topology ip6-addrs children text
@@ -46,7 +46,7 @@ def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr
             router = {}
             router["id"] = match.group(1)
             router["rloc16"] = match.group(2)
-            router["ext_addr"] = match.group(3)
+            router["extaddr"] = match.group(3)
             router["ver"] = match.group(4)
             
             # Check for BR (border router) flag
@@ -54,15 +54,15 @@ def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr
             
             # Enhance with device label from extaddr_map if available
             # Add device_label from extaddr_map if available
-            ext_addr_lower = router["ext_addr"].lower()
-            if ext_addr_lower in extaddr_map:
-                router['device_label'] = extaddr_map[ext_addr_lower]
+            extaddr_lower = router["extaddr"].lower()
+            if extaddr_lower in extaddr_map:
+                router['device_label'] = extaddr_map[extaddr_lower]
             
             # Initialize link counters and children
-            router["3-links"] = []
-            router["2-links"] = []
-            router["1-links"] = []
-            router["ip6-addrs"] = []
+            router["3_links"] = []
+            router["2_links"] = []
+            router["1_links"] = []
+            router["ipv6_addrs"] = []
             router["children"] = []
             
             # Parse the rest of the block
@@ -78,21 +78,21 @@ def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr
                     link_match = re.search(r'3-links:\{\s*(.*?)\s*\}', line)
                     if link_match:
                         links = link_match.group(1).split()
-                        router["3-links"] = links
+                        router["3_links"] = links
                     current_section = None
                 
                 elif '2-links:' in line:
                     link_match = re.search(r'2-links:\{\s*(.*?)\s*\}', line)
                     if link_match:
                         links = link_match.group(1).split()
-                        router["2-links"] = links
+                        router["2_links"] = links
                     current_section = None
                 
                 elif '1-links:' in line:
                     link_match = re.search(r'1-links:\{\s*(.*?)\s*\}', line)
                     if link_match:
                         links = link_match.group(1).split()
-                        router["1-links"] = links
+                        router["1_links"] = links
                     current_section = None
                 
                 elif 'ip6-addrs:' in line:
@@ -110,7 +110,7 @@ def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr
                     if current_section == 'ip6-addrs':
                         # IPv6 address line
                         if ':' in stripped and stripped.count(':') >= 2:
-                            router["ip6-addrs"].append(stripped)
+                            router["ipv6_addrs"].append(stripped)
                     
                     elif current_section == 'children':
                         # Child line: "rloc16:0x5002 lq:3, mode:-"
@@ -157,10 +157,10 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data):
         enhanced_router["total_children"] = len(router.get("children", []))
         
         # Enhancement: Count total links
-        enhanced_router["total_links"] = len(router.get("3-links", [])) + len(router.get("2-links", [])) + len(router.get("1-links", []))
-        enhanced_router["total_link_3"] = len(router.get("3-links", []))
-        enhanced_router["total_link_2"] = len(router.get("2-links", []))
-        enhanced_router["total_link_1"] = len(router.get("1-links", []))
+        enhanced_router["total_links"] = len(router.get("3_links", [])) + len(router.get("2_links", [])) + len(router.get("1_links", []))
+        enhanced_router["total_link_3"] = len(router.get("3_links", []))
+        enhanced_router["total_link_2"] = len(router.get("2_links", []))
+        enhanced_router["total_link_1"] = len(router.get("1_links", []))
 
         # Helper function to decode link ids to objects with id and device_label
         def decode_links_to_objects(link_ids, topology_data):
@@ -180,7 +180,7 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data):
             return link_objects
         
         # Decode all link types and replace the original arrays with objects
-        for link_type in ["3-links", "2-links", "1-links"]:
+        for link_type in ["3_links", "2_links", "1_links"]:
             link_ids = router.get(link_type, [])
             enhanced_router[link_type] = decode_links_to_objects(link_ids, topology_data)
 
