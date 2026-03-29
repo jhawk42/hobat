@@ -13,6 +13,7 @@ def _normalize_prefix_base(prefix):
 def _run_prefix_command(command, debug_label):
     """Runs an ot-ctl prefix command and returns the extracted prefix token."""
     command_output = td_util_ot_ctl.run_ot_ctl_stdio(command)
+    # extract the prefix token from the command output and print it for debugging
     prefix = _extract_prefix_token(command_output)
     print(f"[DEBUG] {debug_label}: {prefix}\n")
     return prefix
