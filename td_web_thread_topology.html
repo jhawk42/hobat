@@ -95,6 +95,12 @@
     <div class="page">
       <h1>Thread Mesh Network Topology: MeshDiag, NetworkDiagnostic</h1>
       <div class="controls">
+        <label for="dataset-select">Dataset:</label>
+        <select id="dataset-select">
+           <option value="default_topology">Merged: MeshDiag + NetworkDiagnostic</option>
+           <option value="eve_topology">Eve Topology</option>
+        </select>
+
         <label for="node-filter">Node Filter:</label>
         <select id="node-filter">
           <option value="all">All Nodes</option>
@@ -135,6 +141,14 @@
       return value === undefined || value === null ? '' : String(value).trim();
     }
 
+    function toFiniteNumber(value) {
+      if (Number.isFinite(value)) {
+        return value;
+      }
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+
     function chooseNodeId(node, fallbackPrefix, index) {
       const rloc16 = toText(node.rloc16);
       if (rloc16) {
@@ -158,7 +172,12 @@
       const nodeName = toText(node.device_label) || 'Unknown node';
       const rloc16 = toText(node.rloc16) || 'rloc16:n/a';
       const idField = toText(node.id) || resolvedId;
-      // return `${nodeName}\n${rloc16}\nid:${idField}`;
+      return `${nodeName}\n${rloc16}`;
+    }
+
+    function buildEveLabel(node, resolvedId) {
+      const nodeName = toText(node.name) || 'Unknown node';
+      const rloc16 = toText(node.rloc16) || 'rloc16:n/a';
       return `${nodeName}\n${rloc16}`;
     }
 
@@ -283,6 +302,7 @@
         'rloc16',
         'extaddr',
         'device_label',
+        'name',
         'type',
         'br',
         'mode.device',
@@ -345,25 +365,159 @@
       return response.json();
     }
 
+    async function processEveTopology(container, status, detailsList, nodeFilter, diagnosticFilter, eveData, network, nodesDataset, edgesDataset) {
+      const nodeMap = new Map();
+      const eveNodeById = new Map();
+      const edgeMap = new Map();
+      const edgeData = [];
+      const routerIdsWithChildren = new Set();
+
+      function upsertEveNode(nodeId, rawNode, style) {
+        const existing = nodeMap.get(nodeId);
+        const merged = {
+          id: nodeId,
+          name: toText(rawNode.name) || (existing ? existing.name : ''),
+          device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
+          rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
+          source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
+          extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
+          type: toText(rawNode.type) || (existing ? existing.type : ''),
+          thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
+          total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
+          total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
+          iftotalpktserrorsdiscards_pct: Number.isFinite(rawNode.mac_counters?.iftotalpktserrorsdiscards_pct) ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct : (existing?.iftotalpktserrorsdiscards_pct),
+          iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct) ? rawNode.mac_counters.iftotalerrors_pct : (existing?.iftotalerrors_pct),
+          mode_device: toText(rawNode.mode?.device) || (existing ? existing.mode_device : ''),
+          partitionidchanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges) ? rawNode.mle_counters.partitionidchanges : (existing?.partitionidchanges),
+          parentchanges: Number.isFinite(rawNode.mle_counters?.parentchanges) ? rawNode.mle_counters.parentchanges : (existing?.parentchanges),
+          br: rawNode.br === true || (existing ? existing.br === true : false),
+          from_eve: true,
+          shape: style.shape || (existing ? existing.shape : 'box'),
+          color: style.color || (existing ? existing.color : { background: '#e8f5e9', border: '#2e7d32' })
+        };
+        if (merged.br) {
+          merged.color = { background: '#ffd9d9', border: '#c62828' };
+        }
+        nodeMap.set(nodeId, merged);
+      }
+
+      eveData.forEach((node) => {
+        const eveNodeId = toText(node.id);
+        if (!eveNodeId) return;
+        eveNodeById.set(eveNodeId, node);
+        upsertEveNode(eveNodeId, node, {
+          source: 'eve',
+          shape: 'box',
+          color: node.br ? { background: '#ffd9d9', border: '#c62828' } : { background: '#e8f5e9', border: '#2e7d32' }
+        });
+      });
+
+      for (const node of eveData) {
+        const fromId = toText(node.id);
+        if (!fromId) continue;
+        const routes = Array.isArray(node.routes) ? node.routes : [];
+        routes.forEach((route) => {
+          const toId = toText(route.to);
+          if (!toId) return;
+          if (!nodeMap.has(toId)) {
+            upsertEveNode(toId, { id: toId }, { source: 'eve', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
+          }
+          const lqiIn = toFiniteNumber(route.in);
+          const lqiOut = toFiniteNumber(route.out);
+          const avgLqi = (Number.isFinite(lqiIn) && Number.isFinite(lqiOut)) ? (lqiIn + lqiOut) / 2 : (lqiIn || lqiOut);
+          let edgeWidth = 1.5;
+          if (Number.isFinite(avgLqi)) {
+            if (avgLqi >= 200) edgeWidth = 3;
+            else if (avgLqi >= 150) edgeWidth = 2;
+          }
+          addEdge(edgeMap, edgeData, fromId, toId, { width: edgeWidth });
+        });
+        const children = Array.isArray(node.children) ? node.children : [];
+        children.forEach((child) => {
+          const childNodeId = toText(typeof child === 'string' ? child : child.id);
+          if (!childNodeId) return;
+          if (!nodeMap.has(childNodeId)) {
+            upsertEveNode(childNodeId, { id: childNodeId }, { source: 'eve', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+          }
+          addEdge(edgeMap, edgeData, fromId, childNodeId, { dashes: true, isParentChild: true });
+          routerIdsWithChildren.add(fromId);
+        });
+      }
+
+      return { nodeMap, eveNodeById, edgeData, routerIdsWithChildren };
+    }
+
     async function loadAndRenderTopology() {
       const container = document.getElementById('mynetwork');
       const status = document.getElementById('status');
       const detailsList = document.getElementById('details-list');
       const nodeFilter = document.getElementById('node-filter');
       const diagnosticFilter = document.getElementById('diagnostic-filter');
+      const datasetSelect = document.getElementById('dataset-select');
 
-      try {
-        const [meshResult, ndResult] = await Promise.allSettled([
-          fetchJson('./thread-meshdiag-topology.json'),
-          fetchJson('./thread-networkdiagnostic-topology.json')
-        ]);
+      function isNodeVisibleByFilter(node, filterMode) {
+        if (filterMode === 'ftd-devices') {
+          return toText(node.mode_device).toUpperCase() === 'FTD';
+        }
+        if (filterMode === 'mtd-devices') {
+          return toText(node.mode_device).toUpperCase() === 'MTD';
+        }
+        if (filterMode === 'main-routers') {
+          return node.isMainRouter === true;
+        }
+        if (filterMode === 'border-routers') {
+          return node.isBorderRouter === true;
+        }
+        if (filterMode === 'routers-with-children') {
+          return node.isRouter === true && node.hasChildren === true;
+        }
+        if (filterMode === 'routers-without-children') {
+          return node.isRouter === true && node.hasChildren !== true;
+        }
+        return true;
+      }
 
-        const meshdiag = meshResult.status === 'fulfilled' && Array.isArray(meshResult.value)
-          ? meshResult.value
-          : [];
-        const networkDiag = ndResult.status === 'fulfilled' && Array.isArray(ndResult.value)
-          ? ndResult.value
-          : [];
+      function isNodeVisibleByDiagnosticFilter(node, filterMode) {
+        if (filterMode === 'medium-discard-error') {
+          return Number.isFinite(node.iftotalpktserrorsdiscards_pct)
+            && node.iftotalpktserrorsdiscards_pct >= 15;
+        }
+        if (filterMode === 'medium-total-errors-pct') {
+          return Number.isFinite(node.iftotalerrors_pct)
+            && node.iftotalerrors_pct >= 5;
+        }
+        if (filterMode === 'medium-total-errors-high') {
+          return Number.isFinite(node.iftotalerrors_pct)
+            && node.iftotalerrors_pct > 10;
+        }
+        if (filterMode === 'medium-partition-changes') {
+          return Number.isFinite(node.partitionidchanges)
+            && node.partitionidchanges >= 2;
+        }
+        if (filterMode === 'high-partition-changes') {
+          return Number.isFinite(node.partitionidchanges)
+            && node.partitionidchanges >= 5;
+        }
+        if (filterMode === 'medium-parent-changes') {
+          return Number.isFinite(node.parentchanges)
+            && node.parentchanges >= 2;
+        }
+        if (filterMode === 'high-parent-changes') {
+          return Number.isFinite(node.parentchanges)
+            && node.parentchanges >= 5;
+        }
+        return true;
+      }
+
+      async function loadMeshdiagNetworkdiag() {
+        try {
+          const [meshResult, ndResult] = await Promise.allSettled([
+            fetchJson('./thread-meshdiag-topology.json'),
+            fetchJson('./thread-networkdiagnostic-topology.json')
+          ]);
+
+          const meshdiag = meshResult.status === 'fulfilled' && Array.isArray(meshResult.value) ? meshResult.value : [];
+          const networkDiag = ndResult.status === 'fulfilled' && Array.isArray(ndResult.value) ? ndResult.value : [];
 
         if (meshdiag.length === 0 && networkDiag.length === 0) {
           throw new Error('Could not load either topology JSON file.');
@@ -678,73 +832,6 @@
 
         const network = new vis.Network(container, data, options);
 
-        function isNodeVisibleByFilter(node, filterMode) {
-          if (filterMode === 'ftd-devices') {
-            return toText(node.mode_device).toUpperCase() === 'FTD';
-          }
-
-          if (filterMode === 'mtd-devices') {
-            return toText(node.mode_device).toUpperCase() === 'MTD';
-          }
-
-          if (filterMode === 'main-routers') {
-            return node.isMainRouter === true;
-          }
-
-          if (filterMode === 'border-routers') {
-            return node.isBorderRouter === true;
-          }
-
-          if (filterMode === 'routers-with-children') {
-            return node.isRouter === true && node.hasChildren === true;
-          }
-
-          if (filterMode === 'routers-without-children') {
-            return node.isRouter === true && node.hasChildren !== true;
-          }
-
-          return true;
-        }
-
-        function isNodeVisibleByDiagnosticFilter(node, filterMode) {
-          if (filterMode === 'medium-discard-error') {
-            return Number.isFinite(node.iftotalpktserrorsdiscards_pct)
-              && node.iftotalpktserrorsdiscards_pct >= 15;
-          }
-
-          if (filterMode === 'medium-total-errors-pct') {
-            return Number.isFinite(node.iftotalerrors_pct)
-              && node.iftotalerrors_pct >= 5;
-          }
-
-          if (filterMode === 'medium-total-errors-high') {
-            return Number.isFinite(node.iftotalerrors_pct)
-              && node.iftotalerrors_pct > 10;
-          }
-
-          if (filterMode === 'medium-partition-changes') {
-            return Number.isFinite(node.partitionidchanges)
-              && node.partitionidchanges >= 2;
-          }
-
-          if (filterMode === 'high-partition-changes') {
-            return Number.isFinite(node.partitionidchanges)
-              && node.partitionidchanges >= 5;
-          }
-
-          if (filterMode === 'medium-parent-changes') {
-            return Number.isFinite(node.parentchanges)
-              && node.parentchanges >= 2;
-          }
-
-          if (filterMode === 'high-parent-changes') {
-            return Number.isFinite(node.parentchanges)
-              && node.parentchanges >= 5;
-          }
-
-          return true;
-        }
-
         function applyFilters(nodeFilterMode, diagnosticFilterMode) {
           const visibleNodeIds = new Set();
           let visibleEdgeCount = 0;
@@ -866,9 +953,286 @@
 
         const initiallyVisible = applyFilters(nodeFilter.value, diagnosticFilter.value);
         updateStatusLine(initiallyVisible.visibleNodeCount, initiallyVisible.visibleEdgeCount);
-      } catch (error) {
-        status.textContent = `Error: ${error.message}`;
+        } catch (error) {
+          status.textContent = `Error: ${error.message}`;
+        }
       }
+
+      async function loadEveDataset() {
+          try {
+            const eveData = await fetchJson('./thread-eve-topology.json');
+            const eveArray = Array.isArray(eveData)
+              ? eveData
+              : (eveData && typeof eveData === 'object' ? Object.values(eveData) : []);
+            if (eveArray.length === 0) {
+              throw new Error('Eve topology JSON is empty.');
+            }
+
+            const nodeMap = new Map();
+            const eveNodeById = new Map();
+            const edgeMap = new Map();
+            const edgeData = [];
+            const routerIdsWithChildren = new Set();
+
+            function upsertEveNode(nodeId, rawNode, style) {
+              const existing = nodeMap.get(nodeId);
+              const merged = {
+                id: nodeId,
+                name: toText(rawNode.name) || (existing ? existing.name : ''),
+                device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
+                rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
+                source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
+                extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
+                type: toText(rawNode.type) || (existing ? existing.type : ''),
+                thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
+                total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
+                total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
+                iftotalpktserrorsdiscards_pct: Number.isFinite(rawNode.mac_counters?.iftotalpktserrorsdiscards_pct) ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct : (existing?.iftotalpktserrorsdiscards_pct),
+                iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct) ? rawNode.mac_counters.iftotalerrors_pct : (existing?.iftotalerrors_pct),
+                mode_device: toText(rawNode.mode?.device) || (rawNode.type === 'router' ? 'FTD' : (rawNode.type === 'child' || rawNode.type === 'sleepy-child' ? 'MTD' : '')) || (existing ? existing.mode_device : ''),
+                partitionidchanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges) ? rawNode.mle_counters.partitionidchanges : (existing?.partitionidchanges),
+                parentchanges: Number.isFinite(rawNode.mle_counters?.parentchanges) ? rawNode.mle_counters.parentchanges : (existing?.parentchanges),
+                br: rawNode.br === true || (existing ? existing.br === true : false),
+                from_eve: true,
+                shape: style.shape || (existing ? existing.shape : 'box'),
+                color: style.color || (existing ? existing.color : { background: '#e8f5e9', border: '#2e7d32' })
+              };
+              if (merged.br) {
+                merged.color = { background: '#ffd9d9', border: '#c62828' };
+              }
+              nodeMap.set(nodeId, merged);
+            }
+
+            eveArray.forEach((node) => {
+              const eveNodeId = toText(node.id);
+              if (!eveNodeId) return;
+              eveNodeById.set(eveNodeId, node);
+              const isChildType = node.type === 'child' || node.type === 'sleepy-child';
+              upsertEveNode(eveNodeId, node, {
+                source: 'eve',
+                shape: isChildType ? 'ellipse' : 'box',
+                color: node.br ? { background: '#ffd9d9', border: '#c62828' } : (isChildType ? { background: '#fff4cc', border: '#d9a400' } : { background: '#e8f5e9', border: '#2e7d32' })
+              });
+            });
+
+            for (const node of eveArray) {
+              const fromId = toText(node.id);
+              if (!fromId) continue;
+              const routes = Array.isArray(node.routes) ? node.routes : [];
+              routes.forEach((route) => {
+                const toId = toText(route.to);
+                if (!toId) return;
+                if (!nodeMap.has(toId)) {
+                  upsertEveNode(toId, { id: toId }, { source: 'eve', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
+                }
+                const lqiIn = toFiniteNumber(route.in);
+                const lqiOut = toFiniteNumber(route.out);
+                const avgLqi = (Number.isFinite(lqiIn) && Number.isFinite(lqiOut)) ? (lqiIn + lqiOut) / 2 : (lqiIn || lqiOut);
+                let edgeWidth = 1.5;
+                if (Number.isFinite(avgLqi)) {
+                  if (avgLqi >= 200) edgeWidth = 3;
+                  else if (avgLqi >= 150) edgeWidth = 2;
+                }
+                addEdge(edgeMap, edgeData, fromId, toId, { width: edgeWidth });
+              });
+              const children = Array.isArray(node.children) ? node.children : [];
+              children.forEach((child) => {
+                const childNodeId = toText(typeof child === 'string' ? child : child.id);
+                if (!childNodeId) return;
+                if (!nodeMap.has(childNodeId)) {
+                  upsertEveNode(childNodeId, { id: childNodeId }, { source: 'eve', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+                }
+                addEdge(edgeMap, edgeData, fromId, childNodeId, { dashes: true, isParentChild: true });
+                routerIdsWithChildren.add(fromId);
+              });
+            }
+
+            const nodeDegree = new Map();
+            for (const edge of edgeData) {
+              nodeDegree.set(edge.from, (nodeDegree.get(edge.from) || 0) + 1);
+              nodeDegree.set(edge.to, (nodeDegree.get(edge.to) || 0) + 1);
+            }
+
+            const nodeData = Array.from(nodeMap.values()).map((node) => {
+              const unknown = toText(node.name || node.device_label).toLowerCase().startsWith('unknown');
+              const rloc16Text = toText(node.rloc16).toLowerCase();
+              const isRouter = node.shape !== 'ellipse';
+              const hasChildren = routerIdsWithChildren.has(node.id);
+              const isMainRouter = rloc16Text.endsWith('00');
+              const isBorderRouter = isMainRouter && node.br === true;
+              return {
+                id: node.id,
+                label: buildEveLabel(node, node.id),
+                shape: node.shape,
+                color: node.color,
+                group: unknown ? 'unknown' : 'known',
+                isRouter,
+                hasChildren,
+                isMainRouter,
+                isBorderRouter,
+                iftotalpktserrorsdiscards_pct: node.iftotalpktserrorsdiscards_pct,
+                iftotalerrors_pct: node.iftotalerrors_pct,
+                mode_device: node.mode_device,
+                partitionidchanges: node.partitionidchanges,
+                parentchanges: node.parentchanges
+              };
+            });
+
+            const unknownNodeIds = nodeData
+              .filter((node) => node.group === 'unknown' && (nodeDegree.get(node.id) || 0) === 0)
+              .map((node) => node.id);
+
+            if (unknownNodeIds.length > 1) {
+              const anchorId = unknownNodeIds[0];
+              for (let i = 1; i < unknownNodeIds.length; i += 1) {
+                addEdge(edgeMap, edgeData, anchorId, unknownNodeIds[i], {
+                  hidden: true,
+                  physics: true,
+                  length: 60,
+                  color: { opacity: 0 }
+                });
+              }
+            }
+
+            if (unknownNodeIds.length > 0) {
+              const knownAnchorCandidates = nodeData.filter((node) => {
+                return node.group !== 'unknown' && (nodeDegree.get(node.id) || 0) > 0;
+              });
+              if (knownAnchorCandidates.length > 0) {
+                knownAnchorCandidates.sort((a, b) => {
+                  return (nodeDegree.get(b.id) || 0) - (nodeDegree.get(a.id) || 0);
+                });
+                addEdge(edgeMap, edgeData, unknownNodeIds[0], knownAnchorCandidates[0].id, {
+                  hidden: true,
+                  physics: true,
+                  length: 180,
+                  color: { opacity: 0 }
+                });
+              }
+            }
+
+            const nodesDataset = new vis.DataSet(nodeData);
+            const edgesDataset = new vis.DataSet(edgeData);
+            const data = { nodes: nodesDataset, edges: edgesDataset };
+            const options = {
+              layout: { improvedLayout: true, randomSeed: 7 },
+              nodes: { font: { size: 13, face: 'monospace', multi: 'md' }, margin: 10, widthConstraint: { maximum: 260 } },
+              groups: { unknown: { color: { background: '#f2f2f2', border: '#808080' } } },
+              edges: { color: '#8a8a8a', width: 1.5, smooth: false },
+              physics: {
+                barnesHut: { gravitationalConstant: -9500, centralGravity: 0.15, springLength: 300, springConstant: 0.01, damping: 0.22, avoidOverlap: 1 },
+                stabilization: { enabled: true, iterations: 1500, updateInterval: 25 }
+              },
+              interaction: { hover: true, navigationButtons: true }
+            };
+            const network = new vis.Network(container, data, options);
+            network.on('click', (params) => {
+              if (params.nodes.length === 0) {
+                detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+                return;
+              }
+              const selectedNodeId = params.nodes[0];
+              const node = nodeMap.get(selectedNodeId);
+              detailsList.innerHTML = '';
+              if (!node) {
+                detailsList.innerHTML = '<li>No details available for selected node.</li>';
+                return;
+              }
+              const eveRaw = eveNodeById.get(selectedNodeId) || {};
+              const graphDetails = {
+                graph: {
+                  unified_id: node.id,
+                  graph_link_count: nodeDegree.get(node.id) || 0,
+                  from_eve: node.from_eve === true
+                }
+              };
+              const mergedDetails = mergeForDisplay(eveRaw, graphDetails);
+              const details = sortDetailsWithPriority(
+                flattenObjectEntries(mergedDetails)
+                  .filter(([key]) => !shouldExcludeDetailPath(key))
+              );
+              if (details.length === 0) {
+                detailsList.innerHTML = '<li>No details available for selected node.</li>';
+                return;
+              }
+              details.forEach(([key, value]) => {
+                const item = document.createElement('li');
+                item.textContent = `${key}: ${formatValue(value)}`;
+                detailsList.appendChild(item);
+              });
+            });
+
+            function applyFiltersEve(nodeFilterMode, diagnosticFilterMode) {
+              const visibleNodeIds = new Set();
+              let visibleEdgeCount = 0;
+              nodesDataset.forEach((node) => {
+                const visible = isNodeVisibleByFilter(node, nodeFilterMode)
+                  && isNodeVisibleByDiagnosticFilter(node, diagnosticFilterMode);
+                if (visible) {
+                  visibleNodeIds.add(node.id);
+                }
+              });
+              if (nodeFilterMode === 'routers-with-children') {
+                edgesDataset.forEach((edge) => {
+                  if (edge.isParentChild === true && visibleNodeIds.has(edge.from)) {
+                    visibleNodeIds.add(edge.to);
+                  }
+                });
+              }
+              nodesDataset.forEach((node) => {
+                nodesDataset.update({ id: node.id, hidden: !visibleNodeIds.has(node.id) });
+              });
+              edgesDataset.forEach((edge) => {
+                const endpointsVisible = visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
+                const shouldShow = edge.baseHidden !== true && endpointsVisible;
+                edgesDataset.update({ id: edge.id, hidden: !shouldShow });
+                if (shouldShow) { visibleEdgeCount += 1; }
+              });
+              return { visibleNodeCount: visibleNodeIds.size, visibleEdgeCount };
+            }
+
+            function updateStatusLineEve(visibleNodeCount, visibleEdgeCount) {
+              const nodeFilterLabel = nodeFilter.options[nodeFilter.selectedIndex].text;
+              const diagnosticFilterLabel = diagnosticFilter.options[diagnosticFilter.selectedIndex].text;
+              status.textContent = `Loaded Eve Topology. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.`;
+            }
+
+            nodeFilter.removeEventListener('change', null);
+            diagnosticFilter.removeEventListener('change', null);
+            nodeFilter.addEventListener('change', (event) => {
+              const filtered = applyFiltersEve(event.target.value, diagnosticFilter.value);
+              updateStatusLineEve(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+              detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+            });
+            diagnosticFilter.addEventListener('change', (event) => {
+              const filtered = applyFiltersEve(nodeFilter.value, event.target.value);
+              updateStatusLineEve(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+              detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+            });
+
+            const initiallyVisible = applyFiltersEve(nodeFilter.value, diagnosticFilter.value);
+            updateStatusLineEve(initiallyVisible.visibleNodeCount, initiallyVisible.visibleEdgeCount);
+          } catch (error) {
+            status.textContent = `Error: ${error.message}`;
+          }
+        }
+
+      datasetSelect.addEventListener('change', (event) => {
+        nodeFilter.value = 'all';
+        diagnosticFilter.value = 'all';
+        container.innerHTML = '';
+        detailsList.innerHTML = '';
+        if (event.target.value === 'eve_topology') {
+          status.textContent = 'Loading Eve Topology...';
+          loadEveDataset();
+        } else {
+          status.textContent = 'Loading MeshDiag + NetworkDiagnostic...';
+          loadMeshdiagNetworkdiag();
+        }
+      });
+
+      status.textContent = 'Loading MeshDiag + NetworkDiagnostic...';
+      loadMeshdiagNetworkdiag();
     }
 
     loadAndRenderTopology();
