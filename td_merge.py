@@ -52,6 +52,48 @@ def lower_str(value: Any) -> Any:
     return value.lower() if isinstance(value, str) else value
 
 
+def derive_mode_device(record: dict[str, Any]) -> str:
+    mode_device_raw = record.get("mode.device")
+    if isinstance(mode_device_raw, str) and mode_device_raw.strip():
+        value = mode_device_raw.strip().upper()
+        if value in {"FTD", "MTD"}:
+            return value
+
+    mode = record.get("mode")
+    if isinstance(mode, dict):
+        mode_device = mode.get("device")
+        if isinstance(mode_device, str) and mode_device.strip():
+            value = mode_device.strip().upper()
+            if value in {"FTD", "MTD"}:
+                return value
+
+        device_type_ftd = mode.get("deviceTypeFTD")
+        if isinstance(device_type_ftd, bool):
+            return "FTD" if device_type_ftd else "MTD"
+
+        device_type = mode.get("device_type")
+        if isinstance(device_type, (int, float)):
+            return "FTD" if int(device_type) != 0 else "MTD"
+
+    role = record.get("role")
+    if isinstance(role, str):
+        role_text = role.strip().lower()
+        if role_text == "router":
+            return "FTD"
+        if role_text == "child":
+            return "MTD"
+
+    node_type = record.get("type")
+    if isinstance(node_type, str):
+        type_text = node_type.strip().lower()
+        if type_text == "router":
+            return "FTD"
+        if "child" in type_text:
+            return "MTD"
+
+    return ""
+
+
 def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, Any]:
     extaddr = record.get("extaddr") or record.get("extAddress")
     if isinstance(extaddr, str):
@@ -77,6 +119,13 @@ def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, 
 
     if omr_addr:
         record["omrIpv6Address"] = omr_addr
+
+    mode_device = derive_mode_device(record)
+    if mode_device:
+        record["mode.device"] = mode_device
+        mode = record.get("mode")
+        if isinstance(mode, dict) and (not isinstance(mode.get("device"), str) or not mode.get("device", "").strip()):
+            mode["device"] = mode_device
 
     return record
 
@@ -327,6 +376,11 @@ def build_merged_records(
 
     merged_records: list[dict[str, Any]] = []
     for _, node in sorted(nodes.items(), key=lambda x: (x[1].get("rloc16") or "", x[0])):
+        source_files = node.get("_source_files")
+        if isinstance(source_files, list):
+            # Compatibility alias for older consumers expecting `_sources`.
+            node["_sources"] = list(source_files)
+
         ordered: dict[str, Any] = {}
 
         for key in PRIORITY_FIELDS:
