@@ -747,6 +747,7 @@
 
         function applyFilters(nodeFilterMode, diagnosticFilterMode) {
           const visibleNodeIds = new Set();
+          let visibleEdgeCount = 0;
 
           nodesDataset.forEach((node) => {
             const visible = isNodeVisibleByFilter(node, nodeFilterMode)
@@ -770,11 +771,21 @@
 
           edgesDataset.forEach((edge) => {
             const endpointsVisible = visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
+            const shouldShow = edge.baseHidden !== true && endpointsVisible;
             edgesDataset.update({
               id: edge.id,
-              hidden: edge.baseHidden === true || !endpointsVisible
+              hidden: !shouldShow
             });
+
+            if (shouldShow) {
+              visibleEdgeCount += 1;
+            }
           });
+
+          return {
+            visibleNodeCount: visibleNodeIds.size,
+            visibleEdgeCount
+          };
         }
 
         function renderNodeDetails(selectedNodeId) {
@@ -827,18 +838,6 @@
           renderNodeDetails(params.nodes[0]);
         });
 
-        nodeFilter.addEventListener('change', (event) => {
-          applyFilters(event.target.value, diagnosticFilter.value);
-          detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
-        });
-
-        diagnosticFilter.addEventListener('change', (event) => {
-          applyFilters(nodeFilter.value, event.target.value);
-          detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
-        });
-
-        applyFilters(nodeFilter.value, diagnosticFilter.value);
-
         const loadedSources = [];
         if (meshdiag.length > 0) {
           loadedSources.push('meshdiag');
@@ -847,7 +846,26 @@
           loadedSources.push('networkdiagnostic');
         }
 
-        status.textContent = `Loaded ${nodeData.length} nodes and ${edgeData.length} links from: ${loadedSources.join(', ')}`;
+        function updateStatusLine(visibleNodeCount, visibleEdgeCount) {
+          const nodeFilterLabel = nodeFilter.options[nodeFilter.selectedIndex].text;
+          const diagnosticFilterLabel = diagnosticFilter.options[diagnosticFilter.selectedIndex].text;
+          status.textContent = `Loaded ${loadedSources.join(', ')}. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.`;
+        }
+
+        nodeFilter.addEventListener('change', (event) => {
+          const filtered = applyFilters(event.target.value, diagnosticFilter.value);
+          updateStatusLine(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+          detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+        });
+
+        diagnosticFilter.addEventListener('change', (event) => {
+          const filtered = applyFilters(nodeFilter.value, event.target.value);
+          updateStatusLine(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+          detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+        });
+
+        const initiallyVisible = applyFilters(nodeFilter.value, diagnosticFilter.value);
+        updateStatusLine(initiallyVisible.visibleNodeCount, initiallyVisible.visibleEdgeCount);
       } catch (error) {
         status.textContent = `Error: ${error.message}`;
       }
