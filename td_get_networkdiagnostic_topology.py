@@ -218,12 +218,18 @@ def parse_child_table(output, parent_rloc16):
 def parse_mac_counters(output):
     """Extracts MAC Counters from diagnostic output.
 
-    Thread network MAC counters track packet-level performance, where high errors indicate radio interference or weak signal strength, and high discards often signal network congestion or inadequate buffer space. Common causes include improperly placed Border Routers, interference with 2.4GHz Wi-Fi, or outdated firmware, requiring node reboots or improved mesh topology
+    Thread network MAC counters track packet-level performance, where high errors indicate radio 
+    interference or weak signal strength, and high discards often signal network congestion or 
+    inadequate buffer space. Common causes include improperly placed Border Routers, interference 
+    with 2.4GHz Wi-Fi, or outdated firmware, requiring node reboots or improved mesh topology
 
     Troubleshooting Steps:
-    -Improve Topology: Ensure Thread Border Routers are well-spaced and not directly next to Wi-Fi routers to minimize interference.
-    -Reboot Devices: Cycle power on unresponsive accessories (turn off/on) to clear hung buffers and force reconnection.
-    -Check Signal: If a device has high discard counts, it may be too far from its neighbors in the mesh, requiring a repeater or closer proximity to a border router
+    -Improve Topology: Ensure Thread Border Routers are well-spaced and not directly next to Wi-Fi 
+     routers to minimize interference.
+    -Reboot Devices: Cycle power on unresponsive accessories (turn off/on) to clear hung buffers 
+     and force reconnection.
+    -Check Signal: If a device has high discard counts, it may be too far from its neighbors in 
+     the mesh, requiring a repeater or closer proximity to a border router
 
     Example MAC Counters:
         "mac_counters": {
@@ -275,6 +281,20 @@ def parse_mac_counters(output):
         counters["iftotalerrors"] = counters.get("ifinerrors", 0) + counters.get("ifouterrors", 0)
         counters["iftotaldiscards"] = counters.get("ifindiscards", 0) + counters.get("ifoutdiscards", 0)
         counters["iftotalpktserrorsdiscards"] =  counters["iftotalerrors"] + counters["iftotaldiscards"]
+
+        # errors are from malformed packets, interference, or weak signal strength causing corruption during 
+        # transmission, while discards typically indicate congestion or buffer overflows where packets are 
+        # dropped due to lack of resources to process them. By calculating the total packets, errors, and 
+        # discards, we can get a clearer picture of the overall health and performance of the network at 
+        # the MAC layer. High error counts relative to total packets may indicate issues with signal quality 
+        # or interference, while high discard counts may point to congestion or insufficient buffering 
+        # capacity in the network.
+        #
+        # discards can also occur when a device is overwhelmed with more traffic than it can handle, which 
+        # may be the case in a dense network or if a device has limited resources. By looking at the total 
+        # packets in relation to errors and discards, we can better understand whether high error/discard 
+        # counts are significant issues that need to be addressed or if they are just a small fraction of 
+        # the overall traffic and may not be as concerning.
 
         # Calculate percentages for each counter relative to iftotalpkts
         # Help determine if high error/discard counts are significant relative to total traffic or just a small fraction.

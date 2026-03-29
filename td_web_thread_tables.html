@@ -78,7 +78,8 @@
       table {
         width: 100%;
         border-collapse: collapse;
-        min-width: 1800px;
+          table-layout: fixed;
+          min-width: 0; /* Remove hardcoded min-width */
       }
 
       thead th {
@@ -99,14 +100,9 @@
         text-align: left;
         font-size: 13px;
         line-height: 1.3;
-        min-width: 220px;
-        max-width: 520px;
-        white-space: pre-wrap;
+          white-space: normal;
         word-break: break-word;
-      }
-
-      th {
-        min-width: 240px;
+          overflow-wrap: break-word;
       }
 
       tr:nth-child(even) td {
@@ -145,7 +141,20 @@
           <option value="thread-meshdiag-topology.json">thread-meshdiag-topology.json</option>
           <option value="thread-networkdiagnostic-topology.json">thread-networkdiagnostic-topology.json</option>
           <option value="thread-eve-topology.json">thread-eve-topology.json</option>
+          <option value="thread-meshdiag-routerneighbortables.json">thread-meshdiag-routerneighbortables.json</option>
           <option value="__merged__">merged: meshdiag, networkdiagnostic, eve </option>
+        </select>
+
+        <label for="diagnostic-filter">Diagnostic Filter:</label>
+        <select id="diagnostic-filter">
+          <option value="all">All Rows</option>
+          <option value="medium-total-errors-pct">Medium Total Error Packets % (>= 5%)</option>
+          <option value="medium-total-errors-high">Medium Total Error Packets (>= 10%)</option>
+          <option value="medium-discard-pct">Medium Discard Packets % (>= 15%)</option>
+          <option value="medium-partition-changes">Medium Partition Changes (>= 2)</option>
+          <option value="high-partition-changes">High Partition Changes (>= 5)</option>
+          <option value="medium-parent-changes">Medium Parent Changes (>= 2)</option>
+          <option value="high-parent-changes">High Parent Changes (>= 5)</option>
         </select>
       </div>
 
@@ -161,9 +170,12 @@
 
     <script>
       const datasetSelect = document.getElementById("dataset-select");
+      const diagnosticFilterSelect = document.getElementById("diagnostic-filter");
       const statusEl = document.getElementById("status");
       const theadEl = document.querySelector("#data-table thead");
       const tbodyEl = document.querySelector("#data-table tbody");
+      let currentRows = [];
+      let currentColumns = [];
       const priorityColumns = [
         "rloc16",
         "extaddr",
@@ -175,8 +187,8 @@
         "total_links",
         "mode.device",
         "thread_stack_version",
-        "mac_counters.ifindiscards_pct",
         "mac_counters.iftotalerrors_pct",
+        "mac_counters.iftotaldiscards_pct",
         "mle_counters.partitionidchanges",
         "mle_counters.betterpartitionattachattempts",
         "mle_counters.parentchanges",
@@ -339,6 +351,92 @@
         return current;
       }
 
+      function isRowVisibleByDiagnosticFilter(row, filterMode) {
+        if (filterMode === "all") {
+          return true;
+        }
+
+        const getMetricValue = (path) => {
+          const value = getColumnValue(row, path);
+          return Number.isFinite(value) ? value : undefined;
+        };
+        
+        if (filterMode === "medium-total-errors-pct") {
+          const err = getMetricValue("mac_counters.iftotalerrors_pct");
+          return Number.isFinite(err) && err >= 5;
+        }
+        
+        if (filterMode === "medium-total-errors-high") {
+          const err = getMetricValue("mac_counters.iftotalerrors_pct");
+          return Number.isFinite(err) && err > 10;
+        }
+        
+        if (filterMode === "medium-discard-pct") {
+          const pkt = getMetricValue("mac_counters.iftotaldiscards_pct");
+          return Number.isFinite(pkt) && pkt >= 15;
+        }
+
+        if (filterMode === "medium-partition-changes") {
+          const part = getMetricValue("mle_counters.partitionidchanges");
+          return Number.isFinite(part) && part >= 2;
+        }
+
+        if (filterMode === "high-partition-changes") {
+          const part = getMetricValue("mle_counters.partitionidchanges");
+          return Number.isFinite(part) && part >= 5;
+        }
+
+        if (filterMode === "medium-parent-changes") {
+          const parent = getMetricValue("mle_counters.parentchanges");
+          return Number.isFinite(parent) && parent >= 2;
+        }
+
+        if (filterMode === "high-parent-changes") {
+          const parent = getMetricValue("mle_counters.parentchanges");
+          return Number.isFinite(parent) && parent >= 5;
+        }
+
+        return true;
+      }
+
+      function calculateColumnMaxLength(rows, column) {
+        let maxLength = column.length;
+        rows.forEach((row) => {
+          const value = formatCellValue(getColumnValue(row, column), column);
+          if (value) {
+            const lines = value.split('\n');
+            lines.forEach((line) => {
+              maxLength = Math.max(maxLength, line.length);
+            });
+          }
+        });
+        return maxLength;
+      }
+
+      function getColumnWidthStyle(maxContentLength) {
+        //const charToPixels = 7.8;
+        const charToPixels = 8.8;
+        const minWidth = 70;
+        const maxWidth = 25 * charToPixels;
+        let width;
+        
+        if (maxContentLength >= 25) {
+          width = maxWidth;
+        }
+        else {
+          width = Math.max(maxContentLength * charToPixels, minWidth);
+        }
+        
+        return {
+          width: `${width}px`
+        };
+      }
+
+      function applyDiagnosticFilter(filterMode) {
+        const filteredRows = currentRows.filter((row) => isRowVisibleByDiagnosticFilter(row, filterMode));
+        renderTable(filteredRows, currentColumns);
+      }
+
       function normalizeRloc16(value) {
         if (value === null || value === undefined) {
           return "";
@@ -397,6 +495,9 @@
         const mergedRows = mergeRowsByRloc16(normalizedGroups);
         const columns = collectColumns(mergedRows);
 
+        currentRows = mergedRows;
+        currentColumns = columns;
+        diagnosticFilterSelect.value = "all";
         renderTable(mergedRows, columns);
         statusEl.textContent = `Loaded merged: ${mergedRows.length} rows, ${columns.length} columns. Click a header to sort.`;
       }
@@ -405,10 +506,20 @@
         theadEl.innerHTML = "";
         tbodyEl.innerHTML = "";
 
+        const columnWidths = new Map();
+        columns.forEach((column) => {
+          const maxLength = calculateColumnMaxLength(rows, column);
+          columnWidths.set(column, getColumnWidthStyle(maxLength));
+        });
+
         const headRow = document.createElement("tr");
         columns.forEach((column) => {
           const th = document.createElement("th");
           th.textContent = column;
+          const widthStyle = columnWidths.get(column);
+          if (widthStyle) {
+            Object.assign(th.style, widthStyle);
+          }
           headRow.appendChild(th);
         });
         theadEl.appendChild(headRow);
@@ -419,6 +530,10 @@
           columns.forEach((column) => {
             const td = document.createElement("td");
             td.textContent = formatCellValue(getColumnValue(row, column), column);
+            const widthStyle = columnWidths.get(column);
+            if (widthStyle) {
+              Object.assign(td.style, widthStyle);
+            }
             tr.appendChild(td);
           });
           bodyFragment.appendChild(tr);
@@ -451,6 +566,9 @@
           const rows = normalizeRows(rawData);
           const columns = collectColumns(rows);
 
+          currentRows = rows;
+          currentColumns = columns;
+          diagnosticFilterSelect.value = "all";
           renderTable(rows, columns);
           statusEl.textContent = `Loaded ${fileName}: ${rows.length} rows, ${columns.length} columns. Click a header to sort.`;
         } catch (error) {
@@ -460,6 +578,10 @@
 
       datasetSelect.addEventListener("change", (event) => {
         loadDataset(event.target.value);
+      });
+
+      diagnosticFilterSelect.addEventListener("change", (event) => {
+        applyDiagnosticFilter(event.target.value);
       });
 
       loadDataset(datasetSelect.value);
