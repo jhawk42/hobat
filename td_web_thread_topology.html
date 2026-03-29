@@ -114,10 +114,10 @@
 
         <label for="diagnostic-filter">Diagnostic Filter:</label>
         <select id="diagnostic-filter">
-          <option value="all">All Nodes</option>
-          <option value="medium-discard-error">Medium Discard and Error Packets (>= 15%)</option>
+          <option value="all">All Rows</option>
           <option value="medium-total-errors-pct">Medium Total Error Packets % (>= 5%)</option>
           <option value="medium-total-errors-high">Medium Total Error Packets (>= 10%)</option>
+          <option value="medium-discard-pct">Medium Discard Packets % (>= 15%)</option>
           <option value="medium-partition-changes">Medium Partition Changes (>= 2)</option>
           <option value="high-partition-changes">High Partition Changes (>= 5)</option>
           <option value="medium-parent-changes">Medium Parent Changes (>= 2)</option>
@@ -310,7 +310,7 @@
         'ver',
         'total_links',
         'total_children',
-        'mac_counters.ifindiscards_pct',
+        'mac_counters.iftotaldiscards_pct',
         'mac_counters.iftotalerrors_pct',
         'mle_counters.partitionidchanges',
         'mle_counters.betterpartitionattachattempts',
@@ -478,7 +478,7 @@
       }
 
       function isNodeVisibleByDiagnosticFilter(node, filterMode) {
-        if (filterMode === 'medium-discard-error') {
+        if (filterMode === 'medium-discard-pct') {
           return Number.isFinite(node.iftotalpktserrorsdiscards_pct)
             && node.iftotalpktserrorsdiscards_pct >= 15;
         }
