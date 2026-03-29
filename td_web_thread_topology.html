@@ -48,6 +48,12 @@
         font-size: 14px;
       }
 
+      #link-filter {
+        margin-left: 10px;
+        padding: 4px 6px;
+        font-size: 14px;
+      }
+
       #diagnostic-filter {
         margin-left: 10px;
         padding: 4px 6px;
@@ -97,9 +103,9 @@
       <div class="controls">
         <label for="dataset-select">Dataset:</label>
         <select id="dataset-select">
-           <option value="default_topology">Merged: MeshDiag + NetworkDiagnostic</option>
+           <option value="default_topology">Merged: otbr cli MeshDiag, NetworkDiagnostic</option>
+           <option value="merged_detailed_topology">Merged: deep: otbr cli, restapi, eve</option>
            <option value="eve_topology">Eve Topology</option>
-            <option value="merged_detailed_topology">Merged Detailed Topology (threadcache)</option>
         </select>
 
         <label for="node-filter">Node Filter:</label>
@@ -111,6 +117,15 @@
           <option value="main-routers">Main Routers (rloc16 ends with 00)</option>
           <option value="routers-with-children">Routers with Children Nodes</option>
           <option value="routers-without-children">Routers without Children Nodes</option>
+        </select>
+
+        <label for="link-filter">Link Filter:</label>
+        <select id="link-filter">
+          <option value="default_links">Default: router, children, 321 _links, childTable</option>
+          <option value="default_plus_router_neighbors">Default plus: router neighbors</option>
+          <option value="otbr_rest_api">OTBR: rest api (route routeData, childTable)</option>
+          <option value="eve_routes_children">Eve: routes and children</option>
+          <option value="all_links">All Links (large)</option>
         </select>
 
         <label for="diagnostic-filter">Diagnostic Filter:</label>
@@ -342,20 +357,125 @@
         return;
       }
 
-      const key = [from, to].sort().join('|');
+      const edgeKeySuffix = toText(style.edgeKeySuffix);
+      const keyBase = [from, to].sort().join('|');
+      const key = edgeKeySuffix ? `${keyBase}|${edgeKeySuffix}` : keyBase;
       const existingEdge = edgeMap.get(key);
       if (existingEdge) {
         if (Number.isFinite(style.width)) {
           existingEdge.width = Math.max(existingEdge.width || 0, style.width);
         }
+        const mergedCategories = new Set([
+          ...normalizeLinkCategories(existingEdge.linkCategories),
+          ...normalizeLinkCategories(style.linkCategories)
+        ]);
+        existingEdge.linkCategories = Array.from(mergedCategories);
+        if (style.isParentChild === true) {
+          existingEdge.isParentChild = true;
+        }
         return;
       }
 
-      const edge = { from, to, ...style };
+      const { edgeKeySuffix: _edgeKeySuffix, ...edgeStyle } = style;
+      const edge = { from, to, ...edgeStyle };
       edge.id = key;
       edge.baseHidden = style.hidden === true;
+      edge.linkCategories = normalizeLinkCategories(style.linkCategories);
       edgeMap.set(key, edge);
       edgeData.push(edge);
+    }
+
+    const LINK_FILTER_DEFAULT = 'default_links';
+    const LINK_FILTER_DEFAULT_PLUS_NEIGHBORS = 'default_plus_router_neighbors';
+    const LINK_FILTER_OTBR_REST_API = 'otbr_rest_api';
+    const LINK_FILTER_EVE = 'eve_routes_children';
+    const LINK_FILTER_ALL = 'all_links';
+
+    const EDGE_CATEGORY_DEFAULT_CHILDREN = 'default_children';
+    const EDGE_CATEGORY_DEFAULT_1 = 'default_1_links';
+    const EDGE_CATEGORY_DEFAULT_2 = 'default_2_links';
+    const EDGE_CATEGORY_DEFAULT_3 = 'default_3_links';
+    const EDGE_CATEGORY_ROUTER_NEIGHBOR = 'router_neighbor';
+    const EDGE_CATEGORY_OTBR_ROUTE = 'otbr_route';
+    const EDGE_CATEGORY_OTBR_CHILD = 'otbr_child';
+    const EDGE_CATEGORY_EVE_ROUTE = 'eve_route';
+    const EDGE_CATEGORY_EVE_CHILD = 'eve_child';
+
+    function normalizeLinkCategories(value) {
+      if (Array.isArray(value)) {
+        return value.filter((item) => toText(item));
+      }
+
+      const text = toText(value);
+      return text ? [text] : [];
+    }
+
+    function edgeMatchesLinkFilter(edge, linkFilterMode) {
+      const categories = normalizeLinkCategories(edge.linkCategories);
+      if (categories.length === 0) {
+        return linkFilterMode === LINK_FILTER_ALL;
+      }
+
+      const hasAny = (...wanted) => wanted.some((item) => categories.includes(item));
+
+      if (linkFilterMode === LINK_FILTER_DEFAULT || linkFilterMode === 'linksdefault_') {
+        return hasAny(
+          EDGE_CATEGORY_DEFAULT_CHILDREN,
+          EDGE_CATEGORY_DEFAULT_1,
+          EDGE_CATEGORY_DEFAULT_2,
+          EDGE_CATEGORY_DEFAULT_3,
+          EDGE_CATEGORY_OTBR_CHILD
+        );
+      }
+
+      if (linkFilterMode === LINK_FILTER_DEFAULT_PLUS_NEIGHBORS) {
+        return hasAny(
+          EDGE_CATEGORY_DEFAULT_CHILDREN,
+          EDGE_CATEGORY_DEFAULT_1,
+          EDGE_CATEGORY_DEFAULT_2,
+          EDGE_CATEGORY_DEFAULT_3,
+          EDGE_CATEGORY_OTBR_CHILD,
+          EDGE_CATEGORY_ROUTER_NEIGHBOR
+        );
+      }
+
+      if (linkFilterMode === LINK_FILTER_OTBR_REST_API) {
+        return hasAny(EDGE_CATEGORY_OTBR_ROUTE, EDGE_CATEGORY_OTBR_CHILD);
+      }
+
+      if (linkFilterMode === LINK_FILTER_EVE) {
+        return hasAny(EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD);
+      }
+
+      if (linkFilterMode === LINK_FILTER_ALL) {
+        return true;
+      }
+
+      return false;
+    }
+
+    function buildMainRouterRloc16(routeId) {
+      const routeNumber = toFiniteNumber(routeId);
+      if (!Number.isFinite(routeNumber)) {
+        return '';
+      }
+
+      return `0x${(routeNumber << 10).toString(16).padStart(4, '0')}`;
+    }
+
+    function buildChildRloc16(parentRloc16, childId) {
+      const parentText = toText(parentRloc16).toLowerCase();
+      const childNumber = toFiniteNumber(childId);
+      if (!parentText.startsWith('0x') || !Number.isFinite(childNumber)) {
+        return '';
+      }
+
+      const parentNumber = Number.parseInt(parentText, 16);
+      if (!Number.isFinite(parentNumber)) {
+        return '';
+      }
+
+      return `0x${(parentNumber + childNumber).toString(16).padStart(4, '0')}`;
     }
 
     async function fetchJson(path) {
@@ -453,6 +573,7 @@
       const status = document.getElementById('status');
       const detailsList = document.getElementById('details-list');
       const nodeFilter = document.getElementById('node-filter');
+      const linkFilter = document.getElementById('link-filter');
       const diagnosticFilter = document.getElementById('diagnostic-filter');
       const datasetSelect = document.getElementById('dataset-select');
 
@@ -512,13 +633,25 @@
 
       async function loadMeshdiagNetworkdiag() {
         try {
-          const [meshResult, ndResult] = await Promise.allSettled([
+          const [meshResult, ndResult, neighborResult, restApiResult] = await Promise.allSettled([
             fetchJson('./thread-meshdiag-topology.json'),
-            fetchJson('./thread-networkdiagnostic-topology.json')
+            fetchJson('./thread-networkdiagnostic-topology.json'),
+            fetchJson('./thread-meshdiag-routerneighbortables.json'),
+            fetchJson('./thread-restapi-diagnostics.json')
           ]);
 
           const meshdiag = meshResult.status === 'fulfilled' && Array.isArray(meshResult.value) ? meshResult.value : [];
           const networkDiag = ndResult.status === 'fulfilled' && Array.isArray(ndResult.value) ? ndResult.value : [];
+          const routerNeighborTables = neighborResult.status === 'fulfilled' && Array.isArray(neighborResult.value) ? neighborResult.value : [];
+          const restApiDiagnostics = restApiResult.status === 'fulfilled' && Array.isArray(restApiResult.value?.data)
+            ? restApiResult.value.data
+                .map((item) => ({
+                  id: item.id,
+                  type: item.type,
+                  ...(item.attributes || {})
+                }))
+                .filter((item) => item && typeof item === 'object')
+            : [];
 
         if (meshdiag.length === 0 && networkDiag.length === 0) {
           throw new Error('Could not load either topology JSON file.');
@@ -527,10 +660,12 @@
         const nodeMap = new Map();
         const meshdiagNodeById = new Map();
         const networkDiagNodeById = new Map();
+        const restApiNodeById = new Map();
         const meshIdToUnifiedId = new Map();
         const edgeMap = new Map();
         const edgeData = [];
         const routerIdsWithChildren = new Set();
+        const routerNeighborByRloc16 = new Map();
 
         function upsertNode(nodeId, rawNode, style) {
           const existing = nodeMap.get(nodeId);
@@ -552,7 +687,7 @@
             : undefined;
           const rawModeDevice = rawNode.mode && toText(rawNode.mode.device)
             ? toText(rawNode.mode.device)
-            : '';
+            : (rawNode.mode?.deviceTypeFTD === true ? 'FTD' : (rawNode.mode?.deviceTypeFTD === false ? 'MTD' : ''));
           const rawPartitionIdChanges = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.partitionidchanges)
             ? rawNode.mle_counters.partitionidchanges
             : undefined;
@@ -611,6 +746,18 @@
           nodeMap.set(nodeId, merged);
         }
 
+        function ensureNode(nodeId, rawNode, style) {
+          if (!nodeId) {
+            return '';
+          }
+
+          if (!nodeMap.has(nodeId)) {
+            upsertNode(nodeId, rawNode, style);
+          }
+
+          return nodeId;
+        }
+
         meshdiag.forEach((node, index) => {
           const unifiedId = chooseNodeId(node, 'meshdiag-node', index + 1);
           meshdiagNodeById.set(unifiedId, node);
@@ -638,6 +785,23 @@
           });
         });
 
+        restApiDiagnostics.forEach((node, index) => {
+          const unifiedId = chooseNodeId(node, 'restapi-node', index + 1);
+          restApiNodeById.set(unifiedId, node);
+          upsertNode(unifiedId, node, {
+            source: 'networkdiagnostic',
+            shape: 'box',
+            color: { background: '#d9ecff', border: '#1565c0' }
+          });
+        });
+
+        routerNeighborTables.forEach((row) => {
+          const rloc16 = toText(row.rloc16).toLowerCase();
+          if (rloc16) {
+            routerNeighborByRloc16.set(rloc16, row);
+          }
+        });
+
         for (const node of meshdiag) {
           const fromId = chooseNodeId(node, 'meshdiag-parent', 0);
 
@@ -654,7 +818,11 @@
               color: { background: '#fff4cc', border: '#d9a400' }
             });
 
-            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true });
+            addEdge(edgeMap, edgeData, fromId, childId, {
+              dashes: true,
+              isParentChild: true,
+              linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN]
+            });
             routerIdsWithChildren.add(fromId);
           });
 
@@ -685,7 +853,37 @@
                 });
               }
 
-              addEdge(edgeMap, edgeData, fromId, toId, linkStyleByField[field] || {});
+              addEdge(edgeMap, edgeData, fromId, toId, {
+                ...(linkStyleByField[field] || {}),
+                linkCategories: [
+                  field === '3_links' ? EDGE_CATEGORY_DEFAULT_3 :
+                  field === '2_links' ? EDGE_CATEGORY_DEFAULT_2 :
+                  EDGE_CATEGORY_DEFAULT_1
+                ]
+              });
+            });
+          });
+
+          const neighborRow = routerNeighborByRloc16.get(toText(node.rloc16).toLowerCase());
+          const neighborLinks = Array.isArray(neighborRow?.router_neighbor_table) ? neighborRow.router_neighbor_table : [];
+          neighborLinks.forEach((neighbor) => {
+            const toId = ensureNode(
+              toText(neighbor.rloc16) || toText(neighbor.extaddr),
+              {
+                rloc16: toText(neighbor.rloc16),
+                extaddr: toText(neighbor.extaddr),
+                device_label: toText(neighbor.device_label),
+                id: toText(neighbor.rloc16) || toText(neighbor.extaddr)
+              },
+              {
+                source: 'meshdiag',
+                shape: 'box',
+                color: { background: '#e8f5e9', border: '#2e7d32' }
+              }
+            );
+            addEdge(edgeMap, edgeData, fromId, toId, {
+              width: 1.5,
+              linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR]
             });
           });
         }
@@ -706,10 +904,66 @@
               color: { background: '#fff4cc', border: '#d9a400' }
             });
 
-            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true });
+            addEdge(edgeMap, edgeData, fromId, childId, {
+              dashes: true,
+              isParentChild: true,
+              linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN]
+            });
             routerIdsWithChildren.add(fromId);
           });
         }
+
+        restApiDiagnostics.forEach((node) => {
+          const fromId = chooseNodeId(node, 'restapi-parent', 0);
+
+          const routeEntries = Array.isArray(node.route?.routeData) ? node.route.routeData : [];
+          routeEntries.forEach((route) => {
+            const toRloc16 = buildMainRouterRloc16(route.routeId);
+            const toId = ensureNode(
+              toRloc16,
+              {
+                rloc16: toRloc16,
+                id: toRloc16,
+                device_label: toRloc16
+              },
+              {
+                source: 'networkdiagnostic',
+                shape: 'box',
+                color: { background: '#d9ecff', border: '#1565c0' }
+              }
+            );
+
+            addEdge(edgeMap, edgeData, fromId, toId, {
+              width: 1.5,
+              linkCategories: [EDGE_CATEGORY_OTBR_ROUTE]
+            });
+          });
+
+          const childEntries = Array.isArray(node.childTable) ? node.childTable : [];
+          childEntries.forEach((child, childIndex) => {
+            const childRloc16 = buildChildRloc16(node.rloc16, child.childId);
+            const childId = ensureNode(
+              childRloc16 || `${fromId}-rest-child-${childIndex + 1}`,
+              {
+                rloc16: childRloc16,
+                id: childRloc16 || `${fromId}-rest-child-${childIndex + 1}`,
+                device_label: childRloc16 || `${fromId} child ${child.childId}`
+              },
+              {
+                source: 'networkdiagnostic',
+                shape: 'ellipse',
+                color: { background: '#fff4cc', border: '#d9a400' }
+              }
+            );
+
+            addEdge(edgeMap, edgeData, fromId, childId, {
+              dashes: true,
+              isParentChild: true,
+              linkCategories: [EDGE_CATEGORY_OTBR_CHILD]
+            });
+            routerIdsWithChildren.add(fromId);
+          });
+        });
 
         const nodeData = Array.from(nodeMap.values()).map((node) => {
           const unknown = isUnknownNodeName(node.device_label);
@@ -833,7 +1087,7 @@
 
         const network = new vis.Network(container, data, options);
 
-        function applyFilters(nodeFilterMode, diagnosticFilterMode) {
+        function applyFilters(nodeFilterMode, linkFilterMode, diagnosticFilterMode) {
           const visibleNodeIds = new Set();
           let visibleEdgeCount = 0;
 
@@ -847,7 +1101,9 @@
 
           if (nodeFilterMode === 'routers-with-children') {
             edgesDataset.forEach((edge) => {
-              if (edge.isParentChild === true && visibleNodeIds.has(edge.from)) {
+              if (edge.isParentChild === true
+                && edgeMatchesLinkFilter(edge, linkFilterMode)
+                && visibleNodeIds.has(edge.from)) {
                 visibleNodeIds.add(edge.to);
               }
             });
@@ -859,7 +1115,9 @@
 
           edgesDataset.forEach((edge) => {
             const endpointsVisible = visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
-            const shouldShow = edge.baseHidden !== true && endpointsVisible;
+            const shouldShow = edge.baseHidden !== true
+              && endpointsVisible
+              && edgeMatchesLinkFilter(edge, linkFilterMode);
             edgesDataset.update({
               id: edge.id,
               hidden: !shouldShow
@@ -887,14 +1145,16 @@
 
           const meshdiagRaw = meshdiagNodeById.get(selectedNodeId) || {};
           const networkDiagRaw = networkDiagNodeById.get(selectedNodeId) || {};
+          const restApiRaw = restApiNodeById.get(selectedNodeId) || {};
 
-          const mergedSourceDetails = mergeForDisplay(meshdiagRaw, networkDiagRaw);
+          const mergedSourceDetails = mergeForDisplay(mergeForDisplay(meshdiagRaw, networkDiagRaw), restApiRaw);
           const graphDetails = {
             graph: {
               unified_id: node.id,
               graph_link_count: nodeDegree.get(node.id) || 0,
               from_meshdiag: node.from_meshdiag === true,
               from_networkdiagnostic: node.from_networkdiagnostic === true,
+              from_rest_api: restApiNodeById.has(selectedNodeId),
               has_children_in_graph: routerIdsWithChildren.has(node.id)
             }
           };
@@ -933,26 +1193,39 @@
         if (networkDiag.length > 0) {
           loadedSources.push('networkdiagnostic');
         }
+        if (routerNeighborTables.length > 0) {
+          loadedSources.push('routerneighbortables');
+        }
+        if (restApiDiagnostics.length > 0) {
+          loadedSources.push('restapi');
+        }
 
         function updateStatusLine(visibleNodeCount, visibleEdgeCount) {
           const nodeFilterLabel = nodeFilter.options[nodeFilter.selectedIndex].text;
+          const linkFilterLabel = linkFilter.options[linkFilter.selectedIndex].text;
           const diagnosticFilterLabel = diagnosticFilter.options[diagnosticFilter.selectedIndex].text;
-          status.textContent = `Loaded ${loadedSources.join(', ')}. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.`;
+          status.textContent = `Loaded ${loadedSources.join(', ')}. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.`;
         }
 
-        nodeFilter.addEventListener('change', (event) => {
-          const filtered = applyFilters(event.target.value, diagnosticFilter.value);
+        nodeFilter.onchange = (event) => {
+          const filtered = applyFilters(event.target.value, linkFilter.value, diagnosticFilter.value);
           updateStatusLine(filtered.visibleNodeCount, filtered.visibleEdgeCount);
           detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
-        });
+        };
 
-        diagnosticFilter.addEventListener('change', (event) => {
-          const filtered = applyFilters(nodeFilter.value, event.target.value);
+        linkFilter.onchange = (event) => {
+          const filtered = applyFilters(nodeFilter.value, event.target.value, diagnosticFilter.value);
           updateStatusLine(filtered.visibleNodeCount, filtered.visibleEdgeCount);
           detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
-        });
+        };
 
-        const initiallyVisible = applyFilters(nodeFilter.value, diagnosticFilter.value);
+        diagnosticFilter.onchange = (event) => {
+          const filtered = applyFilters(nodeFilter.value, linkFilter.value, event.target.value);
+          updateStatusLine(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+          detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+        };
+
+        const initiallyVisible = applyFilters(nodeFilter.value, linkFilter.value, diagnosticFilter.value);
         updateStatusLine(initiallyVisible.visibleNodeCount, initiallyVisible.visibleEdgeCount);
         } catch (error) {
           status.textContent = `Error: ${error.message}`;
@@ -1034,7 +1307,10 @@
                   if (avgLqi >= 200) edgeWidth = 3;
                   else if (avgLqi >= 150) edgeWidth = 2;
                 }
-                addEdge(edgeMap, edgeData, fromId, toId, { width: edgeWidth });
+                addEdge(edgeMap, edgeData, fromId, toId, {
+                  width: edgeWidth,
+                  linkCategories: [EDGE_CATEGORY_EVE_ROUTE]
+                });
               });
               const children = Array.isArray(node.children) ? node.children : [];
               children.forEach((child) => {
@@ -1043,7 +1319,11 @@
                 if (!nodeMap.has(childNodeId)) {
                   upsertEveNode(childNodeId, { id: childNodeId }, { source: 'eve', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
                 }
-                addEdge(edgeMap, edgeData, fromId, childNodeId, { dashes: true, isParentChild: true });
+                addEdge(edgeMap, edgeData, fromId, childNodeId, {
+                  dashes: true,
+                  isParentChild: true,
+                  linkCategories: [EDGE_CATEGORY_EVE_CHILD]
+                });
                 routerIdsWithChildren.add(fromId);
               });
             }
@@ -1163,7 +1443,7 @@
               });
             });
 
-            function applyFiltersEve(nodeFilterMode, diagnosticFilterMode) {
+            function applyFiltersEve(nodeFilterMode, linkFilterMode, diagnosticFilterMode) {
               const visibleNodeIds = new Set();
               let visibleEdgeCount = 0;
               nodesDataset.forEach((node) => {
@@ -1175,7 +1455,9 @@
               });
               if (nodeFilterMode === 'routers-with-children') {
                 edgesDataset.forEach((edge) => {
-                  if (edge.isParentChild === true && visibleNodeIds.has(edge.from)) {
+                  if (edge.isParentChild === true
+                    && edgeMatchesLinkFilter(edge, linkFilterMode)
+                    && visibleNodeIds.has(edge.from)) {
                     visibleNodeIds.add(edge.to);
                   }
                 });
@@ -1185,7 +1467,9 @@
               });
               edgesDataset.forEach((edge) => {
                 const endpointsVisible = visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
-                const shouldShow = edge.baseHidden !== true && endpointsVisible;
+                const shouldShow = edge.baseHidden !== true
+                  && endpointsVisible
+                  && edgeMatchesLinkFilter(edge, linkFilterMode);
                 edgesDataset.update({ id: edge.id, hidden: !shouldShow });
                 if (shouldShow) { visibleEdgeCount += 1; }
               });
@@ -1194,24 +1478,28 @@
 
             function updateStatusLineEve(visibleNodeCount, visibleEdgeCount) {
               const nodeFilterLabel = nodeFilter.options[nodeFilter.selectedIndex].text;
+              const linkFilterLabel = linkFilter.options[linkFilter.selectedIndex].text;
               const diagnosticFilterLabel = diagnosticFilter.options[diagnosticFilter.selectedIndex].text;
-              status.textContent = `Loaded Eve Topology. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.`;
+              status.textContent = `Loaded Eve Topology. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.`;
             }
 
-            nodeFilter.removeEventListener('change', null);
-            diagnosticFilter.removeEventListener('change', null);
-            nodeFilter.addEventListener('change', (event) => {
-              const filtered = applyFiltersEve(event.target.value, diagnosticFilter.value);
+            nodeFilter.onchange = (event) => {
+              const filtered = applyFiltersEve(event.target.value, linkFilter.value, diagnosticFilter.value);
               updateStatusLineEve(filtered.visibleNodeCount, filtered.visibleEdgeCount);
               detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
-            });
-            diagnosticFilter.addEventListener('change', (event) => {
-              const filtered = applyFiltersEve(nodeFilter.value, event.target.value);
+            };
+            linkFilter.onchange = (event) => {
+              const filtered = applyFiltersEve(nodeFilter.value, event.target.value, diagnosticFilter.value);
               updateStatusLineEve(filtered.visibleNodeCount, filtered.visibleEdgeCount);
               detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
-            });
+            };
+            diagnosticFilter.onchange = (event) => {
+              const filtered = applyFiltersEve(nodeFilter.value, linkFilter.value, event.target.value);
+              updateStatusLineEve(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+              detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+            };
 
-            const initiallyVisible = applyFiltersEve(nodeFilter.value, diagnosticFilter.value);
+            const initiallyVisible = applyFiltersEve(nodeFilter.value, linkFilter.value, diagnosticFilter.value);
             updateStatusLineEve(initiallyVisible.visibleNodeCount, initiallyVisible.visibleEdgeCount);
           } catch (error) {
             status.textContent = `Error: ${error.message}`;
@@ -1231,6 +1519,24 @@
             const edgeMap = new Map();
             const edgeData = [];
             const routerIdsWithChildren = new Set();
+
+            function isMergedRowEveOnly(node) {
+              const sources = Array.isArray(node?._sources) ? node._sources : [];
+              if (!sources.includes('thread-eve-topology.json')) {
+                return false;
+              }
+
+              const hasOtbrSource = sources.some((source) => (
+                source === 'thread-router-table.json'
+                || source === 'thread-meshdiag-topology.json'
+                || source === 'thread-networkdiagnostic-topology.json'
+                || source === 'thread-meshdiag-routerneighbortables.json'
+                || source === 'thread-restapi-devices.json'
+                || source === 'thread-restapi-diagnostics.json'
+              ));
+
+              return !hasOtbrSource;
+            }
 
             function chooseMergedNodeId(node, index) {
               const rloc16 = toText(node.rloc16);
@@ -1274,6 +1580,10 @@
             }
 
             rows.forEach((node, index) => {
+              if (isMergedRowEveOnly(node)) {
+                return;
+              }
+
               const nodeId = chooseMergedNodeId(node, index);
               rawNodeById.set(nodeId, node);
 
@@ -1310,6 +1620,10 @@
             }
 
             rows.forEach((node, index) => {
+              if (isMergedRowEveOnly(node)) {
+                return;
+              }
+
               const fromId = chooseMergedNodeId(node, index);
 
               const linkFields = [
@@ -1323,31 +1637,78 @@
                 links.forEach((link) => {
                   const toId = ensureNodeForLink(link, link.rloc16 || link.id);
                   if (!toId) return;
-                  addEdge(edgeMap, edgeData, fromId, toId, { width: field.width });
+                  addEdge(edgeMap, edgeData, fromId, toId, {
+                    width: field.width,
+                    linkCategories: [
+                      field.key === '3_links' ? EDGE_CATEGORY_DEFAULT_3 :
+                      field.key === '2_links' ? EDGE_CATEGORY_DEFAULT_2 :
+                      EDGE_CATEGORY_DEFAULT_1
+                    ],
+                    edgeKeySuffix: `merged-${field.key}`
+                  });
                 });
               });
 
-              const routes = Array.isArray(node.routes) ? node.routes : [];
-              routes.forEach((route) => {
-                const toId = ensureNodeForLink(route, route.to_rloc16 || route.to);
+              const routerNeighborLinks = Array.isArray(node.router_neighbor_table) ? node.router_neighbor_table : [];
+              routerNeighborLinks.forEach((neighbor) => {
+                const toId = ensureNodeForLink(neighbor, neighbor.rloc16 || neighbor.extaddr || neighbor.id);
                 if (!toId) return;
-                const inLqi = toFiniteNumber(route.in);
-                const outLqi = toFiniteNumber(route.out);
-                const avg = (Number.isFinite(inLqi) && Number.isFinite(outLqi)) ? (inLqi + outLqi) / 2 : (inLqi || outLqi);
-                let width = 1.5;
-                if (Number.isFinite(avg)) {
-                  if (avg >= 3) width = 3;
-                  else if (avg >= 2) width = 2;
-                }
-                addEdge(edgeMap, edgeData, fromId, toId, { width });
+                addEdge(edgeMap, edgeData, fromId, toId, {
+                  width: 1.5,
+                  linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
+                  edgeKeySuffix: 'merged-router-neighbor'
+                });
+              });
+
+              const otbrRoutes = Array.isArray(node.route?.routeData) ? node.route.routeData : [];
+              otbrRoutes.forEach((route) => {
+                const toRloc16 = buildMainRouterRloc16(route.routeId);
+                const toId = ensureNodeForLink({
+                  rloc16: toRloc16,
+                  id: toRloc16,
+                  device_label: toRloc16
+                }, toRloc16);
+                if (!toId) return;
+                addEdge(edgeMap, edgeData, fromId, toId, {
+                  width: 1.5,
+                  linkCategories: [EDGE_CATEGORY_OTBR_ROUTE],
+                  edgeKeySuffix: 'merged-otbr-route'
+                });
+              });
+
+              const otbrChildren = Array.isArray(node.childTable) ? node.childTable : [];
+              otbrChildren.forEach((child, childIndex) => {
+                const childRloc16 = buildChildRloc16(node.rloc16, child.childId);
+                const childId = ensureNodeForLink({
+                  rloc16: childRloc16,
+                  id: childRloc16 || `${fromId}-rest-child-${childIndex + 1}`,
+                  device_label: childRloc16 || `${fromId} child ${child.childId}`
+                }, childRloc16 || `${fromId}-rest-child-${childIndex + 1}`);
+                if (!childId) return;
+                addEdge(edgeMap, edgeData, fromId, childId, {
+                  dashes: true,
+                  isParentChild: true,
+                  linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
+                  edgeKeySuffix: 'merged-otbr-child'
+                });
+                routerIdsWithChildren.add(fromId);
               });
 
               const children = Array.isArray(node.children) ? node.children : [];
               children.forEach((child, childIndex) => {
                 const childNode = typeof child === 'string' ? { id: child } : (child || {});
+                const isEveChild = typeof child === 'string' || Boolean(toText(childNode.id));
+                if (isEveChild) {
+                  return;
+                }
                 const childId = ensureNodeForLink(childNode, `${fromId}-child-${childIndex + 1}`);
                 if (!childId) return;
-                addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true });
+                addEdge(edgeMap, edgeData, fromId, childId, {
+                  dashes: true,
+                  isParentChild: true,
+                  linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN],
+                  edgeKeySuffix: 'merged-default-child'
+                });
                 routerIdsWithChildren.add(fromId);
               });
             });
@@ -1436,7 +1797,7 @@
               });
             });
 
-            function applyFiltersMerged(nodeFilterMode, diagnosticFilterMode) {
+            function applyFiltersMerged(nodeFilterMode, linkFilterMode, diagnosticFilterMode) {
               const visibleNodeIds = new Set();
               let visibleEdgeCount = 0;
 
@@ -1450,7 +1811,9 @@
 
               if (nodeFilterMode === 'routers-with-children') {
                 edgesDataset.forEach((edge) => {
-                  if (edge.isParentChild === true && visibleNodeIds.has(edge.from)) {
+                  if (edge.isParentChild === true
+                    && edgeMatchesLinkFilter(edge, linkFilterMode)
+                    && visibleNodeIds.has(edge.from)) {
                     visibleNodeIds.add(edge.to);
                   }
                 });
@@ -1462,7 +1825,9 @@
 
               edgesDataset.forEach((edge) => {
                 const endpointsVisible = visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
-                const shouldShow = edge.baseHidden !== true && endpointsVisible;
+                const shouldShow = edge.baseHidden !== true
+                  && endpointsVisible
+                  && edgeMatchesLinkFilter(edge, linkFilterMode);
                 edgesDataset.update({ id: edge.id, hidden: !shouldShow });
                 if (shouldShow) {
                   visibleEdgeCount += 1;
@@ -1474,25 +1839,30 @@
 
             function updateStatusLineMerged(visibleNodeCount, visibleEdgeCount) {
               const nodeFilterLabel = nodeFilter.options[nodeFilter.selectedIndex].text;
+              const linkFilterLabel = linkFilter.options[linkFilter.selectedIndex].text;
               const diagnosticFilterLabel = diagnosticFilter.options[diagnosticFilter.selectedIndex].text;
-              status.textContent = `Loaded Merged Detailed Topology. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.`;
+              status.textContent = `Loaded Merged Detailed Topology. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.`;
             }
 
-            nodeFilter.removeEventListener('change', null);
-            diagnosticFilter.removeEventListener('change', null);
-            nodeFilter.addEventListener('change', (event) => {
-              const filtered = applyFiltersMerged(event.target.value, diagnosticFilter.value);
+            nodeFilter.onchange = (event) => {
+              const filtered = applyFiltersMerged(event.target.value, linkFilter.value, diagnosticFilter.value);
               updateStatusLineMerged(filtered.visibleNodeCount, filtered.visibleEdgeCount);
               detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
-            });
+            };
 
-            diagnosticFilter.addEventListener('change', (event) => {
-              const filtered = applyFiltersMerged(nodeFilter.value, event.target.value);
+            linkFilter.onchange = (event) => {
+              const filtered = applyFiltersMerged(nodeFilter.value, event.target.value, diagnosticFilter.value);
               updateStatusLineMerged(filtered.visibleNodeCount, filtered.visibleEdgeCount);
               detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
-            });
+            };
 
-            const initiallyVisible = applyFiltersMerged(nodeFilter.value, diagnosticFilter.value);
+            diagnosticFilter.onchange = (event) => {
+              const filtered = applyFiltersMerged(nodeFilter.value, linkFilter.value, event.target.value);
+              updateStatusLineMerged(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+              detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+            };
+
+            const initiallyVisible = applyFiltersMerged(nodeFilter.value, linkFilter.value, diagnosticFilter.value);
             updateStatusLineMerged(initiallyVisible.visibleNodeCount, initiallyVisible.visibleEdgeCount);
           } catch (error) {
             status.textContent = `Error: ${error.message}`;
@@ -1501,6 +1871,13 @@
 
       datasetSelect.addEventListener('change', (event) => {
         nodeFilter.value = 'all';
+        if (event.target.value === 'eve_topology') {
+          linkFilter.value = LINK_FILTER_EVE;
+        } else if (event.target.value === 'merged_detailed_topology') {
+          linkFilter.value = LINK_FILTER_ALL;
+        } else {
+          linkFilter.value = LINK_FILTER_DEFAULT;
+        }
         diagnosticFilter.value = 'all';
         container.innerHTML = '';
         detailsList.innerHTML = '';
