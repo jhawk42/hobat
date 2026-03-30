@@ -974,18 +974,29 @@
           const isBorderRouter = isMainRouter && node.br === true;
           const isHighDiscardError = Number.isFinite(node.iftotalpktserrorsdiscards_pct)
             && node.iftotalpktserrorsdiscards_pct >= 50;
+          let borderWidth = 1;
+          let fontSize = 13;
+          if (isBorderRouter) {
+            borderWidth = 5;
+            fontSize = 19.5;
+          } else if (isRouter) {
+            borderWidth = 3;
+            fontSize = 19.5;
+          }
 
           return {
             id: node.id,
             label: buildLabel(node, node.id),
             shape: node.shape,
             color: node.color,
+            font: { size: fontSize, face: 'monospace', multi: 'md' },
             group: unknown ? 'unknown' : 'known',
             isRouter,
             hasChildren,
             isMainRouter,
             isBorderRouter,
             isHighDiscardError,
+            borderWidth,
             iftotalpktserrorsdiscards_pct: node.iftotalpktserrorsdiscards_pct,
             iftotalerrors_pct: node.iftotalerrors_pct,
             mode_device: node.mode_device,
@@ -1341,16 +1352,27 @@
               const hasChildren = routerIdsWithChildren.has(node.id);
               const isMainRouter = rloc16Text.endsWith('00');
               const isBorderRouter = isMainRouter && node.br === true;
+              let borderWidth = 1;
+              let fontSize = 13;
+              if (isBorderRouter) {
+                borderWidth = 5;
+                fontSize = 19.5;
+              } else if (isRouter) {
+                borderWidth = 3;
+                fontSize = 19.5;
+              }
               return {
                 id: node.id,
                 label: buildEveLabel(node, node.id),
                 shape: node.shape,
                 color: node.color,
+                font: { size: fontSize, face: 'monospace', multi: 'md' },
                 group: unknown ? 'unknown' : 'known',
                 isRouter,
                 hasChildren,
                 isMainRouter,
                 isBorderRouter,
+                borderWidth,
                 iftotalpktserrorsdiscards_pct: node.iftotalpktserrorsdiscards_pct,
                 iftotalerrors_pct: node.iftotalerrors_pct,
                 mode_device: node.mode_device,
@@ -1727,17 +1749,28 @@
               const hasChildren = routerIdsWithChildren.has(node.id);
               const isMainRouter = rloc16Text.endsWith('00');
               const isBorderRouter = isMainRouter && node.br === true;
+              let borderWidth = 1;
+              let fontSize = 13;
+              if (isBorderRouter) {
+                borderWidth = 5;
+                fontSize = 19.5;
+              } else if (isRouter) {
+                borderWidth = 3;
+                fontSize = 19.5;
+              }
 
               return {
                 id: node.id,
                 label: buildEveLabel(node, node.id),
                 shape: node.shape,
                 color: node.color,
+                font: { size: fontSize, face: 'monospace', multi: 'md' },
                 group: unknown ? 'unknown' : 'known',
                 isRouter,
                 hasChildren,
                 isMainRouter,
                 isBorderRouter,
+                borderWidth,
                 iftotalpktserrorsdiscards_pct: node.iftotalpktserrorsdiscards_pct,
                 iftotalerrors_pct: node.iftotalerrors_pct,
                 mode_device: node.mode_device,
