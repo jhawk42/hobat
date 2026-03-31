@@ -99,13 +99,13 @@
 
   <body>
     <div class="page">
-      <h1>Thread Mesh Network Topology: MeshDiag, NetworkDiagnostic</h1>
+      <h1>Thread Mesh Network Topology: meshdiag, networkdiag</h1>
       <div class="controls">
         <label for="dataset-select">Dataset:</label>
         <select id="dataset-select">
-           <option value="default_topology">Merged: otbr cli MeshDiag, NetworkDiagnostic</option>
-           <option value="merged_detailed_topology">Merged: deep: otbr cli, restapi, eve</option>
-           <option value="eve_topology">Eve Topology</option>
+           <option value="default_topology">merged: otbr cli meshdiag, networkdiag</option>
+           <option value="merged_detailed_topology">merged: deep: otbr cli, restapi, eve</option>
+           <option value="eve_topology">eve topology</option>
         </select>
 
         <label for="node-filter">Node Filter:</label>
@@ -1921,12 +1921,12 @@
           status.textContent = 'Loading Merged Detailed Topology...';
           loadMergedDetailedDataset();
         } else {
-          status.textContent = 'Loading MeshDiag + NetworkDiagnostic...';
+          status.textContent = 'Loading: meshdiag, networkdiag...';
           loadMeshdiagNetworkdiag();
         }
       });
 
-      status.textContent = 'Loading MeshDiag + NetworkDiagnostic...';
+      status.textContent = 'Loading: meshdiag, networkdiag...';
       loadMeshdiagNetworkdiag();
     }
 
