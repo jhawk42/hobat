@@ -168,6 +168,16 @@
           <option value="high-partition-changes">High Partition Changes (>= 5)</option>
           <option value="medium-parent-changes">Medium Parent Changes (>= 2)</option>
           <option value="high-parent-changes">High Parent Changes (>= 5)</option>
+          <option value="router-neighbor-err-rate-frame-low">Router Neighbor - Err Rate Frame >= 2% - Low</option>
+          <option value="router-neighbor-err-rate-frame-medium">Router Neighbor - Err Rate Frame >= 5% - Medium</option>
+          <option value="router-neighbor-err-rate-frame-high">Router Neighbor - Err Rate Frame >= 10% - High</option>
+          <option value="router-neighbor-err-rate-msg-low">Router Neighbor - Err Rate Msg >= 2% - Low</option>
+          <option value="router-neighbor-err-rate-msg-medium">Router Neighbor - Err Rate Msg >= 5% - Medium</option>
+          <option value="router-neighbor-err-rate-msg-high">Router Neighbor - Err Rate Msg >= 10% - High</option>
+          <option value="router-neighbor-rss-very-low">Router Neighbor - RSS Ave < -80 dBm - Very Low (Bad)</option>
+          <option value="router-neighbor-rss-low">Router Neighbor - RSS Ave Between -70 dBm To -80 dBm - Low (Fair)</option>
+          <option value="router-neighbor-rss-medium">Router Neighbor - RSS Ave Between -60 dBm To -70 dBm - Medium (Good)</option>
+          <option value="router-neighbor-rss-high">Router Neighbor - RSS Ave > -60 dBm - High (Excellent)</option>
         </select>
       </div>
 
@@ -474,6 +484,82 @@
         if (filterMode === "high-parent-changes") {
           const parent = getMetricValue("mle_counters.parentchanges");
           return Number.isFinite(parent) && parent >= 5;
+        }
+
+        const routerNeighborTable = getColumnValue(row, "router_neighbor_table");
+        const neighborRows = Array.isArray(routerNeighborTable) ? routerNeighborTable : [];
+        const hasMatchingNeighbor = (predicate) => {
+          return neighborRows.some((neighbor) => predicate(neighbor));
+        };
+
+        if (filterMode === "router-neighbor-err-rate-frame-low") {
+          return hasMatchingNeighbor((neighbor) => {
+            const value = toFiniteNumber(neighbor?.err_rate_frame_pct);
+            return Number.isFinite(value) && value >= 2;
+          });
+        }
+
+        if (filterMode === "router-neighbor-err-rate-frame-medium") {
+          return hasMatchingNeighbor((neighbor) => {
+            const value = toFiniteNumber(neighbor?.err_rate_frame_pct);
+            return Number.isFinite(value) && value >= 5;
+          });
+        }
+
+        if (filterMode === "router-neighbor-err-rate-frame-high") {
+          return hasMatchingNeighbor((neighbor) => {
+            const value = toFiniteNumber(neighbor?.err_rate_frame_pct);
+            return Number.isFinite(value) && value >= 10;
+          });
+        }
+
+        if (filterMode === "router-neighbor-err-rate-msg-low") {
+          return hasMatchingNeighbor((neighbor) => {
+            const value = toFiniteNumber(neighbor?.err_rate_msg_pct);
+            return Number.isFinite(value) && value >= 2;
+          });
+        }
+
+        if (filterMode === "router-neighbor-err-rate-msg-medium") {
+          return hasMatchingNeighbor((neighbor) => {
+            const value = toFiniteNumber(neighbor?.err_rate_msg_pct);
+            return Number.isFinite(value) && value >= 5;
+          });
+        }
+
+        if (filterMode === "router-neighbor-err-rate-msg-high") {
+          return hasMatchingNeighbor((neighbor) => {
+            const value = toFiniteNumber(neighbor?.err_rate_msg_pct);
+            return Number.isFinite(value) && value >= 10;
+          });
+        }
+
+        if (filterMode === "router-neighbor-rss-very-low") {
+          return hasMatchingNeighbor((neighbor) => {
+            const value = toFiniteNumber(neighbor?.rss_ave);
+            return Number.isFinite(value) && value < -80;
+          });
+        }
+
+        if (filterMode === "router-neighbor-rss-low") {
+          return hasMatchingNeighbor((neighbor) => {
+            const value = toFiniteNumber(neighbor?.rss_ave);
+            return Number.isFinite(value) && value >= -80 && value < -70;
+          });
+        }
+
+        if (filterMode === "router-neighbor-rss-medium") {
+          return hasMatchingNeighbor((neighbor) => {
+            const value = toFiniteNumber(neighbor?.rss_ave);
+            return Number.isFinite(value) && value >= -70 && value <= -60;
+          });
+        }
+
+        if (filterMode === "router-neighbor-rss-high") {
+          return hasMatchingNeighbor((neighbor) => {
+            const value = toFiniteNumber(neighbor?.rss_ave);
+            return Number.isFinite(value) && value > -60;
+          });
         }
 
         return true;
