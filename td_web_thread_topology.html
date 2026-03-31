@@ -138,6 +138,16 @@
           <option value="high-partition-changes">High Partition Changes (>= 5)</option>
           <option value="medium-parent-changes">Medium Parent Changes (>= 2)</option>
           <option value="high-parent-changes">High Parent Changes (>= 5)</option>
+          <option value="router-neighbor-err-rate-frame-low">Router Neighbor - Err Rate Frame >= 2% - Low</option>
+          <option value="router-neighbor-err-rate-frame-medium">Router Neighbor - Err Rate Frame >= 5% - Medium</option>
+          <option value="router-neighbor-err-rate-frame-high">Router Neighbor - Err Rate Frame >= 10% - High</option>
+          <option value="router-neighbor-err-rate-msg-low">Router Neighbor - Err Rate Msg >= 2% - Low</option>
+          <option value="router-neighbor-err-rate-msg-medium">Router Neighbor - Err Rate Msg >= 5% - Medium</option>
+          <option value="router-neighbor-err-rate-msg-high">Router Neighbor - Err Rate Msg >= 10% - High</option>
+          <option value="router-neighbor-rss-very-low">Router Neighbor - RSS Ave < -80 dBm - Very Low (Bad)</option>
+          <option value="router-neighbor-rss-low">Router Neighbor - RSS Ave Between -70 dBm To -80 dBm - Low (Fair)</option>
+          <option value="router-neighbor-rss-medium">Router Neighbor - RSS Ave Between -60 dBm To -70 dBm - Medium (Good)</option>
+          <option value="router-neighbor-rss-high">Router Neighbor - RSS Ave > -60 dBm - High (Excellent)</option>
         </select>
       </div>
       <div id="status">Loading topology...</div>
@@ -193,6 +203,12 @@
 
     function buildEveLabel(node, resolvedId) {
       const nodeName = toText(node.name) || 'Unknown node';
+      const rloc16 = toText(node.rloc16) || 'rloc16:n/a';
+      return `${nodeName}\n${rloc16}`;
+    }
+
+    function buildMergedDetailedLabel(node, resolvedId) {
+      const nodeName = toText(node.device_label) || toText(node.name) || 'Unknown node';
       const rloc16 = toText(node.rloc16) || 'rloc16:n/a';
       return `${nodeName}\n${rloc16}`;
     }
@@ -478,6 +494,123 @@
       return `0x${(parentNumber + childNumber).toString(16).padStart(4, '0')}`;
     }
 
+    function computeRouterNeighborStats(routerNeighborTable) {
+      const rows = Array.isArray(routerNeighborTable) ? routerNeighborTable : [];
+      let maxErrRateFramePct;
+      let maxErrRateMsgPct;
+      let minRssAve;
+      let maxRssAve;
+      let hasRssVeryLow = false;
+      let hasRssLow = false;
+      let hasRssMedium = false;
+      let hasRssHigh = false;
+
+      rows.forEach((row) => {
+        const framePct = toFiniteNumber(row?.err_rate_frame_pct);
+        if (Number.isFinite(framePct)) {
+          maxErrRateFramePct = Number.isFinite(maxErrRateFramePct)
+            ? Math.max(maxErrRateFramePct, framePct)
+            : framePct;
+        }
+
+        const msgPct = toFiniteNumber(row?.err_rate_msg_pct);
+        if (Number.isFinite(msgPct)) {
+          maxErrRateMsgPct = Number.isFinite(maxErrRateMsgPct)
+            ? Math.max(maxErrRateMsgPct, msgPct)
+            : msgPct;
+        }
+
+        const rssAve = toFiniteNumber(row?.rss_ave);
+        if (Number.isFinite(rssAve)) {
+          minRssAve = Number.isFinite(minRssAve)
+            ? Math.min(minRssAve, rssAve)
+            : rssAve;
+          maxRssAve = Number.isFinite(maxRssAve)
+            ? Math.max(maxRssAve, rssAve)
+            : rssAve;
+
+          if (rssAve < -80) {
+            hasRssVeryLow = true;
+          } else if (rssAve >= -80 && rssAve < -70) {
+            hasRssLow = true;
+          } else if (rssAve >= -70 && rssAve <= -60) {
+            hasRssMedium = true;
+          } else if (rssAve > -60) {
+            hasRssHigh = true;
+          }
+        }
+      });
+
+      return {
+        router_neighbor_max_err_rate_frame_pct: maxErrRateFramePct,
+        router_neighbor_max_err_rate_msg_pct: maxErrRateMsgPct,
+        router_neighbor_min_rss_ave: minRssAve,
+        router_neighbor_max_rss_ave: maxRssAve,
+        router_neighbor_has_rss_very_low: hasRssVeryLow,
+        router_neighbor_has_rss_low: hasRssLow,
+        router_neighbor_has_rss_medium: hasRssMedium,
+        router_neighbor_has_rss_high: hasRssHigh
+      };
+    }
+
+    function isRouterNeighborDiagnosticMode(filterMode) {
+      return filterMode === 'router-neighbor-err-rate-frame-low'
+        || filterMode === 'router-neighbor-err-rate-frame-medium'
+        || filterMode === 'router-neighbor-err-rate-frame-high'
+        || filterMode === 'router-neighbor-err-rate-msg-low'
+        || filterMode === 'router-neighbor-err-rate-msg-medium'
+        || filterMode === 'router-neighbor-err-rate-msg-high'
+        || filterMode === 'router-neighbor-rss-very-low'
+        || filterMode === 'router-neighbor-rss-low'
+        || filterMode === 'router-neighbor-rss-medium'
+        || filterMode === 'router-neighbor-rss-high';
+    }
+
+    function routerNeighborRowMatchesDiagnosticFilter(row, filterMode) {
+      const errRateFramePct = toFiniteNumber(row?.err_rate_frame_pct);
+      const errRateMsgPct = toFiniteNumber(row?.err_rate_msg_pct);
+      const rssAve = toFiniteNumber(row?.rss_ave);
+
+      if (filterMode === 'router-neighbor-err-rate-frame-low') {
+        return Number.isFinite(errRateFramePct) && errRateFramePct >= 2;
+      }
+      if (filterMode === 'router-neighbor-err-rate-frame-medium') {
+        return Number.isFinite(errRateFramePct) && errRateFramePct >= 5;
+      }
+      if (filterMode === 'router-neighbor-err-rate-frame-high') {
+        return Number.isFinite(errRateFramePct) && errRateFramePct >= 10;
+      }
+
+      if (filterMode === 'router-neighbor-err-rate-msg-low') {
+        return Number.isFinite(errRateMsgPct) && errRateMsgPct >= 2;
+      }
+      if (filterMode === 'router-neighbor-err-rate-msg-medium') {
+        return Number.isFinite(errRateMsgPct) && errRateMsgPct >= 5;
+      }
+      if (filterMode === 'router-neighbor-err-rate-msg-high') {
+        return Number.isFinite(errRateMsgPct) && errRateMsgPct >= 10;
+      }
+
+      if (filterMode === 'router-neighbor-rss-very-low') {
+        return Number.isFinite(rssAve) && rssAve < -80;
+      }
+      if (filterMode === 'router-neighbor-rss-low') {
+        return Number.isFinite(rssAve) && rssAve >= -80 && rssAve < -70;
+      }
+      if (filterMode === 'router-neighbor-rss-medium') {
+        return Number.isFinite(rssAve) && rssAve >= -70 && rssAve <= -60;
+      }
+      if (filterMode === 'router-neighbor-rss-high') {
+        return Number.isFinite(rssAve) && rssAve > -60;
+      }
+
+      return false;
+    }
+
+    function areNodeIdsEquivalent(firstId, secondId) {
+      return toText(firstId).toLowerCase() === toText(secondId).toLowerCase();
+    }
+
     async function fetchJson(path) {
       const response = await fetch(path);
       if (!response.ok) {
@@ -627,6 +760,42 @@
         if (filterMode === 'high-parent-changes') {
           return Number.isFinite(node.parentchanges)
             && node.parentchanges >= 5;
+        }
+        if (filterMode === 'router-neighbor-err-rate-frame-low') {
+          return Number.isFinite(node.router_neighbor_max_err_rate_frame_pct)
+            && node.router_neighbor_max_err_rate_frame_pct >= 2;
+        }
+        if (filterMode === 'router-neighbor-err-rate-frame-medium') {
+          return Number.isFinite(node.router_neighbor_max_err_rate_frame_pct)
+            && node.router_neighbor_max_err_rate_frame_pct >= 5;
+        }
+        if (filterMode === 'router-neighbor-err-rate-frame-high') {
+          return Number.isFinite(node.router_neighbor_max_err_rate_frame_pct)
+            && node.router_neighbor_max_err_rate_frame_pct >= 10;
+        }
+        if (filterMode === 'router-neighbor-err-rate-msg-low') {
+          return Number.isFinite(node.router_neighbor_max_err_rate_msg_pct)
+            && node.router_neighbor_max_err_rate_msg_pct >= 2;
+        }
+        if (filterMode === 'router-neighbor-err-rate-msg-medium') {
+          return Number.isFinite(node.router_neighbor_max_err_rate_msg_pct)
+            && node.router_neighbor_max_err_rate_msg_pct >= 5;
+        }
+        if (filterMode === 'router-neighbor-err-rate-msg-high') {
+          return Number.isFinite(node.router_neighbor_max_err_rate_msg_pct)
+            && node.router_neighbor_max_err_rate_msg_pct >= 10;
+        }
+        if (filterMode === 'router-neighbor-rss-very-low') {
+          return node.router_neighbor_has_rss_very_low === true;
+        }
+        if (filterMode === 'router-neighbor-rss-low') {
+          return node.router_neighbor_has_rss_low === true;
+        }
+        if (filterMode === 'router-neighbor-rss-medium') {
+          return node.router_neighbor_has_rss_medium === true;
+        }
+        if (filterMode === 'router-neighbor-rss-high') {
+          return node.router_neighbor_has_rss_high === true;
         }
         return true;
       }
@@ -968,6 +1137,9 @@
         const nodeData = Array.from(nodeMap.values()).map((node) => {
           const unknown = isUnknownNodeName(node.device_label);
           const rloc16Text = toText(node.rloc16).toLowerCase();
+          const routerNeighborStats = computeRouterNeighborStats(
+            routerNeighborByRloc16.get(rloc16Text)?.router_neighbor_table
+          );
           const isRouter = node.shape !== 'ellipse';
           const hasChildren = routerIdsWithChildren.has(node.id);
           const isMainRouter = rloc16Text.endsWith('00');
@@ -1001,7 +1173,15 @@
             iftotalerrors_pct: node.iftotalerrors_pct,
             mode_device: node.mode_device,
             partitionidchanges: node.partitionidchanges,
-            parentchanges: node.parentchanges
+            parentchanges: node.parentchanges,
+            router_neighbor_max_err_rate_frame_pct: routerNeighborStats.router_neighbor_max_err_rate_frame_pct,
+            router_neighbor_max_err_rate_msg_pct: routerNeighborStats.router_neighbor_max_err_rate_msg_pct,
+            router_neighbor_min_rss_ave: routerNeighborStats.router_neighbor_min_rss_ave,
+            router_neighbor_max_rss_ave: routerNeighborStats.router_neighbor_max_rss_ave,
+            router_neighbor_has_rss_very_low: routerNeighborStats.router_neighbor_has_rss_very_low,
+            router_neighbor_has_rss_low: routerNeighborStats.router_neighbor_has_rss_low,
+            router_neighbor_has_rss_medium: routerNeighborStats.router_neighbor_has_rss_medium,
+            router_neighbor_has_rss_high: routerNeighborStats.router_neighbor_has_rss_high
           };
         });
 
@@ -1100,6 +1280,8 @@
 
         function applyFilters(nodeFilterMode, linkFilterMode, diagnosticFilterMode) {
           const visibleNodeIds = new Set();
+          const forcedVisibleEdgeIds = new Set();
+          const matchedTargetNodeIds = new Set();
           let visibleEdgeCount = 0;
 
           nodesDataset.forEach((node) => {
@@ -1120,6 +1302,51 @@
             });
           }
 
+          if (isRouterNeighborDiagnosticMode(diagnosticFilterMode)) {
+            const sourceNodeIds = Array.from(visibleNodeIds);
+
+            sourceNodeIds.forEach((sourceNodeId) => {
+              const sourceNode = nodeMap.get(sourceNodeId);
+              if (!sourceNode) {
+                return;
+              }
+
+              const sourceRloc16 = toText(sourceNode.rloc16).toLowerCase();
+              const neighborRow = routerNeighborByRloc16.get(sourceRloc16);
+              const neighborEntries = Array.isArray(neighborRow?.router_neighbor_table)
+                ? neighborRow.router_neighbor_table
+                : [];
+
+              neighborEntries
+                .filter((neighbor) => routerNeighborRowMatchesDiagnosticFilter(neighbor, diagnosticFilterMode))
+                .forEach((neighbor) => {
+                  const targetNodeId = toText(neighbor.rloc16) || toText(neighbor.extaddr);
+                  if (!targetNodeId) {
+                    return;
+                  }
+
+                  matchedTargetNodeIds.add(targetNodeId);
+                  visibleNodeIds.add(targetNodeId);
+
+                  edgesDataset.forEach((edge) => {
+                    const categories = normalizeLinkCategories(edge.linkCategories);
+                    const isRouterNeighborEdge = categories.includes(EDGE_CATEGORY_ROUTER_NEIGHBOR);
+                    if (!isRouterNeighborEdge) {
+                      return;
+                    }
+
+                    const matchesEndpoints =
+                      (areNodeIdsEquivalent(edge.from, sourceNodeId) && areNodeIdsEquivalent(edge.to, targetNodeId))
+                      || (areNodeIdsEquivalent(edge.to, sourceNodeId) && areNodeIdsEquivalent(edge.from, targetNodeId));
+
+                    if (matchesEndpoints) {
+                      forcedVisibleEdgeIds.add(edge.id);
+                    }
+                  });
+                });
+            });
+          }
+
           nodesDataset.forEach((node) => {
             nodesDataset.update({ id: node.id, hidden: !visibleNodeIds.has(node.id) });
           });
@@ -1128,7 +1355,7 @@
             const endpointsVisible = visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
             const shouldShow = edge.baseHidden !== true
               && endpointsVisible
-              && edgeMatchesLinkFilter(edge, linkFilterMode);
+              && (edgeMatchesLinkFilter(edge, linkFilterMode) || forcedVisibleEdgeIds.has(edge.id));
             edgesDataset.update({
               id: edge.id,
               hidden: !shouldShow
@@ -1141,7 +1368,9 @@
 
           return {
             visibleNodeCount: visibleNodeIds.size,
-            visibleEdgeCount
+            visibleEdgeCount,
+            matchedTargetNodeCount: matchedTargetNodeIds.size,
+            forcedVisibleLinkCount: forcedVisibleEdgeIds.size
           };
         }
 
@@ -1211,33 +1440,56 @@
           loadedSources.push('restapi');
         }
 
-        function updateStatusLine(visibleNodeCount, visibleEdgeCount) {
+        function updateStatusLine(visibleNodeCount, visibleEdgeCount, matchedTargetNodeCount = 0, forcedVisibleLinkCount = 0) {
           const nodeFilterLabel = nodeFilter.options[nodeFilter.selectedIndex].text;
           const linkFilterLabel = linkFilter.options[linkFilter.selectedIndex].text;
           const diagnosticFilterLabel = diagnosticFilter.options[diagnosticFilter.selectedIndex].text;
-          status.textContent = `Loaded ${loadedSources.join(', ')}. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.`;
+          const routerNeighborSuffix = isRouterNeighborDiagnosticMode(diagnosticFilter.value)
+            ? ` Neighbor Match: targets ${matchedTargetNodeCount}, links ${forcedVisibleLinkCount}.`
+            : '';
+          status.textContent = `Loaded ${loadedSources.join(', ')}. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.${routerNeighborSuffix}`;
         }
 
         nodeFilter.onchange = (event) => {
           const filtered = applyFilters(event.target.value, linkFilter.value, diagnosticFilter.value);
-          updateStatusLine(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+          updateStatusLine(
+            filtered.visibleNodeCount,
+            filtered.visibleEdgeCount,
+            filtered.matchedTargetNodeCount,
+            filtered.forcedVisibleLinkCount
+          );
           detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
         };
 
         linkFilter.onchange = (event) => {
           const filtered = applyFilters(nodeFilter.value, event.target.value, diagnosticFilter.value);
-          updateStatusLine(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+          updateStatusLine(
+            filtered.visibleNodeCount,
+            filtered.visibleEdgeCount,
+            filtered.matchedTargetNodeCount,
+            filtered.forcedVisibleLinkCount
+          );
           detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
         };
 
         diagnosticFilter.onchange = (event) => {
           const filtered = applyFilters(nodeFilter.value, linkFilter.value, event.target.value);
-          updateStatusLine(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+          updateStatusLine(
+            filtered.visibleNodeCount,
+            filtered.visibleEdgeCount,
+            filtered.matchedTargetNodeCount,
+            filtered.forcedVisibleLinkCount
+          );
           detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
         };
 
         const initiallyVisible = applyFilters(nodeFilter.value, linkFilter.value, diagnosticFilter.value);
-        updateStatusLine(initiallyVisible.visibleNodeCount, initiallyVisible.visibleEdgeCount);
+        updateStatusLine(
+          initiallyVisible.visibleNodeCount,
+          initiallyVisible.visibleEdgeCount,
+          initiallyVisible.matchedTargetNodeCount,
+          initiallyVisible.forcedVisibleLinkCount
+        );
         } catch (error) {
           status.textContent = `Error: ${error.message}`;
         }
@@ -1348,6 +1600,9 @@
             const nodeData = Array.from(nodeMap.values()).map((node) => {
               const unknown = toText(node.name || node.device_label).toLowerCase().startsWith('unknown');
               const rloc16Text = toText(node.rloc16).toLowerCase();
+              const routerNeighborStats = computeRouterNeighborStats(
+                eveNodeById.get(node.id)?.router_neighbor_table
+              );
               const isRouter = node.shape !== 'ellipse';
               const hasChildren = routerIdsWithChildren.has(node.id);
               const isMainRouter = rloc16Text.endsWith('00');
@@ -1377,7 +1632,15 @@
                 iftotalerrors_pct: node.iftotalerrors_pct,
                 mode_device: node.mode_device,
                 partitionidchanges: node.partitionidchanges,
-                parentchanges: node.parentchanges
+                parentchanges: node.parentchanges,
+                router_neighbor_max_err_rate_frame_pct: routerNeighborStats.router_neighbor_max_err_rate_frame_pct,
+                router_neighbor_max_err_rate_msg_pct: routerNeighborStats.router_neighbor_max_err_rate_msg_pct,
+                router_neighbor_min_rss_ave: routerNeighborStats.router_neighbor_min_rss_ave,
+                router_neighbor_max_rss_ave: routerNeighborStats.router_neighbor_max_rss_ave,
+                router_neighbor_has_rss_very_low: routerNeighborStats.router_neighbor_has_rss_very_low,
+                router_neighbor_has_rss_low: routerNeighborStats.router_neighbor_has_rss_low,
+                router_neighbor_has_rss_medium: routerNeighborStats.router_neighbor_has_rss_medium,
+                router_neighbor_has_rss_high: routerNeighborStats.router_neighbor_has_rss_high
               };
             });
 
@@ -1745,6 +2008,9 @@
               const displayName = toText(node.name) || toText(node.device_label);
               const unknown = displayName.toLowerCase().startsWith('unknown');
               const rloc16Text = toText(node.rloc16).toLowerCase();
+              const routerNeighborStats = computeRouterNeighborStats(
+                rawNodeById.get(node.id)?.router_neighbor_table
+              );
               const isRouter = node.shape !== 'ellipse';
               const hasChildren = routerIdsWithChildren.has(node.id);
               const isMainRouter = rloc16Text.endsWith('00');
@@ -1761,7 +2027,8 @@
 
               return {
                 id: node.id,
-                label: buildEveLabel(node, node.id),
+                  label: buildMergedDetailedLabel(node, node.id),
+                rloc16: node.rloc16,
                 shape: node.shape,
                 color: node.color,
                 font: { size: fontSize, face: 'monospace', multi: 'md' },
@@ -1775,7 +2042,15 @@
                 iftotalerrors_pct: node.iftotalerrors_pct,
                 mode_device: node.mode_device,
                 partitionidchanges: node.partitionidchanges,
-                parentchanges: node.parentchanges
+                parentchanges: node.parentchanges,
+                router_neighbor_max_err_rate_frame_pct: routerNeighborStats.router_neighbor_max_err_rate_frame_pct,
+                router_neighbor_max_err_rate_msg_pct: routerNeighborStats.router_neighbor_max_err_rate_msg_pct,
+                router_neighbor_min_rss_ave: routerNeighborStats.router_neighbor_min_rss_ave,
+                router_neighbor_max_rss_ave: routerNeighborStats.router_neighbor_max_rss_ave,
+                router_neighbor_has_rss_very_low: routerNeighborStats.router_neighbor_has_rss_very_low,
+                router_neighbor_has_rss_low: routerNeighborStats.router_neighbor_has_rss_low,
+                router_neighbor_has_rss_medium: routerNeighborStats.router_neighbor_has_rss_medium,
+                router_neighbor_has_rss_high: routerNeighborStats.router_neighbor_has_rss_high
               };
             });
 
@@ -1812,6 +2087,13 @@
               };
 
               detailsList.innerHTML = '';
+
+              if (Array.isArray(raw.router_neighbor_table)) {
+                const routerNeighborItem = document.createElement('li');
+                routerNeighborItem.textContent = `router_neighbor_table: ${formatValue(raw.router_neighbor_table)}`;
+                detailsList.appendChild(routerNeighborItem);
+              }
+
               const mergedDetails = mergeForDisplay(raw, graphDetails);
               const details = sortDetailsWithPriority(
                 flattenObjectEntries(mergedDetails)
@@ -1832,6 +2114,8 @@
 
             function applyFiltersMerged(nodeFilterMode, linkFilterMode, diagnosticFilterMode) {
               const visibleNodeIds = new Set();
+              const forcedVisibleEdgeIds = new Set();
+              const matchedTargetNodeIds = new Set();
               let visibleEdgeCount = 0;
 
               nodesDataset.forEach((node) => {
@@ -1852,6 +2136,45 @@
                 });
               }
 
+              if (isRouterNeighborDiagnosticMode(diagnosticFilterMode)) {
+                const sourceNodeIds = Array.from(visibleNodeIds);
+
+                sourceNodeIds.forEach((sourceNodeId) => {
+                  const sourceRawRow = rawNodeById.get(sourceNodeId);
+                  const neighborEntries = Array.isArray(sourceRawRow?.router_neighbor_table)
+                    ? sourceRawRow.router_neighbor_table
+                    : [];
+
+                  neighborEntries
+                    .filter((neighbor) => routerNeighborRowMatchesDiagnosticFilter(neighbor, diagnosticFilterMode))
+                    .forEach((neighbor) => {
+                      const targetNodeId = toText(neighbor.rloc16) || toText(neighbor.extaddr) || toText(neighbor.id);
+                      if (!targetNodeId) {
+                        return;
+                      }
+
+                      matchedTargetNodeIds.add(targetNodeId);
+                      visibleNodeIds.add(targetNodeId);
+
+                      edgesDataset.forEach((edge) => {
+                        const categories = normalizeLinkCategories(edge.linkCategories);
+                        const isRouterNeighborEdge = categories.includes(EDGE_CATEGORY_ROUTER_NEIGHBOR);
+                        if (!isRouterNeighborEdge) {
+                          return;
+                        }
+
+                        const matchesEndpoints =
+                          (areNodeIdsEquivalent(edge.from, sourceNodeId) && areNodeIdsEquivalent(edge.to, targetNodeId))
+                          || (areNodeIdsEquivalent(edge.to, sourceNodeId) && areNodeIdsEquivalent(edge.from, targetNodeId));
+
+                        if (matchesEndpoints) {
+                          forcedVisibleEdgeIds.add(edge.id);
+                        }
+                      });
+                    });
+                });
+              }
+
               nodesDataset.forEach((node) => {
                 nodesDataset.update({ id: node.id, hidden: !visibleNodeIds.has(node.id) });
               });
@@ -1860,43 +2183,71 @@
                 const endpointsVisible = visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
                 const shouldShow = edge.baseHidden !== true
                   && endpointsVisible
-                  && edgeMatchesLinkFilter(edge, linkFilterMode);
+                  && (edgeMatchesLinkFilter(edge, linkFilterMode) || forcedVisibleEdgeIds.has(edge.id));
                 edgesDataset.update({ id: edge.id, hidden: !shouldShow });
                 if (shouldShow) {
                   visibleEdgeCount += 1;
                 }
               });
 
-              return { visibleNodeCount: visibleNodeIds.size, visibleEdgeCount };
+              return {
+                visibleNodeCount: visibleNodeIds.size,
+                visibleEdgeCount,
+                matchedTargetNodeCount: matchedTargetNodeIds.size,
+                forcedVisibleLinkCount: forcedVisibleEdgeIds.size
+              };
             }
 
-            function updateStatusLineMerged(visibleNodeCount, visibleEdgeCount) {
+            function updateStatusLineMerged(visibleNodeCount, visibleEdgeCount, matchedTargetNodeCount = 0, forcedVisibleLinkCount = 0) {
               const nodeFilterLabel = nodeFilter.options[nodeFilter.selectedIndex].text;
               const linkFilterLabel = linkFilter.options[linkFilter.selectedIndex].text;
               const diagnosticFilterLabel = diagnosticFilter.options[diagnosticFilter.selectedIndex].text;
-              status.textContent = `Loaded Merged Detailed Topology. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.`;
+              const routerNeighborSuffix = isRouterNeighborDiagnosticMode(diagnosticFilter.value)
+                ? ` Neighbor Match: targets ${matchedTargetNodeCount}, links ${forcedVisibleLinkCount}.`
+                : '';
+              status.textContent = `Loaded Merged Detailed Topology. Total: ${nodeData.length} nodes, ${edgeData.length} links. Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagnosticFilterLabel}.${routerNeighborSuffix}`;
             }
 
             nodeFilter.onchange = (event) => {
               const filtered = applyFiltersMerged(event.target.value, linkFilter.value, diagnosticFilter.value);
-              updateStatusLineMerged(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+              updateStatusLineMerged(
+                filtered.visibleNodeCount,
+                filtered.visibleEdgeCount,
+                filtered.matchedTargetNodeCount,
+                filtered.forcedVisibleLinkCount
+              );
               detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
             };
 
             linkFilter.onchange = (event) => {
               const filtered = applyFiltersMerged(nodeFilter.value, event.target.value, diagnosticFilter.value);
-              updateStatusLineMerged(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+              updateStatusLineMerged(
+                filtered.visibleNodeCount,
+                filtered.visibleEdgeCount,
+                filtered.matchedTargetNodeCount,
+                filtered.forcedVisibleLinkCount
+              );
               detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
             };
 
             diagnosticFilter.onchange = (event) => {
               const filtered = applyFiltersMerged(nodeFilter.value, linkFilter.value, event.target.value);
-              updateStatusLineMerged(filtered.visibleNodeCount, filtered.visibleEdgeCount);
+              updateStatusLineMerged(
+                filtered.visibleNodeCount,
+                filtered.visibleEdgeCount,
+                filtered.matchedTargetNodeCount,
+                filtered.forcedVisibleLinkCount
+              );
               detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
             };
 
             const initiallyVisible = applyFiltersMerged(nodeFilter.value, linkFilter.value, diagnosticFilter.value);
-            updateStatusLineMerged(initiallyVisible.visibleNodeCount, initiallyVisible.visibleEdgeCount);
+            updateStatusLineMerged(
+              initiallyVisible.visibleNodeCount,
+              initiallyVisible.visibleEdgeCount,
+              initiallyVisible.matchedTargetNodeCount,
+              initiallyVisible.forcedVisibleLinkCount
+            );
           } catch (error) {
             status.textContent = `Error: ${error.message}`;
           }
