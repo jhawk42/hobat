@@ -40,15 +40,16 @@ def run_ot_ctl_command_stdio(container_name:None, ot_command):
     except subprocess.CalledProcessError as e:
         return f"Error: {e.stderr.strip()}"
 
-# Helper to inject docker container name and run ot-ctl command
-# This allows us to keep the container name management in one place and easily switch between docker and non-docker execution in the future.
-# TODO add command line option support to run ot-ctl command without docker exec
 def run_ot_ctl_stdio(command):
     """
     Wrapper to execute ot-ctl command and return output.
     """
+    # Helper to inject docker container name and run ot-ctl command
+    # This allows us to keep the container name management in one place and easily switch between docker and non-docker execution in the future.
+    # TODO add command line option support to run ot-ctl command without docker exec
 
     ##TODO expose container name as a parameter or environment variable
+    ## otbr is the default container name used by the OpenThread Border Router (OTBR) Docker image, but this can be changed if needed.  
     container = "border-router"  # Ensure this matches your container's name
     output = run_ot_ctl_command_stdio(container, command)
     return output
