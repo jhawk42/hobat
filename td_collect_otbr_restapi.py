@@ -11,7 +11,7 @@ HEADERS = {"Accept": "application/vnd.api+json"}
 
 # (endpoint path, output file)
 DOWNLOAD_TARGETS: Iterable[Tuple[str, str]] = [
-    ("/node/dataset/active", "td-otbr-restapi-dataset.json"),
+    ("/node/dataset/active", "td-otbr-restapi-dataset-active.json"),
     ("/api/devices", "td-otbr-restapi-devices.json"),
     ("/api/diagnostics", "td-otbr-restapi-diagnostics.json"),
 ]
