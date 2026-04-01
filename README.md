@@ -1,4 +1,4 @@
-# TDiag
+# td Thread Dashboard
 
 Intro
 Background

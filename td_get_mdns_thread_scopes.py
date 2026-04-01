@@ -436,6 +436,31 @@ class MDNSDumpListener(ServiceListener):
             return self._json_safe(vars(value))
         return str(value)
 
+    def _service_info_raw(self, info):
+        """Capture ServiceInfo-like state without assuming __dict__ exists."""
+        if not info:
+            return None
+
+        raw = {}
+        if hasattr(info, "__dict__"):
+            try:
+                raw.update(vars(info))
+            except TypeError:
+                pass
+
+        for attr_name in dir(info):
+            if attr_name.startswith("_") or attr_name in raw:
+                continue
+            try:
+                attr_value = getattr(info, attr_name)
+            except Exception:
+                continue
+            if callable(attr_value):
+                continue
+            raw[attr_name] = attr_value
+
+        return self._json_safe(raw)
+
     def _record_from_info(self, type_: str, name: str, info, event: str):
         """Build a common JSON record from zeroconf ServiceInfo + metadata."""
         parsed_addresses = []
@@ -470,7 +495,7 @@ class MDNSDumpListener(ServiceListener):
                 "addresses_raw_hex": raw_addresses,
                 "addresses_parsed": parsed_addresses,
                 "properties": properties,
-                "raw": self._json_safe(vars(info)),
+                "raw": self._service_info_raw(info),
             }
 
         return {
