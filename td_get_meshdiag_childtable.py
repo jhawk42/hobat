@@ -1,0 +1,182 @@
+import json
+import os
+import re
+
+from td_get_router_table import get_router_table_data
+from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
+from td_util_ot_ctl import run_ot_ctl_stdio
+
+
+def _yes_no_to_bool(value):
+    return value.lower() == "yes"
+
+
+def get_meshdiag_childtable_one(parent_rloc16, router=None, extaddr_map=None):
+    """Collect and parse `meshdiag childtable` output for one parent router."""
+
+    output = run_ot_ctl_stdio(f"meshdiag childtable {parent_rloc16}")
+
+    timeout_match = re.search(r"Error\s+(\d+):\s+ResponseTimeout", output)
+    if timeout_match:
+        return {
+            "parent_rloc16": parent_rloc16,
+            "device_label": extaddr_map.get(router.get("extaddr"), "Unknown") if router and extaddr_map else "Unknown",
+            "router_child_table": [],
+            "router_child_table_count": 0,
+            "_error": {
+                "type": "ResponseTimeout"
+            },
+        }
+
+    router_child_table = {
+        "parent_rloc16": parent_rloc16,
+        "device_label": extaddr_map.get(router.get("extaddr"), "Unknown") if router and extaddr_map else "Unknown",
+    }
+    router_child_table_data = []
+    current_child = None
+
+    for line in output.splitlines():
+        stripped = line.strip()
+
+        if not stripped or stripped == "Done":
+            continue
+
+        if stripped.startswith("rloc16:"):
+            if current_child and current_child.get("rloc16"):
+                router_child_table_data.append(current_child)
+
+            match = re.match(
+                r"rloc16:(0x[0-9a-fA-F]+)\s+ext-addr:([0-9a-fA-F]+)\s+ver:(\d+)",
+                stripped,
+            )
+            if not match:
+                current_child = None
+                continue
+
+            child_extaddr = match.group(2).lower()
+            current_child = {
+                "rloc16": match.group(1),
+                "extaddr": child_extaddr,
+                "device_label": extaddr_map.get(child_extaddr, "Unknown") if extaddr_map else "Unknown",
+                "ver": int(match.group(3)),
+            }
+            continue
+
+        if current_child is None:
+            continue
+
+        timeout_age_match = re.match(
+            r"timeout:(\d+)\s+age:(\d+)\s+supvn:(\d+)\s+q-msg:(\d+)",
+            stripped,
+        )
+        if timeout_age_match:
+            current_child["timeout"] = int(timeout_age_match.group(1))
+            current_child["age"] = int(timeout_age_match.group(2))
+            current_child["supvn"] = int(timeout_age_match.group(3))
+            current_child["q_msg"] = int(timeout_age_match.group(4))
+            continue
+
+        rx_type_match = re.match(
+            r"rx-on:(yes|no)\s+type:(\S+)\s+full-net:(yes|no)",
+            stripped,
+        )
+        if rx_type_match:
+            current_child["rx_on"] = _yes_no_to_bool(rx_type_match.group(1))
+            current_child["type"] = rx_type_match.group(2)
+            current_child["full_net"] = _yes_no_to_bool(rx_type_match.group(3))
+            continue
+
+        rss_match = re.match(
+            r"rss\s+-\s+ave:(-?\d+)\s+last:(-?\d+)\s+margin:(-?\d+)",
+            stripped,
+        )
+        if rss_match:
+            current_child["rss_ave"] = int(rss_match.group(1))
+            current_child["rss_last"] = int(rss_match.group(2))
+            current_child["rss_margin"] = int(rss_match.group(3))
+            continue
+
+        err_rate_match = re.match(
+            r"err-rate\s+-\s+frame:([0-9]+(?:\.[0-9]+)?)%\s+msg:([0-9]+(?:\.[0-9]+)?)%",
+            stripped,
+        )
+        if err_rate_match:
+            current_child["err_rate_frame_pct"] = float(err_rate_match.group(1))
+            current_child["err_rate_msg_pct"] = float(err_rate_match.group(2))
+            continue
+
+        conn_time_match = re.match(r"conn-time:(\S+)", stripped)
+        if conn_time_match:
+            current_child["conn_time"] = conn_time_match.group(1)
+            continue
+
+        csl_match = re.match(
+            r"csl\s+-\s+sync:(yes|no)\s+period:(\d+)\s+timeout:(\d+)\s+channel:(\d+)",
+            stripped,
+        )
+        if csl_match:
+            current_child["csl_sync"] = _yes_no_to_bool(csl_match.group(1))
+            current_child["csl_period"] = int(csl_match.group(2))
+            current_child["csl_timeout"] = int(csl_match.group(3))
+            current_child["csl_channel"] = int(csl_match.group(4))
+
+    if current_child and current_child.get("rloc16"):
+        router_child_table_data.append(current_child)
+
+    router_child_table["router_child_table"] = router_child_table_data
+    router_child_table["router_child_table_count"] = len(router_child_table_data)
+
+    return router_child_table
+
+
+def get_meshdiag_childtables(extaddr_map):
+    """Collect child tables for all active routers in the router table."""
+
+    router_table_data = get_router_table_data(extaddr_map)
+    router_rlocs = [router.get("rloc16") for router in router_table_data if router.get("rloc16")]
+
+    router_child_tables = []
+
+    for parent_rloc16 in router_rlocs:
+        router = next((r for r in router_table_data if r.get("rloc16") == parent_rloc16), None)
+        if router:
+            extaddr = router.get("extaddr")
+            device_label = extaddr_map.get(extaddr, "Unknown") if extaddr_map else "Unknown"
+            print(
+                f"Getting meshdiag childtable for router rloc16 {parent_rloc16} "
+                f"(Node: {device_label}, ExtAddr: {extaddr})..."
+            )
+        else:
+            print(
+                f"Getting meshdiag childtable for router rloc16 {parent_rloc16} "
+                "(Node: Unknown, ExtAddr: Unknown)..."
+            )
+
+        router_child_table = get_meshdiag_childtable_one(parent_rloc16, router, extaddr_map)
+        router_child_tables.append(router_child_table)
+
+    return router_child_tables
+
+
+def main():
+    extaddr_json_filename = "threadstatic-extaddr.json"
+
+    if os.path.exists(extaddr_json_filename):
+        print(f"Loading extended address to node name mapping from {extaddr_json_filename}...")
+        extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
+    else:
+        print(f"ExtAddr mapping file not found: {extaddr_json_filename}. Continuing with Unknown labels.")
+        extaddr_map = {}
+
+    router_child_tables = get_meshdiag_childtables(extaddr_map)
+
+    output_filename = "thread-meshdiag-routerchildtables.json"
+    with open(output_filename, "w") as f:
+        json.dump(router_child_tables, f, indent=4)
+
+    print(f"Meshdiag router childtables data saved to {output_filename}")
+    print(json.dumps(router_child_tables, indent=4))
+
+
+if __name__ == "__main__":
+    main()
