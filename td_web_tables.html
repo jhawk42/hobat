@@ -138,13 +138,13 @@
       <div class="controls">
         <label for="dataset-select">Dataset:</label>
         <select id="dataset-select">
-          <option value="thread-router-table.json">thread-router-table.json</option>
-          <option value="thread-meshdiag-topology.json">thread-meshdiag-topology.json</option>
-          <option value="thread-networkdiagnostic-topology.json">thread-networkdiagnostic-topology.json</option>
-          <option value="thread-meshdiag-routerneighbortables.json">thread-meshdiag-routerneighbortables.json</option>
-          <option value="thread-eve-topology.json">thread-eve-topology.json</option>
+          <option value="td-otbr-cli-router-table.json">td-otbr-cli-router-table.json</option>
+          <option value="td-otbr-cli-meshdiag-topology.json">td-otbr-cli-meshdiag-topology.json</option>
+          <option value="td-otbr-cli-networkdiag-topology.json">td-otbr-cli-networkdiag-topology.json</option>
+          <option value="td-otbr-cli-meshdiag-router-neighbortables.json">td-otbr-cli-meshdiag-router-neighbortables.json</option>
+          <option value="td-eve-topology.json">td-eve-topology.json</option>
           <option value="__merged__">merged: medium: otbr cli meshdiag, networkdiag, eve</option>
-          <option value="threadcache-merged-detailed-topology.json">merged: deep: otbr cli, restapi, eve - threadcache-merged-detailed-topology.json</option>
+          <option value="td-merged-topology-all.json">merged: deep: otbr cli, restapi, eve - td-merged-topology-all.json</option>
         </select>
 
         <label for="node-filter">Node Filter:</label>
@@ -227,9 +227,9 @@
       ];
       const MERGED_DATASET_VALUE = "__merged__";
       const MERGED_SOURCE_FILES = [
-        "thread-meshdiag-topology.json",
-        "thread-networkdiagnostic-topology.json",
-        "thread-eve-topology.json",
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-topology.json",
+        "td-eve-topology.json",
       ];
 
       function isObject(value) {

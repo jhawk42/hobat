@@ -211,7 +211,7 @@ def get_meshdiag_topology_ip6addrs_children_data(extaddr_map=None):
 if __name__ == "__main__":
 
     # Load extaddr to nodename mapping from JSON file
-    extaddr_json_filename = "threadstatic-extaddr.json"
+    extaddr_json_filename = "td-static-extaddr-device-label.json"
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
@@ -220,7 +220,7 @@ if __name__ == "__main__":
         extaddr_map = {}
      
     meshdiag_topology_data = get_meshdiag_topology_ip6addrs_children_data(extaddr_map)
-    save_path = "thread-meshdiag-topology.json"
+    save_path = "td-otbr-cli-meshdiag-topology.json"
     with open(save_path, 'w') as f:
         json.dump(meshdiag_topology_data, f, indent=4)
 

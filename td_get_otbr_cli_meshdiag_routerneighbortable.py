@@ -2,7 +2,7 @@ import json
 import os
 import re
 
-from td_get_router_table import get_router_table_data
+from td_get_otbr_cli_router_table import get_router_table_data
 from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
 from td_util_ot_ctl import run_ot_ctl_stdio
 
@@ -131,7 +131,7 @@ def get_meshdiag_routerneighbortables(extaddr_map:None):
 def main():
 
     # Load extaddr to nodename mapping from JSON file
-    extaddr_json_filename = "threadstatic-extaddr.json"
+    extaddr_json_filename = "td-static-extaddr-device-label.json"
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
@@ -144,9 +144,9 @@ def main():
         
     router_neighbor_tables = get_meshdiag_routerneighbortables(extaddr_map)
     
-    with open('thread-meshdiag-routerneighbortables.json', 'w') as f:
+    with open('td-otbr-cli-meshdiag-router-neighbortables.json', 'w') as f:
         json.dump(router_neighbor_tables, f, indent=4)
-        print("Meshdiag routerneighbortables data saved to thread-meshdiag-routerneighbortables.json")  
+        print("Meshdiag routerneighbortables data saved to td-otbr-cli-meshdiag-router-neighbortables.json")  
     
     print(json.dumps(router_neighbor_tables, indent=4))
 

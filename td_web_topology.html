@@ -823,10 +823,10 @@
       async function loadMeshdiagNetworkdiag() {
         try {
           const [meshResult, ndResult, neighborResult, restApiResult] = await Promise.allSettled([
-            fetchJson('./thread-meshdiag-topology.json'),
-            fetchJson('./thread-networkdiagnostic-topology.json'),
-            fetchJson('./thread-meshdiag-routerneighbortables.json'),
-            fetchJson('./thread-restapi-diagnostics.json')
+            fetchJson('./td-otbr-cli-meshdiag-topology.json'),
+            fetchJson('./td-otbr-cli-networkdiag-topology.json'),
+            fetchJson('./td-otbr-cli-meshdiag-router-neighbortables.json'),
+            fetchJson('./td-otbr-restapi-diagnostics.json')
           ]);
 
           const meshdiag = meshResult.status === 'fulfilled' && Array.isArray(meshResult.value) ? meshResult.value : [];
@@ -1517,7 +1517,7 @@
 
       async function loadEveDataset() {
           try {
-            const eveData = await fetchJson('./thread-eve-topology.json');
+            const eveData = await fetchJson('./td-eve-topology.json');
             const eveArray = Array.isArray(eveData)
               ? eveData
               : (eveData && typeof eveData === 'object' ? Object.values(eveData) : []);
@@ -1813,7 +1813,7 @@
 
       async function loadMergedDetailedDataset() {
           try {
-            const mergedData = await fetchJson('./threadcache-merged-detailed-topology.json');
+            const mergedData = await fetchJson('./td-merged-topology-all.json');
             const rows = Array.isArray(mergedData) ? mergedData : [];
             if (rows.length === 0) {
               throw new Error('Merged detailed topology JSON is empty.');
@@ -1827,17 +1827,17 @@
 
             function isMergedRowEveOnly(node) {
               const sources = Array.isArray(node?._sources) ? node._sources : [];
-              if (!sources.includes('thread-eve-topology.json')) {
+              if (!sources.includes('td-eve-topology.json')) {
                 return false;
               }
 
               const hasOtbrSource = sources.some((source) => (
-                source === 'thread-router-table.json'
-                || source === 'thread-meshdiag-topology.json'
-                || source === 'thread-networkdiagnostic-topology.json'
-                || source === 'thread-meshdiag-routerneighbortables.json'
-                || source === 'thread-restapi-devices.json'
-                || source === 'thread-restapi-diagnostics.json'
+                source === 'td-otbr-cli-router-table.json'
+                || source === 'td-otbr-cli-meshdiag-topology.json'
+                || source === 'td-otbr-cli-networkdiag-topology.json'
+                || source === 'td-otbr-cli-meshdiag-router-neighbortables.json'
+                || source === 'td-otbr-restapi-devices.json'
+                || source === 'td-otbr-restapi-diagnostics.json'
               ));
 
               return !hasOtbrSource;

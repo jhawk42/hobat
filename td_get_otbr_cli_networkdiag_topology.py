@@ -5,7 +5,7 @@ import json
 import sys
 import time
 
-from td_get_router_table import get_router_table_data
+from td_get_otbr_cli_router_table import get_router_table_data
 from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
 import td_util_ot_ctl
 from td_util_network import (
@@ -674,7 +674,7 @@ def print_networkdiagnostic_topology(topology):
         print()
 
 
-def save_networkdiagnostic_topology_to_json_dict(data, filename="thread-networkdiagnostic-topology.json"):
+def save_networkdiagnostic_topology_to_json_dict(data, filename="td-otbr-cli-networkdiag-topology.json"):
     """Serializes the dictionary to a pretty-printed JSON file."""
     with open(filename, 'w') as f:
         json.dump(data, f, indent=4)
@@ -720,7 +720,7 @@ def main():
     ## multicast networkdiagnostic get ff03::1
     
     # Load extaddr to nodename mapping from JSON file
-    extaddr_json_filename = "threadstatic-extaddr.json"
+    extaddr_json_filename = "td-static-extaddr-device-label.json"
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
@@ -735,7 +735,7 @@ def main():
     print_networkdiagnostic_topology(networkdiagnostic_topology_data)
 
     # save the topology as JSON to file
-    save_json_filename = "thread-networkdiagnostic-topology.json"
+    save_json_filename = "td-otbr-cli-networkdiag-topology.json"
     save_networkdiagnostic_topology_to_json_list(networkdiagnostic_topology_data, save_json_filename)
     
     # Print the raw topology dictionary as JSON to console for debugging

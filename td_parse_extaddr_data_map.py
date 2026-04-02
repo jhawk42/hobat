@@ -3,10 +3,10 @@ import json
 
 def parse_extaddr_nodename_mapping(path):
     """
-    Parses extended address to node name mapping from threadstatic-extaddr.json.
+    Parses extended address to node name mapping from td-static-extaddr-device-label.json.
     
     Args:
-        path: Path to threadstatic-extaddr.json file
+        path: Path to td-static-extaddr-device-label.json file
     
     Returns:
         Dictionary mapping extaddr (lowercase) to device_label

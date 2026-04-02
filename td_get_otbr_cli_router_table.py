@@ -125,7 +125,7 @@ if __name__ == "__main__":
     try:
         
         # Load extaddr to nodename mapping from JSON file
-        extaddr_json_filename = "threadstatic-extaddr.json"
+        extaddr_json_filename = "td-static-extaddr-device-label.json"
 
         # Check if file exists before parsing
         if os.path.exists(extaddr_json_filename):
@@ -137,7 +137,7 @@ if __name__ == "__main__":
         extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
             
         router_table_data = get_router_table_data(extaddr_map)
-        save_path = "thread-router-table.json"
+        save_path = "td-otbr-cli-router-table.json"
         with open(save_path, 'w') as f:
             json.dump(router_table_data, f, indent=4)
         print(json.dumps(router_table_data, indent=4))

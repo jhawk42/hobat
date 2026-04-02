@@ -139,7 +139,7 @@ if __name__ == "__main__":
     eve_data_parse_2 = parse_eve_process_route_mappings(eve_data_parse_1)  
     
     ## Save json data structures for reference
-    save_json_filename = "thread-eve-topology.json"
+    save_json_filename = "td-eve-topology.json"
     with open(save_json_filename, 'w') as f:
         json.dump(eve_data_parse_2, f, indent=4)
 

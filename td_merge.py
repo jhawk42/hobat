@@ -33,13 +33,13 @@ PRIORITY_FIELDS = [
 ]
 
 DEFAULT_INPUT_FILES = [
-    "thread-router-table.json",
-    "thread-meshdiag-topology.json",
-    "thread-networkdiagnostic-topology.json",
-    "thread-meshdiag-routerneighbortables.json",
-    "thread-restapi-devices.json",
-    "thread-restapi-diagnostics.json",
-    "thread-eve-topology.json",
+    "td-otbr-cli-router-table.json",
+    "td-otbr-cli-meshdiag-topology.json",
+    "td-otbr-cli-networkdiag-topology.json",
+    "td-otbr-cli-meshdiag-router-neighbortables.json",
+    "td-otbr-restapi-devices.json",
+    "td-otbr-restapi-diagnostics.json",
+    "td-eve-topology.json",
 ]
 
 
@@ -475,12 +475,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dataset-file",
-        default="thread-network-dataset-info.json",
+        default="td-otbr-cli-network-dataset-info.json",
         help="File that contains prefix_omr_ipv6addr_prefix.",
     )
     parser.add_argument(
         "--output",
-        default="threadcache-merged-detailed-topology.json",
+        default="td-merged-topology-all.json",
         help="Output merged JSON file path.",
     )
     parser.add_argument(
@@ -508,7 +508,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--extaddr-map-file",
-        default="threadstatic-extaddr.json",
+        default="td-static-extaddr-device-label.json",
         help="Reference file used only for extaddr to device_label lookup.",
     )
     return parser.parse_args()
