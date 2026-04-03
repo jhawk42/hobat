@@ -286,9 +286,7 @@
           <option value="otbr_rest_api">OTBR restapi: route routeData, childTable</option>
           <option value="eve_routes_children">Eve: routes, children</option>
           <option value="all_links">All Links (large)</option>
-        </select>
-        
-
+        </select>        
       </div>
 
       <div class="controls">
@@ -363,7 +361,7 @@
         // ── Multi-file topology datasets (match td_web_topology.html) ────────────
         {
           value: 'default_topology',
-          label: 'merged: otbr cli: meshdiag, networkdiag',
+          label: 'merged: otbr cli: meshdiag, networkdiag, restapi: diagnostics',
           files: [
             'td-otbr-cli-meshdiag-topology.json',
             'td-otbr-cli-networkdiag-topology.json',
@@ -374,6 +372,34 @@
           topologyMode: 'meshdiag-networkdiag',
           defaultLinkFilter: 'default_links'
         },
+
+        // ── Multi-file merged (medium depth — matches td_web_tables.html __merged__) ──
+        {
+          value: 'merged_medium',
+          label: 'merged: otbr cli: meshdiag, networkdiag, eve',
+          files: [
+            'td-otbr-cli-meshdiag-topology.json',
+            'td-otbr-cli-networkdiag-topology.json',
+            'td-eve-topology.json'
+          ],
+          mergeStrategy: 'by-rloc16',
+          topologyMode: 'meshdiag-networkdiag',
+          defaultLinkFilter: 'default_links'
+        },  
+        
+        // ── Deep merged (matches td_web_tables.html td-merged-topology-all.json) ─
+        {
+          value: 'merged_all_deep_wide',
+          label: 'merged: all: otbr cli, restapi, eve - td-merged-topology-all.json',
+          files: [
+            'td-merged-topology-all.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'merged-detailed',
+          defaultLinkFilter: 'all_links'
+        },
+
+        /*
         {
           value: 'merged_detailed_topology',
           label: 'merged: all: otbr cli, restapi, eve',
@@ -384,6 +410,9 @@
           topologyMode: 'merged-detailed',
           defaultLinkFilter: 'all_links'
         },
+        */
+
+        // ── Single-file simple datasets (table-first; topology via raw-array) ───
         {
           value: 'eve_topology',
           label: 'eve topology',
@@ -393,9 +422,7 @@
           mergeStrategy: 'none',
           topologyMode: 'eve',
           defaultLinkFilter: 'eve_routes_children'
-        },
-
-        // ── Single-file simple datasets (table-first; topology via raw-array) ───
+        },        
         {
           value: 'router_table',
           label: 'td-otbr-cli-router-table.json',
@@ -435,33 +462,8 @@
           mergeStrategy: 'none',
           topologyMode: 'raw-array',
           defaultLinkFilter: 'all_links'
-        },
-
-        // ── Multi-file merged (medium depth — matches td_web_tables.html __merged__) ──
-        {
-          value: 'merged_medium',
-          label: 'merged: otbr cli: meshdiag, networkdiag, eve',
-          files: [
-            'td-otbr-cli-meshdiag-topology.json',
-            'td-otbr-cli-networkdiag-topology.json',
-            'td-eve-topology.json'
-          ],
-          mergeStrategy: 'by-rloc16',
-          topologyMode: 'raw-array',
-          defaultLinkFilter: 'default_links'
-        },
-
-        // ── Deep merged (matches td_web_tables.html td-merged-topology-all.json) ─
-        {
-          value: 'merged_deep_table',
-          label: 'merged: all: otbr cli, restapi, eve - td-merged-topology-all.json',
-          files: [
-            'td-merged-topology-all.json'
-          ],
-          mergeStrategy: 'none',
-          topologyMode: 'merged-detailed',
-          defaultLinkFilter: 'all_links'
         }
+
       ];
 
       // Build dataset <select> from registry
