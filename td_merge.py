@@ -32,6 +32,17 @@ PRIORITY_FIELDS = [
     "mle_counters.parentchanges",
 ]
 
+# Canonical merge identity model used by merge/index matching logic.
+MERGE_STRATEGIES = {
+    "by_identity": "by-identity",
+}
+
+MERGE_IDENTITY_FIELDS = {
+    "rloc16": "rloc16",
+    "extaddr_aliases": ("extaddr", "extAddress", "Extended MAC"),
+    "omrIpv6Address": "omrIpv6Address",
+}
+
 DEFAULT_INPUT_FILES = [
     "td-otbr-cli-router-table.json",
     "td-otbr-cli-meshdiag-topology.json",
@@ -48,8 +59,38 @@ def load_json(path: Path) -> Any:
         return json.load(f)
 
 
-def lower_str(value: Any) -> Any:
-    return value.lower() if isinstance(value, str) else value
+def normalize_identifier_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip().lower()
+
+
+def first_normalized_identifier(record: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = normalize_identifier_text(record.get(key))
+        if value:
+            return value
+    return ""
+
+
+def get_canonical_extaddr(record: dict[str, Any]) -> str:
+    return first_normalized_identifier(record, MERGE_IDENTITY_FIELDS["extaddr_aliases"])
+
+
+def get_canonical_omr(record: dict[str, Any]) -> str:
+    return normalize_identifier_text(record.get(MERGE_IDENTITY_FIELDS["omrIpv6Address"]))
+
+
+def normalize_record_aliases(record: dict[str, Any]) -> dict[str, Any]:
+    extaddr = get_canonical_extaddr(record)
+    omr_addr = get_canonical_omr(record)
+
+    if extaddr:
+        record["extaddr"] = extaddr
+    if omr_addr:
+        record["omrIpv6Address"] = omr_addr
+
+    return record
 
 
 def derive_mode_device(record: dict[str, Any]) -> str:
@@ -95,18 +136,13 @@ def derive_mode_device(record: dict[str, Any]) -> str:
 
 
 def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, Any]:
-    extaddr = record.get("extaddr") or record.get("extAddress")
-    if isinstance(extaddr, str):
-        extaddr = extaddr.lower()
-        record["extaddr"] = extaddr
+    normalize_record_aliases(record)
 
     rloc16 = record.get("rloc16")
     if isinstance(rloc16, str):
         record["rloc16"] = rloc16.lower()
 
-    omr_addr = record.get("omrIpv6Address")
-    if isinstance(omr_addr, str):
-        omr_addr = omr_addr.lower()
+    omr_addr = get_canonical_omr(record)
 
     if not omr_addr:
         ipv6_values = record.get("ipv6_addrs")
@@ -138,20 +174,22 @@ def load_extaddr_device_label_map(path: Path) -> dict[str, str]:
         for item in data:
             if not isinstance(item, dict):
                 continue
-            extaddr = item.get("extaddr") or item.get("extAddress")
+            normalized_item = normalize_record_aliases(item)
+            extaddr = get_canonical_extaddr(normalized_item)
             label = item.get("device_label")
-            if isinstance(extaddr, str) and isinstance(label, str) and label:
-                mapping[extaddr.lower()] = label
+            if extaddr and isinstance(label, str) and label:
+                mapping[extaddr] = label
         return mapping
 
     if isinstance(data, dict):
         for _, item in data.items():
             if not isinstance(item, dict):
                 continue
-            extaddr = item.get("extaddr") or item.get("extAddress")
+            normalized_item = normalize_record_aliases(item)
+            extaddr = get_canonical_extaddr(normalized_item)
             label = item.get("device_label")
-            if isinstance(extaddr, str) and isinstance(label, str) and label:
-                mapping[extaddr.lower()] = label
+            if extaddr and isinstance(label, str) and label:
+                mapping[extaddr] = label
 
     return mapping
 
@@ -162,7 +200,7 @@ def extract_records(filename: str, data: Any) -> list[dict[str, Any]]:
     if isinstance(data, list):
         for item in data:
             if isinstance(item, dict):
-                records.append(deepcopy(item))
+                records.append(normalize_record_aliases(deepcopy(item)))
         return records
 
     if not isinstance(data, dict):
@@ -178,7 +216,7 @@ def extract_records(filename: str, data: Any) -> list[dict[str, Any]]:
                 for k, v in attrs.items():
                     if k not in merged_item:
                         merged_item[k] = deepcopy(v)
-            records.append(merged_item)
+            records.append(normalize_record_aliases(merged_item))
         return records
 
     # Eve topology is a dict keyed by rloc16-like strings.
@@ -187,7 +225,7 @@ def extract_records(filename: str, data: Any) -> list[dict[str, Any]]:
             continue
         copied = deepcopy(item)
         copied.setdefault("_map_key", map_key)
-        records.append(copied)
+        records.append(normalize_record_aliases(copied))
 
     return records
 
@@ -200,6 +238,54 @@ def value_is_empty(value: Any) -> bool:
     if value == [] or value == {}:
         return True
     return False
+
+
+def merge_unique_strings(existing: list[Any], incoming: list[Any]) -> list[str]:
+    merged: list[str] = []
+    for value in existing + incoming:
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if text and text not in merged:
+            merged.append(text)
+    return merged
+
+
+def values_equivalent(left: Any, right: Any) -> bool:
+    if left == right:
+        return True
+    try:
+        return json.dumps(left, sort_keys=True, ensure_ascii=True) == json.dumps(right, sort_keys=True, ensure_ascii=True)
+    except TypeError:
+        return False
+
+
+def append_merge_conflict(base: dict[str, Any], path: str, current_value: Any, incoming_value: Any) -> None:
+    if not path:
+        return
+
+    conflicts = base.setdefault("_merge_conflicts", [])
+    if not isinstance(conflicts, list):
+        conflicts = []
+        base["_merge_conflicts"] = conflicts
+
+    if len(conflicts) >= 20:
+        return
+
+    current_text = json.dumps(current_value, sort_keys=True, ensure_ascii=True, default=str)
+    incoming_text = json.dumps(incoming_value, sort_keys=True, ensure_ascii=True, default=str)
+
+    for entry in conflicts:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("path") == path and entry.get("current") == current_text and entry.get("incoming") == incoming_text:
+            return
+
+    conflicts.append({
+        "path": path,
+        "current": current_text,
+        "incoming": incoming_text,
+    })
 
 
 def merge_lists(a_list: list[Any], b_list: list[Any]) -> list[Any]:
@@ -216,19 +302,46 @@ def merge_lists(a_list: list[Any], b_list: list[Any]) -> list[Any]:
     return merged
 
 
-def deep_merge(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+def deep_merge(
+    base: dict[str, Any],
+    incoming: dict[str, Any],
+    path_prefix: str = "",
+    conflict_target: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if conflict_target is None:
+        conflict_target = base
+
     for key, value in incoming.items():
+        if key == "_merge_conflicts":
+            existing_conflicts = conflict_target.setdefault("_merge_conflicts", [])
+            if isinstance(existing_conflicts, list) and isinstance(value, list):
+                for conflict in value:
+                    if len(existing_conflicts) >= 20:
+                        break
+                    if conflict not in existing_conflicts:
+                        existing_conflicts.append(deepcopy(conflict))
+            continue
+
+        if key == "_source_files":
+            existing_sources = base.get("_source_files") if isinstance(base.get("_source_files"), list) else []
+            incoming_sources = value if isinstance(value, list) else []
+            base["_source_files"] = merge_unique_strings(existing_sources, incoming_sources)
+            continue
+
+        current_path = f"{path_prefix}.{key}" if path_prefix else key
         if key not in base:
             base[key] = deepcopy(value)
             continue
 
         cur = base[key]
         if isinstance(cur, dict) and isinstance(value, dict):
-            deep_merge(cur, value)
+            deep_merge(cur, value, current_path, conflict_target)
         elif isinstance(cur, list) and isinstance(value, list):
             base[key] = merge_lists(cur, value)
         elif value_is_empty(cur) and not value_is_empty(value):
             base[key] = deepcopy(value)
+        elif not value_is_empty(cur) and not value_is_empty(value) and not values_equivalent(cur, value):
+            append_merge_conflict(conflict_target, current_path, cur, value)
     return base
 
 
@@ -240,6 +353,72 @@ def nested_get(record: dict[str, Any], dotted_key: str) -> Any:
             return None
         cur = cur[part]
     return cur
+
+
+def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
+    identities: dict[str, str] = {}
+
+    rloc16 = normalize_identifier_text(record.get(MERGE_IDENTITY_FIELDS["rloc16"]))
+    if rloc16:
+        identities["rloc16"] = rloc16
+
+    extaddr = get_canonical_extaddr(record)
+    if extaddr:
+        identities["extaddr"] = extaddr
+
+    omr = get_canonical_omr(record)
+    if omr:
+        identities["omrIpv6Address"] = omr
+
+    return identities
+
+
+def find_candidate_node_ids(
+    identity_values: dict[str, str],
+    by_rloc16: dict[str, int],
+    by_extaddr: dict[str, int],
+    by_omr: dict[str, int],
+) -> set[int]:
+    candidate_ids: set[int] = set()
+
+    rloc16 = identity_values.get("rloc16")
+    extaddr = identity_values.get("extaddr")
+    omr = identity_values.get("omrIpv6Address")
+
+    if isinstance(rloc16, str) and rloc16 in by_rloc16:
+        candidate_ids.add(by_rloc16[rloc16])
+    if isinstance(extaddr, str) and extaddr in by_extaddr:
+        candidate_ids.add(by_extaddr[extaddr])
+    if isinstance(omr, str) and omr in by_omr:
+        candidate_ids.add(by_omr[omr])
+
+    return candidate_ids
+
+
+def index_node_identity_values(
+    node: dict[str, Any],
+    node_id: int,
+    by_rloc16: dict[str, int],
+    by_extaddr: dict[str, int],
+    by_omr: dict[str, int],
+) -> dict[str, str]:
+    identity_values = collect_merge_identity_values(node)
+
+    rloc16 = identity_values.get("rloc16")
+    extaddr = identity_values.get("extaddr")
+    omr = identity_values.get("omrIpv6Address")
+
+    if isinstance(rloc16, str):
+        node["rloc16"] = rloc16
+        add_identifier(by_rloc16, rloc16, node_id)
+    if isinstance(extaddr, str):
+        node["extaddr"] = extaddr
+        add_identifier(by_extaddr, extaddr, node_id)
+    if isinstance(omr, str):
+        node["omrIpv6Address"] = omr
+        add_identifier(by_omr, omr, node_id)
+
+    return identity_values
 
 
 def add_identifier(
@@ -310,17 +489,12 @@ def build_merged_records(
             if filename not in record["_source_files"]:
                 record["_source_files"].append(filename)
 
-            rloc16 = lower_str(record.get("rloc16"))
-            extaddr = lower_str(record.get("extaddr") or record.get("extAddress"))
-            omr = lower_str(record.get("omrIpv6Address"))
+            identity_values = collect_merge_identity_values(record)
+            rloc16 = identity_values.get("rloc16")
+            extaddr = identity_values.get("extaddr")
+            omr = identity_values.get("omrIpv6Address")
 
-            candidate_ids: set[int] = set()
-            if isinstance(rloc16, str) and rloc16 in by_rloc16:
-                candidate_ids.add(by_rloc16[rloc16])
-            if isinstance(extaddr, str) and extaddr in by_extaddr:
-                candidate_ids.add(by_extaddr[extaddr])
-            if isinstance(omr, str) and omr in by_omr:
-                candidate_ids.add(by_omr[omr])
+            candidate_ids = find_candidate_node_ids(identity_values, by_rloc16, by_extaddr, by_omr)
 
             if not candidate_ids:
                 node_id = next_id
@@ -358,21 +532,12 @@ def build_merged_records(
 
             # Re-read after merges in case node id changed.
             active = nodes[node_id]
-            active_rloc16 = lower_str(active.get("rloc16"))
-            active_extaddr = lower_str(active.get("extaddr") or active.get("extAddress"))
-            active_omr = lower_str(active.get("omrIpv6Address"))
-
-            if isinstance(active_rloc16, str):
-                add_identifier(by_rloc16, active_rloc16, node_id)
+            active_identity_values = index_node_identity_values(active, node_id, by_rloc16, by_extaddr, by_omr)
+            active_extaddr = active_identity_values.get("extaddr")
             if isinstance(active_extaddr, str):
-                active["extaddr"] = active_extaddr
-                add_identifier(by_extaddr, active_extaddr, node_id)
                 mapped_label = extaddr_to_device_label.get(active_extaddr)
                 if mapped_label and value_is_empty(active.get("device_label")):
                     active["device_label"] = mapped_label
-            if isinstance(active_omr, str):
-                active["omrIpv6Address"] = active_omr
-                add_identifier(by_omr, active_omr, node_id)
 
     merged_records: list[dict[str, Any]] = []
     for _, node in sorted(nodes.items(), key=lambda x: (x[1].get("rloc16") or "", x[0])):
