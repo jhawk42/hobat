@@ -259,6 +259,7 @@
         <button id="btn-table">Table</button>
         <button id="btn-physics" class="active" title="Toggle vis.js physics simulation">Physics</button>
         <button id="btn-auto-zoom" class="active" title="Auto-fit topology in view">Auto Zoom</button>
+        <button id="btn-animation" class="active" title="Toggle vis.js animation">Animation</button>
       </div>
 
       <!-- Controls bar -->
@@ -1805,6 +1806,7 @@
       // Stored filter callbacks so that filter dropdowns can call the active view's handler
       let _topologyFilterHandlers = null;
       let _autoZoomEnabled = true;
+      let _animationEnabled = true;
 
       const VIS_OPTIONS = {
         layout: { improvedLayout: true, randomSeed: 7 },
@@ -1863,6 +1865,7 @@
         const nodeFilterEl = document.getElementById('node-filter');
         const linkFilterEl = document.getElementById('link-filter');
         const diagnosticFilterEl = document.getElementById('diagnostic-filter');
+        let lastStatusCounts = null;
 
         // Destroy previous network instance to free memory
         if (_visNetwork) {
@@ -1963,7 +1966,15 @@
 
         // ── Status line ────────────────────────────────────────────────────────
 
+        function formatTopologyScale() {
+          if (!_visNetwork || typeof _visNetwork.getScale !== 'function') return '';
+          const scale = _visNetwork.getScale();
+          if (!Number.isFinite(scale)) return '';
+          return ` Scale: ${scale.toFixed(2)}x.`;
+        }
+
         function updateStatus(counts) {
+          lastStatusCounts = counts;
           const { visibleNodeCount, visibleEdgeCount, matchedTargetNodeCount = 0, forcedVisibleLinkCount = 0 } = counts;
           const nodeFilterLabel = nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
           const linkFilterLabel = linkFilterEl.options[linkFilterEl.selectedIndex].text;
@@ -1972,7 +1983,7 @@
             ? ` Neighbor Match: targets ${matchedTargetNodeCount}, links ${forcedVisibleLinkCount}.` : '';
           statusEl.textContent = `Loaded ${sourceNames.join(', ')}. Total: ${nodeData.length} nodes, ${edgeData.length} links. `
             + `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. `
-            + `Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagFilterLabel}.${neighborSuffix}`;
+            + `Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagFilterLabel}.${neighborSuffix}${formatTopologyScale()}`;
         }
 
         // ── Node detail click handler ──────────────────────────────────────────
@@ -2033,6 +2044,14 @@
           nodeData.filter((n) => n.hasChildren).map((n) => n.id)
         );
 
+        function refreshStatusScale() {
+          if (lastStatusCounts) updateStatus(lastStatusCounts);
+        }
+
+        _visNetwork.on('zoom', refreshStatusScale);
+        _visNetwork.on('animationFinished', refreshStatusScale);
+        _visNetwork.once('stabilized', refreshStatusScale);
+
         // ── Store filter handlers so the toggle/filter wiring (Section 7/8) can call them ──
         _topologyFilterHandlers = {
           applyFilters,
@@ -2041,7 +2060,7 @@
             if (_autoZoomEnabled && _visNetwork) {
               requestAnimationFrame(() => {
                 if (_visNetwork) {
-                  _visNetwork.fit({ animation: true });
+                  _visNetwork.fit({ animation: _animationEnabled });
                 }
               });
             }
@@ -2308,6 +2327,7 @@
         const btnTable = document.getElementById('btn-table');
         const btnPhysics = document.getElementById('btn-physics');
         const btnAutoZoom = document.getElementById('btn-auto-zoom');
+        const btnAnimation = document.getElementById('btn-animation');
         const linkFilterEl = document.getElementById('link-filter');
 
         if (newView === 'topology') {
@@ -2317,6 +2337,7 @@
           btnTable.classList.remove('active');
           btnPhysics.style.display = 'inline-block';
           btnAutoZoom.style.display = 'inline-block';
+          btnAnimation.style.display = 'inline-block';
           linkFilterEl.classList.remove('filter-disabled');
         } else {
           topoPanel.style.display = 'none';
@@ -2325,6 +2346,7 @@
           btnTopology.classList.remove('active');
           btnPhysics.style.display = 'none';
           btnAutoZoom.style.display = 'none';
+          btnAnimation.style.display = 'none';
           linkFilterEl.classList.add('filter-disabled');
         }
 
@@ -2355,6 +2377,19 @@
 
       document.getElementById('btn-physics').addEventListener('click', () => setPhysics(!_physicsEnabled));
 
+      // ── Animation toggle ────────────────────────────────────────────────────
+      function setAnimation(enabled) {
+        _animationEnabled = enabled;
+        const btn = document.getElementById('btn-animation');
+        if (enabled) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      }
+
+      document.getElementById('btn-animation').addEventListener('click', () => setAnimation(!_animationEnabled));
+
       // ── Auto Zoom toggle ─────────────────────────────────────────────────────
       function setAutoZoom(enabled) {
         _autoZoomEnabled = enabled;
@@ -2362,7 +2397,7 @@
         if (enabled) {
           btn.classList.add('active');
           if (currentView === 'topology' && _visNetwork) {
-            _visNetwork.fit({ animation: true });
+            _visNetwork.fit({ animation: _animationEnabled });
           }
         } else {
           btn.classList.remove('active');
