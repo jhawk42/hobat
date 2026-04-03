@@ -1,0 +1,2208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Thread Mesh Network Dashboard</title>
+
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/tofsjonas/sortable@latest/sortable.min.js"></script>
+
+    <style>
+      :root {
+        --bg: #f5f7fb;
+        --surface: #ffffff;
+        --text: #1f2937;
+        --muted: #5b6472;
+        --line: #d6dde8;
+        --accent: #0f766e;
+        --accent-soft: #d6f5f2;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        background: linear-gradient(180deg, #eef4ff 0%, var(--bg) 40%, #eef8f5 100%);
+        color: var(--text);
+      }
+
+      .page {
+        padding: 12px 16px;
+        max-width: 100%;
+      }
+
+      h1 {
+        margin: 0 0 10px 0;
+        font-size: 16px;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+      }
+
+      /* ── Controls bar ─────────────────────────────────────────── */
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      label {
+        font-size: 14px;
+        font-weight: 580;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+      }
+
+      select {
+        padding: 6px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        font-size: 14px;
+      }
+
+      #dataset-select {
+        min-width: 360px;
+      }
+
+      #node-filter,
+      #link-filter,
+      #diagnostic-filter {
+        min-width: 220px;
+      }
+
+      select.filter-disabled {
+        opacity: 0.45;
+        pointer-events: none;
+        cursor: not-allowed;
+      }
+
+      /* ── View toggle bar ──────────────────────────────────────── */
+
+      .view-toggle-bar {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+
+      .view-toggle-bar button {
+        padding: 6px 20px;
+        font-size: 14px;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+      }
+
+      .view-toggle-bar button:hover {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+      }
+
+      .view-toggle-bar button.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #ffffff;
+        font-weight: 600;
+      }
+
+      /* ── Status line ──────────────────────────────────────────── */
+
+      #status {
+        margin: 0 0 8px 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* ── Topology view ────────────────────────────────────────── */
+
+      #view-topology {
+        display: block;
+      }
+
+      #view-table {
+        display: none;
+      }
+
+      .topology-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 12px;
+        align-items: start;
+      }
+
+      #mynetwork {
+        width: 100%;
+        height: 80vh;
+        border: 1px solid lightgray;
+        border-radius: 6px;
+        background: var(--surface);
+      }
+
+      #details {
+        margin-top: 0;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 10px;
+        background: #fafafa;
+        max-height: 80vh;
+        overflow: auto;
+      }
+
+      #details h2 {
+        margin: 0 0 8px 0;
+        font-size: 15px;
+      }
+
+      #details-list {
+        margin: 0;
+        padding-left: 18px;
+        font-size: 13px;
+      }
+
+      #details-list li {
+        margin: 3px 0;
+        word-break: break-word;
+      }
+
+      /* ── Table view ───────────────────────────────────────────── */
+
+      .table-wrap {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--surface);
+        overflow: auto;
+        max-height: calc(100vh - 180px);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        min-width: 0;
+      }
+
+      thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--accent-soft);
+        color: #0f2d3a;
+        border-bottom: 1px solid var(--line);
+      }
+
+      th,
+      td {
+        padding: 8px 10px;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        text-align: left;
+        font-size: 13px;
+        line-height: 1.3;
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: break-word;
+      }
+
+      tr:nth-child(even) td {
+        background: #fcfdff;
+      }
+
+      th:last-child,
+      td:last-child {
+        border-right: 0;
+      }
+
+      /* ── Responsive ───────────────────────────────────────────── */
+
+      @media (max-width: 1000px) {
+        .topology-layout {
+          grid-template-columns: 1fr;
+        }
+
+        #details {
+          max-height: none;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .page {
+          padding: 10px;
+        }
+
+        #dataset-select,
+        #node-filter,
+        #link-filter,
+        #diagnostic-filter {
+          min-width: 100%;
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="page">
+      <h1>Thread Mesh Network Dashboard</h1>
+
+      <!-- View toggle -->
+      <div class="view-toggle-bar">
+        <button id="btn-topology" class="active">Topology</button>
+        <button id="btn-table">Table</button>
+        <button id="btn-physics" class="active" title="Toggle vis.js physics simulation">Physics</button>
+        <button id="btn-auto-zoom" class="active" title="Auto-fit topology in view">Auto Zoom</button>
+      </div>
+
+      <!-- Controls bar -->
+      <div class="controls">
+        <label for="dataset-select">Dataset:</label>
+        <select id="dataset-select">
+          <!-- populated by JS from DATASET_REGISTRY -->
+        </select>
+
+        <label for="node-filter">Nodes:</label>
+        <select id="node-filter">
+          <option value="all">All Nodes</option>
+          <option value="ftd-devices">Full Thread Devices (FTD)</option>
+          <option value="mtd-devices">Minimal Thread Devices (MTD)</option>
+          <option value="border-routers">Border Routers</option>
+          <option value="main-routers">Routers</option>
+          <option value="routers-with-children">Routers with Children Nodes</option>
+          <option value="routers-without-children">Routers without Children Nodes</option>
+        </select>
+
+        <label for="link-filter">Links:</label>
+        <select id="link-filter">
+          <option value="default_links">Default: router,children, 321 _links, childTable</option>
+          <option value="default_plus_router_neighbors">Default: +router neighbors</option>
+          <option value="otbr_rest_api">OTBR restapi: route routeData, childTable</option>
+          <option value="eve_routes_children">Eve: routes, children</option>
+          <option value="all_links">All Links (large)</option>
+        </select>
+        
+
+      </div>
+
+      <div class="controls">
+        <label for="diagnostic-filter">Diagnostics:</label>
+        <select id="diagnostic-filter">
+          <option value="all">All Rows</option>
+          <option value="medium-total-errors-pct">Mac - Total Error Packets % (&gt;= 5%) - Medium</option>
+          <option value="medium-total-errors-high">Mac - Total Error Packets (&gt;= 10%) - High</option>
+          <option value="medium-discard-pct">Mac - Total Discard Packets % (&gt;= 15%) - High</option>
+          <option value="medium-partition-changes">Mle - Partition Changes (&gt;= 2) - Medium</option>
+          <option value="high-partition-changes">Mle - Partition Changes (&gt;= 5) - High</option>
+          <option value="medium-parent-changes">Mle - Parent Changes (&gt;= 2) - Medium</option>
+          <option value="high-parent-changes">Mle - Parent Changes (&gt;= 5) - High</option>
+          <option value="router-neighbor-err-rate-frame-low">Router Neighbor - Err Rate Frame &gt;= 2% - Low</option>
+          <option value="router-neighbor-err-rate-frame-medium">Router Neighbor - Err Rate Frame &gt;= 5% - Medium</option>
+          <option value="router-neighbor-err-rate-frame-high">Router Neighbor - Err Rate Frame &gt;= 10% - High</option>
+          <option value="router-neighbor-err-rate-msg-low">Router Neighbor - Err Rate Msg &gt;= 2% - Low</option>
+          <option value="router-neighbor-err-rate-msg-medium">Router Neighbor - Err Rate Msg &gt;= 5% - Medium</option>
+          <option value="router-neighbor-err-rate-msg-high">Router Neighbor - Err Rate Msg &gt;= 10% - High</option>
+          <option value="router-neighbor-rss-very-low">Router Neighbor - RSS Ave Bad (&lt; -80 dBm)</option>
+          <option value="router-neighbor-rss-low">Router Neighbor - RSS Ave Fair (-70 dBm To -80 dBm)</option>
+          <option value="router-neighbor-rss-medium">Router Neighbor - RSS Ave Good (-60 dBm To -70 dBm)</option>
+          <option value="router-neighbor-rss-high">Router Neighbor - RSS Ave Excellent (&gt; -60 dBm)</option>
+        </select>        
+      </div>
+
+      <!-- Status line -->
+      <div id="status">Select a dataset to load.</div>
+
+      <!-- Topology view -->
+      <div id="view-topology">
+        <div class="topology-layout">
+          <div id="mynetwork"></div>
+          <div id="details">
+            <h2>Node Details</h2>
+            <ul id="details-list">
+              <li>Click a node to view its properties.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table view -->
+      <div id="view-table">
+        <div class="table-wrap">
+          <table id="data-table" class="sortable">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ── Section 2: Dataset Registry ───────────────────────────────────────────
+      //
+      // Each entry describes one selectable dataset.
+      //
+      // Fields:
+      //   value            — unique key used as <option value=>
+      //   label            — display text in the dropdown
+      //   files[]          — ordered list of JSON filenames to fetch
+      //   mergeStrategy    — 'none' | 'by-rloc16'
+      //                       'none'      → pass raw arrays straight to the adaptor
+      //                       'by-rloc16' → merge all fetched arrays by rloc16 key
+      //   topologyMode     — which topology adaptor to call:
+      //                       'meshdiag-networkdiag' | 'merged-detailed' | 'eve'
+      //                       'router-table' | 'raw-array'
+      //   defaultLinkFilter — value pre-selected in #link-filter when this dataset loads
+
+      const DATASET_REGISTRY = [
+        // ── Multi-file topology datasets (match td_web_topology.html) ────────────
+        {
+          value: 'default_topology',
+          label: 'merged: otbr cli: meshdiag, networkdiag',
+          files: [
+            'td-otbr-cli-meshdiag-topology.json',
+            'td-otbr-cli-networkdiag-topology.json',
+            'td-otbr-cli-meshdiag-router-neighbortables.json',
+            'td-otbr-restapi-diagnostics.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'meshdiag-networkdiag',
+          defaultLinkFilter: 'default_links'
+        },
+        {
+          value: 'merged_detailed_topology',
+          label: 'merged: all: otbr cli, restapi, eve',
+          files: [
+            'td-merged-topology-all.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'merged-detailed',
+          defaultLinkFilter: 'all_links'
+        },
+        {
+          value: 'eve_topology',
+          label: 'eve topology',
+          files: [
+            'td-eve-topology.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'eve',
+          defaultLinkFilter: 'eve_routes_children'
+        },
+
+        // ── Single-file simple datasets (table-first; topology via raw-array) ───
+        {
+          value: 'router_table',
+          label: 'td-otbr-cli-router-table.json',
+          files: [
+            'td-otbr-cli-router-table.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'router-table',
+          defaultLinkFilter: 'all_links'
+        },
+        {
+          value: 'meshdiag_only',
+          label: 'td-otbr-cli-meshdiag-topology.json',
+          files: [
+            'td-otbr-cli-meshdiag-topology.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'raw-array',
+          defaultLinkFilter: 'default_links'
+        },
+        {
+          value: 'networkdiag_only',
+          label: 'td-otbr-cli-networkdiag-topology.json',
+          files: [
+            'td-otbr-cli-networkdiag-topology.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'raw-array',
+          defaultLinkFilter: 'default_links'
+        },
+        {
+          value: 'router_neighbortables',
+          label: 'td-otbr-cli-meshdiag-router-neighbortables.json',
+          files: [
+            'td-otbr-cli-meshdiag-router-neighbortables.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'raw-array',
+          defaultLinkFilter: 'all_links'
+        },
+
+        // ── Multi-file merged (medium depth — matches td_web_tables.html __merged__) ──
+        {
+          value: 'merged_medium',
+          label: 'merged: otbr cli: meshdiag, networkdiag, eve',
+          files: [
+            'td-otbr-cli-meshdiag-topology.json',
+            'td-otbr-cli-networkdiag-topology.json',
+            'td-eve-topology.json'
+          ],
+          mergeStrategy: 'by-rloc16',
+          topologyMode: 'raw-array',
+          defaultLinkFilter: 'default_links'
+        },
+
+        // ── Deep merged (matches td_web_tables.html td-merged-topology-all.json) ─
+        {
+          value: 'merged_deep_table',
+          label: 'merged: all: otbr cli, restapi, eve - td-merged-topology-all.json',
+          files: [
+            'td-merged-topology-all.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'merged-detailed',
+          defaultLinkFilter: 'all_links'
+        }
+      ];
+
+      // Build dataset <select> from registry
+      (function populateDatasetSelect() {
+        const sel = document.getElementById('dataset-select');
+        DATASET_REGISTRY.forEach((entry) => {
+          const opt = document.createElement('option');
+          opt.value = entry.value;
+          opt.textContent = entry.label;
+          sel.appendChild(opt);
+        });
+      })();
+
+      // ── Section 3: Dataset Loader ─────────────────────────────────────────────
+      //
+      // currentDataset holds the last successfully loaded result so that
+      // switching views (topology ↔ table) never re-fetches JSON.
+      //
+      // Shape:
+      //   {
+      //     entry       : DATASET_REGISTRY entry
+      //     rawFiles    : array of parsed JSON values, one per entry.files[]
+      //     rows        : flat array of objects (after mergeStrategy applied)
+      //     loadedFiles : string[]  names of files that actually loaded (for status)
+      //   }
+
+      let currentDataset = null;
+
+      // ── Helpers shared with adaptors ────────────────────────────────────────
+
+      function toText(value) {
+        return value === undefined || value === null ? '' : String(value).trim();
+      }
+
+      function toFiniteNumber(value) {
+        if (Number.isFinite(value)) return value;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+      }
+
+      function isPlainObject(value) {
+        return value !== null && typeof value === 'object' && !Array.isArray(value);
+      }
+
+      // ── Row normalisation (used by table renderer + by-rloc16 merge) ─────────
+
+      function normalizeRows(rawData) {
+        if (Array.isArray(rawData)) {
+          return rawData.map((row, index) => {
+            if (isPlainObject(row)) return row;
+            return { row_index: index, value: row };
+          });
+        }
+        if (isPlainObject(rawData)) {
+          return Object.keys(rawData).map((key) => {
+            const row = rawData[key];
+            if (isPlainObject(row)) return { _row_key: key, ...row };
+            return { _row_key: key, value: row };
+          });
+        }
+        return [{ value: rawData }];
+      }
+
+      // ── Merge strategy: by-rloc16 ─────────────────────────────────────────
+
+      function normalizeRloc16(value) {
+        return value === null || value === undefined ? '' : String(value).trim().toLowerCase();
+      }
+
+      function mergeRowFields(target, source) {
+        Object.keys(source).forEach((key) => {
+          const sv = source[key];
+          const tv = target[key];
+          if (tv === undefined || tv === null || tv === '') {
+            target[key] = sv;
+          }
+        });
+      }
+
+      function mergeRowsByRloc16(rowGroups) {
+        const mergedMap = new Map();
+        rowGroups.forEach((rows) => {
+          rows.forEach((row) => {
+            const key = normalizeRloc16(row.rloc16);
+            if (!key) return;
+            if (!mergedMap.has(key)) {
+              mergedMap.set(key, { ...row });
+              return;
+            }
+            mergeRowFields(mergedMap.get(key), row);
+          });
+        });
+        return Array.from(mergedMap.values());
+      }
+
+      // ── Core fetch helper ─────────────────────────────────────────────────
+
+      async function fetchJson(path) {
+        const response = await fetch(path, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
+        return response.json();
+      }
+
+      // ── Dataset load entry-point ──────────────────────────────────────────
+
+      async function loadDataset(entryValue) {
+        const entry = DATASET_REGISTRY.find((e) => e.value === entryValue);
+        if (!entry) {
+          document.getElementById('status').textContent = `Unknown dataset: ${entryValue}`;
+          return;
+        }
+
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = `Loading ${entry.label}…`;
+
+        // Apply default link-filter for this dataset
+        const linkFilterEl = document.getElementById('link-filter');
+        if (entry.defaultLinkFilter) {
+          linkFilterEl.value = entry.defaultLinkFilter;
+        }
+
+        // Fetch all files in parallel (settle so a missing optional file doesn't abort)
+        const settled = await Promise.allSettled(entry.files.map((f) => fetchJson(f)));
+
+        const rawFiles = [];
+        const loadedFiles = [];
+        const failedFiles = [];
+
+        settled.forEach((result, i) => {
+          if (result.status === 'fulfilled') {
+            rawFiles.push(result.value);
+            loadedFiles.push(entry.files[i]);
+          } else {
+            rawFiles.push(null);
+            failedFiles.push(entry.files[i]);
+          }
+        });
+
+        if (loadedFiles.length === 0) {
+          statusEl.textContent = `Error: could not load any file for "${entry.label}". Failed: ${failedFiles.join(', ')}`;
+          return;
+        }
+
+        // Apply merge strategy to produce a flat rows array for the table renderer
+        let rows;
+        if (entry.mergeStrategy === 'by-rloc16') {
+          const groups = rawFiles
+            .filter((d) => d !== null)
+            .map((d) => normalizeRows(d));
+          rows = mergeRowsByRloc16(groups);
+        } else {
+          // 'none' — for single-file datasets just normalise the first loaded file;
+          // multi-file 'none' datasets hand the full rawFiles array to the adaptor
+          const firstLoaded = rawFiles.find((d) => d !== null);
+          rows = firstLoaded !== null ? normalizeRows(firstLoaded) : [];
+        }
+
+        currentDataset = { entry, rawFiles, rows, loadedFiles };
+
+        // Warn about any files that failed to load but don't hard-fail
+        if (failedFiles.length > 0) {
+          console.warn('Some dataset files could not be loaded:', failedFiles);
+        }
+
+        renderCurrentView();
+      }
+
+      // ── Render dispatcher — called after load and after view toggle ──────────
+
+      function renderCurrentView() {
+        if (!currentDataset) return;
+        const view = currentView;   // set by view-toggle (Section 7)
+        if (view === 'topology') {
+          renderTopologyForDataset(currentDataset);
+        } else {
+          renderTableForDataset(currentDataset);
+        }
+      }
+
+      // ── Section 4: Shared topology utilities + Adaptors ──────────────────────
+      //
+      // Each adaptor is a pure function:
+      //   adaptXxx(rawFiles) → { nodeData, edgeData, nodeMap, rawByIdForDetails,
+      //                          routerNeighborByRloc16, sourceNames }
+      //
+      // nodeData / edgeData feed directly into vis.DataSet.
+      // nodeMap / rawByIdForDetails are used by the node-detail click handler.
+      // routerNeighborByRloc16 is needed by the router-neighbor diagnostic filter.
+
+      // ── Shared topology utility functions ────────────────────────────────────
+
+      function chooseNodeId(node, fallbackPrefix, index) {
+        const rloc16 = toText(node.rloc16);
+        if (rloc16) return rloc16;
+        const idField = toText(node.id);
+        if (idField) return idField;
+        const extAddr = toText(node.extaddr);
+        if (extAddr) return extAddr;
+        return `${fallbackPrefix}-${index}`;
+      }
+
+      function buildLabel(node) {
+        const nodeName = toText(node.device_label) || toText(node.name) || 'Unknown node';
+        const rloc16 = toText(node.rloc16) || 'rloc16:n/a';
+        return `${nodeName}\n${rloc16}`;
+      }
+
+      function isUnknownNodeName(nodeName) {
+        return toText(nodeName).toLowerCase().startsWith('unknown');
+      }
+
+      function formatValue(value) {
+        if (Array.isArray(value)) return value.length === 0 ? '[]' : value.join(', ');
+        if (value && typeof value === 'object') {
+          try { return JSON.stringify(value); } catch (_e) { return '[object]'; }
+        }
+        if (typeof value === 'boolean') return value ? 'true' : 'false';
+        return toText(value) || 'n/a';
+      }
+
+      function mergeForDisplay(primary, secondary) {
+        if (primary === undefined || primary === null) return secondary;
+        if (secondary === undefined || secondary === null) return primary;
+        if (Array.isArray(primary) && Array.isArray(secondary)) {
+          return secondary.length > 0 ? secondary : primary;
+        }
+        if (isPlainObject(primary) && isPlainObject(secondary)) {
+          const merged = {};
+          const keys = new Set([...Object.keys(primary), ...Object.keys(secondary)]);
+          keys.forEach((key) => { merged[key] = mergeForDisplay(primary[key], secondary[key]); });
+          return merged;
+        }
+        return secondary;
+      }
+
+      function flattenObjectEntries(value, path = '', entries = []) {
+        if (isPlainObject(value)) {
+          const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
+          if (keys.length === 0 && path) { entries.push([path, {}]); return entries; }
+          keys.forEach((key) => {
+            flattenObjectEntries(value[key], path ? `${path}.${key}` : key, entries);
+          });
+          return entries;
+        }
+        if (Array.isArray(value)) {
+          if (value.length === 0) { entries.push([path, []]); return entries; }
+          if (value.every((item) => isPlainObject(item))) {
+            value.forEach((item, i) => flattenObjectEntries(item, `${path}[${i}]`, entries));
+            return entries;
+          }
+          entries.push([path, value]);
+          return entries;
+        }
+        entries.push([path || 'value', value]);
+        return entries;
+      }
+
+      function shouldExcludeDetailPath(path) {
+        const p = toText(path);
+        if (!p) return false;
+        if (p === '1_links' || p.startsWith('1_links[')) return true;
+        if (p === '2_links' || p.startsWith('2_links[')) return true;
+        if (p === '3_links' || p.startsWith('3_links[')) return true;
+        if (p === 'children' || p.startsWith('children[')) return true;
+        return false;
+      }
+
+      function sortDetailsWithPriority(details) {
+        const priorityKeys = [
+          'rloc16', 'extaddr', 'device_label', 'name', 'type', 'br',
+          'mode.device', 'thread_stack_version', 'ver', 'total_links', 'total_children',
+          'mac_counters.iftotaldiscards_pct', 'mac_counters.iftotalerrors_pct',
+          'mle_counters.partitionidchanges', 'mle_counters.betterpartitionattachattempts',
+          'mle_counters.parentchanges'
+        ];
+        const priorityIndex = new Map(priorityKeys.map((k, i) => [k, i]));
+        return [...details].sort((a, b) => {
+          const ap = priorityIndex.has(a[0]) ? priorityIndex.get(a[0]) : Infinity;
+          const bp = priorityIndex.has(b[0]) ? priorityIndex.get(b[0]) : Infinity;
+          if (ap !== bp) return ap - bp;
+          return a[0].localeCompare(b[0]);
+        });
+      }
+
+      function addEdge(edgeMap, edgeData, from, to, style) {
+        if (!from || !to || from === to) return;
+        const suffix = toText(style.edgeKeySuffix);
+        const keyBase = [from, to].sort().join('|');
+        const key = suffix ? `${keyBase}|${suffix}` : keyBase;
+        const existing = edgeMap.get(key);
+        if (existing) {
+          if (Number.isFinite(style.width)) existing.width = Math.max(existing.width || 0, style.width);
+          const merged = new Set([
+            ...normalizeLinkCategories(existing.linkCategories),
+            ...normalizeLinkCategories(style.linkCategories)
+          ]);
+          existing.linkCategories = Array.from(merged);
+          if (style.isParentChild === true) existing.isParentChild = true;
+          return;
+        }
+        const { edgeKeySuffix: _s, ...edgeStyle } = style;
+        const edge = { from, to, ...edgeStyle };
+        edge.id = key;
+        edge.baseHidden = style.hidden === true;
+        edge.linkCategories = normalizeLinkCategories(style.linkCategories);
+        edgeMap.set(key, edge);
+        edgeData.push(edge);
+      }
+
+      // ── Link filter constants ─────────────────────────────────────────────────
+
+      const LINK_FILTER_DEFAULT = 'default_links';
+      const LINK_FILTER_DEFAULT_PLUS_NEIGHBORS = 'default_plus_router_neighbors';
+      const LINK_FILTER_OTBR_REST_API = 'otbr_rest_api';
+      const LINK_FILTER_EVE = 'eve_routes_children';
+      const LINK_FILTER_ALL = 'all_links';
+
+      const EDGE_CATEGORY_DEFAULT_CHILDREN = 'default_children';
+      const EDGE_CATEGORY_DEFAULT_1 = 'default_1_links';
+      const EDGE_CATEGORY_DEFAULT_2 = 'default_2_links';
+      const EDGE_CATEGORY_DEFAULT_3 = 'default_3_links';
+      const EDGE_CATEGORY_ROUTER_NEIGHBOR = 'router_neighbor';
+      const EDGE_CATEGORY_OTBR_ROUTE = 'otbr_route';
+      const EDGE_CATEGORY_OTBR_CHILD = 'otbr_child';
+      const EDGE_CATEGORY_EVE_ROUTE = 'eve_route';
+      const EDGE_CATEGORY_EVE_CHILD = 'eve_child';
+
+      function normalizeLinkCategories(value) {
+        if (Array.isArray(value)) return value.filter((item) => toText(item));
+        const text = toText(value);
+        return text ? [text] : [];
+      }
+
+      function edgeMatchesLinkFilter(edge, mode) {
+        const cats = normalizeLinkCategories(edge.linkCategories);
+        if (cats.length === 0) return mode === LINK_FILTER_ALL;
+        const hasAny = (...wanted) => wanted.some((c) => cats.includes(c));
+        if (mode === LINK_FILTER_DEFAULT) {
+          return hasAny(EDGE_CATEGORY_DEFAULT_CHILDREN, EDGE_CATEGORY_DEFAULT_1,
+            EDGE_CATEGORY_DEFAULT_2, EDGE_CATEGORY_DEFAULT_3, EDGE_CATEGORY_OTBR_CHILD);
+        }
+        if (mode === LINK_FILTER_DEFAULT_PLUS_NEIGHBORS) {
+          return hasAny(EDGE_CATEGORY_DEFAULT_CHILDREN, EDGE_CATEGORY_DEFAULT_1,
+            EDGE_CATEGORY_DEFAULT_2, EDGE_CATEGORY_DEFAULT_3, EDGE_CATEGORY_OTBR_CHILD,
+            EDGE_CATEGORY_ROUTER_NEIGHBOR);
+        }
+        if (mode === LINK_FILTER_OTBR_REST_API) return hasAny(EDGE_CATEGORY_OTBR_ROUTE, EDGE_CATEGORY_OTBR_CHILD);
+        if (mode === LINK_FILTER_EVE) return hasAny(EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD);
+        if (mode === LINK_FILTER_ALL) return true;
+        return false;
+      }
+
+      function buildMainRouterRloc16(routeId) {
+        const n = toFiniteNumber(routeId);
+        if (!Number.isFinite(n)) return '';
+        return `0x${(n << 10).toString(16).padStart(4, '0')}`;
+      }
+
+      function buildChildRloc16(parentRloc16, childId) {
+        const parentText = toText(parentRloc16).toLowerCase();
+        const childNum = toFiniteNumber(childId);
+        if (!parentText.startsWith('0x') || !Number.isFinite(childNum)) return '';
+        const parentNum = Number.parseInt(parentText, 16);
+        if (!Number.isFinite(parentNum)) return '';
+        return `0x${(parentNum + childNum).toString(16).padStart(4, '0')}`;
+      }
+
+      function computeRouterNeighborStats(routerNeighborTable) {
+        const rows = Array.isArray(routerNeighborTable) ? routerNeighborTable : [];
+        let maxFrame, maxMsg, minRss, maxRss;
+        let hasVeryLow = false, hasLow = false, hasMedium = false, hasHigh = false;
+        rows.forEach((row) => {
+          const fp = toFiniteNumber(row?.err_rate_frame_pct);
+          if (Number.isFinite(fp)) maxFrame = Number.isFinite(maxFrame) ? Math.max(maxFrame, fp) : fp;
+          const mp = toFiniteNumber(row?.err_rate_msg_pct);
+          if (Number.isFinite(mp)) maxMsg = Number.isFinite(maxMsg) ? Math.max(maxMsg, mp) : mp;
+          const rss = toFiniteNumber(row?.rss_ave);
+          if (Number.isFinite(rss)) {
+            minRss = Number.isFinite(minRss) ? Math.min(minRss, rss) : rss;
+            maxRss = Number.isFinite(maxRss) ? Math.max(maxRss, rss) : rss;
+            if (rss < -80) hasVeryLow = true;
+            else if (rss >= -80 && rss < -70) hasLow = true;
+            else if (rss >= -70 && rss <= -60) hasMedium = true;
+            else if (rss > -60) hasHigh = true;
+          }
+        });
+        return {
+          router_neighbor_max_err_rate_frame_pct: maxFrame,
+          router_neighbor_max_err_rate_msg_pct: maxMsg,
+          router_neighbor_min_rss_ave: minRss,
+          router_neighbor_max_rss_ave: maxRss,
+          router_neighbor_has_rss_very_low: hasVeryLow,
+          router_neighbor_has_rss_low: hasLow,
+          router_neighbor_has_rss_medium: hasMedium,
+          router_neighbor_has_rss_high: hasHigh
+        };
+      }
+
+      function isRouterNeighborDiagnosticMode(mode) {
+        return mode === 'router-neighbor-err-rate-frame-low'
+          || mode === 'router-neighbor-err-rate-frame-medium'
+          || mode === 'router-neighbor-err-rate-frame-high'
+          || mode === 'router-neighbor-err-rate-msg-low'
+          || mode === 'router-neighbor-err-rate-msg-medium'
+          || mode === 'router-neighbor-err-rate-msg-high'
+          || mode === 'router-neighbor-rss-very-low'
+          || mode === 'router-neighbor-rss-low'
+          || mode === 'router-neighbor-rss-medium'
+          || mode === 'router-neighbor-rss-high';
+      }
+
+      function routerNeighborRowMatchesDiagnosticFilter(row, mode) {
+        const fp = toFiniteNumber(row?.err_rate_frame_pct);
+        const mp = toFiniteNumber(row?.err_rate_msg_pct);
+        const rss = toFiniteNumber(row?.rss_ave);
+        if (mode === 'router-neighbor-err-rate-frame-low') return Number.isFinite(fp) && fp >= 2;
+        if (mode === 'router-neighbor-err-rate-frame-medium') return Number.isFinite(fp) && fp >= 5;
+        if (mode === 'router-neighbor-err-rate-frame-high') return Number.isFinite(fp) && fp >= 10;
+        if (mode === 'router-neighbor-err-rate-msg-low') return Number.isFinite(mp) && mp >= 2;
+        if (mode === 'router-neighbor-err-rate-msg-medium') return Number.isFinite(mp) && mp >= 5;
+        if (mode === 'router-neighbor-err-rate-msg-high') return Number.isFinite(mp) && mp >= 10;
+        if (mode === 'router-neighbor-rss-very-low') return Number.isFinite(rss) && rss < -80;
+        if (mode === 'router-neighbor-rss-low') return Number.isFinite(rss) && rss >= -80 && rss < -70;
+        if (mode === 'router-neighbor-rss-medium') return Number.isFinite(rss) && rss >= -70 && rss <= -60;
+        if (mode === 'router-neighbor-rss-high') return Number.isFinite(rss) && rss > -60;
+        return false;
+      }
+
+      function areNodeIdsEquivalent(a, b) {
+        return toText(a).toLowerCase() === toText(b).toLowerCase();
+      }
+
+      // ── Shared phantom-edge helper (clusters isolated unknown nodes) ──────────
+
+      function groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap) {
+        const nodeDegree = new Map();
+        for (const edge of edgeData) {
+          nodeDegree.set(edge.from, (nodeDegree.get(edge.from) || 0) + 1);
+          nodeDegree.set(edge.to, (nodeDegree.get(edge.to) || 0) + 1);
+        }
+        const unknownIds = nodeData
+          .filter((n) => n.group === 'unknown' && (nodeDegree.get(n.id) || 0) === 0)
+          .map((n) => n.id);
+        if (unknownIds.length > 1) {
+          const anchor = unknownIds[0];
+          for (let i = 1; i < unknownIds.length; i += 1) {
+            addEdge(edgeMap, edgeData, anchor, unknownIds[i], {
+              hidden: true, physics: true, length: 60, color: { opacity: 0 }
+            });
+          }
+        }
+        if (unknownIds.length > 0) {
+          const knownCandidates = nodeData
+            .filter((n) => n.group !== 'unknown' && (nodeDegree.get(n.id) || 0) > 0)
+            .sort((a, b) => (nodeDegree.get(b.id) || 0) - (nodeDegree.get(a.id) || 0));
+          if (knownCandidates.length > 0) {
+            addEdge(edgeMap, edgeData, unknownIds[0], knownCandidates[0].id, {
+              hidden: true, physics: true, length: 180, color: { opacity: 0 }
+            });
+          }
+        }
+        return nodeDegree;
+      }
+
+      // ── Shared vis nodeData builder ───────────────────────────────────────────
+
+      function buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, labelFn) {
+        return Array.from(nodeMap.values()).map((node) => {
+          const displayName = toText(node.device_label) || toText(node.name);
+          const unknown = isUnknownNodeName(displayName);
+          const rloc16Text = toText(node.rloc16).toLowerCase();
+          const neighborStats = computeRouterNeighborStats(
+            routerNeighborByRloc16.get(rloc16Text)?.router_neighbor_table
+          );
+          const isRouter = node.shape !== 'ellipse';
+          const hasChildren = routerIdsWithChildren.has(node.id);
+          const isMainRouter = rloc16Text.endsWith('00');
+          const isBorderRouter = isMainRouter && node.br === true;
+          let borderWidth = 1;
+          let fontSize = 13;
+          if (isBorderRouter) { borderWidth = 5; fontSize = 19.5; }
+          else if (isRouter) { borderWidth = 3; fontSize = 19.5; }
+          return {
+            id: node.id,
+            label: labelFn(node),
+            shape: node.shape,
+            color: node.color,
+            font: { size: fontSize, face: 'monospace', multi: 'md' },
+            group: unknown ? 'unknown' : 'known',
+            isRouter, hasChildren, isMainRouter, isBorderRouter, borderWidth,
+            iftotalpktserrorsdiscards_pct: node.iftotalpktserrorsdiscards_pct,
+            iftotalerrors_pct: node.iftotalerrors_pct,
+            mode_device: node.mode_device,
+            partitionidchanges: node.partitionidchanges,
+            parentchanges: node.parentchanges,
+            router_neighbor_max_err_rate_frame_pct: neighborStats.router_neighbor_max_err_rate_frame_pct,
+            router_neighbor_max_err_rate_msg_pct: neighborStats.router_neighbor_max_err_rate_msg_pct,
+            router_neighbor_min_rss_ave: neighborStats.router_neighbor_min_rss_ave,
+            router_neighbor_max_rss_ave: neighborStats.router_neighbor_max_rss_ave,
+            router_neighbor_has_rss_very_low: neighborStats.router_neighbor_has_rss_very_low,
+            router_neighbor_has_rss_low: neighborStats.router_neighbor_has_rss_low,
+            router_neighbor_has_rss_medium: neighborStats.router_neighbor_has_rss_medium,
+            router_neighbor_has_rss_high: neighborStats.router_neighbor_has_rss_high
+          };
+        });
+      }
+
+      // ── Adaptor 1: meshdiag + networkdiag + routerNeighbors + restApi ─────────
+
+      function adaptMeshdiagNetworkdiag(rawFiles) {
+        const meshdiag = Array.isArray(rawFiles[0]) ? rawFiles[0] : [];
+        const networkDiag = Array.isArray(rawFiles[1]) ? rawFiles[1] : [];
+        const routerNeighborTables = Array.isArray(rawFiles[2]) ? rawFiles[2] : [];
+        const restApiRaw = rawFiles[3];
+        const restApiDiagnostics = (restApiRaw && Array.isArray(restApiRaw.data))
+          ? restApiRaw.data
+              .map((item) => ({ id: item.id, type: item.type, ...(item.attributes || {}) }))
+              .filter((item) => item && typeof item === 'object')
+          : [];
+
+        const nodeMap = new Map();
+        const meshdiagById = new Map();
+        const networkDiagById = new Map();
+        const restApiById = new Map();
+        const meshIdToUnifiedId = new Map();
+        const edgeMap = new Map();
+        const edgeData = [];
+        const routerIdsWithChildren = new Set();
+        const routerNeighborByRloc16 = new Map();
+
+        function upsertNode(nodeId, rawNode, style) {
+          const existing = nodeMap.get(nodeId);
+          const rawIpv6 = Array.isArray(rawNode.ipv6_addrs) ? rawNode.ipv6_addrs : [];
+          const existingIpv6 = existing && Array.isArray(existing.ipv6_addrs) ? existing.ipv6_addrs : [];
+          const mergedIpv6 = rawIpv6.length > 0 ? rawIpv6 : existingIpv6;
+          const rawChildren = Array.isArray(rawNode.children) ? rawNode.children : [];
+          const rawPacketErrorDiscardPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotalpktserrorsdiscards_pct)
+            ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct : undefined;
+          const rawTotalErrorsPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotalerrors_pct)
+            ? rawNode.mac_counters.iftotalerrors_pct : undefined;
+          const rawModeDevice = rawNode.mode && toText(rawNode.mode.device)
+            ? toText(rawNode.mode.device)
+            : (rawNode.mode?.deviceTypeFTD === true ? 'FTD' : (rawNode.mode?.deviceTypeFTD === false ? 'MTD' : ''));
+          const rawPartitionIdChanges = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.partitionidchanges)
+            ? rawNode.mle_counters.partitionidchanges : undefined;
+          const rawParentChanges = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.parentchanges)
+            ? rawNode.mle_counters.parentchanges : undefined;
+          const merged = {
+            id: nodeId,
+            device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
+            rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
+            source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
+            extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
+            type: toText(rawNode.type) || (existing ? existing.type : ''),
+            thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
+            ipv6_addrs: mergedIpv6,
+            total_children: Number.isFinite(rawNode.total_children)
+              ? rawNode.total_children : (rawChildren.length || (existing ? existing.total_children : 0)),
+            total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
+            iftotalpktserrorsdiscards_pct: Number.isFinite(rawPacketErrorDiscardPct) ? rawPacketErrorDiscardPct
+              : (existing && Number.isFinite(existing.iftotalpktserrorsdiscards_pct) ? existing.iftotalpktserrorsdiscards_pct : undefined),
+            iftotalerrors_pct: Number.isFinite(rawTotalErrorsPct) ? rawTotalErrorsPct
+              : (existing && Number.isFinite(existing.iftotalerrors_pct) ? existing.iftotalerrors_pct : undefined),
+            mode_device: rawModeDevice || (existing ? existing.mode_device : ''),
+            partitionidchanges: Number.isFinite(rawPartitionIdChanges) ? rawPartitionIdChanges
+              : (existing && Number.isFinite(existing.partitionidchanges) ? existing.partitionidchanges : undefined),
+            parentchanges: Number.isFinite(rawParentChanges) ? rawParentChanges
+              : (existing && Number.isFinite(existing.parentchanges) ? existing.parentchanges : undefined),
+            br: rawNode.br === true || (existing ? existing.br === true : false),
+            from_meshdiag: (style.source === 'meshdiag') || (existing ? existing.from_meshdiag === true : false),
+            from_networkdiagnostic: (style.source === 'networkdiagnostic') || (existing ? existing.from_networkdiagnostic === true : false),
+            shape: style.shape || (existing ? existing.shape : 'box'),
+            color: style.color || (existing ? existing.color : { background: '#d9ecff', border: '#1565c0' })
+          };
+          if (merged.br) merged.color = { background: '#ffd9d9', border: '#c62828' };
+          nodeMap.set(nodeId, merged);
+        }
+
+        function ensureNode(nodeId, rawNode, style) {
+          if (!nodeId) return '';
+          if (!nodeMap.has(nodeId)) upsertNode(nodeId, rawNode, style);
+          return nodeId;
+        }
+
+        meshdiag.forEach((node, index) => {
+          const uid = chooseNodeId(node, 'meshdiag-node', index + 1);
+          meshdiagById.set(uid, node);
+          const meshRawId = toText(node.id);
+          if (meshRawId) meshIdToUnifiedId.set(meshRawId, uid);
+          upsertNode(uid, node, {
+            source: 'meshdiag', shape: 'box',
+            color: node.br ? { background: '#ffd9d9', border: '#c62828' } : { background: '#d9ecff', border: '#1565c0' }
+          });
+        });
+
+        networkDiag.forEach((node, index) => {
+          const uid = chooseNodeId(node, 'netdiag-node', index + 1);
+          networkDiagById.set(uid, node);
+          upsertNode(uid, node, { source: 'networkdiagnostic', shape: 'box', color: { background: '#d9ecff', border: '#1565c0' } });
+        });
+
+        restApiDiagnostics.forEach((node, index) => {
+          const uid = chooseNodeId(node, 'restapi-node', index + 1);
+          restApiById.set(uid, node);
+          upsertNode(uid, node, { source: 'networkdiagnostic', shape: 'box', color: { background: '#d9ecff', border: '#1565c0' } });
+        });
+
+        routerNeighborTables.forEach((row) => {
+          const rloc16 = toText(row.rloc16).toLowerCase();
+          if (rloc16) routerNeighborByRloc16.set(rloc16, row);
+        });
+
+        for (const node of meshdiag) {
+          const fromId = chooseNodeId(node, 'meshdiag-parent', 0);
+          (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
+            const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
+            upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
+              { source: 'meshdiag', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
+            routerIdsWithChildren.add(fromId);
+          });
+
+          const linkStyleByField = { '1_links': { width: 1 }, '2_links': { width: 2 }, '3_links': { width: 4 } };
+          ['3_links', '2_links', '1_links'].forEach((field) => {
+            (Array.isArray(node[field]) ? node[field] : []).forEach((link) => {
+              const linkMeshId = toText(link.id);
+              const toId = meshIdToUnifiedId.get(linkMeshId) || toText(link.rloc16) || linkMeshId;
+              if (!toId) return;
+              if (!nodeMap.has(toId)) {
+                upsertNode(toId, { device_label: toText(link.device_label), rloc16: toText(link.rloc16), id: linkMeshId || toId },
+                  { source: 'meshdiag', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
+              }
+              addEdge(edgeMap, edgeData, fromId, toId, {
+                ...(linkStyleByField[field] || {}),
+                linkCategories: [field === '3_links' ? EDGE_CATEGORY_DEFAULT_3 : field === '2_links' ? EDGE_CATEGORY_DEFAULT_2 : EDGE_CATEGORY_DEFAULT_1]
+              });
+            });
+          });
+
+          const neighborRow = routerNeighborByRloc16.get(toText(node.rloc16).toLowerCase());
+          (Array.isArray(neighborRow?.router_neighbor_table) ? neighborRow.router_neighbor_table : []).forEach((neighbor) => {
+            const toId = ensureNode(
+              toText(neighbor.rloc16) || toText(neighbor.extaddr),
+              { rloc16: toText(neighbor.rloc16), extaddr: toText(neighbor.extaddr), device_label: toText(neighbor.device_label),
+                id: toText(neighbor.rloc16) || toText(neighbor.extaddr) },
+              { source: 'meshdiag', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } }
+            );
+            addEdge(edgeMap, edgeData, fromId, toId, { width: 1.5, linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR] });
+          });
+        }
+
+        for (const node of networkDiag) {
+          const fromId = chooseNodeId(node, 'netdiag-parent', 0);
+          (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
+            const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
+            upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
+              { source: 'networkdiagnostic', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
+            routerIdsWithChildren.add(fromId);
+          });
+        }
+
+        restApiDiagnostics.forEach((node) => {
+          const fromId = chooseNodeId(node, 'restapi-parent', 0);
+          (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
+            const toRloc16 = buildMainRouterRloc16(route.routeId);
+            const toId = ensureNode(toRloc16, { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
+              { source: 'networkdiagnostic', shape: 'box', color: { background: '#d9ecff', border: '#1565c0' } });
+            addEdge(edgeMap, edgeData, fromId, toId, { width: 1.5, linkCategories: [EDGE_CATEGORY_OTBR_ROUTE] });
+          });
+          (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
+            const childRloc16 = buildChildRloc16(node.rloc16, child.childId);
+            const childId = ensureNode(
+              childRloc16 || `${fromId}-rest-child-${ci + 1}`,
+              { rloc16: childRloc16, id: childRloc16 || `${fromId}-rest-child-${ci + 1}`,
+                device_label: childRloc16 || `${fromId} child ${child.childId}` },
+              { source: 'networkdiagnostic', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } }
+            );
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD] });
+            routerIdsWithChildren.add(fromId);
+          });
+        });
+
+        const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
+
+        const rawByIdForDetails = new Map();
+        nodeMap.forEach((_, id) => {
+          const m = meshdiagById.get(id) || {};
+          const n = networkDiagById.get(id) || {};
+          const r = restApiById.get(id) || {};
+          rawByIdForDetails.set(id, mergeForDisplay(mergeForDisplay(m, n), r));
+        });
+
+        const sourceNames = [];
+        if (meshdiag.length > 0) sourceNames.push('meshdiag');
+        if (networkDiag.length > 0) sourceNames.push('networkdiagnostic');
+        if (routerNeighborTables.length > 0) sourceNames.push('routerneighbortables');
+        if (restApiDiagnostics.length > 0) sourceNames.push('restapi');
+
+        groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
+
+        return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames };
+      }
+
+      // ── Adaptor 2: Eve topology ───────────────────────────────────────────────
+
+      function adaptEve(rawFiles) {
+        const eveRaw = rawFiles[0];
+        const eveArray = Array.isArray(eveRaw) ? eveRaw
+          : (eveRaw && typeof eveRaw === 'object' ? Object.values(eveRaw) : []);
+
+        const nodeMap = new Map();
+        const eveNodeById = new Map();
+        const edgeMap = new Map();
+        const edgeData = [];
+        const routerIdsWithChildren = new Set();
+        const routerNeighborByRloc16 = new Map();
+
+        function upsertEveNode(nodeId, rawNode, style) {
+          const existing = nodeMap.get(nodeId);
+          const merged = {
+            id: nodeId,
+            name: toText(rawNode.name) || (existing ? existing.name : ''),
+            device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
+            rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
+            source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
+            extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
+            type: toText(rawNode.type) || (existing ? existing.type : ''),
+            thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
+            total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
+            total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
+            iftotalpktserrorsdiscards_pct: Number.isFinite(rawNode.mac_counters?.iftotalpktserrorsdiscards_pct)
+              ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct : (existing?.iftotalpktserrorsdiscards_pct),
+            iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
+              ? rawNode.mac_counters.iftotalerrors_pct : (existing?.iftotalerrors_pct),
+            mode_device: toText(rawNode.mode?.device)
+              || (rawNode.type === 'router' ? 'FTD' : (rawNode.type === 'child' || rawNode.type === 'sleepy-child' ? 'MTD' : ''))
+              || (existing ? existing.mode_device : ''),
+            partitionidchanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges)
+              ? rawNode.mle_counters.partitionidchanges : (existing?.partitionidchanges),
+            parentchanges: Number.isFinite(rawNode.mle_counters?.parentchanges)
+              ? rawNode.mle_counters.parentchanges : (existing?.parentchanges),
+            br: rawNode.br === true || (existing ? existing.br === true : false),
+            from_eve: true,
+            shape: style.shape || (existing ? existing.shape : 'box'),
+            color: style.color || (existing ? existing.color : { background: '#e8f5e9', border: '#2e7d32' })
+          };
+          if (merged.br) merged.color = { background: '#ffd9d9', border: '#c62828' };
+          nodeMap.set(nodeId, merged);
+        }
+
+        eveArray.forEach((node) => {
+          const eveNodeId = toText(node.id);
+          if (!eveNodeId) return;
+          eveNodeById.set(eveNodeId, node);
+          const isChildType = node.type === 'child' || node.type === 'sleepy-child';
+          upsertEveNode(eveNodeId, node, {
+            source: 'eve',
+            shape: isChildType ? 'ellipse' : 'box',
+            color: node.br ? { background: '#ffd9d9', border: '#c62828' }
+              : (isChildType ? { background: '#fff4cc', border: '#d9a400' } : { background: '#e8f5e9', border: '#2e7d32' })
+          });
+        });
+
+        for (const node of eveArray) {
+          const fromId = toText(node.id);
+          if (!fromId) continue;
+          (Array.isArray(node.routes) ? node.routes : []).forEach((route) => {
+            const toId = toText(route.to);
+            if (!toId) return;
+            if (!nodeMap.has(toId)) {
+              upsertEveNode(toId, { id: toId }, { source: 'eve', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
+            }
+            const lqiIn = toFiniteNumber(route.in);
+            const lqiOut = toFiniteNumber(route.out);
+            const avgLqi = (Number.isFinite(lqiIn) && Number.isFinite(lqiOut)) ? (lqiIn + lqiOut) / 2 : (lqiIn || lqiOut);
+            let edgeWidth = 1.5;
+            if (Number.isFinite(avgLqi)) {
+              if (avgLqi >= 200) edgeWidth = 3;
+              else if (avgLqi >= 150) edgeWidth = 2;
+            }
+            addEdge(edgeMap, edgeData, fromId, toId, { width: edgeWidth, linkCategories: [EDGE_CATEGORY_EVE_ROUTE] });
+          });
+          (Array.isArray(node.children) ? node.children : []).forEach((child) => {
+            const childId = toText(typeof child === 'string' ? child : child.id);
+            if (!childId) return;
+            if (!nodeMap.has(childId)) {
+              upsertEveNode(childId, { id: childId }, { source: 'eve', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+            }
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_EVE_CHILD] });
+            routerIdsWithChildren.add(fromId);
+          });
+        }
+
+        const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
+
+        const rawByIdForDetails = new Map();
+        eveNodeById.forEach((raw, id) => rawByIdForDetails.set(id, raw));
+
+        groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
+
+        return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['eve'] };
+      }
+
+      // ── Adaptor 3: Merged detailed topology ───────────────────────────────────
+
+      function adaptMergedDetailed(rawFiles) {
+        const rows = Array.isArray(rawFiles[0]) ? rawFiles[0] : [];
+        const nodeMap = new Map();
+        const rawNodeById = new Map();
+        const edgeMap = new Map();
+        const edgeData = [];
+        const routerIdsWithChildren = new Set();
+        const routerNeighborByRloc16 = new Map();
+
+        function isMergedRowEveOnly(node) {
+          const sources = Array.isArray(node?._sources) ? node._sources : [];
+          if (!sources.includes('td-eve-topology.json')) return false;
+          return !sources.some((s) => s === 'td-otbr-cli-router-table.json'
+            || s === 'td-otbr-cli-meshdiag-topology.json'
+            || s === 'td-otbr-cli-networkdiag-topology.json'
+            || s === 'td-otbr-cli-meshdiag-router-neighbortables.json'
+            || s === 'td-otbr-restapi-devices.json'
+            || s === 'td-otbr-restapi-diagnostics.json');
+        }
+
+        function chooseMergedId(node, index) {
+          return toText(node.rloc16) || toText(node.id) || toText(node.extaddr) || `merged-node-${index + 1}`;
+        }
+
+        function upsertMergedNode(nodeId, rawNode, style) {
+          const existing = nodeMap.get(nodeId);
+          const merged = {
+            id: nodeId,
+            name: toText(rawNode.name) || (existing ? existing.name : ''),
+            device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
+            rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
+            source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
+            extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
+            type: toText(rawNode.type) || (existing ? existing.type : ''),
+            thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
+            total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
+            total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
+            iftotalpktserrorsdiscards_pct: Number.isFinite(rawNode.mac_counters?.iftotalpktserrorsdiscards_pct)
+              ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct : (existing?.iftotalpktserrorsdiscards_pct),
+            iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
+              ? rawNode.mac_counters.iftotalerrors_pct : (existing?.iftotalerrors_pct),
+            mode_device: toText(rawNode['mode.device']) || toText(rawNode.mode?.device) || (existing ? existing.mode_device : ''),
+            partitionidchanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges)
+              ? rawNode.mle_counters.partitionidchanges : (existing?.partitionidchanges),
+            parentchanges: Number.isFinite(rawNode.mle_counters?.parentchanges)
+              ? rawNode.mle_counters.parentchanges : (existing?.parentchanges),
+            br: rawNode.br === true || (existing ? existing.br === true : false),
+            from_merged_detailed: true,
+            shape: style.shape || (existing ? existing.shape : 'box'),
+            color: style.color || (existing ? existing.color : { background: '#e8f5e9', border: '#2e7d32' })
+          };
+          if (merged.br) merged.color = { background: '#ffd9d9', border: '#c62828' };
+          nodeMap.set(nodeId, merged);
+        }
+
+        function ensureNodeForLink(linkNode, fallbackId) {
+          const candidateId = toText(linkNode.rloc16) || toText(linkNode.id) || toText(fallbackId);
+          if (!candidateId) return '';
+          if (!nodeMap.has(candidateId)) {
+            upsertMergedNode(candidateId, {
+              rloc16: toText(linkNode.rloc16), id: toText(linkNode.id) || candidateId,
+              device_label: toText(linkNode.device_label), name: toText(linkNode.name)
+            }, { source: 'merged-detailed', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
+          }
+          return candidateId;
+        }
+
+        rows.forEach((node, index) => {
+          if (isMergedRowEveOnly(node)) return;
+          const nodeId = chooseMergedId(node, index);
+          rawNodeById.set(nodeId, node);
+          const rloc16Text = toText(node.rloc16).toLowerCase();
+          const modeDevice = toText(node['mode.device'] || node.mode?.device).toUpperCase();
+          const isRouterLike = rloc16Text.endsWith('00') || modeDevice === 'FTD' || toText(node.type).toLowerCase() === 'router';
+          const isChildLike = modeDevice === 'MTD' || toText(node.type).toLowerCase().includes('child');
+          upsertMergedNode(nodeId, node, {
+            source: 'merged-detailed',
+            shape: isChildLike && !isRouterLike ? 'ellipse' : 'box',
+            color: isChildLike && !isRouterLike ? { background: '#fff4cc', border: '#d9a400' } : { background: '#e8f5e9', border: '#2e7d32' }
+          });
+          // populate routerNeighborByRloc16 for filter support
+          if (Array.isArray(node.router_neighbor_table) && rloc16Text) {
+            routerNeighborByRloc16.set(rloc16Text, node);
+          }
+        });
+
+        rows.forEach((node, index) => {
+          if (isMergedRowEveOnly(node)) return;
+          const fromId = chooseMergedId(node, index);
+          [{ key: '3_links', width: 4 }, { key: '2_links', width: 2 }, { key: '1_links', width: 1 }].forEach((f) => {
+            (Array.isArray(node[f.key]) ? node[f.key] : []).forEach((link) => {
+              const toId = ensureNodeForLink(link, link.rloc16 || link.id);
+              if (!toId) return;
+              addEdge(edgeMap, edgeData, fromId, toId, {
+                width: f.width,
+                linkCategories: [f.key === '3_links' ? EDGE_CATEGORY_DEFAULT_3 : f.key === '2_links' ? EDGE_CATEGORY_DEFAULT_2 : EDGE_CATEGORY_DEFAULT_1],
+                edgeKeySuffix: `merged-${f.key}`
+              });
+            });
+          });
+          (Array.isArray(node.router_neighbor_table) ? node.router_neighbor_table : []).forEach((neighbor) => {
+            const toId = ensureNodeForLink(neighbor, neighbor.rloc16 || neighbor.extaddr || neighbor.id);
+            if (!toId) return;
+            addEdge(edgeMap, edgeData, fromId, toId, { width: 1.5, linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR], edgeKeySuffix: 'merged-router-neighbor' });
+          });
+          (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
+            const toRloc16 = buildMainRouterRloc16(route.routeId);
+            const toId = ensureNodeForLink({ rloc16: toRloc16, id: toRloc16, device_label: toRloc16 }, toRloc16);
+            if (!toId) return;
+            addEdge(edgeMap, edgeData, fromId, toId, { width: 1.5, linkCategories: [EDGE_CATEGORY_OTBR_ROUTE], edgeKeySuffix: 'merged-otbr-route' });
+          });
+          (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
+            const childRloc16 = buildChildRloc16(node.rloc16, child.childId);
+            const childId = ensureNodeForLink(
+              { rloc16: childRloc16, id: childRloc16 || `${fromId}-rest-child-${ci + 1}`, device_label: childRloc16 || `${fromId} child ${child.childId}` },
+              childRloc16 || `${fromId}-rest-child-${ci + 1}`
+            );
+            if (!childId) return;
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD], edgeKeySuffix: 'merged-otbr-child' });
+            routerIdsWithChildren.add(fromId);
+          });
+          (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
+            const childNode = typeof child === 'string' ? { id: child } : (child || {});
+            if (typeof child === 'string' || toText(childNode.id)) return; // skip eve-only string children
+            const childId = ensureNodeForLink(childNode, `${fromId}-child-${ci + 1}`);
+            if (!childId) return;
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN], edgeKeySuffix: 'merged-default-child' });
+            routerIdsWithChildren.add(fromId);
+          });
+        });
+
+        const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
+
+        const rawByIdForDetails = new Map(rawNodeById);
+
+        groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
+
+        return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['merged-detailed'] };
+      }
+
+      // ── Adaptor 4: Router table (Nodes from ID/rloc16, edges from Next Hop) ───
+
+      function adaptRouterTable(rawFiles) {
+        const rows = Array.isArray(rawFiles[0]) ? rawFiles[0] : [];
+        const nodeMap = new Map();
+        const rawByIdForDetails = new Map();
+        const edgeMap = new Map();
+        const edgeData = [];
+        const routerIdsWithChildren = new Set();
+        const routerNeighborByRloc16 = new Map();
+
+        // Index rows by rloc16 for next-hop lookup
+        const byRloc16 = new Map();
+        rows.forEach((row) => {
+          const rloc16 = toText(row.rloc16).toLowerCase();
+          if (rloc16) byRloc16.set(rloc16, row);
+        });
+
+        rows.forEach((row) => {
+          const nodeId = toText(row.rloc16) || toText(row['Extended MAC']) || toText(row.extaddr);
+          if (!nodeId) return;
+          const isBr = toText(nodeId).toLowerCase().endsWith('00');
+          nodeMap.set(nodeId, {
+            id: nodeId,
+            device_label: toText(row.device_label),
+            rloc16: toText(row.rloc16),
+            extaddr: toText(row['Extended MAC']) || toText(row.extaddr),
+            type: 'router',
+            mode_device: 'FTD',
+            br: isBr,
+            shape: 'box',
+            color: isBr ? { background: '#ffd9d9', border: '#c62828' } : { background: '#d9ecff', border: '#1565c0' }
+          });
+          rawByIdForDetails.set(nodeId, row);
+        });
+
+        // Build edges: row.rloc16 → rloc16 of Next Hop router ID
+        rows.forEach((row) => {
+          const fromId = toText(row.rloc16);
+          if (!fromId) return;
+
+          // "Next Hop" is a router ID integer → convert to rloc16
+          const nextHopId = toFiniteNumber(row['Next Hop']);
+          if (Number.isFinite(nextHopId)) {
+            const toRloc16 = buildMainRouterRloc16(nextHopId);
+            const toRow = byRloc16.get(toRloc16.toLowerCase());
+            if (toRow && toRloc16 && toRloc16 !== fromId) {
+              const lqOut = toFiniteNumber(row['LQ Out']);
+              const edgeWidth = Number.isFinite(lqOut) ? (lqOut >= 3 ? 4 : lqOut >= 2 ? 2 : 1) : 1.5;
+              addEdge(edgeMap, edgeData, fromId, toRloc16, {
+                width: edgeWidth,
+                linkCategories: [EDGE_CATEGORY_DEFAULT_1]
+              });
+            }
+          }
+        });
+
+        const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
+
+        groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
+
+        return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['router-table'] };
+      }
+
+      // ── Adaptor 5: Raw array generic fallback ─────────────────────────────────
+
+      function adaptRawArray(rawFiles) {
+        const raw = rawFiles.find((f) => f !== null);
+        const rows = Array.isArray(raw) ? raw : (raw && typeof raw === 'object' ? Object.values(raw) : []);
+        const nodeMap = new Map();
+        const rawByIdForDetails = new Map();
+        const edgeMap = new Map();
+        const edgeData = [];
+        const routerIdsWithChildren = new Set();
+        const routerNeighborByRloc16 = new Map();
+
+        rows.forEach((row, index) => {
+          if (!isPlainObject(row)) return;
+          const nodeId = chooseNodeId(row, 'raw-node', index + 1);
+          const rloc16Text = toText(row.rloc16).toLowerCase();
+          const isBr = row.br === true || (rloc16Text.endsWith('00') && row.br === true);
+          const isChildLike = toText(row.type).toLowerCase().includes('child');
+          nodeMap.set(nodeId, {
+            id: nodeId,
+            device_label: toText(row.device_label),
+            name: toText(row.name),
+            rloc16: toText(row.rloc16),
+            extaddr: toText(row.extaddr),
+            type: toText(row.type),
+            mode_device: toText(row.mode?.device) || (row.type === 'router' ? 'FTD' : (isChildLike ? 'MTD' : '')),
+            iftotalpktserrorsdiscards_pct: row.mac_counters?.iftotalpktserrorsdiscards_pct,
+            iftotalerrors_pct: row.mac_counters?.iftotalerrors_pct,
+            partitionidchanges: row.mle_counters?.partitionidchanges,
+            parentchanges: row.mle_counters?.parentchanges,
+            br: row.br === true,
+            shape: isChildLike ? 'ellipse' : 'box',
+            color: isBr ? { background: '#ffd9d9', border: '#c62828' }
+              : (isChildLike ? { background: '#fff4cc', border: '#d9a400' } : { background: '#d9ecff', border: '#1565c0' })
+          });
+          rawByIdForDetails.set(nodeId, row);
+          if (Array.isArray(row.router_neighbor_table) && rloc16Text) {
+            routerNeighborByRloc16.set(rloc16Text, row);
+          }
+        });
+
+        rows.forEach((row, index) => {
+          if (!isPlainObject(row)) return;
+          const fromId = chooseNodeId(row, 'raw-node', index + 1);
+          // children[] → dashed edges
+          (Array.isArray(row.children) ? row.children : []).forEach((child) => {
+            const childId = typeof child === 'string' ? child
+              : (toText(child.rloc16) || toText(child.id));
+            if (!childId || !nodeMap.has(childId)) return;
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
+            routerIdsWithChildren.add(fromId);
+          });
+          // routes[] → solid edges
+          (Array.isArray(row.routes) ? row.routes : []).forEach((route) => {
+            const toId = toText(route.to);
+            if (!toId || !nodeMap.has(toId)) return;
+            addEdge(edgeMap, edgeData, fromId, toId, { linkCategories: [EDGE_CATEGORY_EVE_ROUTE] });
+          });
+        });
+
+        const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
+
+        groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
+
+        return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['raw-array'] };
+      }
+
+      // ── Dispatch: pick adaptor based on topologyMode ──────────────────────────
+
+      function runAdaptor(dataset) {
+        const { entry, rawFiles } = dataset;
+        switch (entry.topologyMode) {
+          case 'meshdiag-networkdiag': return adaptMeshdiagNetworkdiag(rawFiles);
+          case 'merged-detailed':     return adaptMergedDetailed(rawFiles);
+          case 'eve':                 return adaptEve(rawFiles);
+          case 'router-table':        return adaptRouterTable(rawFiles);
+          case 'raw-array':
+          default:                    return adaptRawArray(rawFiles);
+        }
+      }
+
+      // ── Section 5: Topology Renderer ─────────────────────────────────────────
+      //
+      // renderTopologyForDataset(dataset):
+      //   1. Runs the appropriate adaptor via runAdaptor()
+      //   2. Destroys any existing vis.Network instance
+      //   3. Creates new vis.DataSet + vis.Network
+      //   4. Wires up applyFilters, node-detail click handler, filter-change handlers
+      //   5. Runs initial applyFilters pass
+
+      // Module-level reference so we can destroy on re-render
+      let _visNetwork = null;
+      // Stored filter callbacks so that filter dropdowns can call the active view's handler
+      let _topologyFilterHandlers = null;
+      let _autoZoomEnabled = true;
+
+      const VIS_OPTIONS = {
+        layout: { improvedLayout: true, randomSeed: 7 },
+        nodes: { font: { size: 13, face: 'monospace', multi: 'md' }, margin: 10, widthConstraint: { maximum: 260 } },
+        groups: { unknown: { color: { background: '#f2f2f2', border: '#808080' } } },
+        edges: { color: '#8a8a8a', width: 1.5, smooth: false },
+        physics: {
+          barnesHut: {
+            gravitationalConstant: -9500,
+            centralGravity: 0.15,
+            springLength: 300,
+            springConstant: 0.01,
+            damping: 0.22,
+            avoidOverlap: 1
+          },
+          stabilization: { enabled: true, iterations: 1500, updateInterval: 25 }
+        },
+        interaction: { hover: true, navigationButtons: true }
+      };
+
+      function isNodeVisibleByFilter(node, filterMode) {
+        if (filterMode === 'ftd-devices') return toText(node.mode_device).toUpperCase() === 'FTD';
+        if (filterMode === 'mtd-devices') return toText(node.mode_device).toUpperCase() === 'MTD';
+        if (filterMode === 'main-routers') return node.isMainRouter === true;
+        if (filterMode === 'border-routers') return node.isBorderRouter === true;
+        if (filterMode === 'routers-with-children') return node.isRouter === true && node.hasChildren === true;
+        if (filterMode === 'routers-without-children') return node.isRouter === true && node.hasChildren !== true;
+        return true;
+      }
+
+      function isNodeVisibleByDiagnosticFilter(node, filterMode) {
+        if (filterMode === 'medium-discard-pct') return Number.isFinite(node.iftotalpktserrorsdiscards_pct) && node.iftotalpktserrorsdiscards_pct >= 15;
+        if (filterMode === 'medium-total-errors-pct') return Number.isFinite(node.iftotalerrors_pct) && node.iftotalerrors_pct >= 5;
+        if (filterMode === 'medium-total-errors-high') return Number.isFinite(node.iftotalerrors_pct) && node.iftotalerrors_pct > 10;
+        if (filterMode === 'medium-partition-changes') return Number.isFinite(node.partitionidchanges) && node.partitionidchanges >= 2;
+        if (filterMode === 'high-partition-changes') return Number.isFinite(node.partitionidchanges) && node.partitionidchanges >= 5;
+        if (filterMode === 'medium-parent-changes') return Number.isFinite(node.parentchanges) && node.parentchanges >= 2;
+        if (filterMode === 'high-parent-changes') return Number.isFinite(node.parentchanges) && node.parentchanges >= 5;
+        if (filterMode === 'router-neighbor-err-rate-frame-low') return Number.isFinite(node.router_neighbor_max_err_rate_frame_pct) && node.router_neighbor_max_err_rate_frame_pct >= 2;
+        if (filterMode === 'router-neighbor-err-rate-frame-medium') return Number.isFinite(node.router_neighbor_max_err_rate_frame_pct) && node.router_neighbor_max_err_rate_frame_pct >= 5;
+        if (filterMode === 'router-neighbor-err-rate-frame-high') return Number.isFinite(node.router_neighbor_max_err_rate_frame_pct) && node.router_neighbor_max_err_rate_frame_pct >= 10;
+        if (filterMode === 'router-neighbor-err-rate-msg-low') return Number.isFinite(node.router_neighbor_max_err_rate_msg_pct) && node.router_neighbor_max_err_rate_msg_pct >= 2;
+        if (filterMode === 'router-neighbor-err-rate-msg-medium') return Number.isFinite(node.router_neighbor_max_err_rate_msg_pct) && node.router_neighbor_max_err_rate_msg_pct >= 5;
+        if (filterMode === 'router-neighbor-err-rate-msg-high') return Number.isFinite(node.router_neighbor_max_err_rate_msg_pct) && node.router_neighbor_max_err_rate_msg_pct >= 10;
+        if (filterMode === 'router-neighbor-rss-very-low') return node.router_neighbor_has_rss_very_low === true;
+        if (filterMode === 'router-neighbor-rss-low') return node.router_neighbor_has_rss_low === true;
+        if (filterMode === 'router-neighbor-rss-medium') return node.router_neighbor_has_rss_medium === true;
+        if (filterMode === 'router-neighbor-rss-high') return node.router_neighbor_has_rss_high === true;
+        return true;
+      }
+
+      function renderTopologyForDataset(dataset) {
+        const container = document.getElementById('mynetwork');
+        const statusEl = document.getElementById('status');
+        const detailsList = document.getElementById('details-list');
+        const nodeFilterEl = document.getElementById('node-filter');
+        const linkFilterEl = document.getElementById('link-filter');
+        const diagnosticFilterEl = document.getElementById('diagnostic-filter');
+
+        // Destroy previous network instance to free memory
+        if (_visNetwork) {
+          _visNetwork.destroy();
+          _visNetwork = null;
+          _topologyFilterHandlers = null;
+        }
+        container.innerHTML = '';
+        detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+
+        let adaptorResult;
+        try {
+          adaptorResult = runAdaptor(dataset);
+        } catch (err) {
+          statusEl.textContent = `Topology error: ${err.message}`;
+          return;
+        }
+
+        const { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames } = adaptorResult;
+
+        const nodesDataset = new vis.DataSet(nodeData);
+        const edgesDataset = new vis.DataSet(edgeData);
+        const effectiveOptions = _physicsEnabled
+          ? VIS_OPTIONS
+          : Object.assign({}, VIS_OPTIONS, { physics: Object.assign({}, VIS_OPTIONS.physics, { enabled: false }) });
+        _visNetwork = new vis.Network(container, { nodes: nodesDataset, edges: edgesDataset }, effectiveOptions);
+
+        // ── applyFilters ───────────────────────────────────────────────────────
+
+        function applyFilters(nodeFilterMode, linkFilterMode, diagnosticFilterMode) {
+          const visibleNodeIds = new Set();
+          const forcedVisibleEdgeIds = new Set();
+          const matchedTargetNodeIds = new Set();
+          let visibleEdgeCount = 0;
+
+          nodesDataset.forEach((node) => {
+            if (isNodeVisibleByFilter(node, nodeFilterMode) && isNodeVisibleByDiagnosticFilter(node, diagnosticFilterMode)) {
+              visibleNodeIds.add(node.id);
+            }
+          });
+
+          // Pull in child nodes when routers-with-children filter is active
+          if (nodeFilterMode === 'routers-with-children') {
+            edgesDataset.forEach((edge) => {
+              if (edge.isParentChild === true && edgeMatchesLinkFilter(edge, linkFilterMode) && visibleNodeIds.has(edge.from)) {
+                visibleNodeIds.add(edge.to);
+              }
+            });
+          }
+
+          // For router-neighbor diagnostic modes: expose matched neighbor nodes + force their edges visible
+          if (isRouterNeighborDiagnosticMode(diagnosticFilterMode)) {
+            Array.from(visibleNodeIds).forEach((sourceNodeId) => {
+              const sourceNode = nodeMap.get(sourceNodeId);
+              if (!sourceNode) return;
+              const sourceRloc16 = toText(sourceNode.rloc16).toLowerCase();
+              const neighborRow = routerNeighborByRloc16.get(sourceRloc16);
+              const neighborEntries = Array.isArray(neighborRow?.router_neighbor_table) ? neighborRow.router_neighbor_table : [];
+              neighborEntries
+                .filter((neighbor) => routerNeighborRowMatchesDiagnosticFilter(neighbor, diagnosticFilterMode))
+                .forEach((neighbor) => {
+                  const targetId = toText(neighbor.rloc16) || toText(neighbor.extaddr);
+                  if (!targetId) return;
+                  matchedTargetNodeIds.add(targetId);
+                  visibleNodeIds.add(targetId);
+                  edgesDataset.forEach((edge) => {
+                    const cats = normalizeLinkCategories(edge.linkCategories);
+                    if (!cats.includes(EDGE_CATEGORY_ROUTER_NEIGHBOR)) return;
+                    if ((areNodeIdsEquivalent(edge.from, sourceNodeId) && areNodeIdsEquivalent(edge.to, targetId))
+                      || (areNodeIdsEquivalent(edge.to, sourceNodeId) && areNodeIdsEquivalent(edge.from, targetId))) {
+                      forcedVisibleEdgeIds.add(edge.id);
+                    }
+                  });
+                });
+            });
+          }
+
+          nodesDataset.forEach((node) => {
+            nodesDataset.update({ id: node.id, hidden: !visibleNodeIds.has(node.id) });
+          });
+
+          edgesDataset.forEach((edge) => {
+            const endpointsVisible = visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
+            const shouldShow = edge.baseHidden !== true
+              && endpointsVisible
+              && (edgeMatchesLinkFilter(edge, linkFilterMode) || forcedVisibleEdgeIds.has(edge.id));
+            edgesDataset.update({ id: edge.id, hidden: !shouldShow });
+            if (shouldShow) visibleEdgeCount += 1;
+          });
+
+          return {
+            visibleNodeCount: visibleNodeIds.size,
+            visibleEdgeCount,
+            matchedTargetNodeCount: matchedTargetNodeIds.size,
+            forcedVisibleLinkCount: forcedVisibleEdgeIds.size
+          };
+        }
+
+        // ── Status line ────────────────────────────────────────────────────────
+
+        function updateStatus(counts) {
+          const { visibleNodeCount, visibleEdgeCount, matchedTargetNodeCount = 0, forcedVisibleLinkCount = 0 } = counts;
+          const nodeFilterLabel = nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
+          const linkFilterLabel = linkFilterEl.options[linkFilterEl.selectedIndex].text;
+          const diagFilterLabel = diagnosticFilterEl.options[diagnosticFilterEl.selectedIndex].text;
+          const neighborSuffix = isRouterNeighborDiagnosticMode(diagnosticFilterEl.value)
+            ? ` Neighbor Match: targets ${matchedTargetNodeCount}, links ${forcedVisibleLinkCount}.` : '';
+          statusEl.textContent = `Loaded ${sourceNames.join(', ')}. Total: ${nodeData.length} nodes, ${edgeData.length} links. `
+            + `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. `
+            + `Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagFilterLabel}.${neighborSuffix}`;
+        }
+
+        // ── Node detail click handler ──────────────────────────────────────────
+
+        _visNetwork.on('click', (params) => {
+          if (params.nodes.length === 0) {
+            detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+            return;
+          }
+          const selectedId = params.nodes[0];
+          const node = nodeMap.get(selectedId);
+          detailsList.innerHTML = '';
+          if (!node) {
+            detailsList.innerHTML = '<li>No details available for selected node.</li>';
+            return;
+          }
+
+          const rawSource = rawByIdForDetails.get(selectedId) || {};
+          const graphDetails = {
+            graph: {
+              unified_id: selectedId,
+              graph_link_count: (function () {
+                let deg = 0;
+                edgesDataset.forEach((e) => { if (e.from === selectedId || e.to === selectedId) deg += 1; });
+                return deg;
+              })(),
+              is_router: node.shape !== 'ellipse',
+              has_children: routerIdsWithChildrenRef ? routerIdsWithChildrenRef.has(selectedId) : undefined
+            }
+          };
+
+          // Router-neighbor table gets its own top-level li for readability
+          if (Array.isArray(rawSource.router_neighbor_table)) {
+            const li = document.createElement('li');
+            li.textContent = `router_neighbor_table: ${formatValue(rawSource.router_neighbor_table)}`;
+            detailsList.appendChild(li);
+          }
+
+          const mergedDetails = mergeForDisplay(rawSource, graphDetails);
+          const details = sortDetailsWithPriority(
+            flattenObjectEntries(mergedDetails).filter(([key]) => !shouldExcludeDetailPath(key))
+          );
+
+          if (details.length === 0) {
+            detailsList.innerHTML = '<li>No details available for selected node.</li>';
+            return;
+          }
+          details.forEach(([key, value]) => {
+            const li = document.createElement('li');
+            li.textContent = `${key}: ${formatValue(value)}`;
+            detailsList.appendChild(li);
+          });
+        });
+
+        // Capture routerIdsWithChildren for detail panel — adaptors put it inside nodeMap entries (hasChildren flag)
+        // Use a closure reference to whatever the adaptor set; we check hasChildren on the vis node directly.
+        const routerIdsWithChildrenRef = new Set(
+          nodeData.filter((n) => n.hasChildren).map((n) => n.id)
+        );
+
+        // ── Store filter handlers so the toggle/filter wiring (Section 7/8) can call them ──
+        _topologyFilterHandlers = {
+          applyFilters,
+          updateStatus,
+          fitIfEnabled: () => {
+            if (_autoZoomEnabled && _visNetwork) {
+              requestAnimationFrame(() => {
+                if (_visNetwork) {
+                  _visNetwork.fit({ animation: true });
+                }
+              });
+            }
+          }
+        };
+
+        // ── Initial filter pass ────────────────────────────────────────────────
+        const initial = applyFilters(nodeFilterEl.value, linkFilterEl.value, diagnosticFilterEl.value);
+        updateStatus(initial);
+        _topologyFilterHandlers.fitIfEnabled();
+      }
+
+      // ── Section 6: Table Renderer ─────────────────────────────────────────────
+      //
+      // renderTableForDataset(dataset):
+      //   Uses dataset.rows (already normalised by Section 3 loader).
+      //   Applies node + diagnostic filters, then renders a sortable HTML table.
+      //
+      // applyTableFilters() re-filters currentRows and re-renders without refetching.
+
+      const TABLE_PRIORITY_COLUMNS = [
+        'rloc16', 'extaddr', 'device_label', 'name', 'room',
+        'ID', 'Extended MAC', 'Next Hop', 'Path Cost', 'LQ In', 'LQ Out', 'Age',
+        'type', 'total_children', 'total_links', 'mode.device', 'thread_stack_version',
+        'mac_counters.iftotalerrors_pct', 'mac_counters.iftotaldiscards_pct',
+        'mle_counters.partitionidchanges', 'mle_counters.betterpartitionattachattempts',
+        'mle_counters.parentchanges'
+      ];
+
+      // ── Column value helpers ──────────────────────────────────────────────────
+
+      function hasNestedPath(row, path) {
+        if (!path.includes('.')) return Object.prototype.hasOwnProperty.call(row, path);
+        let current = row;
+        for (const part of path.split('.')) {
+          if (!isPlainObject(current) || !Object.prototype.hasOwnProperty.call(current, part)) return false;
+          current = current[part];
+        }
+        return true;
+      }
+
+      function getColumnValue(row, columnName) {
+        if (Object.prototype.hasOwnProperty.call(row, columnName)) return row[columnName];
+        if (!columnName.includes('.')) return undefined;
+        let current = row;
+        for (const part of columnName.split('.')) {
+          if (!isPlainObject(current) || !Object.prototype.hasOwnProperty.call(current, part)) return undefined;
+          current = current[part];
+        }
+        return current;
+      }
+
+      function formatCellValue(value, columnName) {
+        if (value === null || value === undefined) return '';
+
+        if (columnName === 'routes') {
+          const routeItems = Array.isArray(value) ? value : (isPlainObject(value) ? [value] : []);
+          if (routeItems.length === 0) return '[]';
+          const summaries = routeItems.map((route) => {
+            if (!isPlainObject(route)) return '';
+            const nestedTo = isPlainObject(route.to) ? route.to : null;
+            const toName = route.to_name ?? (nestedTo ? nestedTo.name ?? nestedTo.to_name : '') ?? '';
+            const toRloc16 = route.to_rloc16 ?? (nestedTo ? nestedTo.rloc16 ?? nestedTo.to_rloc16 : '') ?? '';
+            if (!toName && !toRloc16) return '';
+            return `${toName ? String(toName) : '(no-name)'} (${toRloc16 ? String(toRloc16) : '(no-rloc16)'})`;
+          }).filter(Boolean);
+          return summaries.length > 0 ? summaries.join('\n') : '[]';
+        }
+
+        if (Array.isArray(value) || isPlainObject(value)) {
+          try { return JSON.stringify(value); } catch (_e) { return String(value); }
+        }
+        return String(value);
+      }
+
+      function collectColumns(rows) {
+        const columns = [];
+        const seen = new Set();
+        rows.forEach((row) => {
+          Object.keys(row).forEach((key) => {
+            if (!seen.has(key)) { seen.add(key); columns.push(key); }
+          });
+        });
+        const pinned = TABLE_PRIORITY_COLUMNS.filter(
+          (col) => seen.has(col) || rows.some((row) => hasNestedPath(row, col))
+        );
+        const remaining = columns.filter((col) => !pinned.includes(col));
+        return [...pinned, ...remaining];
+      }
+
+      // ── Column width calculation ──────────────────────────────────────────────
+
+      function calculateColumnMaxLength(rows, column) {
+        let max = column.length;
+        rows.forEach((row) => {
+          const val = formatCellValue(getColumnValue(row, column), column);
+          if (val) {
+            val.split('\n').forEach((line) => { max = Math.max(max, line.length); });
+          }
+        });
+        return max;
+      }
+
+      function getColumnWidthStyle(maxLen) {
+        const charPx = 8.8;
+        const minWidth = 70;
+        const maxWidth = 25 * charPx;
+        const width = maxLen >= 25 ? maxWidth : Math.max(maxLen * charPx, minWidth);
+        return { width: `${width}px` };
+      }
+
+      // ── Row visibility filters (mirrors td_web_tables.html) ──────────────────
+
+      function isRowVisibleByNodeFilter(row, filterMode) {
+        if (filterMode === 'all') return true;
+        const modeDevice = toText(getColumnValue(row, 'mode.device')).toUpperCase();
+        const rloc16Text = toText(getColumnValue(row, 'rloc16')).toLowerCase();
+        const isMainRouter = rloc16Text.endsWith('00');
+        const brValue = getColumnValue(row, 'br');
+        const isBorderRouter = isMainRouter && (brValue === true || toText(brValue).toLowerCase() === 'true');
+        const totalChildren = toFiniteNumber(getColumnValue(row, 'total_children'));
+        const childrenValue = getColumnValue(row, 'children');
+        const childrenCount = Array.isArray(childrenValue) ? childrenValue.length : undefined;
+        const hasChildren = (Number.isFinite(totalChildren) && totalChildren > 0)
+          || (Number.isFinite(childrenCount) && childrenCount > 0);
+        const isRouter = isMainRouter || Number.isFinite(totalChildren) || Array.isArray(childrenValue);
+        if (filterMode === 'ftd-devices') return modeDevice === 'FTD';
+        if (filterMode === 'mtd-devices') return modeDevice === 'MTD';
+        if (filterMode === 'main-routers') return isMainRouter;
+        if (filterMode === 'border-routers') return isBorderRouter;
+        if (filterMode === 'routers-with-children') return isRouter && hasChildren;
+        if (filterMode === 'routers-without-children') return isRouter && !hasChildren;
+        return true;
+      }
+
+      function isRowVisibleByDiagnosticFilter(row, filterMode) {
+        if (filterMode === 'all') return true;
+        const getMetric = (path) => {
+          const v = getColumnValue(row, path);
+          return Number.isFinite(v) ? v : undefined;
+        };
+        if (filterMode === 'medium-total-errors-pct') { const v = getMetric('mac_counters.iftotalerrors_pct'); return Number.isFinite(v) && v >= 5; }
+        if (filterMode === 'medium-total-errors-high') { const v = getMetric('mac_counters.iftotalerrors_pct'); return Number.isFinite(v) && v > 10; }
+        if (filterMode === 'medium-discard-pct') { const v = getMetric('mac_counters.iftotaldiscards_pct'); return Number.isFinite(v) && v >= 15; }
+        if (filterMode === 'medium-partition-changes') { const v = getMetric('mle_counters.partitionidchanges'); return Number.isFinite(v) && v >= 2; }
+        if (filterMode === 'high-partition-changes') { const v = getMetric('mle_counters.partitionidchanges'); return Number.isFinite(v) && v >= 5; }
+        if (filterMode === 'medium-parent-changes') { const v = getMetric('mle_counters.parentchanges'); return Number.isFinite(v) && v >= 2; }
+        if (filterMode === 'high-parent-changes') { const v = getMetric('mle_counters.parentchanges'); return Number.isFinite(v) && v >= 5; }
+
+        const neighborRows = Array.isArray(getColumnValue(row, 'router_neighbor_table'))
+          ? getColumnValue(row, 'router_neighbor_table') : [];
+        const hasMatchingNeighbor = (pred) => neighborRows.some(pred);
+
+        if (filterMode === 'router-neighbor-err-rate-frame-low') return hasMatchingNeighbor((n) => { const v = toFiniteNumber(n?.err_rate_frame_pct); return Number.isFinite(v) && v >= 2; });
+        if (filterMode === 'router-neighbor-err-rate-frame-medium') return hasMatchingNeighbor((n) => { const v = toFiniteNumber(n?.err_rate_frame_pct); return Number.isFinite(v) && v >= 5; });
+        if (filterMode === 'router-neighbor-err-rate-frame-high') return hasMatchingNeighbor((n) => { const v = toFiniteNumber(n?.err_rate_frame_pct); return Number.isFinite(v) && v >= 10; });
+        if (filterMode === 'router-neighbor-err-rate-msg-low') return hasMatchingNeighbor((n) => { const v = toFiniteNumber(n?.err_rate_msg_pct); return Number.isFinite(v) && v >= 2; });
+        if (filterMode === 'router-neighbor-err-rate-msg-medium') return hasMatchingNeighbor((n) => { const v = toFiniteNumber(n?.err_rate_msg_pct); return Number.isFinite(v) && v >= 5; });
+        if (filterMode === 'router-neighbor-err-rate-msg-high') return hasMatchingNeighbor((n) => { const v = toFiniteNumber(n?.err_rate_msg_pct); return Number.isFinite(v) && v >= 10; });
+        if (filterMode === 'router-neighbor-rss-very-low') return hasMatchingNeighbor((n) => { const v = toFiniteNumber(n?.rss_ave); return Number.isFinite(v) && v < -80; });
+        if (filterMode === 'router-neighbor-rss-low') return hasMatchingNeighbor((n) => { const v = toFiniteNumber(n?.rss_ave); return Number.isFinite(v) && v >= -80 && v < -70; });
+        if (filterMode === 'router-neighbor-rss-medium') return hasMatchingNeighbor((n) => { const v = toFiniteNumber(n?.rss_ave); return Number.isFinite(v) && v >= -70 && v <= -60; });
+        if (filterMode === 'router-neighbor-rss-high') return hasMatchingNeighbor((n) => { const v = toFiniteNumber(n?.rss_ave); return Number.isFinite(v) && v > -60; });
+        return true;
+      }
+
+      // ── DOM table builder ─────────────────────────────────────────────────────
+
+      function renderTableRows(rows, columns) {
+        const theadEl = document.querySelector('#data-table thead');
+        const tbodyEl = document.querySelector('#data-table tbody');
+        theadEl.innerHTML = '';
+        tbodyEl.innerHTML = '';
+
+        const columnWidths = new Map();
+        columns.forEach((col) => columnWidths.set(col, getColumnWidthStyle(calculateColumnMaxLength(rows, col))));
+
+        const headRow = document.createElement('tr');
+        columns.forEach((col) => {
+          const th = document.createElement('th');
+          th.textContent = col;
+          Object.assign(th.style, columnWidths.get(col));
+          headRow.appendChild(th);
+        });
+        theadEl.appendChild(headRow);
+
+        const fragment = document.createDocumentFragment();
+        rows.forEach((row) => {
+          const tr = document.createElement('tr');
+          columns.forEach((col) => {
+            const td = document.createElement('td');
+            td.textContent = formatCellValue(getColumnValue(row, col), col);
+            Object.assign(td.style, columnWidths.get(col));
+            tr.appendChild(td);
+          });
+          fragment.appendChild(tr);
+        });
+        tbodyEl.appendChild(fragment);
+
+        // Re-initialise SortableJS after replacing table content
+        if (window.Sortable && typeof window.Sortable.init === 'function') {
+          window.Sortable.init();
+        }
+      }
+
+      // ── Filter + render pipeline ──────────────────────────────────────────────
+
+      // Module-level table state (set by renderTableForDataset, read by applyTableFilters)
+      let _tableRows = [];
+      let _tableColumns = [];
+      let _tableDatasetLabel = '';
+
+      function applyTableFilters() {
+        const nodeMode = document.getElementById('node-filter').value;
+        const diagMode = document.getElementById('diagnostic-filter').value;
+        const filtered = _tableRows.filter(
+          (row) => isRowVisibleByNodeFilter(row, nodeMode) && isRowVisibleByDiagnosticFilter(row, diagMode)
+        );
+        renderTableRows(filtered, _tableColumns);
+        updateTableStatus(filtered.length);
+      }
+
+      function updateTableStatus(visibleRowCount) {
+        const nodeFilterEl = document.getElementById('node-filter');
+        const diagFilterEl = document.getElementById('diagnostic-filter');
+        const nodeLabel = nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
+        const diagLabel = diagFilterEl.options[diagFilterEl.selectedIndex].text;
+        document.getElementById('status').textContent =
+          `Loaded ${_tableDatasetLabel}. Total: ${_tableRows.length} rows, ${_tableColumns.length} columns. `
+          + `Showing: ${visibleRowCount} rows. Node Filter: ${nodeLabel}. Diagnostic Filter: ${diagLabel}. `
+          + `Click a header to sort.`;
+      }
+
+      function renderTableForDataset(dataset) {
+        const rows = dataset.rows;
+        const columns = collectColumns(rows);
+
+        _tableRows = rows;
+        _tableColumns = columns;
+        _tableDatasetLabel = dataset.loadedFiles.join(', ');
+
+        applyTableFilters();
+      }
+
+      // ── Section 7: View Toggle ────────────────────────────────────────────────
+      //
+      // currentView tracks which panel is active: 'topology' | 'table'
+      //
+      // switchView(newView):
+      //   - Shows/hides #view-topology / #view-table
+      //   - Updates active button styling
+      //   - Grays out #link-filter when table view is active (not used by table)
+      //   - Re-renders the current dataset in the new view (no refetch)
+
+      let currentView = 'topology';
+
+      function switchView(newView) {
+        if (newView === currentView) return;
+        currentView = newView;
+
+        const topoPanel = document.getElementById('view-topology');
+        const tablePanel = document.getElementById('view-table');
+        const btnTopology = document.getElementById('btn-topology');
+        const btnTable = document.getElementById('btn-table');
+        const btnPhysics = document.getElementById('btn-physics');
+        const btnAutoZoom = document.getElementById('btn-auto-zoom');
+        const linkFilterEl = document.getElementById('link-filter');
+
+        if (newView === 'topology') {
+          topoPanel.style.display = 'block';
+          tablePanel.style.display = 'none';
+          btnTopology.classList.add('active');
+          btnTable.classList.remove('active');
+          btnPhysics.style.display = 'inline-block';
+          btnAutoZoom.style.display = 'inline-block';
+          linkFilterEl.classList.remove('filter-disabled');
+        } else {
+          topoPanel.style.display = 'none';
+          tablePanel.style.display = 'block';
+          btnTable.classList.add('active');
+          btnTopology.classList.remove('active');
+          btnPhysics.style.display = 'none';
+          btnAutoZoom.style.display = 'none';
+          linkFilterEl.classList.add('filter-disabled');
+        }
+
+        // Re-render current dataset in the new view without refetching
+        if (currentDataset) {
+          renderCurrentView();
+        }
+      }
+
+      document.getElementById('btn-topology').addEventListener('click', () => switchView('topology'));
+      document.getElementById('btn-table').addEventListener('click', () => switchView('table'));
+
+      // ── Physics toggle ────────────────────────────────────────────────────────
+      let _physicsEnabled = true;
+
+      function setPhysics(enabled) {
+        _physicsEnabled = enabled;
+        const btn = document.getElementById('btn-physics');
+        if (enabled) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+        if (_visNetwork) {
+          _visNetwork.setOptions({ physics: { enabled } });
+        }
+      }
+
+      document.getElementById('btn-physics').addEventListener('click', () => setPhysics(!_physicsEnabled));
+
+      // ── Auto Zoom toggle ─────────────────────────────────────────────────────
+      function setAutoZoom(enabled) {
+        _autoZoomEnabled = enabled;
+        const btn = document.getElementById('btn-auto-zoom');
+        if (enabled) {
+          btn.classList.add('active');
+          if (currentView === 'topology' && _visNetwork) {
+            _visNetwork.fit({ animation: true });
+          }
+        } else {
+          btn.classList.remove('active');
+        }
+      }
+
+      document.getElementById('btn-auto-zoom').addEventListener('click', () => setAutoZoom(!_autoZoomEnabled));
+
+      // ── Section 8: Filter Controls + Dataset Select Wiring ────────────────────
+      //
+      // Dataset select   → loadDataset() → renderCurrentView()
+      // Node filter      → re-renders in whichever view is active
+      // Link filter      → topology only (disabled in table view via CSS)
+      // Diagnostic filter → re-renders in whichever view is active
+
+      document.getElementById('dataset-select').addEventListener('change', (event) => {
+        // Reset filters to neutral defaults on dataset change
+        document.getElementById('node-filter').value = 'all';
+        document.getElementById('diagnostic-filter').value = 'all';
+        loadDataset(event.target.value);
+      });
+
+      document.getElementById('node-filter').addEventListener('change', () => {
+        if (!currentDataset) return;
+        if (currentView === 'topology') {
+          if (_topologyFilterHandlers) {
+            const linkFilterEl = document.getElementById('link-filter');
+            const nodeFilterEl = document.getElementById('node-filter');
+            const diagFilterEl = document.getElementById('diagnostic-filter');
+            const counts = _topologyFilterHandlers.applyFilters(
+              nodeFilterEl.value, linkFilterEl.value, diagFilterEl.value
+            );
+            _topologyFilterHandlers.updateStatus(counts);
+            _topologyFilterHandlers.fitIfEnabled();
+            document.getElementById('details-list').innerHTML = '<li>Click a node to view its properties.</li>';
+          }
+        } else {
+          applyTableFilters();
+        }
+      });
+
+      document.getElementById('link-filter').addEventListener('change', () => {
+        // Link filter only applies to topology view
+        if (!currentDataset || currentView !== 'topology') return;
+        if (_topologyFilterHandlers) {
+          const linkFilterEl = document.getElementById('link-filter');
+          const nodeFilterEl = document.getElementById('node-filter');
+          const diagFilterEl = document.getElementById('diagnostic-filter');
+          const counts = _topologyFilterHandlers.applyFilters(
+            nodeFilterEl.value, linkFilterEl.value, diagFilterEl.value
+          );
+          _topologyFilterHandlers.updateStatus(counts);
+          _topologyFilterHandlers.fitIfEnabled();
+          document.getElementById('details-list').innerHTML = '<li>Click a node to view its properties.</li>';
+        }
+      });
+
+      document.getElementById('diagnostic-filter').addEventListener('change', () => {
+        if (!currentDataset) return;
+        if (currentView === 'topology') {
+          if (_topologyFilterHandlers) {
+            const linkFilterEl = document.getElementById('link-filter');
+            const nodeFilterEl = document.getElementById('node-filter');
+            const diagFilterEl = document.getElementById('diagnostic-filter');
+            const counts = _topologyFilterHandlers.applyFilters(
+              nodeFilterEl.value, linkFilterEl.value, diagFilterEl.value
+            );
+            _topologyFilterHandlers.updateStatus(counts);
+            _topologyFilterHandlers.fitIfEnabled();
+            document.getElementById('details-list').innerHTML = '<li>Click a node to view its properties.</li>';
+          }
+        } else {
+          applyTableFilters();
+        }
+      });
+
+      // ── Bootstrap: load first dataset on page load ────────────────────────────
+      loadDataset(document.getElementById('dataset-select').value);
+    </script>
+  </body>
+</html>
