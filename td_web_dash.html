@@ -1171,11 +1171,12 @@
         return Array.from(nodeMap.values()).map((node) => {
           const displayName = toText(node.device_label) || toText(node.name);
           const unknown = isUnknownNodeName(displayName);
+          const effectiveShape = unknown ? 'ellipse' : node.shape;
           const rloc16Text = toText(node.rloc16).toLowerCase();
           const neighborStats = computeRouterNeighborStats(
             routerNeighborByRloc16.get(rloc16Text)?.router_neighbor_table
           );
-          const isRouter = node.shape !== 'ellipse';
+          const isRouter = effectiveShape !== 'ellipse';
           const hasChildren = routerIdsWithChildren.has(node.id);
           const isMainRouter = rloc16Text.endsWith('00');
           const isBorderRouter = isMainRouter && node.br === true;
@@ -1192,7 +1193,7 @@
           return {
             id: node.id,
             label: labelFn(node),
-            shape: node.shape,
+            shape: effectiveShape,
             color: node.color,
             font: { size: fontSize, face: 'monospace', multi: 'md' },
             heightConstraint,
