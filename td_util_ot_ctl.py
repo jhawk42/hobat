@@ -50,6 +50,7 @@ def run_ot_ctl_stdio(command):
 
     ##TODO expose container name as a parameter or environment variable
     ## otbr is the default container name used by the OpenThread Border Router (OTBR) Docker image, but this can be changed if needed.  
-    container = "border-router"  # Ensure this matches your container's name
+    container = "otbr"  # Ensure this matches your container's name
+    
     output = run_ot_ctl_command_stdio(container, command)
     return output
