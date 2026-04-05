@@ -1181,14 +1181,22 @@
           const isBorderRouter = isMainRouter && node.br === true;
           let borderWidth = 1;
           let fontSize = 13;
+          let widthConstraint = { minimum: 109, maximum: 109 };
+          let heightConstraint = { minimum: 41, maximum: 41 };
           if (isBorderRouter) { borderWidth = 5; fontSize = 19.5; }
           else if (isRouter) { borderWidth = 3; fontSize = 19.5; }
+          if (isRouter) {
+            widthConstraint = { minimum: 187, maximum: 187 };
+            heightConstraint = { minimum: 77, maximum: 77 };
+          }
           return {
             id: node.id,
             label: labelFn(node),
             shape: node.shape,
             color: node.color,
             font: { size: fontSize, face: 'monospace', multi: 'md' },
+            heightConstraint,
+            widthConstraint,
             group: unknown ? 'unknown' : 'known',
             isRouter, hasChildren, isMainRouter, isBorderRouter, borderWidth,
             iftotalpktserrorsdiscards_pct: node.iftotalpktserrorsdiscards_pct,
@@ -1817,10 +1825,10 @@
           barnesHut: {
             gravitationalConstant: -9500,
             centralGravity: 0.15,
-            springLength: 300,
+            springLength: 380,
             springConstant: 0.01,
             damping: 0.22,
-            avoidOverlap: 1
+            avoidOverlap: 1.5
           },
           stabilization: { enabled: true, iterations: 1500, updateInterval: 25 }
         },
