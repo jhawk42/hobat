@@ -285,7 +285,8 @@
           <option value="default_links">Default: router,children, 321 _links, childTable</option>
           <option value="default_plus_router_neighbors">Default: +router neighbors</option>
           <option value="otbr_rest_api">OTBR restapi: route routeData, childTable</option>
-          <option value="eve_routes_children">Eve: routes, children</option>
+          <option value="eve_enhanced_routes_children">Eve Enhanced: routes, children</option>
+          <option value="eve_native_routes_children">Eve Native: routes, children</option>
           <option value="all_links">All Links (large)</option>
         </select>        
       </div>
@@ -395,9 +396,9 @@
             'td-otbr-restapi-devices.json',
             'td-otbr-restapi-diagnostics.json'
           ],
-          mergeStrategy: 'by-identity',
-          topologyMode: 'raw-array',
-          defaultLinkFilter: 'all_links'
+          mergeStrategy: 'none',
+          topologyMode: 'otbr_restapi',
+          defaultLinkFilter: 'otbr_rest_api'
         },
         
         // ── Deep merged (matches td_web_tables.html td-merged-topology-all.json) ─
@@ -414,24 +415,24 @@
 
         // ── Single-file simple datasets (table-first; topology via raw-array) ───
         {
-          value: 'eve_topology',
-          label: 'eve topology',
+          value: 'eve_enhanced_topology',
+          label: 'eve enhanced topology',
           files: [
             'td-eve-topology.json'
           ],
           mergeStrategy: 'none',
-          topologyMode: 'eve',
-          defaultLinkFilter: 'eve_routes_children'
+          topologyMode: 'eve_enhanced',
+          defaultLinkFilter: 'eve_enhanced_routes_children'
         }, 
         {
-          value: 'evethreadlayout',
+          value: 'eve_native_threadlayout',
           label: 'Eve Thread Network Layout.evethreadlayout',
           files: [
             'Eve Thread Network Layout.evethreadlayout'
           ],
           mergeStrategy: 'none',
-          topologyMode: 'raw-array',
-          defaultLinkFilter: 'eve_routes_children'
+          topologyMode: 'eve_native',
+          defaultLinkFilter: 'eve_native_routes_children'
         }, 
         {
           value: 'router_table',
@@ -853,7 +854,15 @@
           // multi-file 'none' datasets hand the full rawFiles array to the adaptor
           const firstLoaded = rawFiles.find((d) => d !== null);
           const firstLoadedIndex = rawFiles.findIndex((d) => d !== null);
-          rows = firstLoaded !== null ? normalizeRows(firstLoaded, entry.files[firstLoadedIndex]) : [];
+          // For eve_native files the top-level shape is { version, nodes: [...] };
+          // For otbr_restapi files the top-level shape is { data: [...] };
+          // extract the inner array so the table renderer shows one row per node.
+          const rowSource = (entry.topologyMode === 'eve_native' && firstLoaded && Array.isArray(firstLoaded.nodes))
+            ? firstLoaded.nodes
+            : (entry.topologyMode === 'otbr_restapi' && firstLoaded && Array.isArray(firstLoaded.data))
+            ? firstLoaded.data
+            : firstLoaded;
+          rows = rowSource !== null ? normalizeRows(rowSource, entry.files[firstLoadedIndex]) : [];
         }
 
         currentDataset = { entry, rawFiles, rows, loadedFiles };
@@ -1015,7 +1024,8 @@
       const LINK_FILTER_DEFAULT = 'default_links';
       const LINK_FILTER_DEFAULT_PLUS_NEIGHBORS = 'default_plus_router_neighbors';
       const LINK_FILTER_OTBR_REST_API = 'otbr_rest_api';
-      const LINK_FILTER_EVE = 'eve_routes_children';
+      const LINK_FILTER_EVE_ENHANCED = 'eve_enhanced_routes_children';
+      const LINK_FILTER_EVE_NATIVE = 'eve_native_routes_children';
       const LINK_FILTER_ALL = 'all_links';
 
       const EDGE_CATEGORY_DEFAULT_CHILDREN = 'default_children';
@@ -1027,6 +1037,8 @@
       const EDGE_CATEGORY_OTBR_CHILD = 'otbr_child';
       const EDGE_CATEGORY_EVE_ROUTE = 'eve_route';
       const EDGE_CATEGORY_EVE_CHILD = 'eve_child';
+      const EDGE_CATEGORY_EVE_NATIVE_ROUTE = 'eve_native_route';
+      const EDGE_CATEGORY_EVE_NATIVE_CHILD = 'eve_native_child';
 
       function normalizeLinkCategories(value) {
         if (Array.isArray(value)) return value.filter((item) => toText(item));
@@ -1048,7 +1060,8 @@
             EDGE_CATEGORY_ROUTER_NEIGHBOR);
         }
         if (mode === LINK_FILTER_OTBR_REST_API) return hasAny(EDGE_CATEGORY_OTBR_ROUTE, EDGE_CATEGORY_OTBR_CHILD);
-        if (mode === LINK_FILTER_EVE) return hasAny(EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD);
+        if (mode === LINK_FILTER_EVE_ENHANCED) return hasAny(EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD);
+        if (mode === LINK_FILTER_EVE_NATIVE) return hasAny(EDGE_CATEGORY_EVE_NATIVE_ROUTE, EDGE_CATEGORY_EVE_NATIVE_CHILD);
         if (mode === LINK_FILTER_ALL) return true;
         return false;
       }
@@ -1514,6 +1527,115 @@
         return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['eve'] };
       }
 
+      // ── Adaptor 2b: Eve native topology (Eve Thread Network Layout.evethreadlayout) ───
+
+      function adaptEveNative(rawFiles) {
+        const raw = rawFiles[0];
+        // Native file shape: { version, nodes: [...] }
+        // Fall back gracefully if the loader already normalised it to a plain array.
+        const eveArray = (raw && Array.isArray(raw.nodes)) ? raw.nodes
+          : (Array.isArray(raw) ? raw
+          : (raw && typeof raw === 'object' ? Object.values(raw) : []));
+
+        const nodeMap = new Map();
+        const eveNodeById = new Map();
+        const edgeMap = new Map();
+        const edgeData = [];
+        const routerIdsWithChildren = new Set();
+        const routerNeighborByRloc16 = new Map();
+
+        // Native rloc16 is a decimal integer; convert to canonical hex string '0xNNNN'.
+        function nativeRloc16ToHex(value) {
+          const n = toFiniteNumber(value);
+          if (!Number.isFinite(n)) return '';
+          return `0x${n.toString(16).padStart(4, '0')}`;
+        }
+
+        function upsertEveNativeNode(nodeId, rawNode, style) {
+          const existing = nodeMap.get(nodeId);
+          const rloc16Hex = nativeRloc16ToHex(rawNode.rloc16) || (existing ? existing.rloc16 : '');
+          const merged = {
+            id: nodeId,
+            name: toText(rawNode.name) || (existing ? existing.name : ''),
+            device_label: toText(rawNode.device_label) || toText(rawNode.name) || (existing ? existing.device_label : ''),
+            rloc16: rloc16Hex,
+            source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
+            extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
+            type: toText(rawNode.type) || (existing ? existing.type : ''),
+            room: toText(rawNode.room) || (existing ? existing.room : ''),
+            ip_addresses: Array.isArray(rawNode.ip_addresses) ? rawNode.ip_addresses
+              : (existing ? existing.ip_addresses : []),
+            threadNetworks: Array.isArray(rawNode.threadNetworks) ? rawNode.threadNetworks
+              : (existing ? existing.threadNetworks : []),
+            mode_device: rawNode.type === 'router' ? 'FTD'
+              : (rawNode.type === 'child' || rawNode.type === 'sleepy-child' ? 'MTD' : '')
+              || (existing ? existing.mode_device : ''),
+            br: rawNode.br === true || (existing ? existing.br === true : false),
+            from_eve_native: true,
+            shape: style.shape || (existing ? existing.shape : 'box'),
+            color: style.color || (existing ? existing.color : { background: '#e8f5e9', border: '#2e7d32' })
+          };
+          if (merged.br) merged.color = { background: '#ffd9d9', border: '#c62828' };
+          nodeMap.set(nodeId, merged);
+        }
+
+        // Pass 1: register all nodes
+        eveArray.forEach((node) => {
+          const eveNodeId = toText(node.id);
+          if (!eveNodeId) return;
+          eveNodeById.set(eveNodeId, node);
+          const isChildType = node.type === 'child' || node.type === 'sleepy-child';
+          upsertEveNativeNode(eveNodeId, node, {
+            source: 'eve_native',
+            shape: isChildType ? 'ellipse' : 'box',
+            color: node.br ? { background: '#ffd9d9', border: '#c62828' }
+              : (isChildType ? { background: '#fff4cc', border: '#d9a400' } : { background: '#e8f5e9', border: '#2e7d32' })
+          });
+        });
+
+        // Pass 2: build edges from routes[] and children[]
+        for (const node of eveArray) {
+          const fromId = toText(node.id);
+          if (!fromId) continue;
+
+          (Array.isArray(node.routes) ? node.routes : []).forEach((route) => {
+            const toId = toText(route.to);
+            if (!toId) return;
+            if (!nodeMap.has(toId)) {
+              upsertEveNativeNode(toId, { id: toId }, { source: 'eve_native', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
+            }
+            const lqiIn = toFiniteNumber(route.in);
+            const lqiOut = toFiniteNumber(route.out);
+            const avgLqi = (Number.isFinite(lqiIn) && Number.isFinite(lqiOut)) ? (lqiIn + lqiOut) / 2 : (lqiIn || lqiOut);
+            let edgeWidth = 1.5;
+            if (Number.isFinite(avgLqi)) {
+              if (avgLqi >= 3) edgeWidth = 3;
+              else if (avgLqi >= 2) edgeWidth = 2;
+            }
+            addEdge(edgeMap, edgeData, fromId, toId, { width: edgeWidth, linkCategories: [EDGE_CATEGORY_EVE_NATIVE_ROUTE] });
+          });
+
+          (Array.isArray(node.children) ? node.children : []).forEach((child) => {
+            const childId = toText(typeof child === 'string' ? child : child.id);
+            if (!childId) return;
+            if (!nodeMap.has(childId)) {
+              upsertEveNativeNode(childId, { id: childId }, { source: 'eve_native', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+            }
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_EVE_NATIVE_CHILD] });
+            routerIdsWithChildren.add(fromId);
+          });
+        }
+
+        const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
+
+        const rawByIdForDetails = new Map();
+        eveNodeById.forEach((raw, id) => rawByIdForDetails.set(id, raw));
+
+        groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
+
+        return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['eve_native'] };
+      }
+
       // ── Adaptor 3: Merged detailed topology ───────────────────────────────────
 
       function adaptMergedDetailed(rawFiles) {
@@ -1787,17 +1909,144 @@
         return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['raw-array'] };
       }
 
+      // ── Adaptor 6: OTBR REST API (devices + diagnostics) ──────────────────────
+      //
+      // Both files use { "data": [ { "id", "type", "attributes": {...} } ] } shape.
+      // Devices provide: extAddress, mlEidIid, omrIpv6Address, hostName, role, mode.
+      // Diagnostics provide: extAddress, rloc16, route.routeData[], childTable[].
+      // Primary node ID = extAddress (lowercase). Merged by extAddress identity.
+
+      function adaptOtbrRestApi(rawFiles) {
+        const devicesData = (rawFiles[0] && Array.isArray(rawFiles[0].data)) ? rawFiles[0].data : [];
+        const diagData = (rawFiles[1] && Array.isArray(rawFiles[1].data)) ? rawFiles[1].data : [];
+
+        // Flatten each item: merge top-level fields + attributes sub-object
+        function flattenRestApiItem(item) {
+          if (!isPlainObject(item)) return item;
+          const attrs = isPlainObject(item.attributes) ? item.attributes : {};
+          return { ...item, ...attrs };
+        }
+
+        const devices = devicesData.map(flattenRestApiItem);
+        const diagnostics = diagData.map(flattenRestApiItem);
+
+        const nodeMap = new Map();
+        const rawByIdForDetails = new Map();
+        const rloc16ToNodeId = new Map();
+        const edgeMap = new Map();
+        const edgeData = [];
+        const routerIdsWithChildren = new Set();
+        const routerNeighborByRloc16 = new Map();
+
+        function upsertOtbrRestApiNode(nodeId, rawNode, style) {
+          const existing = nodeMap.get(nodeId);
+          const roleText = toText(rawNode.role).toLowerCase();
+          const isChildLike = roleText === 'child' || roleText.includes('sleepy');
+          const modeDevice = rawNode.mode?.deviceTypeFTD === true ? 'FTD'
+            : (rawNode.mode?.deviceTypeFTD === false ? 'MTD' : (existing ? existing.mode_device : ''));
+          const rloc16Val = toText(rawNode.rloc16) || (existing ? existing.rloc16 : '');
+          const extaddrVal = toText(rawNode.extAddress || rawNode.extaddr).toLowerCase() || (existing ? existing.extaddr : '');
+          const merged = {
+            id: nodeId,
+            device_label: toText(rawNode.hostName) || (existing ? existing.device_label : ''),
+            name: toText(rawNode.hostName) || (existing ? existing.name : ''),
+            rloc16: rloc16Val,
+            extaddr: extaddrVal,
+            type: roleText || toText(rawNode.type) || (existing ? existing.type : ''),
+            mode_device: modeDevice || (existing ? existing.mode_device : ''),
+            omrIpv6Address: toText(rawNode.omrIpv6Address) || (existing ? existing.omrIpv6Address : ''),
+            br: rawNode.br === true || (existing ? existing.br === true : false),
+            from_otbr_restapi: true,
+            shape: style.shape || (existing ? existing.shape : (isChildLike ? 'ellipse' : 'box')),
+            color: style.color || (existing ? existing.color : { background: '#d9ecff', border: '#1565c0' })
+          };
+          if (merged.br) merged.color = { background: '#ffd9d9', border: '#c62828' };
+          nodeMap.set(nodeId, merged);
+        }
+
+        // Pass 1: register nodes from devices (extAddress as node ID)
+        devices.forEach((node) => {
+          const nodeId = toText(node.extAddress || node.extaddr).toLowerCase() || toText(node.id);
+          if (!nodeId) return;
+          const roleText = toText(node.role).toLowerCase();
+          const isChildLike = roleText === 'child' || roleText.includes('sleepy');
+          upsertOtbrRestApiNode(nodeId, node, {
+            shape: isChildLike ? 'ellipse' : 'box',
+            color: isChildLike ? { background: '#fff4cc', border: '#d9a400' } : { background: '#d9ecff', border: '#1565c0' }
+          });
+          rawByIdForDetails.set(nodeId, node);
+        });
+
+        // Pass 2: augment from diagnostics — adds rloc16, route, childTable
+        diagnostics.forEach((node) => {
+          const nodeId = toText(node.extAddress || node.extaddr).toLowerCase() || toText(node.id);
+          if (!nodeId) return;
+          upsertOtbrRestApiNode(nodeId, node, {
+            shape: 'box',
+            color: { background: '#d9ecff', border: '#1565c0' }
+          });
+          const rloc16Val = toText(node.rloc16).toLowerCase();
+          if (rloc16Val) rloc16ToNodeId.set(rloc16Val, nodeId);
+          const existing = rawByIdForDetails.get(nodeId) || {};
+          rawByIdForDetails.set(nodeId, mergeForDisplay(existing, node));
+        });
+
+        // Pass 3: edges from diagnostics route.routeData (router routes) + childTable
+        diagnostics.forEach((node) => {
+          const fromId = toText(node.extAddress || node.extaddr).toLowerCase() || toText(node.id);
+          if (!fromId || !nodeMap.has(fromId)) return;
+          const fromNode = nodeMap.get(fromId);
+
+          (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
+            const toRloc16 = buildMainRouterRloc16(route.routeId);
+            if (!toRloc16) return;
+            let toId = rloc16ToNodeId.get(toRloc16.toLowerCase()) || toRloc16;
+            if (!nodeMap.has(toId)) {
+              upsertOtbrRestApiNode(toId, { rloc16: toRloc16, id: toId },
+                { shape: 'box', color: { background: '#d9ecff', border: '#1565c0' } });
+            }
+            const lqi = Math.max(toFiniteNumber(route.linkQualityOut) || 0, toFiniteNumber(route.linkQualityIn) || 0);
+            const edgeWidth = lqi >= 3 ? 3 : (lqi >= 2 ? 2 : 1.5);
+            addEdge(edgeMap, edgeData, fromId, toId, { width: edgeWidth, linkCategories: [EDGE_CATEGORY_OTBR_ROUTE] });
+          });
+
+          (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
+            const childRloc16 = buildChildRloc16(toText(fromNode.rloc16), child.childId);
+            const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
+              || childRloc16
+              || `${fromId}-child-${ci + 1}`;
+            if (!nodeMap.has(childId)) {
+              upsertOtbrRestApiNode(childId, { rloc16: childRloc16, id: childId },
+                { shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+            }
+            addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD] });
+            routerIdsWithChildren.add(fromId);
+          });
+        });
+
+        const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
+        groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
+
+        const sourceNames = [];
+        if (devices.length > 0) sourceNames.push('otbr_restapi_devices');
+        if (diagnostics.length > 0) sourceNames.push('otbr_restapi_diagnostics');
+
+        return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames };
+      }
+
       // ── Dispatch: pick adaptor based on topologyMode ──────────────────────────
 
       function runAdaptor(dataset) {
         const { entry, rawFiles } = dataset;
         switch (entry.topologyMode) {
           case 'meshdiag-networkdiag': return adaptMeshdiagNetworkdiag(rawFiles);
-          case 'merged-detailed':     return adaptMergedDetailed(rawFiles);
-          case 'eve':                 return adaptEve(rawFiles);
-          case 'router-table':        return adaptRouterTable(rawFiles);
+          case 'merged-detailed':      return adaptMergedDetailed(rawFiles);
+          case 'eve_enhanced':         return adaptEve(rawFiles);
+          case 'eve_native':           return adaptEveNative(rawFiles);
+          case 'router-table':         return adaptRouterTable(rawFiles);
+          case 'otbr_restapi':         return adaptOtbrRestApi(rawFiles);
           case 'raw-array':
-          default:                    return adaptRawArray(rawFiles);
+          default:                     return adaptRawArray(rawFiles);
         }
       }
 
