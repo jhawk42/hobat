@@ -361,6 +361,42 @@
       //   defaultLinkFilter — value pre-selected in #link-filter when this dataset loads
 
       const DATASET_REGISTRY = [
+
+        // ── Single-file simple datasets (eve, table; topology ) ───
+        {
+          value: 'eve_native_threadlayout',
+          label: 'eve native: Eve Thread Network Layout.evethreadlayout',
+          files: [
+            'Eve Thread Network Layout.evethreadlayout'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'eve_native',
+          defaultLinkFilter: 'eve_native_routes_children'
+        }, 
+        {
+          value: 'eve_enhanced_topology',
+          label: 'eve enhanced: td-eve-topology.json',
+          files: [
+            'td-eve-topology.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'eve_enhanced',
+          defaultLinkFilter: 'eve_enhanced_routes_children'
+        }, 
+
+        // ── Multi-file topology datasets (otbr rest api) ────────────
+        {
+          value: 'restapi_devices_diagnostics',
+          label: 'otbr rest api: devices, diagnostics',
+          files: [
+            'td-otbr-restapi-devices.json',
+            'td-otbr-restapi-diagnostics.json'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'otbr_restapi',
+          defaultLinkFilter: 'otbr_rest_api'
+        },
+
         // ── Multi-file topology datasets (match td_web_topology.html) ────────────
         {
           value: 'default_topology',
@@ -389,17 +425,7 @@
           topologyMode: 'meshdiag-networkdiag',
           defaultLinkFilter: 'default_links'
         }, 
-        {
-          value: 'restapi_devices_diagnostics',
-          label: 'td-otbr-restapi devices, diagnostics',
-          files: [
-            'td-otbr-restapi-devices.json',
-            'td-otbr-restapi-diagnostics.json'
-          ],
-          mergeStrategy: 'none',
-          topologyMode: 'otbr_restapi',
-          defaultLinkFilter: 'otbr_rest_api'
-        },
+
         
         // ── Deep merged (matches td_web_tables.html td-merged-topology-all.json) ─
         {
@@ -413,27 +439,9 @@
           defaultLinkFilter: 'all_links'
         },
 
+
+
         // ── Single-file simple datasets (table-first; topology via raw-array) ───
-        {
-          value: 'eve_enhanced_topology',
-          label: 'eve enhanced topology',
-          files: [
-            'td-eve-topology.json'
-          ],
-          mergeStrategy: 'none',
-          topologyMode: 'eve_enhanced',
-          defaultLinkFilter: 'eve_enhanced_routes_children'
-        }, 
-        {
-          value: 'eve_native_threadlayout',
-          label: 'Eve Thread Network Layout.evethreadlayout',
-          files: [
-            'Eve Thread Network Layout.evethreadlayout'
-          ],
-          mergeStrategy: 'none',
-          topologyMode: 'eve_native',
-          defaultLinkFilter: 'eve_native_routes_children'
-        }, 
         {
           value: 'router_table',
           label: 'td-otbr-cli-router-table.json',
