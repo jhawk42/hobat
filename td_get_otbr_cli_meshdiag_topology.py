@@ -3,10 +3,15 @@ import subprocess
 import re
 import json
 
-from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
 import td_util_ot_ctl
+import td_util_network
+from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
 
 def get_meshdiag_topology_ip6addrs_children():
+    """Retrieves the meshdiag topology IP6 addresses and children data from the network.
+    Runs: ot-ctl meshdiag topology ip6-addrs children
+    Returns: Raw output string from the command
+    """
     try:
         # Executes the command: ot-ctl meshdiag topology ip6-addrs children
         # This command provides IPv6 addresses and children info for all routers
@@ -138,7 +143,7 @@ def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr
     
     return routers
 
-def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data):
+def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data, network_dataset_info=None):
     """
     Enhances thread topology IP6 addresses and children data with additional processing.
     
@@ -149,10 +154,17 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data):
         Enhanced topology data with additional fields/calculations
     """
     pass
+
+    omr_ipv6addr_prefix = network_dataset_info["prefix_omr_ipv6addr_prefix"] if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info else None 
+
     topology_data_enhanced = []
     for router in topology_data:
         enhanced_router = router.copy()
         
+        # Enhancement: OMR IPv6 address
+        if omr_ipv6addr_prefix:
+            enhanced_router["omrIpv6Address"] = td_util_network.get_omr_addr_from_list(router.get("ipv6_addrs", []), omr_ipv6addr_prefix)
+
         # Enhancement: Count total children
         enhanced_router["total_children"] = len(router.get("children", []))
         
@@ -188,23 +200,25 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data):
 
     return topology_data_enhanced
 
-def get_meshdiag_topology_ip6addrs_children_data(extaddr_map=None):
+def get_meshdiag_topology_ip6addrs_children_data(extaddr_map=None, network_dataset_info=None):
     """
     Retrieves, parses, and enhances the thread topology IP6 addresses and children data.
     
     Args:
         extaddr_map: Optional dictionary mapping extended MAC to node name.
-    
+        network_dataset_info: Optional dictionary containing network dataset information.
     Returns:
         Enhanced topology data with decoded link IDs and additional fields
     """
     
+    topology_data_enhanced = []
+
     output = get_meshdiag_topology_ip6addrs_children()
     if output:
         topology_data_enhanced = parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr_map)
     
     # enhance links by decoding link IDs to objects with id and device_label
-    topology_data_enhanced_links = meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data_enhanced) 
+    topology_data_enhanced_links = meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data_enhanced, network_dataset_info) 
     
     return topology_data_enhanced_links
 
@@ -218,10 +232,12 @@ if __name__ == "__main__":
         extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
     else:
         extaddr_map = {}
-     
-    meshdiag_topology_data = get_meshdiag_topology_ip6addrs_children_data(extaddr_map)
+
+    network_dataset_info = td_util_network.get_network_dataset_info()
+
+    meshdiag_topology_data = get_meshdiag_topology_ip6addrs_children_data(extaddr_map, network_dataset_info)
     save_path = "td-otbr-cli-meshdiag-topology.json"
-    with open(save_path, 'w') as f:
+    with open(save_path, mode='w', encoding='utf-8') as f:
         json.dump(meshdiag_topology_data, f, indent=4)
 
     print(json.dumps(meshdiag_topology_data, indent=4))

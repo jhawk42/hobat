@@ -5,15 +5,20 @@ import json
 import sys
 import time
 
+from copy import deepcopy
+import td_util_ot_ctl
+import td_util_network
 from td_get_otbr_cli_router_table import get_router_table_data
 from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
-import td_util_ot_ctl
-from td_util_network import (
-    get_prefix_meshlocal,
-    format_prefix_meshlocal_into_ipv6adrr_prefix,
-    conform_rloc_hex_strip,
-    merge_ipv6_rloc_prefix_rloc_hex
-)
+
+# from td_util_network import (
+#     get_prefix_meshlocal,
+#     get_network_dataset_info,
+#     format_prefix_meshlocal_into_ipv6adrr_prefix,
+#     conform_rloc_hex_strip,
+#     merge_ipv6_rloc_prefix_rloc_hex,
+#     get_omr_addr_from_list
+# )
 
 def get_ipv6_addresses():
     """
@@ -442,8 +447,8 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     if ipv6_addresses is None:
         ipv6_addresses = {}
         
-    rloc_hex = conform_rloc_hex_strip(rloc)
-    ipv6_rloc_addr = merge_ipv6_rloc_prefix_rloc_hex(ipv6_rloc_prefix, rloc_hex)
+    rloc_hex = td_util_network.conform_rloc_hex_strip(rloc)
+    ipv6_rloc_addr = td_util_network.merge_ipv6_rloc_prefix_rloc_hex(ipv6_rloc_prefix, rloc_hex)
 
     tlv_values_detailed = "0 1 2 28 8 16 9 34"
     tlv_values_medium = "0 1 2 8 16 9"
@@ -512,9 +517,11 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     
     return network_topology_node
 
-def get_networkdiagnostic_topology_data(extaddr_map=None):
+def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=None):
     """Maps the full network topology and returns a Python dictionary."""
     
+    omr_ipv6addr_prefix = network_dataset_info["prefix_omr_ipv6addr_prefix"] if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info else None 
+
     # Set to True to also query and include child nodes in the topology map (will increase runtime significantly)
     # Set to False to only get parent nodes without expanding children
 
@@ -522,8 +529,8 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
     #expand_children = False  
 
     # 1. Get mesh-local prefix
-    meshlocal_prefix = get_prefix_meshlocal()
-    ipv6_rloc_prefix = format_prefix_meshlocal_into_ipv6adrr_prefix(meshlocal_prefix)
+    meshlocal_prefix = td_util_network.get_prefix_meshlocal()
+    ipv6_rloc_prefix = td_util_network.format_prefix_meshlocal_into_ipv6adrr_prefix(meshlocal_prefix)
 
     # 2. Get all active routers (potential parents)
     router_table_data = get_router_table_data(extaddr_map)
@@ -573,6 +580,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
                 "thread_stack_version": "Unknown",
                 "mode": {},
                 "ipv6_addrs": ipv6_addresses.get(rloc16, []),
+                "omrIpv6Address": td_util_network.get_omr_addr_from_list(ipv6_addresses.get(rloc16, []), omr_ipv6addr_prefix) if omr_ipv6addr_prefix else None,
                 "children": [],
                 "type": "Unknown-Router",
                 "mac_counters": {},
@@ -581,6 +589,8 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
             }
         else:
             network_topology_node['type'] = 'Router'
+            if omr_ipv6addr_prefix:
+                network_topology_node["omrIpv6Address"] = td_util_network.get_omr_addr_from_list(network_topology_node.get("ipv6_addrs", []), omr_ipv6addr_prefix)
             network_topology_map[rloc16] = network_topology_node
 
             if expand_children:
@@ -620,6 +630,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
                             "mode": {},
                             "ipv6_addrs": ipv6_addresses.get(child_rloc, []),
                             "children": [],
+                            "omrIpv6Address": td_util_network.get_omr_addr_from_list(ipv6_addresses.get(child_rloc, []), omr_ipv6addr_prefix) if omr_ipv6addr_prefix else None,
                             "type": "Unknown-Child",
                             "mac_counters": {},
                             "mle_counters": {},
@@ -627,6 +638,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None):
                         }
                         
                         else:
+                            child_node['omrIpv6Address'] = td_util_network.get_omr_addr_from_list(child_node.get("ipv6_addrs", []), omr_ipv6addr_prefix) if omr_ipv6addr_prefix else None
                             network_topology_map[child_rloc] = child_node
                     
     return network_topology_map
@@ -643,6 +655,9 @@ def print_networkdiagnostic_topology(topology):
             for ipv6 in data['ipv6_addrs']:
                 print(f"    - {ipv6}")
         
+        if data.get('omrIpv6Address'):
+            print(f"  OMR IPv6 Address: {data['omrIpv6Address']}")
+
         if data.get('children'):
             print(f"  Children ({len(data['children'])}):")
             for child in data['children']:
@@ -676,7 +691,7 @@ def print_networkdiagnostic_topology(topology):
 
 def save_networkdiagnostic_topology_to_json_dict(data, filename="td-otbr-cli-networkdiag-topology.json"):
     """Serializes the dictionary to a pretty-printed JSON file."""
-    with open(filename, 'w') as f:
+    with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4)
     print(f"Successfully exported topology to {filename}")
 
@@ -687,6 +702,9 @@ def save_networkdiagnostic_topology_to_json_list(data, filename="thread-networkd
     ## TODO "type" find a way to filter to router-br, router, REED, FTD, MTD, child
    
     for rloc, data in data.items():
+        ##backup nn = deepcopy(data)
+
+        # set the order of fields in the output JSON for better readability, with key fields like rloc16, extaddr, device_label at the top, and then the more detailed fields like mode, ipv6_addrs, children, counters grouped together below. This way when looking at the JSON output, it's easier to quickly identify the key information about each node before diving into the more detailed data.
         network_node = {
             "rloc16": rloc,
             "extaddr": data['extaddr'],
@@ -694,6 +712,7 @@ def save_networkdiagnostic_topology_to_json_list(data, filename="thread-networkd
             "thread_stack_version": data.get('thread_stack_version', 'Unknown'),
             "mode": data.get('mode', {}),
             "ipv6_addrs": data.get('ipv6_addrs', []),
+            "omrIpv6Address": data.get('omrIpv6Address'),
             "type": data.get('type', 'Unknown'),
             "children": data.get('children', []),
             "mac_counters": data.get('mac_counters', {}),
@@ -702,7 +721,7 @@ def save_networkdiagnostic_topology_to_json_list(data, filename="thread-networkd
         }
         network_map.append(network_node)
     
-    with open(filename, 'w') as f:
+    with open(filename, 'w', encoding='utf-8') as f:
         json.dump(network_map, f, indent=4)
     print(f"Successfully exported topology to {filename}")
 
@@ -728,8 +747,10 @@ def main():
     else:
         extaddr_map = {}
   
+    network_dataset_info = td_util_network.get_network_dataset_info()
+
     # Get the networkdiagnostic topology data
-    networkdiagnostic_topology_data = get_networkdiagnostic_topology_data(extaddr_map)
+    networkdiagnostic_topology_data = get_networkdiagnostic_topology_data(extaddr_map, network_dataset_info)
     
     # print the topology in tree format to console 
     print_networkdiagnostic_topology(networkdiagnostic_topology_data)
@@ -741,28 +762,27 @@ def main():
     # Print the raw topology dictionary as JSON to console for debugging
     print(json.dumps(networkdiagnostic_topology_data, indent=4))
 
-    """
- 
-    # Determine output format from command-line argument
-    output_format = sys.argv[1] if len(sys.argv) > 1 else "all"
+    # """
+    # # Determine output format from command-line argument
+    # output_format = sys.argv[1] if len(sys.argv) > 1 else "all"
     
-    if output_format in ["console", "all"]:
-        print_network_topology(topology)
+    # if output_format in ["console", "all"]:
+    #     print_network_topology(topology)
     
-    if output_format in ["json-dict", "all"]:
-        save_topology_to_json(topology, "thread_topology.json")
+    # if output_format in ["json-dict", "all"]:
+    #     save_topology_to_json(topology, "thread_topology.json")
     
-    if output_format in ["json-list", "all"]:
-        save_topology_as_list_json(topology, "thread_topology_list.json")
+    # if output_format in ["json-list", "all"]:
+    #     save_topology_as_list_json(topology, "thread_topology_list.json")
     
-    if output_format not in ["console", "json-dict", "json-list", "all"]:
-        print(f"Unknown format '{output_format}'")
-        print("Usage: python td_dump_thread_topology_3_merged.py [console|json-dict|json-list|all]")
-        print("  console:  Print topology to console (tree format)")
-        print("  json-dict: Save as JSON dict with rloc16 keys")
-        print("  json-list: Save as JSON list with parent nodes")
-        print("  all:      Print to console + save both JSON formats (default)")
-    """
+    # if output_format not in ["console", "json-dict", "json-list", "all"]:
+    #     print(f"Unknown format '{output_format}'")
+    #     print("Usage: python td_dump_thread_topology_3_merged.py [console|json-dict|json-list|all]")
+    #     print("  console:  Print topology to console (tree format)")
+    #     print("  json-dict: Save as JSON dict with rloc16 keys")
+    #     print("  json-list: Save as JSON list with parent nodes")
+    #     print("  all:      Print to console + save both JSON formats (default)")
+    # """
         
 if __name__ == "__main__":
     main()

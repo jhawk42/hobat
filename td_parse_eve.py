@@ -1,10 +1,10 @@
-from td_util_convert import convert_from_base64_to_ext_address_hexnumber
-from td_util_network import conform_rloc_hex_strip
-
 import copy
 import json
 
-def parse_eve_process_id_mappings(path):
+import td_util_network
+from td_util_convert import convert_from_base64_to_ext_address_hexnumber
+
+def parse_eve_process_id_mappings(path, network_dataset_info=None):
     """
     Parses Eve JSON file and preserves all node fields.
 
@@ -13,16 +13,20 @@ def parse_eve_process_id_mappings(path):
 
     Args:
         path: Path to thread JSON file
+        network_dataset_info: Network dataset information for reference
 
     Returns:
         Dictionary mapping rloc16 (hex format) to all node fields with extaddr_hex added
     """
     
     rloc16_missing_start = 65535  # Default rloc16 value when missing (0xffff)
-
-    with open(path) as f:
-        j = json.load(f)
     out = {}
+
+    omr_ipv6addr_prefix = network_dataset_info["prefix_omr_ipv6addr_prefix"] if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info else None
+
+    # Load the Eve JSON file
+    with open(path, encoding='utf-8') as f:
+        j = json.load(f)
 
     for node in j.get("nodes", []):
         # Conform rloc16 to hex string for consistent mapping
@@ -34,15 +38,20 @@ def parse_eve_process_id_mappings(path):
         # Conform from 'ip_addresses' to "ipv6_addrs" for consistent naming and mapping
         ipv6_addrs = node.get("ip_addresses", [])
         node["ipv6_addrs"] = ipv6_addrs
-        # remove original 'ip_addresses' to avoid confusion since we have 'ipv6_addrs' now
+
+        # Enhance node with OMR IPv6 address  using OMR prefix
+        if omr_ipv6addr_prefix:
+            node["omr_ipv6_addrs"] = td_util_network.get_omr_addr_from_list(ipv6_addrs, omr_ipv6addr_prefix)
+
+        # Remove original 'ip_addresses' to avoid confusion since we have 'ipv6_addrs' now
         if "ip_addresses" in node:
             del node["ip_addresses"]
 
-        # Enrich node with hex rloc16 and short rloc for easier mapping
+        # Enhance node with hex rloc16 and short rloc for easier mapping
         rloc16_hex = f"0x{rloc16_decimal:04x}"
         node["rloc16"] = rloc16_hex  # Patch original rloc16 field to hex string for consistency in the node data structure
         node["rloc16_hex"] = rloc16_hex  # Add hex rloc16 for reference
-        node["rloc16_hexshort"] = conform_rloc_hex_strip(rloc16_hex)  # Add short rloc for reference
+        node["rloc16_hexshort"] = td_util_network.conform_rloc_hex_strip(rloc16_hex)  # Add short rloc for reference
         node["rloc16_decimal"] = rloc16_decimal  # Preserve original decimal rloc16 for reference
 
         node["node_name_eve"] = node.get("name")  # Preserve original node name from Eve for reference  
@@ -129,18 +138,21 @@ def parse_eve_process_route_mappings(eve_network_enhanced_data):
 
 
 if __name__ == "__main__":
-    ## Main execution: 
+    ## Main execution:
+
+    ## Get network dataset info for reference in parsing and enriching Eve data 
+    network_dataset_info = td_util_network.get_network_dataset_info()
 
     # Parse the Eve JSON file to build an enhanced data structure keyed by rloc16_hex with all node fields preserved and extAddress in hex format for easier mapping and reference. 
     eve_json_file_path = "thread-eve-layout.json"
-    eve_data_parse_1 = parse_eve_process_id_mappings(eve_json_file_path)
+    eve_data_parse_1 = parse_eve_process_id_mappings(eve_json_file_path, network_dataset_info)
 
     ## Reparse and enrich the eve_data json data structure to add route destination node names for reference
     eve_data_parse_2 = parse_eve_process_route_mappings(eve_data_parse_1)  
     
     ## Save json data structures for reference
     save_json_filename = "td-eve-topology.json"
-    with open(save_json_filename, 'w') as f:
+    with open(save_json_filename, 'w', encoding='utf-8') as f:
         json.dump(eve_data_parse_2, f, indent=4)
 
     ## Print the parsed data structure with route names

@@ -102,6 +102,35 @@ def format_prefix_omr_into_ipv6adrr_prefix(omr_prefix):
     """
     return _format_prefix_for_kind(omr_prefix, "omr")
 
+def check_if_ipv6_address_in_omr_prefix(ipv6_address, omr_ipv6_prefix):
+    """
+    Checks if a given IPv6 address falls within a specified OMR (On-Mesh Routable) ipv6 prefix.
+    
+    Args:
+        ipv6_address: The IPv6 address to check (e.g., "fdde:ad00:beef:0:0:ff:fe00:5000")
+        omr_ipv6_prefix: The OMR (On-Mesh Routable) IPv6 prefix to check against (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
+    
+    Returns:
+        True if the IPv6 address is within the prefix, False otherwise.
+    """
+    return ipv6_address.startswith(omr_ipv6_prefix)
+
+def get_omr_addr_from_list(ipv6_addrs, omr_ipv6_prefix):
+    """
+    Retrieves the OMR (On-Mesh Routable) address from a list of IPv6 addresses based on the OMR prefix.
+    
+    Args:
+        ipv6_addrs: List of IPv6 address strings to check (e.g., ["fdde:ad00:beef:0:0:ff:fe00:5000", "fdde:ad00:beef:0:0:ff:fe00:6000"])
+        omr_ipv6_prefix: The OMR (On-Mesh Routable) IPv6 prefix to check against (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
+    
+    Returns:
+        The first IPv6 address from the list that matches the OMR prefix, or None if no match is found.
+    """
+    for addr in ipv6_addrs:
+        if check_if_ipv6_address_in_omr_prefix(addr, omr_ipv6_prefix):
+            return addr
+    return None
+
 
 def get_dataset_active(hideSensitiveInfo=True):
     """
