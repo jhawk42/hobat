@@ -426,11 +426,12 @@
         // ── Multi-file topology datasets (match td_web_topology.html) ────────────
         {
           value: 'merged_otbr_cli_otbr_restapi',
-          label: 'merged: otbr cli: meshdiag, networkdiag, restapi: diagnostics',
+          label: 'merged: otbr cli: meshdiag, networkdiag, restapi: devices, diagnostics',
           files: [
             'td-otbr-cli-meshdiag-topology.json',
             'td-otbr-cli-networkdiag-topology.json',
             'td-otbr-cli-meshdiag-router-neighbortables.json',
+            'td-otbr-restapi-devices.json',
             'td-otbr-restapi-diagnostics.json'
           ],
           mergeStrategy: 'by-identity',
@@ -1202,27 +1203,47 @@
           nodeDegree.set(edge.from, (nodeDegree.get(edge.from) || 0) + 1);
           nodeDegree.set(edge.to, (nodeDegree.get(edge.to) || 0) + 1);
         }
-        const unknownIds = nodeData
-          .filter((n) => n.group === 'unknown' && (nodeDegree.get(n.id) || 0) === 0)
-          .map((n) => n.id);
-        if (unknownIds.length > 1) {
-          const anchor = unknownIds[0];
-          for (let i = 1; i < unknownIds.length; i += 1) {
-            addEdge(edgeMap, edgeData, anchor, unknownIds[i], {
-              hidden: true, physics: true, length: 60, color: { opacity: 0 }
-            });
-          }
-        }
-        if (unknownIds.length > 0) {
+        const connectedAnchorId = (function chooseConnectedAnchorId() {
           const knownCandidates = nodeData
             .filter((n) => n.group !== 'unknown' && (nodeDegree.get(n.id) || 0) > 0)
             .sort((a, b) => (nodeDegree.get(b.id) || 0) - (nodeDegree.get(a.id) || 0));
-          if (knownCandidates.length > 0) {
-            addEdge(edgeMap, edgeData, unknownIds[0], knownCandidates[0].id, {
-              hidden: true, physics: true, length: 180, color: { opacity: 0 }
+          return knownCandidates.length > 0 ? knownCandidates[0].id : '';
+        })();
+
+        function clusterIsolatedNodeIds(nodeIds, options = {}) {
+          if (nodeIds.length === 0) return;
+          const {
+            clusterLength = 80,
+            anchorLength = 180,
+            anchorId = ''
+          } = options;
+
+          if (nodeIds.length > 1) {
+            const anchorNodeId = nodeIds[0];
+            for (let i = 1; i < nodeIds.length; i += 1) {
+              addEdge(edgeMap, edgeData, anchorNodeId, nodeIds[i], {
+                hidden: true, physics: true, length: clusterLength, color: { opacity: 0 }
+              });
+            }
+          }
+
+          if (anchorId) {
+            addEdge(edgeMap, edgeData, nodeIds[0], anchorId, {
+              hidden: true, physics: true, length: anchorLength, color: { opacity: 0 }
             });
           }
         }
+
+        const unknownIds = nodeData
+          .filter((n) => n.group === 'unknown' && (nodeDegree.get(n.id) || 0) === 0)
+          .map((n) => n.id);
+        clusterIsolatedNodeIds(unknownIds, { clusterLength: 60, anchorLength: 180, anchorId: connectedAnchorId });
+
+        const knownIsolatedIds = nodeData
+          .filter((n) => n.group !== 'unknown' && (nodeDegree.get(n.id) || 0) === 0)
+          .map((n) => n.id);
+        clusterIsolatedNodeIds(knownIsolatedIds, { clusterLength: 110, anchorLength: 240, anchorId: connectedAnchorId });
+
         return nodeDegree;
       }
 
