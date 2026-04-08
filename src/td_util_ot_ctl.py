@@ -3,7 +3,8 @@ import subprocess
 import re
 import json
 
-DEFAULT_OT_CONTAINER_NAME = "otbr"  # Default container name for OTBR Docker image
+TD_OTBR_CONTAINER_NAME_DEFAULT = "otbr"  # Default container name for OTBR Docker image
+TD_OTBR_CONTAINER_NAME_ENV = "TD_OTBR_CONTAINER_NAME" # Environment variable name for OTBR container name
 
 def run_ot_ctl_command_stdio(ot_command, container_name:None, ):
     """
@@ -44,7 +45,7 @@ def run_ot_ctl_command_stdio(ot_command, container_name:None, ):
     except subprocess.CalledProcessError as e:
         return f"Error: {e.stderr.strip()}"
 
-def run_ot_ctl_stdio(command, container_name:None = DEFAULT_OT_CONTAINER_NAME):
+def run_ot_ctl_stdio(command, container_name:None = TD_OTBR_CONTAINER_NAME_DEFAULT):
     """
     Wrapper to execute ot-ctl command and return output.
     Inject docker container name and run ot-ctl command
