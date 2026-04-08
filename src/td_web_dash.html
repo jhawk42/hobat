@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Thread Mesh Network Dashboard</title>
+    <title>TDash: Thread Mesh Network Dashboard</title>
 
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/tofsjonas/sortable@latest/sortable.min.js"></script>
@@ -251,7 +251,7 @@
 
   <body>
     <div class="page">
-      <h1>Thread Mesh Network Dashboard</h1>
+      <h1>TDash: Thread Mesh Network Dashboard</h1>
 
       <!-- View toggle -->
       <div class="view-toggle-bar">
@@ -364,6 +364,17 @@
 
         // ── Single-file simple datasets (eve, table; topology ) ───
         {
+          value: 'example_small_eve_native_threadlayout',
+          label: 'example: small: eve native: Eve Thread Network Layout.evethreadlayout',
+          files: [
+            'example-small-Eve Thread Network Layout.evethreadlayout'
+          ],
+          mergeStrategy: 'none',
+          topologyMode: 'eve_native',
+          defaultLinkFilter: 'eve_native_routes_children'
+        },
+        // ── Single-file simple datasets (eve, table; topology ) ───
+        {
           value: 'eve_native_threadlayout',
           label: 'eve native: Eve Thread Network Layout.evethreadlayout',
           files: [
@@ -372,7 +383,8 @@
           mergeStrategy: 'none',
           topologyMode: 'eve_native',
           defaultLinkFilter: 'eve_native_routes_children'
-        }, 
+        },         
+        // ── Single-file simple datasets (eve, table; topology ) ───
         {
           value: 'eve_enhanced_topology',
           label: 'eve enhanced: td-eve-topology.json',
@@ -397,9 +409,23 @@
           defaultLinkFilter: 'otbr_rest_api'
         },
 
+        // ── Multi-file merged (medium depth — matches td_web_tables.html __merged__) ──
+        {
+          value: 'merged_otbr_cli_all',
+          label: 'merged: otbr cli: meshdiag, networkdiag, neighbortables',
+          files: [
+            'td-otbr-cli-meshdiag-topology.json',
+            'td-otbr-cli-networkdiag-topology.json',
+            'td-otbr-cli-meshdiag-router-neighbortables.json'
+          ],
+          mergeStrategy: 'by-identity',
+          topologyMode: 'meshdiag-networkdiag',
+          defaultLinkFilter: 'default_links'
+        }, 
+
         // ── Multi-file topology datasets (match td_web_topology.html) ────────────
         {
-          value: 'default_topology',
+          value: 'merged_otbr_cli_otbr_restapi',
           label: 'merged: otbr cli: meshdiag, networkdiag, restapi: diagnostics',
           files: [
             'td-otbr-cli-meshdiag-topology.json',
@@ -414,22 +440,39 @@
 
         // ── Multi-file merged (medium depth — matches td_web_tables.html __merged__) ──
         {
-          value: 'merged_medium',
-          label: 'merged: otbr cli: meshdiag, networkdiag, eve',
+          value: 'merged_otbr_cli_meshdiag_networkdiag_neighbortables_eve',
+          label: 'merged: otbr cli: meshdiag, networkdiag, neighbortables, eve',
           files: [
             'td-otbr-cli-meshdiag-topology.json',
             'td-otbr-cli-networkdiag-topology.json',
+            'td-otbr-cli-meshdiag-router-neighbortables.json',
             'td-eve-topology.json'
           ],
           mergeStrategy: 'by-identity',
           topologyMode: 'meshdiag-networkdiag',
           defaultLinkFilter: 'default_links'
-        }, 
-
+        },         
         
+        // ── Multi-file merged (medium depth — matches td_web_tables.html __merged__) ──
+        {
+          value: 'merged_otbr_cli_meshdiag_networkdiag_neighbortables_restapi_eve',
+          label: 'merged: otbr cli: meshdiag, networkdiag, neighbortables, otbr restapi, eve',
+          files: [
+            'td-otbr-cli-meshdiag-topology.json',
+            'td-otbr-cli-networkdiag-topology.json',
+            'td-otbr-cli-meshdiag-router-neighbortables.json',
+            'td-otbr-restapi-devices.json',
+            'td-otbr-restapi-diagnostics.json',
+            'td-eve-topology.json'
+          ],
+          mergeStrategy: 'by-identity',
+          topologyMode: 'meshdiag-networkdiag',
+          defaultLinkFilter: 'default_links'
+        },   
+
         // ── Deep merged (matches td_web_tables.html td-merged-topology-all.json) ─
         {
-          value: 'merged_all_deep_wide',
+          value: 'merged_all_deep_wide_otbr_cli_restapi_eve',
           label: 'merged: all: otbr cli, restapi, eve - td-merged-topology-all.json',
           files: [
             'td-merged-topology-all.json'
@@ -438,8 +481,6 @@
           topologyMode: 'merged-detailed',
           defaultLinkFilter: 'all_links'
         },
-
-
 
         // ── Single-file simple datasets (table-first; topology via raw-array) ───
         {
@@ -459,7 +500,7 @@
             'td-otbr-cli-meshdiag-topology.json'
           ],
           mergeStrategy: 'none',
-          topologyMode: 'raw-array',
+          topologyMode: 'meshdiag-networkdiag',
           defaultLinkFilter: 'default_links'
         },
         {
@@ -469,7 +510,7 @@
             'td-otbr-cli-networkdiag-topology.json'
           ],
           mergeStrategy: 'none',
-          topologyMode: 'raw-array',
+          topologyMode: 'meshdiag-networkdiag',
           defaultLinkFilter: 'default_links'
         },
         {
@@ -479,7 +520,7 @@
             'td-otbr-cli-meshdiag-router-neighbortables.json'
           ],
           mergeStrategy: 'none',
-          topologyMode: 'raw-array',
+          topologyMode: 'merged-detailed',
           defaultLinkFilter: 'all_links'
         },
         {
@@ -489,7 +530,7 @@
             'td-otbr-restapi-devices.json'
           ],
           mergeStrategy: 'none',
-          topologyMode: 'raw-array',
+          topologyMode: 'otbr_restapi',
           defaultLinkFilter: 'all_links'
         },
         {
@@ -499,10 +540,9 @@
             'td-otbr-restapi-diagnostics.json'
           ],
           mergeStrategy: 'none',
-          topologyMode: 'raw-array',
+          topologyMode: 'otbr_restapi',
           defaultLinkFilter: 'all_links'
         }
-
       ];
 
       // Build dataset <select> from registry
