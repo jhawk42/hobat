@@ -23,7 +23,8 @@ def run_ot_ctl_command_stdio(ot_command, container_name:None, ):
     ]
     
     if container_name is not None:
-        # Use the docker command for now, but this can be extended to support non-docker execution in the future
+        # Use the docker command for now, but this can be extended to support non-docker execution 
+        # in the future
         full_command = full_command_docker_container
     else:   
         full_command = full_command_no_docker  
@@ -54,7 +55,7 @@ def run_ot_ctl_stdio(command, container_name:None = DEFAULT_OT_CONTAINER_NAME):
     Note:  Default container name "otbr" used by the OpenThread Border Router (OTBR) 
            Docker image. This can be overridden by setting the OT_CONTAINER_NAME environment variable.
     """
-    
+
     # TODO add command line option support to run ot-ctl command without docker exec
 
     # get container name from environment variable or use default
