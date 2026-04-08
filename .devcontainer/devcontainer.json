@@ -3,6 +3,7 @@
 {
 	"name": "Python 3",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	// https://mcr.microsoft.com/en-us/artifact/mar/devcontainers/python/about
 	"image": "mcr.microsoft.com/devcontainers/python:3-3.14-bookworm",
 	"features": {
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
@@ -22,4 +23,8 @@
 
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
+
+	// mount workspace parent root to enable peer worktree directories
+	"workspaceMount": "source=${localWorkspaceFolder}/..,target=/workspaces,type=bind",
+	"workspaceFolder": "${localWorkspaceFolder}"
 }
