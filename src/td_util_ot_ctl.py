@@ -54,13 +54,13 @@ def run_ot_ctl_stdio(command, container_name:None = TD_OTBR_CONTAINER_NAME_DEFAU
     docker and non-docker execution in the future.
    
     Note:  Default container name "otbr" used by the OpenThread Border Router (OTBR) 
-           Docker image. This can be overridden by setting the OT_CONTAINER_NAME environment variable.
+           Docker image. This can be overridden by setting the TD_OTBR_CONTAINER_NAME environment variable.
     """
 
     # TODO add command line option support to run ot-ctl command without docker exec
 
     # get container name from environment variable or use default
-    container_name_env = os.getenv("OT_CONTAINER_NAME")
+    container_name_env = os.getenv(TD_OTBR_CONTAINER_NAME_ENV)
     if container_name_env:
         container_name = container_name_env
 
