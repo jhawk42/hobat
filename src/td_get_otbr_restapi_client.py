@@ -7,7 +7,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-DEFAULT_HOST = "192.168.4.77"
+DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8081
 DEFAULT_TIMEOUT = 10
 DEFAULT_ACCEPT = "application/vnd.api+json"

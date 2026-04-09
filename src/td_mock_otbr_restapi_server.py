@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 18081
-LIVE_DEFAULT_HOST = "192.168.4.77"
+LIVE_DEFAULT_HOST = "127.0.0.1"
 LIVE_DEFAULT_PORT = 8081
 JSON_API = "application/vnd.api+json"
 JSON = "application/json"

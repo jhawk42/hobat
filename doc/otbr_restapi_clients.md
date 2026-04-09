@@ -11,7 +11,7 @@ The existing `td_get_otbr_restapi.py` script is intentionally left unchanged.
 
 Default OTBR host:
 
-- `192.168.4.77`
+- `127.0.0.1`
 - default port remains `8081`
 
 ## Response Shapes
@@ -107,7 +107,7 @@ Coverage includes:
 
 ## Command-Line Examples
 
-These examples use the default live OTBR host `192.168.4.77:8081`.
+These examples use the default live OTBR host `127.0.0.1:8081`.
 
 1. Flattened CLI: get the OTBR node as a flattened object
 
@@ -153,7 +153,7 @@ For the local mock server, do not use the live-default examples directly. Overri
 
 ## Live OTBR Smoke Tests
 
-These examples assume the current default live OTBR host `192.168.4.77`.
+These examples assume the current default live OTBR host `127.0.0.1`.
 
 Do not reuse these live-default commands for the local mock server. The mock server requires explicit `--host 127.0.0.1 --port 18081` overrides.
 
@@ -188,7 +188,7 @@ Expected results:
 
 ### Validated live host example
 
-The following commands were validated against the live OTBR REST API at `192.168.4.77:8081`.
+The following commands were validated against the live OTBR REST API at `127.0.0.1:8081`.
 
 Flattened client and CLI:
 
@@ -215,8 +215,8 @@ Observed live results:
 You can still override the default target explicitly when needed:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py --host 192.168.4.77 devices list --with-meta
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py --host 192.168.4.77 devices list
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py --host 127.0.0.1 devices list --with-meta
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py --host 127.0.0.1 devices list
 ```
 
 ## Local Mock Server
@@ -225,7 +225,7 @@ Use the mock server when a live OTBR endpoint is not available.
 
 Important:
 
-- the client default target is the live OTBR host `192.168.4.77:8081`
+- the client default target is the live OTBR host `127.0.0.1:8081`
 - the mock server runs locally on `127.0.0.1:18081`
 - when talking to the mock server, override both `--host` and `--port`
 - do not rely on client defaults when testing the mock server

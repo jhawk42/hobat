@@ -4,8 +4,7 @@ from typing import Iterable, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-#HOST = "127.0.0.1"
-HOST = "192.168.4.77"
+HOST = "127.0.0.1"
 PORT = 8081
 BASE_URL = f"http://{HOST}:{PORT}"
 HEADERS = {"Accept": "application/vnd.api+json"}
