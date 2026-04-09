@@ -56,14 +56,14 @@ All Python files share the `td_` prefix.  Test files are prefixed `test_td_`.
 
 ### Data Collection — ot-ctl CLI (via Docker)
 
-| File | Purpose |
-|---|---|
-| `td_get_otbr_cli_router_table.py` | Runs `ot-ctl router table` and parses the pipe-delimited table into a list of router dicts. |
-| `td_get_otbr_cli_meshdiag_topology.py` | Runs `ot-ctl meshdiag topology ip6-addrs children` and parses per-router blocks including IPv6 addresses, link-quality buckets (1/2/3-links), and children. |
-| `td_get_otbr_cli_meshdiag_childtable.py` | Runs `ot-ctl meshdiag childtable` to collect the child device table. |
-| `td_get_otbr_cli_meshdiag_routerneighbortable.py` | Runs `ot-ctl meshdiag routerneighbortable` to collect router-to-router neighbour information. |
-| `td_get_otbr_cli_networkdiag_topology.py` | Runs `ot-ctl meshdiag topology ip6-addrs` plus the network-diagnostic APIs to build an enriched topology map. |
-| `td_get_otbr_cli_network_dataset_info.py` | Runs `ot-ctl dataset active` and prefix commands to collect the active Thread dataset and OMR/mesh-local prefixes. |
+| File | ot-ctl Command | Output File | Purpose |
+|---|---|---|---|
+| `td_get_otbr_cli_router_table.py` | `router table` | `td-otbr-cli-router-table.json` | Parses the pipe-delimited router table into a list of router dicts with fields: ID, RLOC16, Next Hop, Path Cost, LQ In/Out, Age, Extended MAC, and Link. Adds `extaddr` and `device_label` from the static label map. |
+| `td_get_otbr_cli_meshdiag_topology.py` | `meshdiag topology ip6-addrs children` | `td-otbr-cli-meshdiag-topology.json` | Parses per-router blocks containing: RLOC16, extaddr, Thread version, BR flag, link-quality buckets (1/2/3-links with peer IDs), IPv6 address list, and children (RLOC16 + link quality + mode).  Also computes `total_children`, `total_links`, and `omrIpv6Address`. |
+| `td_get_otbr_cli_meshdiag_childtable.py` | `meshdiag childtable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childtables.json` | For every router in the router table, collects per-child details: RLOC16, extaddr, Thread version, timeout, age, supervision interval, queued messages, rx-on flag, device type, full-net flag, RSS (avg/last/margin), frame/message error rates, connection time, and CSL parameters.  Handles `ResponseTimeout` gracefully. |
+| `td_get_otbr_cli_meshdiag_routerneighbortable.py` | `meshdiag routerneighbortable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-neighbortables.json` | For every router in the router table, collects per-neighbour details: RLOC16, extaddr, Thread version, RSS (avg/last/margin), frame/message error rates, and connection time.  Handles `ResponseTimeout` gracefully. |
+| `td_get_otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (once per router) | `td-otbr-cli-networkdiag-topology.json` | For every router, issues a network-diagnostic TLV request and parses: IPv6 address list, Mode TLV (RxOnWhenIdle / DeviceType / NetworkData → FTD/MTD classification), child table (IDs, timeouts, link quality, mode flags), MAC counters (error/discard totals and percentages relative to total packets), MLE counters (role changes, partition ID changes, parent changes, attach attempts), and time-in-role statistics. |
+| `td_get_otbr_cli_network_dataset_info.py` | `dataset active`, `prefix meshlocal`, `br omrprefix favored` | `td-otbr-cli-network-dataset-info.json` | Collects the active Thread dataset (channel, PAN ID, extended PAN ID, mesh-local prefix, network name, etc.) and derives the mesh-local IPv6 RLOC prefix and the OMR prefix for use by other collectors. |
 
 ### Data Collection — Other Sources
 
@@ -97,11 +97,108 @@ All Python files share the `td_` prefix.  Test files are prefixed `test_td_`.
 
 | File | Purpose |
 |---|---|
-| `td_web_dash.html` | Main self-contained dashboard.  Loads a merged JSON file selected from a dropdown, renders a **vis-network** topology graph and a **sortable** table, and supports filtering by node, link, and diagnostic fields.  Toggle between Topology and Table views. |
+| `td_web_dash.html` | Main self-contained dashboard (see [Dashboard Functions](#dashboard-functions) below). |
 | `td_web_tables.html` | Standalone table-only view for the merged dataset. |
 | `td_web_topology.html` | Standalone topology-only view. |
 
-### Testing and Mock Server
+---
+
+## Dashboard Functions
+
+`td_web_dash.html` is a single-page application with no build step — open it directly in a browser.
+
+### Dataset Selection
+
+A **Dataset** dropdown (populated from `DATASET_REGISTRY`) lets you choose which JSON file(s) to load. Each registry entry specifies:
+
+- `files[]` — one or more local JSON filenames to fetch (via `fetch()`)
+- `mergeStrategy` — how to combine multiple files (`none` / `by-rloc16` / `by-identity`)
+- `topologyMode` — which topology adaptor to use when drawing the graph
+- `defaultLinkFilter` — the link filter pre-selected when this dataset loads
+
+Pre-configured datasets include single-file views (router table, meshdiag-only, REST API devices) as well as rich multi-file merged views combining CLI collectors, REST API data, and Eve exports.
+
+### View Modes
+
+| Button | What it shows |
+|---|---|
+| **Topology** | Interactive [vis-network](https://visjs.github.io/vis-network/docs/network/) graph of the mesh.  Click any node to see all its properties in the side panel. |
+| **Table** | Flat [sortable](https://github.com/tofsjonas/sortable) table of all rows in the loaded dataset.  Click any column header to sort. |
+| **Physics** | Toggles the vis-network physics simulation on/off (spring-force layout vs. fixed positions). |
+| **Auto Zoom** | Toggles automatic fit-to-view when a dataset loads. |
+| **Animation** | Toggles vis-network edge animation. |
+
+### Node Filter
+
+Filters which nodes appear in both Topology and Table views:
+
+| Option | Criteria |
+|---|---|
+| All Nodes | No filter |
+| Full Thread Devices (FTD) | `mode.device == "FTD"` |
+| Minimal Thread Devices (MTD) | `mode.device == "MTD"` |
+| Border Routers | `br == true` |
+| Routers | `role == "router"` |
+| Routers with Children | `total_children > 0` |
+| Routers without Children | `total_children == 0` |
+
+### Link Filter
+
+Controls which edges are drawn in the Topology view (see [Topology Modes and Link Filters](#topology-modes-and-link-filters) for details).
+
+### Diagnostics Filter
+
+Filters rows in the Table view to highlight nodes with health issues:
+
+| Category | Filters available |
+|---|---|
+| MAC errors | Total error packet % ≥ 5 % (medium) or ≥ 10 % (high) |
+| MAC discards | Total discard packet % ≥ 15 % (high) |
+| MLE partition changes | ≥ 2 (medium) or ≥ 5 (high) |
+| MLE parent changes | ≥ 2 (medium) or ≥ 5 (high) |
+| Router neighbour frame error rate | ≥ 2 % (low), ≥ 5 % (medium), ≥ 10 % (high) |
+| Router neighbour message error rate | ≥ 2 % (low), ≥ 5 % (medium), ≥ 10 % (high) |
+| Router neighbour RSS | Bad (< −80 dBm), Fair (−70 to −80), Good (−60 to −70), Excellent (> −60) |
+
+### Node Details Panel
+
+Clicking a node in Topology view populates a scrollable side panel listing every field from the underlying data row — useful for inspecting raw diagnostic counters, IPv6 addresses, mode flags, and link quality values without opening the Table view.
+
+---
+
+## Topology Modes and Link Filters
+
+### Topology Modes
+
+The `topologyMode` field in each dataset registry entry selects the JavaScript adaptor that transforms raw JSON rows into vis-network nodes and edges.
+
+| Mode | Typical Input Files | What it draws |
+|---|---|---|
+| `meshdiag-networkdiag` | `td-otbr-cli-meshdiag-topology.json`, `td-otbr-cli-networkdiag-topology.json` | Nodes for every router; edges derived from the link-quality buckets (1/2/3-links), children arrays, child tables, and router-neighbour tables depending on the active link filter. |
+| `merged-detailed` | `td-merged-topology-all.json` | Full merged dataset; all link types available. |
+| `otbr_restapi` | `td-otbr-restapi-devices.json`, `td-otbr-restapi-diagnostics.json` | Nodes from OTBR REST API device list; edges from route data and child tables embedded in the REST API payloads. |
+| `eve_enhanced` | `td-eve-topology.json` | Nodes from the pre-processed Eve topology; edges from enriched `routes` and `children` arrays. |
+| `eve_native` | `*.evethreadlayout` | Nodes from a raw Eve App export; edges from the native `routes` and `children` arrays. |
+| `router-table` | `td-otbr-cli-router-table.json` | Nodes from the router table only; edges based on Next Hop column. |
+
+### Link Filters
+
+The **Links** dropdown controls which edge types are drawn for the current topology mode.  The default filter for each dataset is set by `defaultLinkFilter` in `DATASET_REGISTRY`.
+
+| Filter value | Edges drawn |
+|---|---|
+| `default_links` | Router-to-router links from the 3/2/1-link quality buckets, plus child links from the `children` array and `childTable` entries. |
+| `default_plus_router_neighbors` | Everything in `default_links`, plus additional edges from the router-neighbour tables (`meshdiag routerneighbortable`). |
+| `otbr_rest_api` | Edges from `routeData` and `childTable` fields in the OTBR REST API payloads. |
+| `eve_enhanced_routes_children` | Edges from the `routes` and `children` arrays in the pre-processed Eve topology. |
+| `eve_native_routes_children` | Edges from the `routes` and `children` arrays in a raw Eve App export. |
+| `all_links` | All available edge types for the current topology mode.  Can produce a dense graph for large networks. |
+
+> **Tip:** When a dataset is selected, its `defaultLinkFilter` is automatically applied.  Switch the link filter after loading to explore different views of the same data without reloading.
+
+---
+
+## Testing and Mock Server
 
 | File | Purpose |
 |---|---|
@@ -174,9 +271,15 @@ All Python files share the `td_` prefix.  Test files are prefixed `test_td_`.
 # Download REST API snapshots
 python src/td_get_otbr_restapi.py
 
-# Collect CLI data
+# Collect network dataset info (provides OMR / mesh-local prefixes used by other collectors)
+python src/td_get_otbr_cli_network_dataset_info.py
+
+# Collect CLI topology data
 python src/td_get_otbr_cli_router_table.py
 python src/td_get_otbr_cli_meshdiag_topology.py
+python src/td_get_otbr_cli_meshdiag_childtable.py
+python src/td_get_otbr_cli_meshdiag_routerneighbortable.py
+python src/td_get_otbr_cli_networkdiag_topology.py
 
 # Merge everything
 python src/td_merge.py
