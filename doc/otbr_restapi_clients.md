@@ -7,7 +7,7 @@ This repository now provides two client pairs for the OTBR REST API:
 - `td_get_otbr_restapi_raw_client.py`
 - `td_get_otbr_restapi_raw_client_cli.py`
 
-The existing `td_get_otbr_restapi.py` script is intentionally left unchanged.
+The existing `td_get_otbr_restapi.py` script remains a fixed-target downloader, but it now accepts CLI overrides for host, port, base URL, timeout, and request headers.
 
 Default OTBR host:
 
