@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from td_get_otbr_restapi_client import (
+from td_otbr_client import (
     DEFAULT_ACCEPT,
     DEFAULT_HOST,
     DEFAULT_PORT,

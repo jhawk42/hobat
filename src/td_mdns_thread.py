@@ -6,19 +6,12 @@ import time
 import base64
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 
-# Vendor OUI Lookup Table
-VENDORS = {
-    "0017f2": "Apple",
-    "d828c9": "Google (Nest)",
-    "f0d1a9": "Amazon/Eero",
-    "44d832": "Nanoleaf",
-    "00124b": "Texas Instruments"
-}
+from td_util_mdns import VENDOR_OUI, get_vendor_from_extaddr
+
 
 def get_vendor_from_oui(oui_hex):
     """Extract vendor from OUI (first 3 bytes of Extended Address)"""
-    oui = oui_hex[:6].lower()
-    return VENDORS.get(oui, "Unknown Vendor")
+    return get_vendor_from_extaddr(oui_hex)
 
 def decode_state_bitmap_br(sb_hex):
     """Decode the State Bitmap (sb) field into individual bit meanings"""

@@ -6,8 +6,8 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-import td_get_otbr_restapi_client as client_module
-import td_get_otbr_restapi_client_cli as cli_module
+import td_otbr_client as client_module
+import td_otbr_client_cli as cli_module
 
 
 class FakeHeaders:

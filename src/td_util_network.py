@@ -224,3 +224,12 @@ def get_network_dataset_info():
     network_dataset_info.update(dataset_active)
     
     return network_dataset_info
+
+
+# Short-form aliases for the verbose function names
+meshlocal_to_rloc_prefix = format_prefix_meshlocal_into_ipv6adrr_prefix
+omr_to_ipv6_prefix = format_prefix_omr_into_ipv6adrr_prefix
+is_in_omr_prefix = check_if_ipv6_address_in_omr_prefix
+make_rloc_ipv6 = merge_ipv6_rloc_prefix_rloc_hex
+strip_0x = conform_rloc_hex_strip
+

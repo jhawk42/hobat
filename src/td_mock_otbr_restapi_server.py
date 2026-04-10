@@ -39,8 +39,8 @@ class MockOTBRStore:
                 "rloc16": "0xf000",
                 "extAddress": "96518e5497d5b9f3",
                 "mlEidIid": "731f529f1266a17d",
-                "omrIpv6Address": ["fd11:22:0:0:92de:b397:5758:368"],
-                "hostname": "otbr.local",
+                "omrIpv6Address": ["fd11:0000:0000:0000:0000:0000:0000:0001"],
+                "hostname": "otbr-mock.example",
                 "eui": "9035eafffef3e09c",
                 "role": "router",
                 "mode": {
@@ -50,7 +50,7 @@ class MockOTBRStore:
                 },
                 "baId": "e11e23c164311ce642f93297b095b2f8",
                 "routerCount": 2,
-                "rlocAddress": "fd7a:9882:1777:a344:0:ff:fe00:f000",
+                "rlocAddress": "fd00:0000:0000:0000:0:ff:fe00:f000",
                 "networkName": "OpenThread-1234",
                 "routerId": 0,
                 "leaderData": {
@@ -71,8 +71,8 @@ class MockOTBRStore:
             "attributes": {
                 "extAddress": "2a55d952bc7b4008",
                 "mlEidIid": "3abd123497a87083",
-                "omrIpv6Address": ["fd11:22:0:0:3abd:e522:97a8:7083"],
-                "hostname": "sensor-01.local",
+                "omrIpv6Address": ["fd11:0000:0000:0000:0000:0000:0000:0002"],
+                "hostname": "device-01.example",
                 "eui": "f4ce36dbdca16d79",
                 "role": "child",
                 "mode": {
@@ -92,7 +92,7 @@ class MockOTBRStore:
                     "created": "2026-04-04T10:10:00Z",
                     "extAddress": "96518e5497d5b9f3",
                     "rloc16": "0xf000",
-                    "ipv6Addresses": ["fd11:22:0:0:92de:b397:5758:368"],
+                    "ipv6Addresses": ["fd11:0000:0000:0000:0000:0000:0000:0001"],
                     "vendorName": "MockVendor",
                     "vendorModel": "MockOTBR",
                     "threadVersion": 4,
@@ -129,13 +129,13 @@ class MockOTBRStore:
 
         active_dataset_json = {
             "activeTimestamp": {"seconds": 1, "ticks": 0, "authoritative": False},
-            "networkKey": "08277229F21FB7342D705D3CEFDC042A",
+            "networkKey": "00000000000000000000000000000000",
             "networkName": "OpenThread-1234",
-            "extPanId": "996D3BEE320097A3",
-            "meshLocalPrefix": "fd33:d3b9:89e3:72e4::/64",
+            "extPanId": "0000000000000000",
+            "meshLocalPrefix": "fd00:0000:0000:0000::/64",
             "panId": 4660,
             "channel": 21,
-            "pskc": "FD943ECA225A28979B991EFAC1218A72",
+            "pskc": "00000000000000000000000000000000",
         }
 
         return cls(

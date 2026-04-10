@@ -1,7 +1,7 @@
 import json
 
 
-def parse_extaddr_nodename_mapping(path):
+def load_extaddr_map(path):
     """
     Parses extended address to node name mapping from td-static-extaddr-device-label.json.
     
@@ -22,3 +22,7 @@ def parse_extaddr_nodename_mapping(path):
             mapping[extaddr] = device_label
 
     return mapping
+
+
+# Backward-compatible alias
+parse_extaddr_nodename_mapping = load_extaddr_map

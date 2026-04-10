@@ -9,8 +9,8 @@ from copy import deepcopy
 import td_util_ot_ctl
 import td_util_network
 import logging
-from td_get_otbr_cli_router_table import get_router_table_data
-from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
+from td_otbr_router_table import get_router_table_data
+from td_extaddr_map import parse_extaddr_nodename_mapping
 
 # from td_util_network import (
 #     get_prefix_meshlocal,

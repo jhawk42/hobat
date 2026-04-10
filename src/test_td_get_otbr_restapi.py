@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-import td_get_otbr_restapi as script_module
+import td_otbr_download as script_module
 
 
 class TdGetOtbrRestApiTests(unittest.TestCase):
@@ -33,7 +33,7 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
             exit_code = script_module.main(
                 [
                     "--host",
-                    "192.168.4.77",
+                    "192.0.2.1",
                     "--port",
                     "18081",
                     "--accept",
@@ -47,7 +47,7 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         restapi_downloads.assert_called_once_with(
-            base_url="http://192.168.4.77:18081",
+            base_url="http://192.0.2.1:18081",
             headers={
                 "Accept": "application/json",
                 "Authorization": "Bearer token",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from td_get_otbr_restapi_client import (
+from td_otbr_client import (
     DEFAULT_ACCEPT,
     DEFAULT_HOST,
     DEFAULT_PORT,

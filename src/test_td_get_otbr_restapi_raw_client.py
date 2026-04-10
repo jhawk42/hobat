@@ -5,9 +5,9 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-import td_get_otbr_restapi_client as base_client_module
-import td_get_otbr_restapi_raw_client as raw_client_module
-import td_get_otbr_restapi_raw_client_cli as raw_cli_module
+import td_otbr_client as base_client_module
+import td_otbr_raw_client as raw_client_module
+import td_otbr_raw_client_cli as raw_cli_module
 
 
 class FakeHeaders:

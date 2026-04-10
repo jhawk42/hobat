@@ -5,7 +5,7 @@ import json
 
 import td_util_ot_ctl
 import td_util_network
-from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
+from td_extaddr_map import parse_extaddr_nodename_mapping
 
 def get_meshdiag_topology_ip6addrs_children():
     """Retrieves the meshdiag topology IP6 addresses and children data from the network.

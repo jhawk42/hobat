@@ -1,6 +1,6 @@
 import base64
 
-def convert_from_base64_to_ext_address_hexnumber(b64_str, reverse=False):
+def b64_to_extaddr_hex(b64_str, reverse=False):
     """
     Converts a base64-encoded extended address to hexadecimal format.
     
@@ -24,7 +24,7 @@ def convert_from_base64_to_ext_address_hexnumber(b64_str, reverse=False):
     return raw_bytes.hex()
 
 
-def convert_hexnumber_extaddr_to_base64(hex_str, reverse=False):
+def extaddr_hex_to_b64(hex_str, reverse=False):
     """
     Converts a hexadecimal extended address to a base64-encoded string.
     
@@ -49,3 +49,8 @@ def convert_hexnumber_extaddr_to_base64(hex_str, reverse=False):
     escaped_b64_str = b64_str.replace('/', r'\/')
     
     return escaped_b64_str
+
+
+# Backward-compatible aliases
+convert_from_base64_to_ext_address_hexnumber = b64_to_extaddr_hex
+convert_hexnumber_extaddr_to_base64 = extaddr_hex_to_b64

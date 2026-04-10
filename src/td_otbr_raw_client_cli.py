@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from typing import Any, Sequence
 
-from td_get_otbr_restapi_client_cli import (
+from td_otbr_client_cli import (
     EXIT_SUCCESS,
     _load_dataset_input,
     _parse_typed_values,
@@ -11,7 +11,7 @@ from td_get_otbr_restapi_client_cli import (
     emit_error,
     emit_output,
 )
-from td_get_otbr_restapi_raw_client import OTBRRawRestApiClient, build_fields_mapping
+from td_otbr_raw_client import OTBRRawRestApiClient, build_fields_mapping
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -111,7 +111,7 @@ def dispatch(args: argparse.Namespace) -> Any:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    from td_get_otbr_restapi_client_cli import exit_code_for_exception
+    from td_otbr_client_cli import exit_code_for_exception
 
     parser = build_parser()
     args = parser.parse_args(argv)
