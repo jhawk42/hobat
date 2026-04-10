@@ -106,7 +106,7 @@ def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
 
     return router_neighbor_table
     
-def get_meshdiag_routerneighbortables(extaddr_map:None):
+def get_meshdiag_routerneighbortables(extaddr_map: dict | None = None):
 
     # 1. Get all active routers (potential parents)
     router_table_data = get_router_table_data(extaddr_map)
@@ -133,14 +133,13 @@ def main():
     # Load extaddr to nodename mapping from JSON file
     extaddr_json_filename = "td-static-extaddr-device-label.json"
 
-    # Check if file exists before parsing
-    if os.path.exists(extaddr_json_filename):
-        extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
+    extaddr_file = extaddr_json_filename
+    if os.path.exists(extaddr_file):
+        print(f"Loading extended address to node name mapping from {extaddr_file}...")
+        extaddr_map = parse_extaddr_nodename_mapping(extaddr_file)
     else:
+        print(f"ExtAddr mapping file not found: {extaddr_file}. Continuing with empty map.")
         extaddr_map = {}
-
-    print(f"Loading extended address to node name mapping from {extaddr_json_filename}...")
-    extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
         
     router_neighbor_tables = get_meshdiag_routerneighbortables(extaddr_map)
     

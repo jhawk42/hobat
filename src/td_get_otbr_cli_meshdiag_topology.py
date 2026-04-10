@@ -153,8 +153,6 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data, networ
     Returns:
         Enhanced topology data with additional fields/calculations
     """
-    pass
-
     omr_ipv6addr_prefix = network_dataset_info["prefix_omr_ipv6addr_prefix"] if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info else None 
 
     topology_data_enhanced = []

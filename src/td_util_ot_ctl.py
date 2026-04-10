@@ -1,69 +1,53 @@
 import os
+import shlex
 import subprocess
-import re
-import json
 
-TD_OTBR_CONTAINER_NAME_DEFAULT = "otbr"  # Default container name for OTBR Docker image
-TD_OTBR_CONTAINER_NAME_ENV = "TD_OTBR_CONTAINER_NAME" # Environment variable name for OTBR container name
+DEFAULT_CONTAINER_NAME = "otbr"  # Default container name for OTBR Docker image
+CONTAINER_NAME_ENV_VAR = "TD_OTBR_CONTAINER_NAME"  # Environment variable name for OTBR container name
 
-def run_ot_ctl_command_stdio(ot_command, container_name:None, ):
+
+def _exec_ot_ctl(command: str, container_name: str | None) -> str:
     """
-    Executes an ot-ctl command inside a running OTBR Docker container.
+    Executes an ot-ctl command, optionally inside a running OTBR Docker container.
     """
-    
-    # Construct the docker exec command
-    # 'sh -c' is often used to ensure the command executes correctly in the container shell
-    full_command_docker_container = [
-        "docker", "exec", container_name, 
-        "sh", "-c", f"ot-ctl {ot_command}"
-    ]
-
-    ## TODO add command line option support to run ot-ctl command without docker exec
-    full_command_no_docker = [
-        f"ot-ctl {ot_command}"
-    ]
-    
     if container_name is not None:
-        # Use the docker command for now, but this can be extended to support non-docker execution 
-        # in the future
-        full_command = full_command_docker_container
-    else:   
-        full_command = full_command_no_docker  
+        cmd = ["docker", "exec", container_name, "sh", "-c", f"ot-ctl {command}"]
+    else:
+        cmd = ["ot-ctl"] + shlex.split(command)
 
-    # Debug: Print the command being executed
-    print(f"[DEBUG] {full_command}")
+    import logging
+    logging.debug("Running command: %s", cmd)
 
     try:
-        # Run the command and capture output    
         result = subprocess.run(
-            full_command, 
-            capture_output=True, 
-            text=True, 
-            check=True
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
         return f"Error: {e.stderr.strip()}"
 
-def run_ot_ctl_stdio(command, container_name:None = TD_OTBR_CONTAINER_NAME_DEFAULT):
+
+def run_ot_ctl(command: str, container_name: str = DEFAULT_CONTAINER_NAME) -> str:
     """
     Wrapper to execute ot-ctl command and return output.
-    Inject docker container name and run ot-ctl command
+    Inject docker container name and run ot-ctl command.
 
-    Keeps the container name management in one place and easily switch between 
-    docker and non-docker execution in the future.
-   
-    Note:  Default container name "otbr" used by the OpenThread Border Router (OTBR) 
-           Docker image. This can be overridden by setting the TD_OTBR_CONTAINER_NAME environment variable.
+    Keeps the container name management in one place and makes it easy to switch
+    between docker and non-docker execution.
+
+    Note: Default container name "otbr" used by the OpenThread Border Router (OTBR)
+          Docker image. This can be overridden by setting the TD_OTBR_CONTAINER_NAME
+          environment variable or passing container_name=None to run without Docker.
     """
+    env_container_name = os.getenv(CONTAINER_NAME_ENV_VAR)
+    if env_container_name:
+        container_name = env_container_name
 
-    # TODO add env & command line option support to run ot-ctl command without docker exec
+    return _exec_ot_ctl(command, container_name)
 
-    # get container name from environment variable or use default
-    container_name_env = os.getenv(TD_OTBR_CONTAINER_NAME_ENV)
-    if container_name_env:
-        container_name = container_name_env
 
-    # use the provided container name or default if not provided   
-    output = run_ot_ctl_command_stdio(command, container_name)
-    return output
+# Backward-compatible alias used by existing callers
+run_ot_ctl_stdio = run_ot_ctl

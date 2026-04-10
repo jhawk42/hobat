@@ -8,6 +8,7 @@ import time
 from copy import deepcopy
 import td_util_ot_ctl
 import td_util_network
+import logging
 from td_get_otbr_cli_router_table import get_router_table_data
 from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
 
@@ -27,7 +28,7 @@ def get_ipv6_addresses():
     Returns a dictionary mapping RLOC16 to IPv6 addresses.
     """
     output = td_util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs")
-    print(f"[DEBUG] Output of 'meshdiag topology ip6-addrs':\n{output}\n")
+    logging.debug("Output of 'meshdiag topology ip6-addrs':\n%s", output)
 
     ipv6_map = {}
     
@@ -474,7 +475,7 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     # TLV 9 = MAC Counters, TLV 34 = MLE Counters
     
     output = td_util_ot_ctl.run_ot_ctl_stdio(f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}")
-    print(f"[DEBUG] Diagnostic for RLOC {rloc} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
+    logging.debug("Diagnostic for RLOC %s (IPv6: %s):\n%s", rloc, ipv6_rloc_addr, output)
 
     # Extract Ext Address (TLV 0)
     extaddr_match = re.search(r"Ext Address: ([0-9a-fA-F]{16})", output)
@@ -559,16 +560,16 @@ def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=N
             # On last retries, try with simpler TLV set in case detailed one is causing issues
             if r == retries - 2:
                 tlv_detail_level = 2
-                print(f"[DEBUG] Router Node {rloc16} not found after {r} attempts, trying with medium detail TLV set.")   
+                logging.debug("Router Node %s not found after %s attempts, trying with medium detail TLV set.", rloc16, r)
 
             if r == retries - 1:
                 tlv_detail_level = 1
-                print(f"[DEBUG] Router Node {rloc16} not found after {r} attempts, trying with simple values.")
+                logging.debug("Router Node %s not found after %s attempts, trying with simple values.", rloc16, r)
 
             network_topology_node = get_networkdiagnostic_one(rloc16, ipv6_rloc_prefix, extaddr_map, ipv6_addresses, tlv_detail_level)
             if network_topology_node is not None:
                 break
-            print (f"[DEBUG] Router Node {rloc16} not found, retrying in {delay} seconds...")
+            logging.debug("Router Node %s not found, retrying in %s seconds...", rloc16, delay)
             time.sleep(delay)
         
         if network_topology_node is None:
@@ -608,17 +609,17 @@ def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=N
                             # On last retries, try with simpler TLV set in case detailed one is causing issues
                             if cr == child_retries - 2:
                                 child_tlv_detail_level = 2
-                                print(f"[DEBUG] Child node {child_rloc} not found after {cr} attempts, trying with medium detail TLV set.")   
+                                logging.debug("Child node %s not found after %s attempts, trying with medium detail TLV set.", child_rloc, cr)
 
                             if cr == child_retries - 1:
                                 child_tlv_detail_level = 1
-                                print(f"[DEBUG] Child node {child_rloc} not found after {cr} attempts, trying with simple values.")
+                                logging.debug("Child node %s not found after %s attempts, trying with simple values.", child_rloc, cr)
 
                             child_node = get_networkdiagnostic_one(child_rloc, ipv6_rloc_prefix, extaddr_map, ipv6_addresses, child_tlv_detail_level)
                             if child_node is not None:
                                 child_node['type'] = 'Child'
                                 break
-                            print (f"[DEBUG] Child node {child_rloc} not found, retrying in {child_delay} seconds...")
+                            logging.debug("Child node %s not found, retrying in %s seconds...", child_rloc, child_delay)
                             time.sleep(child_delay)
                             
                         if child_node is None:
