@@ -3,7 +3,7 @@ import os
 import re
 
 from otbr_cli_router_table import get_router_table_data
-from extaddr_device_label_map import parse_extaddr_nodename_mapping
+from extaddr_device_label_map import extaddr_device_label_mapping_load
 from util_ot_ctl import run_ot_ctl_stdio
 
 
@@ -163,7 +163,7 @@ def main():
 
     if os.path.exists(extaddr_json_filename):
         print(f"Loading extended address to node name mapping from {extaddr_json_filename}...")
-        extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
+        extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
     else:
         print(f"ExtAddr mapping file not found: {extaddr_json_filename}. Continuing with Unknown labels.")
         extaddr_map = {}

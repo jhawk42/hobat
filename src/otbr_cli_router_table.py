@@ -2,7 +2,7 @@ import os
 import subprocess
 import json
 
-from extaddr_device_label_map import parse_extaddr_nodename_mapping
+from extaddr_device_label_map import extaddr_device_label_mapping_load
 import util_ot_ctl
 
 def get_thread_router_table():
@@ -129,13 +129,11 @@ if __name__ == "__main__":
 
         # Check if file exists before parsing
         if os.path.exists(extaddr_json_filename):
-            extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
+            print(f"Loading extended address to node name mapping from {extaddr_json_filename}...")
+            extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
         else:
             extaddr_map = {}
 
-        print(f"Loading extended address to node name mapping from {extaddr_json_filename}...")
-        extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
-            
         router_table_data = get_router_table_data(extaddr_map)
         save_path = "td-otbr-cli-router-table.json"
         with open(save_path, 'w') as f:
