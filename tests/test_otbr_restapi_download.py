@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-import td_get_otbr_restapi as script_module
+import otbr_restapi_download as script_module
 
 
 class TdGetOtbrRestApiTests(unittest.TestCase):

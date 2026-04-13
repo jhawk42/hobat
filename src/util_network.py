@@ -1,4 +1,4 @@
-import td_util_ot_ctl
+import util_ot_ctl
 
 
 def _extract_prefix_token(command_output):
@@ -12,7 +12,7 @@ def _normalize_prefix_base(prefix):
 
 def _run_prefix_command(command, debug_label):
     """Runs an ot-ctl prefix command and returns the extracted prefix token."""
-    command_output = td_util_ot_ctl.run_ot_ctl_stdio(command)
+    command_output = util_ot_ctl.run_ot_ctl_stdio(command)
     # extract the prefix token from the command output and print it for debugging
     prefix = _extract_prefix_token(command_output)
     print(f"[DEBUG] {debug_label}: {prefix}\n")
@@ -156,7 +156,7 @@ def get_dataset_active(hideSensitiveInfo=True):
     command = "dataset active"
     if hideSensitiveInfo:
         command += " -ns"  # Add -ns flag to hide sensitive info in the output
-    dataset_output = td_util_ot_ctl.run_ot_ctl_stdio(command).strip()
+    dataset_output = util_ot_ctl.run_ot_ctl_stdio(command).strip()
     print(f"[DEBUG] Dataset Active Output:\n{dataset_output}\n")
     
     dataset_info = {}

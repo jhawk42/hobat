@@ -30,15 +30,32 @@ tdash/
 │   ├── codebase_overview.md    # This file
 │   └── otbr_restapi_clients.md # OTBR REST API client reference
 ├── src/                        # All source code
-│   ├── td_*.py                 # Python modules and scripts
-│   ├── test_*.py               # Unit tests
+│   ├── *.py                    # Python modules and scripts
 │   └── td_web_*.html           # Browser dashboard pages
+├── tests/                      # Test suite and local mock server
+│   ├── test_*.py               # Unit tests
+│   └── td_mock_otbr_restapi_server.py
 ├── .devcontainer/              # VS Code / Codespaces dev-container config
 ├── README.md
 └── LICENSE
 ```
 
-All Python files share the `td_` prefix.  Test files are prefixed `test_td_`.
+Collector and utility files use source-first prefixes (`otbr_restapi_`, `otbr_cli_`, `mdns_`, `eve_`, `util_`).
+Test files use `test_*.py` names that follow the module under test.
+
+---
+
+## CLI vs REST API Naming
+
+This codebase uses a strict naming split so the data source is visible from the filename.
+
+| Prefix | Data source | Example |
+|---|---|---|
+| `otbr_cli_` | OTBR `ot-ctl` CLI wrappers (via Docker exec) | `otbr_cli_router_table.py` |
+| `otbr_restapi_` | OTBR HTTP REST API clients and downloaders | `otbr_restapi_client.py` |
+| `mdns_` | Zeroconf/mDNS discovery collectors | `mdns_thread_scopes.py` |
+| `eve_` | Eve topology parsing helpers | `eve_parse.py` |
+| `util_` | Shared helpers used across collectors/parsers | `util_network.py` |
 
 ---
 
@@ -48,35 +65,35 @@ All Python files share the `td_` prefix.  Test files are prefixed `test_td_`.
 
 | File | Purpose |
 |---|---|
-| `td_get_otbr_restapi.py` | Fixed-target downloader: fetches `/node/dataset/active`, `/api/devices`, and `/api/diagnostics` and writes them to local JSON files.  Accepts CLI overrides for host, port, base URL, timeout, and headers. |
-| `td_get_otbr_restapi_client.py` | Full-featured REST API client (`OTBRRestApiClient`).  Returns **flattened** Python objects by default (JSON:API `id`/`type`/`attributes` merged into a single dict). Also contains the shared exception hierarchy (`OTBRHTTPError`, `OTBRConnectionError`, etc.). |
-| `td_get_otbr_restapi_raw_client.py` | Thin subclass (`OTBRRawRestApiClient`) that defaults to returning raw JSON:API envelopes (`{"data": …, "meta": …}`) rather than flattening them. |
-| `td_get_otbr_restapi_client_cli.py` | CLI front-end for the flattened client.  Supports sub-commands: `node get/state get/state set/dataset get`, `devices list/get`, `diagnostics list/get`, `actions list/get/enqueue`. |
-| `td_get_otbr_restapi_raw_client_cli.py` | Identical command surface as the flattened CLI but routes through the raw client. |
+| `otbr_restapi_download.py` | Fixed-target downloader: fetches `/node/dataset/active`, `/api/devices`, and `/api/diagnostics` and writes them to local JSON files.  Accepts CLI overrides for host, port, base URL, timeout, and headers. |
+| `otbr_restapi_client.py` | Full-featured REST API client (`OTBRRestApiClient`).  Returns **flattened** Python objects by default (JSON:API `id`/`type`/`attributes` merged into a single dict). Also contains the shared exception hierarchy (`OTBRHTTPError`, `OTBRConnectionError`, etc.). |
+| `otbr_restapi_raw_client.py` | Thin subclass (`OTBRRawRestApiClient`) that defaults to returning raw JSON:API envelopes (`{"data": …, "meta": …}`) rather than flattening them. |
+| `otbr_restapi_client_cli.py` | CLI front-end for the flattened client.  Supports sub-commands: `node get/state get/state set/dataset get`, `devices list/get`, `diagnostics list/get`, `actions list/get/enqueue`. |
+| `otbr_restapi_raw_client_cli.py` | Identical command surface as the flattened CLI but routes through the raw client. |
 
 ### Data Collection — ot-ctl CLI (via Docker)
 
 | File | ot-ctl Command | Output File | Purpose |
 |---|---|---|---|
-| `td_get_otbr_cli_router_table.py` | `router table` | `td-otbr-cli-router-table.json` | Parses the pipe-delimited router table into a list of router dicts with fields: ID, RLOC16, Next Hop, Path Cost, LQ In/Out, Age, Extended MAC, and Link. Adds `extaddr` and `device_label` from the static label map. |
-| `td_get_otbr_cli_meshdiag_topology.py` | `meshdiag topology ip6-addrs children` | `td-otbr-cli-meshdiag-topology.json` | Parses per-router blocks containing: RLOC16, extaddr, Thread version, BR flag, link-quality buckets (1/2/3-links with peer IDs), IPv6 address list, and children (RLOC16 + link quality + mode).  Also computes `total_children`, `total_links`, and `omrIpv6Address`. |
-| `td_get_otbr_cli_meshdiag_childtable.py` | `meshdiag childtable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childtables.json` | For every router in the router table, collects per-child details: RLOC16, extaddr, Thread version, timeout, age, supervision interval, queued messages, rx-on flag, device type, full-net flag, RSS (avg/last/margin), frame/message error rates, connection time, and CSL parameters.  Handles `ResponseTimeout` gracefully. |
-| `td_get_otbr_cli_meshdiag_routerneighbortable.py` | `meshdiag routerneighbortable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-neighbortables.json` | For every router in the router table, collects per-neighbour details: RLOC16, extaddr, Thread version, RSS (avg/last/margin), frame/message error rates, and connection time.  Handles `ResponseTimeout` gracefully. |
-| `td_get_otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (once per router) | `td-otbr-cli-networkdiag-topology.json` | For every router, issues a network-diagnostic TLV request and parses: IPv6 address list, Mode TLV (RxOnWhenIdle / DeviceType / NetworkData → FTD/MTD classification), child table (IDs, timeouts, link quality, mode flags), MAC counters (error/discard totals and percentages relative to total packets), MLE counters (role changes, partition ID changes, parent changes, attach attempts), and time-in-role statistics. |
-| `td_get_otbr_cli_network_dataset_info.py` | `dataset active`, `prefix meshlocal`, `br omrprefix favored` | `td-otbr-cli-network-dataset-info.json` | Collects the active Thread dataset (channel, PAN ID, extended PAN ID, mesh-local prefix, network name, etc.) and derives the mesh-local IPv6 RLOC prefix and the OMR prefix for use by other collectors. |
+| `otbr_cli_router_table.py` | `router table` | `td-otbr-cli-router-table.json` | Parses the pipe-delimited router table into a list of router dicts with fields: ID, RLOC16, Next Hop, Path Cost, LQ In/Out, Age, Extended MAC, and Link. Adds `extaddr` and `device_label` from the static label map. |
+| `otbr_cli_meshdiag_topology.py` | `meshdiag topology ip6-addrs children` | `td-otbr-cli-meshdiag-topology.json` | Parses per-router blocks containing: RLOC16, extaddr, Thread version, BR flag, link-quality buckets (1/2/3-links with peer IDs), IPv6 address list, and children (RLOC16 + link quality + mode).  Also computes `total_children`, `total_links`, and `omrIpv6Address`. |
+| `otbr_cli_meshdiag_childtable.py` | `meshdiag childtable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childtables.json` | For every router in the router table, collects per-child details: RLOC16, extaddr, Thread version, timeout, age, supervision interval, queued messages, rx-on flag, device type, full-net flag, RSS (avg/last/margin), frame/message error rates, connection time, and CSL parameters.  Handles `ResponseTimeout` gracefully. |
+| `otbr_cli_meshdiag_routerneighbortable.py` | `meshdiag routerneighbortable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-neighbortables.json` | For every router in the router table, collects per-neighbour details: RLOC16, extaddr, Thread version, RSS (avg/last/margin), frame/message error rates, and connection time.  Handles `ResponseTimeout` gracefully. |
+| `otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (once per router) | `td-otbr-cli-networkdiag-topology.json` | For every router, issues a network-diagnostic TLV request and parses: IPv6 address list, Mode TLV (RxOnWhenIdle / DeviceType / NetworkData → FTD/MTD classification), child table (IDs, timeouts, link quality, mode flags), MAC counters (error/discard totals and percentages relative to total packets), MLE counters (role changes, partition ID changes, parent changes, attach attempts), and time-in-role statistics. |
+| `otbr_cli_network_dataset_info.py` | `dataset active`, `prefix meshlocal`, `br omrprefix favored` | `td-otbr-cli-network-dataset-info.json` | Collects the active Thread dataset (channel, PAN ID, extended PAN ID, mesh-local prefix, network name, etc.) and derives the mesh-local IPv6 RLOC prefix and the OMR prefix for use by other collectors. |
 
 ### Data Collection — Other Sources
 
 | File | Purpose |
 |---|---|
-| `td_get_mdns_thread_scopes.py` | Uses `zeroconf` to browse for Thread-related mDNS service types (e.g. `_meshcop._udp`).  Decodes HAP categories, State Bitmaps, and OUI vendor lookups. |
+| `mdns_thread_scopes.py` | Uses `zeroconf` to browse for Thread-related mDNS service types (e.g. `_meshcop._udp`).  Decodes HAP categories, State Bitmaps, and OUI vendor lookups. |
 
 ### Data Parsing
 
 | File | Purpose |
 |---|---|
-| `td_parse_eve.py` | Parses an Eve App `thread-eve-layout.json` export.  Normalises decimal RLOC16 to hex, converts base64-encoded extended addresses to hex, enriches nodes with OMR IPv6 address and route-destination names, and keys the output by `rloc16_hex`. |
-| `td_parse_extaddr_data_map.py` | Loads a static `td-static-extaddr-device-label.json` file that maps extended addresses to human-readable device labels. |
+| `eve_parse.py` | Parses an Eve App `thread-eve-layout.json` export.  Normalises decimal RLOC16 to hex, converts base64-encoded extended addresses to hex, enriches nodes with OMR IPv6 address and route-destination names, and keys the output by `rloc16_hex`. |
+| `extaddr_device_label_map.py` | Loads a static `td-static-extaddr-device-label.json` file that maps extended addresses to human-readable device labels. |
 
 ### Data Merging
 
@@ -88,10 +105,10 @@ All Python files share the `td_` prefix.  Test files are prefixed `test_td_`.
 
 | File | Purpose |
 |---|---|
-| `td_util_ot_ctl.py` | Low-level wrapper that runs `ot-ctl <command>` inside a named Docker container via `docker exec`.  The container name defaults to `"otbr"` and can be overridden with the `TD_OTBR_CONTAINER_NAME` environment variable. |
-| `td_util_network.py` | Network helpers: mesh-local and OMR prefix retrieval, IPv6 address prefix formatting, RLOC16 manipulation, OMR address matching in an address list, and full `get_network_dataset_info()` aggregator. |
-| `td_util_convert.py` | Base64 ↔ hex conversion for 64-bit extended addresses (handles JSON-escaped slashes and optional byte-order reversal for 802.15.4 little-endianness). |
-| `td_util_mdns.py` | OUI vendor lookup table (Apple, Google/Nest, Amazon/Eero, Nanoleaf, Texas Instruments). |
+| `util_ot_ctl.py` | Low-level wrapper that runs `ot-ctl <command>` inside a named Docker container via `docker exec`.  The container name defaults to `"otbr"` and can be overridden with the `TD_OTBR_CONTAINER_NAME` environment variable. |
+| `util_network.py` | Network helpers: mesh-local and OMR prefix retrieval, IPv6 address prefix formatting, RLOC16 manipulation, OMR address matching in an address list, and full `get_network_dataset_info()` aggregator. |
+| `util_convert.py` | Base64 ↔ hex conversion for 64-bit extended addresses (handles JSON-escaped slashes and optional byte-order reversal for 802.15.4 little-endianness). |
+| `util_mdns.py` | OUI vendor lookup table (Apple, Google/Nest, Amazon/Eero, Nanoleaf, Texas Instruments). |
 
 ### Web Dashboard
 
@@ -202,10 +219,10 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 
 | File | Purpose |
 |---|---|
-| `td_mock_otbr_restapi_server.py` | In-process `ThreadingHTTPServer` that serves mock JSON:API responses for `/api/node`, `/node/state`, `/node/dataset/active`, `/api/devices`, `/api/diagnostics`, and `/api/actions`.  Used when a live OTBR is not available.  Runs on `127.0.0.1:18081` by default. |
-| `test_td_get_otbr_restapi.py` | Unit tests for `td_get_otbr_restapi.py`. |
-| `test_td_get_otbr_restapi_client.py` | Unit tests for the flattened client: JSON:API flattening, HTTP error parsing, usage validation, CLI output and exit codes. |
-| `test_td_get_otbr_restapi_raw_client.py` | Unit tests for the raw client: raw envelope pass-through, error handling. |
+| `tests/td_mock_otbr_restapi_server.py` | In-process `ThreadingHTTPServer` that serves mock JSON:API responses for `/api/node`, `/node/state`, `/node/dataset/active`, `/api/devices`, `/api/diagnostics`, and `/api/actions`.  Used when a live OTBR is not available.  Runs on `127.0.0.1:18081` by default. |
+| `tests/test_otbr_restapi_download.py` | Unit tests for `otbr_restapi_download.py`. |
+| `tests/test_otbr_restapi_client.py` | Unit tests for the flattened client: JSON:API flattening, HTTP error parsing, usage validation, CLI output and exit codes. |
+| `tests/test_otbr_restapi_raw_client.py` | Unit tests for the raw client: raw envelope pass-through, error handling. |
 
 ---
 
@@ -216,8 +233,8 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 │                        Data Collection                         │
 │                                                                │
 │  OTBR REST API          ot-ctl (Docker)        Eve App / mDNS  │
-│  td_get_otbr_           td_get_otbr_cli_*      td_parse_eve.py │
-│  restapi*.py            *.py                   td_get_mdns_    │
+│  otbr_restapi_*         otbr_cli_*             eve_parse.py    │
+│  *.py                   *.py                   mdns_            │
 │                                                thread_scopes.py│
 └────────────────┬───────────────────┬───────────────────────────┘
                  │  JSON files        │  JSON files
@@ -238,7 +255,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 
 ### Step-by-step
 
-1. **Collect**: Run individual `td_get_otbr_*` and `td_get_mdns_*` scripts.  Each saves data as a local JSON file (e.g. `td-otbr-restapi-devices.json`, `td-otbr-cli-router-table.json`, `td-eve-topology.json`).
+1. **Collect**: Run individual `otbr_restapi_*`, `otbr_cli_*`, and `mdns_*` scripts.  Each saves data as a local JSON file (e.g. `td-otbr-restapi-devices.json`, `td-otbr-cli-router-table.json`, `td-eve-topology.json`).
 2. **Normalize**: Each collector normalises its data — RLOC16 values are hex strings (`0x5000`), extended addresses are lowercase hex (`1a7fbf0434e4f043`), field aliases are canonicalised (`extAddress` → `extaddr`).
 3. **Merge**: `td_merge.py` reads the JSON files and merges records using the configured strategy.  Non-empty values are never silently overwritten; conflicts are recorded.  The output JSON retains a `_source_files` list per row.
 4. **Visualise**: Open one of the HTML files in a browser, select the merged JSON file from the dataset dropdown, and explore the interactive topology graph or table.
@@ -269,17 +286,17 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 ### Collect and merge data
 ```bash
 # Download REST API snapshots
-python src/td_get_otbr_restapi.py
+python src/otbr_restapi_download.py
 
 # Collect network dataset info (provides OMR / mesh-local prefixes used by other collectors)
-python src/td_get_otbr_cli_network_dataset_info.py
+python src/otbr_cli_network_dataset_info.py
 
 # Collect CLI topology data
-python src/td_get_otbr_cli_router_table.py
-python src/td_get_otbr_cli_meshdiag_topology.py
-python src/td_get_otbr_cli_meshdiag_childtable.py
-python src/td_get_otbr_cli_meshdiag_routerneighbortable.py
-python src/td_get_otbr_cli_networkdiag_topology.py
+python src/otbr_cli_router_table.py
+python src/otbr_cli_meshdiag_topology.py
+python src/otbr_cli_meshdiag_childtable.py
+python src/otbr_cli_meshdiag_routerneighbortable.py
+python src/otbr_cli_networkdiag_topology.py
 
 # Merge everything
 python src/td_merge.py
@@ -288,23 +305,23 @@ python src/td_merge.py
 ### Use the REST API clients directly
 ```bash
 # Flattened client CLI
-python src/td_get_otbr_restapi_client_cli.py node get
-python src/td_get_otbr_restapi_client_cli.py devices list --with-meta
+python src/otbr_restapi_client_cli.py node get
+python src/otbr_restapi_client_cli.py devices list --with-meta
 
 # Raw client CLI
-python src/td_get_otbr_restapi_raw_client_cli.py node get
+python src/otbr_restapi_raw_client_cli.py node get
 ```
 
 ### Run tests
 ```bash
-python -m unittest src/test_td_get_otbr_restapi_client.py src/test_td_get_otbr_restapi_raw_client.py
+python -m unittest tests/test_otbr_restapi_download.py tests/test_otbr_restapi_client.py tests/test_otbr_restapi_raw_client.py
 ```
 
 ### Mock server (no live OTBR needed)
 ```bash
-python src/td_mock_otbr_restapi_server.py --host 127.0.0.1 --port 18081
+python tests/td_mock_otbr_restapi_server.py --host 127.0.0.1 --port 18081
 # then override client defaults:
-python src/td_get_otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 node get
+python src/otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 node get
 ```
 
 ### Open the dashboard
@@ -326,7 +343,7 @@ Identity matching is case-insensitive and ignores leading/trailing whitespace.  
 
 ## REST API Client Exit Codes
 
-Both CLI pairs (`td_get_otbr_restapi_client_cli.py` and `td_get_otbr_restapi_raw_client_cli.py`) use the same exit codes:
+Both CLI pairs (`otbr_restapi_client_cli.py` and `otbr_restapi_raw_client_cli.py`) use the same exit codes:
 
 | Code | Meaning |
 |---|---|

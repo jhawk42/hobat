@@ -2,12 +2,12 @@
 
 This repository now provides two client pairs for the OTBR REST API:
 
-- `td_get_otbr_restapi_client.py`
-- `td_get_otbr_restapi_client_cli.py`
-- `td_get_otbr_restapi_raw_client.py`
-- `td_get_otbr_restapi_raw_client_cli.py`
+- `otbr_restapi_client.py`
+- `otbr_restapi_client_cli.py`
+- `otbr_restapi_raw_client.py`
+- `otbr_restapi_raw_client_cli.py`
 
-The existing `td_get_otbr_restapi.py` script remains a fixed-target downloader, but it now accepts CLI overrides for host, port, base URL, timeout, and request headers.
+The existing `otbr_restapi_download.py` script remains a fixed-target downloader, but it now accepts CLI overrides for host, port, base URL, timeout, and request headers.
 
 Default OTBR host:
 
@@ -26,8 +26,8 @@ The flattened client is intended for scripts that want simple Python objects.
 
 Files:
 
-- `td_get_otbr_restapi_client.py`
-- `td_get_otbr_restapi_client_cli.py`
+- `otbr_restapi_client.py`
+- `otbr_restapi_client_cli.py`
 
 ### Raw client pair
 
@@ -39,13 +39,13 @@ The raw client is intended for callers that want the OTBR server payloads withou
 
 Files:
 
-- `td_get_otbr_restapi_raw_client.py`
-- `td_get_otbr_restapi_raw_client_cli.py`
+- `otbr_restapi_raw_client.py`
+- `otbr_restapi_raw_client_cli.py`
 
 Implementation note:
 
 - `OTBRRawRestApiClient` reuses the same HTTP, parsing, and error-handling layer as the flattened client but defaults `raw=True` on JSON:API-capable methods.
-- `td_get_otbr_restapi_raw_client_cli.py` uses the same command surface as the flattened CLI and routes requests through the raw client library.
+- `otbr_restapi_raw_client_cli.py` uses the same command surface as the flattened CLI and routes requests through the raw client library.
 
 ## Error Handling Contract
 
@@ -94,7 +94,7 @@ CLI exit codes for both CLIs:
 Run both focused test files:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python -m unittest test_td_get_otbr_restapi_client.py test_td_get_otbr_restapi_raw_client.py
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python -m unittest test_otbr_restapi_client.py test_otbr_restapi_raw_client.py
 ```
 
 Coverage includes:
@@ -112,43 +112,43 @@ These examples use the default live OTBR host `127.0.0.1:8081`.
 1. Flattened CLI: get the OTBR node as a flattened object
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py node get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py node get
 ```
 
 2. Flattened CLI: get the current Thread node state
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py node state get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py node state get
 ```
 
 3. Flattened CLI: list devices with collection metadata
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py devices list --with-meta
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py devices list --with-meta
 ```
 
 4. Raw CLI: get the OTBR node as a raw JSON:API envelope
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py node get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py node get
 ```
 
 5. Raw CLI: list devices as a raw JSON:API collection
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py devices list
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py devices list
 ```
 
 6. Raw CLI: enqueue an update-device-collection task and keep the raw server response
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py actions enqueue update-device-collection --max-age 30 --max-retries 5 --device-count 10 --timeout 93
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py actions enqueue update-device-collection --max-age 30 --max-retries 5 --device-count 10 --timeout 93
 ```
 
 For the local mock server, do not use the live-default examples directly. Override both host and port explicitly, for example:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 node get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 node get
 ```
 
 ## Live OTBR Smoke Tests
@@ -160,24 +160,24 @@ Do not reuse these live-default commands for the local mock server. The mock ser
 Flattened CLI examples:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py node get
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py devices list --with-meta
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py actions list --with-meta
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py node get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py devices list --with-meta
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py actions list --with-meta
 ```
 
 Raw CLI examples:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py node get
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py devices list
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py actions list
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py node get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py devices list
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py actions list
 ```
 
 Error-path examples:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py devices get --device-id 0000000000000000
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py devices get --device-id 0000000000000000
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py devices get --device-id 0000000000000000
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py devices get --device-id 0000000000000000
 ```
 
 Expected results:
@@ -193,16 +193,16 @@ The following commands were validated against the live OTBR REST API at `127.0.0
 Flattened client and CLI:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py node get
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py node state get
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py devices list --with-meta
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py node get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py node state get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py devices list --with-meta
 ```
 
 Raw client and CLI:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py node get
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py devices list
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py node get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py devices list
 ```
 
 Observed live results:
@@ -215,8 +215,8 @@ Observed live results:
 You can still override the default target explicitly when needed:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py --host 127.0.0.1 devices list --with-meta
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py --host 127.0.0.1 devices list
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py --host 127.0.0.1 devices list --with-meta
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py --host 127.0.0.1 devices list
 ```
 
 ## Local Mock Server
@@ -239,15 +239,15 @@ Start the mock server in one terminal:
 Run flattened smoke tests against it:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 node get
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 devices list --with-meta
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 node get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 devices list --with-meta
 ```
 
 Run raw smoke tests against it:
 
 ```bash
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py --host 127.0.0.1 --port 18081 node get
-/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python td_get_otbr_restapi_raw_client_cli.py --host 127.0.0.1 --port 18081 devices list
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py --host 127.0.0.1 --port 18081 node get
+/workspaces/td/td_otbr_restapi_swagger/.venv/bin/python otbr_restapi_raw_client_cli.py --host 127.0.0.1 --port 18081 devices list
 ```
 
 The mock server supports the high-value endpoints used by both client pairs:
