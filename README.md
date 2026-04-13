@@ -1,26 +1,24 @@
-# td Thread Dashboard
+# Thread Network Toplogy Dashboard
 
-td / tdash is a simple set of tools to visualize a thread mesh network
-from various datset sources like
-Eve App
-Open Group OTBR
 
-Existing useful Thread Dashboards and Tools
+A simple set of tools to collect and display a thread mesh network in both a network topology view and table view. 
+The tool collects from various dataset sources:
+- Open Thread OTBR cli 
+- Open Thread OTBR restapi
+- Eve app
+- mDNS
 
-Open Thread - OTBR
+There are a number of existing useful Thread Dashboards and tools:
+- Open Thread - OTBR 
+- Home Assistant - Matter Server -JS
+- Eve App as a list 
 
-Home Assistant - Matter Server -JS
 
-Eve App
+# Getting Started
+docker container 
+Python
 
-as
-network topology
-table
-
-Intro
-Background
-
-Getting Started
+# Details
 
 Merge strategy notes
 
