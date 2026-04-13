@@ -116,7 +116,7 @@ Steps:
 
 ## Phase 6 — HTML Cleanup and Documentation Updates
 
-**Scope:** `td_web_dash.html`, `td_web_tables.html`, `td_web_topology.html`,
+**Scope:** `tdash.html`, `td_web_tables.html`, `td_web_topology.html`,
 `doc/codebase_overview.md`, `doc/otbr_restapi_clients.md`.
 
 Steps:

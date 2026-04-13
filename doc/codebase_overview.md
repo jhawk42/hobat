@@ -114,7 +114,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 
 | File | Purpose |
 |---|---|
-| `td_web_dash.html` | Main self-contained dashboard (see [Dashboard Functions](#dashboard-functions) below). |
+| `tdash.html` | Main self-contained dashboard (see [Dashboard Functions](#dashboard-functions) below). |
 | `td_web_tables.html` | Standalone table-only view for the merged dataset. |
 | `td_web_topology.html` | Standalone topology-only view. |
 
@@ -122,7 +122,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 
 ## Dashboard Functions
 
-`td_web_dash.html` is a single-page application with no build step — open it directly in a browser.
+`tdash.html` is a single-page application with no build step — open it directly in a browser.
 
 ### Dataset Selection
 
@@ -249,7 +249,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
                                    ▼
 ┌────────────────────────────────────────────────────────────────┐
 │                    Browser Dashboard                           │
-│  td_web_dash.html  (vis-network topology + sortable table)     │
+│  tdash.html  (vis-network topology + sortable table)     │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -325,7 +325,7 @@ python src/otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 node get
 ```
 
 ### Open the dashboard
-Open `src/td_web_dash.html` in a browser and point it at the merged JSON file.
+Open `src/tdash.html` in a browser and point it at the merged JSON file.
 
 ---
 
