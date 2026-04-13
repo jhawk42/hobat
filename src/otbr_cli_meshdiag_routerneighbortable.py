@@ -3,7 +3,7 @@ import os
 import re
 
 from otbr_cli_router_table import get_router_table_data
-from extaddr_device_label_map import parse_extaddr_nodename_mapping
+from extaddr_device_label_map import extaddr_device_label_mapping_load
 from util_ot_ctl import run_ot_ctl_stdio
 
 def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
@@ -135,12 +135,12 @@ def main():
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
-        extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
+        extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
     else:
         extaddr_map = {}
 
     print(f"Loading extended address to node name mapping from {extaddr_json_filename}...")
-    extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
+    extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
         
     router_neighbor_tables = get_meshdiag_routerneighbortables(extaddr_map)
     

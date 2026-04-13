@@ -4,7 +4,7 @@ import json
 import sys
 import time
 
-from extaddr_device_label_map import parse_extaddr_nodename_mapping
+from extaddr_device_label_map import extaddr_device_label_mapping_load
 import util_network
 import os
 
@@ -23,7 +23,7 @@ def main():
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
-        extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
+        extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
     else:
         extaddr_map = {}
 

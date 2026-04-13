@@ -9,16 +9,7 @@ from copy import deepcopy
 import util_ot_ctl
 import util_network
 from otbr_cli_router_table import get_router_table_data
-from extaddr_device_label_map import parse_extaddr_nodename_mapping
-
-# from util_network import (
-#     get_prefix_meshlocal,
-#     get_network_dataset_info,
-#     format_prefix_meshlocal_into_ipv6adrr_prefix,
-#     conform_rloc_hex_strip,
-#     merge_ipv6_rloc_prefix_rloc_hex,
-#     get_omr_addr_from_list
-# )
+from extaddr_device_label_map import extaddr_device_label_mapping_load
 
 def get_ipv6_addresses():
     """
@@ -743,7 +734,7 @@ def main():
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
-        extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
+        extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
     else:
         extaddr_map = {}
   

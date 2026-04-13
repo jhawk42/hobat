@@ -5,7 +5,7 @@ import json
 
 import util_ot_ctl
 import util_network
-from extaddr_device_label_map import parse_extaddr_nodename_mapping
+from extaddr_device_label_map import extaddr_device_label_mapping_load
 
 def get_meshdiag_topology_ip6addrs_children():
     """Retrieves the meshdiag topology IP6 addresses and children data from the network.
@@ -229,7 +229,7 @@ if __name__ == "__main__":
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
-        extaddr_map = parse_extaddr_nodename_mapping(extaddr_json_filename)
+        extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
     else:
         extaddr_map = {}
 
