@@ -2,9 +2,9 @@ import json
 import os
 import re
 
-from td_get_otbr_cli_router_table import get_router_table_data
-from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
-from td_util_ot_ctl import run_ot_ctl_stdio
+from otbr_cli_router_table import get_router_table_data
+from extaddr_device_label_map import parse_extaddr_nodename_mapping
+from util_ot_ctl import run_ot_ctl_stdio
 
 
 def _yes_no_to_bool(value):

@@ -2,13 +2,13 @@ import os
 import subprocess
 import json
 
-from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
-import td_util_ot_ctl
+from extaddr_device_label_map import parse_extaddr_nodename_mapping
+import util_ot_ctl
 
 def get_thread_router_table():
     try:
         # Executes the command: ot-ctl router table
-        output = td_util_ot_ctl.run_ot_ctl_stdio("router table")
+        output = util_ot_ctl.run_ot_ctl_stdio("router table")
         return output
     except subprocess.CalledProcessError as e:
         print(f"Error running ot-ctl: {e}")

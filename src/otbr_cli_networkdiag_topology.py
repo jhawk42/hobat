@@ -6,12 +6,12 @@ import sys
 import time
 
 from copy import deepcopy
-import td_util_ot_ctl
-import td_util_network
-from td_get_otbr_cli_router_table import get_router_table_data
-from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
+import util_ot_ctl
+import util_network
+from otbr_cli_router_table import get_router_table_data
+from extaddr_device_label_map import parse_extaddr_nodename_mapping
 
-# from td_util_network import (
+# from util_network import (
 #     get_prefix_meshlocal,
 #     get_network_dataset_info,
 #     format_prefix_meshlocal_into_ipv6adrr_prefix,
@@ -26,7 +26,7 @@ def get_ipv6_addresses():
     Runs: ot-ctl meshdiag topology ip6-addrs
     Returns a dictionary mapping RLOC16 to IPv6 addresses.
     """
-    output = td_util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs")
+    output = util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs")
     print(f"[DEBUG] Output of 'meshdiag topology ip6-addrs':\n{output}\n")
 
     ipv6_map = {}
@@ -447,8 +447,8 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     if ipv6_addresses is None:
         ipv6_addresses = {}
         
-    rloc_hex = td_util_network.conform_rloc_hex_strip(rloc)
-    ipv6_rloc_addr = td_util_network.merge_ipv6_rloc_prefix_rloc_hex(ipv6_rloc_prefix, rloc_hex)
+    rloc_hex = util_network.conform_rloc_hex_strip(rloc)
+    ipv6_rloc_addr = util_network.merge_ipv6_rloc_prefix_rloc_hex(ipv6_rloc_prefix, rloc_hex)
 
     tlv_values_detailed = "0 1 2 28 8 16 9 34"
     tlv_values_medium = "0 1 2 8 16 9"
@@ -473,7 +473,7 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     # TLV 16 = Child Table, 
     # TLV 9 = MAC Counters, TLV 34 = MLE Counters
     
-    output = td_util_ot_ctl.run_ot_ctl_stdio(f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}")
+    output = util_ot_ctl.run_ot_ctl_stdio(f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}")
     print(f"[DEBUG] Diagnostic for RLOC {rloc} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
 
     # Extract Ext Address (TLV 0)
@@ -529,8 +529,8 @@ def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=N
     #expand_children = False  
 
     # 1. Get mesh-local prefix
-    meshlocal_prefix = td_util_network.get_prefix_meshlocal()
-    ipv6_rloc_prefix = td_util_network.format_prefix_meshlocal_into_ipv6adrr_prefix(meshlocal_prefix)
+    meshlocal_prefix = util_network.get_prefix_meshlocal()
+    ipv6_rloc_prefix = util_network.format_prefix_meshlocal_into_ipv6adrr_prefix(meshlocal_prefix)
 
     # 2. Get all active routers (potential parents)
     router_table_data = get_router_table_data(extaddr_map)
@@ -580,7 +580,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=N
                 "thread_stack_version": "Unknown",
                 "mode": {},
                 "ipv6_addrs": ipv6_addresses.get(rloc16, []),
-                "omrIpv6Address": td_util_network.get_omr_addr_from_list(ipv6_addresses.get(rloc16, []), omr_ipv6addr_prefix) if omr_ipv6addr_prefix else None,
+                "omrIpv6Address": util_network.get_omr_addr_from_list(ipv6_addresses.get(rloc16, []), omr_ipv6addr_prefix) if omr_ipv6addr_prefix else None,
                 "children": [],
                 "type": "Unknown-Router",
                 "mac_counters": {},
@@ -590,7 +590,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=N
         else:
             network_topology_node['type'] = 'Router'
             if omr_ipv6addr_prefix:
-                network_topology_node["omrIpv6Address"] = td_util_network.get_omr_addr_from_list(network_topology_node.get("ipv6_addrs", []), omr_ipv6addr_prefix)
+                network_topology_node["omrIpv6Address"] = util_network.get_omr_addr_from_list(network_topology_node.get("ipv6_addrs", []), omr_ipv6addr_prefix)
             network_topology_map[rloc16] = network_topology_node
 
             if expand_children:
@@ -630,7 +630,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=N
                             "mode": {},
                             "ipv6_addrs": ipv6_addresses.get(child_rloc, []),
                             "children": [],
-                            "omrIpv6Address": td_util_network.get_omr_addr_from_list(ipv6_addresses.get(child_rloc, []), omr_ipv6addr_prefix) if omr_ipv6addr_prefix else None,
+                            "omrIpv6Address": util_network.get_omr_addr_from_list(ipv6_addresses.get(child_rloc, []), omr_ipv6addr_prefix) if omr_ipv6addr_prefix else None,
                             "type": "Unknown-Child",
                             "mac_counters": {},
                             "mle_counters": {},
@@ -638,7 +638,7 @@ def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=N
                         }
                         
                         else:
-                            child_node['omrIpv6Address'] = td_util_network.get_omr_addr_from_list(child_node.get("ipv6_addrs", []), omr_ipv6addr_prefix) if omr_ipv6addr_prefix else None
+                            child_node['omrIpv6Address'] = util_network.get_omr_addr_from_list(child_node.get("ipv6_addrs", []), omr_ipv6addr_prefix) if omr_ipv6addr_prefix else None
                             network_topology_map[child_rloc] = child_node
                     
     return network_topology_map
@@ -747,7 +747,7 @@ def main():
     else:
         extaddr_map = {}
   
-    network_dataset_info = td_util_network.get_network_dataset_info()
+    network_dataset_info = util_network.get_network_dataset_info()
 
     # Get the networkdiagnostic topology data
     networkdiagnostic_topology_data = get_networkdiagnostic_topology_data(extaddr_map, network_dataset_info)

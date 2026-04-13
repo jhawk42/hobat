@@ -3,9 +3,9 @@ import subprocess
 import re
 import json
 
-import td_util_ot_ctl
-import td_util_network
-from td_parse_extaddr_data_map import parse_extaddr_nodename_mapping
+import util_ot_ctl
+import util_network
+from extaddr_device_label_map import parse_extaddr_nodename_mapping
 
 def get_meshdiag_topology_ip6addrs_children():
     """Retrieves the meshdiag topology IP6 addresses and children data from the network.
@@ -15,7 +15,7 @@ def get_meshdiag_topology_ip6addrs_children():
     try:
         # Executes the command: ot-ctl meshdiag topology ip6-addrs children
         # This command provides IPv6 addresses and children info for all routers
-        output = td_util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs children")
+        output = util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs children")
         return output
     except subprocess.CalledProcessError as e:
         print(f"Error running ot-ctl: {e}")
@@ -163,7 +163,7 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data, networ
         
         # Enhancement: OMR IPv6 address
         if omr_ipv6addr_prefix:
-            enhanced_router["omrIpv6Address"] = td_util_network.get_omr_addr_from_list(router.get("ipv6_addrs", []), omr_ipv6addr_prefix)
+            enhanced_router["omrIpv6Address"] = util_network.get_omr_addr_from_list(router.get("ipv6_addrs", []), omr_ipv6addr_prefix)
 
         # Enhancement: Count total children
         enhanced_router["total_children"] = len(router.get("children", []))
@@ -233,7 +233,7 @@ if __name__ == "__main__":
     else:
         extaddr_map = {}
 
-    network_dataset_info = td_util_network.get_network_dataset_info()
+    network_dataset_info = util_network.get_network_dataset_info()
 
     meshdiag_topology_data = get_meshdiag_topology_ip6addrs_children_data(extaddr_map, network_dataset_info)
     save_path = "td-otbr-cli-meshdiag-topology.json"

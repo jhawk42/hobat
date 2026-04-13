@@ -28,12 +28,12 @@ These files all import `td_util_ot_ctl` and ultimately call `ot-ctl`.
 
 | Current name | New name |
 |---|---|
-| `td_otbr_cli_networkdiag.py` | `otbr_cli_networkdiag.py` |
-| `td_otbr_cli_router_table.py` | `otbr_cli_router_table.py` |
-| `td_otbr_cli_meshdiag_topology.py` | `otbr_cli_meshdiag_topology.py` |
-| `td_otbr_cli_meshdiag_childtable.py` | `otbr_cli_meshdiag_childtable.py` |
-| `td_otbr_cli_meshdiag_neighbortable.py` | `otbr_cli_meshdiag_neighbortable.py` |
-| `td_get_otbr_cli_network_dataset_info.py` | `otbr_cli_network_dataset.py` |
+| `td_get_otbr_cli_networkdiag_topology.py` | `otbr_cli_networkdiag_topology.py` |
+| `td_get_otbr_cli_router_table.py` | `otbr_cli_router_table.py` |
+| `td_get_otbr_cli_meshdiag_topology.py` | `otbr_cli_meshdiag_topology.py` |
+| `td_get_otbr_cli_meshdiag_childtable.py` | `otbr_cli_meshdiag_childtable.py` |
+| `td_get_otbr_cli_meshdiag_routerneighbortable.py` | `otbr_cli_meshdiag_routerneighbortable.py` |
+| `td_get_otbr_cli_network_dataset_info.py` | `otbr_cli_network_dataset_info.py` |
 
 **Steps for each file:**
 1. `git mv src/<old>.py src/<new>.py`
@@ -53,10 +53,10 @@ These files call the OTBR HTTP REST API (port 8081 by default).
 
 | Current name | New name |
 |---|---|
-| `td_otbr_restapi_client.py` | `otbr_restapi_client.py` |
-| `td_otbr_restapi_client_cli.py` | `otbr_restapi_client_cli.py` |
-| `td_otbr_restapi_raw_client.py` | `otbr_restapi_raw_client.py` |
-| `td_otbr_restapi_raw_client_cli.py` | `otbr_restapi_raw_client_cli.py` |
+| `td_get_otbr_restapi_client.py` | `otbr_restapi_client.py` |
+| `td_get_otbr_restapi_client_cli.py` | `otbr_restapi_client_cli.py` |
+| `td_get_otbr_restapi_raw_client.py` | `otbr_restapi_raw_client.py` |
+| `td_get_otbr_restapi_raw_client_cli.py` | `otbr_restapi_raw_client_cli.py` |
 | `td_get_otbr_restapi.py` | `otbr_restapi_download.py` |
 
 **Steps for each file:**
@@ -111,6 +111,8 @@ These files call the OTBR HTTP REST API (port 8081 by default).
 | `test_td_get_otbr_restapi_client.py` | `test_otbr_restapi_client.py` |
 | `test_td_get_otbr_restapi_raw_client.py` | `test_otbr_restapi_raw_client.py` |
 
+These test files now live under `tests/`.
+
 Update all internal `import` statements in each test file to point at the new
 module names.
 
@@ -126,17 +128,21 @@ module names.
 
 ---
 
-## Phase 5 — Validate
+## Phase 7 — Validate
 
 ```bash
-# Run the test suite
-python -m pytest src/test_otbr_restapi_download.py \
-                 src/test_otbr_restapi_client.py \
-                 src/test_otbr_restapi_raw_client.py -v
+# Run the renamed REST API tests
+python -m unittest tests/test_otbr_restapi_download.py \
+                 tests/test_otbr_restapi_client.py \
+                 tests/test_otbr_restapi_raw_client.py
 
-# Verify no old names remain in import statements
-grep -r "from td_otbr_client import\|import td_otbr_client$" src/
-grep -r "from td_otbr_networkdiag import\|import td_otbr_networkdiag$" src/
+# Run the util tests impacted by util module renames
+python -m unittest tests/test_util_convert_base64_extaddr_to_hexnumber.py \
+                 tests/test_util_convert_base64_extaddr_list_to_hexnumber_list.py \
+                 tests/test_util_convert_hexnumber_extaddr_to_base64.py
+
+# Verify no old module names remain in imports or script references
+rg "td_get_otbr_cli_|td_get_otbr_restapi_|td_get_mdns_thread_scopes|td_parse_eve|td_parse_extaddr_data_map|td_util_convert|td_util_mdns|td_util_network|td_util_ot_ctl|test_td_get_otbr_restapi" src tests doc
 ```
 
 ---
@@ -145,17 +151,24 @@ grep -r "from td_otbr_networkdiag import\|import td_otbr_networkdiag$" src/
 
 | Old name | New name | Category |
 |---|---|---|
-| `td_get_otbr_cli_networkdiag.py` | `otbr_cli_networkdiag.py` | cli |
+| `td_get_otbr_cli_networkdiag_topology.py` | `otbr_cli_networkdiag_topology.py` | cli |
 | `td_get_otbr_cli_router_table.py` | `otbr_cli_router_table.py` | cli |
 | `td_get_otbr_cli_meshdiag_topology.py` | `otbr_cli_meshdiag_topology.py` | cli |
 | `td_get_otbr_cli_meshdiag_childtable.py` | `otbr_cli_meshdiag_childtable.py` | cli |
-| `td_get_otbr_cli__meshdiag_neighbortable.py` | `otbr_cli_meshdiag_neighbortable.py` | cli |
-| `td_get_otbr_cli_network_dataset_info.py` | `otbr_cli_network_dataset.py` | cli |
-| `td_otbr_restapi_client.py` | `otbr_restapi_client.py` | restapi |
-| `td_otbr_restapi_client_cli.py` | `otbr_restapi_client_cli.py` | restapi |
-| `td_otbr_restapi_raw_client.py` | `otbr_restapi_raw_client.py` | restapi |
-| `td_otbr_restapi_raw_client_cli.py` | `otbr_restapi_raw_client_cli.py` | restapi |
-| `td_get_otbr_restapi.py` | `td_otbr_restapi_download.py` | restapi |
+| `td_get_otbr_cli_meshdiag_routerneighbortable.py` | `otbr_cli_meshdiag_routerneighbortable.py` | cli |
+| `td_get_otbr_cli_network_dataset_info.py` | `otbr_cli_network_dataset_info.py` | cli |
+| `td_get_otbr_restapi_client.py` | `otbr_restapi_client.py` | restapi |
+| `td_get_otbr_restapi_client_cli.py` | `otbr_restapi_client_cli.py` | restapi |
+| `td_get_otbr_restapi_raw_client.py` | `otbr_restapi_raw_client.py` | restapi |
+| `td_get_otbr_restapi_raw_client_cli.py` | `otbr_restapi_raw_client_cli.py` | restapi |
+| `td_get_otbr_restapi.py` | `otbr_restapi_download.py` | restapi |
+| `td_get_mdns_thread_scopes.py` | `mdns_thread_scopes.py` | mdns |
+| `td_parse_eve.py` | `eve_parse.py` | eve |
+| `td_parse_extaddr_data_map.py` | `extaddr_device_label_map.py` | parser |
+| `td_util_convert.py` | `util_convert.py` | util |
+| `td_util_mdns.py` | `util_mdns.py` | util |
+| `td_util_network.py` | `util_network.py` | util |
+| `td_util_ot_ctl.py` | `util_ot_ctl.py` | util |
 | `test_td_get_otbr_restapi.py` | `test_otbr_restapi_download.py` | test |
 | `test_td_get_otbr_restapi_client.py` | `test_otbr_restapi_client.py` | test |
 | `test_td_get_otbr_restapi_raw_client.py` | `test_otbr_restapi_raw_client.py` | test |
