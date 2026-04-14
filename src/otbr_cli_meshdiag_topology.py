@@ -153,8 +153,7 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data, networ
     Returns:
         Enhanced topology data with additional fields/calculations
     """
-    pass
-
+    
     omr_ipv6addr_prefix = network_dataset_info["prefix_omr_ipv6addr_prefix"] if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info else None 
 
     topology_data_enhanced = []
@@ -200,7 +199,7 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(topology_data, networ
 
     return topology_data_enhanced
 
-def get_meshdiag_topology_ip6addrs_children_data(extaddr_map=None, network_dataset_info=None):
+def meshdiag_topology_ip6addrs_children_data_get(extaddr_map=None, network_dataset_info=None):
     """
     Retrieves, parses, and enhances the thread topology IP6 addresses and children data.
     
@@ -235,7 +234,7 @@ if __name__ == "__main__":
 
     network_dataset_info = util_network.get_network_dataset_info()
 
-    meshdiag_topology_data = get_meshdiag_topology_ip6addrs_children_data(extaddr_map, network_dataset_info)
+    meshdiag_topology_data = meshdiag_topology_ip6addrs_children_data_get(extaddr_map, network_dataset_info)
     save_path = "td-otbr-cli-meshdiag-topology.json"
     with open(save_path, mode='w', encoding='utf-8') as f:
         json.dump(meshdiag_topology_data, f, indent=4)

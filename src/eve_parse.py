@@ -4,7 +4,7 @@ import json
 import util_network
 from util_convert import convert_from_base64_to_ext_address_hexnumber
 
-def parse_eve_process_id_mappings(path, network_dataset_info=None):
+def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=None):
     """
     Parses Eve JSON file and preserves all node fields.
 
@@ -76,7 +76,7 @@ def parse_eve_process_id_mappings(path, network_dataset_info=None):
         out[rloc16_hex] = node
     return out
 
-def parse_eve_process_route_mappings(eve_network_enhanced_data):
+def eve_enhance_routes(eve_network_enhanced_data):
     """
     Rebuild Eve enhanced data keyed by rloc16_hex and enrich route entries.
 
@@ -118,7 +118,7 @@ def parse_eve_process_route_mappings(eve_network_enhanced_data):
         node_copy = copy.deepcopy(original_node)
         rloc16_hex = node_copy.get("rloc16_hex", original_key)
 
-        # Enrich route entries with "to_name" by resolving route["to"] to node names using the original data maps
+        # Enhance route entries with "to_name" by resolving route["to"] to node names using the original data maps
         routes = node_copy.get("routes")
         if isinstance(routes, list):
             for route in routes:
@@ -145,15 +145,15 @@ if __name__ == "__main__":
 
     # Parse the Eve JSON file to build an enhanced data structure keyed by rloc16_hex with all node fields preserved and extAddress in hex format for easier mapping and reference. 
     eve_json_file_path = "thread-eve-layout.json"
-    eve_data_parse_1 = parse_eve_process_id_mappings(eve_json_file_path, network_dataset_info)
+    eve_data_parse_1 = eve_native_file_parse_and_enhance_id_mappings(eve_json_file_path, network_dataset_info)
 
-    ## Reparse and enrich the eve_data json data structure to add route destination node names for reference
-    eve_data_parse_2 = parse_eve_process_route_mappings(eve_data_parse_1)  
+    ## Enhance the eve_data json data structure to add route destination node names for reference
+    eve_data_enhanced = eve_enhance_routes(eve_data_parse_1)  
     
     ## Save json data structures for reference
     save_json_filename = "td-eve-topology.json"
     with open(save_json_filename, 'w', encoding='utf-8') as f:
-        json.dump(eve_data_parse_2, f, indent=4)
+        json.dump(eve_data_enhanced, f, indent=4)
 
     ## Print the parsed data structure with route names
-    print(json.dumps(eve_data_parse_2, indent=4))
+    print(json.dumps(eve_data_enhanced, indent=4))
