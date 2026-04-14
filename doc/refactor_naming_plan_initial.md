@@ -92,7 +92,7 @@ These files call the OTBR HTTP REST API (default port 8081).
 Steps:
 1. `git mv src/<old>.py src/<new>.py`
 2. Update all `import` / `from` statements in every dependent file, in
-   particular `td_merge.py` and the test files.
+   particular `dataset_merge.py` and the test files.
 3. Update the output JSON filenames embedded in `td_get_otbr_restapi.py` if
    they still reference the old module name.
 4. Update `doc/otbr_restapi_clients.md` to reference the new file names in all
@@ -109,7 +109,7 @@ Steps:
 
 Steps:
 1. `git mv src/<old>.py src/<new>.py`
-2. Update all callers (e.g. `td_merge.py`, any `__main__` entry points that
+2. Update all callers (e.g. `dataset_merge.py`, any `__main__` entry points that
    import these modules).
 
 ---
@@ -173,7 +173,7 @@ Steps:
 
 | File | Role |
 |---|---|
-| `td_merge.py` | Merges all collector outputs into a single JSON file |
+| `dataset_merge.py` | Merges all collector outputs into a single JSON file |
 | `td_util_ot_ctl.py` | Runs `ot-ctl` inside a Docker container |
 | `td_util_network.py` | Network helpers (prefixes, RLOC16, OMR) |
 | `td_util_convert.py` | Base64 ↔ hex conversion for extended addresses |

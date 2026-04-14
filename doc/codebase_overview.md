@@ -99,7 +99,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 
 | File | Purpose |
 |---|---|
-| `td_merge.py` | Reads multiple JSON data files (OTBR CLI, REST API, Eve) and merges all records into a single output file.  Supports three merge strategies: `none` (pass-through), `by-rloc16`, and `by-identity` (matches on RLOC16, canonical `extaddr`, or `omrIpv6Address`).  Tracks source provenance in `_source_files` and records conflicts without overwriting existing values. |
+| `dataset_merge.py` | Reads multiple JSON data files (OTBR CLI, REST API, Eve) and merges all records into a single output file.  Supports three merge strategies: `none` (pass-through), `by-rloc16`, and `by-identity` (matches on RLOC16, canonical `extaddr`, or `omrIpv6Address`).  Tracks source provenance in `_source_files` and records conflicts without overwriting existing values. |
 
 ### Utilities
 
@@ -240,7 +240,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
                  │  JSON files        │  JSON files
                  ▼                   ▼
 ┌────────────────────────────────────────────────────────────────┐
-│                         td_merge.py                            │
+│                         dataset_merge.py                            │
 │  Normalize identifiers (RLOC16, extaddr, OMR IPv6)             │
 │  Merge rows by identity  →  resolve conflicts                  │
 │  Output: td-merged-topology.json                               │
@@ -257,7 +257,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 
 1. **Collect**: Run individual `otbr_restapi_*`, `otbr_cli_*`, and `mdns_*` scripts.  Each saves data as a local JSON file (e.g. `td-otbr-restapi-devices.json`, `td-otbr-cli-router-table.json`, `td-eve-topology.json`).
 2. **Normalize**: Each collector normalises its data — RLOC16 values are hex strings (`0x5000`), extended addresses are lowercase hex (`1a7fbf0434e4f043`), field aliases are canonicalised (`extAddress` → `extaddr`).
-3. **Merge**: `td_merge.py` reads the JSON files and merges records using the configured strategy.  Non-empty values are never silently overwritten; conflicts are recorded.  The output JSON retains a `_source_files` list per row.
+3. **Merge**: `dataset_merge.py` reads the JSON files and merges records using the configured strategy.  Non-empty values are never silently overwritten; conflicts are recorded.  The output JSON retains a `_source_files` list per row.
 4. **Visualise**: Open one of the HTML files in a browser, select the merged JSON file from the dataset dropdown, and explore the interactive topology graph or table.
 
 ---
@@ -299,7 +299,7 @@ python src/otbr_cli_meshdiag_routerneighbortable.py
 python src/otbr_cli_networkdiag_topology.py
 
 # Merge everything
-python src/td_merge.py
+python src/dataset_merge.py
 ```
 
 ### Use the REST API clients directly

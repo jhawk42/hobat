@@ -20,6 +20,11 @@ def get_vendor_from_oui(oui_hex):
     oui = oui_hex[:6].lower()
     return VENDORS.get(oui, "Unknown Vendor")
 
+def get_vendor_from_xa(xa_hex):
+    # Take first 6 chars (3 bytes) for OUI
+    oui = xa_hex[:6].lower()
+    return VENDORS.get(oui, "Unknown Vendor")
+
 def decode_state_bitmap_br(sb_hex):
     """Decode the State Bitmap (sb) field into individual bit meanings"""
     try:
