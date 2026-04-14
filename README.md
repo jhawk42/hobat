@@ -1,8 +1,9 @@
-# Thread Network Toplogy Dashboard
+# Thread Network Topology Dashboard
 
 
-A simple set of tools to collect and display a thread mesh network in both a network topology view and table view. 
-The tool collects from various dataset sources:
+A set of tools to collect and display a thread mesh network in both a network topology view and table view. 
+
+The tool collects dats from various dataset sources:
 - Open Thread OTBR cli 
 - Open Thread OTBR restapi
 - Eve app
