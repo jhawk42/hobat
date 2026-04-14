@@ -62,7 +62,7 @@ These files call the OTBR HTTP REST API (port 8081 by default).
 **Steps for each file:**
 1. `git mv src/<old>.py src/<new>.py`
 2. Update all `import` / `from` statements in every file that references the
-   old module name (including `td_merge.py` and test files).
+   old module name (including `dataset_merge.py` and test files).
 3. Update `doc/otbr_restapi_clients.md` to use the new file names throughout.
 4. Update `codebase_overview.md` to use the new file names throughout.
 
@@ -79,7 +79,7 @@ These files call the OTBR HTTP REST API (port 8081 by default).
 **Steps for each file:**
 1. `git mv src/<old>.py src/<new>.py`
 2. Update all `import` / `from` statements in every file that references the
-   old module name (including `td_merge.py` and test files).
+   old module name (including `dataset_merge.py` and test files).
 3. Update `doc/otbr_restapi_clients.md` to use the new file names throughout.
 4. Update `codebase_overview.md` to use the new file names throughout.
 
@@ -98,7 +98,7 @@ These files call the OTBR HTTP REST API (port 8081 by default).
 **Steps for each file:**
 1. `git mv src/<old>.py src/<new>.py`
 2. Update all `import` / `from` statements in every file that references the
-   old module name (including `td_merge.py` and test files).
+   old module name (including `dataset_merge.py` and test files).
 3. Update `codebase_overview.md` to use the new file names throughout.
 
 ---

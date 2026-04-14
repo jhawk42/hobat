@@ -1,11 +1,11 @@
 import base64
-from util_convert import convert_from_base64_to_ext_address_hexnumber
+from util_convert import b64_to_ext_address
 
 # The original Base64 string
 #base64_string = "qvJwk3MAmFM="
 base64_string = "emv0Jau9vjM="
 
-hex_number = convert_from_base64_to_ext_address_hexnumber(base64_string)
+hex_number = b64_to_ext_address(base64_string)
 
 print(f"Base64: {base64_string}")
 print(f"Hex:    {hex_number}")

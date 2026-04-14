@@ -2,7 +2,7 @@ import copy
 import json
 
 import util_network
-from util_convert import convert_from_base64_to_ext_address_hexnumber
+from util_convert import b64_to_ext_address
 
 def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=None):
     """
@@ -63,7 +63,7 @@ def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=Non
             extAddress_b64 = threadNetworks[0].get("extAddress")
             if extAddress_b64:
                 # Convert base64 extAddress to hex string
-                extAddress_hex = convert_from_base64_to_ext_address_hexnumber(extAddress_b64)
+                extAddress_hex = b64_to_ext_address(extAddress_b64)
                 
                 # store enhanced hex extAddress for reference
                 # Add hex extAddress to threadNetworks for reference

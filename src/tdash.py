@@ -10,7 +10,7 @@ import os
 
 def main():
 
-    print("TDash: Thread Network Topology Scanner")
+    print("Thread Network Topology Scanner")
 
     """Main entry point with optional command-line arguments."""
     print("Initiating Thread Network Topology Scan...\n")
