@@ -18,9 +18,9 @@ def run_ot_ctl_command_stdio(ot_command, container_name:None, ):
         "sh", "-c", f"ot-ctl {ot_command}"
     ]
 
-    ## TODO add command line option support to run ot-ctl command without docker exec
+    ## command line option support to run ot-ctl command without docker exec
     full_command_no_docker = [
-        f"ot-ctl {ot_command}"
+        "sh", "-c", f"ot-ctl {ot_command}"
     ]
     
     if container_name is not None:
