@@ -1,5 +1,6 @@
 import base64
-from util_convert import b64_to_ext_address
+import logging
+from util_convert import b64_to_extended_address
 
 # Your raw strings from the JSON
 b64_list = [
@@ -9,5 +10,5 @@ b64_list = [
 ]
 
 for item in b64_list:
-    hexnumber = b64_to_ext_address(item)
-    print(f"Base64: {item:15} -> Hex: {hexnumber}")
+    hexnumber = b64_to_extended_address(item)
+    logging.info(f"Base64: {item:15} -> Hex: {hexnumber}")

@@ -2,6 +2,7 @@ import os
 import subprocess
 import re
 import json
+import logging
 
 TD_OTBR_CONTAINER_NAME_DEFAULT = "otbr"  # Default container name for OTBR Docker image
 TD_OTBR_CONTAINER_NAME_ENV = "TD_OTBR_CONTAINER_NAME" # Environment variable name for OTBR container name
@@ -30,8 +31,8 @@ def run_ot_ctl_command_stdio(ot_command, container_name:None, ):
     else:   
         full_command = full_command_no_docker  
 
-    # Debug: Print the command being executed
-    print(f"[DEBUG] {full_command}")
+    # log the command being executed
+    logging.debug(f"[DEBUG] {full_command}")
 
     try:
         # Run the command and capture output    
@@ -43,7 +44,9 @@ def run_ot_ctl_command_stdio(ot_command, container_name:None, ):
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
-        return f"Error: {e.stderr.strip()}"
+        err_str = e.stderr.strip() if e.stderr else "Unknown error"
+        logging.error(f"[ERROR] {err_str}")
+        return f"Error: {err_str}"
 
 def run_ot_ctl_stdio(command, container_name:None = TD_OTBR_CONTAINER_NAME_DEFAULT):
     """

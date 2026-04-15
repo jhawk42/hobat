@@ -6,10 +6,9 @@ venv/
 # Cache compliled files
 __pycache__/
 
-# History files
-history_data/
-history_src/
-
+# Ignore all files in the .vscode directory, but NOT the launch.json file
+.vscode/*
+!.vscode/launch.json
 
 # Ignore comments start with a hash (#)
 

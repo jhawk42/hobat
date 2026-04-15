@@ -4,6 +4,7 @@ import re
 import json
 import sys
 import time
+import logging
 
 from copy import deepcopy
 import util_ot_ctl
@@ -18,7 +19,7 @@ def get_ipv6_addresses():
     Returns a dictionary mapping RLOC16 to IPv6 addresses.
     """
     output = util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs")
-    print(f"[DEBUG] Output of 'meshdiag topology ip6-addrs':\n{output}\n")
+    logging.info(f"[DEBUG] Output of 'meshdiag topology ip6-addrs':\n{output}\n")
 
     ipv6_map = {}
     
@@ -465,7 +466,7 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     # TLV 9 = MAC Counters, TLV 34 = MLE Counters
     
     output = util_ot_ctl.run_ot_ctl_stdio(f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}")
-    print(f"[DEBUG] Diagnostic for RLOC {rloc} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
+    logging.info(f"Diagnostic for RLOC {rloc} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
 
     # Extract Ext Address (TLV 0)
     extaddr_match = re.search(r"Ext Address: ([0-9a-fA-F]{16})", output)
@@ -550,16 +551,16 @@ def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=N
             # On last retries, try with simpler TLV set in case detailed one is causing issues
             if r == retries - 2:
                 tlv_detail_level = 2
-                print(f"[DEBUG] Router Node {rloc16} not found after {r} attempts, trying with medium detail TLV set.")   
+                logging.info(f"Router Node {rloc16} not found after {r} attempts, trying with medium detail TLV set.")   
 
             if r == retries - 1:
                 tlv_detail_level = 1
-                print(f"[DEBUG] Router Node {rloc16} not found after {r} attempts, trying with simple values.")
+                logging.info(f"Router Node {rloc16} not found after {r} attempts, trying with simple values.")
 
             network_topology_node = get_networkdiagnostic_one(rloc16, ipv6_rloc_prefix, extaddr_map, ipv6_addresses, tlv_detail_level)
             if network_topology_node is not None:
                 break
-            print (f"[DEBUG] Router Node {rloc16} not found, retrying in {delay} seconds...")
+            logging.info(f"Router Node {rloc16} not found, retrying in {delay} seconds...")
             time.sleep(delay)
         
         if network_topology_node is None:
@@ -599,17 +600,17 @@ def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=N
                             # On last retries, try with simpler TLV set in case detailed one is causing issues
                             if cr == child_retries - 2:
                                 child_tlv_detail_level = 2
-                                print(f"[DEBUG] Child node {child_rloc} not found after {cr} attempts, trying with medium detail TLV set.")   
+                                logging.info(f"Child node {child_rloc} not found after {cr} attempts, trying with medium detail TLV set.")   
 
                             if cr == child_retries - 1:
                                 child_tlv_detail_level = 1
-                                print(f"[DEBUG] Child node {child_rloc} not found after {cr} attempts, trying with simple values.")
+                                logging.info(f"Child node {child_rloc} not found after {cr} attempts, trying with simple values.")
 
                             child_node = get_networkdiagnostic_one(child_rloc, ipv6_rloc_prefix, extaddr_map, ipv6_addresses, child_tlv_detail_level)
                             if child_node is not None:
                                 child_node['type'] = 'Child'
                                 break
-                            print (f"[DEBUG] Child node {child_rloc} not found, retrying in {child_delay} seconds...")
+                            logging.info(f"Child node {child_rloc} not found, retrying in {child_delay} seconds...")
                             time.sleep(child_delay)
                             
                         if child_node is None:
@@ -636,55 +637,55 @@ def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=N
 
 def print_networkdiagnostic_topology(topology):
     """Prints the network topology to console in tree format."""
-    print("\n--- Thread Network Topology ---\n")
+    logging.info("\n--- Thread Network Topology ---\n")
     for rloc, data in topology.items():
-        print(f"Parent [RLOC: {rloc}] (Ext: {data['extaddr']})")
-        print(f"  Thread Stack Version: {data.get('thread_stack_version', 'Unknown')}")
+        logging.info(f"Parent [RLOC: {rloc}] (Ext: {data['extaddr']})")
+        logging.info(f"  Thread Stack Version: {data.get('thread_stack_version', 'Unknown')}")
         
         if data.get('ipv6_addrs'):
-            print(f"  IPv6 Addresses ({len(data['ipv6_addrs'])}):")
+            logging.info(f"  IPv6 Addresses ({len(data['ipv6_addrs'])}):")
             for ipv6 in data['ipv6_addrs']:
-                print(f"    - {ipv6}")
+                logging.info(f"    - {ipv6}")
         
         if data.get('omrIpv6Address'):
-            print(f"  OMR IPv6 Address: {data['omrIpv6Address']}")
+            logging.info(f"  OMR IPv6 Address: {data['omrIpv6Address']}")
 
         if data.get('children'):
-            print(f"  Children ({len(data['children'])}):")
+            logging.info(f"  Children ({len(data['children'])}):")
             for child in data['children']:
-                print(f"    - ID: {child['id']}, Timeout: {child.get('timeout')}, Link Quality: {child.get('link_quality')}")
+                logging.info(f"    - ID: {child['id']}, Timeout: {child.get('timeout')}, Link Quality: {child.get('link_quality')}")
                 if child.get('mode'):
                     mode = child['mode']
-                    print(f"      Mode: RxOnWhenIdle={mode.get('rx_on_when_idle')}, DeviceType={mode.get('device_type')}, NetworkData={mode.get('network_data')}")
+                    logging.info(f"      Mode: RxOnWhenIdle={mode.get('rx_on_when_idle')}, DeviceType={mode.get('device_type')}, NetworkData={mode.get('network_data')}")
         
         if data.get('mac_counters'):
-            print(f"  MAC Counters:")
+            logging.info(f"  MAC Counters:")
             for key, value in sorted(data['mac_counters'].items()):
-                print(f"    {key}: {value}")
+                logging.info(f"    {key}: {value}")
         
         if data.get('mle_counters'):
-            print(f"  MLE Counters:")
+            logging.info(f"  MLE Counters:")
             for key, value in sorted(data['mle_counters'].items()):
-                print(f"    {key}: {value}")
+                logging.info(f"    {key}: {value}")
         
         if data.get('time_statistics'):
-            print(f"  Time Statistics:")
+            logging.info(f"  Time Statistics:")
             time_stats = data['time_statistics']
             if time_stats:
                 total_time = time_stats.get('tracked_time', 0)
                 router_pct = (time_stats.get('router_time', 0) / total_time * 100) if total_time > 0 else 0
                 child_pct = (time_stats.get('child_time', 0) / total_time * 100) if total_time > 0 else 0
-                print(f"    Tracked: {time_stats.get('tracked_time')}, Router: {time_stats.get('router_time')} ({router_pct:.1f}%), Child: {time_stats.get('child_time')} ({child_pct:.1f}%)")
-                print(f"    Disabled: {time_stats.get('disabled_time')}, Detached: {time_stats.get('detached_time')}, Leader: {time_stats.get('leader_time')}")
+                logging.info(f"    Tracked: {time_stats.get('tracked_time')}, Router: {time_stats.get('router_time')} ({router_pct:.1f}%), Child: {time_stats.get('child_time')} ({child_pct:.1f}%)")
+                logging.info(f"    Disabled: {time_stats.get('disabled_time')}, Detached: {time_stats.get('detached_time')}, Leader: {time_stats.get('leader_time')}")
         
-        print()
+        logging.info("")
 
 
 def save_networkdiagnostic_topology_to_json_dict(data, filename="td-otbr-cli-networkdiag-topology.json"):
     """Serializes the dictionary to a pretty-printed JSON file."""
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4)
-    print(f"Successfully exported topology to {filename}")
+    logging.info(f"Successfully exported topology to {filename}")
 
 def save_networkdiagnostic_topology_to_json_list(data, filename="thread-networkdiagnostic-topology-list.json"):
     """Converts dict format to list format and saves to JSON."""
@@ -714,11 +715,14 @@ def save_networkdiagnostic_topology_to_json_list(data, filename="thread-networkd
     
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(network_map, f, indent=4)
-    print(f"Successfully exported topology to {filename}")
+    logging.info(f"Successfully exported topology to {filename}")
 
 def main():
     """Main entry point with optional command-line arguments."""
-    print("Initiating Thread Network Topology Scan...\n")
+
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
+    logging.info("Initiating Thread Network Topology Scan...\n")
     
     ## TODO 
     ## arguments
@@ -753,27 +757,6 @@ def main():
     # Print the raw topology dictionary as JSON to console for debugging
     print(json.dumps(networkdiagnostic_topology_data, indent=4))
 
-    # """
-    # # Determine output format from command-line argument
-    # output_format = sys.argv[1] if len(sys.argv) > 1 else "all"
-    
-    # if output_format in ["console", "all"]:
-    #     print_network_topology(topology)
-    
-    # if output_format in ["json-dict", "all"]:
-    #     save_topology_to_json(topology, "thread_topology.json")
-    
-    # if output_format in ["json-list", "all"]:
-    #     save_topology_as_list_json(topology, "thread_topology_list.json")
-    
-    # if output_format not in ["console", "json-dict", "json-list", "all"]:
-    #     print(f"Unknown format '{output_format}'")
-    #     print("Usage: python td_dump_thread_topology_3_merged.py [console|json-dict|json-list|all]")
-    #     print("  console:  Print topology to console (tree format)")
-    #     print("  json-dict: Save as JSON dict with rloc16 keys")
-    #     print("  json-list: Save as JSON list with parent nodes")
-    #     print("  all:      Print to console + save both JSON formats (default)")
-    # """
         
 if __name__ == "__main__":
     main()

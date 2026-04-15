@@ -1,5 +1,5 @@
 import json
-
+import logging
 
 def extaddr_device_label_mapping_load(path):
     """

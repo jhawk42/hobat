@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
@@ -680,6 +682,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
     args = parse_args()
     base_dir = Path(args.base_dir)
     include_files = parse_file_list_args(args.include_files)
@@ -722,10 +726,10 @@ def main() -> int:
         with report_path.open("w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
             f.write("\n")
-        print(f"Wrote merge report to {report_path}")
+        logging.info(f"Wrote merge report to {report_path}")
 
-    print(f"Wrote {len(merged_records)} merged records to {output_path}")
-    print(
+    logging.info(f"Wrote {len(merged_records)} merged records to {output_path}")
+    logging.info(
         "Validation summary: "
         f"multi_source_nodes={report['multi_source_nodes_total']}, "
         f"single_source_nodes={report['single_source_nodes_total']}, "

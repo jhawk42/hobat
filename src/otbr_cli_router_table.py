@@ -1,6 +1,7 @@
 import os
 import subprocess
 import json
+import logging
 
 from extaddr_device_label_map import extaddr_device_label_mapping_load
 import util_ot_ctl
@@ -11,10 +12,10 @@ def get_thread_router_table():
         output = util_ot_ctl.run_ot_ctl_stdio("router table")
         return output
     except subprocess.CalledProcessError as e:
-        print(f"Error running ot-ctl: {e}")
+        logging.error(f"Error running ot-ctl: {e}")
         raise
     except Exception as e:
-        print(f"Unexpected error running ot-ctl: {e}")
+        logging.error(f"Unexpected error running ot-ctl: {e}")
         raise
 
 def parse_router_table_output(output, extaddr_map=None):
@@ -122,14 +123,16 @@ def get_router_table_data(extaddr_map=None):
     return parse_router_table_output(raw_output, extaddr_map)
 
 if __name__ == "__main__":
+    
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
     try:
-        
         # Load extaddr to nodename mapping from JSON file
         extaddr_json_filename = "td-static-extaddr-device-label.json"
 
         # Check if file exists before parsing
         if os.path.exists(extaddr_json_filename):
-            print(f"Loading extended address to node name mapping from {extaddr_json_filename}...")
+            logging.info(f"Loading extended address to node name mapping from {extaddr_json_filename}...")
             extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
         else:
             extaddr_map = {}
@@ -139,11 +142,12 @@ if __name__ == "__main__":
         with open(save_path, 'w') as f:
             json.dump(router_table_data, f, indent=4)
         print(json.dumps(router_table_data, indent=4))
+        
     except FileNotFoundError as e:
-        print(f"Error: File not found - {e}")
+        logging.error(f"Error: File not found - {e}")
     except json.JSONDecodeError as e:
-        print(f"Error: Invalid JSON - {e}")
+        logging.error(f"Error: Invalid JSON - {e}")
     except IOError as e:
-        print(f"Error: I/O error - {e}")
+        logging.error(f"Error: I/O error - {e}")
     except Exception as e:
-        print(f"Error: {e}")
+        logging.error(f"Error: {e}")

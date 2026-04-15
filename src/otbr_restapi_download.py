@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import logging
+
 from typing import Iterable, Sequence, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -80,20 +82,20 @@ def download_json(url: str, headers: dict[str, str], output_file: str, timeout: 
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
 
-        print(f"OK: {url} -> {output_file}")
-        # print the json data in a human readable format
-        print(json.dumps(data, indent=4))
+        logging.info(f"OK: {url} -> {output_file}")
+        # log the json data in a human readable format
+        logging.info(json.dumps(data, indent=4))
         return True
     except HTTPError as e:
-        print(f"HTTP error for {url}: {e.code} {e.reason}")
+        logging.error(f"HTTP error for {url}: {e.code} {e.reason}")
     except URLError as e:
-        print(f"Network error for {url}: {e.reason}")
+        logging.error(f"Network error for {url}: {e.reason}")
     except json.JSONDecodeError as e:
-        print(f"Invalid JSON from {url}: {e}")
+        logging.error(f"Invalid JSON from {url}: {e}")
     except OSError as e:
-        print(f"File write error for {output_file}: {e}")
+        logging.error(f"File write error for {output_file}: {e}")
     except Exception as e:
-        print(f"Unexpected error for {url}: {e}")
+        logging.error(f"Unexpected error for {url}: {e}")
 
     return False
 
@@ -109,14 +111,16 @@ def restapi_downloads(base_url: str = BASE_URL, headers: dict[str, str] | None =
             failures += 1
 
     if failures:
-        print(f"Completed with {failures} failure(s).")
+        logging.error(f"Completed with {failures} failure(s).")
         return 1
 
-    print("All downloads completed successfully.")
+    logging.info("All downloads completed successfully.")
     return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

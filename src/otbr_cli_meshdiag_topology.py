@@ -2,6 +2,7 @@ import os
 import subprocess
 import re
 import json
+import logging
 
 import util_ot_ctl
 import util_network
@@ -18,7 +19,7 @@ def get_meshdiag_topology_ip6addrs_children():
         output = util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs children")
         return output
     except subprocess.CalledProcessError as e:
-        print(f"Error running ot-ctl: {e}")
+        logging.error(f"Error running ot-ctl: {e}")
         return None
 
 def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr_map=None):
@@ -222,6 +223,8 @@ def meshdiag_topology_ip6addrs_children_data_get(extaddr_map=None, network_datas
     return topology_data_enhanced_links
 
 if __name__ == "__main__":
+
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
     # Load extaddr to nodename mapping from JSON file
     extaddr_json_filename = "td-static-extaddr-device-label.json"

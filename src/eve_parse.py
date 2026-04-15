@@ -1,8 +1,9 @@
 import copy
 import json
+import logging
 
 import util_network
-from util_convert import b64_to_ext_address
+from util_convert import b64_to_extended_address
 
 def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=None):
     """
@@ -63,7 +64,7 @@ def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=Non
             extAddress_b64 = threadNetworks[0].get("extAddress")
             if extAddress_b64:
                 # Convert base64 extAddress to hex string
-                extAddress_hex = b64_to_ext_address(extAddress_b64)
+                extAddress_hex = b64_to_extended_address(extAddress_b64)
                 
                 # store enhanced hex extAddress for reference
                 # Add hex extAddress to threadNetworks for reference
@@ -138,6 +139,8 @@ def eve_enhance_routes(eve_network_enhanced_data):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
     ## Main execution:
 
     ## Get network dataset info for reference in parsing and enriching Eve data 
@@ -156,4 +159,4 @@ if __name__ == "__main__":
         json.dump(eve_data_enhanced, f, indent=4)
 
     ## Print the parsed data structure with route names
-    print(json.dumps(eve_data_enhanced, indent=4))
+    logging.info(json.dumps(eve_data_enhanced, indent=4))

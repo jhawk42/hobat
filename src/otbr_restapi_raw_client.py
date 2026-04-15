@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
+import logging
+
 from otbr_restapi_client import (
     DEFAULT_ACCEPT,
     DEFAULT_HOST,

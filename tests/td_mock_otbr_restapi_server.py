@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import threading
 import uuid
 from copy import deepcopy
@@ -388,8 +389,8 @@ def main() -> int:
     args = build_parser().parse_args()
     store = MockOTBRStore.build()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(store))
-    print(f"Mock OTBR REST API listening on http://{args.host}:{args.port}")
-    print(
+    logging.info(f"Mock OTBR REST API listening on http://{args.host}:{args.port}")
+    logging.info(
         "Use explicit client overrides to reach the mock server: "
         f"--host {args.host} --port {args.port}. "
         f"The normal client default remains http://{LIVE_DEFAULT_HOST}:{LIVE_DEFAULT_PORT}."

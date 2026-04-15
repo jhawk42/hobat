@@ -1,5 +1,5 @@
 import util_ot_ctl
-
+import logging
 
 def _extract_prefix_token(command_output):
     """Extracts the first token (prefix) from ot-ctl command output."""
@@ -15,7 +15,7 @@ def _run_prefix_command(command, debug_label):
     command_output = util_ot_ctl.run_ot_ctl_stdio(command)
     # extract the prefix token from the command output and print it for debugging
     prefix = _extract_prefix_token(command_output)
-    print(f"[DEBUG] {debug_label}: {prefix}\n")
+    logging.debug(f"[DEBUG] {debug_label}: {prefix}\n")
     return prefix
 
 def _format_prefix_for_kind(prefix, kind):
@@ -157,7 +157,7 @@ def get_dataset_active(hideSensitiveInfo=True):
     if hideSensitiveInfo:
         command += " -ns"  # Add -ns flag to hide sensitive info in the output
     dataset_output = util_ot_ctl.run_ot_ctl_stdio(command).strip()
-    print(f"[DEBUG] Dataset Active Output:\n{dataset_output}\n")
+    logging.debug(f"[DEBUG] Dataset Active Output:\n{dataset_output}\n")
     
     dataset_info = {}
     
@@ -176,7 +176,7 @@ def get_dataset_active(hideSensitiveInfo=True):
             value = value.strip()
             dataset_info[key] = value
     
-    print(f"[DEBUG] Parsed Dataset Info: {dataset_info}\n")
+    logging.debug(f"[DEBUG] Parsed Dataset Info: {dataset_info}\n")
     return dataset_info
 
 

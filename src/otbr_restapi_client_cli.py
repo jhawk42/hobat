@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import logging
+
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -301,12 +303,12 @@ def emit_output(result: Any, output_path: str | None) -> None:
         Path(output_path).write_text(rendered + suffix, encoding="utf-8")
 
     if rendered:
-        print(rendered)
+        logging.info(rendered)
 
 
 def emit_error(exc: Exception) -> None:
     payload = error_to_dict(exc)
-    print(json.dumps(payload, indent=4, sort_keys=True), file=sys.stderr)
+    logging.error(json.dumps(payload, indent=4, sort_keys=True))
 
 
 def exit_code_for_exception(exc: Exception) -> int:
@@ -324,6 +326,8 @@ def exit_code_for_exception(exc: Exception) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

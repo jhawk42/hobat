@@ -4,6 +4,8 @@ import socket
 import threading
 import time
 import base64
+import logging
+
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 
 # Vendor OUI Lookup Table
@@ -939,6 +941,8 @@ class MDNSDumpListener(ServiceListener):
                         print(f"    - {key.decode('utf-8') if isinstance(key, bytes) else key}: {val_str}")
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
     parser = argparse.ArgumentParser(
         description="Browse Thread-related mDNS scopes",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -991,7 +995,7 @@ def main():
 
     selected_scopes, scope_label = scope_map[args.scope]
 
-    print(f"Browsing {scope_label} scopes ({len(selected_scopes)} service type(s))... (Press Ctrl+C to stop)")
+    logging.info(f"Browsing {scope_label} scopes ({len(selected_scopes)} service type(s))... (Press Ctrl+C to stop)")
 
     IDLE_TIMEOUT = 30.0
 
@@ -1010,12 +1014,12 @@ def main():
     idle_thread.start()
 
     try:
-        print(f"Waiting (exits automatically after {int(IDLE_TIMEOUT)}s of no new updates)...")
+        logging.info(f"Waiting (exits automatically after {int(IDLE_TIMEOUT)}s of no new updates)...")
         listener.idle_done.wait()
     except KeyboardInterrupt:
         pass
     finally:
-        print("\nStopping...")
+        logging.info("Stopping...")
         zeroconf.close()
 
         records = listener.get_records()
@@ -1028,8 +1032,8 @@ def main():
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=2)
 
-        print(f"Saved {len(records)} mDNS record(s) to {output_file}")
-        print(json.dumps(records, indent=2))
+        logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
+        logging.info(json.dumps(records, indent=2))
 
 if __name__ == "__main__":
     main()

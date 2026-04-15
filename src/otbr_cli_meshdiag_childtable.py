@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import logging
 
 from otbr_cli_router_table import get_router_table_data
 from extaddr_device_label_map import extaddr_device_label_mapping_load
@@ -15,6 +16,7 @@ def get_meshdiag_childtable_one(parent_rloc16, router=None, extaddr_map=None):
     """Collect and parse `meshdiag childtable` output for one parent router."""
 
     output = run_ot_ctl_stdio(f"meshdiag childtable {parent_rloc16}")
+    logging.info(f"[DEBUG] Output of 'meshdiag childtable {parent_rloc16}':\n{output}\n")
 
     timeout_match = re.search(r"Error\s+(\d+):\s+ResponseTimeout", output)
     if timeout_match:
@@ -142,12 +144,12 @@ def get_meshdiag_childtables(extaddr_map):
         if router:
             extaddr = router.get("extaddr")
             device_label = extaddr_map.get(extaddr, "Unknown") if extaddr_map else "Unknown"
-            print(
+            logging.info(
                 f"Getting meshdiag childtable for router rloc16 {parent_rloc16} "
                 f"(Node: {device_label}, ExtAddr: {extaddr})..."
             )
         else:
-            print(
+            logging.info(
                 f"Getting meshdiag childtable for router rloc16 {parent_rloc16} "
                 "(Node: Unknown, ExtAddr: Unknown)..."
             )
@@ -159,13 +161,15 @@ def get_meshdiag_childtables(extaddr_map):
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
     extaddr_json_filename = "td-static-extaddr-device-label.json"
 
     if os.path.exists(extaddr_json_filename):
-        print(f"Loading extended address to node name mapping from {extaddr_json_filename}...")
+        logging.info(f"Loading extended address to device label mapping from {extaddr_json_filename}...")
         extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
     else:
-        print(f"ExtAddr mapping file not found: {extaddr_json_filename}. Continuing with Unknown labels.")
+        logging.warning(f"extended address mapping file not found: {extaddr_json_filename}. Continuing with Unknown labels.")
         extaddr_map = {}
 
     router_child_tables = get_meshdiag_childtables(extaddr_map)
@@ -174,7 +178,7 @@ def main():
     with open(output_filename, "w") as f:
         json.dump(router_child_tables, f, indent=4)
 
-    print(f"Meshdiag router childtables data saved to {output_filename}")
+    logging.info(f"Meshdiag router childtables data saved to {output_filename}")
     print(json.dumps(router_child_tables, indent=4))
 
 

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import logging
 
 from otbr_cli_router_table import get_router_table_data
 from extaddr_device_label_map import extaddr_device_label_mapping_load
@@ -119,9 +120,9 @@ def get_meshdiag_routerneighbortables(extaddr_map:None):
         if router:
             extaddr = router.get('extaddr')
             device_label = extaddr_map.get(extaddr, "Unknown")
-            print(f"Getting meshdiag routerneighbortable for router rloc16 {rloc16} (Node: {device_label}, ExtAddr: {extaddr})...")
+            logging.info(f"Getting meshdiag routerneighbortable for router rloc16 {rloc16} (Node: {device_label}, ExtAddr: {extaddr})...")
         else:
-            print(f"Getting meshdiag routerneighbortable for router rloc16 {rloc16} (Node: Unknown, ExtAddr: Unknown)...")  
+            logging.info(f"Getting meshdiag routerneighbortable for router rloc16 {rloc16} (Node: Unknown, ExtAddr: Unknown)...")
 
         router_neighbor_table = get_meshdiag_routerneighbortable_one(rloc16, router, extaddr_map)
         router_neighbor_tables.append(router_neighbor_table)
@@ -129,6 +130,7 @@ def get_meshdiag_routerneighbortables(extaddr_map:None):
     return router_neighbor_tables
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
     # Load extaddr to nodename mapping from JSON file
     extaddr_json_filename = "td-static-extaddr-device-label.json"
@@ -139,14 +141,14 @@ def main():
     else:
         extaddr_map = {}
 
-    print(f"Loading extended address to node name mapping from {extaddr_json_filename}...")
+    logging.info(f"Loading extended address to device label mapping from {extaddr_json_filename}...")
     extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
         
     router_neighbor_tables = get_meshdiag_routerneighbortables(extaddr_map)
     
     with open('td-otbr-cli-meshdiag-router-neighbortables.json', 'w') as f:
         json.dump(router_neighbor_tables, f, indent=4)
-        print("Meshdiag routerneighbortables data saved to td-otbr-cli-meshdiag-router-neighbortables.json")  
+        logging.info("Meshdiag routerneighbortables data saved to td-otbr-cli-meshdiag-router-neighbortables.json")  
     
     print(json.dumps(router_neighbor_tables, indent=4))
 
