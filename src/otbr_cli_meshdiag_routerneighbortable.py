@@ -2,6 +2,7 @@ import json
 import os
 import re
 import logging
+from typing import Sequence
 
 from otbr_cli_router_table import get_router_table_data
 from extaddr_device_label_map import extaddr_device_label_mapping_load
@@ -59,6 +60,7 @@ def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
                 stripped,
             )
             if not match:
+                logging.warning("meshdiag routerneighbortable: unexpected format, pattern did not match: %r", stripped)
                 current_neighbor = None
                 continue
 
@@ -107,7 +109,7 @@ def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
 
     return router_neighbor_table
     
-def get_meshdiag_routerneighbortables(extaddr_map:None):
+def get_meshdiag_routerneighbortables(extaddr_map=None):
 
     # 1. Get all active routers (potential parents)
     router_table_data = get_router_table_data(extaddr_map)
@@ -129,7 +131,7 @@ def get_meshdiag_routerneighbortables(extaddr_map:None):
 
     return router_neighbor_tables
 
-def main():
+def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
     # Load extaddr to nodename mapping from JSON file
@@ -153,4 +155,4 @@ def main():
     print(json.dumps(router_neighbor_tables, indent=4))
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main()) 

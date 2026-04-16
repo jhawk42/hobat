@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
@@ -12,6 +13,7 @@ from urllib.request import Request, urlopen
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8081
 DEFAULT_TIMEOUT = 10
+DEFAULT_RETRIES = 3
 DEFAULT_ACCEPT = "application/vnd.api+json"
 JSON_CONTENT_TYPES = {
     "application/json",
@@ -84,11 +86,13 @@ class OTBRRestApiClient:
         port: int = DEFAULT_PORT,
         base_url: str | None = None,
         timeout: int = DEFAULT_TIMEOUT,
+        retries: int = DEFAULT_RETRIES,
         accept: str = DEFAULT_ACCEPT,
         user_agent: str = "td-otbr-restapi-client/1.0",
     ) -> None:
         self.base_url = (base_url or f"http://{host}:{port}").rstrip("/")
         self.timeout = timeout
+        self.retries = retries
         self.accept = accept
         self.user_agent = user_agent
 
@@ -357,6 +361,7 @@ class OTBRRestApiClient:
         raw: bool = False,
         with_meta: bool = False,
         timeout: int | None = None,
+        retries: int | None = None,
     ) -> Any:
         url = self._build_url(path, query)
         body = self._encode_body(data, content_type)
@@ -366,22 +371,53 @@ class OTBRRestApiClient:
             headers=self._build_headers(accept=accept, content_type=content_type),
             method=method,
         )
+        effective_retries = retries if retries is not None else self.retries
+        last_exc: Exception | None = None
 
-        try:
-            with urlopen(request, timeout=timeout or self.timeout) as response:
-                response_body = response.read()
-                media_type = self._extract_media_type(response.headers.get("Content-Type"))
+        for attempt in range(max(1, effective_retries)):
+            try:
+                with urlopen(request, timeout=timeout or self.timeout) as response:
+                    response_body = response.read()
+                    media_type = self._extract_media_type(response.headers.get("Content-Type"))
 
-            if not response_body:
-                return None
+                if not response_body:
+                    return None
 
-            payload = self._decode_response_body(response_body, media_type)
-            if raw:
-                return payload
+                payload = self._decode_response_body(response_body, media_type)
+                if raw:
+                    return payload
 
-            return self._normalize_response_payload(payload, media_type, with_meta=with_meta)
-        except HTTPError as exc:
-            error_body = exc.read()
+                return self._normalize_response_payload(payload, media_type, with_meta=with_meta)
+            except HTTPError as exc:
+                if exc.code < 500:
+                    # 4xx errors are not retried — re-raise immediately
+                    error_body = exc.read()
+                    media_type = self._extract_media_type(exc.headers.get("Content-Type"))
+                    payload = None
+                    body_text = None
+                    if error_body:
+                        body_text = error_body.decode("utf-8", errors="replace")
+                        payload = self._decode_payload_from_text(body_text, media_type)
+                    raise OTBRHTTPError(
+                        status_code=exc.code,
+                        reason=exc.reason,
+                        url=url,
+                        errors=self._extract_error_details(payload, exc.code, exc.reason),
+                        payload=payload,
+                        body=body_text,
+                    ) from exc
+                last_exc = exc
+                logging.warning("HTTP %d on attempt %d/%d for %s", exc.code, attempt + 1, effective_retries, url)
+            except URLError as exc:
+                last_exc = exc
+                logging.warning("URLError on attempt %d/%d for %s: %s", attempt + 1, effective_retries, url, exc.reason)
+
+            if attempt < effective_retries - 1:
+                time.sleep(2 ** attempt)
+
+        if isinstance(last_exc, HTTPError):
+            exc = last_exc
+            error_body = exc.read() if hasattr(exc, 'read') else b""
             media_type = self._extract_media_type(exc.headers.get("Content-Type"))
             payload = None
             body_text = None
@@ -395,9 +431,8 @@ class OTBRRestApiClient:
                 errors=self._extract_error_details(payload, exc.code, exc.reason),
                 payload=payload,
                 body=body_text,
-            ) from exc
-        except URLError as exc:
-            raise OTBRConnectionError(f"Failed to reach OTBR API at {url}: {exc.reason}") from exc
+            ) from last_exc
+        raise OTBRConnectionError(f"Failed to reach OTBR API at {url}: {last_exc}") from last_exc
 
     def _build_url(self, path: str, query: Mapping[str, str] | None = None) -> str:
         url = f"{self.base_url}{path}"

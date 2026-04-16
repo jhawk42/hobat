@@ -6,8 +6,10 @@ import logging
 
 TD_OTBR_CONTAINER_NAME_DEFAULT = "otbr"  # Default container name for OTBR Docker image
 TD_OTBR_CONTAINER_NAME_ENV = "TD_OTBR_CONTAINER_NAME" # Environment variable name for OTBR container name
+TD_OT_CTL_TIMEOUT_ENV = "TD_OT_CTL_TIMEOUT"  # Environment variable name for ot-ctl subprocess timeout
+TD_OT_CTL_TIMEOUT_DEFAULT = 30  # Default subprocess timeout in seconds
 
-def run_ot_ctl_command_stdio(ot_command, container_name:None, ):
+def run_ot_ctl_command_stdio(ot_command, container_name=None):
     """
     Executes an ot-ctl command inside a running OTBR Docker container.
     """
@@ -35,20 +37,25 @@ def run_ot_ctl_command_stdio(ot_command, container_name:None, ):
     logging.debug(f"[DEBUG] {full_command}")
 
     try:
-        # Run the command and capture output    
+        # Run the command and capture output
+        _timeout = int(os.environ.get(TD_OT_CTL_TIMEOUT_ENV, TD_OT_CTL_TIMEOUT_DEFAULT))
         result = subprocess.run(
-            full_command, 
-            capture_output=True, 
-            text=True, 
-            check=True
+            full_command,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=_timeout,
         )
         return result.stdout.strip()
+    except subprocess.TimeoutExpired:
+        logging.error(f"[ERROR] ot-ctl command timed out after {_timeout}s: {full_command}")
+        return f"Error: command timed out after {_timeout}s"
     except subprocess.CalledProcessError as e:
         err_str = e.stderr.strip() if e.stderr else "Unknown error"
         logging.error(f"[ERROR] {err_str}")
         return f"Error: {err_str}"
 
-def run_ot_ctl_stdio(command, container_name:None = TD_OTBR_CONTAINER_NAME_DEFAULT):
+def run_ot_ctl_stdio(command, container_name=TD_OTBR_CONTAINER_NAME_DEFAULT):
     """
     Wrapper to execute ot-ctl command and return output.
     Inject docker container name and run ot-ctl command

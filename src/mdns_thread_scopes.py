@@ -1,10 +1,13 @@
 import argparse
 import json
+import os
 import socket
+import sys
 import threading
 import time
 import base64
 import logging
+from typing import Sequence
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 
@@ -940,7 +943,8 @@ class MDNSDumpListener(ServiceListener):
                         val_str = value.decode('utf-8') if isinstance(value, bytes) else value
                         print(f"    - {key.decode('utf-8') if isinstance(key, bytes) else key}: {val_str}")
 
-def main():
+def main(argv: Sequence[str] | None = None) -> int:
+
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
     parser = argparse.ArgumentParser(
@@ -958,6 +962,13 @@ def main():
         choices=["all", "br", "hap", "matter"],
         default="all",
         help="Scope filter: all | br | hap | matter  (default: all scopes)",
+    )
+    parser.add_argument(
+        "--browse-timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="Seconds of idle time before auto-exit (default: 30, or TD_MDNS_BROWSE_TIMEOUT env var)",
     )
     args = parser.parse_args()
 
@@ -997,7 +1008,8 @@ def main():
 
     logging.info(f"Browsing {scope_label} scopes ({len(selected_scopes)} service type(s))... (Press Ctrl+C to stop)")
 
-    IDLE_TIMEOUT = 30.0
+    _default_timeout = float(os.environ.get("TD_MDNS_BROWSE_TIMEOUT", "30"))
+    IDLE_TIMEOUT = args.browse_timeout if args.browse_timeout is not None else _default_timeout
 
     zeroconf = Zeroconf()
     listener = MDNSDumpListener()
@@ -1036,4 +1048,4 @@ def main():
         logging.info(json.dumps(records, indent=2))
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

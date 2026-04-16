@@ -1,7 +1,9 @@
 import os
+import sys
 import subprocess
 import json
 import logging
+from typing import Sequence
 
 from extaddr_device_label_map import extaddr_device_label_mapping_load
 import util_ot_ctl
@@ -101,7 +103,10 @@ def parse_router_table_output(output, extaddr_map=None):
                 router['device_label'] = extaddr_map[ext_mac]
             
             routers.append(router)
-    
+        else:
+            if values:  # Skip blank separator rows silently
+                logging.warning("router table: unexpected format, pattern did not match: %r", line)
+
     return routers
 
 def get_router_table_data(extaddr_map=None):
@@ -122,7 +127,7 @@ def get_router_table_data(extaddr_map=None):
         raise ValueError("Router table output is empty")
     return parse_router_table_output(raw_output, extaddr_map)
 
-if __name__ == "__main__":
+def main(argv: Sequence[str] | None = None) -> int:
     
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
@@ -151,3 +156,6 @@ if __name__ == "__main__":
         logging.error(f"Error: I/O error - {e}")
     except Exception as e:
         logging.error(f"Error: {e}")
+
+if __name__ == "__main__":
+    sys.exit(main())

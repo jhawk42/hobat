@@ -3,6 +3,7 @@ import subprocess
 import re
 import json
 import logging
+from typing import Sequence
 
 import util_ot_ctl
 import util_network
@@ -141,6 +142,8 @@ def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(output, extaddr
                     current_section = None
             
             routers.append(router)
+        else:
+            logging.warning("meshdiag topology: unexpected format, pattern did not match: %r", first_line)
     
     return routers
 
@@ -222,7 +225,7 @@ def meshdiag_topology_ip6addrs_children_data_get(extaddr_map=None, network_datas
     
     return topology_data_enhanced_links
 
-if __name__ == "__main__":
+def main(argv: Sequence[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
@@ -243,3 +246,6 @@ if __name__ == "__main__":
         json.dump(meshdiag_topology_data, f, indent=4)
 
     print(json.dumps(meshdiag_topology_data, indent=4))
+
+if __name__ == "__main__":
+    raise SystemExit(main()) 

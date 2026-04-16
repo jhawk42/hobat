@@ -1,9 +1,9 @@
-import json
-import util_network
 import logging
+import json
+from typing import Sequence
+import util_network
 
-if __name__ == "__main__":
-
+def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
     network_dataset_info = util_network.get_network_dataset_info()
@@ -11,3 +11,7 @@ if __name__ == "__main__":
     with open(save_json_path, 'w', encoding='utf-8') as f:
         json.dump(network_dataset_info, f, indent=4)
     print(json.dumps(network_dataset_info, indent=4))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())    

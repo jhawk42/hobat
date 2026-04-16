@@ -7,6 +7,7 @@ import time
 import logging
 
 from copy import deepcopy
+from typing import Sequence
 import util_ot_ctl
 import util_network
 from otbr_cli_router_table import get_router_table_data
@@ -295,7 +296,7 @@ def parse_mac_counters(output):
 
         # Calculate percentages for each counter relative to iftotalpkts
         # Help determine if high error/discard counts are significant relative to total traffic or just a small fraction.
-        # format the perentages to 1 decimal place when printing
+        # format the percentages to 1 decimal place when printing
         total_pkts = counters.get("iftotalpkts", 0)
         if total_pkts > 0:
             counters["iftotalpktserrorsdiscards_pct"] = round((counters.get("iftotalpktserrorsdiscards", 0) / total_pkts) * 100, 1)
@@ -411,7 +412,7 @@ def parse_time_statistics(output):
             time_stats['detached_disabled_time'] = time_stats.get('detached_time', 0) + time_stats.get('disabled_time', 0)
 
             # Calculate percentages for each role time relative to tracked time
-            # format the perentages to 1 decimal place when printing
+            # format the percentages to 1 decimal place when printing
             time_stats['router_pct'] = round((time_stats.get('router_time', 0) / tracked_time) * 100, 1)
             time_stats['child_pct'] = round((time_stats.get('child_time', 0) / tracked_time) * 100, 1)
             time_stats['leader_pct'] = round((time_stats.get('leader_time', 0) / tracked_time) * 100, 1)
@@ -717,7 +718,7 @@ def save_networkdiagnostic_topology_to_json_list(data, filename="thread-networkd
         json.dump(network_map, f, indent=4)
     logging.info(f"Successfully exported topology to {filename}")
 
-def main():
+def main(argv: Sequence[str] | None = None) -> int:
     """Main entry point with optional command-line arguments."""
 
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
@@ -759,4 +760,4 @@ def main():
 
         
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

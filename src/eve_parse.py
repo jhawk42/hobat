@@ -1,6 +1,7 @@
 import copy
 import json
 import logging
+from typing import Sequence
 
 import util_network
 from util_convert import b64_to_extended_address
@@ -26,8 +27,15 @@ def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=Non
     omr_ipv6addr_prefix = network_dataset_info["prefix_omr_ipv6addr_prefix"] if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info else None
 
     # Load the Eve JSON file
-    with open(path, encoding='utf-8') as f:
-        j = json.load(f)
+    try:
+        with open(path, encoding='utf-8') as f:
+            j = json.load(f)
+    except OSError as e:
+        logging.error(f"Failed to open Eve JSON file {path!r}: {e}")
+        return out
+    except json.JSONDecodeError as e:
+        logging.error(f"Invalid JSON in Eve file {path!r}: {e}")
+        return out
 
     for node in j.get("nodes", []):
         # Conform rloc16 to hex string for consistent mapping
@@ -138,7 +146,7 @@ def eve_enhance_routes(eve_network_enhanced_data):
     return output
 
 
-if __name__ == "__main__":
+def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
     ## Main execution:
@@ -160,3 +168,6 @@ if __name__ == "__main__":
 
     ## Print the parsed data structure with route names
     logging.info(json.dumps(eve_data_enhanced, indent=4))
+
+if __name__ == "__main__":
+    raise SystemExit(main())

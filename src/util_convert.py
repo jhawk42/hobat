@@ -1,4 +1,5 @@
 import base64
+import binascii
 
 def b64_to_extended_address(b64_str, reverse=False):
     """
@@ -11,11 +12,17 @@ def b64_to_extended_address(b64_str, reverse=False):
     Returns:
         Hexadecimal string representation of the extended address
     """
+    if not isinstance(b64_str, str) or not b64_str:
+        raise ValueError(f"b64_to_extended_address: expected a non-empty string, got {b64_str!r}")
+
     # 1. Clean JSON escaped slashes
     clean_b64 = b64_str.replace(r'\/', '/')
-    
+
     # 2. Decode to bytes
-    raw_bytes = base64.b64decode(clean_b64)
+    try:
+        raw_bytes = base64.b64decode(clean_b64)
+    except binascii.Error as e:
+        raise ValueError(f"b64_to_extended_address: invalid base64 input {b64_str!r}: {e}") from e
     
     # 3. Handle 802.15.4 little-endianness if needed
     if reverse:
@@ -35,8 +42,14 @@ def extended_address_to_b64(hex_str, reverse=False):
     Returns:
         Base64 encoded string (with escaped slashes if needed)
     """
+    if not isinstance(hex_str, str) or not hex_str:
+        raise ValueError(f"extended_address_to_b64: expected a non-empty string, got {hex_str!r}")
+
     # 1. Convert hex string to bytes
-    raw_bytes = bytes.fromhex(hex_str)
+    try:
+        raw_bytes = bytes.fromhex(hex_str)
+    except ValueError as e:
+        raise ValueError(f"extended_address_to_b64: invalid hex input {hex_str!r}: {e}") from e
     
     # 2. Handle 802.15.4 little-endianness if needed
     if reverse:

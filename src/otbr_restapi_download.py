@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
 import logging
 
 from typing import Iterable, Sequence, Tuple
@@ -14,6 +16,7 @@ PORT = 8081
 BASE_URL = f"http://{HOST}:{PORT}"
 HEADERS = {"Accept": "application/vnd.api+json"}
 TIMEOUT = 10
+RETRIES = 3
 
 # (endpoint path, output file)
 DOWNLOAD_TARGETS: Iterable[Tuple[str, str]] = [
@@ -68,35 +71,51 @@ def build_headers(accept: str, extra_headers: Sequence[str] | None = None) -> di
     return headers
 
 
-def download_json(url: str, headers: dict[str, str], output_file: str, timeout: int = TIMEOUT) -> bool:
+def download_json(url: str, headers: dict[str, str], output_file: str, timeout: int = TIMEOUT, retries: int = RETRIES) -> bool:
     """Download JSON from a URL and save it to a file."""
     request = Request(url=url, headers=headers, method="GET")
+    last_exc: Exception | None = None
 
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            charset = response.headers.get_content_charset() or "utf-8"
-            payload = response.read().decode(charset)
+    for attempt in range(max(1, retries)):
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                charset = response.headers.get_content_charset() or "utf-8"
+                payload = response.read().decode(charset)
 
-        data = json.loads(payload)
+            data = json.loads(payload)
 
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4)
+            tmp_file = output_file + ".tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+            os.replace(tmp_file, output_file)
 
-        logging.info(f"OK: {url} -> {output_file}")
-        # log the json data in a human readable format
-        logging.info(json.dumps(data, indent=4))
-        return True
-    except HTTPError as e:
-        logging.error(f"HTTP error for {url}: {e.code} {e.reason}")
-    except URLError as e:
-        logging.error(f"Network error for {url}: {e.reason}")
-    except json.JSONDecodeError as e:
-        logging.error(f"Invalid JSON from {url}: {e}")
-    except OSError as e:
-        logging.error(f"File write error for {output_file}: {e}")
-    except Exception as e:
-        logging.error(f"Unexpected error for {url}: {e}")
+            logging.info(f"OK: {url} -> {output_file}")
+            # log the json data in a human readable format
+            logging.info(json.dumps(data, indent=4))
+            return True
+        except HTTPError as e:
+            if e.code < 500:
+                logging.error(f"HTTP error for {url}: {e.code} {e.reason}")
+                return False
+            last_exc = e
+            logging.warning(f"HTTP {e.code} on attempt {attempt + 1}/{retries} for {url}: {e.reason}")
+        except URLError as e:
+            last_exc = e
+            logging.warning(f"Network error on attempt {attempt + 1}/{retries} for {url}: {e.reason}")
+        except json.JSONDecodeError as e:
+            logging.error(f"Invalid JSON from {url}: {e}")
+            return False
+        except OSError as e:
+            logging.error(f"File write error for {output_file}: {e}")
+            return False
+        except Exception:
+            logging.error(f"Unexpected error for {url}", exc_info=True)
+            raise
 
+        if attempt < retries - 1:
+            time.sleep(2 ** attempt)
+
+    logging.error(f"All {retries} attempt(s) failed for {url}: {last_exc}")
     return False
 
 

@@ -412,11 +412,12 @@
         // ── Multi-file merged (medium depth — matches td_web_tables.html __merged__) ──
         {
           value: 'merged_otbr_cli_all',
-          label: 'merged: otbr cli: meshdiag, networkdiag, neighbortables',
+          label: 'merged: otbr cli: meshdiag, networkdiag, neighbortables, childtables',
           files: [
             'td-otbr-cli-meshdiag-topology.json',
             'td-otbr-cli-networkdiag-topology.json',
-            'td-otbr-cli-meshdiag-router-neighbortables.json'
+            'td-otbr-cli-meshdiag-router-neighbortables.json', 
+            'td-otbr-cli-meshdiag-router-childtables.json'
           ],
           mergeStrategy: 'by-identity',
           topologyMode: 'meshdiag-networkdiag',
@@ -431,6 +432,7 @@
             'td-otbr-cli-meshdiag-topology.json',
             'td-otbr-cli-networkdiag-topology.json',
             'td-otbr-cli-meshdiag-router-neighbortables.json',
+            'td-otbr-cli-meshdiag-router-childtables.json',
             'td-otbr-restapi-devices.json',
             'td-otbr-restapi-diagnostics.json'
           ],

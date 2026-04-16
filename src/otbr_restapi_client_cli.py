@@ -335,7 +335,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = dispatch(args)
         emit_output(result, args.output)
         return EXIT_SUCCESS
-    except Exception as exc:
+    except OTBRClientError as exc:
         emit_error(exc)
         return exit_code_for_exception(exc)
 
