@@ -140,7 +140,7 @@ def _add_merge_commands(subparsers: argparse._SubParsersAction) -> None:  # type
     """ build the 'merge' subcommand tree."""
 
     # Remaining args are captured as extras via parse_known_args and forwarded to dataset_merge.main().
-    subparsers.add_parser("dataset", help="Merge Thread topology JSON sources into one cache file")
+    subparsers.add_parser("dataset", aliases=["data"], help="Merge Thread topology JSON sources into one cache file")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -264,7 +264,7 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str]) -> int:
 
     # --- merge ---
     if args.command == "merge":
-        if args.merge_type == "dataset":
+        if args.merge_type in ("dataset", "data"):
             # sub_argv forwarded for future use; dataset_merge currently ignores argv
             return dataset_merge.main(sub_argv) or 0
 

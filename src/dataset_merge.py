@@ -10,7 +10,7 @@ import logging
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 
 PRIORITY_FIELDS = [
@@ -631,7 +631,7 @@ def resolve_input_files(
     return resolved
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Merge Thread topology JSON sources into one detailed cache file.",
     )
@@ -678,13 +678,13 @@ def parse_args() -> argparse.Namespace:
         default="td-static-extaddr-device-label.json",
         help="Reference file used only for extaddr to device_label lookup.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
-    args = parse_args()
+    args = parse_args(argv)
     base_dir = Path(args.base_dir)
     include_files = parse_file_list_args(args.include_files)
     exclude_files = parse_file_list_args(args.exclude_files)
