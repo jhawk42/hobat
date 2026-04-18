@@ -99,8 +99,8 @@ def _add_scan_commands(subparsers: argparse._SubParsersAction) -> None:  # type:
     """ build the 'scan' subcommand tree."""
 
     # scan otbr-cli
-    otbr_cli_p = subparsers.add_parser("otbr-cli", help="OpenThread CLI scan commands")
-    otbr_cli_sub = otbr_cli_p.add_subparsers(dest="cli_command", required=True)
+    otbr_cli_p = subparsers.add_parser("otbr-cli", help="Scan otbr-cli commands")
+    otbr_cli_sub = otbr_cli_p.add_subparsers(dest="cli_command", required=False)
 
     otbr_cli_sub.add_parser("network-dataset-info", help="Scan and save network dataset info")
     otbr_cli_sub.add_parser("router-table", help="Scan and save router table")
@@ -120,7 +120,7 @@ def _add_scan_commands(subparsers: argparse._SubParsersAction) -> None:  # type:
     otbr_cli_sub.add_parser("all", help="Run all otbr-cli scans")
 
     # scan mdns
-    mdns_p = subparsers.add_parser("mdns", help="Browse Thread-related mDNS scopes")
+    mdns_p = subparsers.add_parser("mdns", help="Scan Thread-related mDNS scopes")
     mdns_p.add_argument(
         "mdns_scope",
         nargs="?",
@@ -135,8 +135,8 @@ def _add_web_commands(subparsers: argparse._SubParsersAction) -> None:  # type: 
     """ build the 'web' subcommand tree."""
 
     # web otbr-restapi
-    restapi_p = subparsers.add_parser("otbr-restapi", help="OTBR REST API commands")
-    restapi_sub = restapi_p.add_subparsers(dest="restapi_command", required=True)
+    restapi_p = subparsers.add_parser("otbr-restapi", help="otbr-restapi sub commands")
+    restapi_sub = restapi_p.add_subparsers(dest="restapi_command", required=False)
 
     # web otbr-restapi download  — remaining args forwarded to otbr_restapi_download.main()
     restapi_sub.add_parser("download", help="Download OTBR REST API endpoints to JSON files")
@@ -159,7 +159,7 @@ def _add_merge_commands(subparsers: argparse._SubParsersAction) -> None:  # type
     """ build the 'merge' subcommand tree."""
 
     # Remaining args are captured as extras via parse_known_args and forwarded to dataset_merge.main().
-    subparsers.add_parser("dataset", aliases=["data"], help="Merge Thread topology JSON sources into one cache file")
+    subparsers.add_parser("dataset", aliases=["data"], help="Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -172,31 +172,36 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # --- common options ---
+    parser._optionals.title = "Options"
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose (INFO) logging")
     parser.add_argument("--debug", "-d", action="store_true", help="Enable debug logging")
     parser.add_argument("--output", "-o", metavar="FILE", help="Write command output to FILE")
 
     # --- top-level subcommands ---
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+        title="These are the high level commands",
+    )
 
     # scan -
-    scan_p = subparsers.add_parser("scan", help="Run a scan command (otbr-cli or mdns)")
-    scan_sub = scan_p.add_subparsers(dest="scan_type", required=True)
+    scan_p = subparsers.add_parser("scan", help="Scan (otbr-cli or mdns) for thread device details")
+    scan_sub = scan_p.add_subparsers(dest="scan_type", required=False)
     _add_scan_commands(scan_sub)
 
     # web -
-    web_p = subparsers.add_parser("web", help="OTBR REST API commands")
-    web_sub = web_p.add_subparsers(dest="web_type", required=True)
+    web_p = subparsers.add_parser("web", help="Web call to OTBR REST API for thread device details")
+    web_sub = web_p.add_subparsers(dest="web_type", required=False)
     _add_web_commands(web_sub)
 
     # process
-    proc_p = subparsers.add_parser("process", help="Process raw data files")
-    proc_sub = proc_p.add_subparsers(dest="process_type", required=True)
+    proc_p = subparsers.add_parser("process", help="Process (eve) raw data files")
+    proc_sub = proc_p.add_subparsers(dest="process_type", required=False)
     _add_process_commands(proc_sub)
 
     # merge
-    merge_p = subparsers.add_parser("merge", help="Merge datasets")
-    merge_sub = merge_p.add_subparsers(dest="merge_type", required=True)
+    merge_p = subparsers.add_parser("merge", help="Merge datasets (otbr-cli, otbr-restapi, eve, mdns)")
+    merge_sub = merge_p.add_subparsers(dest="merge_type", required=False)
     _add_merge_commands(merge_sub)
 
     # web-server — remaining args forwarded to tdash_web.main()
@@ -204,41 +209,43 @@ def build_parser() -> argparse.ArgumentParser:
     ws_p.add_argument("--host", default="localhost", help="Host to bind to (default: localhost)")
     ws_p.add_argument("--port", type=int, default=8087, help="Port to listen on (default: 8087)")
 
-    # --- build epilog with per-command help ---
-    def _indent(text: str, prefix: str = "  ") -> str:
-        # Strip the repeated "options: -h/--help" block that every subparser includes
-        lines = text.splitlines()
-        filtered = []
-        skip_next = False
-        for line in lines:
-            stripped = line.strip()
-            if stripped == "options:":
-                skip_next = True
-                continue
-            if skip_next:
-                if stripped in ("-h, --help  show this help message and exit",
-                                "-h, --help       show this help message and exit",
-                                "-h, --help  show this help message and exit"):
-                    skip_next = False
-                    continue
-                # check partial match for the -h/--help line
-                if stripped.startswith("-h, --help"):
-                    skip_next = False
-                    continue
-                skip_next = False
-            filtered.append(prefix + line)
-        # Remove trailing blank lines
-        while filtered and not filtered[-1].strip():
-            filtered.pop()
-        return "\n".join(filtered)
+    # --- hand-crafted "Commands usage:" epilog ---
+    parser.epilog = """\
+Commands usage:
+  scan
+    usage: tdash scan [-h] {otbr-cli,mdns} ...
+    scan otbr-cli       Scan otbr-cli commands
+    scan mdns           Scan Thread-related mDNS scopes
 
-    command_details = []
-    for name, sub_p in [("scan", scan_p), ("web", web_p), ("process", proc_p), ("merge", merge_p), ("web-server", ws_p)]:
-        header = f"\n  {name}"
-        command_details.append(header)
-        command_details.append(_indent(sub_p.format_help()))
+  web
+    usage: tdash web [-h] {otbr-restapi} ...
+    web otbr-restapi    otbr-restapi sub commands
 
-    parser.epilog = "\ncommand details:\n" + "\n".join(command_details)
+  process
+    usage: tdash process [-h] {eve} ...
+    process eve         Parse and enhance an Eve Thread layout file
+
+  merge
+    usage: tdash merge [-h] {dataset,data} ...
+    dataset             Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file
+
+  web-server
+    usage: tdash web-server [-h] [--host HOST] [--port PORT]
+    options:
+        --host HOST  Host to bind to (default: localhost)
+        --port PORT  Port to listen on (default: 8087)
+"""
+
+    # Expose subparsers so dispatch() can print targeted help
+    parser._subcommand_parsers = {  # type: ignore[attr-defined]
+        "scan": scan_p,
+        "scan:otbr-cli": scan_sub._name_parser_map["otbr-cli"],
+        "web": web_p,
+        "web:otbr-restapi": web_sub._name_parser_map["otbr-restapi"],
+        "process": proc_p,
+        "merge": merge_p,
+        "web-server": ws_p,
+    }
 
     return parser
 
@@ -252,18 +259,25 @@ def _load_extaddr_map() -> dict:
     return {}
 
 
-def dispatch(args: argparse.Namespace, sub_argv: list[str]) -> int:
+def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.ArgumentParser) -> int:
     """Dispatch parsed arguments to the appropriate module entry point.
 
     sub_argv contains the unrecognised arguments returned by parse_known_args.
     For scan commands it should be empty.  For forwarding commands (web, process,
     merge) it is passed directly to the subordinate module's main().
     """
+    _sub = parser._subcommand_parsers  # type: ignore[attr-defined]
 
     # --- scan ---
     if args.command == "scan":
+        if not args.scan_type:
+            _sub["scan"].print_help()
+            return 0
         if args.scan_type == "otbr-cli":
             cli_cmd = args.cli_command
+            if not cli_cmd:
+                _sub["scan:otbr-cli"].print_help()
+                return 0
 
             if cli_cmd == "network-dataset-info":
                 return otbr_cli_network_dataset_info.main() or 0
@@ -306,8 +320,14 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str]) -> int:
 
     # --- web ---
     if args.command == "web":
+        if not args.web_type:
+            _sub["web"].print_help()
+            return 0
         if args.web_type == "otbr-restapi":
             restapi_cmd = args.restapi_command
+            if not restapi_cmd:
+                _sub["web:otbr-restapi"].print_help()
+                return 0
 
             if restapi_cmd == "download":
                 return otbr_restapi_download.main(sub_argv)
@@ -318,12 +338,18 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str]) -> int:
 
     # --- process ---
     if args.command == "process":
+        if not args.process_type:
+            _sub["process"].print_help()
+            return 0
         if args.process_type == "eve":
             # sub_argv forwarded for future use; eve_parse currently ignores argv
             return eve_parse.main(sub_argv) or 0
 
     # --- merge ---
     if args.command == "merge":
+        if not args.merge_type:
+            _sub["merge"].print_help()
+            return 0
         if args.merge_type in ("dataset", "data"):
             # sub_argv forwarded for future use; dataset_merge currently ignores argv
             return dataset_merge.main(sub_argv) or 0
@@ -361,7 +387,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.info("Thread Network Topology Scanner")
     logging.info("Initiating Thread Network Topology Scan...\n")
 
-    return dispatch(args, extras)
+    return dispatch(args, extras, parser)
 
 
 if __name__ == "__main__":

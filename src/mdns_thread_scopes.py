@@ -1339,7 +1339,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="SECONDS",
         help="Seconds of idle time before auto-exit (default: 30, or TD_MDNS_BROWSE_TIMEOUT env var)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     scopes_all = [
         "_meshcop._udp.local.",
