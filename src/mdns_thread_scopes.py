@@ -68,56 +68,53 @@ def format_state_bitmap_br(bits):
     return ", ".join(status) if status else "No flags set"
 
 # HAP Category Mapping
+# Source: Apple HomeKit Developer Documentation
+# https://developer.apple.com/documentation/homekit
 HAP_CATEGORIES = {
-    1: "Lightbulb",
-    2: "Lock",
-    3: "Outlet",
-    4: "Switch",
-    5: "Thermostat",
-    6: "Bridge",
-    7: "Fan",
-    8: "Garage Door Opener",
-    9: "Accessory Server",
-    10: "Camera",
-    11: "Door",
-    12: "Doorbell",
-    13: "Blinds/Shades",
-    14: "Air Purifier",
-    15: "Air Heater",
-    16: "Air Humidifier",
-    17: "Television",
-    18: "Speaker",
-    19: "Sprinkler",
-    20: "Faucet",
-    21: "Shower Head",
-    22: "Television Set-Top Box",
-    23: "Television Streaming Stick",
-    24: "Audio Receiver",
-    25: "Television",
-    26: "Power Strip",
-    27: "Humidifier",
-    28: "Dehumidifier",
-    29: "Microphone",
-    30: "Awning",
-    31: "Closet",
-    32: "Television",
-    33: "Receiver",
-    34: "Projector",
-    35: "Processor",
-    36: "Player",
-    37: "Preamp",
-    38: "Tuner",
+    1:  "Other (Generic/Unspecified)",
+    2:  "Bridges",
+    3:  "Fans",
+    4:  "Garage Door Openers",
+    5:  "Lighting (Light Bulb / Switch)",
+    6:  "Locks (Door Lock)",
+    7:  "Outlets (Smart Plug)",
+    8:  "Switches",
+    9:  "Thermostats",
+    10: "Sensors",
+    11: "Home Security (Alarm / Camera)",
+    12: "Doors",
+    13: "Windows",
+    14: "Window Coverings (Blinds / Curtains)",
+    15: "Programmable Switches (Smart Button)",
+    17: "IP Cameras",
+    18: "Video Doorbells",
+    19: "Air Purifiers",
+    20: "Air Heaters",
+    21: "Air Conditioners",
+    22: "Air Humidifiers",
+    23: "Air Dehumidifiers",
+    28: "Sprinklers",
+    29: "Faucets",
+    30: "Shower Systems",
+    31: "Televisions",
+    32: "Displays"
 }
 
 def decode_hap_status_flags(sf_value):
-    """Decode HAP Status Flags (sf) - indicates accessory status"""
+    """Decode HAP Status Flags (sf) - indicates accessory status.
+    Source: Apple HAP Specification
+      Bit 0: Pairing Status - 0=Paired, 1=Not Paired
+      Bit 1: IP Networking - 0=Enabled, 1=Disabled
+      Bit 2: Problem Detected - 0=No problem, 1=Problem Detected
+      Bits 3-7: Reserved (shall be 0)
+    """
     try:
         sf_int = int(sf_value)
         bits = {
-            "not_paired": bool(sf_int & (1 << 0)),  # Bit 0: 1 = Not Paired, 0 = Paired
-            "not_ip_enabled": bool(sf_int & (1 << 1)),  # Bit 1: 1 = Not IP Enabled
-            "problem_detected": bool(sf_int & (1 << 2)),  # Bit 2: 1 = Problem Detected
-            "reserved_bits": (sf_int >> 3) & 0x1F  # Bits 3-7: Reserved
+            "pairing_status": "Not Paired" if bool(sf_int & (1 << 0)) else "Paired",  # Bit 0: 1 = Not Paired, 0 = Paired
+            "ip_networking_enabled": not bool(sf_int & (1 << 1)),                        # Bit 1: 0 = Enabled, 1 = Disabled
+            "problem_detected": bool(sf_int & (1 << 2)),                               # Bit 2: 1 = Problem Detected
+            "reserved_bits": (sf_int >> 3) & 0x1F                                      # Bits 3-7: Reserved
         }
         return bits
     except (ValueError, TypeError):
@@ -129,8 +126,8 @@ def format_hap_status_flags(bits):
         return "Invalid"
     
     status = []
-    status.append(f"Pairing: {'Unpaired' if bits['not_paired'] else 'Paired'}")
-    status.append(f"IP Enabled: {'No' if bits['not_ip_enabled'] else 'Yes'}")
+    status.append(f"Pairing: {bits['pairing_status']}")
+    status.append(f"IP Networking: {'Enabled' if bits['ip_networking_enabled'] else 'Disabled'}")
     status.append(f"Problem Detected: {'Yes' if bits['problem_detected'] else 'No'}")
     
     return " | ".join(status)
@@ -413,6 +410,358 @@ def extract_fabric_and_node_ids_from_name(service_name):
     except Exception:
         return None, None, None, None
 
+
+# ---------------------------------------------------------------------------
+# Field metadata registry
+# Maps each known TXT record key to its human-readable full name.
+# ---------------------------------------------------------------------------
+FIELD_METADATA = {
+    # Thread Border Router (_meshcop, _trel)
+    "rv": "Protocol Revision",
+    "vn": "Vendor Name",
+    "mn": "Model Name",
+    "tv": "Thread Version",
+    "nn": "Network Name",
+    "xp": "Extended PAN ID",
+    "xa": "Extended Address",
+    "dd": "Discriminator ID",
+    "sq": "Sequence Number",
+    "at": "IEEE 802.15.4 Extended Address",
+    "id": "Border Agent ID / Device ID",
+    "sb": "State Bitmap",
+    "dt": "Device Type",
+    "pt": "Partition Identifier",
+    "bb": "Beacon Bitmap",
+    "dn": "Domain Name",
+    # HAP (_hap._udp, _hap._tcp)
+    "md": "Model Name",
+    "pv": "Protocol Version",
+    "ci": "Category Identifier",
+    "c#": "Configuration Number",
+    "s#": "State Number",
+    "sf": "Status Flags",
+    "ff": "Feature Flags",
+    "sh": "Setup Hash",
+    # Matter (_matter._tcp, _matterc._udp)
+    "txtvers": "TXT Record Version",
+    "VP": "Vendor Product",
+    "DT": "Device Type",
+    "DN": "Device Name",
+    "RI": "Rotating Identifier",
+    "PI": "Product / Pairing Identifier",
+    "CD": "Commissioning Data",
+    "D": "Discriminator",
+    "PH": "Pairing Hint",
+    "SII": "Sleepy Idle Interval",
+    "SAI": "Sleepy Active Interval",
+    "SAT": "Sleepy Active Threshold",
+    "T": "TCP Support",
+    "ICD": "ICD Capability",
+    "FabricID": "Fabric ID",
+    "NodeID": "Node ID",
+}
+
+
+# ---------------------------------------------------------------------------
+# Base helper: produces decoded / hex / base64 envelope for any TXT value.
+# ---------------------------------------------------------------------------
+def _base_field_dict(raw_value, full_name: str) -> dict:
+    """Produce the common decoded/hex/base64 envelope for a TXT field value."""
+    if isinstance(raw_value, bytes):
+        return {
+            "full_name": full_name,
+            "decoded": raw_value.decode("utf-8", errors="replace"),
+            "hex": raw_value.hex(),
+            "base64": base64.b64encode(raw_value).decode("ascii"),
+        }
+    return {
+        "full_name": full_name,
+        "decoded": str(raw_value),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Per-field enricher functions
+# Each takes (raw_value, full_name) and returns an enriched dict.
+# ---------------------------------------------------------------------------
+
+def _enrich_field_sb(raw_value, full_name: str) -> dict:
+    """Enrich Thread Border Router State Bitmap (sb)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        sb_hex = raw_value.hex() if isinstance(raw_value, bytes) else str(raw_value)
+        sb_int = int(sb_hex, 16)
+        result["int_value"] = sb_int
+        bits = decode_state_bitmap_br(sb_hex)
+        if bits:
+            result["status"] = format_state_bitmap_br(bits)
+            result["individual_bits"] = [
+                {"bit": 0, "name": "connection_allowed",  "label": "Connection Allowed",  "value": bits["connection_allowed"]},
+                {"bit": 1, "name": "native_commissioner", "label": "Native Commissioner", "value": bits["native_commissioner"]},
+                {"bit": 2, "name": "active_commissioner", "label": "Active Commissioner", "value": bits["active_commissioner"]},
+                {"bit": 3, "name": "active_thread_partition", "label": "Active Thread Partition", "value": bits["active_thread_partition"]},
+                {"bit": 4, "name": "leader_role",         "label": "Leader Role",         "value": bits["leader_role"]},
+                {"bit": 5, "name": "backbone_router",     "label": "Backbone Router",     "value": bits["backbone_router"]},
+            ]
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def _enrich_field_bb(raw_value, full_name: str) -> dict:
+    """Enrich Thread Beacon Bitmap (bb)."""
+    result = _base_field_dict(raw_value, full_name)
+    bb_int, bb_hex, bits = decode_thread_beacon_bitmap(raw_value)
+    if bb_int is not None:
+        result["int_value"] = bb_int
+        result["hex_value"] = bb_hex
+        if bits:
+            result["status"] = format_thread_beacon_bitmap(bits)
+            result["individual_bits"] = [
+                {"bit": 0, "name": "commissioning_active", "label": "Active Commissioning",            "value": bits["commissioning_active"]},
+                {"bit": 1, "name": "native_commissioner",  "label": "Native Commissioner",             "value": bits["native_commissioner"]},
+                {"bit": 2, "name": "eth_interface",        "label": "Ethernet Interface",              "value": bits["eth_interface"]},
+                {"bit": 3, "name": "wifi_interface",       "label": "WiFi Interface",                  "value": bits["wifi_interface"]},
+                {"bit": 4, "name": "thread_interface",     "label": "Thread Interface",                "value": bits["thread_interface"]},
+                {"bit": 5, "name": "thread_ml_eid",        "label": "Thread Multicast Listener EID",   "value": bits["thread_ml_eid"]},
+                {"bit": 6, "name": "thread_dua",           "label": "Thread Domain Unicast Address",   "value": bits["thread_dua"]},
+                {"bit": 7, "name": "backbone_router",      "label": "Backbone Router",                 "value": bits["backbone_router"]},
+            ]
+    return result
+
+
+def _enrich_field_at(raw_value, full_name: str) -> dict:
+    """Enrich IEEE 802.15.4 Extended Address (at)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        at_hex = raw_value.hex().upper() if isinstance(raw_value, bytes) else str(raw_value).upper()
+        result["oui"] = at_hex[:6]
+        result["vendor"] = get_vendor_from_oui(at_hex)
+        result["extension_id"] = at_hex[6:]
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return result
+
+
+def _enrich_field_xa(raw_value, full_name: str) -> dict:
+    """Enrich Extended Address (xa)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        xa_hex = raw_value.hex().upper() if isinstance(raw_value, bytes) else str(raw_value).upper()
+        result["oui"] = xa_hex[:6]
+        result["vendor"] = get_vendor_from_oui(xa_hex)
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return result
+
+
+def _enrich_field_pt(raw_value, full_name: str) -> dict:
+    """Enrich Thread Partition Identifier (pt)."""
+    result = _base_field_dict(raw_value, full_name)
+    pt_int, pt_hex = decode_thread_partition_id(raw_value)
+    if pt_int is not None:
+        result["int_value"] = pt_int
+        result["hex_value"] = pt_hex
+    return result
+
+
+def _enrich_field_sf(raw_value, full_name: str) -> dict:
+    """Enrich HAP Status Flags (sf)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        sf_str = raw_value.decode("utf-8") if isinstance(raw_value, bytes) else str(raw_value)
+        bits = decode_hap_status_flags(sf_str)
+        if bits:
+            result["status"] = format_hap_status_flags(bits)
+            result["individual_bits"] = [
+                {"bit": 0, "name": "pairing_status",        "label": "Pairing Status",      "value": bits["pairing_status"]},
+                {"bit": 1, "name": "ip_networking_enabled", "label": "IP Networking",       "value": "Enabled" if bits["ip_networking_enabled"] else "Disabled"},
+                {"bit": 2, "name": "problem_detected",      "label": "Problem Detected",   "value": "Yes" if bits["problem_detected"] else "No"},
+            ]
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def _enrich_field_ff(raw_value, full_name: str) -> dict:
+    """Enrich HAP Feature Flags (ff)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        ff_int = int.from_bytes(raw_value, "big") if isinstance(raw_value, bytes) else int(raw_value)
+        bits = decode_hap_feature_flags(ff_int)
+        if bits:
+            result["supported_features"] = format_hap_feature_flags(bits)
+            result["individual_bits"] = [
+                {"bit": 0, "name": "supports_hap_over_coap",    "label": "HAP over CoAP",                "value": bits["supports_hap_over_coap"]},
+                {"bit": 1, "name": "supports_wifi_throughput",  "label": "Wi-Fi Throughput Management",  "value": bits["supports_wifi_throughput"]},
+                {"bit": 2, "name": "supports_matter_bridge",    "label": "Matter Bridge",                "value": bits["supports_matter_bridge"]},
+                {"bit": 3, "name": "supports_hap_over_ble",     "label": "HAP over BLE",                 "value": bits["supports_hap_over_ble"]},
+            ]
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def _enrich_field_sh(raw_value, full_name: str) -> dict:
+    """Enrich HAP Setup Hash (sh)."""
+    result = _base_field_dict(raw_value, full_name)
+    sh_hex = decode_hap_setup_hash(raw_value)
+    if sh_hex:
+        result["hex_value"] = sh_hex
+        result["purpose"] = "Hash derived from Setup ID and Device ID for pairing verification"
+    return result
+
+
+def _enrich_field_ci(raw_value, full_name: str) -> dict:
+    """Enrich HAP Category Identifier (ci)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        ci_str = raw_value.decode("utf-8") if isinstance(raw_value, bytes) else str(raw_value)
+        result["category_name"] = get_hap_category_name(ci_str)
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def _enrich_field_VP(raw_value, full_name: str) -> dict:
+    """Enrich Matter Vendor Product (VP)."""
+    result = _base_field_dict(raw_value, full_name)
+    vendor_id, product_id, vp_str = parse_matter_vp(raw_value)
+    if vendor_id is not None:
+        result["vendor_id"] = vendor_id
+    if product_id is not None:
+        result["product_id"] = product_id
+    return result
+
+
+def _enrich_field_DT(raw_value, full_name: str) -> dict:
+    """Enrich Matter Device Type (DT)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        dt_str = raw_value.decode("utf-8") if isinstance(raw_value, bytes) else str(raw_value)
+        result["device_type_name"] = get_matter_device_type_name(dt_str)
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def _enrich_field_CD(raw_value, full_name: str) -> dict:
+    """Enrich Matter Commissioning Data (CD)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        cd_str = raw_value.decode("utf-8") if isinstance(raw_value, bytes) else str(raw_value)
+        bits = decode_matter_commissioning_data(cd_str)
+        if bits:
+            result["status"] = format_matter_commissioning_data(bits)
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def _enrich_field_D(raw_value, full_name: str) -> dict:
+    """Enrich Matter Discriminator (D)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        d_str = raw_value.decode("utf-8") if isinstance(raw_value, bytes) else str(raw_value)
+        d_int = int(d_str)
+        result["int_value"] = d_int
+        result["hex_value"] = format(d_int, "03x")
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def _enrich_field_PH(raw_value, full_name: str) -> dict:
+    """Enrich Matter Pairing Hint (PH)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        ph_str = raw_value.decode("utf-8") if isinstance(raw_value, bytes) else str(raw_value)
+        result["description"] = get_pairing_hint_description(ph_str)
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def _enrich_field_interval_ms(raw_value, full_name: str) -> dict:
+    """Enrich a millisecond interval field (SII, SAI, SAT)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        ms_str = raw_value.decode("utf-8") if isinstance(raw_value, bytes) else str(raw_value)
+        ms_int = int(ms_str)
+        result["milliseconds"] = ms_int
+        result["seconds"] = round(ms_int / 1000.0, 3)
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def _enrich_field_T(raw_value, full_name: str) -> dict:
+    """Enrich Matter TCP Support flag (T)."""
+    result = _base_field_dict(raw_value, full_name)
+    try:
+        t_str = raw_value.decode("utf-8") if isinstance(raw_value, bytes) else str(raw_value)
+        tcp_support = decode_matter_tcp_support(t_str)
+        if tcp_support is not None:
+            result["supported"] = tcp_support
+    except (ValueError, TypeError):
+        pass
+    return result
+
+
+def _enrich_field_ICD(raw_value, full_name: str) -> dict:
+    """Enrich Matter ICD Capability (ICD)."""
+    result = _base_field_dict(raw_value, full_name)
+    desc = decode_matter_icd_capability(raw_value)
+    if desc:
+        result["description"] = desc
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Enricher dispatch table
+# ---------------------------------------------------------------------------
+FIELD_ENRICHERS = {
+    "sb":  _enrich_field_sb,
+    "bb":  _enrich_field_bb,
+    "at":  _enrich_field_at,
+    "xa":  _enrich_field_xa,
+    "pt":  _enrich_field_pt,
+    "sf":  _enrich_field_sf,
+    "ff":  _enrich_field_ff,
+    "sh":  _enrich_field_sh,
+    "ci":  _enrich_field_ci,
+    "VP":  _enrich_field_VP,
+    "DT":  _enrich_field_DT,
+    "CD":  _enrich_field_CD,
+    "D":   _enrich_field_D,
+    "PH":  _enrich_field_PH,
+    "SII": _enrich_field_interval_ms,
+    "SAI": _enrich_field_interval_ms,
+    "SAT": _enrich_field_interval_ms,
+    "T":   _enrich_field_T,
+    "ICD": _enrich_field_ICD,
+}
+
+
+def _enrich_properties(properties: dict) -> dict:
+    """Return an enriched copy of a zeroconf properties dict.
+
+    Each key maps to a structured object with full_name, decoded, hex, base64,
+    plus any field-specific decoded information (bitmaps, categories, etc.).
+    Unknown fields fall back to _base_field_dict.
+    """
+    enriched = {}
+    for raw_key, raw_value in properties.items():
+        key_str = raw_key.decode("utf-8", errors="replace") if isinstance(raw_key, bytes) else str(raw_key)
+        full_name = FIELD_METADATA.get(key_str, key_str)
+        enricher = FIELD_ENRICHERS.get(key_str)
+        if enricher:
+            enriched[key_str] = enricher(raw_value, full_name)
+        else:
+            enriched[key_str] = _base_field_dict(raw_value, full_name)
+    return enriched
+
+
 class MDNSDumpListener(ServiceListener):
     def __init__(self):
         self._last_update = time.time()
@@ -446,31 +795,6 @@ class MDNSDumpListener(ServiceListener):
             return self._json_safe(vars(value))
         return str(value)
 
-    def _service_info_raw(self, info):
-        """Capture ServiceInfo-like state without assuming __dict__ exists."""
-        if not info:
-            return None
-
-        raw = {}
-        if hasattr(info, "__dict__"):
-            try:
-                raw.update(vars(info))
-            except TypeError:
-                pass
-
-        for attr_name in dir(info):
-            if attr_name.startswith("_") or attr_name in raw:
-                continue
-            try:
-                attr_value = getattr(info, attr_name)
-            except Exception:
-                continue
-            if callable(attr_value):
-                continue
-            raw[attr_name] = attr_value
-
-        return self._json_safe(raw)
-
     def _record_from_info(self, type_: str, name: str, info, event: str):
         """Build a common JSON record from zeroconf ServiceInfo + metadata."""
         parsed_addresses = []
@@ -486,11 +810,57 @@ class MDNSDumpListener(ServiceListener):
 
         properties = {}
         if info and getattr(info, "properties", None):
-            properties = self._json_safe(info.properties)
+            properties = _enrich_properties(info.properties)
+
+        # For Matter operational scope, inject FabricID / NodeID extracted from
+        # the service instance name when they are absent from the TXT properties.
+        if type_ == "_matter._tcp.local.":
+            if "FabricID" not in properties:
+                fabric_id_hex, node_id_hex, fabric_id_dec, node_id_dec = extract_fabric_and_node_ids_from_name(name)
+                if fabric_id_hex:
+                    entry = {
+                        "full_name": FIELD_METADATA.get("FabricID", "Fabric ID"),
+                        "decoded": fabric_id_hex,
+                        "source": "instance_name",
+                    }
+                    if fabric_id_dec is not None:
+                        entry["int_value"] = fabric_id_dec
+                    properties["FabricID"] = entry
+            if "NodeID" not in properties:
+                fabric_id_hex, node_id_hex, fabric_id_dec, node_id_dec = extract_fabric_and_node_ids_from_name(name)
+                if node_id_hex:
+                    entry = {
+                        "full_name": FIELD_METADATA.get("NodeID", "Node ID"),
+                        "decoded": node_id_hex,
+                        "source": "instance_name",
+                    }
+                    if node_id_dec is not None:
+                        entry["int_value"] = node_id_dec
+                    properties["NodeID"] = entry
 
         service_info = {}
         if info:
-            service_info = {
+            # Start with all public non-callable attributes from ServiceInfo.
+            if hasattr(info, "__dict__"):
+                try:
+                    for k, v in vars(info).items():
+                        if not k.startswith("_"):
+                            service_info[k] = self._json_safe(v)
+                except TypeError:
+                    pass
+            for attr_name in dir(info):
+                if attr_name.startswith("_") or attr_name in service_info:
+                    continue
+                try:
+                    attr_value = getattr(info, attr_name)
+                except Exception:
+                    continue
+                if callable(attr_value):
+                    continue
+                service_info[attr_name] = self._json_safe(attr_value)
+
+            # Override with explicitly structured / enriched fields.
+            service_info.update({
                 "name": getattr(info, "name", None),
                 "type": getattr(info, "type", None),
                 "server": getattr(info, "server", None),
@@ -505,8 +875,7 @@ class MDNSDumpListener(ServiceListener):
                 "addresses_raw_hex": raw_addresses,
                 "addresses_parsed": parsed_addresses,
                 "properties": properties,
-                "raw": self._service_info_raw(info),
-            }
+            })
 
         return {
             "record_key": f"{type_}|{name}",
@@ -739,8 +1108,8 @@ class MDNSDumpListener(ServiceListener):
                         if sf_bits:
                             print(f"      * {format_hap_status_flags(sf_bits)}")
                             print(f"      * Individual Bits:")
-                            print(f"        - Bit 0 (Pairing Status): {'Not Paired' if sf_bits['not_paired'] else 'Paired'}")
-                            print(f"        - Bit 1 (IP Enabled): {'No' if sf_bits['not_ip_enabled'] else 'Yes'}")
+                            print(f"        - Bit 0 (Pairing Status): {sf_bits['pairing_status']}")
+                            print(f"        - Bit 1 (IP Networking): {'Enabled' if sf_bits['ip_networking_enabled'] else 'Disabled'}")
                             print(f"        - Bit 2 (Problem Detected): {'Yes' if sf_bits['problem_detected'] else 'No'}")
                     
                     # Feature Flags (ff) - Optional
@@ -1040,7 +1409,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             scope_tag = args.scope.lower()
             
-        output_file = f"thread-mdns-scopes-{scope_tag}.json"
+        output_file = f"td-mdns-scopes-{scope_tag}.json"
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=2)
 

@@ -59,6 +59,14 @@ import tdash_web
 #   tdash.py scan otbr-cli networkdiag topology
 #   tdash.py scan otbr-cli all
 #
+# scan mdns examples:
+#   tdash.py scan mdns
+#   tdash.py scan mdns all
+#   tdash.py scan mdns br
+#   tdash.py scan mdns hap
+#   tdash.py scan mdns matter
+#   tdash.py scan mdns all --browse-timeout 60
+#
 # web otbr-restapi examples:
 #   tdash.py web otbr-restapi download --url http://localhost:8080/api/v1/diagnostics --output td-otbr-restapi-diagnostics.json
 #   tdash.py web otbr-restapi client diagnostics list
@@ -111,6 +119,17 @@ def _add_scan_commands(subparsers: argparse._SubParsersAction) -> None:  # type:
 
     otbr_cli_sub.add_parser("all", help="Run all otbr-cli scans")
 
+    # scan mdns
+    mdns_p = subparsers.add_parser("mdns", help="Browse Thread-related mDNS scopes")
+    mdns_p.add_argument(
+        "mdns_scope",
+        nargs="?",
+        choices=["all", "br", "hap", "matter"],
+        default="all",
+        metavar="SCOPE",
+        help="Scope filter: all | br | hap | matter  (default: all)",
+    )
+
 
 def _add_web_commands(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
     """ build the 'web' subcommand tree."""
@@ -149,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tdash",
         description="Thread Network Topology Dashboard CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     # --- common options ---
@@ -159,12 +179,12 @@ def build_parser() -> argparse.ArgumentParser:
     # --- top-level subcommands ---
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # scan - 
-    scan_p = subparsers.add_parser("scan", help="Run an OpenThread CLI scan command")
+    # scan -
+    scan_p = subparsers.add_parser("scan", help="Run a scan command (otbr-cli or mdns)")
     scan_sub = scan_p.add_subparsers(dest="scan_type", required=True)
     _add_scan_commands(scan_sub)
 
-    # web - 
+    # web -
     web_p = subparsers.add_parser("web", help="OTBR REST API commands")
     web_sub = web_p.add_subparsers(dest="web_type", required=True)
     _add_web_commands(web_sub)
@@ -183,6 +203,42 @@ def build_parser() -> argparse.ArgumentParser:
     ws_p = subparsers.add_parser("web-server", help="Start the web dashboard server")
     ws_p.add_argument("--host", default="localhost", help="Host to bind to (default: localhost)")
     ws_p.add_argument("--port", type=int, default=8087, help="Port to listen on (default: 8087)")
+
+    # --- build epilog with per-command help ---
+    def _indent(text: str, prefix: str = "  ") -> str:
+        # Strip the repeated "options: -h/--help" block that every subparser includes
+        lines = text.splitlines()
+        filtered = []
+        skip_next = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped == "options:":
+                skip_next = True
+                continue
+            if skip_next:
+                if stripped in ("-h, --help  show this help message and exit",
+                                "-h, --help       show this help message and exit",
+                                "-h, --help  show this help message and exit"):
+                    skip_next = False
+                    continue
+                # check partial match for the -h/--help line
+                if stripped.startswith("-h, --help"):
+                    skip_next = False
+                    continue
+                skip_next = False
+            filtered.append(prefix + line)
+        # Remove trailing blank lines
+        while filtered and not filtered[-1].strip():
+            filtered.pop()
+        return "\n".join(filtered)
+
+    command_details = []
+    for name, sub_p in [("scan", scan_p), ("web", web_p), ("process", proc_p), ("merge", merge_p), ("web-server", ws_p)]:
+        header = f"\n  {name}"
+        command_details.append(header)
+        command_details.append(_indent(sub_p.format_help()))
+
+    parser.epilog = "\ncommand details:\n" + "\n".join(command_details)
 
     return parser
 
@@ -243,6 +299,10 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str]) -> int:
                 rc = rc or otbr_cli_meshdiag_childtable.main() or 0
                 rc = rc or otbr_cli_networkdiag_topology.main() or 0
                 return rc
+
+        if args.scan_type == "mdns":
+            mdns_argv = [args.mdns_scope] + sub_argv
+            return mdns_thread_scopes.main(mdns_argv) or 0
 
     # --- web ---
     if args.command == "web":
