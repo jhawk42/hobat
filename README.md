@@ -1,14 +1,19 @@
-# Thread Network Topology Dashboard
+# Thread Mesh Network Dashboard
 
-Thread Network Topology Dashboard (tdash) is a Python toolkit and browser-based dashboard for visualizing and monitoring [Thread](https://www.threadgroup.org/) mesh networks.  It collects network data from several sources (OTBR, mDNS, Eve), normalizes and merges that data, and renders it as an interactive topology graph and table in HTML dashboard page.
+Thread Mesh Network Dashboard (tdash) is a Python toolkit and browser-based dashboard for visualizing and monitoring [Thread](https://github.com/openthread/openthread) mesh networks.  It collects network data from several sources (OTBR, mDNS, Eve), normalizes and merges that data, and renders it as an interactive topology graph and table in HTML dashboard page.
 
+## Dataset Sources
 The tool collects data from various dataset sources including:
-- otbr-cli: Open Thread OTBR cli. Executes ot-ctl command line tool against an OTBR instance to scan for information on thread devices. 
-- otbr-restapi: Open Thread OTBR restapi. Web calls to OTBR instance restapi to collect information on thread devices.
+- otbr-cli: OpenThread OTBR cli. Executes ot-ctl command line tool against an OTBR instance to scan for information on thread devices. 
+- otbr-restapi: OpenThread OTBR restapi. Web calls to OTBR instance restapi to collect information on thread devices.
 - mDNS: Multicast DNS allows devices on a local network to discover each other and services
 - Eve app: The native Eve JSON file has useful information for Apple Home thread mesh networks. This tool enhances the native Eve app JSON file with RLOC16 in hex format, etc
 
-# Getting Started
+## Getting Started
+
+Pipeline steps:
+
+{scan|web} -> {process|merge} -> web-server -> dashboard
 
 ```
 python3 tdash.py --help
@@ -39,7 +44,7 @@ Docker container
 TODO 
 ```
 
-# tdash.py help
+## tdash.py --help
 ```
 usage: tdash [-h] [--verbose] [--debug] [--output FILE] {scan,web,process,merge,web-server} ...
 
@@ -85,27 +90,7 @@ Commands usage:
         --port PORT  Port to listen on (default: 8087)
 ```
 
-# Notes
-
-Merge Strategy for Thread Node information
-
-The dashboard and Python merge pipeline support canonical identity matching across these fields:
-
-- `rloc16`
-- `extaddr`, `extAddress`, and `Extended MAC` as one canonical `extaddr` identity
-- `omrIpv6Address`
-
-Supported dashboard merge strategies:
-
-- `none`: pass loaded JSON through without dashboard row merging
-- `by-rloc16`: merge rows only when `rloc16` matches
-- `by-identity`: merge rows when any canonical identity matches in this order of use: `rloc16`, canonical `extaddr`, `omrIpv6Address`
-
-Merge normalization rules:
-
-- identity values are trimmed and compared case-insensitively
-- empty identifiers are ignored
-- non-empty existing values are preserved during merge; conflicting incoming non-empty values are recorded as merge conflicts instead of overwriting the existing value
-- merged rows and merged Python records retain source provenance in `_source_files`
+## Notes
+TODO
 
 -eof

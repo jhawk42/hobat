@@ -1,8 +1,8 @@
-# tdash Codebase Overview
+# Codebase Overview
 
 ## What Is tdash?
 
-Thread Network Topology Dashboard (tdash) is a Python toolkit and browser-based dashboard for visualizing and monitoring [Thread](https://www.threadgroup.org/) mesh networks.  It collects network data from several sources (OTBR, mDNS, Eve), normalizes and merges that data, and renders it as an interactive topology graph and table in HTML dashboard page.
+Thread Mesh Network Dashboard (tdash) is a Python toolkit and browser-based dashboard for visualizing and monitoring [Thread](https://github.com/openthread/openthread) mesh networks.  It collects network data from several sources (OTBR, mDNS, Eve), normalizes and merges that data, and renders it as an interactive topology graph and table in HTML dashboard page.
 
 The tool collects data from various dataset sources including:
 - otbr-cli: Open Thread OTBR cli. Executes ot-ctl command line tool against an OTBR instance to scan for information on thread devices. 
