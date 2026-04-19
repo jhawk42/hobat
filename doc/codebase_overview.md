@@ -38,6 +38,19 @@ tdash/
 │   ├── tdash.py                # Unified CLI dispatcher (top-level entry point)
 │   ├── tdash_web_server.py     # HTTP web server module
 │   ├── tdash.html              # Combined single-page browser dashboard
+│   ├── tdash.css               # Dashboard stylesheet
+│   ├── js/                     # Dashboard JavaScript modules
+│   │   ├── tdash-adaptors.js       # Topology adaptors (meshdiag/REST/Eve → vis-network)
+│   │   ├── tdash-constants.js      # Merge strategies, link filters, edge category labels
+│   │   ├── tdash-dataset-registry.js # Dataset registry (files, modes, filters)
+│   │   ├── tdash-dataset.js        # Dataset loading and node label enrichment
+│   │   ├── tdash-filters.js        # Node and edge visibility filters
+│   │   ├── tdash-merge.js          # Client-side row merge by identity
+│   │   ├── tdash-table-renderer.js # Sortable table renderer
+│   │   ├── tdash-topology-renderer.js # vis-network topology renderer
+│   │   ├── tdash-topology-utils.js # Node/edge helper utilities
+│   │   ├── tdash-ui.js             # UI event wiring and render dispatch
+│   │   └── tdash-utils.js          # Canonical identity and type helpers
 │   ├── otbr_restapi_*.py       # OTBR REST API collectors and CLI clients
 │   ├── otbr_cli_*.py           # ot-ctl CLI collectors
 │   ├── mdns_thread_scopes.py   # mDNS discovery collector
@@ -128,7 +141,24 @@ This codebase uses a strict naming split so the data source is visible from the 
 | File | Purpose |
 |---|---|
 | `tdash.html` | Combined single-page dashboard — replaces the former separate topology and tables HTML files.  See [Dashboard Functions](#dashboard-functions) below. |
-| `tdash_web_server.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree via `SimpleHTTPRequestHandler`.  Has `build_parser()` and `main(argv)` so it can be invoked standalone or via `tdash.py web-server`. |
+| `tdash.css` | Stylesheet for the browser dashboard.  Defines CSS variables for colours, typography, and layout of all dashboard components. |
+| `tdash_web_server.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree with explicit MIME-type overrides.  Has `build_parser()` and `main(argv)` so it can be invoked standalone or via `tdash.py web-server`. |
+
+### Dashboard JavaScript Modules (`js/`)
+
+| File | Purpose |
+|---|---|
+| `tdash-adaptors.js` | Topology adaptors — converts raw data from each source (meshdiag, networkdiag, REST API, Eve native, Eve enhanced, router-table) into the unified `{nodes, edges}` format consumed by vis-network. |
+| `tdash-constants.js` | Central registry of merge-strategy identifiers, link-filter mode names, edge-category label strings, and dropdown option metadata used across modules. |
+| `tdash-dataset-registry.js` | Defines `DATASET_REGISTRY`: each entry names the JSON file(s) to fetch, the merge strategy, the topology adaptor mode, and the default link filter for that dataset. |
+| `tdash-dataset.js` | Dataset loading pipeline — fetches JSON file(s) from the server, applies the client-side merge, and enriches nodes with static device labels from the extaddr map. |
+| `tdash-filters.js` | Visibility filters — implements edge filtering by link-filter mode and node filtering by device type (FTD/MTD/BR/Router) and diagnostics thresholds. |
+| `tdash-merge.js` | Client-side row-merge engine — normalises identifiers and merges rows by `rloc16`, canonical `extaddr`, or `omrIpv6Address`, mirroring the Python `dataset_merge.py` logic. |
+| `tdash-table-renderer.js` | Renders the current dataset as a sortable, column-filterable HTML table; discovers columns dynamically from loaded rows. |
+| `tdash-topology-renderer.js` | Drives the vis-network graph: creates nodes and edges via the active adaptor, applies node/edge filters, handles click-to-details-panel, and wires physics/animation/zoom toggles. |
+| `tdash-topology-utils.js` | Low-level helpers shared by adaptors and renderers: node-ID selection, label building, and directed-edge deduplication with per-category tracking. |
+| `tdash-ui.js` | Top-level UI wiring — binds dropdown and button event handlers, delegates dataset loads, and dispatches render calls to the topology or table renderer. |
+| `tdash-utils.js` | Primitive helpers for canonical-identity comparison (`rloc16`, `extaddr`, `omrIpv6Address`) and type guards used by the merge and filter modules. |
 
 ### Unified CLI Dispatcher
 
