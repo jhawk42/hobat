@@ -1,0 +1,244 @@
+:root {
+  --bg: #f5f7fb;
+  --surface: #ffffff;
+  --text: #1f2937;
+  --muted: #5b6472;
+  --line: #d6dde8;
+  --accent: #0f766e;
+  --accent-soft: #d6f5f2;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  background: linear-gradient(180deg, #eef4ff 0%, var(--bg) 40%, #eef8f5 100%);
+  color: var(--text);
+}
+
+.page {
+  padding: 12px 16px;
+  max-width: 100%;
+}
+
+h1 {
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+/* ── Controls bar ─────────────────────────────────────────── */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+label {
+  font-size: 14px;
+  font-weight: 580;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+select {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 14px;
+}
+
+#dataset-select {
+  min-width: 360px;
+}
+
+#node-filter,
+#link-filter,
+#diagnostic-filter {
+  min-width: 220px;
+}
+
+select.filter-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* Hide options that are unavailable for the active dataset (Phase 6) */
+#node-filter option:disabled,
+#link-filter option:disabled,
+#diagnostic-filter option:disabled {
+  display: none;
+}
+
+/* ── View toggle bar ──────────────────────────────────────── */
+
+.view-toggle-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.view-toggle-bar button {
+  padding: 6px 20px;
+  font-size: 14px;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.view-toggle-bar button:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.view-toggle-bar button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* ── Status line ──────────────────────────────────────────── */
+
+#status {
+  margin: 0 0 8px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ── Topology view ────────────────────────────────────────── */
+
+#view-topology {
+  display: block;
+}
+
+#view-table {
+  display: none;
+}
+
+.topology-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 12px;
+  align-items: start;
+}
+
+#topology-view {
+  width: 100%;
+  height: 80vh;
+  border: 1px solid lightgray;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+#details {
+  margin-top: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  background: #fafafa;
+  max-height: 80vh;
+  overflow: auto;
+}
+
+#details h2 {
+  margin: 0 0 8px 0;
+  font-size: 15px;
+}
+
+#details-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+#details-list li {
+  margin: 3px 0;
+  word-break: break-word;
+}
+
+/* ── Table view ───────────────────────────────────────────── */
+
+.table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: auto;
+  max-height: calc(100vh - 180px);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  min-width: 0;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--accent-soft);
+  color: #0f2d3a;
+  border-bottom: 1px solid var(--line);
+}
+
+th,
+td {
+  padding: 8px 10px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.3;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+tr:nth-child(even) td {
+  background: #fcfdff;
+}
+
+th:last-child,
+td:last-child {
+  border-right: 0;
+}
+
+/* ── Responsive ───────────────────────────────────────────── */
+
+@media (max-width: 1000px) {
+  .topology-layout {
+    grid-template-columns: 1fr;
+  }
+
+  #details {
+    max-height: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 10px;
+  }
+
+  #dataset-select,
+  #node-filter,
+  #link-filter,
+  #diagnostic-filter {
+    min-width: 100%;
+    width: 100%;
+  }
+}

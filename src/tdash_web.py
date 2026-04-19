@@ -12,6 +12,19 @@ TD_WEB_PORT = 8087
 class TDashHandler(http.server.SimpleHTTPRequestHandler):
     """HTTP request handler that redirects '/' to '/tdash.html'."""
 
+    # Explicit MIME map so that ES modules are served with the correct
+    # Content-Type on minimal container images where the OS mime database
+    # may be absent or incomplete (browsers reject modules without
+    # application/javascript).
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        '.js':   'application/javascript',
+        '.mjs':  'application/javascript',
+        '.json': 'application/json',
+        '.css':  'text/css',
+        '.html': 'text/html',
+    }
+
     def do_GET(self) -> None:
         if self.path == "/":
             self.send_response(302)
