@@ -36,7 +36,7 @@ tdash/
 │   └── otbr_restapi_clients.md # OTBR REST API client reference
 ├── src/                        # All source code
 │   ├── tdash.py                # Unified CLI dispatcher (top-level entry point)
-│   ├── tdash_web.py            # HTTP web server module
+│   ├── tdash_web_server.py     # HTTP web server module
 │   ├── tdash.html              # Combined single-page browser dashboard
 │   ├── otbr_restapi_*.py       # OTBR REST API collectors and CLI clients
 │   ├── otbr_cli_*.py           # ot-ctl CLI collectors
@@ -128,7 +128,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 | File | Purpose |
 |---|---|
 | `tdash.html` | Combined single-page dashboard — replaces the former separate topology and tables HTML files.  See [Dashboard Functions](#dashboard-functions) below. |
-| `tdash_web.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree via `SimpleHTTPRequestHandler`.  Has `build_parser()` and `main(argv)` so it can be invoked standalone or via `tdash.py web-server`. |
+| `tdash_web_server.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree via `SimpleHTTPRequestHandler`.  Has `build_parser()` and `main(argv)` so it can be invoked standalone or via `tdash.py web-server`. |
 
 ### Unified CLI Dispatcher
 
@@ -391,7 +391,7 @@ python src/tdash.py web-server
 python src/tdash.py web-server --host 0.0.0.0 --port 8090
 
 # Or run the module directly
-python src/tdash_web.py --port 8087
+python src/tdash_web_server.py --port 8087
 ```
 
 ### Open the dashboard

@@ -29,7 +29,7 @@ import otbr_restapi_client_cli
 import otbr_restapi_raw_client_cli
 
 import dataset_merge
-import tdash_web
+import tdash_web_server
 
 
 ## Command hierarchy:
@@ -209,7 +209,7 @@ def build_parser() -> argparse.ArgumentParser:
     merge_sub = merge_p.add_subparsers(dest="merge_type", required=False)
     _add_merge_commands(merge_sub)
 
-    # web-server — remaining args forwarded to tdash_web.main()
+    # web-server — remaining args forwarded to tdash_web_server.main()
     ws_p = subparsers.add_parser("web-server", help="Start the web dashboard server")
     ws_p.add_argument("--host", default="localhost", help="Host to bind to (default: localhost)")
     ws_p.add_argument("--port", type=int, default=8087, help="Port to listen on (default: 8087)")
@@ -362,7 +362,7 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
 
     # --- web-server ---
     if args.command == "web-server":
-        return tdash_web.main(["--host", args.host, "--port", str(args.port)])
+        return tdash_web_server.main(["--host", args.host, "--port", str(args.port)])
 
     raise ValueError(f"Unhandled command: {args.command}")
 
