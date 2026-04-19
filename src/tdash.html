@@ -267,6 +267,7 @@
         <button id="btn-physics" class="active" title="Toggle vis.js physics simulation">Physics</button>
         <button id="btn-auto-zoom" class="active" title="Auto-fit topology in view">Auto Zoom</button>
         <button id="btn-animation" class="active" title="Toggle vis.js animation">Animation</button>
+        <button id="btn-enhance" title="Enhance node labels using static extaddr→device_label map">Enhance</button>
       </div>
 
       <!-- Controls bar -->
@@ -581,6 +582,9 @@
 
       let currentDataset = null;
 
+      // Map<lowercased-extaddr-string, device_label-string> — loaded at startup
+      let staticExtaddrLabelMap = new Map();
+
       // Canonical merge identity model used by dashboard merge paths.
       const MERGE_STRATEGIES = Object.freeze({
         none: 'none',
@@ -658,6 +662,56 @@
           return normalized;
         }
         return value;
+      }
+
+      // ── Enrichment helpers (used by Enhance toggle) ────────────────────────
+
+      // Returns an enriched copy of a single node/row; original is not mutated.
+      // Eligible when: no device_label AND no name AND extaddr is present in map.
+      function enrichNodeWithStaticLabel(node) {
+        if (!isPlainObject(node)) return node;
+        if (toText(node.device_label) || toText(node.name)) return node;
+        // Restapi rows have shape { id, type, attributes: { extAddress, ... } };
+        // extAddress lives in attributes, not at the top level.
+        let extaddr = getCanonicalExtaddr(node);
+        if (!extaddr && isPlainObject(node.attributes)) extaddr = getCanonicalExtaddr(node.attributes);
+        if (!extaddr) return node;
+        const label = staticExtaddrLabelMap.get(extaddr);
+        if (!label) return node;
+        return { ...node, device_label: label };
+      }
+
+      // Enriches a flat array of normalised rows (used by table renderer path).
+      function enrichRows(rows) {
+        return rows.map(enrichNodeWithStaticLabel);
+      }
+
+      // Recursively enriches a raw JSON value, targeting node-like objects.
+      // Handles plain arrays, objects with .nodes[] (eve_native), .data[] (otbr_restapi),
+      // and plain node objects directly.
+      function enrichRawValue(value) {
+        if (Array.isArray(value)) {
+          return value.map((item) => enrichRawValue(item));
+        }
+        if (isPlainObject(value)) {
+          const enriched = enrichNodeWithStaticLabel(value);
+          const result = {};
+          Object.keys(enriched).forEach((key) => {
+            const child = enriched[key];
+            if (Array.isArray(child) || isPlainObject(child)) {
+              result[key] = enrichRawValue(child);
+            } else {
+              result[key] = child;
+            }
+          });
+          return result;
+        }
+        return value;
+      }
+
+      // Returns a new rawFiles array with enrichment applied to each file's data.
+      function enrichRawFiles(rawFiles) {
+        return rawFiles.map((file) => (file === null ? null : enrichRawValue(file)));
       }
 
       // ── Row normalisation (used by table renderer + merge strategies) ────────
@@ -855,6 +909,23 @@
         return response.json();
       }
 
+      // ── Static label map loader ───────────────────────────────────────────
+
+      async function loadStaticLabelMap() {
+        try {
+          const data = await fetchJson('td-static-extaddr-device-label.json');
+          if (Array.isArray(data)) {
+            data.forEach((entry) => {
+              const key = canonicalIdText(entry?.extaddr);
+              const label = toText(entry?.device_label);
+              if (key && label) staticExtaddrLabelMap.set(key, label);
+            });
+          }
+        } catch (err) {
+          console.warn('td-static-extaddr-device-label.json could not be loaded:', err);
+        }
+      }
+
       // ── Dataset load entry-point ──────────────────────────────────────────
 
       async function loadDataset(entryValue) {
@@ -938,10 +1009,19 @@
       function renderCurrentView() {
         if (!currentDataset) return;
         const view = currentView;   // set by view-toggle (Section 7)
+
+        const effectiveDataset = _enhanceEnabled
+          ? {
+              ...currentDataset,
+              rows:     enrichRows(currentDataset.rows),
+              rawFiles: enrichRawFiles(currentDataset.rawFiles)
+            }
+          : currentDataset;
+
         if (view === 'topology') {
-          renderTopologyForDataset(currentDataset);
+          renderTopologyForDataset(effectiveDataset);
         } else {
-          renderTableForDataset(currentDataset);
+          renderTableForDataset(effectiveDataset);
         }
       }
 
@@ -2404,8 +2484,8 @@
           const extaddrVal = toText(rawNode.extAddress || rawNode.extaddr).toLowerCase() || (existing ? existing.extaddr : '');
           const merged = {
             id: nodeId,
-            device_label: toText(rawNode.hostName) || (existing ? existing.device_label : ''),
-            name: toText(rawNode.hostName) || (existing ? existing.name : ''),
+            device_label: toText(rawNode.hostName) || toText(rawNode.device_label) || (existing ? existing.device_label : ''),
+            name: toText(rawNode.hostName) || toText(rawNode.device_label) || (existing ? existing.name : ''),
             rloc16: rloc16Val,
             extaddr: extaddrVal,
             type: roleText || toText(rawNode.type) || (existing ? existing.type : ''),
@@ -3180,6 +3260,23 @@
 
       document.getElementById('btn-physics').addEventListener('click', () => setPhysics(!_physicsEnabled));
 
+      // ── Enhance toggle ────────────────────────────────────────────────────
+      let _enhanceEnabled = true;
+
+      function setEnhance(enabled) {
+        _enhanceEnabled = enabled;
+        const btn = document.getElementById('btn-enhance');
+        if (enabled) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+        renderCurrentView();
+      }
+
+      document.getElementById('btn-enhance').addEventListener('click', () => setEnhance(!_enhanceEnabled));
+      setEnhance(_enhanceEnabled); // apply initial state to button
+
       // ── Animation toggle ────────────────────────────────────────────────────
       function setAnimation(enabled) {
         _animationEnabled = enabled;
@@ -3277,8 +3374,10 @@
         }
       });
 
-      // ── Bootstrap: load first dataset on page load ────────────────────────────
-      loadDataset(document.getElementById('dataset-select').value);
+      // ── Bootstrap: load static label map, then first dataset ─────────────────
+      loadStaticLabelMap().then(() => {
+        loadDataset(document.getElementById('dataset-select').value);
+      });
     </script>
   </body>
 </html>
