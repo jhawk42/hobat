@@ -50,7 +50,7 @@ def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=Non
 
         # Enhance node with OMR IPv6 address  using OMR prefix
         if omr_ipv6addr_prefix:
-            node["omr_ipv6_addrs"] = util_network.get_omr_addr_from_list(ipv6_addrs, omr_ipv6addr_prefix)
+            node["omrIpv6Address"] = util_network.get_omr_addr_from_list(ipv6_addrs, omr_ipv6addr_prefix)
 
         # Remove original 'ip_addresses' to avoid confusion since we have 'ipv6_addrs' now
         if "ip_addresses" in node:
