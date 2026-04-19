@@ -115,7 +115,12 @@ def _add_scan_commands(subparsers: argparse._SubParsersAction) -> None:  # type:
 
     networkdiag_p = otbr_cli_sub.add_parser("networkdiag", help="Network diagnostic scans")
     networkdiag_sub = networkdiag_p.add_subparsers(dest="networkdiag_command", required=True)
-    networkdiag_sub.add_parser("topology", help="Scan networkdiag topology")
+    networkdiag_topology_p = networkdiag_sub.add_parser("topology", help="Scan networkdiag topology")
+    networkdiag_children_group = networkdiag_topology_p.add_mutually_exclusive_group()
+    networkdiag_children_group.add_argument("-c", "--children", dest="expand_children", action="store_true", default=True,
+                                            help="Expand and include child nodes in the topology map (default)")
+    networkdiag_children_group.add_argument("-cno", "--children-no", dest="expand_children", action="store_false",
+                                            help="Do not expand child nodes in the topology map")
 
     otbr_cli_sub.add_parser("all", help="Run all otbr-cli scans")
 
@@ -303,7 +308,8 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
 
             if cli_cmd == "networkdiag":
                 if args.networkdiag_command == "topology":
-                    return otbr_cli_networkdiag_topology.main() or 0
+                    expand_children_argv = [] if getattr(args, 'expand_children', True) else ["-cno"]
+                    return otbr_cli_networkdiag_topology.main(expand_children_argv) or 0
 
             if cli_cmd == "all":
                 rc = otbr_cli_network_dataset_info.main() or 0

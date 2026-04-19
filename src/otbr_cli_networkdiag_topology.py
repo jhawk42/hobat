@@ -1,3 +1,4 @@
+import argparse
 import os
 import subprocess
 import re
@@ -510,16 +511,13 @@ def get_networkdiagnostic_one(rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_add
     
     return network_topology_node
 
-def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=None):
+def get_networkdiagnostic_topology_data(extaddr_map=None, network_dataset_info=None, expand_children=True):
     """Maps the full network topology and returns a Python dictionary."""
     
     omr_ipv6addr_prefix = network_dataset_info["prefix_omr_ipv6addr_prefix"] if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info else None 
 
     # Set to True to also query and include child nodes in the topology map (will increase runtime significantly)
     # Set to False to only get parent nodes without expanding children
-
-    expand_children = True  
-    #expand_children = False  
 
     # 1. Get mesh-local prefix
     meshlocal_prefix = util_network.get_prefix_meshlocal()
@@ -733,7 +731,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     ## router only
     ## children only
     ## multicast networkdiagnostic get ff03::1
-    
+
+    parser = argparse.ArgumentParser(description="Thread Network Diagnostic Topology")
+    children_group = parser.add_mutually_exclusive_group()
+    children_group.add_argument("-c", "--children", dest="expand_children", action="store_true", default=True,
+                                help="Expand and include child nodes in the topology map (default)")
+    children_group.add_argument("-cno", "--children-no", dest="expand_children", action="store_false",
+                                help="Do not expand child nodes in the topology map")
+    args = parser.parse_args(argv)
+
     # Load extaddr to nodename mapping from JSON file
     extaddr_json_filename = "td-static-extaddr-device-label.json"
 
@@ -746,7 +752,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     network_dataset_info = util_network.get_network_dataset_info()
 
     # Get the networkdiagnostic topology data
-    networkdiagnostic_topology_data = get_networkdiagnostic_topology_data(extaddr_map, network_dataset_info)
+    networkdiagnostic_topology_data = get_networkdiagnostic_topology_data(extaddr_map, network_dataset_info, expand_children=args.expand_children)
     
     # print the topology in tree format to console 
     print_networkdiagnostic_topology(networkdiagnostic_topology_data)
