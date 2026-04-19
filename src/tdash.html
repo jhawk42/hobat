@@ -81,6 +81,13 @@
         cursor: not-allowed;
       }
 
+      /* Hide options that are unavailable for the active dataset (Phase 6) */
+      #node-filter option:disabled,
+      #link-filter option:disabled,
+      #diagnostic-filter option:disabled {
+        display: none;
+      }
+
       /* ── View toggle bar ──────────────────────────────────────── */
 
       .view-toggle-bar {
@@ -1090,6 +1097,384 @@
       const EDGE_CATEGORY_EVE_CHILD = 'eve_child';
       const EDGE_CATEGORY_EVE_NATIVE_ROUTE = 'eve_native_route';
       const EDGE_CATEGORY_EVE_NATIVE_CHILD = 'eve_native_child';
+
+      // ── Phase 1: Filter option metadata registries ────────────────────────────
+      //
+      // Each registry is the single source of truth mapping a dropdown <option>
+      // value to the data fields / edge categories that must be present in the
+      // active dataset for that option to be meaningful.
+      //
+      // Fields:
+      //   value          — must match the <option value="..."> in the HTML
+      //   alwaysShow     — when true the option is never hidden regardless of data
+      //
+      // NODE_FILTER_OPTIONS
+      //   topoNodeField  — vis-node property name (topology view)
+      //   topoNodeValue  — expected value to test for (undefined → truthy-check)
+      //   tableRowField  — dot-path into the normalised row (table view)
+      //   tableRowValue  — expected value to test for (undefined → any non-empty)
+      //
+      // LINK_FILTER_OPTIONS  (topology-only; always hidden in table view)
+      //   requiredEdgeCategories — at least one edge must carry one of these
+      //
+      // DIAGNOSTIC_FILTER_OPTIONS
+      //   topoNodeField  — vis-node property name (topology view)
+      //   tableRowField  — dot-path into the normalised row (table view)
+      //   tableNeighborField — field inside router_neighbor_table[] rows
+      //                        (used instead of tableRowField when set)
+
+      const NODE_FILTER_OPTIONS = Object.freeze([
+        { value: 'all',                       alwaysShow: true },
+        {
+          value: 'ftd-devices',
+          topoNodeField: 'mode_device',       topoNodeValue: 'FTD',
+          tableRowField: 'mode.device',       tableRowValue: 'FTD'
+        },
+        {
+          value: 'mtd-devices',
+          topoNodeField: 'mode_device',       topoNodeValue: 'MTD',
+          tableRowField: 'mode.device',       tableRowValue: 'MTD'
+        },
+        {
+          value: 'main-routers',
+          topoNodeField: 'isMainRouter',
+          tableRowField: 'rloc16'             // rloc16 ending in '00' → main router
+        },
+        {
+          value: 'border-routers',
+          topoNodeField: 'isBorderRouter',
+          tableRowField: 'br'
+        },
+        {
+          value: 'routers-with-children',
+          topoNodeField: 'isRouter',          // isRouter && hasChildren
+          tableRowField: 'total_children'     // > 0, or children[] length > 0
+        },
+        {
+          value: 'routers-without-children',
+          topoNodeField: 'isRouter',          // isRouter && !hasChildren
+          tableRowField: 'rloc16'             // router-shaped, checked by predicate
+        }
+      ]);
+
+      const LINK_FILTER_OPTIONS = Object.freeze([
+        { value: LINK_FILTER_ALL,                    alwaysShow: true },
+        {
+          value: LINK_FILTER_DEFAULT,
+          requiredEdgeCategories: [
+            EDGE_CATEGORY_DEFAULT_CHILDREN,
+            EDGE_CATEGORY_DEFAULT_1,
+            EDGE_CATEGORY_DEFAULT_2,
+            EDGE_CATEGORY_DEFAULT_3,
+            EDGE_CATEGORY_OTBR_CHILD
+          ]
+        },
+        {
+          value: LINK_FILTER_DEFAULT_PLUS_NEIGHBORS,
+          requiredEdgeCategories: [
+            EDGE_CATEGORY_DEFAULT_CHILDREN,
+            EDGE_CATEGORY_DEFAULT_1,
+            EDGE_CATEGORY_DEFAULT_2,
+            EDGE_CATEGORY_DEFAULT_3,
+            EDGE_CATEGORY_OTBR_CHILD,
+            EDGE_CATEGORY_ROUTER_NEIGHBOR
+          ]
+        },
+        {
+          value: LINK_FILTER_OTBR_REST_API,
+          requiredEdgeCategories: [EDGE_CATEGORY_OTBR_ROUTE, EDGE_CATEGORY_OTBR_CHILD]
+        },
+        {
+          value: LINK_FILTER_EVE_ENHANCED,
+          requiredEdgeCategories: [EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD]
+        },
+        {
+          value: LINK_FILTER_EVE_NATIVE,
+          requiredEdgeCategories: [EDGE_CATEGORY_EVE_NATIVE_ROUTE, EDGE_CATEGORY_EVE_NATIVE_CHILD]
+        }
+      ]);
+
+      const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
+        { value: 'all', alwaysShow: true },
+        // ── Mac counters ──────────────────────────────────────────────────────
+        {
+          value: 'medium-total-errors-pct',
+          topoNodeField: 'iftotalerrors_pct',
+          tableRowField: 'mac_counters.iftotalerrors_pct'
+        },
+        {
+          value: 'medium-total-errors-high',
+          topoNodeField: 'iftotalerrors_pct',
+          tableRowField: 'mac_counters.iftotalerrors_pct'
+        },
+        {
+          value: 'medium-discard-pct',
+          topoNodeField: 'iftotalpktserrorsdiscards_pct',
+          tableRowField: 'mac_counters.iftotalpktserrorsdiscards_pct'
+        },
+        // ── Mle counters ──────────────────────────────────────────────────────
+        {
+          value: 'medium-partition-changes',
+          topoNodeField: 'partitionidchanges',
+          tableRowField: 'mle_counters.partitionidchanges'
+        },
+        {
+          value: 'high-partition-changes',
+          topoNodeField: 'partitionidchanges',
+          tableRowField: 'mle_counters.partitionidchanges'
+        },
+        {
+          value: 'medium-parent-changes',
+          topoNodeField: 'parentchanges',
+          tableRowField: 'mle_counters.parentchanges'
+        },
+        {
+          value: 'high-parent-changes',
+          topoNodeField: 'parentchanges',
+          tableRowField: 'mle_counters.parentchanges'
+        },
+        // ── Router-neighbor: frame error rate ─────────────────────────────────
+        {
+          value: 'router-neighbor-err-rate-frame-low',
+          topoNodeField: 'router_neighbor_max_err_rate_frame_pct',
+          tableNeighborField: 'err_rate_frame_pct'
+        },
+        {
+          value: 'router-neighbor-err-rate-frame-medium',
+          topoNodeField: 'router_neighbor_max_err_rate_frame_pct',
+          tableNeighborField: 'err_rate_frame_pct'
+        },
+        {
+          value: 'router-neighbor-err-rate-frame-high',
+          topoNodeField: 'router_neighbor_max_err_rate_frame_pct',
+          tableNeighborField: 'err_rate_frame_pct'
+        },
+        // ── Router-neighbor: message error rate ───────────────────────────────
+        {
+          value: 'router-neighbor-err-rate-msg-low',
+          topoNodeField: 'router_neighbor_max_err_rate_msg_pct',
+          tableNeighborField: 'err_rate_msg_pct'
+        },
+        {
+          value: 'router-neighbor-err-rate-msg-medium',
+          topoNodeField: 'router_neighbor_max_err_rate_msg_pct',
+          tableNeighborField: 'err_rate_msg_pct'
+        },
+        {
+          value: 'router-neighbor-err-rate-msg-high',
+          topoNodeField: 'router_neighbor_max_err_rate_msg_pct',
+          tableNeighborField: 'err_rate_msg_pct'
+        },
+        // ── Router-neighbor: RSS ──────────────────────────────────────────────
+        {
+          value: 'router-neighbor-rss-very-low',
+          topoNodeField: 'router_neighbor_has_rss_very_low',
+          tableNeighborField: 'rss_ave'
+        },
+        {
+          value: 'router-neighbor-rss-low',
+          topoNodeField: 'router_neighbor_has_rss_low',
+          tableNeighborField: 'rss_ave'
+        },
+        {
+          value: 'router-neighbor-rss-medium',
+          topoNodeField: 'router_neighbor_has_rss_medium',
+          tableNeighborField: 'rss_ave'
+        },
+        {
+          value: 'router-neighbor-rss-high',
+          topoNodeField: 'router_neighbor_has_rss_high',
+          tableNeighborField: 'rss_ave'
+        }
+      ]);
+
+      // ── Phase 2: DatasetCapabilities compute functions ────────────────────────
+      //
+      // computeTopologyCapabilities(nodeData, edgeData)
+      //   Called after runAdaptor() in renderTopologyForDataset.
+      //   Scans vis-node objects and edge linkCategories to produce capability flags.
+      //
+      // computeTableCapabilities(rows)
+      //   Called at the top of renderTableForDataset.
+      //   Scans normalised row objects (including router_neighbor_table sub-arrays).
+      //   Defined after getColumnValue (which it depends on) further down in this
+      //   script, but declared here so the shape is documented alongside Phase 1.
+      //
+      // Both return a DatasetCapabilities object:
+      //   {
+      //     // Node filter flags
+      //     hasFtdNodes               : bool,
+      //     hasMtdNodes               : bool,
+      //     hasMainRouters            : bool,
+      //     hasBorderRouters          : bool,
+      //     hasRoutersWithChildren    : bool,
+      //     hasRoutersWithoutChildren : bool,
+      //
+      //     // Link filter (topology: Set of edge category strings; table: empty Set)
+      //     edgeCategories            : Set<string>,
+      //
+      //     // Diagnostic filter flags
+      //     hasFieldMacTotalErrorsPct  : bool,
+      //     hasFieldMacDiscardPct      : bool,
+      //     hasFieldPartitionChanges   : bool,
+      //     hasFieldParentChanges      : bool,
+      //     hasNeighborFrameErrRate    : bool,
+      //     hasNeighborMsgErrRate      : bool,
+      //     hasNeighborRss             : bool
+      //   }
+
+      function computeTopologyCapabilities(nodeData, edgeData) {
+        let hasFtdNodes = false;
+        let hasMtdNodes = false;
+        let hasMainRouters = false;
+        let hasBorderRouters = false;
+        let hasRoutersWithChildren = false;
+        let hasRoutersWithoutChildren = false;
+        let hasFieldMacTotalErrorsPct = false;
+        let hasFieldMacDiscardPct = false;
+        let hasFieldPartitionChanges = false;
+        let hasFieldParentChanges = false;
+        let hasNeighborFrameErrRate = false;
+        let hasNeighborMsgErrRate = false;
+        let hasNeighborRss = false;
+
+        for (const node of nodeData) {
+          const md = toText(node.mode_device).toUpperCase();
+          if (md === 'FTD') hasFtdNodes = true;
+          if (md === 'MTD') hasMtdNodes = true;
+          if (node.isMainRouter === true) hasMainRouters = true;
+          if (node.isBorderRouter === true) hasBorderRouters = true;
+          if (node.isRouter === true && node.hasChildren === true) hasRoutersWithChildren = true;
+          if (node.isRouter === true && node.hasChildren !== true) hasRoutersWithoutChildren = true;
+          if (Number.isFinite(node.iftotalerrors_pct)) hasFieldMacTotalErrorsPct = true;
+          if (Number.isFinite(node.iftotalpktserrorsdiscards_pct)) hasFieldMacDiscardPct = true;
+          if (Number.isFinite(node.partitionidchanges)) hasFieldPartitionChanges = true;
+          if (Number.isFinite(node.parentchanges)) hasFieldParentChanges = true;
+          if (Number.isFinite(node.router_neighbor_max_err_rate_frame_pct)) hasNeighborFrameErrRate = true;
+          if (Number.isFinite(node.router_neighbor_max_err_rate_msg_pct)) hasNeighborMsgErrRate = true;
+          if (Number.isFinite(node.router_neighbor_min_rss_ave)
+              || Number.isFinite(node.router_neighbor_max_rss_ave)) hasNeighborRss = true;
+        }
+
+        const edgeCategories = new Set();
+        for (const edge of edgeData) {
+          for (const cat of normalizeLinkCategories(edge.linkCategories)) {
+            edgeCategories.add(cat);
+          }
+        }
+
+        return {
+          hasFtdNodes, hasMtdNodes,
+          hasMainRouters, hasBorderRouters,
+          hasRoutersWithChildren, hasRoutersWithoutChildren,
+          edgeCategories,
+          hasFieldMacTotalErrorsPct, hasFieldMacDiscardPct,
+          hasFieldPartitionChanges, hasFieldParentChanges,
+          hasNeighborFrameErrRate, hasNeighborMsgErrRate, hasNeighborRss
+        };
+      }
+
+      // computeTableCapabilities is defined after getColumnValue (Section 6 helpers).
+
+      // ── Phase 4: updateFilterOptionVisibility ─────────────────────────────────
+      //
+      // Called after capabilities are computed for any dataset/view change.
+      // Hides/disables options whose required fields are absent from the active
+      // dataset.  If the currently-selected option becomes unavailable it is
+      // reset to the safe default for that dropdown.
+      //
+      // Uses the Phase 1 registries (NODE_FILTER_OPTIONS, LINK_FILTER_OPTIONS,
+      // DIAGNOSTIC_FILTER_OPTIONS) to iterate options and the Phase 2
+      // DatasetCapabilities flags/edgeCategories to decide visibility.
+
+      function updateFilterOptionVisibility(capabilities, view) {
+        // ── Node filter ─────────────────────────────────────────────────────────
+        const nodeCapabilityByValue = {
+          'ftd-devices':              capabilities.hasFtdNodes,
+          'mtd-devices':              capabilities.hasMtdNodes,
+          'main-routers':             capabilities.hasMainRouters,
+          'border-routers':           capabilities.hasBorderRouters,
+          'routers-with-children':    capabilities.hasRoutersWithChildren,
+          'routers-without-children': capabilities.hasRoutersWithoutChildren
+        };
+
+        const nodeFilterEl = document.getElementById('node-filter');
+        Array.from(nodeFilterEl.options).forEach((opt) => {
+          const meta = NODE_FILTER_OPTIONS.find((m) => m.value === opt.value);
+          if (!meta || meta.alwaysShow) {
+            opt.hidden = false;
+            opt.disabled = false;
+            return;
+          }
+          const available = nodeCapabilityByValue[opt.value] === true;
+          opt.hidden = !available;
+          opt.disabled = !available;
+        });
+        // Reset to 'all' if currently-selected option is now unavailable
+        if (nodeFilterEl.options[nodeFilterEl.selectedIndex]?.disabled) {
+          nodeFilterEl.value = 'all';
+        }
+
+        // ── Link filter ─────────────────────────────────────────────────────────
+        // Link filter visibility only applies in topology view; in table view the
+        // whole control is styled as disabled via CSS (filter-disabled class).
+        const linkFilterEl = document.getElementById('link-filter');
+        if (view === 'topology') {
+          Array.from(linkFilterEl.options).forEach((opt) => {
+            const meta = LINK_FILTER_OPTIONS.find((m) => m.value === opt.value);
+            if (!meta || meta.alwaysShow) {
+              opt.hidden = false;
+              opt.disabled = false;
+              return;
+            }
+            const available = meta.requiredEdgeCategories.some(
+              (cat) => capabilities.edgeCategories.has(cat)
+            );
+            opt.hidden = !available;
+            opt.disabled = !available;
+          });
+          if (linkFilterEl.options[linkFilterEl.selectedIndex]?.disabled) {
+            linkFilterEl.value = LINK_FILTER_ALL;
+          }
+        }
+
+        // ── Diagnostic filter ───────────────────────────────────────────────────
+        const diagCapabilityByValue = {
+          'medium-total-errors-pct':               capabilities.hasFieldMacTotalErrorsPct,
+          'medium-total-errors-high':              capabilities.hasFieldMacTotalErrorsPct,
+          'medium-discard-pct':                    capabilities.hasFieldMacDiscardPct,
+          'medium-partition-changes':              capabilities.hasFieldPartitionChanges,
+          'high-partition-changes':                capabilities.hasFieldPartitionChanges,
+          'medium-parent-changes':                 capabilities.hasFieldParentChanges,
+          'high-parent-changes':                   capabilities.hasFieldParentChanges,
+          'router-neighbor-err-rate-frame-low':    capabilities.hasNeighborFrameErrRate,
+          'router-neighbor-err-rate-frame-medium': capabilities.hasNeighborFrameErrRate,
+          'router-neighbor-err-rate-frame-high':   capabilities.hasNeighborFrameErrRate,
+          'router-neighbor-err-rate-msg-low':      capabilities.hasNeighborMsgErrRate,
+          'router-neighbor-err-rate-msg-medium':   capabilities.hasNeighborMsgErrRate,
+          'router-neighbor-err-rate-msg-high':     capabilities.hasNeighborMsgErrRate,
+          'router-neighbor-rss-very-low':          capabilities.hasNeighborRss,
+          'router-neighbor-rss-low':               capabilities.hasNeighborRss,
+          'router-neighbor-rss-medium':            capabilities.hasNeighborRss,
+          'router-neighbor-rss-high':              capabilities.hasNeighborRss
+        };
+
+        const diagFilterEl = document.getElementById('diagnostic-filter');
+        Array.from(diagFilterEl.options).forEach((opt) => {
+          const meta = DIAGNOSTIC_FILTER_OPTIONS.find((m) => m.value === opt.value);
+          if (!meta || meta.alwaysShow) {
+            opt.hidden = false;
+            opt.disabled = false;
+            return;
+          }
+          const available = diagCapabilityByValue[opt.value] === true;
+          opt.hidden = !available;
+          opt.disabled = !available;
+        });
+        if (diagFilterEl.options[diagFilterEl.selectedIndex]?.disabled) {
+          diagFilterEl.value = 'all';
+        }
+      }
 
       function normalizeLinkCategories(value) {
         if (Array.isArray(value)) return value.filter((item) => toText(item));
@@ -2215,6 +2600,11 @@
 
         const { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames } = adaptorResult;
 
+        // ── Phase 5.1: compute and apply dynamic filter option visibility ────────
+        const capabilities = computeTopologyCapabilities(nodeData, edgeData);
+        dataset.capabilities = capabilities;
+        updateFilterOptionVisibility(capabilities, 'topology');
+
         const nodesDataset = new vis.DataSet(nodeData);
         const edgesDataset = new vis.DataSet(edgeData);
         const effectiveOptions = _physicsEnabled
@@ -2442,6 +2832,85 @@
         return current;
       }
 
+      // ── Phase 2 (continued): computeTableCapabilities ─────────────────────────
+      //
+      // Placed here because it depends on getColumnValue (defined just above).
+      // Scans the flat normalised rows array to produce the same DatasetCapabilities
+      // shape as computeTopologyCapabilities, with edgeCategories always empty (table
+      // view has no topology edges).
+
+      function computeTableCapabilities(rows) {
+        let hasFtdNodes = false;
+        let hasMtdNodes = false;
+        let hasMainRouters = false;
+        let hasBorderRouters = false;
+        let hasRoutersWithChildren = false;
+        let hasRoutersWithoutChildren = false;
+        let hasFieldMacTotalErrorsPct = false;
+        let hasFieldMacDiscardPct = false;
+        let hasFieldPartitionChanges = false;
+        let hasFieldParentChanges = false;
+        let hasNeighborFrameErrRate = false;
+        let hasNeighborMsgErrRate = false;
+        let hasNeighborRss = false;
+
+        for (const row of rows) {
+          const md = toText(getColumnValue(row, 'mode.device')).toUpperCase();
+          if (md === 'FTD') hasFtdNodes = true;
+          if (md === 'MTD') hasMtdNodes = true;
+
+          const rloc16Text = toText(getColumnValue(row, 'rloc16')).toLowerCase();
+          const isMainRouter = rloc16Text.endsWith('00') && rloc16Text.length > 0;
+          if (isMainRouter) hasMainRouters = true;
+
+          const brValue = getColumnValue(row, 'br');
+          if (isMainRouter && (brValue === true || toText(brValue).toLowerCase() === 'true')) {
+            hasBorderRouters = true;
+          }
+
+          const totalChildren = toFiniteNumber(getColumnValue(row, 'total_children'));
+          const childrenValue = getColumnValue(row, 'children');
+          const childrenCount = Array.isArray(childrenValue) ? childrenValue.length : undefined;
+          const hasChildren = (Number.isFinite(totalChildren) && totalChildren > 0)
+            || (Number.isFinite(childrenCount) && childrenCount > 0);
+          const isRouter = isMainRouter
+            || Number.isFinite(totalChildren)
+            || Array.isArray(childrenValue);
+          if (isRouter && hasChildren) hasRoutersWithChildren = true;
+          if (isRouter && !hasChildren) hasRoutersWithoutChildren = true;
+
+          const macTotalErrors = getColumnValue(row, 'mac_counters.iftotalerrors_pct');
+          if (Number.isFinite(toFiniteNumber(macTotalErrors))) hasFieldMacTotalErrorsPct = true;
+
+          const macDiscard = getColumnValue(row, 'mac_counters.iftotalpktserrorsdiscards_pct');
+          if (Number.isFinite(toFiniteNumber(macDiscard))) hasFieldMacDiscardPct = true;
+
+          const partChanges = getColumnValue(row, 'mle_counters.partitionidchanges');
+          if (Number.isFinite(toFiniteNumber(partChanges))) hasFieldPartitionChanges = true;
+
+          const parentChanges = getColumnValue(row, 'mle_counters.parentchanges');
+          if (Number.isFinite(toFiniteNumber(parentChanges))) hasFieldParentChanges = true;
+
+          const neighborRows = Array.isArray(getColumnValue(row, 'router_neighbor_table'))
+            ? getColumnValue(row, 'router_neighbor_table') : [];
+          for (const neighbor of neighborRows) {
+            if (Number.isFinite(toFiniteNumber(neighbor?.err_rate_frame_pct))) hasNeighborFrameErrRate = true;
+            if (Number.isFinite(toFiniteNumber(neighbor?.err_rate_msg_pct))) hasNeighborMsgErrRate = true;
+            if (Number.isFinite(toFiniteNumber(neighbor?.rss_ave))) hasNeighborRss = true;
+          }
+        }
+
+        return {
+          hasFtdNodes, hasMtdNodes,
+          hasMainRouters, hasBorderRouters,
+          hasRoutersWithChildren, hasRoutersWithoutChildren,
+          edgeCategories: new Set(),
+          hasFieldMacTotalErrorsPct, hasFieldMacDiscardPct,
+          hasFieldPartitionChanges, hasFieldParentChanges,
+          hasNeighborFrameErrRate, hasNeighborMsgErrRate, hasNeighborRss
+        };
+      }
+
       function formatCellValue(value, columnName) {
         if (value === null || value === undefined) return '';
 
@@ -2630,6 +3099,11 @@
         _tableRows = rows;
         _tableColumns = columns;
         _tableDatasetLabel = dataset.loadedFiles.join(', ');
+
+        // ── Phase 5.2: compute and apply dynamic filter option visibility ────────
+        const capabilities = computeTableCapabilities(rows);
+        dataset.capabilities = capabilities;
+        updateFilterOptionVisibility(capabilities, 'table');
 
         applyTableFilters();
       }
