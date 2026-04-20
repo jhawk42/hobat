@@ -201,7 +201,7 @@ Pre-configured datasets include single-file views (router table, meshdiag-only, 
 | **Table** | Flat [sortable](https://github.com/tofsjonas/sortable) table of all rows in the loaded dataset.  Click any column header to sort. |
 | **Physics** | Toggles the vis-network physics simulation on/off (spring-force layout vs. fixed positions). |
 | **Auto Zoom** | Toggles automatic fit-to-view when a dataset loads. |
-| **Animation** | Toggles vis-network edge animation. |
+| **Animation** | Toggles vis-network fit animation.  Disabled by default — fit-to-view is instant on load. |
 
 ### Node Filter
 
@@ -458,6 +458,78 @@ python src/tdash.py web otbr-restapi client --host 127.0.0.1 --port 18081 node g
 | `by-identity` | Merge when any canonical identity matches (checked in order: `rloc16` → canonical `extaddr` → `omrIpv6Address`) |
 
 Identity matching is case-insensitive and ignores leading/trailing whitespace.  Empty identifiers are never used for matching.
+
+---
+
+## Animation Button — Call Chain
+
+The **Animation** button in `tdash.html` controls whether vis-network uses a smooth animated transition when fitting the graph to the viewport.
+
+### 1. HTML button (`tdash.html:24`)
+```html
+<button id="btn-animation" class="active" title="Toggle vis.js animation">Animation</button>
+```
+Starts without `active` class (animation **OFF** by default).
+
+### 2. Click handler wiring (`tdash-ui.js:135`)
+```js
+document.getElementById('btn-animation')
+  .addEventListener('click', () => setAnimation(!isAnimationEnabled()));
+```
+On click, calls the local `setAnimation(bool)` with the toggled value.
+
+### 3. `setAnimation()` (`tdash-ui.js:125`)
+```js
+function setAnimation(enabled) {
+  setAnimationEnabled(enabled);              // writes state to renderer module
+  const btn = document.getElementById('btn-animation');
+  if (enabled) btn.classList.add('active');
+  else         btn.classList.remove('active');
+}
+```
+Updates the button's visual `active` class, then delegates state storage to the renderer.
+
+### 4. State stored in renderer (`tdash-topology-renderer.js:20`)
+```js
+let _animationEnabled = false;   // module-level flag, OFF by default
+
+export function setAnimationEnabled(val) { _animationEnabled = val; }
+export function isAnimationEnabled()     { return _animationEnabled; }
+```
+
+### 5. vis.js consumption (`tdash-topology-renderer.js:237`)
+
+`_animationEnabled` is read in `fitIfEnabled()`, stored in `_topologyFilterHandlers`, and called after every dataset load or filter change:
+
+```js
+fitIfEnabled: () => {
+  if (_autoZoomEnabled && _visNetwork) {
+    requestAnimationFrame(() => {
+      if (_visNetwork) {
+        _visNetwork.fit({ animation: _animationEnabled });  // vis.js call
+      }
+    });
+  }
+}
+```
+
+`_visNetwork.fit({ animation: true })` tells vis-network to **smoothly pan/zoom** the graph to fit all visible nodes.  When `animation: false`, the fit is **instant** with no transition.
+
+### Visibility scoping
+
+The button is shown/hidden when switching views (`tdash-ui.js:70`):
+- `topology` view → `display: inline-block`
+- `table` view → `display: none`
+
+### Layer summary
+
+| Layer | File | Role |
+|---|---|---|
+| Button `#btn-animation` | `tdash.html:24` | Toggle UI element, starts active |
+| Click handler + `setAnimation()` | `tdash-ui.js:125,135` | Toggles `active` class, calls renderer setter |
+| `_animationEnabled` flag | `tdash-topology-renderer.js:20` | Module-level boolean state |
+| `setAnimationEnabled()` / `isAnimationEnabled()` | `tdash-topology-renderer.js:27,29` | Exported getter/setter |
+| `_visNetwork.fit({ animation: bool })` | `tdash-topology-renderer.js:239` | Actual vis.js API call — animated vs instant fit |
 
 ---
 

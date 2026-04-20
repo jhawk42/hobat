@@ -17,7 +17,7 @@ import { runAdaptor } from './tdash-adaptors.js';
 let _visNetwork = null;
 let _topologyFilterHandlers = null;
 let _autoZoomEnabled = true;
-let _animationEnabled = true;
+let _animationEnabled = false;
 
 // ── Exported accessors / setters ──────────────────────────────────────────────
 

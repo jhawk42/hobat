@@ -7,7 +7,7 @@ The tool collects data from various dataset sources including:
 - otbr-cli: OpenThread OTBR cli. Executes ot-ctl command line tool against an OTBR instance to scan for information on thread devices. 
 - otbr-restapi: OpenThread OTBR restapi. Web calls to OTBR instance restapi to collect information on thread devices.
 - mDNS: Multicast DNS allows devices on a local network to discover each other and services
-- Eve app: The native Eve JSON file has useful information for Apple Home thread mesh networks. This tool enhances the native Eve app JSON file with RLOC16 in hex format, etc
+- Eve Systems iOS app: The native Eve JSON file has useful information for Apple Home thread mesh networks. This tool enhances the native Eve app JSON file with RLOC16 in hex format, etc
 
 ## Getting Started
 

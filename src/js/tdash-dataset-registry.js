@@ -17,57 +17,11 @@
 
 export const DATASET_REGISTRY = [
 
-  // ── Single-file simple datasets (eve, table; topology ) ───
-  {
-    value: 'example_small_eve_native_threadlayout',
-    label: 'example: small: eve native: Eve Thread Network Layout.evethreadlayout',
-    files: [
-      'example-small-Eve Thread Network Layout.evethreadlayout'
-    ],
-    mergeStrategy: 'none',
-    topologyMode: 'eve_native',
-    defaultLinkFilter: 'eve_native_routes_children'
-  },
-  // ── Single-file simple datasets (eve, table; topology ) ───
-  {
-    value: 'eve_native_threadlayout',
-    label: 'eve native: Eve Thread Network Layout.evethreadlayout',
-    files: [
-      'Eve Thread Network Layout.evethreadlayout'
-    ],
-    mergeStrategy: 'none',
-    topologyMode: 'eve_native',
-    defaultLinkFilter: 'eve_native_routes_children'
-  },
-  // ── Single-file simple datasets (eve, table; topology ) ───
-  {
-    value: 'eve_enhanced_topology',
-    label: 'eve enhanced: td-eve-topology.json',
-    files: [
-      'td-eve-topology.json'
-    ],
-    mergeStrategy: 'none',
-    topologyMode: 'eve_enhanced',
-    defaultLinkFilter: 'eve_enhanced_routes_children'
-  },
 
-  // ── Multi-file topology datasets (otbr rest api) ────────────
-  {
-    value: 'restapi_devices_diagnostics',
-    label: 'otbr rest api: devices, diagnostics',
-    files: [
-      'td-otbr-restapi-devices.json',
-      'td-otbr-restapi-diagnostics.json'
-    ],
-    mergeStrategy: 'none',
-    topologyMode: 'otbr_restapi',
-    defaultLinkFilter: 'otbr_rest_api'
-  },
-
-  // ── Multi-file merged (medium depth — matches td_web_tables.html __merged__) ──
+  // ── Multi-file merged (otbr-cli) ──
   {
     value: 'merged_otbr_cli_all',
-    label: 'merged: otbr cli: meshdiag, networkdiag, neighbortables, childtables',
+    label: 'otbr-cli: [meshdiag, networkdiag, neighbortables, childtables]',
     files: [
       'td-otbr-cli-meshdiag-topology.json',
       'td-otbr-cli-networkdiag-topology.json',
@@ -79,10 +33,70 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: 'default_links'
   },
 
-  // ── Multi-file topology datasets (match td_web_topology.html) ────────────
+  // ── Multi-file topology datasets (otbr-restapi) ────────────
+  {
+    value: 'restapi_devices_diagnostics',
+    label: 'otbr-restapi: [devices, diagnostics]',
+    files: [
+      'td-otbr-restapi-devices.json',
+      'td-otbr-restapi-diagnostics.json'
+    ],
+    mergeStrategy: 'none',
+    topologyMode: 'otbr_restapi',
+    defaultLinkFilter: 'otbr_rest_api'
+  },  
+
+  // ── Deep merged (all nodes) ─
+  {
+    value: 'merged_all_deep_wide_otbr_cli_restapi_eve',
+    label: 'merged: 1 file: [otbr-cli, otbr-restapi, eve]',
+    files: [
+      'td-merged-topology-all.json'
+    ],
+    mergeStrategy: 'none',
+    topologyMode: 'merged-detailed',
+    defaultLinkFilter: 'all_links'
+  },
+
+
+  // ── Single-file simple dataset ───
+  {
+    value: 'example_small_eve_native_threadlayout',
+    label: 'eve native: example: eve layout',
+    files: [
+      'example-small-Eve Thread Network Layout.evethreadlayout'
+    ],
+    mergeStrategy: 'none',
+    topologyMode: 'eve_native',
+    defaultLinkFilter: 'eve_native_routes_children'
+  },
+  // ── Single-file simple dataset ───
+  {
+    value: 'eve_native_threadlayout',
+    label: 'eve native: Eve Thread Network Layout.evethreadlayout',
+    files: [
+      'Eve Thread Network Layout.evethreadlayout'
+    ],
+    mergeStrategy: 'none',
+    topologyMode: 'eve_native',
+    defaultLinkFilter: 'eve_native_routes_children'
+  },
+  // ── Single-file simple dataset ───
+  {
+    value: 'eve_enhanced_topology',
+    label: 'eve enhanced: td-eve-topology.json',
+    files: [
+      'td-eve-topology.json'
+    ],
+    mergeStrategy: 'none',
+    topologyMode: 'eve_enhanced',
+    defaultLinkFilter: 'eve_enhanced_routes_children'
+  },
+
+  // ── Multi-file topology datasets (otbr-cli, otbr-restapi) ────────────
   {
     value: 'merged_otbr_cli_otbr_restapi',
-    label: 'merged: otbr cli: meshdiag, networkdiag, restapi: devices, diagnostics',
+    label: 'merged: [otbr-cli, otbr-restapi]',
     files: [
       'td-otbr-cli-meshdiag-topology.json',
       'td-otbr-cli-networkdiag-topology.json',
@@ -96,10 +110,10 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: 'default_links'
   },
 
-  // ── Multi-file merged (medium depth — matches td_web_tables.html __merged__) ──
+  // ── Multi-file merge (otbr-cli, eve) ──
   {
     value: 'merged_otbr_cli_meshdiag_networkdiag_neighbortables_eve',
-    label: 'merged: otbr cli: meshdiag, networkdiag, neighbortables, eve',
+    label: 'merged: [otbr-cli, eve]',
     files: [
       'td-otbr-cli-meshdiag-topology.json',
       'td-otbr-cli-networkdiag-topology.json',
@@ -111,14 +125,15 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: 'default_links'
   },
 
-  // ── Multi-file merged (medium depth — matches td_web_tables.html __merged__) ──
+  // ── Multi-file merge [otbr-cli, otbr-restapi, eve] ──
   {
     value: 'merged_otbr_cli_meshdiag_networkdiag_neighbortables_restapi_eve',
-    label: 'merged: otbr cli: meshdiag, networkdiag, neighbortables, otbr restapi, eve',
+    label: 'merged: [otbr-cli, otbr-restapi, eve]',
     files: [
       'td-otbr-cli-meshdiag-topology.json',
       'td-otbr-cli-networkdiag-topology.json',
       'td-otbr-cli-meshdiag-router-neighbortables.json',
+      'td-otbr-cli-meshdiag-router-childtables.json',
       'td-otbr-restapi-devices.json',
       'td-otbr-restapi-diagnostics.json',
       'td-eve-topology.json'
@@ -128,19 +143,7 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: 'default_links'
   },
 
-  // ── Deep merged (matches td_web_tables.html td-merged-topology-all.json) ─
-  {
-    value: 'merged_all_deep_wide_otbr_cli_restapi_eve',
-    label: 'merged: all: otbr cli, restapi, eve - td-merged-topology-all.json',
-    files: [
-      'td-merged-topology-all.json'
-    ],
-    mergeStrategy: 'none',
-    topologyMode: 'merged-detailed',
-    defaultLinkFilter: 'all_links'
-  },
-
-  // ── Single-file simple datasets (table-first; topology via raw-array) ───
+  // ── Single-file simple datasets ───
   {
     value: 'router_table',
     label: 'td-otbr-cli-router-table.json',
@@ -176,6 +179,16 @@ export const DATASET_REGISTRY = [
     label: 'td-otbr-cli-meshdiag-router-neighbortables.json',
     files: [
       'td-otbr-cli-meshdiag-router-neighbortables.json'
+    ],
+    mergeStrategy: 'none',
+    topologyMode: 'merged-detailed',
+    defaultLinkFilter: 'all_links'
+  },
+  {
+    value: 'router_childtables',
+    label: 'td-otbr-cli-meshdiag-router-childtables.json',
+    files: [
+      'td-otbr-cli-meshdiag-router-childtables.json'
     ],
     mergeStrategy: 'none',
     topologyMode: 'merged-detailed',
