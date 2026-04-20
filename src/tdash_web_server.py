@@ -5,8 +5,8 @@ import http.server
 import socketserver
 from typing import Sequence
 
-TD_WEB_HOST = ""
-TD_WEB_PORT = 8087
+TD_WEB_HOST_ADDR = ""
+TD_WEB_HOST_PORT = 8087
 
 
 class TDashHandler(http.server.SimpleHTTPRequestHandler):
@@ -40,14 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--host",
-        default=os.environ.get("HOST", TD_WEB_HOST),
-        help=f"Host/address to bind to (default: '{TD_WEB_HOST}', env: HOST)",
+        default=os.environ.get("HOST", TD_WEB_HOST_ADDR),
+        help=f"Host/address to bind to (default: '{TD_WEB_HOST_ADDR}', env: HOST)",
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("PORT", TD_WEB_PORT)),
-        help=f"Port to listen on (default: {TD_WEB_PORT}, env: PORT)",
+        default=int(os.environ.get("PORT", TD_WEB_HOST_PORT)),
+        help=f"Port to listen on (default: {TD_WEB_HOST_PORT}, env: PORT)",
     )
     return parser
 
