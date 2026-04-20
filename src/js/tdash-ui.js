@@ -6,7 +6,7 @@ import {
   setAutoZoomEnabled, setAnimationEnabled,
   isAutoZoomEnabled, isAnimationEnabled
 } from './tdash-topology-renderer.js';
-import { renderTableForDataset, applyTableFilters } from './tdash-table-renderer.js';
+import { renderTableForDataset, applyTableFilters, setMoreInfoEnabled, isMoreInfoEnabled } from './tdash-table-renderer.js';
 
 // ── Section 2: Build dataset <select> ────────────────────────────────────────
 
@@ -69,6 +69,7 @@ function switchView(newView) {
     btnAutoZoom.style.display = 'inline-block';
     btnAnimation.style.display = 'inline-block';
     linkFilterEl.classList.remove('filter-disabled');
+    document.getElementById('table-details-list').innerHTML = '<li>Click a row to view its properties.</li>';
   } else {
     topoPanel.style.display = 'none';
     tablePanel.style.display = 'block';
@@ -119,6 +120,21 @@ function setEnhance(enabled) {
 
 document.getElementById('btn-enhance').addEventListener('click', () => setEnhance(!_enhanceEnabled));
 setEnhance(_enhanceEnabled); // apply initial state to button
+
+// ── More Info toggle ──────────────────────────────────────────────────
+
+function setMoreInfo(enabled) {
+  setMoreInfoEnabled(enabled);
+  const btn = document.getElementById('btn-more-info');
+  if (enabled) {
+    btn.classList.add('active');
+  } else {
+    btn.classList.remove('active');
+  }
+  if (currentDataset && currentView === 'table') applyTableFilters();
+}
+
+document.getElementById('btn-more-info').addEventListener('click', () => setMoreInfo(!isMoreInfoEnabled()));
 
 // ── Animation toggle ──────────────────────────────────────────────────────────
 

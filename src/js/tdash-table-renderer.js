@@ -1,5 +1,5 @@
 import { TABLE_PRIORITY_COLUMNS } from './tdash-constants.js';
-import { isPlainObject, hasNestedPath, getColumnValue, formatValue } from './tdash-utils.js';
+import { isPlainObject, hasNestedPath, getColumnValue, formatValue, flattenObjectEntries, shouldExcludeDetailPath, sortDetailsWithPriority } from './tdash-utils.js';
 import {
   computeTableCapabilities, updateFilterOptionVisibility,
   isRowVisibleByNodeFilter, isRowVisibleByDiagnosticFilter
@@ -10,6 +10,11 @@ import {
 let _tableRows = [];
 let _tableColumns = [];
 let _tableDatasetLabel = '';
+let _moreInfoEnabled = false;
+let _lastFilteredRows = [];
+
+export function setMoreInfoEnabled(val) { _moreInfoEnabled = val; }
+export function isMoreInfoEnabled() { return _moreInfoEnabled; }
 
 // ── Cell formatting ───────────────────────────────────────────────────────────
 
@@ -95,13 +100,35 @@ function renderTableRows(rows, columns) {
   theadEl.appendChild(headRow);
 
   const fragment = document.createDocumentFragment();
-  rows.forEach((row) => {
+  rows.forEach((row, idx) => {
     const tr = document.createElement('tr');
+    tr.dataset.rowIndex = idx;
     columns.forEach((col) => {
       const td = document.createElement('td');
       td.textContent = formatCellValue(getColumnValue(row, col), col);
       Object.assign(td.style, columnWidths.get(col));
       tr.appendChild(td);
+    });
+    tr.addEventListener('click', () => {
+      const prev = tbodyEl.querySelector('tr.selected-row');
+      if (prev) prev.classList.remove('selected-row');
+      tr.classList.add('selected-row');
+      const detailsListEl = document.getElementById('table-details-list');
+      if (!detailsListEl) return;
+      detailsListEl.innerHTML = '';
+      const rawRow = _lastFilteredRows[idx] ?? row;
+      const details = sortDetailsWithPriority(
+        flattenObjectEntries(rawRow).filter(([key]) => !shouldExcludeDetailPath(key, 'table'))
+      );
+      if (details.length === 0) {
+        detailsListEl.innerHTML = '<li>No details available for selected row.</li>';
+        return;
+      }
+      details.forEach(([key, value]) => {
+        const li = document.createElement('li');
+        li.textContent = `${key}: ${formatValue(value)}`;
+        detailsListEl.appendChild(li);
+      });
     });
     fragment.appendChild(tr);
   });
@@ -115,14 +142,14 @@ function renderTableRows(rows, columns) {
 
 // ── Filter + render pipeline ──────────────────────────────────────────────────
 
-function updateTableStatus(visibleRowCount) {
+function updateTableStatus(visibleRowCount, columnCount) {
   const nodeFilterEl = document.getElementById('node-filter');
   const diagFilterEl = document.getElementById('diagnostic-filter');
   const nodeLabel = nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
   const diagLabel = diagFilterEl.options[diagFilterEl.selectedIndex].text;
   document.getElementById('status').textContent =
     `Loaded ${_tableDatasetLabel}. Total: ${_tableRows.length} rows, ${_tableColumns.length} columns. `
-    + `Showing: ${visibleRowCount} rows. Node Filter: ${nodeLabel}. Diagnostic Filter: ${diagLabel}. `
+    + `Showing: ${visibleRowCount} rows, ${columnCount} columns. Node Filter: ${nodeLabel}. Diagnostic Filter: ${diagLabel}. `
     + `Click a header to sort.`;
 }
 
@@ -132,8 +159,14 @@ export function applyTableFilters() {
   const filtered = _tableRows.filter(
     (row) => isRowVisibleByNodeFilter(row, nodeMode) && isRowVisibleByDiagnosticFilter(row, diagMode)
   );
-  renderTableRows(filtered, _tableColumns);
-  updateTableStatus(filtered.length);
+  _lastFilteredRows = filtered;
+  const activeColumns = _moreInfoEnabled
+    ? _tableColumns
+    : TABLE_PRIORITY_COLUMNS.filter((col) => _tableColumns.includes(col));
+  const detailsListEl = document.getElementById('table-details-list');
+  if (detailsListEl) detailsListEl.innerHTML = '<li>Click a row to view its properties.</li>';
+  renderTableRows(filtered, activeColumns);
+  updateTableStatus(filtered.length, activeColumns.length);
 }
 
 export function renderTableForDataset(dataset) {

@@ -118,20 +118,16 @@ export function flattenObjectEntries(value, path = '', entries = []) {
   return entries;
 }
 
-export function shouldExcludeDetailPath(path) {
-  const p = toText(path);
-  if (!p) return false;
-  if (p === '1_links' || p.startsWith('1_links[')) return true;
-  if (p === '2_links' || p.startsWith('2_links[')) return true;
-  if (p === '3_links' || p.startsWith('3_links[')) return true;
-  if (p === 'children' || p.startsWith('children[')) return true;
+export function shouldExcludeDetailPath(_path, _context) {
   return false;
 }
 
 export function sortDetailsWithPriority(details) {
   const priorityKeys = [
-    'rloc16', 'extaddr', 'device_label', 'name', 'type', 'br',
-    'mode.device', 'thread_stack_version', 'ver', 'total_links', 'total_children',
+    'rloc16', 'extaddr', 'device_label', 'name', 'type', 'br', 'status', 'icon', 'ver',
+    'total_links', 'total_children', 'total_link_3', 'total_link_2', 'total_link_1',
+    'router_neighbor_table_count', 'router_child_table_count',
+    'mode', 'mode.device', 'omrIpv6Address', 'thread_stack_version',
     'mac_counters.iftotaldiscards_pct', 'mac_counters.iftotalerrors_pct',
     'mle_counters.partitionidchanges', 'mle_counters.betterpartitionattachattempts',
     'mle_counters.parentchanges'

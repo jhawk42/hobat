@@ -251,7 +251,10 @@ export const VIS_OPTIONS = {
 export const TABLE_PRIORITY_COLUMNS = [
   'rloc16', 'extaddr', 'device_label', 'name', 'room',
   'ID', 'Extended MAC', 'Next Hop', 'Path Cost', 'LQ In', 'LQ Out', 'Age',
-  'type', 'total_children', 'total_links', 'mode.device', 'thread_stack_version',
+  'type', 'br', 'status', 'icon', 'ver',
+  'total_children', 'total_links', 'total_link_3', 'total_link_2', 'total_link_1',
+  'router_neighbor_table_count', 'router_child_table_count',
+  'mode', 'mode.device', 'omrIpv6Address', 'thread_stack_version',
   'mac_counters.iftotalerrors_pct', 'mac_counters.iftotaldiscards_pct',
   'mle_counters.partitionidchanges', 'mle_counters.betterpartitionattachattempts',
   'mle_counters.parentchanges'
