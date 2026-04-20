@@ -23,6 +23,7 @@ Command line options for scan otbr-cli for thread node information
 ```
 python3 tdash.py scan otbr-cli --help
 
+python3 tdash.py scan otbr-cli router-table
 python3 tdash.py scan otbr-cli meshdiag topology
 python3 tdash.py scan otbr-cli networkdiag topology
 python3 tdash.py scan otbr-cli all
@@ -70,6 +71,11 @@ Commands usage:
     usage: tdash scan [-h] {otbr-cli,mdns} ...
     scan otbr-cli       Scan otbr-cli commands
     scan mdns           Scan Thread-related mDNS scopes
+
+    scan otbr-cli router-table        Scan and save router table
+    scan otbr-cli meshdiag            Mesh diagnostic scans
+    scan otbr-cli networkdiag         Network diagnostic scans
+    scan otbr-cli all                 Run all otbr-cli scans
 
   web
     usage: tdash web [-h] {otbr-restapi} ...
