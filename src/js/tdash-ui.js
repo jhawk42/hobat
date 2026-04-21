@@ -150,6 +150,15 @@ function setAnimation(enabled) {
 
 document.getElementById('btn-animation').addEventListener('click', () => setAnimation(!isAnimationEnabled()));
 
+// ── Legend toggle ─────────────────────────────────────────────────────────────
+
+const btnLegend  = document.getElementById('btn-legend');
+const lqLegendEl = document.getElementById('lq-legend');
+btnLegend.addEventListener('click', () => {
+  btnLegend.classList.toggle('active');
+  lqLegendEl.classList.toggle('hidden', !btnLegend.classList.contains('active'));
+});
+
 // ── Auto Zoom toggle ──────────────────────────────────────────────────────────
 
 function setAutoZoom(enabled) {

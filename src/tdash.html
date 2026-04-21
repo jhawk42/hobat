@@ -24,6 +24,7 @@
         <button id="btn-animation" title="Toggle vis.js animation">Animation</button>
         <button id="btn-enhance" title="Enhance node labels using static extaddr→device_label map">Enhance</button>
         <button id="btn-more-info" title="Show all columns in table view">More Info</button>
+        <button id="btn-legend" class="active" title="Toggle link quality legend">Legend</button>
       </div>
 
       <!-- Controls bar -->
@@ -85,7 +86,17 @@
       <!-- Topology view -->
       <div id="view-topology">
         <div class="topology-layout">
-          <div id="topology-view"></div>
+          <div class="topology-canvas-wrap">
+            <div id="topology-view"></div>
+            <div id="lq-legend" class="lq-legend">
+              <span class="lq-legend-title">Link Quality</span>
+              <span class="lq-legend-item lq-high">&#9644;&#9644;&#9644; High (LQ3)</span>
+              <span class="lq-legend-item lq-medium">&#9644;&#9644; Medium (LQ2)</span>
+              <span class="lq-legend-item lq-low">- - Low (LQ1)</span>
+              <span class="lq-legend-item lq-parent-child">&#9644; Parent&#8211;Child</span>
+              <span class="lq-legend-item lq-otbr">&#9644; OTBR / Neighbor</span>
+            </div>
+          </div>
           <div id="details" class="node-details-panel">
             <h2>Node Details</h2>
             <ul id="details-list" class="node-details-list">

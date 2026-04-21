@@ -3,6 +3,7 @@ import {
   getCanonicalExtaddr, getCanonicalOmrIpv6Address
 } from './tdash-utils.js';
 import { normalizeLinkCategories } from './tdash-filters.js';
+import { EDGE_LQ_STYLES } from './tdash-constants.js';
 
 // ── Node-id selection ─────────────────────────────────────────────────────────
 
@@ -30,6 +31,30 @@ export function isUnknownNodeName(nodeName) {
   return toText(nodeName).toLowerCase().startsWith('unknown');
 }
 
+// ── Link Quality style helpers ───────────────────────────────────────────────
+
+export function lqStyleFromField(field) {
+  if (field === '3_links') return EDGE_LQ_STYLES.high;
+  if (field === '2_links') return EDGE_LQ_STYLES.medium;
+  if (field === '1_links') return EDGE_LQ_STYLES.low;
+  return EDGE_LQ_STYLES.none;
+}
+
+// scale = 255  → Eve-enhanced (0–255 range)
+// scale = 3    → Eve-native / Thread route quality (0–3 range)
+export function lqStyleFromAvgLqi(avgLqi, scale) {
+  if (!Number.isFinite(avgLqi)) return EDGE_LQ_STYLES.none;
+  if (scale === 3) {
+    if (avgLqi >= 3) return EDGE_LQ_STYLES.high;
+    if (avgLqi >= 2) return EDGE_LQ_STYLES.medium;
+    return EDGE_LQ_STYLES.low;
+  }
+  // default: 0–255 scale
+  if (avgLqi >= 200) return EDGE_LQ_STYLES.high;
+  if (avgLqi >= 128) return EDGE_LQ_STYLES.medium;
+  return EDGE_LQ_STYLES.low;
+}
+
 // ── Edge builder ──────────────────────────────────────────────────────────────
 //
 // Inserts or merges a directed edge into edgeMap/edgeData.
@@ -52,6 +77,11 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
     ]);
     existing.linkCategories = Array.from(merged);
     if (style.isParentChild === true) existing.isParentChild = true;
+    if (style.lqLevel !== undefined && (existing.lqLevel === undefined || style.lqLevel > existing.lqLevel)) {
+      existing.lqLevel = style.lqLevel;
+      existing.color   = style.color;
+      existing.dashes  = style.dashes;
+    }
     return;
   }
   const { edgeKeySuffix: _s, ...edgeStyle } = style;

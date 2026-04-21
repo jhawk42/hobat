@@ -35,6 +35,16 @@ export const EDGE_CATEGORY_EVE_CHILD = 'eve_child';
 export const EDGE_CATEGORY_EVE_NATIVE_ROUTE = 'eve_native_route';
 export const EDGE_CATEGORY_EVE_NATIVE_CHILD = 'eve_native_child';
 
+// ── Link Quality edge style constants ─────────────────────────────────────────
+export const EDGE_LQ_STYLES = Object.freeze({
+  high:        { width: 4,   color: '#00c853', dashes: false, lqLevel: 3 },  // LQ3 green bold
+  medium:      { width: 2,   color: '#1565c0', dashes: false, lqLevel: 2 },  // LQ2 blue medium
+  low:         { width: 1,   color: '#c62828', dashes: true,  lqLevel: 1 },  // LQ1 red narrow dashed
+  none:        { width: 1.5, color: '#8a8a8a', dashes: false, lqLevel: 0 },  // fallback (no LQ data)
+  parentChild: { width: 1.5, color: '#8a8a8a', dashes: false, lqLevel: 0 },  // parent–child solid grey
+  noLqPurple:  { width: 1.5, color: '#6a0dad', dashes: false, lqLevel: 0 },  // OTBR / router-neighbor purple
+});
+
 // ── Filter option metadata registries ────────────────────────────────────────
 //
 // Each registry is the single source of truth mapping a dropdown <option>

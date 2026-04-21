@@ -14,7 +14,8 @@ import {
 import {
   chooseNodeId, buildLabel,
   buildMainRouterRloc16, buildChildRloc16,
-  addEdge, groupIsolatedUnknownNodes, buildVisNodeData
+  addEdge, groupIsolatedUnknownNodes, buildVisNodeData,
+  lqStyleFromField, lqStyleFromAvgLqi
 } from './tdash-topology-utils.js';
 
 // ── Adaptor 1: meshdiag + networkdiag + routerNeighbors + restApi ─────────────
@@ -136,8 +137,8 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
       routerIdsWithChildren.add(fromId);
     });
 
-    const linkStyleByField = { '1_links': { width: 1 }, '2_links': { width: 2 }, '3_links': { width: 4 } };
     ['3_links', '2_links', '1_links'].forEach((field) => {
+      const lqStyle = lqStyleFromField(field);
       (Array.isArray(node[field]) ? node[field] : []).forEach((link) => {
         const linkMeshId = toText(link.id);
         const toId = meshIdToUnifiedId.get(linkMeshId) || toText(link.rloc16) || linkMeshId;
@@ -147,7 +148,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
             { source: 'meshdiag', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
         }
         addEdge(edgeMap, edgeData, fromId, toId, {
-          ...(linkStyleByField[field] || {}),
+          ...lqStyle,
           linkCategories: [field === '3_links' ? EDGE_CATEGORY_DEFAULT_3 : field === '2_links' ? EDGE_CATEGORY_DEFAULT_2 : EDGE_CATEGORY_DEFAULT_1]
         });
       });
@@ -290,12 +291,8 @@ export function adaptEve(rawFiles) {
       const lqiIn = toFiniteNumber(route.in);
       const lqiOut = toFiniteNumber(route.out);
       const avgLqi = (Number.isFinite(lqiIn) && Number.isFinite(lqiOut)) ? (lqiIn + lqiOut) / 2 : (lqiIn || lqiOut);
-      let edgeWidth = 1.5;
-      if (Number.isFinite(avgLqi)) {
-        if (avgLqi >= 200) edgeWidth = 3;
-        else if (avgLqi >= 150) edgeWidth = 2;
-      }
-      addEdge(edgeMap, edgeData, fromId, toId, { width: edgeWidth, linkCategories: [EDGE_CATEGORY_EVE_ROUTE] });
+      const lqStyle = lqStyleFromAvgLqi(avgLqi, 255);
+      addEdge(edgeMap, edgeData, fromId, toId, { ...lqStyle, linkCategories: [EDGE_CATEGORY_EVE_ROUTE] });
     });
     (Array.isArray(node.children) ? node.children : []).forEach((child) => {
       const childId = toText(typeof child === 'string' ? child : child.id);
@@ -398,12 +395,8 @@ export function adaptEveNative(rawFiles) {
       const lqiIn = toFiniteNumber(route.in);
       const lqiOut = toFiniteNumber(route.out);
       const avgLqi = (Number.isFinite(lqiIn) && Number.isFinite(lqiOut)) ? (lqiIn + lqiOut) / 2 : (lqiIn || lqiOut);
-      let edgeWidth = 1.5;
-      if (Number.isFinite(avgLqi)) {
-        if (avgLqi >= 3) edgeWidth = 3;
-        else if (avgLqi >= 2) edgeWidth = 2;
-      }
-      addEdge(edgeMap, edgeData, fromId, toId, { width: edgeWidth, linkCategories: [EDGE_CATEGORY_EVE_NATIVE_ROUTE] });
+      const lqStyle = lqStyleFromAvgLqi(avgLqi, 3);
+      addEdge(edgeMap, edgeData, fromId, toId, { ...lqStyle, linkCategories: [EDGE_CATEGORY_EVE_NATIVE_ROUTE] });
     });
 
     (Array.isArray(node.children) ? node.children : []).forEach((child) => {
@@ -518,14 +511,15 @@ export function adaptMergedDetailed(rawFiles) {
   rows.forEach((node, index) => {
     if (isMergedRowEveOnly(node)) return;
     const fromId = chooseMergedId(node, index);
-    [{ key: '3_links', width: 4 }, { key: '2_links', width: 2 }, { key: '1_links', width: 1 }].forEach((f) => {
-      (Array.isArray(node[f.key]) ? node[f.key] : []).forEach((link) => {
+    ['3_links', '2_links', '1_links'].forEach((key) => {
+      const lqStyle = lqStyleFromField(key);
+      (Array.isArray(node[key]) ? node[key] : []).forEach((link) => {
         const toId = ensureNodeForLink(link, link.rloc16 || link.id);
         if (!toId) return;
         addEdge(edgeMap, edgeData, fromId, toId, {
-          width: f.width,
-          linkCategories: [f.key === '3_links' ? EDGE_CATEGORY_DEFAULT_3 : f.key === '2_links' ? EDGE_CATEGORY_DEFAULT_2 : EDGE_CATEGORY_DEFAULT_1],
-          edgeKeySuffix: `merged-${f.key}`
+          ...lqStyle,
+          linkCategories: [key === '3_links' ? EDGE_CATEGORY_DEFAULT_3 : key === '2_links' ? EDGE_CATEGORY_DEFAULT_2 : EDGE_CATEGORY_DEFAULT_1],
+          edgeKeySuffix: `merged-${key}`
         });
       });
     });
