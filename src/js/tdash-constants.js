@@ -20,6 +20,12 @@ export const LINK_FILTER_OTBR_REST_API = 'otbr_rest_api';
 export const LINK_FILTER_EVE_ENHANCED = 'eve_enhanced_routes_children';
 export const LINK_FILTER_EVE_NATIVE = 'eve_native_routes_children';
 export const LINK_FILTER_ALL = 'all_links';
+export const LINK_FILTER_LQ_HIGH       = 'lq_high';
+export const LINK_FILTER_LQ_MEDIUM     = 'lq_medium';
+export const LINK_FILTER_LQ_LOW        = 'lq_low';
+export const LINK_FILTER_PARENT_CHILD  = 'lq_parent_child';
+export const LINK_FILTER_OTBR_NEIGHBOR = 'lq_otbr_neighbor';
+export const LINK_FILTER_LQ_NONE       = 'lq_none';
 
 // ── Edge category constants ───────────────────────────────────────────────────
 
@@ -138,7 +144,29 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
   {
     value: LINK_FILTER_EVE_NATIVE,
     requiredEdgeCategories: [EDGE_CATEGORY_EVE_NATIVE_ROUTE, EDGE_CATEGORY_EVE_NATIVE_CHILD]
-  }
+  },
+  // ── Link Quality filters ──────────────────────────────────────────────
+  {
+    value: LINK_FILTER_LQ_HIGH,
+    requiredEdgeCategories: [EDGE_CATEGORY_DEFAULT_3, EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_NATIVE_ROUTE]
+  },
+  {
+    value: LINK_FILTER_LQ_MEDIUM,
+    requiredEdgeCategories: [EDGE_CATEGORY_DEFAULT_2, EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_NATIVE_ROUTE]
+  },
+  {
+    value: LINK_FILTER_LQ_LOW,
+    requiredEdgeCategories: [EDGE_CATEGORY_DEFAULT_1, EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_NATIVE_ROUTE]
+  },
+  {
+    value: LINK_FILTER_PARENT_CHILD,
+    requiredEdgeCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN, EDGE_CATEGORY_EVE_CHILD, EDGE_CATEGORY_EVE_NATIVE_CHILD, EDGE_CATEGORY_OTBR_CHILD]
+  },
+  {
+    value: LINK_FILTER_OTBR_NEIGHBOR,
+    requiredEdgeCategories: [EDGE_CATEGORY_OTBR_ROUTE, EDGE_CATEGORY_ROUTER_NEIGHBOR]
+  },
+  { value: LINK_FILTER_LQ_NONE, alwaysShow: true }
 ]);
 
 export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
