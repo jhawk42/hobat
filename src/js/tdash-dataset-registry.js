@@ -30,7 +30,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: 'by-identity',
     topologyMode: 'meshdiag-networkdiag',
-    defaultLinkFilter: 'default_links'
+    defaultLinkFilter: 'all_links' //all_links, default_links
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────

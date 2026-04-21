@@ -47,18 +47,18 @@
 
         <label for="link-filter">Links:</label>
         <select id="link-filter">
-          <option value="default_links">Default: router,children, 321 _links, childTable</option>
-          <option value="default_plus_router_neighbors">Default: +router neighbors</option>
+          <option value="all_links">All Links (large)</option>
+          <option value="default_links">Standard: routers, children, 321_links</option>
+          <option value="default_plus_router_neighbors">Standard: +neighbors</option>
           <option value="otbr_rest_api">OTBR restapi: route routeData, childTable</option>
           <option value="eve_enhanced_routes_children">Eve Enhanced: routes, children</option>
           <option value="eve_native_routes_children">Eve Native: routes, children</option>
-          <option value="all_links">All Links (large)</option>
           <optgroup label="── Link Quality ──">
             <option value="lq_high">High Quality Links (LQ3)</option>
             <option value="lq_medium">Medium Quality Links (LQ2)</option>
             <option value="lq_low">Low Quality Links (LQ1)</option>
             <option value="lq_parent_child">Parent–Child Only</option>
-            <option value="lq_otbr_neighbor">OTBR / Router Neighbor</option>
+            <option value="lq_otbr_neighbor">Router Neighbors</option>
             <option value="lq_none">Unknown / No LQ Data</option>
           </optgroup>
         </select>        

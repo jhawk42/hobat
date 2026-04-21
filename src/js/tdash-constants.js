@@ -292,7 +292,7 @@ export const TABLE_PRIORITY_COLUMNS = [
   'type', 'br', 'status', 'icon', 'ver',
   'total_children', 'total_links', 'total_link_3', 'total_link_2', 'total_link_1',
   'router_neighbor_table_count', 'router_child_table_count',
-  'mode', 'mode.device', 'omrIpv6Address', 'thread_stack_version',
+  'mode.device', 'omrIpv6Address', 'thread_stack_version',
   'mac_counters.ifinerrors_pct', 'mac_counters.ifouterrors_pct', 'mac_counters.ifindiscards_pct', 'mac_counters.ifoutdiscards_pct',
   'mle_counters.partitionidchanges', 'mle_counters.betterpartitionattachattempts',
   'mle_counters.parentchanges'

@@ -58,6 +58,7 @@ function switchView(newView) {
   const btnPhysics = document.getElementById('btn-physics');
   const btnAutoZoom = document.getElementById('btn-auto-zoom');
   const btnAnimation = document.getElementById('btn-animation');
+  const btnLegendBtn = document.getElementById('btn-legend');
   const linkFilterEl = document.getElementById('link-filter');
 
   if (newView === 'topology') {
@@ -68,6 +69,7 @@ function switchView(newView) {
     btnPhysics.style.display = 'inline-block';
     btnAutoZoom.style.display = 'inline-block';
     btnAnimation.style.display = 'inline-block';
+    btnLegendBtn.style.display = 'inline-block';
     linkFilterEl.classList.remove('filter-disabled');
     document.getElementById('table-details-list').innerHTML = '<li>Click a row to view its properties.</li>';
   } else {
@@ -78,6 +80,7 @@ function switchView(newView) {
     btnPhysics.style.display = 'none';
     btnAutoZoom.style.display = 'none';
     btnAnimation.style.display = 'none';
+    btnLegendBtn.style.display = 'none';
     linkFilterEl.classList.add('filter-disabled');
   }
 

@@ -133,7 +133,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
       const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
       upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
         { source: 'meshdiag', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
-      addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
+      addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
       routerIdsWithChildren.add(fromId);
     });
 
@@ -172,7 +172,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
       const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
       upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
         { source: 'networkdiagnostic', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
-      addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
+      addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
       routerIdsWithChildren.add(fromId);
     });
   }
@@ -193,7 +193,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
           device_label: childRloc16 || `${fromId} child ${child.childId}` },
         { source: 'networkdiagnostic', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } }
       );
-      addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD] });
+      addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD] });
       routerIdsWithChildren.add(fromId);
     });
   });
@@ -300,7 +300,7 @@ export function adaptEve(rawFiles) {
       if (!nodeMap.has(childId)) {
         upsertEveNode(childId, { id: childId }, { source: 'eve', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
       }
-      addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_EVE_CHILD] });
+      addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_EVE_CHILD] });
       routerIdsWithChildren.add(fromId);
     });
   }
@@ -405,7 +405,7 @@ export function adaptEveNative(rawFiles) {
       if (!nodeMap.has(childId)) {
         upsertEveNativeNode(childId, { id: childId }, { source: 'eve_native', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
       }
-      addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_EVE_NATIVE_CHILD] });
+      addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_EVE_NATIVE_CHILD] });
       routerIdsWithChildren.add(fromId);
     });
   }
@@ -541,7 +541,7 @@ export function adaptMergedDetailed(rawFiles) {
         childRloc16 || `${fromId}-rest-child-${ci + 1}`
       );
       if (!childId) return;
-      addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD], edgeKeySuffix: 'merged-otbr-child' });
+      addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD], edgeKeySuffix: 'merged-otbr-child' });
       routerIdsWithChildren.add(fromId);
     });
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
@@ -549,7 +549,7 @@ export function adaptMergedDetailed(rawFiles) {
       if (typeof child === 'string' || toText(childNode.id)) return; // skip eve-only string children
       const childId = ensureNodeForLink(childNode, `${fromId}-child-${ci + 1}`);
       if (!childId) return;
-      addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN], edgeKeySuffix: 'merged-default-child' });
+      addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN], edgeKeySuffix: 'merged-default-child' });
       routerIdsWithChildren.add(fromId);
     });
   });
@@ -676,7 +676,7 @@ export function adaptRawArray(rawFiles) {
       const childId = typeof child === 'string' ? child
         : (toText(child.rloc16) || toText(child.id));
       if (!childId || !nodeMap.has(childId)) return;
-      addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
+      addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
       routerIdsWithChildren.add(fromId);
     });
     // routes[] → solid edges
@@ -804,7 +804,7 @@ export function adaptOtbrRestApi(rawFiles) {
         upsertOtbrRestApiNode(childId, { rloc16: childRloc16, id: childId },
           { shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
       }
-      addEdge(edgeMap, edgeData, fromId, childId, { dashes: true, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD] });
+      addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD] });
       routerIdsWithChildren.add(fromId);
     });
   });
