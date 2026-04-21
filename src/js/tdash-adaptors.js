@@ -48,8 +48,10 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     const rawChildren = Array.isArray(rawNode.children) ? rawNode.children : [];
     const rawPacketErrorDiscardPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotalpktserrorsdiscards_pct)
       ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct : undefined;
-    const rawTotalErrorsPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotalerrors_pct)
-      ? rawNode.mac_counters.iftotalerrors_pct : undefined;
+    const rawInerrorsPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.ifinerrors_pct)
+      ? rawNode.mac_counters.ifinerrors_pct : undefined;
+    const rawOuterrorsPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.ifouterrors_pct)
+      ? rawNode.mac_counters.ifouterrors_pct : undefined;
     const rawModeDevice = rawNode.mode && toText(rawNode.mode.device)
       ? toText(rawNode.mode.device)
       : (rawNode.mode?.deviceTypeFTD === true ? 'FTD' : (rawNode.mode?.deviceTypeFTD === false ? 'MTD' : ''));
@@ -71,8 +73,10 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
       total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
       iftotalpktserrorsdiscards_pct: Number.isFinite(rawPacketErrorDiscardPct) ? rawPacketErrorDiscardPct
         : (existing && Number.isFinite(existing.iftotalpktserrorsdiscards_pct) ? existing.iftotalpktserrorsdiscards_pct : undefined),
-      iftotalerrors_pct: Number.isFinite(rawTotalErrorsPct) ? rawTotalErrorsPct
-        : (existing && Number.isFinite(existing.iftotalerrors_pct) ? existing.iftotalerrors_pct : undefined),
+      ifinerrors_pct: Number.isFinite(rawInerrorsPct) ? rawInerrorsPct
+        : (existing && Number.isFinite(existing.ifinerrors_pct) ? existing.ifinerrors_pct : undefined),
+      ifouterrors_pct: Number.isFinite(rawOuterrorsPct) ? rawOuterrorsPct
+        : (existing && Number.isFinite(existing.ifouterrors_pct) ? existing.ifouterrors_pct : undefined),
       mode_device: rawModeDevice || (existing ? existing.mode_device : ''),
       partitionidchanges: Number.isFinite(rawPartitionIdChanges) ? rawPartitionIdChanges
         : (existing && Number.isFinite(existing.partitionidchanges) ? existing.partitionidchanges : undefined),

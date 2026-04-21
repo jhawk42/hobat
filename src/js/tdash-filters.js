@@ -82,7 +82,7 @@ export function computeTopologyCapabilities(nodeData, edgeData) {
     if (node.isBorderRouter === true) hasBorderRouters = true;
     if (node.isRouter === true && node.hasChildren === true) hasRoutersWithChildren = true;
     if (node.isRouter === true && node.hasChildren !== true) hasRoutersWithoutChildren = true;
-    if (Number.isFinite(node.iftotalerrors_pct)) hasFieldMacTotalErrorsPct = true;
+    if (Number.isFinite(node.ifinerrors_pct) || Number.isFinite(node.ifouterrors_pct)) hasFieldMacTotalErrorsPct = true;
     if (Number.isFinite(node.iftotalpktserrorsdiscards_pct)) hasFieldMacDiscardPct = true;
     if (Number.isFinite(node.partitionidchanges)) hasFieldPartitionChanges = true;
     if (Number.isFinite(node.parentchanges)) hasFieldParentChanges = true;
@@ -153,8 +153,9 @@ export function computeTableCapabilities(rows) {
     if (isRouter && hasChildren) hasRoutersWithChildren = true;
     if (isRouter && !hasChildren) hasRoutersWithoutChildren = true;
 
-    const macTotalErrors = getColumnValue(row, 'mac_counters.iftotalerrors_pct');
-    if (Number.isFinite(toFiniteNumber(macTotalErrors))) hasFieldMacTotalErrorsPct = true;
+    const macInerrors = getColumnValue(row, 'mac_counters.ifinerrors_pct');
+    const macOuterrors = getColumnValue(row, 'mac_counters.ifouterrors_pct');
+    if (Number.isFinite(toFiniteNumber(macInerrors)) || Number.isFinite(toFiniteNumber(macOuterrors))) hasFieldMacTotalErrorsPct = true;
 
     const macDiscard = getColumnValue(row, 'mac_counters.iftotalpktserrorsdiscards_pct');
     if (Number.isFinite(toFiniteNumber(macDiscard))) hasFieldMacDiscardPct = true;
@@ -294,8 +295,8 @@ export function isNodeVisibleByFilter(node, filterMode) {
 
 export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
   if (filterMode === 'medium-discard-pct') return Number.isFinite(node.iftotalpktserrorsdiscards_pct) && node.iftotalpktserrorsdiscards_pct >= 15;
-  if (filterMode === 'medium-total-errors-pct') return Number.isFinite(node.iftotalerrors_pct) && node.iftotalerrors_pct >= 5;
-  if (filterMode === 'medium-total-errors-high') return Number.isFinite(node.iftotalerrors_pct) && node.iftotalerrors_pct > 10;
+  if (filterMode === 'medium-total-errors-pct') return (Number.isFinite(node.ifinerrors_pct) && node.ifinerrors_pct >= 5) || (Number.isFinite(node.ifouterrors_pct) && node.ifouterrors_pct >= 5);
+  if (filterMode === 'medium-total-errors-high') return (Number.isFinite(node.ifinerrors_pct) && node.ifinerrors_pct > 10) || (Number.isFinite(node.ifouterrors_pct) && node.ifouterrors_pct > 10);
   if (filterMode === 'medium-partition-changes') return Number.isFinite(node.partitionidchanges) && node.partitionidchanges >= 2;
   if (filterMode === 'high-partition-changes') return Number.isFinite(node.partitionidchanges) && node.partitionidchanges >= 5;
   if (filterMode === 'medium-parent-changes') return Number.isFinite(node.parentchanges) && node.parentchanges >= 2;
@@ -375,9 +376,9 @@ export function isRowVisibleByDiagnosticFilter(row, filterMode) {
     const v = getColumnValue(row, path);
     return Number.isFinite(v) ? v : undefined;
   };
-  if (filterMode === 'medium-total-errors-pct') { const v = getMetric('mac_counters.iftotalerrors_pct'); return Number.isFinite(v) && v >= 5; }
-  if (filterMode === 'medium-total-errors-high') { const v = getMetric('mac_counters.iftotalerrors_pct'); return Number.isFinite(v) && v > 10; }
-  if (filterMode === 'medium-discard-pct') { const v = getMetric('mac_counters.iftotaldiscards_pct'); return Number.isFinite(v) && v >= 15; }
+  if (filterMode === 'medium-total-errors-pct') { const vi = getMetric('mac_counters.ifinerrors_pct'); const vo = getMetric('mac_counters.ifouterrors_pct'); return (Number.isFinite(vi) && vi >= 5) || (Number.isFinite(vo) && vo >= 5); }
+  if (filterMode === 'medium-total-errors-high') { const vi = getMetric('mac_counters.ifinerrors_pct'); const vo = getMetric('mac_counters.ifouterrors_pct'); return (Number.isFinite(vi) && vi > 10) || (Number.isFinite(vo) && vo > 10); }
+  if (filterMode === 'medium-discard-pct') { const vi = getMetric('mac_counters.ifindiscards_pct'); const vo = getMetric('mac_counters.ifoutdiscards_pct'); return (Number.isFinite(vi) && vi >= 15) || (Number.isFinite(vo) && vo >= 15); }
   if (filterMode === 'medium-partition-changes') { const v = getMetric('mle_counters.partitionidchanges'); return Number.isFinite(v) && v >= 2; }
   if (filterMode === 'high-partition-changes') { const v = getMetric('mle_counters.partitionidchanges'); return Number.isFinite(v) && v >= 5; }
   if (filterMode === 'medium-parent-changes') { const v = getMetric('mle_counters.parentchanges'); return Number.isFinite(v) && v >= 2; }

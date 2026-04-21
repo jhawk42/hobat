@@ -279,8 +279,7 @@ def parse_mac_counters(output):
         counters["iftotalpkts"] = counters.get("ifinucastpkts", 0) + counters.get("ifinbroadcastpkts", 0) + counters.get("ifoutucastpkts", 0) + counters.get("ifoutbroadcastpkts", 0)
         counters["iftotalerrors"] = counters.get("ifinerrors", 0) + counters.get("ifouterrors", 0)
         counters["iftotaldiscards"] = counters.get("ifindiscards", 0) + counters.get("ifoutdiscards", 0)
-        counters["iftotalpktserrorsdiscards"] =  counters["iftotalerrors"] + counters["iftotaldiscards"]
-
+     
         # errors are from malformed packets, interference, or weak signal strength causing corruption during 
         # transmission, while discards typically indicate congestion or buffer overflows where packets are 
         # dropped due to lack of resources to process them. By calculating the total packets, errors, and 
@@ -295,19 +294,28 @@ def parse_mac_counters(output):
         # counts are significant issues that need to be addressed or if they are just a small fraction of 
         # the overall traffic and may not be as concerning.
 
-        # Calculate percentages for each counter relative to iftotalpkts
-        # Help determine if high error/discard counts are significant relative to total traffic or just a small fraction.
+        # Calculate percentages for each errors, discards counter relative to totalerrors and totaldiscards. To help identify if high error/discard counts are significant or just a small fraction. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of errors or discards, which may indicate more severe issues with signal quality, interference, or congestion that need to be addressed to improve network performance and reliability.
+
+        # Help determine if high error counts are significant 
         # format the percentages to 1 decimal place when printing
-        total_pkts = counters.get("iftotalpkts", 0)
-        if total_pkts > 0:
-            counters["iftotalpktserrorsdiscards_pct"] = round((counters.get("iftotalpktserrorsdiscards", 0) / total_pkts) * 100, 1)
-            counters["iftotalerrors_pct"] = round((counters.get("iftotalerrors", 0) / total_pkts) * 100, 1)
-            counters["iftotaldiscards_pct"] = round((counters.get("iftotaldiscards", 0) / total_pkts) * 100, 1)
-            counters["ifinerrors_pct"] = round((counters.get("ifinerrors", 0) / total_pkts) * 100, 1)
-            counters["ifouterrors_pct"] = round((counters.get("ifouterrors", 0) / total_pkts) * 100, 1)
-            counters["ifindiscards_pct"] = round((counters.get("ifindiscards", 0) / total_pkts) * 100, 1)
-            counters["ifoutdiscards_pct"] = round((counters.get("ifoutdiscards", 0) / total_pkts) * 100, 1)
-    
+        totalerrors = counters.get("iftotalerrors", 0)
+        if totalerrors > 0:
+            counters["ifinerrors_pct"] = round((counters.get("ifinerrors", 0) / round((counters.get("iftotalerrors", 0)) * 100, 1)) if counters.get("iftotalerrors", 0) > 0 else 0)
+            counters["ifouterrors_pct"] = round((counters.get("ifouterrors", 0) / round((counters.get("iftotalerrors", 0)) * 100, 1)) if counters.get("iftotalerrors", 0) > 0 else 0)
+        else:
+            counters["ifinerrors_pct"] = 0
+            counters["ifouterrors_pct"] = 0
+
+        # Help determine if high discard counts are significant 
+        # format the percentages to 1 decimal place when printing
+        totaldiscards = counters.get("iftotaldiscards", 0)
+        if totaldiscards > 0:
+            counters["ifindiscards_pct"] = round((counters.get("ifindiscards", 0) / round((counters.get("iftotaldiscards", 0)) * 100, 1)) if counters.get("iftotaldiscards", 0) > 0 else 0)
+            counters["ifoutdiscards_pct"] = round((counters.get("ifoutdiscards", 0) / round((counters.get("iftotaldiscards", 0)) * 100, 1)) if counters.get("iftotaldiscards", 0) > 0 else 0)
+        else:
+            counters["ifindiscards_pct"] = 0
+            counters["ifoutdiscards_pct"] = 0
+
     return counters
 
 def parse_mle_counters(output):

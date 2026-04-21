@@ -136,13 +136,13 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
   // ── Mac counters ──────────────────────────────────────────────────────
   {
     value: 'medium-total-errors-pct',
-    topoNodeField: 'iftotalerrors_pct',
-    tableRowField: 'mac_counters.iftotalerrors_pct'
+    topoNodeField: 'ifinerrors_pct',
+    tableRowField: 'mac_counters.ifinerrors_pct'
   },
   {
     value: 'medium-total-errors-high',
-    topoNodeField: 'iftotalerrors_pct',
-    tableRowField: 'mac_counters.iftotalerrors_pct'
+    topoNodeField: 'ifinerrors_pct',
+    tableRowField: 'mac_counters.ifinerrors_pct'
   },
   {
     value: 'medium-discard-pct',
@@ -255,7 +255,7 @@ export const TABLE_PRIORITY_COLUMNS = [
   'total_children', 'total_links', 'total_link_3', 'total_link_2', 'total_link_1',
   'router_neighbor_table_count', 'router_child_table_count',
   'mode', 'mode.device', 'omrIpv6Address', 'thread_stack_version',
-  'mac_counters.iftotalerrors_pct', 'mac_counters.iftotaldiscards_pct',
+  'mac_counters.ifinerrors_pct', 'mac_counters.ifouterrors_pct', 'mac_counters.ifindiscards_pct', 'mac_counters.ifoutdiscards_pct',
   'mle_counters.partitionidchanges', 'mle_counters.betterpartitionattachattempts',
   'mle_counters.parentchanges'
 ];
