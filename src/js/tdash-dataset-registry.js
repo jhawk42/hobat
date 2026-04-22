@@ -144,6 +144,17 @@ export const DATASET_REGISTRY = [
   },
 
   // ── Single-file simple datasets ───
+  
+  {
+    value: 'static_extaddr_device_label',
+    label: 'td-static-extaddr-device-label.json',
+    files: [
+      'td-static-extaddr-device-label.json'
+    ],
+    mergeStrategy: 'none',
+    topologyMode: 'raw-array',
+    defaultLinkFilter: 'all_links'
+  },
   {
     value: 'router_table',
     label: 'td-otbr-cli-router-table.json',

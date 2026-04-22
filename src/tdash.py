@@ -338,7 +338,7 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
                 rc = rc or otbr_cli_meshdiag_topology.main() or 0
                 rc = rc or otbr_cli_meshdiag_routerneighbortable.main() or 0
                 rc = rc or otbr_cli_meshdiag_childtable.main() or 0
-                rc = rc or otbr_cli_networkdiag_topology.main() or 0
+                rc = rc or otbr_cli_networkdiag_topology.main([]) or 0
                 return rc
 
         if args.scan_type == "mdns":

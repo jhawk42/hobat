@@ -1,0 +1,26 @@
+# venv
+venv
+.venv
+
+# Temporary files
+**/__pycache__
+.pytest_cache
+
+# git
+.git
+.gitignore
+.github
+
+# dev tools
+.devcontainer
+.vscode
+
+# Test files
+tests
+
+# General files
+doc
+downloads
+data
+diag
+
