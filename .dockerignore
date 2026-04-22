@@ -15,6 +15,11 @@ venv
 .devcontainer
 .vscode
 
+# docker 
+.dockerignore
+Dockerfile
+Dockerfile.ubuntu
+
 # Test files
 tests
 
@@ -23,4 +28,16 @@ doc
 downloads
 data
 diag
+
+# data files
+**/*.log
+
+**/td-*.txt
+**/td-*.json
+!td-static-extaddr-device-label.json
+
+**/*.evethreadlayout
+!'Eve Thread Network Layout.evethreadlayout'
+!'example-small-Eve Thread Network Layout.evethreadlayout'
+
 
