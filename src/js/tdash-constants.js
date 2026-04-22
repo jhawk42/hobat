@@ -43,12 +43,12 @@ export const EDGE_CATEGORY_EVE_NATIVE_CHILD = 'eve_native_child';
 
 // ── Link Quality edge style constants ─────────────────────────────────────────
 export const EDGE_LQ_STYLES = Object.freeze({
-  high:        { width: 4,   color: '#00c853', dashes: false, lqLevel: 3 },  // LQ3 green bold
-  medium:      { width: 2,   color: '#1565c0', dashes: false, lqLevel: 2 },  // LQ2 blue medium
-  low:         { width: 1,   color: '#c62828', dashes: true,  lqLevel: 1 },  // LQ1 red narrow dashed
+  high:        { width: 4,   color: '#0072B2', dashes: false, lqLevel: 3 },  // LQ3 bold blue  (.lq-high)
+  medium:      { width: 2,   color: '#56B4E9', dashes: false, lqLevel: 2 },  // LQ2 light blue (.lq-medium)
+  low:         { width: 1,   color: '#c62828', dashes: true,  lqLevel: 1 },  // LQ1 red dashed (.lq-low)
   none:        { width: 1.5, color: '#8a8a8a', dashes: false, lqLevel: 0 },  // fallback (no LQ data)
-  parentChild: { width: 1.5, color: '#8a8a8a', dashes: false, lqLevel: 0 },  // parent–child solid grey
-  noLqPurple:  { width: 1.5, color: '#6a0dad', dashes: false, lqLevel: 0 },  // OTBR / router-neighbor purple
+  parentChild: { width: 1.5, color: '#CC79A7', dashes: false, lqLevel: 0 },  // parent–child pink/mauve (.lq-parent-child)
+  noLqPurple:  { width: 1.5, color: '#009E73', dashes: false, lqLevel: 0 },  // OTBR / router-neighbor green (.lq-otbr)
 });
 
 // ── Filter option metadata registries ────────────────────────────────────────

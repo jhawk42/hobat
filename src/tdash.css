@@ -207,11 +207,11 @@ div.vis-network div.vis-navigation div.vis-button.vis-down        { bottom: auto
 
 .lq-legend-title       { font-weight: bold; }
 .lq-legend-item        { display: flex; align-items: center; gap: 4px; }
-.lq-high               { color: #00c853; font-weight: bold; }
-.lq-medium             { color: #1565c0; }
+.lq-high               { color: #0072B2; font-weight: bold; }
+.lq-medium             { color: #56B4E9; }
 .lq-low                { color: #c62828; }
-.lq-parent-child       { color: #8a8a8a; }
-.lq-otbr               { color: #6a0dad; }
+.lq-parent-child       { color: #CC79A7; }
+.lq-otbr               { color: #009E73; }
 
 
 .table-layout {
