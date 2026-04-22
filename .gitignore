@@ -1,7 +1,14 @@
 # Environments
 .venv/
+.venv.bak/
 venv/
-.vscode/
+venv.bak/
+
+.env
+.envrc
+env/
+env.bak/
+ENV/
 
 # Cache compliled files
 __pycache__/

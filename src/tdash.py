@@ -134,6 +134,27 @@ def _add_scan_commands(subparsers: argparse._SubParsersAction) -> None:  # type:
         metavar="SCOPE",
         help="Scope filter: all | br | hap | matter  (default: all)",
     )
+    mdns_p.add_argument(
+        "--browse-timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="Seconds of idle time before auto-exit (default: 10, or TD_MDNS_BROWSE_TIMEOUT env var)",
+    )
+    mdns_p.add_argument(
+        "--haptcp",
+        action="store_true",
+        default=False,
+        help="Also browse _hap._tcp.local. (Wi-Fi HomeKit accessories). "
+             "Applies when scope is 'all' or 'hap'. Off by default.",
+    )
+    mdns_p.add_argument(
+        "--mattertcpsupported",
+        action="store_true",
+        default=False,
+        help="Include _matter._tcp records where T=1 (TCP supported). "
+             "By default those records are excluded.",
+    )
 
 
 def _add_web_commands(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
@@ -321,7 +342,13 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
                 return rc
 
         if args.scan_type == "mdns":
-            mdns_argv = [args.mdns_scope] + sub_argv
+            mdns_argv = (
+                [args.mdns_scope]
+                + (["--browse-timeout", str(args.browse_timeout)] if args.browse_timeout is not None else [])
+                + (["--haptcp"] if args.haptcp else [])
+                + (["--mattertcpsupported"] if args.mattertcpsupported else [])
+                + sub_argv
+            )
             return mdns_thread_scopes.main(mdns_argv) or 0
 
     # --- web ---

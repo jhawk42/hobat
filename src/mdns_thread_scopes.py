@@ -427,7 +427,7 @@ FIELD_METADATA = {
     "dd": "Discriminator ID",
     "sq": "Sequence Number",
     "at": "IEEE 802.15.4 Extended Address",
-    "id": "Border Agent ID / Device ID",
+    "id": "Device ID",
     "sb": "State Bitmap",
     "dt": "Device Type",
     "pt": "Partition Identifier",
@@ -763,11 +763,12 @@ def _enrich_properties(properties: dict) -> dict:
 
 
 class MDNSDumpListener(ServiceListener):
-    def __init__(self):
+    def __init__(self, include_matter_tcp_supported: bool = False):
         self._last_update = time.time()
         self.idle_done = threading.Event()
         self._lock = threading.Lock()
         self._records_by_key = {}
+        self._include_matter_tcp_supported = include_matter_tcp_supported
 
     def _touch(self):
         """Record the time of the most recent service event."""
@@ -887,6 +888,31 @@ class MDNSDumpListener(ServiceListener):
             "service_info": service_info,
         }
 
+    def _matter_tcp_is_excluded(self, type_: str, info) -> bool:
+        """Return True for _matter._tcp records that advertise TCP support (T=1).
+
+        By default, Matter operational records with T=1 (TCP supported) are
+        excluded from JSON output and console printing.  Records with T=0 or
+        no T key are included.
+
+        Pass --mattertcpsupported to include T=1 records.
+        """
+        if self._include_matter_tcp_supported:
+            return False  # opt-in: never exclude
+        if type_ != "_matter._tcp.local.":
+            return False
+        if info is None or not getattr(info, "properties", None):
+            return False
+        for raw_key, raw_val in info.properties.items():
+            key_str = raw_key.decode("utf-8", errors="replace") if isinstance(raw_key, bytes) else str(raw_key)
+            if key_str == "T":
+                try:
+                    val_str = raw_val.decode("utf-8") if isinstance(raw_val, bytes) else str(raw_val)
+                    return bool(int(val_str))  # T=1 → exclude
+                except (ValueError, TypeError):
+                    return False
+        return False  # T absent → include
+
     def _upsert_record(self, record):
         with self._lock:
             self._records_by_key[record["record_key"]] = record
@@ -907,16 +933,25 @@ class MDNSDumpListener(ServiceListener):
     def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         self._touch()
         info = zc.get_service_info(type_, name)
+        if self._matter_tcp_is_excluded(type_, info):
+            return
         self._upsert_record(self._record_from_info(type_, name, info, "update"))
 
     def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         self._touch()
+        # Only record remove events for records we actually stored.
+        record_key = f"{type_}|{name}"
+        with self._lock:
+            if record_key not in self._records_by_key:
+                return
         self._upsert_record(self._record_from_info(type_, name, None, "remove"))
         print(f"Service Removed: {name}")
 
     def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         self._touch()
         info = zc.get_service_info(type_, name)
+        if self._matter_tcp_is_excluded(type_, info):
+            return
         self._upsert_record(self._record_from_info(type_, name, info, "add"))
         if info:
             print(f"\n[ SCOPE: {type_} ]")
@@ -1322,9 +1357,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         epilog="""scope argument:
   (none)   browse all scopes (default)
   br       browse Thread Border Router scopes (_meshcop._udp, _trel._udp)
-  hap      browse Apple HomeKit HAP scopes (_hap._udp, _hap._tcp)
-  matter   browse Matter scopes (_matter._tcp, _matterc._udp)"""
+  hap      browse Apple HomeKit HAP scopes (_hap._udp)
+  matter   browse Matter scopes (_matter._tcp, _matterc._udp)
+
+options:
+  --haptcp   Also browse _hap._tcp.local. (Wi-Fi HomeKit accessories).
+             Applies when scope is 'all' or 'hap'. Off by default."""
     )
+
     parser.add_argument(
         "scope",
         nargs="?",
@@ -1339,13 +1379,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="SECONDS",
         help="Seconds of idle time before auto-exit (default: 30, or TD_MDNS_BROWSE_TIMEOUT env var)",
     )
+    parser.add_argument(
+        "--haptcp",
+        action="store_true",
+        default=False,
+        help="Also browse _hap._tcp.local. (Wi-Fi HomeKit accessories). "
+             "Applies when scope is 'all' or 'hap'. Off by default.",
+    )
+    parser.add_argument(
+        "--mattertcpsupported",
+        action="store_true",
+        default=False,
+        help="Include _matter._tcp records where T=1 (TCP supported). "
+             "By default those records are excluded.",
+    )
     args = parser.parse_args(argv)
 
     scopes_all = [
         "_meshcop._udp.local.",
         "_trel._udp.local.",
         "_hap._udp.local.",
-        "_hap._tcp.local.",
         "_matterc._udp.local.",
         "_matter._tcp.local."
     ]
@@ -1356,8 +1409,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ]
 
     scopes_apple_hap = [
-        "_hap._udp.local.",
-        "_hap._tcp.local."
+        "_hap._udp.local."
     ]
 
     scopes_matter = [
@@ -1375,13 +1427,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     selected_scopes, scope_label = scope_map[args.scope]
 
+    # Opt-in: append _hap._tcp.local. (Wi-Fi HomeKit) when --haptcp is set
+    if args.haptcp and args.scope in (None, "all", "hap"):
+        if "_hap._tcp.local." not in selected_scopes:
+            selected_scopes = selected_scopes + ["_hap._tcp.local."]
+
     logging.info(f"Browsing {scope_label} scopes ({len(selected_scopes)} service type(s))... (Press Ctrl+C to stop)")
 
-    _default_timeout = float(os.environ.get("TD_MDNS_BROWSE_TIMEOUT", "30"))
+    _default_timeout = float(os.environ.get("TD_MDNS_BROWSE_TIMEOUT", "10"))
     IDLE_TIMEOUT = args.browse_timeout if args.browse_timeout is not None else _default_timeout
 
     zeroconf = Zeroconf()
-    listener = MDNSDumpListener()
+    listener = MDNSDumpListener(include_matter_tcp_supported=args.mattertcpsupported)
 
     # Start browsers for each scope
     browsers = [ServiceBrowser(zeroconf, s, listener) for s in selected_scopes]
