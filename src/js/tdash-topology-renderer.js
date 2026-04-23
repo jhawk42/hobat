@@ -33,6 +33,7 @@ export function isAnimationEnabled() { return _animationEnabled; }
 export function renderTopologyForDataset(dataset, physicsEnabled) {
   const container = document.getElementById('topology-view');
   const statusEl = document.getElementById('status');
+  const deviceStatsEl = document.getElementById('device_stats');
   const detailsList = document.getElementById('details-list');
   const nodeFilterEl = document.getElementById('node-filter');
   const linkFilterEl = document.getElementById('link-filter');
@@ -53,6 +54,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     adaptorResult = runAdaptor(dataset);
   } catch (err) {
     statusEl.textContent = `Topology error: ${err.message}`;
+    deviceStatsEl.textContent = 'Devices: 0';
     return;
   }
 
@@ -158,6 +160,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     const diagFilterLabel = diagnosticFilterEl.options[diagnosticFilterEl.selectedIndex].text;
     const neighborSuffix = isRouterNeighborDiagnosticMode(diagnosticFilterEl.value)
       ? ` Neighbor Match: targets ${matchedTargetNodeCount}, links ${forcedVisibleLinkCount}.` : '';
+    deviceStatsEl.textContent = `Devices: ${nodeData.length}`;
     statusEl.textContent = `Loaded ${sourceNames.join(', ')}. Total: ${nodeData.length} nodes, ${edgeData.length} links. `
       + `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. `
       + `Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagFilterLabel}.${neighborSuffix}${formatTopologyScale()}`;

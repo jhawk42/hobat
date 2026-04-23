@@ -111,10 +111,29 @@ select.filter-disabled {
 
 /* ── Status line ──────────────────────────────────────────── */
 
+.status-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: nowrap;
+}
+
+#device_stats,
 #status {
   margin: 0 0 8px 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+#device_stats {
+  flex: 0 0 auto;
+  min-width: 90px;
+  font-weight: 600;
+}
+
+#status {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ── Topology view ────────────────────────────────────────── */

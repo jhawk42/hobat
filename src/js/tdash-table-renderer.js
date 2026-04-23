@@ -145,8 +145,10 @@ function renderTableRows(rows, columns) {
 function updateTableStatus(visibleRowCount, columnCount) {
   const nodeFilterEl = document.getElementById('node-filter');
   const diagFilterEl = document.getElementById('diagnostic-filter');
+  const deviceStatsEl = document.getElementById('device_stats');
   const nodeLabel = nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
   const diagLabel = diagFilterEl.options[diagFilterEl.selectedIndex].text;
+  deviceStatsEl.textContent = `Devices: ${_tableRows.length}`;
   document.getElementById('status').textContent =
     `Loaded ${_tableDatasetLabel}. Total: ${_tableRows.length} rows, ${_tableColumns.length} columns. `
     + `Showing: ${visibleRowCount} rows, ${columnCount} columns. Node Filter: ${nodeLabel}. Diagnostic Filter: ${diagLabel}. `

@@ -17,14 +17,20 @@
 
       <!-- View toggle -->
       <div class="view-toggle-bar">
-        <button id="btn-topology" class="active">Topology</button>
-        <button id="btn-table">Table</button>
-        <button id="btn-physics" class="active" title="Toggle vis.js physics simulation">Physics</button>
+        <button id="btn-load" title="load">Load</button>
+        <span class="view-toggle-spacer">.</span>
+        <button id="btn-topology" class="active" title="Topology view">Topology</button>
+        <button id="btn-table" title="Table view">Table</button>
+        <span class="view-toggle-spacer">.</span>
+        <button id="btn-physics" class="active" title="Toggle physics simulation">Physics</button>
         <button id="btn-auto-zoom" class="active" title="Auto-fit topology in view">Auto Zoom</button>
-        <button id="btn-animation" title="Toggle vis.js animation">Animation</button>
+        <button id="btn-animation" title="Toggle animation">Animation</button>
+        <button id="btn-legend" class="active" title="Toggle link quality legend">Legend</button>
+        <span class="view-toggle-spacer">.</span>
         <button id="btn-enhance" title="Enhance node labels using static extaddr→device_label map">Enhance</button>
         <button id="btn-more-info" title="Show all columns in table view">More Info</button>
-        <button id="btn-legend" class="active" title="Toggle link quality legend">Legend</button>
+        <span class="view-toggle-spacer">.</span>
+        <button id="btn-lab" title="lab">lab</button>
       </div>
 
       <!-- Controls bar -->
@@ -33,16 +39,17 @@
         <select id="dataset-select">
           <!-- populated by JS from DATASET_REGISTRY -->
         </select>
-
+      </div>
+      <div class="controls">
         <label for="node-filter">Nodes:</label>
         <select id="node-filter">
           <option value="all">All Nodes</option>
-          <option value="ftd-devices">Full Thread Devices (FTD)</option>
-          <option value="mtd-devices">Minimal Thread Devices (MTD)</option>
           <option value="border-routers">Border Routers (BR)</option>
           <option value="main-routers">Routers (R)</option>
           <option value="routers-with-children">Routers with Children Nodes</option>
           <option value="routers-without-children">Routers without Children Nodes</option>
+          <option value="ftd-devices">Full Thread Devices (FTD)</option>
+          <option value="mtd-devices">Minimal Thread Devices (MTD)</option>
         </select>
 
         <label for="link-filter">Links:</label>
@@ -64,9 +71,7 @@
             <option value="lq_otbr_neighbor">Router Neighbors</option>
           </optgroup>
         </select>        
-      </div>
 
-      <div class="controls">
         <label for="diagnostic-filter">Diagnostics:</label>
         <select id="diagnostic-filter">
           <option value="all">All Rows</option>
@@ -105,7 +110,10 @@
       </div>
 
       <!-- Status line -->
-      <div id="status">Select a dataset to load.</div>
+      <div class="status-bar">
+        <div id="device_stats">Devices: 0</div>
+        <div id="status">Select a dataset to load.</div>
+      </div>
 
       <!-- Topology view -->
       <div id="view-topology">
@@ -126,6 +134,7 @@
                 <span class="lq-legend-line lq-legend-line-low" aria-hidden="true"></span>
                 <span>Low (LQ1)</span>
               </span>
+              <span class="lq-legend-title">Link Type</span>
               <span class="lq-legend-item lq-parent-child">
                 <span class="lq-legend-line lq-legend-line-parent-child" aria-hidden="true"></span>
                 <span>Parent&#8211;Child</span>

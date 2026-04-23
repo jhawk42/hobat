@@ -103,11 +103,14 @@ export async function loadDataset(entryValue) {
   const entry = DATASET_REGISTRY.find((e) => e.value === entryValue);
   if (!entry) {
     document.getElementById('status').textContent = `Unknown dataset: ${entryValue}`;
+    document.getElementById('device_stats').textContent = 'Devices: 0';
     return;
   }
 
   const statusEl = document.getElementById('status');
+  const deviceStatsEl = document.getElementById('device_stats');
   statusEl.textContent = `Loading ${entry.label}…`;
+  deviceStatsEl.textContent = 'Devices: 0';
 
   // Apply default link-filter for this dataset
   const linkFilterEl = document.getElementById('link-filter');
@@ -134,6 +137,7 @@ export async function loadDataset(entryValue) {
 
   if (loadedFiles.length === 0) {
     statusEl.textContent = `Error: could not load any file for "${entry.label}". Failed: ${failedFiles.join(', ')}`;
+    deviceStatsEl.textContent = 'Devices: 0';
     return;
   }
 
