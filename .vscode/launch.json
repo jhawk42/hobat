@@ -10,6 +10,38 @@
             "request": "launch",
             "program": "${file}",
             "cwd": "${fileDirname}"
+        },
+        {
+            "name": "Python Debugger: Python File with args: --debug",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "args": ["--debug", "arg2"],
+            "cwd": "${fileDirname}" 
+        },
+        {
+            "name": "Python Debugger: Python File with args: --verbose",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "args": ["--verbose", "arg2"],
+            "cwd": "${fileDirname}" 
+        },
+        {
+            "name": "Python Debugger: Python File with args: --test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "args": ["--test", "arg2"],
+            "cwd": "${fileDirname}" 
+        },
+        {
+            "name": "Python Debugger: Python File with args: --help",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "args": ["--help", "arg2"],
+            "cwd": "${fileDirname}" 
         }
     ]
 }

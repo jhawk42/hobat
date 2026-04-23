@@ -306,25 +306,25 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
                 return 0
 
             if cli_cmd == "network-dataset-info":
-                return otbr_cli_network_dataset_info.main() or 0
+                return otbr_cli_network_dataset_info.main(sub_argv) or 0
 
             if cli_cmd == "router-table":
-                return otbr_cli_router_table.main() or 0
+                return otbr_cli_router_table.main(sub_argv) or 0
 
             if cli_cmd == "meshdiag":
                 meshdiag_cmd = args.meshdiag_command
                 if meshdiag_cmd == "topology":
-                    return otbr_cli_meshdiag_topology.main() or 0
+                    return otbr_cli_meshdiag_topology.main(sub_argv) or 0
                 if meshdiag_cmd == "routerneighbortable":
-                    return otbr_cli_meshdiag_routerneighbortable.main() or 0
+                    return otbr_cli_meshdiag_routerneighbortable.main(sub_argv) or 0
                 if meshdiag_cmd == "childtable":
-                    return otbr_cli_meshdiag_childtable.main() or 0
+                    return otbr_cli_meshdiag_childtable.main(sub_argv) or 0
                 if meshdiag_cmd == "childip6":
                     raise NotImplementedError("scan otbr-cli meshdiag childip6 is not yet implemented")
                 if meshdiag_cmd == "all":
-                    rc = otbr_cli_meshdiag_topology.main() or 0
-                    rc = rc or otbr_cli_meshdiag_routerneighbortable.main() or 0
-                    rc = rc or otbr_cli_meshdiag_childtable.main() or 0
+                    rc = otbr_cli_meshdiag_topology.main(sub_argv) or 0
+                    rc = rc or otbr_cli_meshdiag_routerneighbortable.main(sub_argv) or 0
+                    rc = rc or otbr_cli_meshdiag_childtable.main(sub_argv) or 0
                     return rc
 
             if cli_cmd == "networkdiag":
@@ -333,12 +333,12 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
                     return otbr_cli_networkdiag_topology.main(expand_children_argv) or 0
 
             if cli_cmd == "all":
-                rc = otbr_cli_network_dataset_info.main() or 0
-                rc = rc or otbr_cli_router_table.main() or 0
-                rc = rc or otbr_cli_meshdiag_topology.main() or 0
-                rc = rc or otbr_cli_meshdiag_routerneighbortable.main() or 0
-                rc = rc or otbr_cli_meshdiag_childtable.main() or 0
-                rc = rc or otbr_cli_networkdiag_topology.main([]) or 0
+                rc = otbr_cli_network_dataset_info.main(sub_argv) or 0
+                rc = rc or otbr_cli_router_table.main(sub_argv) or 0
+                rc = rc or otbr_cli_meshdiag_topology.main(sub_argv) or 0
+                rc = rc or otbr_cli_meshdiag_routerneighbortable.main(sub_argv) or 0
+                rc = rc or otbr_cli_meshdiag_childtable.main(sub_argv) or 0
+                rc = rc or otbr_cli_networkdiag_topology.main(sub_argv) or 0
                 return rc
 
         if args.scan_type == "mdns":
@@ -363,11 +363,11 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
                 return 0
 
             if restapi_cmd == "download":
-                return otbr_restapi_download.main(sub_argv)
+                return otbr_restapi_download.main(sub_argv) or 0
             if restapi_cmd == "client":
-                return otbr_restapi_client_cli.main(sub_argv)
+                return otbr_restapi_client_cli.main(sub_argv) or 0
             if restapi_cmd == "rawclient":
-                return otbr_restapi_raw_client_cli.main(sub_argv)
+                return otbr_restapi_raw_client_cli.main(sub_argv) or 0
 
     # --- process ---
     if args.command == "process":
