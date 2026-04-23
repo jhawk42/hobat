@@ -29,11 +29,11 @@ import otbr_restapi_client_cli
 import otbr_restapi_raw_client_cli
 
 import dataset_merge
-import tdash_web_server
+import web_server
 
 
 ## Command hierarchy:
-#   tdash.py {common-options} {command} {sub-command} {command-options} {command-arguments}
+#   td_cli.py {common-options} {command} {sub-command} {command-options} {command-arguments}
 #
 # Common options:
 #   --help / -h
@@ -49,50 +49,50 @@ import tdash_web_server
 #   web-server  – start the web dashboard server
 #
 # scan otbr-cli examples:
-#   tdash.py scan otbr-cli network-dataset-info
-#   tdash.py scan otbr-cli router-table
-#   tdash.py scan otbr-cli meshdiag topology
-#   tdash.py scan otbr-cli meshdiag routerneighbortable
-#   tdash.py scan otbr-cli meshdiag childtable
-#   tdash.py scan otbr-cli meshdiag childip6
-#   tdash.py scan otbr-cli meshdiag all
-#   tdash.py scan otbr-cli networkdiag topology
-#   tdash.py scan otbr-cli all
+#   td_cli.py scan otbr-cli network-dataset-info
+#   td_cli.py scan otbr-cli router-table
+#   td_cli.py scan otbr-cli meshdiag topology
+#   td_cli.py scan otbr-cli meshdiag routerneighbortable
+#   td_cli.py scan otbr-cli meshdiag childtable
+#   td_cli.py scan otbr-cli meshdiag childip6
+#   td_cli.py scan otbr-cli meshdiag all
+#   td_cli.py scan otbr-cli networkdiag topology
+#   td_cli.py scan otbr-cli all
 #
 # scan mdns examples:
-#   tdash.py scan mdns
-#   tdash.py scan mdns all
-#   tdash.py scan mdns br
-#   tdash.py scan mdns hap
-#   tdash.py scan mdns matter
-#   tdash.py scan mdns all --browse-timeout 60
+#   td_cli.py scan mdns
+#   td_cli.py scan mdns all
+#   td_cli.py scan mdns br
+#   td_cli.py scan mdns hap
+#   td_cli.py scan mdns matter
+#   td_cli.py scan mdns all --browse-timeout 60
 #
 # web otbr-restapi examples:
-#   tdash.py web otbr-restapi download --url http://localhost:8080/api/v1/diagnostics --output td-otbr-restapi-diagnostics.json
-#   tdash.py web otbr-restapi client diagnostics list
-#   tdash.py web otbr-restapi client diagnostics get --diagnostics-id 123456789
-#   tdash.py web otbr-restapi client actions list
-#   tdash.py web otbr-restapi client actions get --action-id 123456789
-#   tdash.py web otbr-restapi client actions enqueue add-thread-device --pskd 12345678 --eui 123456789 --discerner 123
-#   tdash.py web otbr-restapi client actions enqueue get-network-diagnostic --destination 123456789 --types 1,2,3 --timeout 60 --destination-type extaddr
-#   tdash.py web otbr-restapi client actions enqueue reset-network-diag-counter --destination 123456789 --types 1,2,3 --timeout 60 --destination-type extaddr
-#   tdash.py web otbr-restapi client actions enqueue get-energy-scan --destination 123456789 --channel-mask 0x1FFF800 --count 5 --period
-#   tdash.py web otbr-restapi rawclient diagnostics list
-#   tdash.py web otbr-restapi rawclient diagnostics get --diagnostics-id 123456789
-#   tdash.py web otbr-restapi rawclient actions list
-#   tdash.py web otbr-restapi rawclient actions get --action-id 123456789
-#   tdash.py web otbr-restapi rawclient actions enqueue add-thread-device --pskd 12345678 --eui 123456789 --discerner 123
-#   tdash.py web otbr-restapi rawclient actions enqueue get-network-diagnostic --destination 123456789 --types 1,2,3 --timeout 60 --destination-type
+#   td_cli.py web otbr-restapi download --url http://localhost:8080/api/v1/diagnostics --output td-otbr-restapi-diagnostics.json
+#   td_cli.py web otbr-restapi client diagnostics list
+#   td_cli.py web otbr-restapi client diagnostics get --diagnostics-id 123456789
+#   td_cli.py web otbr-restapi client actions list
+#   td_cli.py web otbr-restapi client actions get --action-id 123456789
+#   td_cli.py web otbr-restapi client actions enqueue add-thread-device --pskd 12345678 --eui 123456789 --discerner 123
+#   td_cli.py web otbr-restapi client actions enqueue get-network-diagnostic --destination 123456789 --types 1,2,3 --timeout 60 --destination-type extaddr
+#   td_cli.py web otbr-restapi client actions enqueue reset-network-diag-counter --destination 123456789 --types 1,2,3 --timeout 60 --destination-type extaddr
+#   td_cli.py web otbr-restapi client actions enqueue get-energy-scan --destination 123456789 --channel-mask 0x1FFF800 --count 5 --period
+#   td_cli.py web otbr-restapi rawclient diagnostics list
+#   td_cli.py web otbr-restapi rawclient diagnostics get --diagnostics-id 123456789
+#   td_cli.py web otbr-restapi rawclient actions list
+#   td_cli.py web otbr-restapi rawclient actions get --action-id 123456789
+#   td_cli.py web otbr-restapi rawclient actions enqueue add-thread-device --pskd 12345678 --eui 123456789 --discerner 123
+#   td_cli.py web otbr-restapi rawclient actions enqueue get-network-diagnostic --destination 123456789 --types 1,2,3 --timeout 60 --destination-type
 #
 # process examples:
-#   tdash.py process eve --input eve_data.json --output td-eve-topology.json
-#   tdash.py process eve --input 'Eve Thread Network Layout.evethreadlayout' --output td-eve-topology.json
+#   td_cli.py process eve --input eve_data.json --output td-eve-topology.json
+#   td_cli.py process eve --input 'Eve Thread Network Layout.evethreadlayout' --output td-eve-topology.json
 #
 # merge examples:
-#   tdash.py merge dataset --input1 dataset1.json --input2 dataset2.json --output merged_dataset.json
+#   td_cli.py merge dataset --input1 dataset1.json --input2 dataset2.json --output merged_dataset.json
 #
 # web-server examples:
-#   tdash.py web-server --host localhost --port 8087
+#   td_cli.py web-server --host localhost --port 8087
 
 
 def _add_scan_commands(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
@@ -230,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
     merge_sub = merge_p.add_subparsers(dest="merge_type", required=False)
     _add_merge_commands(merge_sub)
 
-    # web-server — remaining args forwarded to tdash_web_server.main()
+    # web-server — remaining args forwarded to web_server.main()
     ws_p = subparsers.add_parser("web-server", help="Start the web dashboard server")
     ws_p.add_argument("--host", default="localhost", help="Host to bind to (default: localhost)")
     ws_p.add_argument("--port", type=int, default=8087, help="Port to listen on (default: 8087)")
@@ -239,24 +239,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.epilog = """\
 Commands usage:
   scan
-    usage: tdash scan [-h] {otbr-cli,mdns} ...
+    usage: td_cli scan [-h] {otbr-cli,mdns} ...
     scan otbr-cli       Scan otbr-cli commands
     scan mdns           Scan Thread-related mDNS scopes
 
   web
-    usage: tdash web [-h] {otbr-restapi} ...
+    usage: td_cli web [-h] {otbr-restapi} ...
     web otbr-restapi    otbr-restapi sub commands
 
   process
-    usage: tdash process [-h] {eve} ...
+    usage: td_cli process [-h] {eve} ...
     process eve         Parse and enhance an Eve Thread layout file
 
   merge
-    usage: tdash merge [-h] {dataset,data} ...
+    usage: td_cli merge [-h] {dataset,data} ...
     dataset             Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file
 
   web-server
-    usage: tdash web-server [-h] [--host HOST] [--port PORT]
+    usage: td_cli web-server [-h] [--host HOST] [--port PORT]
     options:
         --host HOST  Host to bind to (default: localhost)
         --port PORT  Port to listen on (default: 8087)
@@ -389,7 +389,7 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
 
     # --- web-server ---
     if args.command == "web-server":
-        return tdash_web_server.main(["--host", args.host, "--port", str(args.port)])
+        return web_server.main(["--host", args.host, "--port", str(args.port)])
 
     raise ValueError(f"Unhandled command: {args.command}")
 

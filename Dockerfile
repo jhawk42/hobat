@@ -27,8 +27,8 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY . .
 
-# Set the working directory to where tdash.py is located  
+# Set the working directory to where td_cli.py is located  
 WORKDIR /app/src
 
 # Command to run the script
-CMD ["python3", "tdash.py", "web-server", "--host", "0.0.0.0"]
+CMD ["python3", "td_cli.py", "web-server", "--host", "0.0.0.0"]

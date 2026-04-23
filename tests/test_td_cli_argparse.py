@@ -1,4 +1,4 @@
-"""Tests for tdash.py build_parser(), dispatch(), and main() (Phase 8).
+"""Tests for td_cli.py build_parser(), dispatch(), and main() (Phase 8).
 
 Run with:
     PYTHONPATH=/workspaces/tdash/src python -m pytest tests/test_tdash_argparse.py -v
@@ -12,7 +12,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import call, patch
 
 
-import tdash as tdash_module
+import td_cli as tdash_module
 
 
 # ---------------------------------------------------------------------------
