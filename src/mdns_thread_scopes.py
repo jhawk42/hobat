@@ -11,6 +11,9 @@ from typing import Sequence
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 
+TD_MDNS_BROWSE_TIMEOUT_ENV_NAME = "TD_MDNS_BROWSE_TIMEOUT"
+TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE = 5  # seconds (default if env var not set)" 
+
 # Vendor OUI Lookup Table
 VENDORS = {
     "0017f2": "Apple",
@@ -1355,7 +1358,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Browse Thread-related mDNS scopes",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""scope argument:
-  (none)   browse all scopes (default)
+  (none)   browse all thread scopes (default)
+  thread   browse Thread-related scopes (_meshcop._udp, _trel._udp, _hap._udp, _matterc._udp, _matter._tcp)
   br       browse Thread Border Router scopes (_meshcop._udp, _trel._udp)
   hap      browse Apple HomeKit HAP scopes (_hap._udp)
   matter   browse Matter scopes (_matter._tcp, _matterc._udp)
@@ -1368,23 +1372,23 @@ options:
     parser.add_argument(
         "scope",
         nargs="?",
-        choices=["all", "br", "hap", "matter"],
-        default="all",
-        help="Scope filter: all | br | hap | matter  (default: all scopes)",
+        choices=["thread", "br", "hap", "matter"],
+        default="thread",
+        help="Scope filter: thread | br | hap | matter  (default: thread scopes)",
     )
     parser.add_argument(
         "--browse-timeout",
         type=float,
         default=None,
         metavar="SECONDS",
-        help="Seconds of idle time before auto-exit (default: 30, or TD_MDNS_BROWSE_TIMEOUT env var)",
+        help=f"Seconds of idle time before auto-exit (default: {TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE}, or {TD_MDNS_BROWSE_TIMEOUT_ENV_NAME} env var)",
     )
     parser.add_argument(
         "--haptcp",
         action="store_true",
         default=False,
         help="Also browse _hap._tcp.local. (Wi-Fi HomeKit accessories). "
-             "Applies when scope is 'all' or 'hap'. Off by default.",
+             "Applies when scope is 'thread' or 'hap'. Off by default.",
     )
     parser.add_argument(
         "--mattertcpsupported",
@@ -1418,8 +1422,8 @@ options:
     ]
 
     scope_map = {
-        None:     (scopes_all,       "all"),
-        "all":    (scopes_all,       "all"),
+        None:     (scopes_all,       "thread"),
+        "thread": (scopes_all,       "Thread"),
         "br":     (scopes_br,        "Thread Border Router"),
         "hap":    (scopes_apple_hap, "Apple HomeKit HAP"),
         "matter": (scopes_matter,    "Matter"),
@@ -1428,13 +1432,13 @@ options:
     selected_scopes, scope_label = scope_map[args.scope]
 
     # Opt-in: append _hap._tcp.local. (Wi-Fi HomeKit) when --haptcp is set
-    if args.haptcp and args.scope in (None, "all", "hap"):
+    if args.haptcp and args.scope in (None, "thread", "hap"):
         if "_hap._tcp.local." not in selected_scopes:
             selected_scopes = selected_scopes + ["_hap._tcp.local."]
 
     logging.info(f"Browsing {scope_label} scopes ({len(selected_scopes)} service type(s))... (Press Ctrl+C to stop)")
 
-    _default_timeout = float(os.environ.get("TD_MDNS_BROWSE_TIMEOUT", "10"))
+    _default_timeout = float(os.environ.get(TD_MDNS_BROWSE_TIMEOUT_ENV_NAME, str(TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE)))
     IDLE_TIMEOUT = args.browse_timeout if args.browse_timeout is not None else _default_timeout
 
     zeroconf = Zeroconf()
@@ -1462,7 +1466,7 @@ options:
 
         records = listener.get_records()
         if args.scope is None:
-            scope_tag = "all"
+            scope_tag = "thread"
         else:
             scope_tag = args.scope.lower()
             

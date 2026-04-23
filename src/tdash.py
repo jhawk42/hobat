@@ -129,10 +129,10 @@ def _add_scan_commands(subparsers: argparse._SubParsersAction) -> None:  # type:
     mdns_p.add_argument(
         "mdns_scope",
         nargs="?",
-        choices=["all", "br", "hap", "matter"],
-        default="all",
+        choices=["thread", "br", "hap", "matter"],
+        default="thread",
         metavar="SCOPE",
-        help="Scope filter: all | br | hap | matter  (default: all)",
+        help="Scope filter: thread | br | hap | matter  (default: thread)",
     )
     mdns_p.add_argument(
         "--browse-timeout",
