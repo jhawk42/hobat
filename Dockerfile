@@ -1,5 +1,5 @@
 # Use an official Python runtime based on Debian Slim for a small image size
-FROM python:3.11-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -29,6 +29,10 @@ COPY . .
 
 # Set the working directory to where td_cli.py is located  
 WORKDIR /app/src
+
+# Set environment variable for the port and expose it
+ENV PORT=8087
+EXPOSE ${PORT}
 
 # Command to run the script
 CMD ["python3", "td_cli.py", "web-server", "--host", "0.0.0.0"]
