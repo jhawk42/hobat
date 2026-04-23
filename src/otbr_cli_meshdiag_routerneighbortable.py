@@ -140,13 +140,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
+        logging.info(f"Loading extended address to device label mapping from {extaddr_json_filename}...")
         extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
     else:
         extaddr_map = {}
 
-    logging.info(f"Loading extended address to device label mapping from {extaddr_json_filename}...")
-    extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
-        
     router_neighbor_tables = get_meshdiag_routerneighbortables(extaddr_map)
     
     with open('td-otbr-cli-meshdiag-router-neighbortables.json', 'w') as f:
