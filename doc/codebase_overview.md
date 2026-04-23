@@ -35,8 +35,8 @@ tdash/
 │   ├── codebase_overview.md    # This file
 │   └── otbr_restapi_clients.md # OTBR REST API client reference
 ├── src/                        # All source code
-│   ├── tdash.py                # Unified CLI dispatcher (top-level entry point)
-│   ├── tdash_web_server.py     # HTTP web server module
+│   ├── td_cli.py               # Unified CLI dispatcher (top-level entry point)
+│   ├── web_server.py           # HTTP web server module
 │   ├── tdash.html              # Combined single-page browser dashboard
 │   ├── tdash.css               # Dashboard stylesheet
 │   ├── js/                     # Dashboard JavaScript modules
@@ -58,7 +58,7 @@ tdash/
 │   ├── dataset_merge.py        # Dataset merge engine
 │   ├── extaddr_device_label_map.py  # Static extaddr→label loader
 │   ├── util_*.py               # Shared utility modules
-│   └── td_web*.py              # HTTP server prototypes (scratch)
+│   ├── td_bash_thread_*.sh     # Shell collection helpers / scratch scripts
 ├── tests/                      # Test suite and local mock server
 │   ├── test_*.py               # Unit tests
 │   └── td_mock_otbr_restapi_server.py
@@ -105,6 +105,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 | `otbr_cli_router_table.py` | `router table` | `td-otbr-cli-router-table.json` | Parses the pipe-delimited router table into a list of router dicts with fields: ID, RLOC16, Next Hop, Path Cost, LQ In/Out, Age, Extended MAC, and Link. Adds `extaddr` and `device_label` from the static label map. |
 | `otbr_cli_meshdiag_topology.py` | `meshdiag topology ip6-addrs children` | `td-otbr-cli-meshdiag-topology.json` | Parses per-router blocks containing: RLOC16, extaddr, Thread version, BR flag, link-quality buckets (1/2/3-links with peer IDs), IPv6 address list, and children (RLOC16 + link quality + mode).  Also computes `total_children`, `total_links`, and `omrIpv6Address`. |
 | `otbr_cli_meshdiag_childtable.py` | `meshdiag childtable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childtables.json` | For every router in the router table, collects per-child details: RLOC16, extaddr, Thread version, timeout, age, supervision interval, queued messages, rx-on flag, device type, full-net flag, RSS (avg/last/margin), frame/message error rates, connection time, and CSL parameters.  Handles `ResponseTimeout` gracefully. |
+| `otbr_cli_meshdiag_childip6.py` | `meshdiag childip6 <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childip6.json` | For every router in the router table, collects child IPv6 address lists grouped by child RLOC16 and records per-child IP address counts.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_meshdiag_routerneighbortable.py` | `meshdiag routerneighbortable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-neighbortables.json` | For every router in the router table, collects per-neighbour details: RLOC16, extaddr, Thread version, RSS (avg/last/margin), frame/message error rates, and connection time.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (once per router) | `td-otbr-cli-networkdiag-topology.json` | For every router, issues a network-diagnostic TLV request and parses: IPv6 address list, Mode TLV (RxOnWhenIdle / DeviceType / NetworkData → FTD/MTD classification), child table (IDs, timeouts, link quality, mode flags), MAC counters (error/discard totals and percentages relative to total packets), MLE counters (role changes, partition ID changes, parent changes, attach attempts), and time-in-role statistics. |
 | `otbr_cli_network_dataset_info.py` | `dataset active`, `prefix meshlocal`, `br omrprefix favored` | `td-otbr-cli-network-dataset-info.json` | Collects the active Thread dataset (channel, PAN ID, extended PAN ID, mesh-local prefix, network name, etc.) and derives the mesh-local IPv6 RLOC prefix and the OMR prefix for use by other collectors. |
@@ -142,7 +143,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 |---|---|
 | `tdash.html` | Combined single-page dashboard — replaces the former separate topology and tables HTML files.  See [Dashboard Functions](#dashboard-functions) below. |
 | `tdash.css` | Stylesheet for the browser dashboard.  Defines CSS variables for colours, typography, and layout of all dashboard components. |
-| `tdash_web_server.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree with explicit MIME-type overrides.  Has `build_parser()` and `main(argv)` so it can be invoked standalone or via `tdash.py web-server`. |
+| `web_server.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree with explicit MIME-type overrides.  Has `main(argv)` so it can be invoked standalone or via `td_cli.py web-server`. |
 
 ### Dashboard JavaScript Modules (`js/`)
 
@@ -164,17 +165,14 @@ This codebase uses a strict naming split so the data source is visible from the 
 
 | File | Purpose |
 |---|---|
-| `tdash.py` | Top-level CLI entry point.  Builds a hierarchical `argparse` tree and dispatches to the appropriate module `main()`.  Supported top-level commands: `scan` (otbr-cli sub-tree and mdns), `web` (otbr-restapi download/client/rawclient), `process` (eve), `merge` (dataset), and `web-server`.  Unknown trailing arguments are forwarded via `parse_known_args` to subordinate modules. |
+| `td_cli.py` | Top-level CLI entry point.  Builds the flattened `argparse` tree and dispatches to the appropriate module `main()`.  Supported top-level commands: `otbr-cli`, `mdns`, `otbr-restapi`, `process-eve`, `merge-dataset`, and `web-server`.  Unknown trailing arguments are forwarded via `parse_known_args` to subordinate modules. |
 
 ### Scratch / Prototype Files
 
 | File | Purpose |
 |---|---|
-| `td_web1.py` | Hello-world `HTTPServer` prototype. |
-| `td_web2.py` | `socketserver.TCPServer` + `SimpleHTTPRequestHandler` prototype. |
-| `td_web3.py` | Custom `GET` handler prototype. |
-| `td_web4.py` | POST body-size-limited handler prototype. |
-| `TODO_otbr_cli_meshdiag_childip6_add_parsing.py` | Placeholder stub for future `meshdiag childip6` parser (not yet implemented; referenced as `NotImplementedError` in `tdash.py`). |
+| `td_bash_thread_collect.sh` | Shell helper that runs a sequence of `td_cli.py` collection and merge commands with pauses between steps. |
+| `td_bash_thread_scratch.sh` | Scratchpad shell script for ad hoc OTBR, mDNS, Wi-Fi, and raw `ot-ctl` exploration commands. |
 
 ---
 
@@ -282,7 +280,8 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 | `tests/test_otbr_restapi_client.py` | Unit tests for the flattened client: JSON:API flattening, HTTP error parsing, usage validation, CLI output and exit codes. |
 | `tests/test_otbr_restapi_raw_client.py` | Unit tests for the raw client: raw envelope pass-through, error handling. |
 | `tests/test_td_merge_identity.py` | Unit tests for `build_merged_records()` in `dataset_merge.py`: verifies that `extaddr`, `extAddress`, and `Extended MAC` aliases all resolve to the same canonical record under `by-identity` merge. |
-| `tests/test_tdash_argparse.py` | Unit tests for `tdash.py`: covers `build_parser()`, `dispatch()`, and `main()` — argument parsing, subcommand routing, and exit codes. |
+| `tests/test_td_cli_argparse.py` | Unit tests for `td_cli.py`: covers `build_parser()`, `dispatch()`, and `main()` — argument parsing, subcommand routing, and exit codes. |
+| `tests/test_tdash_web_routing.py` | Tests for dashboard/web route handling. |
 | `tests/test_util_convert_base64_extaddr_to_hexnumber.py` | Script exercising `b64_to_extended_address()` for a single Base64 extended-address string. |
 | `tests/test_util_convert_base64_extaddr_list_to_hexnumber_list.py` | Script exercising `b64_to_extended_address()` across a list of Base64 extended-address strings. |
 | `tests/test_util_convert_hexnumber_extaddr_to_base64.py` | Script exercising `convert_hexnumber_extaddr_to_base64()` for a single hex extended-address string. |
@@ -318,10 +317,10 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 
 ### Step-by-step
 
-1. **Collect**: Run individual `otbr_restapi_*`, `otbr_cli_*`, and `mdns_*` scripts directly, or via `tdash.py scan` / `tdash.py web`.  Each saves data as a local JSON file (e.g. `td-otbr-restapi-devices.json`, `td-otbr-cli-router-table.json`, `td-eve-topology.json`).
+1. **Collect**: Run individual `otbr_restapi_*`, `otbr_cli_*`, and `mdns_*` scripts directly, or via `td_cli.py`.  Each saves data as a local JSON file (e.g. `td-otbr-restapi-devices.json`, `td-otbr-cli-router-table.json`, `td-eve-topology.json`).
 2. **Normalize**: Each collector normalises its data — RLOC16 values are hex strings (`0x5000`), extended addresses are lowercase hex (`1a7fbf0434e4f043`), field aliases are canonicalised (`extAddress` → `extaddr`).
-3. **Merge**: `dataset_merge.py` (or `tdash.py merge dataset`) reads the JSON files and merges records using the configured strategy.  Non-empty values are never silently overwritten; conflicts are recorded.  The output JSON (`td-merged-topology-all.json`) retains a `_source_files` list per row.
-4. **Visualise**: Open `src/tdash.html` in a browser, select a dataset from the dropdown, and explore the interactive topology graph or table.  Alternatively, serve the `src/` directory with `tdash.py web-server` and open `http://localhost:8087/tdash.html`.
+3. **Merge**: `dataset_merge.py` (or `td_cli.py merge-dataset`) reads the JSON files and merges records using the configured strategy.  Non-empty values are never silently overwritten; conflicts are recorded.  The output JSON (`td-merged-topology-all.json`) retains a `_source_files` list per row.
+4. **Visualise**: Open `src/tdash.html` in a browser, select a dataset from the dropdown, and explore the interactive topology graph or table.  Alternatively, serve the `src/` directory with `td_cli.py web-server` and open `http://localhost:8087/tdash.html`.
 
 ---
 
@@ -346,7 +345,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 - A running OTBR Docker container named `otbr` (or set `TD_OTBR_CONTAINER_NAME`)
 - For mDNS discovery: `pip install zeroconf`
 
-### Collect and merge data — via unified CLI (`tdash.py`)
+### Collect and merge data — via unified CLI (`td_cli.py`)
 
 Run all commands from the `src/` directory (or add `src/` to `PYTHONPATH`).
 
@@ -354,29 +353,30 @@ Run all commands from the `src/` directory (or add `src/` to `PYTHONPATH`).
 cd src
 
 # Download REST API snapshots
-python tdash.py web otbr-restapi download
+python td_cli.py otbr-restapi download
 
 # Collect network dataset info (provides OMR / mesh-local prefixes used by other collectors)
-python tdash.py scan otbr-cli network-dataset-info
+python td_cli.py otbr-cli network-dataset-info
 
 # Collect all CLI topology data in one shot
-python tdash.py scan otbr-cli all
+python td_cli.py otbr-cli all
 
 # Or collect individual CLI sources
-python tdash.py scan otbr-cli router-table
-python tdash.py scan otbr-cli meshdiag topology
-python tdash.py scan otbr-cli meshdiag childtable
-python tdash.py scan otbr-cli meshdiag routerneighbortable
-python tdash.py scan otbr-cli networkdiag topology
+python td_cli.py otbr-cli router-table
+python td_cli.py otbr-cli meshdiag topology
+python td_cli.py otbr-cli meshdiag childtable
+python td_cli.py otbr-cli meshdiag childip6
+python td_cli.py otbr-cli meshdiag routerneighbortable
+python td_cli.py otbr-cli networkdiag topology
 
 # Scan mDNS (optional)
-python tdash.py scan mdns all
+python td_cli.py mdns thread
 
 # Process an Eve layout file (optional)
-python tdash.py process eve
+python td_cli.py process-eve
 
 # Merge everything
-python tdash.py merge dataset
+python td_cli.py merge-dataset
 ```
 
 ### Collect and merge data — via individual modules
@@ -400,12 +400,12 @@ python src/dataset_merge.py
 
 ### Use the REST API clients directly
 ```bash
-# Flattened client CLI (via tdash.py)
-python src/tdash.py web otbr-restapi client node get
-python src/tdash.py web otbr-restapi client devices list --with-meta
+# Flattened client CLI (via td_cli.py)
+python src/td_cli.py otbr-restapi client node get
+python src/td_cli.py otbr-restapi client devices list --with-meta
 
-# Raw client CLI (via tdash.py)
-python src/tdash.py web otbr-restapi rawclient node get
+# Raw client CLI (via td_cli.py)
+python src/td_cli.py otbr-restapi rawclient node get
 
 # Or invoke the modules directly
 python src/otbr_restapi_client_cli.py node get
@@ -415,13 +415,13 @@ python src/otbr_restapi_raw_client_cli.py node get
 ### Start the web server
 ```bash
 # Via unified CLI (serves src/ on http://localhost:8087)
-python src/tdash.py web-server
+python src/td_cli.py web-server
 
 # Custom host/port
-python src/tdash.py web-server --host 0.0.0.0 --port 8090
+python src/td_cli.py web-server --host 0.0.0.0 --port 8090
 
 # Or run the module directly
-python src/tdash_web_server.py --port 8087
+python src/web_server.py --port 8087
 ```
 
 ### Open the dashboard
@@ -435,7 +435,8 @@ python -m pytest tests/
 # Specific test modules
 python -m unittest tests/test_otbr_restapi_download.py tests/test_otbr_restapi_client.py tests/test_otbr_restapi_raw_client.py
 python -m unittest tests/test_td_merge_identity.py
-python -m unittest tests/test_tdash_argparse.py
+python -m unittest tests/test_td_cli_argparse.py
+python -m unittest tests/test_tdash_web_routing.py
 ```
 
 ### Mock server (no live OTBR needed)
@@ -443,8 +444,8 @@ python -m unittest tests/test_tdash_argparse.py
 python tests/td_mock_otbr_restapi_server.py --host 127.0.0.1 --port 18081
 # then override client defaults:
 python src/otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 node get
-# or via tdash.py:
-python src/tdash.py web otbr-restapi client --host 127.0.0.1 --port 18081 node get
+# or via td_cli.py:
+python src/td_cli.py otbr-restapi client --host 127.0.0.1 --port 18081 node get
 ```
 
 ---
