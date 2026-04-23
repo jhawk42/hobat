@@ -1,12 +1,14 @@
 import json
 import logging
 
-def extaddr_device_label_mapping_load(path):
+from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+
+def extaddr_device_label_mapping_load(path=EXTADDR_DEVICE_LABEL_MAP_FILENAME):
     """
-    Parses extended address to node name mapping from td-static-extaddr-device-label.json.
+    Parses extended address to node name mapping from the configured label map file.
     
     Args:
-        path: Path to td-static-extaddr-device-label.json file
+        path: Path to the extaddr->device_label mapping JSON file
     
     Returns:
         Dictionary mapping extaddr (lowercase) to device_label

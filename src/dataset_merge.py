@@ -12,6 +12,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Sequence
 
+from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+
 
 PRIORITY_FIELDS = [
     "rloc16",
@@ -677,7 +679,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--extaddr-map-file",
-        default="td-static-extaddr-device-label.json",
+        default=EXTADDR_DEVICE_LABEL_MAP_FILENAME,
         help="Reference file used only for extaddr to device_label lookup.",
     )
     return parser.parse_args(argv)

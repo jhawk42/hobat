@@ -5,6 +5,7 @@ import json
 import logging
 from typing import Sequence
 
+from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 import util_ot_ctl
 import util_network
 from extaddr_device_label_map import extaddr_device_label_mapping_load
@@ -230,7 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
     # Load extaddr to nodename mapping from JSON file
-    extaddr_json_filename = "td-static-extaddr-device-label.json"
+    extaddr_json_filename = EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):

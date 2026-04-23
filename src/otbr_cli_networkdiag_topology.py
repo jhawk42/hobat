@@ -9,6 +9,7 @@ import logging
 
 from copy import deepcopy
 from typing import Sequence
+from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 import util_ot_ctl
 import util_network
 from otbr_cli_router_table import get_router_table_data
@@ -763,7 +764,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Load extaddr to nodename mapping from JSON file
-    extaddr_json_filename = "td-static-extaddr-device-label.json"
+    extaddr_json_filename = EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):

@@ -4,6 +4,7 @@ import re
 import logging
 from typing import Sequence
 
+from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from otbr_cli_router_table import get_router_table_data
 from extaddr_device_label_map import extaddr_device_label_mapping_load
 from util_ot_ctl import run_ot_ctl_stdio
@@ -165,7 +166,7 @@ def get_meshdiag_childtables(extaddr_map):
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
-    extaddr_json_filename = "td-static-extaddr-device-label.json"
+    extaddr_json_filename = EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
     if os.path.exists(extaddr_json_filename):
         logging.info(f"Loading extended address to device label mapping from {extaddr_json_filename}...")
