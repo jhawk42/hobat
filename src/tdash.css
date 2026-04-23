@@ -207,6 +207,20 @@ div.vis-network div.vis-navigation div.vis-button.vis-down        { bottom: auto
 
 .lq-legend-title       { font-weight: bold; }
 .lq-legend-item        { display: flex; align-items: center; gap: 4px; }
+.lq-legend-line {
+  display: inline-block;
+  width: 30px;
+  flex: 0 0 30px;
+  border-top-style: solid;
+  border-top-color: currentColor;
+  border-top-width: 4px;
+  line-height: 0;
+}
+.lq-legend-line-high         { border-top-width: var(--lq-style-width-high, 8px); }
+.lq-legend-line-medium       { border-top-width: var(--lq-style-width-medium, 6px); }
+.lq-legend-line-low          { border-top-width: var(--lq-style-width-low, 4px); border-top-style: dashed; }
+.lq-legend-line-parent-child { border-top-width: var(--lq-style-width-parent-child, 8px); }
+.lq-legend-line-otbr         { border-top-width: var(--lq-style-width-otbr, 4px); }
 .lq-high               { color: #0072B2; font-weight: bold; }
 .lq-medium             { color: #56B4E9; }
 .lq-low                { color: #c62828; }

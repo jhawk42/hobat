@@ -39,27 +39,29 @@
           <option value="all">All Nodes</option>
           <option value="ftd-devices">Full Thread Devices (FTD)</option>
           <option value="mtd-devices">Minimal Thread Devices (MTD)</option>
-          <option value="border-routers">Border Routers</option>
-          <option value="main-routers">Routers</option>
+          <option value="border-routers">Border Routers (BR)</option>
+          <option value="main-routers">Routers (R)</option>
           <option value="routers-with-children">Routers with Children Nodes</option>
           <option value="routers-without-children">Routers without Children Nodes</option>
         </select>
 
         <label for="link-filter">Links:</label>
         <select id="link-filter">
-          <option value="all_links">All Links (large)</option>
+          <option value="all_links">All Links</option>
           <option value="default_links">Standard: routers, children, 321_links</option>
           <option value="default_plus_router_neighbors">Standard: +neighbors</option>
           <option value="otbr_rest_api">OTBR restapi: route routeData, childTable</option>
-          <option value="eve_enhanced_routes_children">Eve Enhanced: routes, children</option>
           <option value="eve_native_routes_children">Eve Native: routes, children</option>
-          <optgroup label="── Link Quality ──">
-            <option value="lq_high">High Quality Links (LQ3)</option>
-            <option value="lq_medium">Medium Quality Links (LQ2)</option>
-            <option value="lq_low">Low Quality Links (LQ1)</option>
-            <option value="lq_parent_child">Parent–Child Only</option>
+          <option value="eve_enhanced_routes_children">Eve Enhanced: routes, children</option>
+          <optgroup label="─ Link Quality ─">
+            <option value="lq_high">High (LQ3)</option>
+            <option value="lq_medium">Medium (LQ2)</option>
+            <option value="lq_low">Low (LQ1)</option>
+            <option value="lq_none">No LQ Data / Unknown</option>
+          </optgroup>
+          <optgroup label="─ Link Types ─">
+            <option value="lq_parent_child">Parent–Child</option>
             <option value="lq_otbr_neighbor">Router Neighbors</option>
-            <option value="lq_none">Unknown / No LQ Data</option>
           </optgroup>
         </select>        
       </div>
@@ -68,23 +70,37 @@
         <label for="diagnostic-filter">Diagnostics:</label>
         <select id="diagnostic-filter">
           <option value="all">All Rows</option>
-          <option value="medium-total-errors-pct">Mac - Total Error Packets % (&gt;= 5%) - Medium</option>
-          <option value="medium-total-errors-high">Mac - Total Error Packets (&gt;= 10%) - High</option>
-          <option value="medium-discard-pct">Mac - Total Discard Packets % (&gt;= 15%) - High</option>
-          <option value="medium-partition-changes">Mle - Partition Changes (&gt;= 2) - Medium</option>
-          <option value="high-partition-changes">Mle - Partition Changes (&gt;= 5) - High</option>
-          <option value="medium-parent-changes">Mle - Parent Changes (&gt;= 2) - Medium</option>
-          <option value="high-parent-changes">Mle - Parent Changes (&gt;= 5) - High</option>
-          <option value="router-neighbor-err-rate-frame-low">Router Neighbor - Err Rate Frame &gt;= 2% - Low</option>
-          <option value="router-neighbor-err-rate-frame-medium">Router Neighbor - Err Rate Frame &gt;= 5% - Medium</option>
-          <option value="router-neighbor-err-rate-frame-high">Router Neighbor - Err Rate Frame &gt;= 10% - High</option>
-          <option value="router-neighbor-err-rate-msg-low">Router Neighbor - Err Rate Msg &gt;= 2% - Low</option>
-          <option value="router-neighbor-err-rate-msg-medium">Router Neighbor - Err Rate Msg &gt;= 5% - Medium</option>
-          <option value="router-neighbor-err-rate-msg-high">Router Neighbor - Err Rate Msg &gt;= 10% - High</option>
-          <option value="router-neighbor-rss-very-low">Router Neighbor - RSS Ave Bad (&lt; -80 dBm)</option>
-          <option value="router-neighbor-rss-low">Router Neighbor - RSS Ave Fair (-70 dBm To -80 dBm)</option>
-          <option value="router-neighbor-rss-medium">Router Neighbor - RSS Ave Good (-60 dBm To -70 dBm)</option>
-          <option value="router-neighbor-rss-high">Router Neighbor - RSS Ave Excellent (&gt; -60 dBm)</option>
+          <optgroup label="─ Mac Total Error Packets ─">
+            <option value="medium-total-errors-pct">Medium % (&gt;= 5%)</option>
+            <option value="medium-total-errors-high">High (&gt;= 10%)</option>
+          </optgroup>
+          <optgroup label="─ Mac Discard Packets ─">
+            <option value="medium-discard-pct">Medium % (&gt;= 15%)</option>
+          </optgroup>
+          <optgroup label="─ Mle Partition Changes ─">
+          <option value="medium-partition-changes">Medium (&gt;= 2)</option>
+          <option value="high-partition-changes">High (&gt;= 5)</option>
+          </optgroup>
+          <optgroup label="─ MLE Parent Changes ─">
+          <option value="medium-parent-changes">Medium (&gt;= 2)</option>
+          <option value="high-parent-changes">High (&gt;= 5)</option>
+          </optgroup>
+          <optgroup label="─ Router Neighbor Err Rate Frame ─">
+          <option value="router-neighbor-err-rate-frame-low">Low (&gt;= 2%)</option>
+          <option value="router-neighbor-err-rate-frame-medium">Medium (&gt;= 5%)</option>
+          <option value="router-neighbor-err-rate-frame-high">High (&gt;= 10%)</option>
+          </optgroup>
+          <optgroup label="─ Router Neighbor Err Rate Msg ─">
+          <option value="router-neighbor-err-rate-msg-low">Low (&gt;= 2%)</option>
+          <option value="router-neighbor-err-rate-msg-medium">Medium (&gt;= 5%)</option>
+          <option value="router-neighbor-err-rate-msg-high">High (&gt;= 10%)</option>
+          </optgroup>
+          <optgroup label="─ Router Neighbor RSS Ave ─">
+          <option value="router-neighbor-rss-very-low">Bad (&lt; -80 dBm)</option>
+          <option value="router-neighbor-rss-low">Fair (-70 dBm To -80 dBm)</option>
+          <option value="router-neighbor-rss-medium">Good (-60 dBm To -70 dBm)</option>
+          <option value="router-neighbor-rss-high">Excellent (&gt; -60 dBm)</option>
+          </optgroup>
         </select>        
       </div>
 
@@ -98,11 +114,26 @@
             <div id="topology-view"></div>
             <div id="lq-legend" class="lq-legend">
               <span class="lq-legend-title">Link Quality</span>
-              <span class="lq-legend-item lq-high">&#9644;&#9644;&#9644; High (LQ3)</span>
-              <span class="lq-legend-item lq-medium">&#9644;&#9644; Medium (LQ2)</span>
-              <span class="lq-legend-item lq-low">- - Low (LQ1)</span>
-              <span class="lq-legend-item lq-parent-child">&#9644; Parent&#8211;Child</span>
-              <span class="lq-legend-item lq-otbr">&#9644; Router-Neighbor</span>
+              <span class="lq-legend-item lq-high">
+                <span class="lq-legend-line lq-legend-line-high" aria-hidden="true"></span>
+                <span>High (LQ3)</span>
+              </span>
+              <span class="lq-legend-item lq-medium">
+                <span class="lq-legend-line lq-legend-line-medium" aria-hidden="true"></span>
+                <span>Medium (LQ2)</span>
+              </span>
+              <span class="lq-legend-item lq-low">
+                <span class="lq-legend-line lq-legend-line-low" aria-hidden="true"></span>
+                <span>Low (LQ1)</span>
+              </span>
+              <span class="lq-legend-item lq-parent-child">
+                <span class="lq-legend-line lq-legend-line-parent-child" aria-hidden="true"></span>
+                <span>Parent&#8211;Child</span>
+              </span>
+              <span class="lq-legend-item lq-otbr">
+                <span class="lq-legend-line lq-legend-line-otbr" aria-hidden="true"></span>
+                <span>Router-Neighbor</span>
+              </span>
             </div>
           </div>
           <div id="details" class="node-details-panel">

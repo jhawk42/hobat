@@ -21,7 +21,7 @@ export const DATASET_REGISTRY = [
   // ── Multi-file merged (otbr-cli) ──
   {
     value: 'merged_otbr_cli_all',
-    label: 'otbr-cli: [meshdiag, networkdiag, neighbortables, childtables]',
+    label: 'otbr-cli: [meshdiag, networkdiag, tables (neighbors, children)]',
     files: [
       'td-otbr-cli-meshdiag-topology.json',
       'td-otbr-cli-networkdiag-topology.json',
@@ -36,7 +36,7 @@ export const DATASET_REGISTRY = [
   // ── Multi-file topology datasets (otbr-restapi) ────────────
   {
     value: 'restapi_devices_diagnostics',
-    label: 'otbr-restapi: [devices, diagnostics]',
+    label: 'lab: otbr-restapi: [devices, diagnostics]',
     files: [
       'td-otbr-restapi-devices.json',
       'td-otbr-restapi-diagnostics.json'
@@ -46,10 +46,10 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: 'otbr_rest_api'
   },  
 
-  // ── Deep merged (all nodes) ─
+  // ── Merged (all nodes) ─
   {
     value: 'merged_all_deep_wide_otbr_cli_restapi_eve',
-    label: 'merged: 1 file: [otbr-cli, otbr-restapi, eve]',
+    label: 'lab: merged: all 1 file: [otbr-cli, otbr-restapi, eve]',
     files: [
       'td-merged-topology-all.json'
     ],
@@ -64,7 +64,7 @@ export const DATASET_REGISTRY = [
     value: 'example_small_eve_native_threadlayout',
     label: 'eve native: example: eve layout',
     files: [
-      'example-small-Eve Thread Network Layout.evethreadlayout'
+      'example-small-Eve Thread Network Layout'
     ],
     mergeStrategy: 'none',
     topologyMode: 'eve_native',
@@ -73,7 +73,7 @@ export const DATASET_REGISTRY = [
   // ── Single-file simple dataset ───
   {
     value: 'eve_native_threadlayout',
-    label: 'eve native: Eve Thread Network Layout.evethreadlayout',
+    label: 'eve native: Eve Thread Network Layout',
     files: [
       'Eve Thread Network Layout.evethreadlayout'
     ],
@@ -96,7 +96,7 @@ export const DATASET_REGISTRY = [
   // ── Multi-file topology datasets (otbr-cli, otbr-restapi) ────────────
   {
     value: 'merged_otbr_cli_otbr_restapi',
-    label: 'merged: [otbr-cli, otbr-restapi]',
+    label: 'lab: merged: [otbr-cli, otbr-restapi]',
     files: [
       'td-otbr-cli-meshdiag-topology.json',
       'td-otbr-cli-networkdiag-topology.json',
@@ -113,7 +113,7 @@ export const DATASET_REGISTRY = [
   // ── Multi-file merge (otbr-cli, eve) ──
   {
     value: 'merged_otbr_cli_meshdiag_networkdiag_neighbortables_eve',
-    label: 'merged: [otbr-cli, eve]',
+    label: 'lab: merged: [otbr-cli, eve]',
     files: [
       'td-otbr-cli-meshdiag-topology.json',
       'td-otbr-cli-networkdiag-topology.json',
@@ -128,7 +128,7 @@ export const DATASET_REGISTRY = [
   // ── Multi-file merge [otbr-cli, otbr-restapi, eve] ──
   {
     value: 'merged_otbr_cli_meshdiag_networkdiag_neighbortables_restapi_eve',
-    label: 'merged: [otbr-cli, otbr-restapi, eve]',
+    label: 'lab: merged: [otbr-cli, otbr-restapi, eve]',
     files: [
       'td-otbr-cli-meshdiag-topology.json',
       'td-otbr-cli-networkdiag-topology.json',

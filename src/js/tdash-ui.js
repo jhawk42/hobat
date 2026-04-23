@@ -7,6 +7,7 @@ import {
   isAutoZoomEnabled, isAnimationEnabled
 } from './tdash-topology-renderer.js';
 import { renderTableForDataset, applyTableFilters, setMoreInfoEnabled, isMoreInfoEnabled } from './tdash-table-renderer.js';
+import { EDGE_LQ_STYLES } from './tdash-constants.js';
 
 // ── Section 2: Build dataset <select> ────────────────────────────────────────
 
@@ -25,6 +26,15 @@ function populateDatasetSelect() {
 let currentView = 'topology';
 let _physicsEnabled = true;
 let _enhanceEnabled = true;
+
+function applyLegendLineStylesFromConstants() {
+  const root = document.documentElement;
+  root.style.setProperty('--lq-style-width-high', `${EDGE_LQ_STYLES.high.width}px`);
+  root.style.setProperty('--lq-style-width-medium', `${EDGE_LQ_STYLES.medium.width}px`);
+  root.style.setProperty('--lq-style-width-low', `${EDGE_LQ_STYLES.low.width}px`);
+  root.style.setProperty('--lq-style-width-parent-child', `${EDGE_LQ_STYLES.parentChild.width}px`);
+  root.style.setProperty('--lq-style-width-otbr', `${EDGE_LQ_STYLES.noLqPurple.width}px`);
+}
 
 function renderCurrentView() {
   if (!currentDataset) return;
@@ -248,6 +258,7 @@ document.getElementById('diagnostic-filter').addEventListener('change', () => {
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 populateDatasetSelect();
+applyLegendLineStylesFromConstants();
 await loadStaticLabelMap();
 await loadDataset(document.getElementById('dataset-select').value);
 renderCurrentView();

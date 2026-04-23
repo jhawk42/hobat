@@ -47,8 +47,8 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     const existingIpv6 = existing && Array.isArray(existing.ipv6_addrs) ? existing.ipv6_addrs : [];
     const mergedIpv6 = rawIpv6.length > 0 ? rawIpv6 : existingIpv6;
     const rawChildren = Array.isArray(rawNode.children) ? rawNode.children : [];
-    const rawPacketErrorDiscardPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotalpktserrorsdiscards_pct)
-      ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct : undefined;
+    const rawPacketErrorDiscardPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.ifindiscards_pct)
+      ? rawNode.mac_counters.ifindiscards_pct : undefined;
     const rawInerrorsPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.ifinerrors_pct)
       ? rawNode.mac_counters.ifinerrors_pct : undefined;
     const rawOuterrorsPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.ifouterrors_pct)
@@ -72,8 +72,8 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
       total_children: Number.isFinite(rawNode.total_children)
         ? rawNode.total_children : (rawChildren.length || (existing ? existing.total_children : 0)),
       total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
-      iftotalpktserrorsdiscards_pct: Number.isFinite(rawPacketErrorDiscardPct) ? rawPacketErrorDiscardPct
-        : (existing && Number.isFinite(existing.iftotalpktserrorsdiscards_pct) ? existing.iftotalpktserrorsdiscards_pct : undefined),
+      ifindiscards_pct: Number.isFinite(rawPacketErrorDiscardPct) ? rawPacketErrorDiscardPct
+        : (existing && Number.isFinite(existing.ifindiscards_pct) ? existing.ifindiscards_pct : undefined),
       ifinerrors_pct: Number.isFinite(rawInerrorsPct) ? rawInerrorsPct
         : (existing && Number.isFinite(existing.ifinerrors_pct) ? existing.ifinerrors_pct : undefined),
       ifouterrors_pct: Number.isFinite(rawOuterrorsPct) ? rawOuterrorsPct
@@ -246,8 +246,8 @@ export function adaptEve(rawFiles) {
       thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
       total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
       total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
-      iftotalpktserrorsdiscards_pct: Number.isFinite(rawNode.mac_counters?.iftotalpktserrorsdiscards_pct)
-        ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct : (existing?.iftotalpktserrorsdiscards_pct),
+      ifindiscards_pct: Number.isFinite(rawNode.mac_counters?.ifindiscards_pct)
+        ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifindiscards_pct),
       iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
         ? rawNode.mac_counters.iftotalerrors_pct : (existing?.iftotalerrors_pct),
       mode_device: toText(rawNode.mode?.device)
@@ -459,8 +459,8 @@ export function adaptMergedDetailed(rawFiles) {
       thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
       total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
       total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
-      iftotalpktserrorsdiscards_pct: Number.isFinite(rawNode.mac_counters?.iftotalpktserrorsdiscards_pct)
-        ? rawNode.mac_counters.iftotalpktserrorsdiscards_pct : (existing?.iftotalpktserrorsdiscards_pct),
+      ifindiscards_pct: Number.isFinite(rawNode.mac_counters?.ifindiscards_pct)
+        ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifindiscards_pct),
       iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
         ? rawNode.mac_counters.iftotalerrors_pct : (existing?.iftotalerrors_pct),
       mode_device: toText(rawNode['mode.device']) || toText(rawNode.mode?.device) || (existing ? existing.mode_device : ''),
@@ -653,7 +653,7 @@ export function adaptRawArray(rawFiles) {
       extaddr: getCanonicalExtaddr(row),
       type: toText(row.type),
       mode_device: toText(row.mode?.device) || (row.type === 'router' ? 'FTD' : (isChildLike ? 'MTD' : '')),
-      iftotalpktserrorsdiscards_pct: row.mac_counters?.iftotalpktserrorsdiscards_pct,
+      ifindiscards_pct: row.mac_counters?.ifindiscards_pct,
       iftotalerrors_pct: row.mac_counters?.iftotalerrors_pct,
       partitionidchanges: row.mle_counters?.partitionidchanges,
       parentchanges: row.mle_counters?.parentchanges,

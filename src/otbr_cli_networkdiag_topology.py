@@ -276,11 +276,15 @@ def parse_mac_counters(output):
     
     ## Enhance MAC counters with totals
     if counters:
+        # Calculate total packets by summing unicast and broadcast packets for both in and out directions. 
+        # This provides a more comprehensive view of the overall traffic volume at the MAC layer, which can 
+        # help contextualize the error and discard counts. For example, a high number of errors may be more 
+        # concerning if the total packet count is low, while it may be less significant if the total packet 
+        # count is very high. By having the total packet count, we can better assess the health and performance 
+        # of the network and identify potential issues that may need to be addressed.
         counters["iftotalpkts"] = counters.get("ifinucastpkts", 0) + counters.get("ifinbroadcastpkts", 0) + counters.get("ifoutucastpkts", 0) + counters.get("ifoutbroadcastpkts", 0)
-        counters["iftotalerrors"] = counters.get("ifinerrors", 0) + counters.get("ifouterrors", 0)
-        counters["iftotaldiscards"] = counters.get("ifindiscards", 0) + counters.get("ifoutdiscards", 0)
-     
-        # errors are from malformed packets, interference, or weak signal strength causing corruption during 
+        
+        # Errors are from malformed packets, interference, or weak signal strength causing corruption during 
         # transmission, while discards typically indicate congestion or buffer overflows where packets are 
         # dropped due to lack of resources to process them. By calculating the total packets, errors, and 
         # discards, we can get a clearer picture of the overall health and performance of the network at 
@@ -288,7 +292,7 @@ def parse_mac_counters(output):
         # or interference, while high discard counts may point to congestion or insufficient buffering 
         # capacity in the network.
         #
-        # discards can also occur when a device is overwhelmed with more traffic than it can handle, which 
+        # Discards can also occur when a device is overwhelmed with more traffic than it can handle, which 
         # may be the case in a dense network or if a device has limited resources. By looking at the total 
         # packets in relation to errors and discards, we can better understand whether high error/discard 
         # counts are significant issues that need to be addressed or if they are just a small fraction of 
@@ -297,21 +301,31 @@ def parse_mac_counters(output):
         # Calculate percentages for each errors, discards counter relative to totalerrors and totaldiscards. To help identify if high error/discard counts are significant or just a small fraction. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of errors or discards, which may indicate more severe issues with signal quality, interference, or congestion that need to be addressed to improve network performance and reliability.
 
         # Help determine if high error counts are significant 
-        # format the percentages to 1 decimal place when printing
-        totalerrors = counters.get("iftotalerrors", 0)
+        # Format the percentages to 1 decimal place when printing
+        ifinerrors = counters.get("ifinerrors", 0)
+        ifouterrors = counters.get("ifouterrors", 0)
+        totalerrors = ifinerrors + ifouterrors
+        counters["iftotalerrors"] = totalerrors
+        
+        # calc errors pct relative to total errors to help determine if high error counts are significant or just a small fraction of overall traffic. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of errors, which may indicate more severe issues with signal quality or interference that need to be addressed to improve network performance and reliability.
         if totalerrors > 0:
-            counters["ifinerrors_pct"] = round((counters.get("ifinerrors", 0) / round((counters.get("iftotalerrors", 0)) * 100, 1)) if counters.get("iftotalerrors", 0) > 0 else 0)
-            counters["ifouterrors_pct"] = round((counters.get("ifouterrors", 0) / round((counters.get("iftotalerrors", 0)) * 100, 1)) if counters.get("iftotalerrors", 0) > 0 else 0)
+            counters["ifinerrors_pct"] = round((ifinerrors / totalerrors) * 100, 1)
+            counters["ifouterrors_pct"] = round((ifouterrors / totalerrors) * 100, 1)
         else:
             counters["ifinerrors_pct"] = 0
             counters["ifouterrors_pct"] = 0
 
         # Help determine if high discard counts are significant 
-        # format the percentages to 1 decimal place when printing
-        totaldiscards = counters.get("iftotaldiscards", 0)
+        # Format the percentages to 1 decimal place when printing
+        ifindiscards = counters.get("ifindiscards", 0)
+        ifoutdiscards = counters.get("ifoutdiscards", 0)
+        totaldiscards = ifindiscards + ifoutdiscards
+        counters["iftotaldiscards"] = totaldiscards
+     
+        # calc discards pct relative to total discards to help determine if high discard counts are significant or just a small fraction of overall traffic. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of discards, which may indicate more severe issues with congestion or insufficient buffering capacity that need to be addressed to improve network performance and reliability.
         if totaldiscards > 0:
-            counters["ifindiscards_pct"] = round((counters.get("ifindiscards", 0) / round((counters.get("iftotaldiscards", 0)) * 100, 1)) if counters.get("iftotaldiscards", 0) > 0 else 0)
-            counters["ifoutdiscards_pct"] = round((counters.get("ifoutdiscards", 0) / round((counters.get("iftotaldiscards", 0)) * 100, 1)) if counters.get("iftotaldiscards", 0) > 0 else 0)
+            counters["ifindiscards_pct"] = round((ifindiscards / totaldiscards) * 100, 1)
+            counters["ifoutdiscards_pct"] = round((ifoutdiscards / totaldiscards) * 100, 1)
         else:
             counters["ifindiscards_pct"] = 0
             counters["ifoutdiscards_pct"] = 0

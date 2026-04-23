@@ -233,7 +233,7 @@ export function buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborB
       widthConstraint,
       group: unknown ? 'unknown' : 'known',
       isRouter, hasChildren, isMainRouter, isBorderRouter, borderWidth,
-      iftotalpktserrorsdiscards_pct: node.iftotalpktserrorsdiscards_pct,
+      ifindiscards_pct: node.ifindiscards_pct,
       ifinerrors_pct: node.ifinerrors_pct,
       ifouterrors_pct: node.ifouterrors_pct,
       mode_device: node.mode_device,

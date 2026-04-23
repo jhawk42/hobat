@@ -91,7 +91,7 @@ export function computeTopologyCapabilities(nodeData, edgeData) {
     if (node.isRouter === true && node.hasChildren === true) hasRoutersWithChildren = true;
     if (node.isRouter === true && node.hasChildren !== true) hasRoutersWithoutChildren = true;
     if (Number.isFinite(node.ifinerrors_pct) || Number.isFinite(node.ifouterrors_pct)) hasFieldMacTotalErrorsPct = true;
-    if (Number.isFinite(node.iftotalpktserrorsdiscards_pct)) hasFieldMacDiscardPct = true;
+    if (Number.isFinite(node.ifindiscards_pct)) hasFieldMacDiscardPct = true;
     if (Number.isFinite(node.partitionidchanges)) hasFieldPartitionChanges = true;
     if (Number.isFinite(node.parentchanges)) hasFieldParentChanges = true;
     if (Number.isFinite(node.router_neighbor_max_err_rate_frame_pct)) hasNeighborFrameErrRate = true;
@@ -165,7 +165,7 @@ export function computeTableCapabilities(rows) {
     const macOuterrors = getColumnValue(row, 'mac_counters.ifouterrors_pct');
     if (Number.isFinite(toFiniteNumber(macInerrors)) || Number.isFinite(toFiniteNumber(macOuterrors))) hasFieldMacTotalErrorsPct = true;
 
-    const macDiscard = getColumnValue(row, 'mac_counters.iftotalpktserrorsdiscards_pct');
+    const macDiscard = getColumnValue(row, 'mac_counters.ifindiscards_pct');
     if (Number.isFinite(toFiniteNumber(macDiscard))) hasFieldMacDiscardPct = true;
 
     const partChanges = getColumnValue(row, 'mle_counters.partitionidchanges');
@@ -302,7 +302,7 @@ export function isNodeVisibleByFilter(node, filterMode) {
 }
 
 export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
-  if (filterMode === 'medium-discard-pct') return Number.isFinite(node.iftotalpktserrorsdiscards_pct) && node.iftotalpktserrorsdiscards_pct >= 15;
+  if (filterMode === 'medium-discard-pct') return Number.isFinite(node.ifindiscards_pct) && node.ifindiscards_pct >= 15;
   if (filterMode === 'medium-total-errors-pct') return (Number.isFinite(node.ifinerrors_pct) && node.ifinerrors_pct >= 5) || (Number.isFinite(node.ifouterrors_pct) && node.ifouterrors_pct >= 5);
   if (filterMode === 'medium-total-errors-high') return (Number.isFinite(node.ifinerrors_pct) && node.ifinerrors_pct > 10) || (Number.isFinite(node.ifouterrors_pct) && node.ifouterrors_pct > 10);
   if (filterMode === 'medium-partition-changes') return Number.isFinite(node.partitionidchanges) && node.partitionidchanges >= 2;
