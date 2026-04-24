@@ -6,10 +6,13 @@ import os
 import sys
 import time
 import logging
+from pathlib import Path
 
 from typing import Iterable, Sequence, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from util_data import data_file_arg_or_default, resolve_td_data_dir
+from const import TD_DATA_DIR_ARG_HELP
 
 HOST = "127.0.0.1"
 PORT = 8081
@@ -25,6 +28,8 @@ DOWNLOAD_TARGETS: Iterable[Tuple[str, str]] = [
     ("/api/diagnostics", "td-otbr-restapi-diagnostics.json"),
 ]
 
+_ACTIVE_TD_DATA_DIR: Path | None = None
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -32,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--host", default=HOST, help="OTBR REST API host")
     parser.add_argument("--port", type=int, default=PORT, help="OTBR REST API port")
+    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     parser.add_argument("--base-url", help="Override host/port with a full base URL")
     parser.add_argument("--timeout", type=int, default=TIMEOUT, help="HTTP timeout in seconds")
     parser.add_argument(
@@ -125,7 +131,11 @@ def restapi_downloads(base_url: str = BASE_URL, headers: dict[str, str] | None =
 
     for endpoint, output_file in DOWNLOAD_TARGETS:
         url = f"{base_url}{endpoint}"
-        ok = download_json(url, request_headers, output_file, timeout=timeout)
+        resolved_output_file = output_file
+        if _ACTIVE_TD_DATA_DIR is not None:
+            resolved_output_file = str(data_file_arg_or_default(output_file, _ACTIVE_TD_DATA_DIR))
+
+        ok = download_json(url, request_headers, resolved_output_file, timeout=timeout)
         if not ok:
             failures += 1
 
@@ -143,13 +153,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    global _ACTIVE_TD_DATA_DIR
+    previous_td_data_dir = _ACTIVE_TD_DATA_DIR
+    _ACTIVE_TD_DATA_DIR = resolve_td_data_dir(datadir_arg=args.datadir)
+
     try:
         base_url = build_base_url(args.host, args.port, args.base_url)
         headers = build_headers(args.accept, args.header)
     except ValueError as exc:
         parser.error(str(exc))
 
-    return restapi_downloads(base_url=base_url, headers=headers, timeout=args.timeout)
+    try:
+        return restapi_downloads(base_url=base_url, headers=headers, timeout=args.timeout)
+    finally:
+        _ACTIVE_TD_DATA_DIR = previous_td_data_dir
 
 if __name__ == "__main__":
     sys.exit(main())

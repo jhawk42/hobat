@@ -9,11 +9,12 @@ import logging
 
 from copy import deepcopy
 from typing import Sequence
-from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
 import util_ot_ctl
 import util_network
 from otbr_cli_router_table import get_router_table_data
 from extaddr_device_label_map import extaddr_device_label_mapping_load
+from util_data import data_file_path, resolve_td_data_dir
 
 def get_ipv6_addresses():
     """
@@ -756,15 +757,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     ## multicast networkdiagnostic get ff03::1
 
     parser = argparse.ArgumentParser(description="Thread Network Diagnostic Topology")
+    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     children_group = parser.add_mutually_exclusive_group()
     children_group.add_argument("-c", "--children", dest="expand_children", action="store_true", default=True,
                                 help="Expand and include child nodes in the topology map (default)")
     children_group.add_argument("-cno", "--children-no", dest="expand_children", action="store_false",
                                 help="Do not expand child nodes in the topology map")
     args = parser.parse_args(argv)
+    td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)
 
     # Load extaddr to nodename mapping from JSON file
-    extaddr_json_filename = EXTADDR_DEVICE_LABEL_MAP_FILENAME
+    extaddr_json_filename = data_file_path(EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir)
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
@@ -781,7 +784,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print_networkdiagnostic_topology(networkdiagnostic_topology_data)
 
     # save the topology as JSON to file
-    save_json_filename = "td-otbr-cli-networkdiag-topology.json"
+    save_json_filename = data_file_path("td-otbr-cli-networkdiag-topology.json", td_data_dir)
     save_networkdiagnostic_topology_to_json_list(networkdiagnostic_topology_data, save_json_filename)
     
     # Print the raw topology dictionary as JSON to console for debugging

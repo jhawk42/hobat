@@ -9,6 +9,7 @@ from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 import util_ot_ctl
 import util_network
 from extaddr_device_label_map import extaddr_device_label_mapping_load
+from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
 
 def get_meshdiag_topology_ip6addrs_children():
     """Retrieves the meshdiag topology IP6 addresses and children data from the network.
@@ -229,9 +230,10 @@ def meshdiag_topology_ip6addrs_children_data_get(extaddr_map=None, network_datas
 def main(argv: Sequence[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
 
     # Load extaddr to nodename mapping from JSON file
-    extaddr_json_filename = EXTADDR_DEVICE_LABEL_MAP_FILENAME
+    extaddr_json_filename = data_file_path(EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir)
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
@@ -242,7 +244,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     network_dataset_info = util_network.get_network_dataset_info()
 
     meshdiag_topology_data = meshdiag_topology_ip6addrs_children_data_get(extaddr_map, network_dataset_info)
-    save_path = "td-otbr-cli-meshdiag-topology.json"
+    save_path = data_file_path("td-otbr-cli-meshdiag-topology.json", td_data_dir)
     with open(save_path, mode='w', encoding='utf-8') as f:
         json.dump(meshdiag_topology_data, f, indent=4)
 

@@ -10,6 +10,8 @@ import logging
 from typing import Sequence
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
+from util_data import data_file_arg_or_default, resolve_td_data_dir
+from const import TD_DATA_DIR_ARG_HELP
 
 TD_MDNS_BROWSE_TIMEOUT_ENV_NAME = "TD_MDNS_BROWSE_TIMEOUT"
 TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE = 5  # seconds (default if env var not set)" 
@@ -1376,6 +1378,7 @@ options:
         default="thread",
         help="Scope filter: thread | br | hap | matter  (default: thread scopes)",
     )
+    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     parser.add_argument(
         "--browse-timeout",
         type=float,
@@ -1398,6 +1401,7 @@ options:
              "By default those records are excluded.",
     )
     args = parser.parse_args(argv)
+    td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)
 
     scopes_all = [
         "_meshcop._udp.local.",
@@ -1470,7 +1474,7 @@ options:
         else:
             scope_tag = args.scope.lower()
             
-        output_file = f"td-mdns-scopes-{scope_tag}.json"
+        output_file = data_file_arg_or_default(f"td-mdns-scopes-{scope_tag}.json", td_data_dir)
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=2)
 

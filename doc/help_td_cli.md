@@ -2,21 +2,31 @@ usage: td_cli [-h] [--verbose] [--debug] [--output FILE]
               {otbr-cli,mdns,otbr-restapi,process-eve,merge-dataset,web-server}
               ...
 
+Thread Network Topology Dashboard CLI
+
 Options:
   -h, --help                    show this help message and exit
   --verbose, -v                 Enable verbose (INFO) logging
   --debug, -d                   Enable debug logging
   --output FILE, -o FILE        Write command output to FILE
+  --datadir DIR                 Data directory for JSON reads/writes when
+                                TD_DATA_DIR is not set. If omitted and
+                                TD_DATA_DIR is unset: use /data when present;
+                                otherwise create/use ./data under the current
+                                run directory.
 
 These are the common commands:
   {otbr-cli,mdns,otbr-restapi,process-eve,merge-dataset,web-server}
     otbr-cli                    Scan otbr-cli commands
     mdns                        Scan Thread-related mDNS scopes
-    otbr-restapi                otbr-restapi sub commands
+    otbr-restapi                Query otbr-restapi sub commands
     process-eve                 Parse and enhance an Eve Thread layout file
     merge-dataset               Merge Thread (otbr-cli, otbr-restapi, eve,
                                 mdns) sources into one cache file
     web-server                  Start the web dashboard server
+
+Data directory behavior:
+    Data directory resolution precedence: 1) TD_DATA_DIR environment variable, 2) --datadir CLI argument, 3) defaults (/data when present, otherwise ./data under the current run directory).
 
 Commands usage:
     otbr-cli

@@ -5,6 +5,7 @@ from typing import Sequence
 
 import util_network
 from util_convert import b64_to_extended_address
+from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
 
 def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=None):
     """
@@ -148,6 +149,7 @@ def eve_enhance_routes(eve_network_enhanced_data):
 
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
 
     ## Main execution:
 
@@ -155,14 +157,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     network_dataset_info = util_network.get_network_dataset_info()
 
     # Parse the Eve JSON file to build an enhanced data structure keyed by rloc16_hex with all node fields preserved and extAddress in hex format for easier mapping and reference. 
-    eve_json_file_path = "thread-eve-layout.json"
+    eve_json_file_path = data_file_path("thread-eve-layout.json", td_data_dir)
     eve_data_parse_1 = eve_native_file_parse_and_enhance_id_mappings(eve_json_file_path, network_dataset_info)
 
     ## Enhance the eve_data json data structure to add route destination node names for reference
     eve_data_enhanced = eve_enhance_routes(eve_data_parse_1)  
     
     ## Save json data structures for reference
-    save_json_filename = "td-eve-topology.json"
+    save_json_filename = data_file_path("td-eve-topology.json", td_data_dir)
     with open(save_json_filename, 'w', encoding='utf-8') as f:
         json.dump(eve_data_enhanced, f, indent=4)
 

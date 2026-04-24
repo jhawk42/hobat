@@ -1,102 +1,76 @@
 # Thread Mesh Network Dashboard
 
-Thread Mesh Network Dashboard (tdash) is a Python toolkit and browser-based dashboard for visualizing and monitoring [Thread](https://github.com/openthread/openthread) mesh networks.  It collects network data from several sources (OTBR, mDNS, Eve), normalizes and merges that data, and renders it as an interactive topology graph and table in HTML dashboard page.
+Thread Mesh Network Dashboard (tdash) is a Python toolkit and browser dashboard for visualizing and monitoring [Thread](https://github.com/openthread/openthread) mesh networks. It collects topology data from OTBR CLI, OTBR REST API, mDNS, and Eve exports, then merges these datasets for dashboard visualization.
 
 ## Dataset Sources
-The tool collects data from various dataset sources including:
-- otbr-cli: OpenThread OTBR cli. Executes ot-ctl command line tool against an OTBR instance to scan for information on thread devices. 
-- otbr-restapi: OpenThread OTBR restapi. Web calls to OTBR instance restapi to collect information on thread devices.
-- mDNS: Multicast DNS allows devices on a local network to discover each other and services
-- Eve Systems iOS app: The native Eve JSON file has useful information for Apple Home thread mesh networks. This tool enhances the native Eve app JSON file with RLOC16 in hex format, etc
+- otbr-cli: OpenThread CLI scans (router table, meshdiag, networkdiag)
+- otbr-restapi: OpenThread Border Router REST API snapshots
+- mdns: Thread-related mDNS browsing and capture
+- Eve export: Eve Thread layout enhancement and conversion
+
+## Data Directory Model
+
+All JSON file reads/writes use one effective data directory (`td_data_directory`) resolved in this order:
+
+1. `TD_DATA_DIR` environment variable
+2. `--datadir DIR` command line argument
+3. Defaults
+   - If `/data` exists, use `/data`
+   - Otherwise create and use `./data` under the current run directory
+
+Important behavior:
+- `TD_DATA_DIR` takes precedence over `--datadir`.
+- User-supplied `TD_DATA_DIR`/`--datadir` paths are resolved to absolute paths.
+- Local default `./data` is auto-created when selected.
 
 ## Getting Started
 
-Pipeline steps:
+Use the top-level CLI entry point:
 
-{scan|web} -> {process|merge} -> web-server -> dashboard
-
-```
-python3 tdash.py --help
+```bash
+PYTHONPATH=src python3 -m td_cli --help
 ```
 
-Command line options for scan otbr-cli for thread node information
-```
-python3 tdash.py scan otbr-cli --help
+Common command families:
 
-python3 tdash.py scan otbr-cli router-table
-python3 tdash.py scan otbr-cli meshdiag topology
-python3 tdash.py scan otbr-cli networkdiag topology
-python3 tdash.py scan otbr-cli all
-```
-Command line options for web otbr-restapi
-```
-python3 tdash.py web otbr-restapi --help
+```bash
+# OTBR CLI scans
+PYTHONPATH=src python3 -m td_cli otbr-cli router-table
+PYTHONPATH=src python3 -m td_cli otbr-cli meshdiag topology
+PYTHONPATH=src python3 -m td_cli otbr-cli networkdiag topology
+PYTHONPATH=src python3 -m td_cli otbr-cli all
 
-python3 tdash.py web otbr-restapi download
-```
+# OTBR REST API downloads
+PYTHONPATH=src python3 -m td_cli otbr-restapi download
 
-Start web server that hosts the dashboard HTML page.
-```
-python3 tdash.py web-server 
-```
+# mDNS capture
+PYTHONPATH=src python3 -m td_cli mdns thread
 
-Docker container
-```
-TODO 
-```
+# Eve processing
+PYTHONPATH=src python3 -m td_cli process-eve --input "data/Eve Thread Network Layout.evethreadlayout"
 
-## tdash.py --help
-```
-usage: tdash [-h] [--verbose] [--debug] [--output FILE] {scan,web,process,merge,web-server} ...
+# Dataset merge
+PYTHONPATH=src python3 -m td_cli merge-dataset
 
-Thread Network Topology Dashboard CLI
-
-Options:
-  -h, --help            show this help message and exit
-  --verbose, -v         Enable verbose (INFO) logging
-  --debug, -d           Enable debug logging
-  --output FILE, -o FILE
-                        Write command output to FILE
-
-These are the high level commands:
-  {scan,web,process,merge,web-server}
-    scan                Scan (otbr-cli or mdns) for thread device details
-    web                 Web call to OTBR REST API for thread device details
-    process             Process (eve) raw data files
-    merge               Merge datasets (otbr-cli, otbr-restapi, eve, mdns)
-    web-server          Start the web dashboard server
-
-Commands usage:
-  scan
-    usage: tdash scan [-h] {otbr-cli,mdns} ...
-    scan otbr-cli       Scan otbr-cli commands
-    scan mdns           Scan Thread-related mDNS scopes
-
-    scan otbr-cli router-table        Scan and save router table
-    scan otbr-cli meshdiag            Mesh diagnostic scans
-    scan otbr-cli networkdiag         Network diagnostic scans
-    scan otbr-cli all                 Run all otbr-cli scans
-
-  web
-    usage: tdash web [-h] {otbr-restapi} ...
-    web otbr-restapi    otbr-restapi sub commands
-
-  process
-    usage: tdash process [-h] {eve} ...
-    process eve         Parse and enhance an Eve Thread layout file
-
-  merge
-    usage: tdash merge [-h] {dataset,data} ...
-    dataset             Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file
-
-  web-server
-    usage: tdash web-server [-h] [--host HOST] [--port PORT]
-    options:
-        --host HOST  Host to bind to (default: localhost)
-        --port PORT  Port to listen on (default: 8087)
+# Dashboard server
+PYTHONPATH=src python3 -m td_cli web-server --host localhost --port 8087
 ```
 
-## Notes
-TODO
+## Data Directory Usage Examples
 
--eof
+```bash
+# Highest priority: environment variable
+TD_DATA_DIR=/tmp/td-data PYTHONPATH=src python3 -m td_cli otbr-restapi download
+
+# CLI argument when TD_DATA_DIR is not set
+PYTHONPATH=src python3 -m td_cli --datadir ./my-data mdns thread
+
+# web-server JSON reads from the effective data directory
+PYTHONPATH=src python3 -m td_cli --datadir ./my-data web-server
+```
+
+## Migration Note
+
+Previous behavior relied on process current working directory for many JSON paths.
+
+Current behavior uses `td_data_directory` consistently across command families, including web-server JSON responses. This makes docker and non-docker executions deterministic while preserving static dashboard asset serving.

@@ -4,6 +4,7 @@ import argparse
 import logging
 
 from typing import Any, Sequence
+from util_data import data_file_arg_or_default, resolve_td_data_dir
 
 from otbr_restapi_client_cli import (
     EXIT_SUCCESS,
@@ -119,10 +120,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
+    args.td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)
+
+    output_path = args.output
+    if output_path:
+        output_path = str(data_file_arg_or_default(output_path, args.td_data_dir))
 
     try:
         result = dispatch(args)
-        emit_output(result, args.output)
+        emit_output(result, output_path)
         return EXIT_SUCCESS
     except Exception as exc:
         emit_error(exc)

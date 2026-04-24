@@ -12,7 +12,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Sequence
 
-from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
+from util_data import resolve_td_data_dir
 
 
 PRIORITY_FIELDS = [
@@ -644,6 +645,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=".",
         help="Directory containing input JSON files (default: current directory).",
     )
+    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     parser.add_argument(
         "--dataset-file",
         default="td-otbr-cli-network-dataset-info.json",
@@ -689,7 +691,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
     args = parse_args(argv)
-    base_dir = Path(args.base_dir)
+    td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)
+    base_dir = td_data_dir if args.base_dir == "." else Path(args.base_dir)
     include_files = parse_file_list_args(args.include_files)
     exclude_files = parse_file_list_args(args.exclude_files)
 

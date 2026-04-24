@@ -7,6 +7,7 @@ import time
 import logging
 import argparse
 from typing import Sequence
+from const import TD_DATA_DIR_ARG, TD_DATA_DIR_ARG_HELP, TD_DATA_DIR_RESOLUTION_SUMMARY
 
 # Note: The imports below are organized to reflect the different components of the project, such as OTBR CLI parsing, REST API interactions, dataset merging, and the web interface. This structure helps maintain clarity and separation of concerns within the codebase. 
 import util_network
@@ -224,6 +225,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose (INFO) logging")
     parser.add_argument("--debug", "-d", action="store_true", help="Enable debug logging")
     parser.add_argument("--output", "-o", metavar="FILE", help="Write command output to FILE")
+    parser.add_argument(
+        "--datadir",
+        metavar="DIR",
+        default=None,
+        help=TD_DATA_DIR_ARG_HELP,
+    )
 
     # --- top-level subcommands ---
     subparsers = parser.add_subparsers(
@@ -243,8 +250,8 @@ def build_parser() -> argparse.ArgumentParser:
     ws_p.add_argument("--port", type=int, default=8087, help="Port to listen on (default: 8087)")
 
     # --- hand-crafted "Commands usage:" epilog ---
-    parser.epilog = """\
-Commands usage:
+    parser.epilog = (
+        """Commands usage:
     otbr-cli
         usage: td_cli otbr-cli [-h] {network-dataset-info,router-table,meshdiag,networkdiag,all} ...
 
@@ -265,7 +272,9 @@ Commands usage:
         options:
                 --host HOST  Host to bind to (default: localhost)
                 --port PORT  Port to listen on (default: 8087)
+
 """
+    )
 
     # Expose subparsers so dispatch() can print targeted help
     parser._subcommand_parsers = {  # type: ignore[attr-defined]
@@ -297,6 +306,11 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
     """
     _sub = parser._subcommand_parsers  # type: ignore[attr-defined]
 
+    def _forward_with_datadir(argv: list[str]) -> list[str]:
+        if getattr(args, "datadir", None):
+            return [TD_DATA_DIR_ARG, str(args.datadir)] + list(argv)
+        return list(argv)
+
     # --- otbr-cli ---
     if args.command == "otbr-cli":
         cli_cmd = args.cli_command
@@ -305,41 +319,43 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
             return 0
 
         if cli_cmd == "network-dataset-info":
-            return otbr_cli_network_dataset_info.main(sub_argv) or 0
+            return otbr_cli_network_dataset_info.main(_forward_with_datadir(sub_argv)) or 0
 
         if cli_cmd == "router-table":
-            return otbr_cli_router_table.main(sub_argv) or 0
+            return otbr_cli_router_table.main(_forward_with_datadir(sub_argv)) or 0
 
         if cli_cmd == "meshdiag":
             meshdiag_cmd = args.meshdiag_command
             if meshdiag_cmd == "topology":
-                return otbr_cli_meshdiag_topology.main(sub_argv) or 0
+                return otbr_cli_meshdiag_topology.main(_forward_with_datadir(sub_argv)) or 0
             if meshdiag_cmd == "routerneighbortable":
-                return otbr_cli_meshdiag_routerneighbortable.main(sub_argv) or 0
+                return otbr_cli_meshdiag_routerneighbortable.main(_forward_with_datadir(sub_argv)) or 0
             if meshdiag_cmd == "childtable":
-                return otbr_cli_meshdiag_childtable.main(sub_argv) or 0
+                return otbr_cli_meshdiag_childtable.main(_forward_with_datadir(sub_argv)) or 0
             if meshdiag_cmd == "childip6":
-                return otbr_cli_meshdiag_childip6.main(sub_argv) or 0
+                return otbr_cli_meshdiag_childip6.main(_forward_with_datadir(sub_argv)) or 0
             if meshdiag_cmd == "all":
-                rc = otbr_cli_meshdiag_topology.main(sub_argv) or 0
-                rc = rc or otbr_cli_meshdiag_routerneighbortable.main(sub_argv) or 0
-                rc = rc or otbr_cli_meshdiag_childtable.main(sub_argv) or 0
-                rc = rc or otbr_cli_meshdiag_childip6.main(sub_argv) or 0
+                forwarded = _forward_with_datadir(sub_argv)
+                rc = otbr_cli_meshdiag_topology.main(forwarded) or 0
+                rc = rc or otbr_cli_meshdiag_routerneighbortable.main(forwarded) or 0
+                rc = rc or otbr_cli_meshdiag_childtable.main(forwarded) or 0
+                rc = rc or otbr_cli_meshdiag_childip6.main(forwarded) or 0
                 return rc
 
         if cli_cmd == "networkdiag":
             if args.networkdiag_command == "topology":
                 expand_children_argv = [] if getattr(args, 'expand_children', True) else ["-cno"]
-                return otbr_cli_networkdiag_topology.main(expand_children_argv) or 0
+                return otbr_cli_networkdiag_topology.main(_forward_with_datadir(expand_children_argv)) or 0
 
         if cli_cmd == "all":
-            rc = otbr_cli_network_dataset_info.main(sub_argv) or 0
-            rc = rc or otbr_cli_router_table.main(sub_argv) or 0
-            rc = rc or otbr_cli_meshdiag_topology.main(sub_argv) or 0
-            rc = rc or otbr_cli_meshdiag_routerneighbortable.main(sub_argv) or 0
-            rc = rc or otbr_cli_meshdiag_childtable.main(sub_argv) or 0
-            rc = rc or otbr_cli_meshdiag_childip6.main(sub_argv) or 0
-            rc = rc or otbr_cli_networkdiag_topology.main(sub_argv) or 0
+            forwarded = _forward_with_datadir(sub_argv)
+            rc = otbr_cli_network_dataset_info.main(forwarded) or 0
+            rc = rc or otbr_cli_router_table.main(forwarded) or 0
+            rc = rc or otbr_cli_meshdiag_topology.main(forwarded) or 0
+            rc = rc or otbr_cli_meshdiag_routerneighbortable.main(forwarded) or 0
+            rc = rc or otbr_cli_meshdiag_childtable.main(forwarded) or 0
+            rc = rc or otbr_cli_meshdiag_childip6.main(forwarded) or 0
+            rc = rc or otbr_cli_networkdiag_topology.main(forwarded) or 0
             return rc
 
     # --- mdns ---
@@ -351,7 +367,7 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
             + (["--mattertcpsupported"] if args.mattertcpsupported else [])
             + sub_argv
         )
-        return mdns_thread_scopes.main(mdns_argv) or 0
+        return mdns_thread_scopes.main(_forward_with_datadir(mdns_argv)) or 0
 
     # --- otbr-restapi ---
     if args.command == "otbr-restapi":
@@ -361,23 +377,24 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
             return 0
 
         if restapi_cmd == "download":
-            return otbr_restapi_download.main(sub_argv) or 0
+            return otbr_restapi_download.main(_forward_with_datadir(sub_argv)) or 0
         if restapi_cmd == "client":
-            return otbr_restapi_client_cli.main(sub_argv) or 0
+            return otbr_restapi_client_cli.main(_forward_with_datadir(sub_argv)) or 0
         if restapi_cmd == "rawclient":
-            return otbr_restapi_raw_client_cli.main(sub_argv) or 0
+            return otbr_restapi_raw_client_cli.main(_forward_with_datadir(sub_argv)) or 0
 
     # --- process-eve ---
     if args.command == "process-eve":
-        return eve_parse.main(sub_argv) or 0
+        return eve_parse.main(_forward_with_datadir(sub_argv)) or 0
 
     # --- merge-dataset ---
     if args.command in ("merge-dataset", "merge-data"):
-        return dataset_merge.main(sub_argv) or 0
+        return dataset_merge.main(_forward_with_datadir(sub_argv)) or 0
 
     # --- web-server ---
     if args.command == "web-server":
-        return web_server.main(["--host", args.host, "--port", str(args.port)])
+        web_argv = ["--host", args.host, "--port", str(args.port)]
+        return web_server.main(_forward_with_datadir(web_argv))
 
     raise ValueError(f"Unhandled command: {args.command}")
 

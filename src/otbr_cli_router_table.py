@@ -8,6 +8,7 @@ from typing import Sequence
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from extaddr_device_label_map import extaddr_device_label_mapping_load
 import util_ot_ctl
+from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
 
 def get_thread_router_table():
     try:
@@ -131,10 +132,11 @@ def get_router_table_data(extaddr_map=None):
 def main(argv: Sequence[str] | None = None) -> int:
     
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
 
     try:
         # Load extaddr to nodename mapping from JSON file
-        extaddr_json_filename = EXTADDR_DEVICE_LABEL_MAP_FILENAME
+        extaddr_json_filename = data_file_path(EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir)
 
         # Check if file exists before parsing
         if os.path.exists(extaddr_json_filename):
@@ -144,7 +146,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             extaddr_map = {}
 
         router_table_data = get_router_table_data(extaddr_map)
-        save_path = "td-otbr-cli-router-table.json"
+        save_path = data_file_path("td-otbr-cli-router-table.json", td_data_dir)
         with open(save_path, 'w') as f:
             json.dump(router_table_data, f, indent=4)
         print(json.dumps(router_table_data, indent=4))

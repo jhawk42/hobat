@@ -62,3 +62,8 @@ def extended_address_to_b64(hex_str, reverse=False):
     escaped_b64_str = b64_str.replace('/', r'\/')
     
     return escaped_b64_str
+
+
+def convert_hexnumber_extaddr_to_base64(hex_number, reverse=False):
+    """Backward-compatible alias for hex extaddr to Base64 conversion."""
+    return extended_address_to_b64(hex_number, reverse=reverse)

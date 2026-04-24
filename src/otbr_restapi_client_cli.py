@@ -7,6 +7,8 @@ import logging
 
 from pathlib import Path
 from typing import Any, Sequence
+from util_data import data_file_arg_or_default, resolve_td_data_dir
+from const import TD_DATA_DIR_ARG_HELP
 
 from otbr_restapi_client import (
     DEFAULT_ACCEPT,
@@ -37,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--host", default=DEFAULT_HOST, help="OTBR REST API host")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="OTBR REST API port")
+    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     parser.add_argument("--base-url", help="Override host/port with a full base URL")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="HTTP timeout in seconds")
     parser.add_argument(
@@ -263,15 +266,22 @@ def dispatch(args: argparse.Namespace) -> Any:
 
 
 def _load_dataset_input(args: argparse.Namespace) -> dict[str, Any] | str:
+    td_data_dir = getattr(args, "td_data_dir", None)
+
+    def _resolve(path_value: str) -> Path:
+        if td_data_dir is None:
+            return Path(path_value)
+        return data_file_arg_or_default(path_value, td_data_dir)
+
     try:
         if args.json is not None:
             return json.loads(args.json)
         if args.json_file is not None:
-            return json.loads(Path(args.json_file).read_text(encoding="utf-8"))
+            return json.loads(_resolve(args.json_file).read_text(encoding="utf-8"))
         if args.text is not None:
             return args.text
         if args.text_file is not None:
-            return Path(args.text_file).read_text(encoding="utf-8").strip()
+            return _resolve(args.text_file).read_text(encoding="utf-8").strip()
     except json.JSONDecodeError as exc:
         raise OTBRUsageError(f"Invalid dataset JSON: {exc}") from exc
     except OSError as exc:
@@ -303,12 +313,12 @@ def emit_output(result: Any, output_path: str | None) -> None:
         Path(output_path).write_text(rendered + suffix, encoding="utf-8")
 
     if rendered:
-        logging.info(rendered)
+        print(rendered)
 
 
 def emit_error(exc: Exception) -> None:
     payload = error_to_dict(exc)
-    logging.error(json.dumps(payload, indent=4, sort_keys=True))
+    print(json.dumps(payload, indent=4, sort_keys=True), file=sys.stderr)
 
 
 def exit_code_for_exception(exc: Exception) -> int:
@@ -330,10 +340,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
+    args.td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)
+
+    output_path = args.output
+    if output_path:
+        output_path = str(data_file_arg_or_default(output_path, args.td_data_dir))
 
     try:
         result = dispatch(args)
-        emit_output(result, args.output)
+        emit_output(result, output_path)
         return EXIT_SUCCESS
     except OTBRClientError as exc:
         emit_error(exc)

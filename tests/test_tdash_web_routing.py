@@ -1,4 +1,4 @@
-"""Tests for TDashHandler URI routing in tdash_web.py.
+"""Tests for TDashHandler URI routing in web_server.py.
 
 Run with:
     PYTHONPATH=/workspaces/tdash/src python -m pytest tests/test_tdash_web_routing.py -v
@@ -11,11 +11,13 @@ import tempfile
 import threading
 import unittest
 import socketserver
+from functools import partial
+from pathlib import Path
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import tdash_web
+import web_server
 
 
 class TestTDashHandlerRouting(unittest.TestCase):
@@ -24,22 +26,28 @@ class TestTDashHandlerRouting(unittest.TestCase):
     server: socketserver.TCPServer
     port: int
     thread: threading.Thread
-    tmpdir: str
+    static_dir: str
+    data_dir: str
 
     @classmethod
     def setUpClass(cls) -> None:
-        # Serve from a temp directory that contains a minimal tdash.html and a .json file.
-        cls.tmpdir = tempfile.mkdtemp()
-        with open(os.path.join(cls.tmpdir, "tdash.html"), "w") as f:
+        # Static files are served from one directory.
+        cls.static_dir = tempfile.mkdtemp()
+        with open(os.path.join(cls.static_dir, "tdash.html"), "w") as f:
             f.write("<html><body>dashboard</body></html>")
-        with open(os.path.join(cls.tmpdir, "data.json"), "w") as f:
+
+        # JSON files are served from td_data_dir, not static_dir.
+        cls.data_dir = tempfile.mkdtemp()
+        with open(os.path.join(cls.data_dir, "data.json"), "w") as f:
             f.write('{"key": "value"}')
 
-        # Change CWD so SimpleHTTPRequestHandler finds the files.
-        cls._orig_cwd = os.getcwd()
-        os.chdir(cls.tmpdir)
+        handler = partial(
+            web_server.TDashHandler,
+            directory=cls.static_dir,
+            td_data_dir=Path(cls.data_dir),
+        )
 
-        cls.server = socketserver.TCPServer(("127.0.0.1", 0), tdash_web.TDashHandler)
+        cls.server = socketserver.TCPServer(("127.0.0.1", 0), handler)
         cls.port = cls.server.server_address[1]
         cls.thread = threading.Thread(target=cls.server.serve_forever)
         cls.thread.daemon = True
@@ -49,7 +57,6 @@ class TestTDashHandlerRouting(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.server.shutdown()
         cls.thread.join(timeout=5)
-        os.chdir(cls._orig_cwd)
 
     def _get(self, path: str) -> http.client.HTTPResponse:
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
@@ -72,11 +79,16 @@ class TestTDashHandlerRouting(unittest.TestCase):
         self.assertEqual(resp.status, 200)
 
     def test_json_file_returns_200(self):
-        """GET /data.json must return 200 with JSON content-type."""
+        """GET /data.json must return 200 with JSON content-type from td_data_dir."""
         resp = self._get("/data.json")
         self.assertEqual(resp.status, 200)
         content_type = resp.getheader("Content-Type", "")
         self.assertIn("json", content_type)
+
+    def test_missing_json_file_returns_404(self):
+        """GET missing JSON must return 404."""
+        resp = self._get("/missing.json")
+        self.assertEqual(resp.status, 404)
 
 
 if __name__ == "__main__":

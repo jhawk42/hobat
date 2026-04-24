@@ -46,7 +46,7 @@ The following lines use `param:None` (an annotation of type `None`) instead of `
 The following files open and parse JSON with no error handling:
 - `extaddr_device_label_map.py` lines 13-14
 - `eve_parse.py` line 35
-- `tdash.py` lines 31-34
+- `td_cli.py` lines 31-34
 
 **Fix**: Wrap each with `try … except (OSError, json.JSONDecodeError)` and log a descriptive message. Return a sensible empty fallback (e.g. `{}` or `[]`) rather than crashing.
 
@@ -63,7 +63,7 @@ Direct writes to target filenames leave corrupt files if the process crashes mid
 `b64_to_extended_address()` and `extended_address_to_b64()` have no error handling around `base64.b64decode()` and `bytes.fromhex()`.  
 **Fix**: Wrap with `try … except (binascii.Error, ValueError)` and raise a `ValueError` with a descriptive message. Also validate that inputs are non-empty strings before attempting conversion.
 
-**Files**: `src/extaddr_device_label_map.py`, `src/eve_parse.py`, `src/tdash.py`, `src/otbr_restapi_download.py`, `src/util_convert.py`
+**Files**: `src/extaddr_device_label_map.py`, `src/eve_parse.py`, `src/td_cli.py`, `src/otbr_restapi_download.py`, `src/util_convert.py`
 
 ---
 
@@ -177,7 +177,7 @@ The `ServiceBrowser` loop can block indefinitely.
 | `src/util_convert.py` | 2 |
 | `src/extaddr_device_label_map.py` | 2 |
 | `src/eve_parse.py` | 2, 5 |
-| `src/tdash.py` | 2 |
+| `src/td_cli.py` | 2 |
 | `src/otbr_cli_router_table.py` | 3 |
 | `src/otbr_cli_meshdiag_topology.py` | 3 |
 | `src/otbr_cli_meshdiag_childtable.py` | 3, 5 |

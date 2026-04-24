@@ -8,6 +8,7 @@ from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from otbr_cli_router_table import get_router_table_data
 from extaddr_device_label_map import extaddr_device_label_mapping_load
 from util_ot_ctl import run_ot_ctl_stdio
+from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
 
 def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
     """ 
@@ -134,9 +135,10 @@ def get_meshdiag_routerneighbortables(extaddr_map=None):
 
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
 
     # Load extaddr to nodename mapping from JSON file
-    extaddr_json_filename = EXTADDR_DEVICE_LABEL_MAP_FILENAME
+    extaddr_json_filename = data_file_path(EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir)
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
@@ -146,10 +148,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         extaddr_map = {}
 
     router_neighbor_tables = get_meshdiag_routerneighbortables(extaddr_map)
-    
-    with open('td-otbr-cli-meshdiag-router-neighbortables.json', 'w') as f:
+    output_path = data_file_path("td-otbr-cli-meshdiag-router-neighbortables.json", td_data_dir)
+
+    with open(output_path, 'w') as f:
         json.dump(router_neighbor_tables, f, indent=4)
-        logging.info("Meshdiag routerneighbortables data saved to td-otbr-cli-meshdiag-router-neighbortables.json")  
+        logging.info(f"Meshdiag routerneighbortables data saved to {output_path}")
     
     print(json.dumps(router_neighbor_tables, indent=4))
 

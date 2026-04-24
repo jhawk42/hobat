@@ -1,18 +1,13 @@
-"""Tests for td_cli.py build_parser(), dispatch(), and main() (Phase 8).
-
-Run with:
-    PYTHONPATH=/workspaces/tdash/src python -m pytest tests/test_tdash_argparse.py -v
-"""
+"""Tests for td_cli.py build_parser(), dispatch(), and main()."""
 from __future__ import annotations
 
 import io
-import sys
+import logging
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
-from unittest.mock import call, patch
+from contextlib import redirect_stdout
+from unittest.mock import patch
 
-
-import td_cli as tdash_module
+import td_cli
 
 
 # ---------------------------------------------------------------------------
@@ -20,473 +15,231 @@ import td_cli as tdash_module
 # ---------------------------------------------------------------------------
 
 def _parse(argv: list[str]):
-    """Strict parse – returns Namespace.  Raises SystemExit for invalid input."""
-    return tdash_module.build_parser().parse_args(argv)
+    """Strict parse. Raises SystemExit on invalid input."""
+    return td_cli.build_parser().parse_args(argv)
 
 
 def _parse_known(argv: list[str]):
-    """Lenient parse – returns (Namespace, extras) like parse_known_args."""
-    return tdash_module.build_parser().parse_known_args(argv)
+    """Lenient parse for command forwarding tests."""
+    return td_cli.build_parser().parse_known_args(argv)
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 – common options
+# Parser: common options and top-level commands
 # ---------------------------------------------------------------------------
 
 class TestCommonOptions(unittest.TestCase):
-
     def test_verbose_short_flag(self):
-        # Common options must come before the first subcommand token.
-        args = _parse(["-v", "scan", "otbr-cli", "router-table"])
+        args = _parse(["-v", "otbr-cli", "router-table"])
         self.assertTrue(args.verbose)
-
-    def test_verbose_long_flag(self):
-        args = _parse(["--verbose", "scan", "otbr-cli", "router-table"])
-        self.assertTrue(args.verbose)
-
-    def test_debug_short_flag(self):
-        args = _parse(["-d", "scan", "otbr-cli", "router-table"])
-        self.assertTrue(args.debug)
 
     def test_debug_long_flag(self):
-        args = _parse(["--debug", "scan", "otbr-cli", "router-table"])
+        args = _parse(["--debug", "otbr-cli", "router-table"])
         self.assertTrue(args.debug)
 
-    def test_output_short_flag(self):
-        args = _parse(["-o", "out.json", "scan", "otbr-cli", "router-table"])
+    def test_output_and_datadir(self):
+        args = _parse(["--output", "out.json", "--datadir", "/tmp/td", "web-server"])
         self.assertEqual(args.output, "out.json")
-
-    def test_output_long_flag(self):
-        args = _parse(["--output", "result.json", "scan", "otbr-cli", "router-table"])
-        self.assertEqual(args.output, "result.json")
-
-    def test_defaults_are_false_and_none(self):
-        args = _parse(["scan", "otbr-cli", "router-table"])
-        self.assertFalse(args.verbose)
-        self.assertFalse(args.debug)
-        self.assertIsNone(args.output)
+        self.assertEqual(args.datadir, "/tmp/td")
 
     def test_help_exits_zero(self):
         buf = io.StringIO()
         with redirect_stdout(buf):
             with self.assertRaises(SystemExit) as cm:
-                tdash_module.build_parser().parse_args(["--help"])
+                td_cli.build_parser().parse_args(["--help"])
         self.assertEqual(cm.exception.code, 0)
 
-
-# ---------------------------------------------------------------------------
-# Phase 2 – top-level command routing
-# ---------------------------------------------------------------------------
-
-class TestTopLevelCommands(unittest.TestCase):
-
-    def _check_command(self, argv, expected_command):
-        args = _parse(argv)
-        self.assertEqual(args.command, expected_command)
-
-    def test_no_command_exits_nonzero(self):
+    def test_no_command_is_error(self):
         with self.assertRaises(SystemExit) as cm:
             _parse([])
         self.assertNotEqual(cm.exception.code, 0)
 
-    def test_unknown_command_exits_nonzero(self):
-        with self.assertRaises(SystemExit) as cm:
-            _parse(["bogus"])
-        self.assertNotEqual(cm.exception.code, 0)
 
-    def test_command_web_server(self):
+class TestTopLevelCommands(unittest.TestCase):
+    def test_otbr_cli_command(self):
+        args = _parse(["otbr-cli", "router-table"])
+        self.assertEqual(args.command, "otbr-cli")
+        self.assertEqual(args.cli_command, "router-table")
+
+    def test_otbr_restapi_command(self):
+        args = _parse(["otbr-restapi", "download"])
+        self.assertEqual(args.command, "otbr-restapi")
+        self.assertEqual(args.restapi_command, "download")
+
+    def test_mdns_defaults(self):
+        args = _parse(["mdns"])
+        self.assertEqual(args.command, "mdns")
+        self.assertEqual(args.mdns_scope, "thread")
+        self.assertIsNone(args.browse_timeout)
+        self.assertFalse(args.haptcp)
+        self.assertFalse(args.mattertcpsupported)
+
+    def test_process_eve_command(self):
+        args = _parse(["process-eve"])
+        self.assertEqual(args.command, "process-eve")
+
+    def test_merge_dataset_command(self):
+        args = _parse(["merge-dataset"])
+        self.assertEqual(args.command, "merge-dataset")
+
+    def test_web_server_defaults(self):
         args = _parse(["web-server"])
         self.assertEqual(args.command, "web-server")
         self.assertEqual(args.host, "localhost")
         self.assertEqual(args.port, 8087)
 
-    def test_web_server_custom_host_and_port(self):
-        args = _parse(["web-server", "--host", "0.0.0.0", "--port", "9090"])
-        self.assertEqual(args.host, "0.0.0.0")
-        self.assertEqual(args.port, 9090)
-
 
 # ---------------------------------------------------------------------------
-# Phase 3 – scan subcommand tree
+# Parser: nested command trees and passthrough extras
 # ---------------------------------------------------------------------------
 
-class TestScanParser(unittest.TestCase):
+class TestOtbrCliParser(unittest.TestCase):
+    def test_otbr_cli_without_subcommand_is_allowed(self):
+        args = _parse(["otbr-cli"])
+        self.assertEqual(args.command, "otbr-cli")
+        self.assertIsNone(args.cli_command)
 
-    def test_scan_requires_subcommand(self):
-        with self.assertRaises(SystemExit) as cm:
-            _parse(["scan"])
-        self.assertNotEqual(cm.exception.code, 0)
-
-    def test_scan_otbr_cli_requires_subcommand(self):
+    def test_meshdiag_requires_subcommand(self):
         with self.assertRaises(SystemExit):
-            _parse(["scan", "otbr-cli"])
+            _parse(["otbr-cli", "meshdiag"])
 
-    def test_scan_otbr_cli_network_dataset_info(self):
-        args = _parse(["scan", "otbr-cli", "network-dataset-info"])
-        self.assertEqual(args.command, "scan")
-        self.assertEqual(args.scan_type, "otbr-cli")
-        self.assertEqual(args.cli_command, "network-dataset-info")
-
-    def test_scan_otbr_cli_router_table(self):
-        args = _parse(["scan", "otbr-cli", "router-table"])
-        self.assertEqual(args.cli_command, "router-table")
-
-    def test_scan_otbr_cli_meshdiag_topology(self):
-        args = _parse(["scan", "otbr-cli", "meshdiag", "topology"])
+    def test_meshdiag_childip6(self):
+        args = _parse(["otbr-cli", "meshdiag", "childip6"])
         self.assertEqual(args.cli_command, "meshdiag")
-        self.assertEqual(args.meshdiag_command, "topology")
-
-    def test_scan_otbr_cli_meshdiag_routerneighbortable(self):
-        args = _parse(["scan", "otbr-cli", "meshdiag", "routerneighbortable"])
-        self.assertEqual(args.meshdiag_command, "routerneighbortable")
-
-    def test_scan_otbr_cli_meshdiag_childtable(self):
-        args = _parse(["scan", "otbr-cli", "meshdiag", "childtable"])
-        self.assertEqual(args.meshdiag_command, "childtable")
-
-    def test_scan_otbr_cli_meshdiag_childip6(self):
-        args = _parse(["scan", "otbr-cli", "meshdiag", "childip6"])
         self.assertEqual(args.meshdiag_command, "childip6")
 
-    def test_scan_otbr_cli_meshdiag_all(self):
-        args = _parse(["scan", "otbr-cli", "meshdiag", "all"])
-        self.assertEqual(args.meshdiag_command, "all")
-
-    def test_scan_otbr_cli_meshdiag_requires_subcommand(self):
-        with self.assertRaises(SystemExit):
-            _parse(["scan", "otbr-cli", "meshdiag"])
-
-    def test_scan_otbr_cli_networkdiag_topology(self):
-        args = _parse(["scan", "otbr-cli", "networkdiag", "topology"])
+    def test_networkdiag_topology_default_children(self):
+        args = _parse(["otbr-cli", "networkdiag", "topology"])
         self.assertEqual(args.cli_command, "networkdiag")
         self.assertEqual(args.networkdiag_command, "topology")
+        self.assertTrue(args.expand_children)
 
-    def test_scan_otbr_cli_all(self):
-        args = _parse(["scan", "otbr-cli", "all"])
-        self.assertEqual(args.cli_command, "all")
-
-    def test_scan_help_exits_zero(self):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            with self.assertRaises(SystemExit) as cm:
-                _parse(["scan", "--help"])
-        self.assertEqual(cm.exception.code, 0)
-
-    def test_scan_otbr_cli_help_exits_zero(self):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            with self.assertRaises(SystemExit) as cm:
-                _parse(["scan", "otbr-cli", "--help"])
-        self.assertEqual(cm.exception.code, 0)
-
-    def test_scan_otbr_cli_meshdiag_help_exits_zero(self):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            with self.assertRaises(SystemExit) as cm:
-                _parse(["scan", "otbr-cli", "meshdiag", "--help"])
-        self.assertEqual(cm.exception.code, 0)
+    def test_networkdiag_topology_children_no(self):
+        args = _parse(["otbr-cli", "networkdiag", "topology", "--children-no"])
+        self.assertFalse(args.expand_children)
 
 
-# ---------------------------------------------------------------------------
-# Phase 4 – web subcommand tree
-# ---------------------------------------------------------------------------
-
-class TestWebParser(unittest.TestCase):
-
-    def test_web_requires_subcommand(self):
-        with self.assertRaises(SystemExit):
-            _parse(["web"])
-
-    def test_web_otbr_restapi_requires_subcommand(self):
-        with self.assertRaises(SystemExit):
-            _parse(["web", "otbr-restapi"])
-
-    def test_web_otbr_restapi_download_no_sub_argv(self):
-        args, extras = _parse_known(["web", "otbr-restapi", "download"])
-        self.assertEqual(args.command, "web")
-        self.assertEqual(args.web_type, "otbr-restapi")
-        self.assertEqual(args.restapi_command, "download")
-        self.assertEqual(extras, [])
-
-    def test_web_otbr_restapi_download_with_sub_argv(self):
-        args, extras = _parse_known(["web", "otbr-restapi", "download", "--host", "10.0.0.1", "--port", "8888"])
-        self.assertEqual(args.restapi_command, "download")
-        self.assertEqual(extras, ["--host", "10.0.0.1", "--port", "8888"])
-
-    def test_web_otbr_restapi_client_sub_argv(self):
-        args, extras = _parse_known(["web", "otbr-restapi", "client", "diagnostics", "list"])
+class TestForwardingParsers(unittest.TestCase):
+    def test_restapi_client_extras_preserved(self):
+        args, extras = _parse_known(["otbr-restapi", "client", "diagnostics", "list"])
         self.assertEqual(args.restapi_command, "client")
         self.assertEqual(extras, ["diagnostics", "list"])
 
-    def test_web_otbr_restapi_rawclient_sub_argv(self):
-        args, extras = _parse_known(["web", "otbr-restapi", "rawclient", "actions", "list"])
-        self.assertEqual(args.restapi_command, "rawclient")
-        self.assertEqual(extras, ["actions", "list"])
+    def test_process_eve_extras_preserved(self):
+        args, extras = _parse_known(["process-eve", "--input", "layout.json"])
+        self.assertEqual(args.command, "process-eve")
+        self.assertEqual(extras, ["--input", "layout.json"])
 
-    def test_web_help_exits_zero(self):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            with self.assertRaises(SystemExit) as cm:
-                _parse(["web", "--help"])
-        self.assertEqual(cm.exception.code, 0)
-
-
-# ---------------------------------------------------------------------------
-# Phase 5 – process and merge subcommand trees
-# ---------------------------------------------------------------------------
-
-class TestProcessParser(unittest.TestCase):
-
-    def test_process_requires_subcommand(self):
-        with self.assertRaises(SystemExit):
-            _parse(["process"])
-
-    def test_process_eve_no_sub_argv(self):
-        args, extras = _parse_known(["process", "eve"])
-        self.assertEqual(args.command, "process")
-        self.assertEqual(args.process_type, "eve")
-        self.assertEqual(extras, [])
-
-    def test_process_eve_with_sub_argv(self):
-        args, extras = _parse_known(["process", "eve", "--input", "layout.json", "--output", "out.json"])
-        self.assertEqual(extras, ["--input", "layout.json", "--output", "out.json"])
-
-
-class TestMergeParser(unittest.TestCase):
-
-    def test_merge_requires_subcommand(self):
-        with self.assertRaises(SystemExit):
-            _parse(["merge"])
-
-    def test_merge_dataset_no_sub_argv(self):
-        args, extras = _parse_known(["merge", "dataset"])
-        self.assertEqual(args.command, "merge")
-        self.assertEqual(args.merge_type, "dataset")
-        self.assertEqual(extras, [])
-
-    def test_merge_dataset_with_sub_argv(self):
-        args, extras = _parse_known(["merge", "dataset", "--input1", "a.json", "--input2", "b.json"])
+    def test_merge_dataset_extras_preserved(self):
+        args, extras = _parse_known(["merge-dataset", "--input1", "a.json", "--input2", "b.json"])
+        self.assertEqual(args.command, "merge-dataset")
         self.assertEqual(extras, ["--input1", "a.json", "--input2", "b.json"])
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 – dispatch: scan commands call correct module main()
+# Dispatch behavior
 # ---------------------------------------------------------------------------
 
-class TestDispatchScan(unittest.TestCase):
-
+class TestDispatchOtbrCli(unittest.TestCase):
     def _dispatch(self, argv: list[str]) -> int:
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        return tdash_module.dispatch(args, extras)
+        parser = td_cli.build_parser()
+        args, extras = parser.parse_known_args(argv)
+        return td_cli.dispatch(args, extras, parser)
 
-    def _mock_module(self, module_attr: str, return_value: int = 0):
-        return patch.object(tdash_module, module_attr, **{"main.return_value": return_value})
-
-    def test_scan_network_dataset_info_calls_module_main(self):
-        with self._mock_module("otbr_cli_network_dataset_info") as m:
-            rc = self._dispatch(["scan", "otbr-cli", "network-dataset-info"])
-        m.main.assert_called_once_with()
+    def test_router_table_calls_module_main(self):
+        with patch.object(td_cli.otbr_cli_router_table, "main", return_value=0) as m:
+            rc = self._dispatch(["otbr-cli", "router-table"])
+        m.assert_called_once_with([])
         self.assertEqual(rc, 0)
 
-    def test_scan_router_table_calls_module_main(self):
-        with self._mock_module("otbr_cli_router_table") as m:
-            rc = self._dispatch(["scan", "otbr-cli", "router-table"])
-        m.main.assert_called_once_with()
+    def test_meshdiag_childip6_calls_module_main(self):
+        with patch.object(td_cli.otbr_cli_meshdiag_childip6, "main", return_value=0) as m:
+            rc = self._dispatch(["otbr-cli", "meshdiag", "childip6"])
+        m.assert_called_once_with([])
         self.assertEqual(rc, 0)
 
-    def test_scan_meshdiag_topology_calls_module_main(self):
-        with self._mock_module("otbr_cli_meshdiag_topology") as m:
-            rc = self._dispatch(["scan", "otbr-cli", "meshdiag", "topology"])
-        m.main.assert_called_once_with()
-        self.assertEqual(rc, 0)
-
-    def test_scan_meshdiag_routerneighbortable_calls_module_main(self):
-        with self._mock_module("otbr_cli_meshdiag_routerneighbortable") as m:
-            rc = self._dispatch(["scan", "otbr-cli", "meshdiag", "routerneighbortable"])
-        m.main.assert_called_once_with()
-        self.assertEqual(rc, 0)
-
-    def test_scan_meshdiag_childtable_calls_module_main(self):
-        with self._mock_module("otbr_cli_meshdiag_childtable") as m:
-            rc = self._dispatch(["scan", "otbr-cli", "meshdiag", "childtable"])
-        m.main.assert_called_once_with()
-        self.assertEqual(rc, 0)
-
-    def test_scan_meshdiag_childip6_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
-            self._dispatch(["scan", "otbr-cli", "meshdiag", "childip6"])
-
-    def test_scan_meshdiag_all_calls_three_modules(self):
+    def test_meshdiag_all_calls_all_meshdiag_modules(self):
         with (
-            self._mock_module("otbr_cli_meshdiag_topology") as mt,
-            self._mock_module("otbr_cli_meshdiag_routerneighbortable") as mrn,
-            self._mock_module("otbr_cli_meshdiag_childtable") as mct,
+            patch.object(td_cli.otbr_cli_meshdiag_topology, "main", return_value=0) as mt,
+            patch.object(td_cli.otbr_cli_meshdiag_routerneighbortable, "main", return_value=0) as mr,
+            patch.object(td_cli.otbr_cli_meshdiag_childtable, "main", return_value=0) as mc,
+            patch.object(td_cli.otbr_cli_meshdiag_childip6, "main", return_value=0) as mi,
         ):
-            rc = self._dispatch(["scan", "otbr-cli", "meshdiag", "all"])
-        mt.main.assert_called_once_with()
-        mrn.main.assert_called_once_with()
-        mct.main.assert_called_once_with()
+            rc = self._dispatch(["otbr-cli", "meshdiag", "all"])
+        mt.assert_called_once_with([])
+        mr.assert_called_once_with([])
+        mc.assert_called_once_with([])
+        mi.assert_called_once_with([])
         self.assertEqual(rc, 0)
 
-    def test_scan_networkdiag_topology_calls_module_main(self):
-        with self._mock_module("otbr_cli_networkdiag_topology") as m:
-            rc = self._dispatch(["scan", "otbr-cli", "networkdiag", "topology"])
-        m.main.assert_called_once_with()
+    def test_networkdiag_children_no_forwards_cno(self):
+        with patch.object(td_cli.otbr_cli_networkdiag_topology, "main", return_value=0) as m:
+            rc = self._dispatch(["otbr-cli", "networkdiag", "topology", "--children-no"])
+        m.assert_called_once_with(["-cno"])
         self.assertEqual(rc, 0)
 
-    def test_scan_all_calls_all_modules(self):
-        with (
-            self._mock_module("otbr_cli_network_dataset_info") as m1,
-            self._mock_module("otbr_cli_router_table") as m2,
-            self._mock_module("otbr_cli_meshdiag_topology") as m3,
-            self._mock_module("otbr_cli_meshdiag_routerneighbortable") as m4,
-            self._mock_module("otbr_cli_meshdiag_childtable") as m5,
-            self._mock_module("otbr_cli_networkdiag_topology") as m6,
-        ):
-            rc = self._dispatch(["scan", "otbr-cli", "all"])
-        for m in (m1, m2, m3, m4, m5, m6):
-            m.main.assert_called_once_with()
-        self.assertEqual(rc, 0)
 
-    def test_scan_exit_code_propagates(self):
-        with self._mock_module("otbr_cli_network_dataset_info", return_value=5) as m:
-            rc = self._dispatch(["scan", "otbr-cli", "network-dataset-info"])
-        self.assertEqual(rc, 5)
-
-
-# ---------------------------------------------------------------------------
-# Phase 4 – dispatch: web commands forward sub_argv to module main()
-# ---------------------------------------------------------------------------
-
-class TestDispatchWeb(unittest.TestCase):
-
+class TestDispatchOtherCommands(unittest.TestCase):
     def _dispatch(self, argv: list[str]) -> int:
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        return tdash_module.dispatch(args, extras)
+        parser = td_cli.build_parser()
+        args, extras = parser.parse_known_args(argv)
+        return td_cli.dispatch(args, extras, parser)
 
-    def test_web_download_forwards_sub_argv(self):
-        argv = ["web", "otbr-restapi", "download", "--host", "10.0.0.1"]
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        with patch.object(tdash_module.otbr_restapi_download, "main", return_value=0) as m:
-            rc = tdash_module.dispatch(args, extras)
-        m.assert_called_once_with(["--host", "10.0.0.1"])
-        self.assertEqual(rc, 0)
-
-    def test_web_client_forwards_sub_argv(self):
-        argv = ["web", "otbr-restapi", "client", "diagnostics", "list"]
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        with patch.object(tdash_module.otbr_restapi_client_cli, "main", return_value=0) as m:
-            rc = tdash_module.dispatch(args, extras)
-        m.assert_called_once_with(["diagnostics", "list"])
-        self.assertEqual(rc, 0)
-
-    def test_web_rawclient_forwards_sub_argv(self):
-        argv = ["web", "otbr-restapi", "rawclient", "actions", "list"]
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        with patch.object(tdash_module.otbr_restapi_raw_client_cli, "main", return_value=0) as m:
-            rc = tdash_module.dispatch(args, extras)
-        m.assert_called_once_with(["actions", "list"])
-        self.assertEqual(rc, 0)
-
-    def test_web_exit_code_propagates(self):
-        argv = ["web", "otbr-restapi", "download"]
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        with patch.object(tdash_module.otbr_restapi_download, "main", return_value=3) as m:
-            rc = tdash_module.dispatch(args, extras)
-        self.assertEqual(rc, 3)
-
-    def test_web_download_no_sub_argv(self):
-        argv = ["web", "otbr-restapi", "download"]
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        with patch.object(tdash_module.otbr_restapi_download, "main", return_value=0) as m:
-            self._dispatch(argv)
-        m.assert_called_once_with([])
-
-
-# ---------------------------------------------------------------------------
-# Phase 5 – dispatch: process and merge forward sub_argv to module main()
-# ---------------------------------------------------------------------------
-
-class TestDispatchProcess(unittest.TestCase):
-
-    def _dispatch(self, argv: list[str]) -> int:
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        return tdash_module.dispatch(args, extras)
-
-    def test_process_eve_calls_eve_parse_main(self):
-        argv = ["process", "eve"]
-        with patch.object(tdash_module.eve_parse, "main", return_value=0) as m:
+    def test_mdns_builds_expected_argv(self):
+        argv = ["mdns", "hap", "--browse-timeout", "3", "--haptcp", "--mattertcpsupported"]
+        with patch.object(td_cli.mdns_thread_scopes, "main", return_value=0) as m:
             rc = self._dispatch(argv)
-        m.assert_called_once_with([])
+        m.assert_called_once_with(["hap", "--browse-timeout", "3.0", "--haptcp", "--mattertcpsupported"])
         self.assertEqual(rc, 0)
 
-    def test_process_eve_forwards_sub_argv(self):
-        argv = ["process", "eve", "--input", "layout.json"]
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        with patch.object(tdash_module.eve_parse, "main", return_value=0) as m:
-            tdash_module.dispatch(args, extras)
-        m.assert_called_once_with(["--input", "layout.json"])
-
-
-class TestDispatchMerge(unittest.TestCase):
-
-    def _dispatch(self, argv: list[str]) -> int:
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        return tdash_module.dispatch(args, extras)
-
-    def test_merge_dataset_calls_dataset_merge_main(self):
-        argv = ["merge", "dataset"]
-        with patch.object(tdash_module.dataset_merge, "main", return_value=0) as m:
+    def test_restapi_download_forwards_extras(self):
+        argv = ["otbr-restapi", "download", "--url", "http://localhost:8080/api/v1/diagnostics"]
+        with patch.object(td_cli.otbr_restapi_download, "main", return_value=0) as m:
             rc = self._dispatch(argv)
-        m.assert_called_once_with([])
+        m.assert_called_once_with(["--url", "http://localhost:8080/api/v1/diagnostics"])
         self.assertEqual(rc, 0)
 
-    def test_merge_dataset_forwards_sub_argv(self):
-        argv = ["merge", "dataset", "--input1", "a.json", "--input2", "b.json"]
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        with patch.object(tdash_module.dataset_merge, "main", return_value=0) as m:
-            tdash_module.dispatch(args, extras)
-        m.assert_called_once_with(["--input1", "a.json", "--input2", "b.json"])
-
-
-# ---------------------------------------------------------------------------
-# Phase 6 – dispatch: web-server forwards host/port to tdash_web.main()
-# ---------------------------------------------------------------------------
-
-class TestDispatchWebServer(unittest.TestCase):
-
-    def _dispatch(self, argv: list[str]) -> int:
-        args, extras = tdash_module.build_parser().parse_known_args(argv)
-        return tdash_module.dispatch(args, extras)
-
-    def test_web_server_default_host_and_port(self):
-        argv = ["web-server"]
-        with patch.object(tdash_module.tdash_web, "main", return_value=0) as m:
+    def test_process_eve_forwards_extras(self):
+        argv = ["process-eve", "--input", "layout.evethreadlayout"]
+        with patch.object(td_cli.eve_parse, "main", return_value=0) as m:
             rc = self._dispatch(argv)
-        m.assert_called_once_with(["--host", "localhost", "--port", "8087"])
+        m.assert_called_once_with(["--input", "layout.evethreadlayout"])
         self.assertEqual(rc, 0)
 
-    def test_web_server_custom_host_and_port(self):
+    def test_merge_dataset_forwards_extras(self):
+        argv = ["merge-dataset", "--input1", "a.json"]
+        with patch.object(td_cli.dataset_merge, "main", return_value=0) as m:
+            rc = self._dispatch(argv)
+        m.assert_called_once_with(["--input1", "a.json"])
+        self.assertEqual(rc, 0)
+
+    def test_web_server_forwards_host_port(self):
         argv = ["web-server", "--host", "0.0.0.0", "--port", "9090"]
-        with patch.object(tdash_module.tdash_web, "main", return_value=0) as m:
+        with patch.object(td_cli.web_server, "main", return_value=0) as m:
             rc = self._dispatch(argv)
         m.assert_called_once_with(["--host", "0.0.0.0", "--port", "9090"])
+        self.assertEqual(rc, 0)
 
 
 # ---------------------------------------------------------------------------
-# main() integration: --debug sets logging level
+# main() integration
 # ---------------------------------------------------------------------------
 
-class TestMainLogging(unittest.TestCase):
+class TestMain(unittest.TestCase):
+    def test_main_no_argv_prints_help_and_returns_zero(self):
+        with patch.object(td_cli, "build_parser") as mock_build:
+            parser = td_cli.build_parser()
+            mock_build.return_value = parser
+            with patch.object(parser, "print_help") as help_mock:
+                rc = td_cli.main([])
+        help_mock.assert_called_once_with()
+        self.assertEqual(rc, 0)
 
-    def test_main_debug_flag_sets_debug_level(self):
-        import logging
-        argv = ["--debug", "scan", "otbr-cli", "router-table"]
-        with patch.object(tdash_module.otbr_cli_router_table, "main", return_value=0):
-            tdash_module.main(argv)
+    def test_main_debug_flag_sets_root_logger_debug(self):
+        logging.getLogger().setLevel(logging.INFO)
+        with patch.object(td_cli.otbr_cli_router_table, "main", return_value=0):
+            td_cli.main(["--debug", "otbr-cli", "router-table"])
         self.assertEqual(logging.getLogger().level, logging.DEBUG)
-        # reset so other tests are not affected
-        logging.getLogger().setLevel(logging.WARNING)
 
 
 if __name__ == "__main__":

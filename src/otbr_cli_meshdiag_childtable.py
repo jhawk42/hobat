@@ -8,6 +8,7 @@ from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from otbr_cli_router_table import get_router_table_data
 from extaddr_device_label_map import extaddr_device_label_mapping_load
 from util_ot_ctl import run_ot_ctl_stdio
+from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
 
 
 def _yes_no_to_bool(value):
@@ -165,8 +166,9 @@ def get_meshdiag_childtables(extaddr_map):
 
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
 
-    extaddr_json_filename = EXTADDR_DEVICE_LABEL_MAP_FILENAME
+    extaddr_json_filename = data_file_path(EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir)
 
     if os.path.exists(extaddr_json_filename):
         logging.info(f"Loading extended address to device label mapping from {extaddr_json_filename}...")
@@ -177,7 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     router_child_tables = get_meshdiag_childtables(extaddr_map)
 
-    output_filename = "td-otbr-cli-meshdiag-router-childtables.json"
+    output_filename = data_file_path("td-otbr-cli-meshdiag-router-childtables.json", td_data_dir)
     with open(output_filename, "w") as f:
         json.dump(router_child_tables, f, indent=4)
 
