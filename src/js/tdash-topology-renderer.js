@@ -1,16 +1,27 @@
-import { VIS_OPTIONS, EDGE_CATEGORY_ROUTER_NEIGHBOR } from './tdash-constants.js';
 import {
-  toText, mergeForDisplay, flattenObjectEntries,
-  shouldExcludeDetailPath, sortDetailsWithPriority,
-  formatValue, areNodeIdsEquivalent
-} from './tdash-utils.js';
+  VIS_OPTIONS,
+  EDGE_CATEGORY_ROUTER_NEIGHBOR,
+} from "./tdash-constants.js";
 import {
-  computeTopologyCapabilities, updateFilterOptionVisibility,
-  isNodeVisibleByFilter, isNodeVisibleByDiagnosticFilter,
-  edgeMatchesLinkFilter, isRouterNeighborDiagnosticMode,
-  routerNeighborRowMatchesDiagnosticFilter, normalizeLinkCategories
-} from './tdash-filters.js';
-import { runAdaptor } from './tdash-adaptors.js';
+  toText,
+  mergeForDisplay,
+  flattenObjectEntries,
+  shouldExcludeDetailPath,
+  sortDetailsWithPriority,
+  formatValue,
+  areNodeIdsEquivalent,
+} from "./tdash-utils.js";
+import {
+  computeTopologyCapabilities,
+  updateFilterOptionVisibility,
+  isNodeVisibleByFilter,
+  isNodeVisibleByDiagnosticFilter,
+  edgeMatchesLinkFilter,
+  isRouterNeighborDiagnosticMode,
+  routerNeighborRowMatchesDiagnosticFilter,
+  normalizeLinkCategories,
+} from "./tdash-filters.js";
+import { runAdaptor } from "./tdash-adaptors.js";
 
 // ── Module-level state ────────────────────────────────────────────────────────
 
@@ -21,23 +32,35 @@ let _animationEnabled = false;
 
 // ── Exported accessors / setters ──────────────────────────────────────────────
 
-export function getVisNetwork() { return _visNetwork; }
-export function getTopologyFilterHandlers() { return _topologyFilterHandlers; }
-export function setAutoZoomEnabled(val) { _autoZoomEnabled = val; }
-export function setAnimationEnabled(val) { _animationEnabled = val; }
-export function isAutoZoomEnabled() { return _autoZoomEnabled; }
-export function isAnimationEnabled() { return _animationEnabled; }
+export function getVisNetwork() {
+  return _visNetwork;
+}
+export function getTopologyFilterHandlers() {
+  return _topologyFilterHandlers;
+}
+export function setAutoZoomEnabled(val) {
+  _autoZoomEnabled = val;
+}
+export function setAnimationEnabled(val) {
+  _animationEnabled = val;
+}
+export function isAutoZoomEnabled() {
+  return _autoZoomEnabled;
+}
+export function isAnimationEnabled() {
+  return _animationEnabled;
+}
 
 // ── Main renderer ─────────────────────────────────────────────────────────────
 
 export function renderTopologyForDataset(dataset, physicsEnabled) {
-  const container = document.getElementById('topology-view');
-  const statusEl = document.getElementById('status');
-  const deviceStatsEl = document.getElementById('device_stats');
-  const detailsList = document.getElementById('details-list');
-  const nodeFilterEl = document.getElementById('node-filter');
-  const linkFilterEl = document.getElementById('link-filter');
-  const diagnosticFilterEl = document.getElementById('diagnostic-filter');
+  const container = document.getElementById("topology-view");
+  const statusEl = document.getElementById("status");
+  const deviceStatsEl = document.getElementById("device_stats");
+  const detailsList = document.getElementById("details-list");
+  const nodeFilterEl = document.getElementById("node-filter");
+  const linkFilterEl = document.getElementById("link-filter");
+  const diagnosticFilterEl = document.getElementById("diagnostic-filter");
   let lastStatusCounts = null;
 
   // Destroy previous network instance to free memory
@@ -46,31 +69,44 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     _visNetwork = null;
     _topologyFilterHandlers = null;
   }
-  container.innerHTML = '';
-  detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+  container.innerHTML = "";
+  detailsList.innerHTML = "<li>Click a node to view its properties.</li>";
 
   let adaptorResult;
   try {
     adaptorResult = runAdaptor(dataset);
   } catch (err) {
     statusEl.textContent = `Topology error: ${err.message}`;
-    deviceStatsEl.textContent = 'Devices: 0';
+    deviceStatsEl.textContent = "Devices: 0";
     return;
   }
 
-  const { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames } = adaptorResult;
+  const {
+    nodeData,
+    edgeData,
+    nodeMap,
+    rawByIdForDetails,
+    routerNeighborByRloc16,
+    sourceNames,
+  } = adaptorResult;
 
   // ── Phase 5.1: compute and apply dynamic filter option visibility ────────
   const capabilities = computeTopologyCapabilities(nodeData, edgeData);
   dataset.capabilities = capabilities;
-  updateFilterOptionVisibility(capabilities, 'topology');
+  updateFilterOptionVisibility(capabilities, "topology");
 
   const nodesDataset = new vis.DataSet(nodeData);
   const edgesDataset = new vis.DataSet(edgeData);
   const effectiveOptions = physicsEnabled
     ? VIS_OPTIONS
-    : Object.assign({}, VIS_OPTIONS, { physics: Object.assign({}, VIS_OPTIONS.physics, { enabled: false }) });
-  _visNetwork = new vis.Network(container, { nodes: nodesDataset, edges: edgesDataset }, effectiveOptions);
+    : Object.assign({}, VIS_OPTIONS, {
+        physics: Object.assign({}, VIS_OPTIONS.physics, { enabled: false }),
+      });
+  _visNetwork = new vis.Network(
+    container,
+    { nodes: nodesDataset, edges: edgesDataset },
+    effectiveOptions,
+  );
 
   // ── applyFilters ───────────────────────────────────────────────────────
 
@@ -81,15 +117,22 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     let visibleEdgeCount = 0;
 
     nodesDataset.forEach((node) => {
-      if (isNodeVisibleByFilter(node, nodeFilterMode) && isNodeVisibleByDiagnosticFilter(node, diagnosticFilterMode)) {
+      if (
+        isNodeVisibleByFilter(node, nodeFilterMode) &&
+        isNodeVisibleByDiagnosticFilter(node, diagnosticFilterMode)
+      ) {
         visibleNodeIds.add(node.id);
       }
     });
 
     // Pull in child nodes when routers-with-children filter is active
-    if (nodeFilterMode === 'routers-with-children') {
+    if (nodeFilterMode === "routers-with-children") {
       edgesDataset.forEach((edge) => {
-        if (edge.isParentChild === true && edgeMatchesLinkFilter(edge, linkFilterMode) && visibleNodeIds.has(edge.from)) {
+        if (
+          edge.isParentChild === true &&
+          edgeMatchesLinkFilter(edge, linkFilterMode) &&
+          visibleNodeIds.has(edge.from)
+        ) {
           visibleNodeIds.add(edge.to);
         }
       });
@@ -102,19 +145,33 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
         if (!sourceNode) return;
         const sourceRloc16 = toText(sourceNode.rloc16).toLowerCase();
         const neighborRow = routerNeighborByRloc16.get(sourceRloc16);
-        const neighborEntries = Array.isArray(neighborRow?.router_neighbor_table) ? neighborRow.router_neighbor_table : [];
+        const neighborEntries = Array.isArray(
+          neighborRow?.router_neighbor_table,
+        )
+          ? neighborRow.router_neighbor_table
+          : [];
         neighborEntries
-          .filter((neighbor) => routerNeighborRowMatchesDiagnosticFilter(neighbor, diagnosticFilterMode))
+          .filter((neighbor) =>
+            routerNeighborRowMatchesDiagnosticFilter(
+              neighbor,
+              diagnosticFilterMode,
+            ),
+          )
           .forEach((neighbor) => {
-            const targetId = toText(neighbor.rloc16) || toText(neighbor.extaddr);
+            const targetId =
+              toText(neighbor.rloc16) || toText(neighbor.extaddr);
             if (!targetId) return;
             matchedTargetNodeIds.add(targetId);
             visibleNodeIds.add(targetId);
             edgesDataset.forEach((edge) => {
               const cats = normalizeLinkCategories(edge.linkCategories);
               if (!cats.includes(EDGE_CATEGORY_ROUTER_NEIGHBOR)) return;
-              if ((areNodeIdsEquivalent(edge.from, sourceNodeId) && areNodeIdsEquivalent(edge.to, targetId))
-                || (areNodeIdsEquivalent(edge.to, sourceNodeId) && areNodeIdsEquivalent(edge.from, targetId))) {
+              if (
+                (areNodeIdsEquivalent(edge.from, sourceNodeId) &&
+                  areNodeIdsEquivalent(edge.to, targetId)) ||
+                (areNodeIdsEquivalent(edge.to, sourceNodeId) &&
+                  areNodeIdsEquivalent(edge.from, targetId))
+              ) {
                 forcedVisibleEdgeIds.add(edge.id);
               }
             });
@@ -123,14 +180,20 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     }
 
     nodesDataset.forEach((node) => {
-      nodesDataset.update({ id: node.id, hidden: !visibleNodeIds.has(node.id) });
+      nodesDataset.update({
+        id: node.id,
+        hidden: !visibleNodeIds.has(node.id),
+      });
     });
 
     edgesDataset.forEach((edge) => {
-      const endpointsVisible = visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
-      const shouldShow = edge.baseHidden !== true
-        && endpointsVisible
-        && (edgeMatchesLinkFilter(edge, linkFilterMode) || forcedVisibleEdgeIds.has(edge.id));
+      const endpointsVisible =
+        visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to);
+      const shouldShow =
+        edge.baseHidden !== true &&
+        endpointsVisible &&
+        (edgeMatchesLinkFilter(edge, linkFilterMode) ||
+          forcedVisibleEdgeIds.has(edge.id));
       edgesDataset.update({ id: edge.id, hidden: !shouldShow });
       if (shouldShow) visibleEdgeCount += 1;
     });
@@ -139,45 +202,58 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
       visibleNodeCount: visibleNodeIds.size,
       visibleEdgeCount,
       matchedTargetNodeCount: matchedTargetNodeIds.size,
-      forcedVisibleLinkCount: forcedVisibleEdgeIds.size
+      forcedVisibleLinkCount: forcedVisibleEdgeIds.size,
     };
   }
 
   // ── Status line ────────────────────────────────────────────────────────
 
   function formatTopologyScale() {
-    if (!_visNetwork || typeof _visNetwork.getScale !== 'function') return '';
+    if (!_visNetwork || typeof _visNetwork.getScale !== "function") return "";
     const scale = _visNetwork.getScale();
-    if (!Number.isFinite(scale)) return '';
+    if (!Number.isFinite(scale)) return "";
     return ` Scale: ${scale.toFixed(2)}x.`;
   }
 
   function updateStatus(counts) {
     lastStatusCounts = counts;
-    const { visibleNodeCount, visibleEdgeCount, matchedTargetNodeCount = 0, forcedVisibleLinkCount = 0 } = counts;
-    const nodeFilterLabel = nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
-    const linkFilterLabel = linkFilterEl.options[linkFilterEl.selectedIndex].text;
-    const diagFilterLabel = diagnosticFilterEl.options[diagnosticFilterEl.selectedIndex].text;
-    const neighborSuffix = isRouterNeighborDiagnosticMode(diagnosticFilterEl.value)
-      ? ` Neighbor Match: targets ${matchedTargetNodeCount}, links ${forcedVisibleLinkCount}.` : '';
+    const {
+      visibleNodeCount,
+      visibleEdgeCount,
+      matchedTargetNodeCount = 0,
+      forcedVisibleLinkCount = 0,
+    } = counts;
+    const nodeFilterLabel =
+      nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
+    const linkFilterLabel =
+      linkFilterEl.options[linkFilterEl.selectedIndex].text;
+    const diagFilterLabel =
+      diagnosticFilterEl.options[diagnosticFilterEl.selectedIndex].text;
+    const neighborSuffix = isRouterNeighborDiagnosticMode(
+      diagnosticFilterEl.value,
+    )
+      ? ` Neighbor Match: targets ${matchedTargetNodeCount}, links ${forcedVisibleLinkCount}.`
+      : "";
     deviceStatsEl.textContent = `Devices: ${nodeData.length}`;
-    statusEl.textContent = `Loaded ${sourceNames.join(', ')}. Total: ${nodeData.length} nodes, ${edgeData.length} links. `
-      + `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. `
-      + `Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagFilterLabel}.${neighborSuffix}${formatTopologyScale()}`;
+    statusEl.textContent =
+      `Loaded ${sourceNames.join(", ")}. Total: ${nodeData.length} nodes, ${edgeData.length} links. ` +
+      `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. ` +
+      `Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagFilterLabel}.${neighborSuffix}${formatTopologyScale()}`;
   }
 
   // ── Node detail click handler ──────────────────────────────────────────
 
-  _visNetwork.on('click', (params) => {
+  _visNetwork.on("click", (params) => {
     if (params.nodes.length === 0) {
-      detailsList.innerHTML = '<li>Click a node to view its properties.</li>';
+      detailsList.innerHTML = "<li>Click a node to view its properties.</li>";
       return;
     }
     const selectedId = params.nodes[0];
     const node = nodeMap.get(selectedId);
-    detailsList.innerHTML = '';
+    detailsList.innerHTML = "";
     if (!node) {
-      detailsList.innerHTML = '<li>No details available for selected node.</li>';
+      detailsList.innerHTML =
+        "<li>No details available for selected node.</li>";
       return;
     }
 
@@ -187,32 +263,39 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
         unified_id: selectedId,
         graph_link_count: (function () {
           let deg = 0;
-          edgesDataset.forEach((e) => { if (e.from === selectedId || e.to === selectedId) deg += 1; });
+          edgesDataset.forEach((e) => {
+            if (e.from === selectedId || e.to === selectedId) deg += 1;
+          });
           return deg;
         })(),
-        is_router: node.shape !== 'ellipse',
-        has_children: routerIdsWithChildrenRef ? routerIdsWithChildrenRef.has(selectedId) : undefined
-      }
+        is_router: node.shape !== "ellipse",
+        has_children: routerIdsWithChildrenRef
+          ? routerIdsWithChildrenRef.has(selectedId)
+          : undefined,
+      },
     };
 
     // Router-neighbor table gets its own top-level li for readability
     if (Array.isArray(rawSource.router_neighbor_table)) {
-      const li = document.createElement('li');
+      const li = document.createElement("li");
       li.textContent = `router_neighbor_table: ${formatValue(rawSource.router_neighbor_table)}`;
       detailsList.appendChild(li);
     }
 
     const mergedDetails = mergeForDisplay(rawSource, graphDetails);
     const details = sortDetailsWithPriority(
-      flattenObjectEntries(mergedDetails).filter(([key]) => !shouldExcludeDetailPath(key))
+      flattenObjectEntries(mergedDetails).filter(
+        ([key]) => !shouldExcludeDetailPath(key),
+      ),
     );
 
     if (details.length === 0) {
-      detailsList.innerHTML = '<li>No details available for selected node.</li>';
+      detailsList.innerHTML =
+        "<li>No details available for selected node.</li>";
       return;
     }
     details.forEach(([key, value]) => {
-      const li = document.createElement('li');
+      const li = document.createElement("li");
       li.textContent = `${key}: ${formatValue(value)}`;
       detailsList.appendChild(li);
     });
@@ -220,16 +303,16 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
 
   // Capture routerIdsWithChildren for detail panel
   const routerIdsWithChildrenRef = new Set(
-    nodeData.filter((n) => n.hasChildren).map((n) => n.id)
+    nodeData.filter((n) => n.hasChildren).map((n) => n.id),
   );
 
   function refreshStatusScale() {
     if (lastStatusCounts) updateStatus(lastStatusCounts);
   }
 
-  _visNetwork.on('zoom', refreshStatusScale);
-  _visNetwork.on('animationFinished', refreshStatusScale);
-  _visNetwork.once('stabilized', refreshStatusScale);
+  _visNetwork.on("zoom", refreshStatusScale);
+  _visNetwork.on("animationFinished", refreshStatusScale);
+  _visNetwork.once("stabilized", refreshStatusScale);
 
   // ── Store filter handlers so the toggle/filter wiring can call them ──
   _topologyFilterHandlers = {
@@ -243,11 +326,15 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
           }
         });
       }
-    }
+    },
   };
 
   // ── Initial filter pass ────────────────────────────────────────────────
-  const initial = applyFilters(nodeFilterEl.value, linkFilterEl.value, diagnosticFilterEl.value);
+  const initial = applyFilters(
+    nodeFilterEl.value,
+    linkFilterEl.value,
+    diagnosticFilterEl.value,
+  );
   updateStatus(initial);
   _topologyFilterHandlers.fitIfEnabled();
 }

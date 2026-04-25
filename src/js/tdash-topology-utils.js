@@ -1,9 +1,11 @@
 import {
-  toText, toFiniteNumber,
-  getCanonicalExtaddr, getCanonicalOmrIpv6Address
-} from './tdash-utils.js';
-import { normalizeLinkCategories } from './tdash-filters.js';
-import { EDGE_LQ_STYLES } from './tdash-constants.js';
+  toText,
+  toFiniteNumber,
+  getCanonicalExtaddr,
+  getCanonicalOmrIpv6Address,
+} from "./tdash-utils.js";
+import { normalizeLinkCategories } from "./tdash-filters.js";
+import { EDGE_LQ_STYLES } from "./tdash-constants.js";
 
 // ── Node-id selection ─────────────────────────────────────────────────────────
 
@@ -22,21 +24,22 @@ export function chooseNodeId(node, fallbackPrefix, index) {
 // ── Node label builder ────────────────────────────────────────────────────────
 
 export function buildLabel(node) {
-  const nodeName = toText(node.device_label) || toText(node.name) || 'Unknown node';
-  const rloc16 = toText(node.rloc16) || 'rloc16:n/a';
+  const nodeName =
+    toText(node.device_label) || toText(node.name) || "Unknown node";
+  const rloc16 = toText(node.rloc16) || "rloc16:n/a";
   return `${nodeName}\n${rloc16}`;
 }
 
 export function isUnknownNodeName(nodeName) {
-  return toText(nodeName).toLowerCase().startsWith('unknown');
+  return toText(nodeName).toLowerCase().startsWith("unknown");
 }
 
 // ── Link Quality style helpers ───────────────────────────────────────────────
 
 export function lqStyleFromField(field) {
-  if (field === '3_links') return EDGE_LQ_STYLES.high;
-  if (field === '2_links') return EDGE_LQ_STYLES.medium;
-  if (field === '1_links') return EDGE_LQ_STYLES.low;
+  if (field === "3_links") return EDGE_LQ_STYLES.high;
+  if (field === "2_links") return EDGE_LQ_STYLES.medium;
+  if (field === "1_links") return EDGE_LQ_STYLES.low;
   return EDGE_LQ_STYLES.none;
 }
 
@@ -66,21 +69,25 @@ export function lqStyleFromAvgLqi(avgLqi, scale) {
 export function addEdge(edgeMap, edgeData, from, to, style) {
   if (!from || !to || from === to) return;
   const suffix = toText(style.edgeKeySuffix);
-  const keyBase = [from, to].sort().join('|');
+  const keyBase = [from, to].sort().join("|");
   const key = suffix ? `${keyBase}|${suffix}` : keyBase;
   const existing = edgeMap.get(key);
   if (existing) {
-    if (Number.isFinite(style.width)) existing.width = Math.max(existing.width || 0, style.width);
+    if (Number.isFinite(style.width))
+      existing.width = Math.max(existing.width || 0, style.width);
     const merged = new Set([
       ...normalizeLinkCategories(existing.linkCategories),
-      ...normalizeLinkCategories(style.linkCategories)
+      ...normalizeLinkCategories(style.linkCategories),
     ]);
     existing.linkCategories = Array.from(merged);
     if (style.isParentChild === true) existing.isParentChild = true;
-    if (style.lqLevel !== undefined && (existing.lqLevel === undefined || style.lqLevel > existing.lqLevel)) {
+    if (
+      style.lqLevel !== undefined &&
+      (existing.lqLevel === undefined || style.lqLevel > existing.lqLevel)
+    ) {
       existing.lqLevel = style.lqLevel;
-      existing.color   = style.color;
-      existing.dashes  = style.dashes;
+      existing.color = style.color;
+      existing.dashes = style.dashes;
     }
     return;
   }
@@ -97,17 +104,17 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
 
 export function buildMainRouterRloc16(routeId) {
   const n = toFiniteNumber(routeId);
-  if (!Number.isFinite(n)) return '';
-  return `0x${(n << 10).toString(16).padStart(4, '0')}`;
+  if (!Number.isFinite(n)) return "";
+  return `0x${(n << 10).toString(16).padStart(4, "0")}`;
 }
 
 export function buildChildRloc16(parentRloc16, childId) {
   const parentText = toText(parentRloc16).toLowerCase();
   const childNum = toFiniteNumber(childId);
-  if (!parentText.startsWith('0x') || !Number.isFinite(childNum)) return '';
+  if (!parentText.startsWith("0x") || !Number.isFinite(childNum)) return "";
   const parentNum = Number.parseInt(parentText, 16);
-  if (!Number.isFinite(parentNum)) return '';
-  return `0x${(parentNum + childNum).toString(16).padStart(4, '0')}`;
+  if (!Number.isFinite(parentNum)) return "";
+  return `0x${(parentNum + childNum).toString(16).padStart(4, "0")}`;
 }
 
 // ── Router-neighbor statistics ────────────────────────────────────────────────
@@ -115,12 +122,17 @@ export function buildChildRloc16(parentRloc16, childId) {
 export function computeRouterNeighborStats(routerNeighborTable) {
   const rows = Array.isArray(routerNeighborTable) ? routerNeighborTable : [];
   let maxFrame, maxMsg, minRss, maxRss;
-  let hasVeryLow = false, hasLow = false, hasMedium = false, hasHigh = false;
+  let hasVeryLow = false,
+    hasLow = false,
+    hasMedium = false,
+    hasHigh = false;
   rows.forEach((row) => {
     const fp = toFiniteNumber(row?.err_rate_frame_pct);
-    if (Number.isFinite(fp)) maxFrame = Number.isFinite(maxFrame) ? Math.max(maxFrame, fp) : fp;
+    if (Number.isFinite(fp))
+      maxFrame = Number.isFinite(maxFrame) ? Math.max(maxFrame, fp) : fp;
     const mp = toFiniteNumber(row?.err_rate_msg_pct);
-    if (Number.isFinite(mp)) maxMsg = Number.isFinite(maxMsg) ? Math.max(maxMsg, mp) : mp;
+    if (Number.isFinite(mp))
+      maxMsg = Number.isFinite(maxMsg) ? Math.max(maxMsg, mp) : mp;
     const rss = toFiniteNumber(row?.rss_ave);
     if (Number.isFinite(rss)) {
       minRss = Number.isFinite(minRss) ? Math.min(minRss, rss) : rss;
@@ -139,7 +151,7 @@ export function computeRouterNeighborStats(routerNeighborTable) {
     router_neighbor_has_rss_very_low: hasVeryLow,
     router_neighbor_has_rss_low: hasLow,
     router_neighbor_has_rss_medium: hasMedium,
-    router_neighbor_has_rss_high: hasHigh
+    router_neighbor_has_rss_high: hasHigh,
   };
 }
 
@@ -156,69 +168,91 @@ export function groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap) {
   }
   const connectedAnchorId = (function chooseConnectedAnchorId() {
     const knownCandidates = nodeData
-      .filter((n) => n.group !== 'unknown' && (nodeDegree.get(n.id) || 0) > 0)
-      .sort((a, b) => (nodeDegree.get(b.id) || 0) - (nodeDegree.get(a.id) || 0));
-    return knownCandidates.length > 0 ? knownCandidates[0].id : '';
+      .filter((n) => n.group !== "unknown" && (nodeDegree.get(n.id) || 0) > 0)
+      .sort(
+        (a, b) => (nodeDegree.get(b.id) || 0) - (nodeDegree.get(a.id) || 0),
+      );
+    return knownCandidates.length > 0 ? knownCandidates[0].id : "";
   })();
 
   function clusterIsolatedNodeIds(nodeIds, options = {}) {
     if (nodeIds.length === 0) return;
-    const {
-      clusterLength = 80,
-      anchorLength = 180,
-      anchorId = ''
-    } = options;
+    const { clusterLength = 80, anchorLength = 180, anchorId = "" } = options;
 
     if (nodeIds.length > 1) {
       const anchorNodeId = nodeIds[0];
       for (let i = 1; i < nodeIds.length; i += 1) {
         addEdge(edgeMap, edgeData, anchorNodeId, nodeIds[i], {
-          hidden: true, physics: true, length: clusterLength, color: { opacity: 0 }
+          hidden: true,
+          physics: true,
+          length: clusterLength,
+          color: { opacity: 0 },
         });
       }
     }
 
     if (anchorId) {
       addEdge(edgeMap, edgeData, nodeIds[0], anchorId, {
-        hidden: true, physics: true, length: anchorLength, color: { opacity: 0 }
+        hidden: true,
+        physics: true,
+        length: anchorLength,
+        color: { opacity: 0 },
       });
     }
   }
 
   const unknownIds = nodeData
-    .filter((n) => n.group === 'unknown' && (nodeDegree.get(n.id) || 0) === 0)
+    .filter((n) => n.group === "unknown" && (nodeDegree.get(n.id) || 0) === 0)
     .map((n) => n.id);
-  clusterIsolatedNodeIds(unknownIds, { clusterLength: 60, anchorLength: 180, anchorId: connectedAnchorId });
+  clusterIsolatedNodeIds(unknownIds, {
+    clusterLength: 60,
+    anchorLength: 180,
+    anchorId: connectedAnchorId,
+  });
 
   const knownIsolatedIds = nodeData
-    .filter((n) => n.group !== 'unknown' && (nodeDegree.get(n.id) || 0) === 0)
+    .filter((n) => n.group !== "unknown" && (nodeDegree.get(n.id) || 0) === 0)
     .map((n) => n.id);
-  clusterIsolatedNodeIds(knownIsolatedIds, { clusterLength: 110, anchorLength: 240, anchorId: connectedAnchorId });
+  clusterIsolatedNodeIds(knownIsolatedIds, {
+    clusterLength: 110,
+    anchorLength: 240,
+    anchorId: connectedAnchorId,
+  });
 
   return nodeDegree;
 }
 
 // ── Vis-node data builder ─────────────────────────────────────────────────────
 
-export function buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, labelFn) {
+export function buildVisNodeData(
+  nodeMap,
+  routerIdsWithChildren,
+  routerNeighborByRloc16,
+  labelFn,
+) {
   return Array.from(nodeMap.values()).map((node) => {
     const displayName = toText(node.device_label) || toText(node.name);
     const unknown = isUnknownNodeName(displayName);
-    const effectiveShape = unknown ? 'ellipse' : node.shape;
+    const effectiveShape = unknown ? "ellipse" : node.shape;
     const rloc16Text = toText(node.rloc16).toLowerCase();
     const neighborStats = computeRouterNeighborStats(
-      routerNeighborByRloc16.get(rloc16Text)?.router_neighbor_table
+      routerNeighborByRloc16.get(rloc16Text)?.router_neighbor_table,
     );
-    const isRouter = effectiveShape !== 'ellipse';
+    const isRouter = effectiveShape !== "ellipse";
     const hasChildren = routerIdsWithChildren.has(node.id);
-    const isMainRouter = rloc16Text.endsWith('00');
+    const isMainRouter = rloc16Text.endsWith("00");
     const isBorderRouter = isMainRouter && node.br === true;
     let borderWidth = 1;
     let fontSize = 13;
     let widthConstraint = { minimum: 109, maximum: 109 };
     let heightConstraint = { minimum: 41, maximum: 41 };
-    if (isBorderRouter) { borderWidth = 5; fontSize = 19.5; }
-    else if (isRouter) { borderWidth = 3; fontSize = 19.5; }
+    if (isBorderRouter) {
+      borderWidth = 5;
+      fontSize = 19.5;
+    } else if (isRouter) {
+      borderWidth = 3;
+      fontSize = 19.5;
+    }
     if (isRouter) {
       widthConstraint = { minimum: 187, maximum: 187 };
       heightConstraint = { minimum: 77, maximum: 77 };
@@ -228,25 +262,33 @@ export function buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborB
       label: labelFn(node),
       shape: effectiveShape,
       color: node.color,
-      font: { size: fontSize, face: 'monospace', multi: 'md' },
+      font: { size: fontSize, face: "monospace", multi: "md" },
       heightConstraint,
       widthConstraint,
-      group: unknown ? 'unknown' : 'known',
-      isRouter, hasChildren, isMainRouter, isBorderRouter, borderWidth,
+      group: unknown ? "unknown" : "known",
+      isRouter,
+      hasChildren,
+      isMainRouter,
+      isBorderRouter,
+      borderWidth,
       ifindiscards_pct: node.ifindiscards_pct,
       ifinerrors_pct: node.ifinerrors_pct,
       ifouterrors_pct: node.ifouterrors_pct,
       mode_device: node.mode_device,
       partitionidchanges: node.partitionidchanges,
       parentchanges: node.parentchanges,
-      router_neighbor_max_err_rate_frame_pct: neighborStats.router_neighbor_max_err_rate_frame_pct,
-      router_neighbor_max_err_rate_msg_pct: neighborStats.router_neighbor_max_err_rate_msg_pct,
+      router_neighbor_max_err_rate_frame_pct:
+        neighborStats.router_neighbor_max_err_rate_frame_pct,
+      router_neighbor_max_err_rate_msg_pct:
+        neighborStats.router_neighbor_max_err_rate_msg_pct,
       router_neighbor_min_rss_ave: neighborStats.router_neighbor_min_rss_ave,
       router_neighbor_max_rss_ave: neighborStats.router_neighbor_max_rss_ave,
-      router_neighbor_has_rss_very_low: neighborStats.router_neighbor_has_rss_very_low,
+      router_neighbor_has_rss_very_low:
+        neighborStats.router_neighbor_has_rss_very_low,
       router_neighbor_has_rss_low: neighborStats.router_neighbor_has_rss_low,
-      router_neighbor_has_rss_medium: neighborStats.router_neighbor_has_rss_medium,
-      router_neighbor_has_rss_high: neighborStats.router_neighbor_has_rss_high
+      router_neighbor_has_rss_medium:
+        neighborStats.router_neighbor_has_rss_medium,
+      router_neighbor_has_rss_high: neighborStats.router_neighbor_has_rss_high,
     };
   });
 }

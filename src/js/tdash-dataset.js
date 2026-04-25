@@ -1,12 +1,17 @@
-import { DATASET_REGISTRY } from './tdash-dataset-registry.js';
-import { MERGE_STRATEGIES } from './tdash-constants.js';
+import { DATASET_REGISTRY } from "./tdash-dataset-registry.js";
+import { MERGE_STRATEGIES } from "./tdash-constants.js";
 import {
-  toText, isPlainObject, canonicalIdText,
-  getCanonicalExtaddr, normalizeDatasetPayload
-} from './tdash-utils.js';
+  toText,
+  isPlainObject,
+  canonicalIdText,
+  getCanonicalExtaddr,
+  normalizeDatasetPayload,
+} from "./tdash-utils.js";
 import {
-  normalizeRows, mergeRowsByRloc16, mergeRowsByIdentity
-} from './tdash-merge.js';
+  normalizeRows,
+  mergeRowsByRloc16,
+  mergeRowsByIdentity,
+} from "./tdash-merge.js";
 
 // ── Module-level state ────────────────────────────────────────────────────────
 
@@ -27,7 +32,8 @@ function enrichNodeWithStaticLabel(node) {
   // Restapi rows have shape { id, type, attributes: { extAddress, ... } };
   // extAddress lives in attributes, not at the top level.
   let extaddr = getCanonicalExtaddr(node);
-  if (!extaddr && isPlainObject(node.attributes)) extaddr = getCanonicalExtaddr(node.attributes);
+  if (!extaddr && isPlainObject(node.attributes))
+    extaddr = getCanonicalExtaddr(node.attributes);
   if (!extaddr) return node;
   const label = staticExtaddrLabelMap.get(extaddr);
   if (!label) return node;
@@ -70,7 +76,7 @@ export function enrichRawFiles(rawFiles) {
 // ── Core fetch helper ─────────────────────────────────────────────────────────
 
 async function fetchJson(path) {
-  const response = await fetch(path, { cache: 'no-store' });
+  const response = await fetch(path, { cache: "no-store" });
   if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
   return response.json();
 }
@@ -79,7 +85,7 @@ async function fetchJson(path) {
 
 export async function loadStaticLabelMap() {
   try {
-    const data = await fetchJson('td-static-extaddr-device-label.json');
+    const data = await fetchJson("td-static-extaddr-device-label.json");
     if (Array.isArray(data)) {
       data.forEach((entry) => {
         const key = canonicalIdText(entry?.extaddr);
@@ -88,7 +94,10 @@ export async function loadStaticLabelMap() {
       });
     }
   } catch (err) {
-    console.warn('td-static-extaddr-device-label.json could not be loaded:', err);
+    console.warn(
+      "td-static-extaddr-device-label.json could not be loaded:",
+      err,
+    );
   }
 }
 
@@ -102,31 +111,34 @@ export async function loadStaticLabelMap() {
 export async function loadDataset(entryValue) {
   const entry = DATASET_REGISTRY.find((e) => e.value === entryValue);
   if (!entry) {
-    document.getElementById('status').textContent = `Unknown dataset: ${entryValue}`;
-    document.getElementById('device_stats').textContent = 'Devices: 0';
+    document.getElementById("status").textContent =
+      `Unknown dataset: ${entryValue}`;
+    document.getElementById("device_stats").textContent = "Devices: 0";
     return;
   }
 
-  const statusEl = document.getElementById('status');
-  const deviceStatsEl = document.getElementById('device_stats');
+  const statusEl = document.getElementById("status");
+  const deviceStatsEl = document.getElementById("device_stats");
   statusEl.textContent = `Loading ${entry.label}…`;
-  deviceStatsEl.textContent = 'Devices: 0';
+  deviceStatsEl.textContent = "Devices: 0";
 
   // Apply default link-filter for this dataset
-  const linkFilterEl = document.getElementById('link-filter');
+  const linkFilterEl = document.getElementById("link-filter");
   if (entry.defaultLinkFilter) {
     linkFilterEl.value = entry.defaultLinkFilter;
   }
 
   // Fetch all files in parallel (settle so a missing optional file doesn't abort)
-  const settled = await Promise.allSettled(entry.files.map((f) => fetchJson(f)));
+  const settled = await Promise.allSettled(
+    entry.files.map((f) => fetchJson(f)),
+  );
 
   const rawFiles = [];
   const loadedFiles = [];
   const failedFiles = [];
 
   settled.forEach((result, i) => {
-    if (result.status === 'fulfilled') {
+    if (result.status === "fulfilled") {
       rawFiles.push(normalizeDatasetPayload(result.value));
       loadedFiles.push(entry.files[i]);
     } else {
@@ -136,8 +148,8 @@ export async function loadDataset(entryValue) {
   });
 
   if (loadedFiles.length === 0) {
-    statusEl.textContent = `Error: could not load any file for "${entry.label}". Failed: ${failedFiles.join(', ')}`;
-    deviceStatsEl.textContent = 'Devices: 0';
+    statusEl.textContent = `Error: could not load any file for "${entry.label}". Failed: ${failedFiles.join(", ")}`;
+    deviceStatsEl.textContent = "Devices: 0";
     return;
   }
 
@@ -145,12 +157,16 @@ export async function loadDataset(entryValue) {
   let rows;
   if (entry.mergeStrategy === MERGE_STRATEGIES.byRloc16) {
     const groups = rawFiles
-      .map((d, index) => (d !== null ? normalizeRows(d, entry.files[index]) : null))
+      .map((d, index) =>
+        d !== null ? normalizeRows(d, entry.files[index]) : null,
+      )
       .filter((group) => group !== null);
     rows = mergeRowsByRloc16(groups);
   } else if (entry.mergeStrategy === MERGE_STRATEGIES.byIdentity) {
     const groups = rawFiles
-      .map((d, index) => (d !== null ? normalizeRows(d, entry.files[index]) : null))
+      .map((d, index) =>
+        d !== null ? normalizeRows(d, entry.files[index]) : null,
+      )
       .filter((group) => group !== null);
     rows = mergeRowsByIdentity(groups);
   } else {
@@ -161,18 +177,26 @@ export async function loadDataset(entryValue) {
     // For eve_native files the top-level shape is { version, nodes: [...] };
     // For otbr_restapi files the top-level shape is { data: [...] };
     // extract the inner array so the table renderer shows one row per node.
-    const rowSource = (entry.topologyMode === 'eve_native' && firstLoaded && Array.isArray(firstLoaded.nodes))
-      ? firstLoaded.nodes
-      : (entry.topologyMode === 'otbr_restapi' && firstLoaded && Array.isArray(firstLoaded.data))
-      ? firstLoaded.data
-      : firstLoaded;
-    rows = rowSource !== null ? normalizeRows(rowSource, entry.files[firstLoadedIndex]) : [];
+    const rowSource =
+      entry.topologyMode === "eve_native" &&
+      firstLoaded &&
+      Array.isArray(firstLoaded.nodes)
+        ? firstLoaded.nodes
+        : entry.topologyMode === "otbr_restapi" &&
+            firstLoaded &&
+            Array.isArray(firstLoaded.data)
+          ? firstLoaded.data
+          : firstLoaded;
+    rows =
+      rowSource !== null
+        ? normalizeRows(rowSource, entry.files[firstLoadedIndex])
+        : [];
   }
 
   currentDataset = { entry, rawFiles, rows, loadedFiles };
 
   // Warn about any files that failed to load but don't hard-fail
   if (failedFiles.length > 0) {
-    console.warn('Some dataset files could not be loaded:', failedFiles);
+    console.warn("Some dataset files could not be loaded:", failedFiles);
   }
 }

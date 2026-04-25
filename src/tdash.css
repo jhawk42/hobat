@@ -94,7 +94,10 @@ select.filter-disabled {
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .view-toggle-bar button:hover {
@@ -168,13 +171,48 @@ select.filter-disabled {
 }
 
 /* Move vis.js navigation buttons from bottom corners to top corners */
-div.vis-network div.vis-navigation div.vis-button.vis-zoomIn      { bottom: auto; top: 10px; right: 95px; left: auto; }
-div.vis-network div.vis-navigation div.vis-button.vis-zoomOut     { bottom: auto; top: 10px; right: 55px; left: auto; }
-div.vis-network div.vis-navigation div.vis-button.vis-zoomExtends { bottom: auto; top: 10px; right: 15px; left: auto; }
-div.vis-network div.vis-navigation div.vis-button.vis-left        { bottom: auto; top: 50px; right: 95px; left: auto; }
-div.vis-network div.vis-navigation div.vis-button.vis-up          { bottom: auto; top: 50px; right: 55px; left: auto; }
-div.vis-network div.vis-navigation div.vis-button.vis-right       { bottom: auto; top: 50px; right: 15px; left: auto; }
-div.vis-network div.vis-navigation div.vis-button.vis-down        { bottom: auto; top: 90px; right: 55px; left: auto; }
+div.vis-network div.vis-navigation div.vis-button.vis-zoomIn {
+  bottom: auto;
+  top: 10px;
+  right: 95px;
+  left: auto;
+}
+div.vis-network div.vis-navigation div.vis-button.vis-zoomOut {
+  bottom: auto;
+  top: 10px;
+  right: 55px;
+  left: auto;
+}
+div.vis-network div.vis-navigation div.vis-button.vis-zoomExtends {
+  bottom: auto;
+  top: 10px;
+  right: 15px;
+  left: auto;
+}
+div.vis-network div.vis-navigation div.vis-button.vis-left {
+  bottom: auto;
+  top: 50px;
+  right: 95px;
+  left: auto;
+}
+div.vis-network div.vis-navigation div.vis-button.vis-up {
+  bottom: auto;
+  top: 50px;
+  right: 55px;
+  left: auto;
+}
+div.vis-network div.vis-navigation div.vis-button.vis-right {
+  bottom: auto;
+  top: 50px;
+  right: 15px;
+  left: auto;
+}
+div.vis-network div.vis-navigation div.vis-button.vis-down {
+  bottom: auto;
+  top: 90px;
+  right: 55px;
+  left: auto;
+}
 
 .node-details-panel {
   margin-top: 0;
@@ -215,17 +253,25 @@ div.vis-network div.vis-navigation div.vis-button.vis-down        { bottom: auto
   flex-direction: column;
   gap: 4px;
   padding: 6px 10px;
-  background: rgba(255,255,255,0.88);
+  background: rgba(255, 255, 255, 0.88);
   border: 1px solid #ccc;
   border-radius: 4px;
   font-size: 0.8rem;
   pointer-events: none;
 }
 
-.lq-legend.hidden { display: none; }
+.lq-legend.hidden {
+  display: none;
+}
 
-.lq-legend-title       { font-weight: bold; }
-.lq-legend-item        { display: flex; align-items: center; gap: 4px; }
+.lq-legend-title {
+  font-weight: bold;
+}
+.lq-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .lq-legend-line {
   display: inline-block;
   width: 30px;
@@ -235,17 +281,38 @@ div.vis-network div.vis-navigation div.vis-button.vis-down        { bottom: auto
   border-top-width: 4px;
   line-height: 0;
 }
-.lq-legend-line-high         { border-top-width: var(--lq-style-width-high, 8px); }
-.lq-legend-line-medium       { border-top-width: var(--lq-style-width-medium, 6px); }
-.lq-legend-line-low          { border-top-width: var(--lq-style-width-low, 4px); border-top-style: dashed; }
-.lq-legend-line-parent-child { border-top-width: var(--lq-style-width-parent-child, 8px); }
-.lq-legend-line-otbr         { border-top-width: var(--lq-style-width-otbr, 4px); }
-.lq-high               { color: #0072B2; font-weight: bold; }
-.lq-medium             { color: #56B4E9; }
-.lq-low                { color: #c62828; }
-.lq-parent-child       { color: #CC79A7; }
-.lq-otbr               { color: #009E73; }
-
+.lq-legend-line-high {
+  border-top-width: var(--lq-style-width-high, 8px);
+}
+.lq-legend-line-medium {
+  border-top-width: var(--lq-style-width-medium, 6px);
+}
+.lq-legend-line-low {
+  border-top-width: var(--lq-style-width-low, 4px);
+  border-top-style: dashed;
+}
+.lq-legend-line-parent-child {
+  border-top-width: var(--lq-style-width-parent-child, 8px);
+}
+.lq-legend-line-otbr {
+  border-top-width: var(--lq-style-width-otbr, 4px);
+}
+.lq-high {
+  color: #0072b2;
+  font-weight: bold;
+}
+.lq-medium {
+  color: #56b4e9;
+}
+.lq-low {
+  color: #c62828;
+}
+.lq-parent-child {
+  color: #cc79a7;
+}
+.lq-otbr {
+  color: #009e73;
+}
 
 .table-layout {
   display: grid;
