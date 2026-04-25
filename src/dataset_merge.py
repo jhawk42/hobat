@@ -85,7 +85,9 @@ def get_canonical_extaddr(record: dict[str, Any]) -> str:
 
 
 def get_canonical_omr(record: dict[str, Any]) -> str:
-    return normalize_identifier_text(record.get(MERGE_IDENTITY_FIELDS["omrIpv6Address"]))
+    return normalize_identifier_text(
+        record.get(MERGE_IDENTITY_FIELDS["omrIpv6Address"])
+    )
 
 
 def normalize_record_aliases(record: dict[str, Any]) -> dict[str, Any]:
@@ -167,7 +169,10 @@ def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, 
     if mode_device:
         record["mode.device"] = mode_device
         mode = record.get("mode")
-        if isinstance(mode, dict) and (not isinstance(mode.get("device"), str) or not mode.get("device", "").strip()):
+        if isinstance(mode, dict) and (
+            not isinstance(mode.get("device"), str)
+            or not mode.get("device", "").strip()
+        ):
             mode["device"] = mode_device
 
     return record
@@ -262,12 +267,16 @@ def values_equivalent(left: Any, right: Any) -> bool:
     if left == right:
         return True
     try:
-        return json.dumps(left, sort_keys=True, ensure_ascii=True) == json.dumps(right, sort_keys=True, ensure_ascii=True)
+        return json.dumps(left, sort_keys=True, ensure_ascii=True) == json.dumps(
+            right, sort_keys=True, ensure_ascii=True
+        )
     except TypeError:
         return False
 
 
-def append_merge_conflict(base: dict[str, Any], path: str, current_value: Any, incoming_value: Any) -> None:
+def append_merge_conflict(
+    base: dict[str, Any], path: str, current_value: Any, incoming_value: Any
+) -> None:
     if not path:
         return
 
@@ -279,20 +288,30 @@ def append_merge_conflict(base: dict[str, Any], path: str, current_value: Any, i
     if len(conflicts) >= 20:
         return
 
-    current_text = json.dumps(current_value, sort_keys=True, ensure_ascii=True, default=str)
-    incoming_text = json.dumps(incoming_value, sort_keys=True, ensure_ascii=True, default=str)
+    current_text = json.dumps(
+        current_value, sort_keys=True, ensure_ascii=True, default=str
+    )
+    incoming_text = json.dumps(
+        incoming_value, sort_keys=True, ensure_ascii=True, default=str
+    )
 
     for entry in conflicts:
         if not isinstance(entry, dict):
             continue
-        if entry.get("path") == path and entry.get("current") == current_text and entry.get("incoming") == incoming_text:
+        if (
+            entry.get("path") == path
+            and entry.get("current") == current_text
+            and entry.get("incoming") == incoming_text
+        ):
             return
 
-    conflicts.append({
-        "path": path,
-        "current": current_text,
-        "incoming": incoming_text,
-    })
+    conflicts.append(
+        {
+            "path": path,
+            "current": current_text,
+            "incoming": incoming_text,
+        }
+    )
 
 
 def merge_lists(a_list: list[Any], b_list: list[Any]) -> list[Any]:
@@ -330,9 +349,15 @@ def deep_merge(
             continue
 
         if key == "_source_files":
-            existing_sources = base.get("_source_files") if isinstance(base.get("_source_files"), list) else []
+            existing_sources = (
+                base.get("_source_files")
+                if isinstance(base.get("_source_files"), list)
+                else []
+            )
             incoming_sources = value if isinstance(value, list) else []
-            base["_source_files"] = merge_unique_strings(existing_sources, incoming_sources)
+            base["_source_files"] = merge_unique_strings(
+                existing_sources, incoming_sources
+            )
             continue
 
         current_path = f"{path_prefix}.{key}" if path_prefix else key
@@ -347,7 +372,11 @@ def deep_merge(
             base[key] = merge_lists(cur, value)
         elif value_is_empty(cur) and not value_is_empty(value):
             base[key] = deepcopy(value)
-        elif not value_is_empty(cur) and not value_is_empty(value) and not values_equivalent(cur, value):
+        elif (
+            not value_is_empty(cur)
+            and not value_is_empty(value)
+            and not values_equivalent(cur, value)
+        ):
             append_merge_conflict(conflict_target, current_path, cur, value)
     return base
 
@@ -501,7 +530,9 @@ def build_merged_records(
             extaddr = identity_values.get("extaddr")
             omr = identity_values.get("omrIpv6Address")
 
-            candidate_ids = find_candidate_node_ids(identity_values, by_rloc16, by_extaddr, by_omr)
+            candidate_ids = find_candidate_node_ids(
+                identity_values, by_rloc16, by_extaddr, by_omr
+            )
 
             if not candidate_ids:
                 node_id = next_id
@@ -539,7 +570,9 @@ def build_merged_records(
 
             # Re-read after merges in case node id changed.
             active = nodes[node_id]
-            active_identity_values = index_node_identity_values(active, node_id, by_rloc16, by_extaddr, by_omr)
+            active_identity_values = index_node_identity_values(
+                active, node_id, by_rloc16, by_extaddr, by_omr
+            )
             active_extaddr = active_identity_values.get("extaddr")
             if isinstance(active_extaddr, str):
                 mapped_label = extaddr_to_device_label.get(active_extaddr)
@@ -547,7 +580,9 @@ def build_merged_records(
                     active["device_label"] = mapped_label
 
     merged_records: list[dict[str, Any]] = []
-    for _, node in sorted(nodes.items(), key=lambda x: (x[1].get("rloc16") or "", x[0])):
+    for _, node in sorted(
+        nodes.items(), key=lambda x: (x[1].get("rloc16") or "", x[0])
+    ):
         source_files = node.get("_source_files")
         if isinstance(source_files, list):
             # Compatibility alias for older consumers expecting `_sources`.
@@ -592,7 +627,9 @@ def build_merged_records(
         "new_nodes_by_source": dict(sorted(new_nodes_by_source.items())),
         "matched_existing_by_source": dict(sorted(matched_existing_by_source.items())),
         "merged_nodes_by_source": dict(sorted(merged_nodes_by_source.items())),
-        "single_source_nodes_by_source": dict(sorted(single_source_nodes_by_source.items())),
+        "single_source_nodes_by_source": dict(
+            sorted(single_source_nodes_by_source.items())
+        ),
         "single_source_nodes_total": sum(single_source_nodes_by_source.values()),
         "multi_source_nodes_total": multi_source_nodes,
         "identity_collision_count": identity_collision_count,
@@ -631,7 +668,9 @@ def resolve_input_files(
     resolved = [filename for filename in resolved if filename not in excluded]
 
     if not resolved:
-        raise ValueError("No input files selected after applying include/exclude options.")
+        raise ValueError(
+            "No input files selected after applying include/exclude options."
+        )
 
     return resolved
 
@@ -688,7 +727,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
 
     args = parse_args(argv)
     td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)

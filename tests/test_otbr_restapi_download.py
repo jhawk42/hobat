@@ -9,7 +9,9 @@ import otbr_restapi_download as script_module
 class TdGetOtbrRestApiTests(unittest.TestCase):
     def test_build_base_url_prefers_explicit_base_url(self) -> None:
         self.assertEqual(
-            script_module.build_base_url("127.0.0.1", 8081, "http://example.test:1234/"),
+            script_module.build_base_url(
+                "127.0.0.1", 8081, "http://example.test:1234/"
+            ),
             "http://example.test:1234",
         )
 
@@ -29,7 +31,9 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
         )
 
     def test_main_passes_parsed_network_options_to_restapi_downloads(self) -> None:
-        with patch.object(script_module, "restapi_downloads", return_value=0) as restapi_downloads:
+        with patch.object(
+            script_module, "restapi_downloads", return_value=0
+        ) as restapi_downloads:
             exit_code = script_module.main(
                 [
                     "--host",

@@ -95,7 +95,9 @@ class OTBRRawRestApiClient(OTBRRestApiClient):
     def get_action(self, action_id: str, *, raw: bool = True) -> Any:
         return super().get_action(action_id=action_id, raw=raw)
 
-    def enqueue_actions(self, tasks: Sequence[Mapping[str, Any]], *, raw: bool = True) -> Any:
+    def enqueue_actions(
+        self, tasks: Sequence[Mapping[str, Any]], *, raw: bool = True
+    ) -> Any:
         return super().enqueue_actions(tasks=tasks, raw=raw)
 
     def enqueue_add_thread_device_task(

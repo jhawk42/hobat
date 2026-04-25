@@ -3,13 +3,14 @@ import logging
 
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
+
 def extaddr_device_label_mapping_load(path=EXTADDR_DEVICE_LABEL_MAP_FILENAME):
     """
     Parses extended address to node name mapping from the configured label map file.
-    
+
     Args:
         path: Path to the extaddr->device_label mapping JSON file
-    
+
     Returns:
         Dictionary mapping extaddr (lowercase) to device_label
     """
@@ -36,7 +37,9 @@ def extaddr_device_label_mapping_load(path=EXTADDR_DEVICE_LABEL_MAP_FILENAME):
             logging.warning(f"Skipping entry missing 'extaddr': {item!r}")
             continue
         if not device_label:
-            logging.warning(f"Skipping entry missing 'device_label' for extaddr {extaddr!r}: {item!r}")
+            logging.warning(
+                f"Skipping entry missing 'device_label' for extaddr {extaddr!r}: {item!r}"
+            )
             continue
         mapping[extaddr] = device_label
 

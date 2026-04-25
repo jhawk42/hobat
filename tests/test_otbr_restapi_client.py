@@ -42,7 +42,11 @@ class OTBRClientTests(unittest.TestCase):
     def test_list_devices_flattens_jsonapi_collection_with_meta(self) -> None:
         payload = b'{"meta":{"collection":{"total":1}},"data":[{"id":"abc123","type":"threadDevice","attributes":{"hostname":"node-1","role":"leader"}}]}'
 
-        with patch.object(client_module, "urlopen", return_value=FakeResponse(payload, "application/vnd.api+json")):
+        with patch.object(
+            client_module,
+            "urlopen",
+            return_value=FakeResponse(payload, "application/vnd.api+json"),
+        ):
             result = self.client.list_devices(with_meta=True)
 
         self.assertEqual(
@@ -83,7 +87,9 @@ class OTBRClientTests(unittest.TestCase):
 
     def test_empty_task_type_list_raises_usage_error(self) -> None:
         with self.assertRaises(client_module.OTBRUsageError):
-            self.client.enqueue_get_network_diagnostic_task(destination="abcd1234abcd1234", types=[])
+            self.client.enqueue_get_network_diagnostic_task(
+                destination="abcd1234abcd1234", types=[]
+            )
 
 
 class OTBRCliTests(unittest.TestCase):
@@ -96,7 +102,9 @@ class OTBRCliTests(unittest.TestCase):
     def test_main_returns_usage_exit_code_for_invalid_dataset_json(self) -> None:
         stderr = io.StringIO()
         with redirect_stderr(stderr):
-            exit_code = cli_module.main(["node", "dataset", "active", "set", "--json", "{"])
+            exit_code = cli_module.main(
+                ["node", "dataset", "active", "set", "--json", "{"]
+            )
 
         self.assertEqual(exit_code, cli_module.EXIT_USAGE)
         self.assertIn('"type": "usage"', stderr.getvalue())
@@ -106,7 +114,11 @@ class OTBRCliTests(unittest.TestCase):
             status_code=404,
             reason="Not Found",
             url="http://example.test/api/actions/missing",
-            errors=[client_module.OTBRErrorDetail(title="Not Found", status=404, detail="Missing action")],
+            errors=[
+                client_module.OTBRErrorDetail(
+                    title="Not Found", status=404, detail="Missing action"
+                )
+            ],
         )
 
         with patch.object(cli_module, "dispatch", side_effect=error):

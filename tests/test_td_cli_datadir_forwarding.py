@@ -18,18 +18,26 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
         self.assertEqual(extras, [])
 
     def test_dispatch_forwards_datadir_to_restapi_download(self) -> None:
-        parser, args, extras = self._parse_known(["--datadir", "/tmp/td-data", "otbr-restapi", "download"])
+        parser, args, extras = self._parse_known(
+            ["--datadir", "/tmp/td-data", "otbr-restapi", "download"]
+        )
 
-        with patch.object(td_cli.otbr_restapi_download, "main", return_value=0) as module_main:
+        with patch.object(
+            td_cli.otbr_restapi_download, "main", return_value=0
+        ) as module_main:
             rc = td_cli.dispatch(args, extras, parser)
 
         self.assertEqual(rc, 0)
         module_main.assert_called_once_with(["--datadir", "/tmp/td-data"])
 
     def test_dispatch_forwards_datadir_to_mdns(self) -> None:
-        parser, args, extras = self._parse_known(["--datadir", "/tmp/td-data", "mdns", "thread"])
+        parser, args, extras = self._parse_known(
+            ["--datadir", "/tmp/td-data", "mdns", "thread"]
+        )
 
-        with patch.object(td_cli.mdns_thread_scopes, "main", return_value=0) as module_main:
+        with patch.object(
+            td_cli.mdns_thread_scopes, "main", return_value=0
+        ) as module_main:
             rc = td_cli.dispatch(args, extras, parser)
 
         self.assertEqual(rc, 0)
@@ -40,10 +48,19 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
 
     def test_dispatch_forwards_datadir_with_networkdiag_children_flag(self) -> None:
         parser, args, extras = self._parse_known(
-            ["--datadir", "/tmp/td-data", "otbr-cli", "networkdiag", "topology", "--children-no"]
+            [
+                "--datadir",
+                "/tmp/td-data",
+                "otbr-cli",
+                "networkdiag",
+                "topology",
+                "--children-no",
+            ]
         )
 
-        with patch.object(td_cli.otbr_cli_networkdiag_topology, "main", return_value=0) as module_main:
+        with patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
+        ) as module_main:
             rc = td_cli.dispatch(args, extras, parser)
 
         self.assertEqual(rc, 0)
@@ -51,7 +68,15 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
 
     def test_dispatch_forwards_datadir_to_web_server(self) -> None:
         parser, args, extras = self._parse_known(
-            ["--datadir", "/tmp/td-data", "web-server", "--host", "0.0.0.0", "--port", "9090"]
+            [
+                "--datadir",
+                "/tmp/td-data",
+                "web-server",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "9090",
+            ]
         )
 
         with patch.object(td_cli.web_server, "main", return_value=0) as module_main:

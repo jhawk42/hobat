@@ -116,7 +116,9 @@ def dispatch(args: argparse.Namespace) -> Any:
 def main(argv: Sequence[str] | None = None) -> int:
     from otbr_restapi_client_cli import exit_code_for_exception
 
-    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
 
     parser = build_parser()
     args = parser.parse_args(argv)

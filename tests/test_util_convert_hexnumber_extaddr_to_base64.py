@@ -11,5 +11,3 @@ logging.info(f"Base64: {base64_string}")
 
 
 # Output: aaf2709373009853 -> Base64: qvJwk3MAmFM=
-
-

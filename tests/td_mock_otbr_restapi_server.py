@@ -183,15 +183,23 @@ def make_handler(store: MockOTBRStore):
             if method == "GET" and path == "/api/devices":
                 return self._send_collection(list(store.devices.values()), accept)
             if method == "GET" and path.startswith("/api/devices/"):
-                return self._send_item_by_id(store.devices, path.split("/")[-1], accept, "device")
+                return self._send_item_by_id(
+                    store.devices, path.split("/")[-1], accept, "device"
+                )
             if method == "GET" and path == "/api/diagnostics":
                 return self._send_collection(list(store.diagnostics.values()), accept)
             if method == "GET" and path.startswith("/api/diagnostics/"):
-                return self._send_item_by_id(store.diagnostics, path.split("/")[-1], accept, "diagnostic")
+                return self._send_item_by_id(
+                    store.diagnostics, path.split("/")[-1], accept, "diagnostic"
+                )
             if method == "GET" and path == "/api/actions":
-                return self._send_collection(list(store.actions.values()), accept, pending=True)
+                return self._send_collection(
+                    list(store.actions.values()), accept, pending=True
+                )
             if method == "GET" and path.startswith("/api/actions/"):
-                return self._send_item_by_id(store.actions, path.split("/")[-1], accept, "action")
+                return self._send_item_by_id(
+                    store.actions, path.split("/")[-1], accept, "action"
+                )
             if method == "POST" and path == "/api/actions":
                 return self._enqueue_actions()
 
@@ -221,14 +229,18 @@ def make_handler(store: MockOTBRStore):
             try:
                 value = json.loads(body.decode("utf-8"))
             except json.JSONDecodeError:
-                return self._send_error_document(400, "Bad Request", "Invalid JSON body for node state", JSON)
+                return self._send_error_document(
+                    400, "Bad Request", "Invalid JSON body for node state", JSON
+                )
 
             if value == "enable":
                 store.node_state = "router"
             elif value == "disable":
                 store.node_state = "disabled"
             else:
-                return self._send_error_document(400, "Bad Request", "State must be enable or disable", JSON)
+                return self._send_error_document(
+                    400, "Bad Request", "State must be enable or disable", JSON
+                )
 
             self._send_json({"state": store.node_state})
 
@@ -243,7 +255,9 @@ def make_handler(store: MockOTBRStore):
             try:
                 store.active_dataset_json = json.loads(body.decode("utf-8"))
             except json.JSONDecodeError:
-                return self._send_error_document(400, "Bad Request", "Invalid JSON body for active dataset", JSON)
+                return self._send_error_document(
+                    400, "Bad Request", "Invalid JSON body for active dataset", JSON
+                )
 
             self._send_json({"updated": True, "format": "json"})
 
@@ -256,10 +270,14 @@ def make_handler(store: MockOTBRStore):
 
             self._send_json(item["attributes"])
 
-        def _send_collection(self, items: list[dict], accept: str, pending: bool = False) -> None:
+        def _send_collection(
+            self, items: list[dict], accept: str, pending: bool = False
+        ) -> None:
             materialized = [deepcopy(item) for item in items]
             for item in materialized:
-                if item["id"] == store.node_item["id"] and "role" in item.get("attributes", {}):
+                if item["id"] == store.node_item["id"] and "role" in item.get(
+                    "attributes", {}
+                ):
                     item["attributes"]["role"] = store.node_state
 
             if accept == JSON_API:
@@ -272,20 +290,28 @@ def make_handler(store: MockOTBRStore):
                 }
                 if pending:
                     meta["collection"]["pending"] = sum(
-                        1 for item in materialized if item.get("attributes", {}).get("status") == "pending"
+                        1
+                        for item in materialized
+                        if item.get("attributes", {}).get("status") == "pending"
                     )
                 self._send_jsonapi_document(materialized, meta=meta)
                 return
 
             self._send_json([item.get("attributes", {}) for item in materialized])
 
-        def _send_item_by_id(self, items: dict[str, dict], item_id: str, accept: str, label: str) -> None:
+        def _send_item_by_id(
+            self, items: dict[str, dict], item_id: str, accept: str, label: str
+        ) -> None:
             item = items.get(item_id)
             if item is None:
-                return self._send_error_document(404, "Not Found", f"No {label} matches the requested ID.", accept)
+                return self._send_error_document(
+                    404, "Not Found", f"No {label} matches the requested ID.", accept
+                )
 
             materialized = deepcopy(item)
-            if item_id == store.node_item["id"] and "role" in materialized.get("attributes", {}):
+            if item_id == store.node_item["id"] and "role" in materialized.get(
+                "attributes", {}
+            ):
                 materialized["attributes"]["role"] = store.node_state
 
             if accept == JSON_API:
@@ -297,11 +323,18 @@ def make_handler(store: MockOTBRStore):
             try:
                 payload = json.loads(body.decode("utf-8"))
             except json.JSONDecodeError:
-                return self._send_error_document(400, "Bad Request", "Invalid JSON body for actions", JSON_API)
+                return self._send_error_document(
+                    400, "Bad Request", "Invalid JSON body for actions", JSON_API
+                )
 
             tasks = payload.get("data")
             if not isinstance(tasks, list) or not tasks:
-                return self._send_error_document(422, "Unprocessable Content", "Request must contain a non-empty data list.", JSON_API)
+                return self._send_error_document(
+                    422,
+                    "Unprocessable Content",
+                    "Request must contain a non-empty data list.",
+                    JSON_API,
+                )
 
             created = []
             with store.lock:
@@ -310,7 +343,10 @@ def make_handler(store: MockOTBRStore):
                     attributes = deepcopy(task.get("attributes", {}))
                     action_id = str(uuid.uuid4())
                     attributes["status"] = "pending"
-                    if task_type in {"getNetworkDiagnosticTask", "getEnergyScanTask"} and store.diagnostics:
+                    if (
+                        task_type in {"getNetworkDiagnosticTask", "getEnergyScanTask"}
+                        and store.diagnostics
+                    ):
                         first_diagnostic_id = next(iter(store.diagnostics.keys()))
                         created_item = {
                             "id": action_id,
@@ -336,7 +372,9 @@ def make_handler(store: MockOTBRStore):
 
             self._send_jsonapi_document(created, status=200)
 
-        def _send_jsonapi_document(self, data: dict | list[dict], status: int = 200, meta: dict | None = None) -> None:
+        def _send_jsonapi_document(
+            self, data: dict | list[dict], status: int = 200, meta: dict | None = None
+        ) -> None:
             document = {"data": data}
             if meta is not None:
                 document["meta"] = meta
@@ -353,9 +391,13 @@ def make_handler(store: MockOTBRStore):
             self.end_headers()
             self.wfile.write(body)
 
-        def _send_error_document(self, status: int, title: str, detail: str, accept: str) -> None:
+        def _send_error_document(
+            self, status: int, title: str, detail: str, accept: str
+        ) -> None:
             if accept == JSON_API:
-                payload = {"errors": [{"title": title, "status": status, "detail": detail}]}
+                payload = {
+                    "errors": [{"title": title, "status": status, "detail": detail}]
+                }
                 self._send(status, JSON_API, payload)
                 return
             payload = {"title": title, "status": status, "detail": detail}

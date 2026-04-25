@@ -40,8 +40,12 @@ class Phase6DataDirResolutionTests(unittest.TestCase):
 
     def test_case_3b_local_default_creation_permission_error_bubbles(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("util_data.Path.exists", return_value=False), patch(
-                "util_data.Path.mkdir", side_effect=PermissionError("permission denied")
+            with (
+                patch("util_data.Path.exists", return_value=False),
+                patch(
+                    "util_data.Path.mkdir",
+                    side_effect=PermissionError("permission denied"),
+                ),
             ):
                 with self.assertRaises(PermissionError):
                     util_data.resolve_td_data_dir(datadir_arg=None, env={}, cwd=tmpdir)
@@ -59,7 +63,9 @@ class Phase6WebServerRoutingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.static_dir = tempfile.mkdtemp()
-        with open(os.path.join(cls.static_dir, "tdash.html"), "w", encoding="utf-8") as f:
+        with open(
+            os.path.join(cls.static_dir, "tdash.html"), "w", encoding="utf-8"
+        ) as f:
             f.write("<html><body>dashboard</body></html>")
         with open(os.path.join(cls.static_dir, "app.js"), "w", encoding="utf-8") as f:
             f.write("console.log('ok');")

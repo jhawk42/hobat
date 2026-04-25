@@ -39,7 +39,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=PORT, help="OTBR REST API port")
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     parser.add_argument("--base-url", help="Override host/port with a full base URL")
-    parser.add_argument("--timeout", type=int, default=TIMEOUT, help="HTTP timeout in seconds")
+    parser.add_argument(
+        "--timeout", type=int, default=TIMEOUT, help="HTTP timeout in seconds"
+    )
     parser.add_argument(
         "--accept",
         default=HEADERS["Accept"],
@@ -59,7 +61,9 @@ def build_base_url(host: str, port: int, base_url: str | None = None) -> str:
     return (base_url or f"http://{host}:{port}").rstrip("/")
 
 
-def build_headers(accept: str, extra_headers: Sequence[str] | None = None) -> dict[str, str]:
+def build_headers(
+    accept: str, extra_headers: Sequence[str] | None = None
+) -> dict[str, str]:
     headers = {"Accept": accept}
 
     for raw_header in extra_headers or []:
@@ -77,7 +81,13 @@ def build_headers(accept: str, extra_headers: Sequence[str] | None = None) -> di
     return headers
 
 
-def download_json(url: str, headers: dict[str, str], output_file: str, timeout: int = TIMEOUT, retries: int = RETRIES) -> bool:
+def download_json(
+    url: str,
+    headers: dict[str, str],
+    output_file: str,
+    timeout: int = TIMEOUT,
+    retries: int = RETRIES,
+) -> bool:
     """Download JSON from a URL and save it to a file."""
     request = Request(url=url, headers=headers, method="GET")
     last_exc: Exception | None = None
@@ -104,10 +114,14 @@ def download_json(url: str, headers: dict[str, str], output_file: str, timeout: 
                 logging.error(f"HTTP error for {url}: {e.code} {e.reason}")
                 return False
             last_exc = e
-            logging.warning(f"HTTP {e.code} on attempt {attempt + 1}/{retries} for {url}: {e.reason}")
+            logging.warning(
+                f"HTTP {e.code} on attempt {attempt + 1}/{retries} for {url}: {e.reason}"
+            )
         except URLError as e:
             last_exc = e
-            logging.warning(f"Network error on attempt {attempt + 1}/{retries} for {url}: {e.reason}")
+            logging.warning(
+                f"Network error on attempt {attempt + 1}/{retries} for {url}: {e.reason}"
+            )
         except json.JSONDecodeError as e:
             logging.error(f"Invalid JSON from {url}: {e}")
             return False
@@ -119,13 +133,17 @@ def download_json(url: str, headers: dict[str, str], output_file: str, timeout: 
             raise
 
         if attempt < retries - 1:
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
 
     logging.error(f"All {retries} attempt(s) failed for {url}: {last_exc}")
     return False
 
 
-def restapi_downloads(base_url: str = BASE_URL, headers: dict[str, str] | None = None, timeout: int = TIMEOUT) -> int:
+def restapi_downloads(
+    base_url: str = BASE_URL,
+    headers: dict[str, str] | None = None,
+    timeout: int = TIMEOUT,
+) -> int:
     failures = 0
     request_headers = dict(headers or HEADERS)
 
@@ -133,7 +151,9 @@ def restapi_downloads(base_url: str = BASE_URL, headers: dict[str, str] | None =
         url = f"{base_url}{endpoint}"
         resolved_output_file = output_file
         if _ACTIVE_TD_DATA_DIR is not None:
-            resolved_output_file = str(data_file_arg_or_default(output_file, _ACTIVE_TD_DATA_DIR))
+            resolved_output_file = str(
+                data_file_arg_or_default(output_file, _ACTIVE_TD_DATA_DIR)
+            )
 
         ok = download_json(url, request_headers, resolved_output_file, timeout=timeout)
         if not ok:
@@ -148,7 +168,9 @@ def restapi_downloads(base_url: str = BASE_URL, headers: dict[str, str] | None =
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -164,9 +186,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(exc))
 
     try:
-        return restapi_downloads(base_url=base_url, headers=headers, timeout=args.timeout)
+        return restapi_downloads(
+            base_url=base_url, headers=headers, timeout=args.timeout
+        )
     finally:
         _ACTIVE_TD_DATA_DIR = previous_td_data_dir
+
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -9,7 +9,7 @@ import argparse
 from typing import Sequence
 from const import TD_DATA_DIR_ARG, TD_DATA_DIR_ARG_HELP, TD_DATA_DIR_RESOLUTION_SUMMARY
 
-# Note: The imports below are organized to reflect the different components of the project, such as OTBR CLI parsing, REST API interactions, dataset merging, and the web interface. This structure helps maintain clarity and separation of concerns within the codebase. 
+# Note: The imports below are organized to reflect the different components of the project, such as OTBR CLI parsing, REST API interactions, dataset merging, and the web interface. This structure helps maintain clarity and separation of concerns within the codebase.
 import util_network
 import extaddr_device_label_map
 
@@ -117,7 +117,9 @@ def _add_scan_commands(subparsers: argparse._SubParsersAction) -> None:  # type:
     )
     otbr_cli_sub = otbr_cli_p.add_subparsers(dest="cli_command", required=False)
 
-    otbr_cli_sub.add_parser("network-dataset-info", help="Scan and save network dataset info")
+    otbr_cli_sub.add_parser(
+        "network-dataset-info", help="Scan and save network dataset info"
+    )
     otbr_cli_sub.add_parser("router-table", help="Scan and save router table")
 
     meshdiag_p = otbr_cli_sub.add_parser(
@@ -126,24 +128,43 @@ def _add_scan_commands(subparsers: argparse._SubParsersAction) -> None:  # type:
         formatter_class=TDHelpFormatter,
     )
     meshdiag_sub = meshdiag_p.add_subparsers(dest="meshdiag_command", required=True)
-    meshdiag_sub.add_parser("topology",            help="Scan and save meshdiag topology")
-    meshdiag_sub.add_parser("routerneighbortable", help="Scan and save meshdiag router-neighbour table")
-    meshdiag_sub.add_parser("childtable",          help="Scan and save meshdiag child table")
-    meshdiag_sub.add_parser("childip6",            help="Scan and save meshdiag child IPv6 addresses")
-    meshdiag_sub.add_parser("all",                 help="Run all meshdiag scans")
+    meshdiag_sub.add_parser("topology", help="Scan and save meshdiag topology")
+    meshdiag_sub.add_parser(
+        "routerneighbortable", help="Scan and save meshdiag router-neighbour table"
+    )
+    meshdiag_sub.add_parser("childtable", help="Scan and save meshdiag child table")
+    meshdiag_sub.add_parser(
+        "childip6", help="Scan and save meshdiag child IPv6 addresses"
+    )
+    meshdiag_sub.add_parser("all", help="Run all meshdiag scans")
 
     networkdiag_p = otbr_cli_sub.add_parser(
         "networkdiag",
         help="Scan and save network diagnostic data",
         formatter_class=TDHelpFormatter,
     )
-    networkdiag_sub = networkdiag_p.add_subparsers(dest="networkdiag_command", required=True)
-    networkdiag_topology_p = networkdiag_sub.add_parser("topology", help="Scan and save networkdiag topology")
+    networkdiag_sub = networkdiag_p.add_subparsers(
+        dest="networkdiag_command", required=True
+    )
+    networkdiag_topology_p = networkdiag_sub.add_parser(
+        "topology", help="Scan and save networkdiag topology"
+    )
     networkdiag_children_group = networkdiag_topology_p.add_mutually_exclusive_group()
-    networkdiag_children_group.add_argument("-c", "--children", dest="expand_children", action="store_true", default=True,
-                                            help="Expand and include child nodes in the topology map (default)")
-    networkdiag_children_group.add_argument("-cno", "--children-no", dest="expand_children", action="store_false",
-                                            help="Do not expand child nodes in the topology map")
+    networkdiag_children_group.add_argument(
+        "-c",
+        "--children",
+        dest="expand_children",
+        action="store_true",
+        default=True,
+        help="Expand and include child nodes in the topology map (default)",
+    )
+    networkdiag_children_group.add_argument(
+        "-cno",
+        "--children-no",
+        dest="expand_children",
+        action="store_false",
+        help="Do not expand child nodes in the topology map",
+    )
 
     otbr_cli_sub.add_parser("all", help="Run all otbr-cli scans")
 
@@ -169,14 +190,14 @@ def _add_scan_commands(subparsers: argparse._SubParsersAction) -> None:  # type:
         action="store_true",
         default=False,
         help="Also browse _hap._tcp.local. (Wi-Fi HomeKit accessories). "
-               "Applies when scope is 'thread' or 'hap'. Off by default.",
+        "Applies when scope is 'thread' or 'hap'. Off by default.",
     )
     mdns_p.add_argument(
         "--mattertcpsupported",
         action="store_true",
         default=False,
         help="Include _matter._tcp records where T=1 (TCP supported). "
-             "By default those records are excluded.",
+        "By default those records are excluded.",
     )
 
 
@@ -184,31 +205,44 @@ def _add_web_commands(subparsers: argparse._SubParsersAction) -> None:  # type: 
     """Build the flattened otbr-restapi command tree."""
 
     # otbr-restapi
-    restapi_p = subparsers.add_parser("otbr-restapi", help="Query otbr-restapi sub commands")
+    restapi_p = subparsers.add_parser(
+        "otbr-restapi", help="Query otbr-restapi sub commands"
+    )
     restapi_sub = restapi_p.add_subparsers(dest="restapi_command", required=False)
 
     # otbr-restapi download  — remaining args forwarded to otbr_restapi_download.main()
-    restapi_sub.add_parser("download", help="Download OTBR REST API endpoints to JSON files")
+    restapi_sub.add_parser(
+        "download", help="Download OTBR REST API endpoints to JSON files"
+    )
 
     # otbr-restapi client  — remaining args forwarded to otbr_restapi_client_cli.main()
-    restapi_sub.add_parser("client", help="Call OTBR REST API client commands (flattened output)")
+    restapi_sub.add_parser(
+        "client", help="Call OTBR REST API client commands (flattened output)"
+    )
 
     # otbr-restapi rawclient  — remaining args forwarded to otbr_restapi_raw_client_cli.main()
-    restapi_sub.add_parser("rawclient", help="Call OTBR REST API client commands (raw envelopes)")
+    restapi_sub.add_parser(
+        "rawclient", help="Call OTBR REST API client commands (raw envelopes)"
+    )
 
 
 def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
     """Build the flattened process-eve command."""
 
     # Remaining args are captured as extras via parse_known_args and forwarded to eve_parse.main().
-    subparsers.add_parser("process-eve", help="Parse and enhance an Eve Thread layout file")
+    subparsers.add_parser(
+        "process-eve", help="Parse and enhance an Eve Thread layout file"
+    )
 
 
 def _add_merge_commands(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
     """Build the flattened merge-dataset command."""
 
     # Remaining args are captured as extras via parse_known_args and forwarded to dataset_merge.main().
-    subparsers.add_parser("merge-dataset", help="Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file")
+    subparsers.add_parser(
+        "merge-dataset",
+        help="Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -222,9 +256,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- common options ---
     parser._optionals.title = "Options"
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose (INFO) logging")
-    parser.add_argument("--debug", "-d", action="store_true", help="Enable debug logging")
-    parser.add_argument("--output", "-o", metavar="FILE", help="Write command output to FILE")
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable verbose (INFO) logging"
+    )
+    parser.add_argument(
+        "--debug", "-d", action="store_true", help="Enable debug logging"
+    )
+    parser.add_argument(
+        "--output", "-o", metavar="FILE", help="Write command output to FILE"
+    )
     parser.add_argument(
         "--datadir",
         metavar="DIR",
@@ -246,12 +286,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     # web-server — remaining args forwarded to web_server.main()
     ws_p = subparsers.add_parser("web-server", help="Start the web dashboard server")
-    ws_p.add_argument("--host", default="localhost", help="Host to bind to (default: localhost)")
-    ws_p.add_argument("--port", type=int, default=8087, help="Port to listen on (default: 8087)")
+    ws_p.add_argument(
+        "--host", default="localhost", help="Host to bind to (default: localhost)"
+    )
+    ws_p.add_argument(
+        "--port", type=int, default=8087, help="Port to listen on (default: 8087)"
+    )
 
     # --- hand-crafted "Commands usage:" epilog ---
-    parser.epilog = (
-        """Commands usage:
+    parser.epilog = """Commands usage:
     otbr-cli
         usage: td_cli otbr-cli [-h] {network-dataset-info,router-table,meshdiag,networkdiag,all} ...
 
@@ -274,7 +317,6 @@ def build_parser() -> argparse.ArgumentParser:
                 --port PORT  Port to listen on (default: 8087)
 
 """
-    )
 
     # Expose subparsers so dispatch() can print targeted help
     parser._subcommand_parsers = {  # type: ignore[attr-defined]
@@ -289,15 +331,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _load_extaddr_map() -> dict:
-    """ lazily load the extaddr-to-device-label map for scan commands."""
+    """lazily load the extaddr-to-device-label map for scan commands."""
     EXTADDR_JSON_FILENAME_DEFAULT = "threadstatic-extaddr.json"
     if os.path.exists(EXTADDR_JSON_FILENAME_DEFAULT):
-        return extaddr_device_label_map.extaddr_device_label_mapping_load(EXTADDR_JSON_FILENAME_DEFAULT)
-    logging.debug(f"Extaddr JSON file '{EXTADDR_JSON_FILENAME_DEFAULT}' not found; using empty mapping.")
+        return extaddr_device_label_map.extaddr_device_label_mapping_load(
+            EXTADDR_JSON_FILENAME_DEFAULT
+        )
+    logging.debug(
+        f"Extaddr JSON file '{EXTADDR_JSON_FILENAME_DEFAULT}' not found; using empty mapping."
+    )
     return {}
 
 
-def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.ArgumentParser) -> int:
+def dispatch(
+    args: argparse.Namespace, sub_argv: list[str], parser: argparse.ArgumentParser
+) -> int:
     """Dispatch parsed arguments to the appropriate module entry point.
 
     sub_argv contains the unrecognised arguments returned by parse_known_args.
@@ -319,7 +367,9 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
             return 0
 
         if cli_cmd == "network-dataset-info":
-            return otbr_cli_network_dataset_info.main(_forward_with_datadir(sub_argv)) or 0
+            return (
+                otbr_cli_network_dataset_info.main(_forward_with_datadir(sub_argv)) or 0
+            )
 
         if cli_cmd == "router-table":
             return otbr_cli_router_table.main(_forward_with_datadir(sub_argv)) or 0
@@ -327,13 +377,27 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
         if cli_cmd == "meshdiag":
             meshdiag_cmd = args.meshdiag_command
             if meshdiag_cmd == "topology":
-                return otbr_cli_meshdiag_topology.main(_forward_with_datadir(sub_argv)) or 0
+                return (
+                    otbr_cli_meshdiag_topology.main(_forward_with_datadir(sub_argv))
+                    or 0
+                )
             if meshdiag_cmd == "routerneighbortable":
-                return otbr_cli_meshdiag_routerneighbortable.main(_forward_with_datadir(sub_argv)) or 0
+                return (
+                    otbr_cli_meshdiag_routerneighbortable.main(
+                        _forward_with_datadir(sub_argv)
+                    )
+                    or 0
+                )
             if meshdiag_cmd == "childtable":
-                return otbr_cli_meshdiag_childtable.main(_forward_with_datadir(sub_argv)) or 0
+                return (
+                    otbr_cli_meshdiag_childtable.main(_forward_with_datadir(sub_argv))
+                    or 0
+                )
             if meshdiag_cmd == "childip6":
-                return otbr_cli_meshdiag_childip6.main(_forward_with_datadir(sub_argv)) or 0
+                return (
+                    otbr_cli_meshdiag_childip6.main(_forward_with_datadir(sub_argv))
+                    or 0
+                )
             if meshdiag_cmd == "all":
                 forwarded = _forward_with_datadir(sub_argv)
                 rc = otbr_cli_meshdiag_topology.main(forwarded) or 0
@@ -344,8 +408,15 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
 
         if cli_cmd == "networkdiag":
             if args.networkdiag_command == "topology":
-                expand_children_argv = [] if getattr(args, 'expand_children', True) else ["-cno"]
-                return otbr_cli_networkdiag_topology.main(_forward_with_datadir(expand_children_argv)) or 0
+                expand_children_argv = (
+                    [] if getattr(args, "expand_children", True) else ["-cno"]
+                )
+                return (
+                    otbr_cli_networkdiag_topology.main(
+                        _forward_with_datadir(expand_children_argv)
+                    )
+                    or 0
+                )
 
         if cli_cmd == "all":
             forwarded = _forward_with_datadir(sub_argv)
@@ -362,7 +433,11 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
     if args.command == "mdns":
         mdns_argv = (
             [args.mdns_scope]
-            + (["--browse-timeout", str(args.browse_timeout)] if args.browse_timeout is not None else [])
+            + (
+                ["--browse-timeout", str(args.browse_timeout)]
+                if args.browse_timeout is not None
+                else []
+            )
             + (["--haptcp"] if args.haptcp else [])
             + (["--mattertcpsupported"] if args.mattertcpsupported else [])
             + sub_argv
@@ -381,7 +456,9 @@ def dispatch(args: argparse.Namespace, sub_argv: list[str], parser: argparse.Arg
         if restapi_cmd == "client":
             return otbr_restapi_client_cli.main(_forward_with_datadir(sub_argv)) or 0
         if restapi_cmd == "rawclient":
-            return otbr_restapi_raw_client_cli.main(_forward_with_datadir(sub_argv)) or 0
+            return (
+                otbr_restapi_raw_client_cli.main(_forward_with_datadir(sub_argv)) or 0
+            )
 
     # --- process-eve ---
     if args.command == "process-eve":
@@ -403,7 +480,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Main entry point with optional command-line arguments."""
 
     # Default logging configuration; level may be raised to DEBUG after arg parsing
-    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
 
     argv_list: list[str] = list(sys.argv[1:] if argv is None else argv)
 

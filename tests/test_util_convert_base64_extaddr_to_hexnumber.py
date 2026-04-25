@@ -3,7 +3,7 @@ import logging
 from util_convert import b64_to_extended_address
 
 # The original Base64 string
-#base64_string = "qvJwk3MAmFM="
+# base64_string = "qvJwk3MAmFM="
 base64_string = "emv0Jau9vjM="
 
 hex_number = b64_to_extended_address(base64_string)

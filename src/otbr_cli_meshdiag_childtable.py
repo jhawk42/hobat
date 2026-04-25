@@ -19,23 +19,27 @@ def get_meshdiag_childtable_one(parent_rloc16, router=None, extaddr_map=None):
     """Collect and parse `meshdiag childtable` output for one parent router."""
 
     output = run_ot_ctl_stdio(f"meshdiag childtable {parent_rloc16}")
-    logging.info(f"[DEBUG] Output of 'meshdiag childtable {parent_rloc16}':\n{output}\n")
+    logging.info(
+        f"[DEBUG] Output of 'meshdiag childtable {parent_rloc16}':\n{output}\n"
+    )
 
     timeout_match = re.search(r"Error\s+(\d+):\s+ResponseTimeout", output)
     if timeout_match:
         return {
             "parent_rloc16": parent_rloc16,
-            "device_label": extaddr_map.get(router.get("extaddr"), "Unknown") if router and extaddr_map else "Unknown",
+            "device_label": extaddr_map.get(router.get("extaddr"), "Unknown")
+            if router and extaddr_map
+            else "Unknown",
             "router_child_table": [],
             "router_child_table_count": 0,
-            "_error": {
-                "type": "ResponseTimeout"
-            },
+            "_error": {"type": "ResponseTimeout"},
         }
 
     router_child_table = {
         "parent_rloc16": parent_rloc16,
-        "device_label": extaddr_map.get(router.get("extaddr"), "Unknown") if router and extaddr_map else "Unknown",
+        "device_label": extaddr_map.get(router.get("extaddr"), "Unknown")
+        if router and extaddr_map
+        else "Unknown",
     }
     router_child_table_data = []
     current_child = None
@@ -55,7 +59,10 @@ def get_meshdiag_childtable_one(parent_rloc16, router=None, extaddr_map=None):
                 stripped,
             )
             if not match:
-                logging.warning("meshdiag childtable: unexpected format, pattern did not match: %r", stripped)
+                logging.warning(
+                    "meshdiag childtable: unexpected format, pattern did not match: %r",
+                    stripped,
+                )
                 current_child = None
                 continue
 
@@ -63,7 +70,9 @@ def get_meshdiag_childtable_one(parent_rloc16, router=None, extaddr_map=None):
             current_child = {
                 "rloc16": match.group(1),
                 "extaddr": child_extaddr,
-                "device_label": extaddr_map.get(child_extaddr, "Unknown") if extaddr_map else "Unknown",
+                "device_label": extaddr_map.get(child_extaddr, "Unknown")
+                if extaddr_map
+                else "Unknown",
                 "ver": int(match.group(3)),
             }
             continue
@@ -139,15 +148,21 @@ def get_meshdiag_childtables(extaddr_map):
     """Collect child tables for all active routers in the router table."""
 
     router_table_data = get_router_table_data(extaddr_map)
-    router_rlocs = [router.get("rloc16") for router in router_table_data if router.get("rloc16")]
+    router_rlocs = [
+        router.get("rloc16") for router in router_table_data if router.get("rloc16")
+    ]
 
     router_child_tables = []
 
     for parent_rloc16 in router_rlocs:
-        router = next((r for r in router_table_data if r.get("rloc16") == parent_rloc16), None)
+        router = next(
+            (r for r in router_table_data if r.get("rloc16") == parent_rloc16), None
+        )
         if router:
             extaddr = router.get("extaddr")
-            device_label = extaddr_map.get(extaddr, "Unknown") if extaddr_map else "Unknown"
+            device_label = (
+                extaddr_map.get(extaddr, "Unknown") if extaddr_map else "Unknown"
+            )
             logging.info(
                 f"Getting meshdiag childtable for router rloc16 {parent_rloc16} "
                 f"(Node: {device_label}, ExtAddr: {extaddr})..."
@@ -158,28 +173,40 @@ def get_meshdiag_childtables(extaddr_map):
                 "(Node: Unknown, ExtAddr: Unknown)..."
             )
 
-        router_child_table = get_meshdiag_childtable_one(parent_rloc16, router, extaddr_map)
+        router_child_table = get_meshdiag_childtable_one(
+            parent_rloc16, router, extaddr_map
+        )
         router_child_tables.append(router_child_table)
 
     return router_child_tables
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
     td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
 
-    extaddr_json_filename = data_file_path(EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir)
+    extaddr_json_filename = data_file_path(
+        EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir
+    )
 
     if os.path.exists(extaddr_json_filename):
-        logging.info(f"Loading extended address to device label mapping from {extaddr_json_filename}...")
+        logging.info(
+            f"Loading extended address to device label mapping from {extaddr_json_filename}..."
+        )
         extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
     else:
-        logging.warning(f"extended address mapping file not found: {extaddr_json_filename}. Continuing with Unknown labels.")
+        logging.warning(
+            f"extended address mapping file not found: {extaddr_json_filename}. Continuing with Unknown labels."
+        )
         extaddr_map = {}
 
     router_child_tables = get_meshdiag_childtables(extaddr_map)
 
-    output_filename = data_file_path("td-otbr-cli-meshdiag-router-childtables.json", td_data_dir)
+    output_filename = data_file_path(
+        "td-otbr-cli-meshdiag-router-childtables.json", td_data_dir
+    )
     with open(output_filename, "w") as f:
         json.dump(router_child_tables, f, indent=4)
 

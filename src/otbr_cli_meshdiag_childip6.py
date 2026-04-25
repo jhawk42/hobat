@@ -21,7 +21,9 @@ def get_meshdiag_childip6_one(parent_rloc16, router=None, extaddr_map=None):
     if timeout_match:
         return {
             "parent_rloc16": parent_rloc16,
-            "device_label": extaddr_map.get(router.get("extaddr"), "Unknown") if router and extaddr_map else "Unknown",
+            "device_label": extaddr_map.get(router.get("extaddr"), "Unknown")
+            if router and extaddr_map
+            else "Unknown",
             "router_child_ip6_table": [],
             "router_child_ip6_table_count": 0,
             "_error": {
@@ -31,7 +33,9 @@ def get_meshdiag_childip6_one(parent_rloc16, router=None, extaddr_map=None):
 
     router_child_ip6 = {
         "parent_rloc16": parent_rloc16,
-        "device_label": extaddr_map.get(router.get("extaddr"), "Unknown") if router and extaddr_map else "Unknown",
+        "device_label": extaddr_map.get(router.get("extaddr"), "Unknown")
+        if router and extaddr_map
+        else "Unknown",
     }
 
     router_child_ip6_data = []
@@ -46,7 +50,9 @@ def get_meshdiag_childip6_one(parent_rloc16, router=None, extaddr_map=None):
         child_rloc16_match = re.match(r"child-rloc16:\s*(0x[0-9a-fA-F]+)", stripped)
         if child_rloc16_match:
             if current_child and current_child.get("child_rloc16"):
-                current_child["ip6_addr_count"] = len(current_child.get("ip6_addrs", []))
+                current_child["ip6_addr_count"] = len(
+                    current_child.get("ip6_addrs", [])
+                )
                 router_child_ip6_data.append(current_child)
 
             current_child = {
@@ -76,15 +82,21 @@ def get_meshdiag_childip6_tables(extaddr_map):
     """Collect child IPv6 tables for all active routers in the router table."""
 
     router_table_data = get_router_table_data(extaddr_map)
-    router_rlocs = [router.get("rloc16") for router in router_table_data if router.get("rloc16")]
+    router_rlocs = [
+        router.get("rloc16") for router in router_table_data if router.get("rloc16")
+    ]
 
     router_child_ip6_tables = []
 
     for parent_rloc16 in router_rlocs:
-        router = next((r for r in router_table_data if r.get("rloc16") == parent_rloc16), None)
+        router = next(
+            (r for r in router_table_data if r.get("rloc16") == parent_rloc16), None
+        )
         if router:
             extaddr = router.get("extaddr")
-            device_label = extaddr_map.get(extaddr, "Unknown") if extaddr_map else "Unknown"
+            device_label = (
+                extaddr_map.get(extaddr, "Unknown") if extaddr_map else "Unknown"
+            )
             logging.info(
                 f"Getting meshdiag childip6 for router rloc16 {parent_rloc16} "
                 f"(Node: {device_label}, ExtAddr: {extaddr})..."
@@ -102,13 +114,19 @@ def get_meshdiag_childip6_tables(extaddr_map):
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
     td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
 
-    extaddr_json_filename = data_file_path(EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir)
+    extaddr_json_filename = data_file_path(
+        EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir
+    )
 
     if os.path.exists(extaddr_json_filename):
-        logging.info(f"Loading extended address to device label mapping from {extaddr_json_filename}...")
+        logging.info(
+            f"Loading extended address to device label mapping from {extaddr_json_filename}..."
+        )
         extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
     else:
         logging.warning(
@@ -118,7 +136,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     router_child_ip6_tables = get_meshdiag_childip6_tables(extaddr_map)
 
-    output_filename = data_file_path("td-otbr-cli-meshdiag-router-childip6.json", td_data_dir)
+    output_filename = data_file_path(
+        "td-otbr-cli-meshdiag-router-childip6.json", td_data_dir
+    )
     with open(output_filename, "w") as f:
         json.dump(router_child_ip6_tables, f, indent=4)
 

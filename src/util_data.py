@@ -31,7 +31,9 @@ class TDDataDirResolution:
     created: bool = False
 
 
-def _normalize_path(path_value: str | os.PathLike[str], cwd: Path | None = None) -> Path:
+def _normalize_path(
+    path_value: str | os.PathLike[str], cwd: Path | None = None
+) -> Path:
     """Normalize path_value to an absolute Path, resolving relative paths against cwd."""
     path = Path(path_value).expanduser()
     if not path.is_absolute():
@@ -39,7 +41,9 @@ def _normalize_path(path_value: str | os.PathLike[str], cwd: Path | None = None)
     return path.resolve()
 
 
-def _normalize_optional(value: str | os.PathLike[str] | None) -> str | os.PathLike[str] | None:
+def _normalize_optional(
+    value: str | os.PathLike[str] | None,
+) -> str | os.PathLike[str] | None:
     """Return None for blank values so callers can safely pass env/CLI text."""
     if value is None:
         return None
@@ -149,7 +153,9 @@ def ensure_td_data_dir(path: Path) -> Path:
 def format_td_data_dir_log_message(resolution: TDDataDirResolution) -> str:
     """Format a standard log line for effective td_data_dir diagnostics."""
     suffix = " (created)" if resolution.created else ""
-    return f"td_data_directory={resolution.path} source={resolution.source.value}{suffix}"
+    return (
+        f"td_data_directory={resolution.path} source={resolution.source.value}{suffix}"
+    )
 
 
 def data_file_path(filename: str, td_data_dir: Path) -> Path:

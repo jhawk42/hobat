@@ -134,7 +134,9 @@ class DataDirectoryHelpersTests(unittest.TestCase):
 class DataPathHelpersTests(unittest.TestCase):
     def test_data_file_path_joins_relative_name(self) -> None:
         base = Path("/tmp/td-data")
-        self.assertEqual(util_data.data_file_path("example.json", base), base / "example.json")
+        self.assertEqual(
+            util_data.data_file_path("example.json", base), base / "example.json"
+        )
 
     def test_data_file_path_rejects_absolute(self) -> None:
         with self.assertRaises(ValueError):
@@ -146,7 +148,9 @@ class DataPathHelpersTests(unittest.TestCase):
 
     def test_data_file_arg_or_default_resolves_absolute(self) -> None:
         absolute = Path("/tmp/custom.json")
-        resolved = util_data.data_file_arg_or_default(str(absolute), Path("/tmp/td-data"))
+        resolved = util_data.data_file_arg_or_default(
+            str(absolute), Path("/tmp/td-data")
+        )
         self.assertEqual(resolved, absolute.resolve())
 
     def test_data_file_arg_or_default_maps_relative_to_data_dir(self) -> None:

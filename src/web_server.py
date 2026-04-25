@@ -37,11 +37,11 @@ class TDashHandler(http.server.SimpleHTTPRequestHandler):
     # application/javascript).
     extensions_map = {
         **http.server.SimpleHTTPRequestHandler.extensions_map,
-        '.js':   'application/javascript',
-        '.mjs':  'application/javascript',
-        '.json': 'application/json',
-        '.css':  'text/css',
-        '.html': 'text/html',
+        ".js": "application/javascript",
+        ".mjs": "application/javascript",
+        ".json": "application/json",
+        ".css": "text/css",
+        ".html": "text/html",
     }
 
     def do_GET(self) -> None:
@@ -120,7 +120,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -139,14 +141,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer((args.host, args.port), Handler) as httpd:
-        logging.info(f"Serving at http://{args.host or 'localhost'}:{args.port} (/ redirects to /tdash.html)")
+        logging.info(
+            f"Serving at http://{args.host or 'localhost'}:{args.port} (/ redirects to /tdash.html)"
+        )
         logging.info("Static assets root: %s", static_root)
         logging.info("JSON data root: %s", td_data_dir)
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
             pass
-        logging.info('Stopping httpd...')
+        logging.info("Stopping httpd...")
 
     return 0
 

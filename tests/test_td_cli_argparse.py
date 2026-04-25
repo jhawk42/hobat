@@ -1,4 +1,5 @@
 """Tests for td_cli.py build_parser(), dispatch(), and main()."""
+
 from __future__ import annotations
 
 import io
@@ -14,6 +15,7 @@ import td_cli
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse(argv: list[str]):
     """Strict parse. Raises SystemExit on invalid input."""
     return td_cli.build_parser().parse_args(argv)
@@ -27,6 +29,7 @@ def _parse_known(argv: list[str]):
 # ---------------------------------------------------------------------------
 # Parser: common options and top-level commands
 # ---------------------------------------------------------------------------
+
 
 class TestCommonOptions(unittest.TestCase):
     def test_verbose_short_flag(self):
@@ -93,6 +96,7 @@ class TestTopLevelCommands(unittest.TestCase):
 # Parser: nested command trees and passthrough extras
 # ---------------------------------------------------------------------------
 
+
 class TestOtbrCliParser(unittest.TestCase):
     def test_otbr_cli_without_subcommand_is_allowed(self):
         args = _parse(["otbr-cli"])
@@ -131,7 +135,9 @@ class TestForwardingParsers(unittest.TestCase):
         self.assertEqual(extras, ["--input", "layout.json"])
 
     def test_merge_dataset_extras_preserved(self):
-        args, extras = _parse_known(["merge-dataset", "--input1", "a.json", "--input2", "b.json"])
+        args, extras = _parse_known(
+            ["merge-dataset", "--input1", "a.json", "--input2", "b.json"]
+        )
         self.assertEqual(args.command, "merge-dataset")
         self.assertEqual(extras, ["--input1", "a.json", "--input2", "b.json"])
 
@@ -139,6 +145,7 @@ class TestForwardingParsers(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Dispatch behavior
 # ---------------------------------------------------------------------------
+
 
 class TestDispatchOtbrCli(unittest.TestCase):
     def _dispatch(self, argv: list[str]) -> int:
@@ -153,17 +160,27 @@ class TestDispatchOtbrCli(unittest.TestCase):
         self.assertEqual(rc, 0)
 
     def test_meshdiag_childip6_calls_module_main(self):
-        with patch.object(td_cli.otbr_cli_meshdiag_childip6, "main", return_value=0) as m:
+        with patch.object(
+            td_cli.otbr_cli_meshdiag_childip6, "main", return_value=0
+        ) as m:
             rc = self._dispatch(["otbr-cli", "meshdiag", "childip6"])
         m.assert_called_once_with([])
         self.assertEqual(rc, 0)
 
     def test_meshdiag_all_calls_all_meshdiag_modules(self):
         with (
-            patch.object(td_cli.otbr_cli_meshdiag_topology, "main", return_value=0) as mt,
-            patch.object(td_cli.otbr_cli_meshdiag_routerneighbortable, "main", return_value=0) as mr,
-            patch.object(td_cli.otbr_cli_meshdiag_childtable, "main", return_value=0) as mc,
-            patch.object(td_cli.otbr_cli_meshdiag_childip6, "main", return_value=0) as mi,
+            patch.object(
+                td_cli.otbr_cli_meshdiag_topology, "main", return_value=0
+            ) as mt,
+            patch.object(
+                td_cli.otbr_cli_meshdiag_routerneighbortable, "main", return_value=0
+            ) as mr,
+            patch.object(
+                td_cli.otbr_cli_meshdiag_childtable, "main", return_value=0
+            ) as mc,
+            patch.object(
+                td_cli.otbr_cli_meshdiag_childip6, "main", return_value=0
+            ) as mi,
         ):
             rc = self._dispatch(["otbr-cli", "meshdiag", "all"])
         mt.assert_called_once_with([])
@@ -173,8 +190,12 @@ class TestDispatchOtbrCli(unittest.TestCase):
         self.assertEqual(rc, 0)
 
     def test_networkdiag_children_no_forwards_cno(self):
-        with patch.object(td_cli.otbr_cli_networkdiag_topology, "main", return_value=0) as m:
-            rc = self._dispatch(["otbr-cli", "networkdiag", "topology", "--children-no"])
+        with patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
+        ) as m:
+            rc = self._dispatch(
+                ["otbr-cli", "networkdiag", "topology", "--children-no"]
+            )
         m.assert_called_once_with(["-cno"])
         self.assertEqual(rc, 0)
 
@@ -186,14 +207,28 @@ class TestDispatchOtherCommands(unittest.TestCase):
         return td_cli.dispatch(args, extras, parser)
 
     def test_mdns_builds_expected_argv(self):
-        argv = ["mdns", "hap", "--browse-timeout", "3", "--haptcp", "--mattertcpsupported"]
+        argv = [
+            "mdns",
+            "hap",
+            "--browse-timeout",
+            "3",
+            "--haptcp",
+            "--mattertcpsupported",
+        ]
         with patch.object(td_cli.mdns_thread_scopes, "main", return_value=0) as m:
             rc = self._dispatch(argv)
-        m.assert_called_once_with(["hap", "--browse-timeout", "3.0", "--haptcp", "--mattertcpsupported"])
+        m.assert_called_once_with(
+            ["hap", "--browse-timeout", "3.0", "--haptcp", "--mattertcpsupported"]
+        )
         self.assertEqual(rc, 0)
 
     def test_restapi_download_forwards_extras(self):
-        argv = ["otbr-restapi", "download", "--url", "http://localhost:8080/api/v1/diagnostics"]
+        argv = [
+            "otbr-restapi",
+            "download",
+            "--url",
+            "http://localhost:8080/api/v1/diagnostics",
+        ]
         with patch.object(td_cli.otbr_restapi_download, "main", return_value=0) as m:
             rc = self._dispatch(argv)
         m.assert_called_once_with(["--url", "http://localhost:8080/api/v1/diagnostics"])
@@ -224,6 +259,7 @@ class TestDispatchOtherCommands(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # main() integration
 # ---------------------------------------------------------------------------
+
 
 class TestMain(unittest.TestCase):
     def test_main_no_argv_prints_help_and_returns_zero(self):

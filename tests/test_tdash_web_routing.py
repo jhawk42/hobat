@@ -3,6 +3,7 @@
 Run with:
     PYTHONPATH=/workspaces/tdash/src python -m pytest tests/test_tdash_web_routing.py -v
 """
+
 from __future__ import annotations
 
 import http.client
@@ -15,6 +16,7 @@ from functools import partial
 from pathlib import Path
 
 import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import web_server

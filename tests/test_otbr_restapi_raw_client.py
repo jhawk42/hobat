@@ -37,12 +37,18 @@ class FakeResponse:
 
 class OTBRRawClientTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.client = raw_client_module.OTBRRawRestApiClient(base_url="http://example.test")
+        self.client = raw_client_module.OTBRRawRestApiClient(
+            base_url="http://example.test"
+        )
 
     def test_list_devices_returns_raw_jsonapi_collection_by_default(self) -> None:
         payload = b'{"meta":{"collection":{"total":1}},"data":[{"id":"abc123","type":"threadDevice","attributes":{"hostname":"node-1"}}]}'
 
-        with patch.object(base_client_module, "urlopen", return_value=FakeResponse(payload, "application/vnd.api+json")):
+        with patch.object(
+            base_client_module,
+            "urlopen",
+            return_value=FakeResponse(payload, "application/vnd.api+json"),
+        ):
             result = self.client.list_devices()
 
         self.assertEqual(result["meta"]["collection"]["total"], 1)
@@ -52,7 +58,11 @@ class OTBRRawClientTests(unittest.TestCase):
     def test_get_node_can_still_flatten_when_explicitly_requested(self) -> None:
         payload = b'{"data":{"id":"abc123","type":"threadBorderRouter","attributes":{"hostname":"node-1"}}}'
 
-        with patch.object(base_client_module, "urlopen", return_value=FakeResponse(payload, "application/vnd.api+json")):
+        with patch.object(
+            base_client_module,
+            "urlopen",
+            return_value=FakeResponse(payload, "application/vnd.api+json"),
+        ):
             result = self.client.get_node(raw=False)
 
         self.assertEqual(result["id"], "abc123")
@@ -61,7 +71,15 @@ class OTBRRawClientTests(unittest.TestCase):
 
 class OTBRRawCliTests(unittest.TestCase):
     def test_main_emits_raw_jsonapi_document(self) -> None:
-        raw_document = {"data": [{"id": "abc123", "type": "threadDevice", "attributes": {"hostname": "node-1"}}]}
+        raw_document = {
+            "data": [
+                {
+                    "id": "abc123",
+                    "type": "threadDevice",
+                    "attributes": {"hostname": "node-1"},
+                }
+            ]
+        }
 
         with patch.object(raw_cli_module, "dispatch", return_value=raw_document):
             stdout = io.StringIO()
