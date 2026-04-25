@@ -1,10 +1,10 @@
 import base64
 import logging
-from util_convert import convert_hexnumber_extaddr_to_base64
+from util_convert import extended_address_to_b64
 
 # The original hex string
 hex_number = "aaf2709373009853"
-base64_string = convert_hexnumber_extaddr_to_base64(hex_number)
+base64_string = extended_address_to_b64(hex_number)
 
 logging.info(f"Hex:    {hex_number}")
 logging.info(f"Base64: {base64_string}")
