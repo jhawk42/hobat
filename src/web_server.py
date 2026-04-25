@@ -19,7 +19,7 @@ TD_WEB_HOST_PORT = 8087
 
 
 class TDashHandler(http.server.SimpleHTTPRequestHandler):
-    """HTTP request handler that redirects '/' to '/tdash.html'."""
+    """HTTP request handler that serves '/tdash.html' for the root path."""
 
     def __init__(
         self,
@@ -46,10 +46,7 @@ class TDashHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/":
-            self.send_response(302)
-            self.send_header("Location", "/tdash.html")
-            self.end_headers()
-            return
+            self.path = "/tdash.html"
 
         if self._is_json_request(self.path):
             self._serve_json_from_data_dir(self.path)
