@@ -4,7 +4,8 @@ import re
 import json
 import logging
 
-TD_OTBR_CONTAINER_NAME_DEFAULT = "otbr"  # Default container name for OTBR Docker image
+# Default container name for OTBR Docker image
+TD_OTBR_CONTAINER_NAME_DEFAULT = "otbr"
 TD_OTBR_CONTAINER_NAME_ENV = (
     "TD_OTBR_CONTAINER_NAME"  # Environment variable name for OTBR container name
 )
@@ -30,7 +31,7 @@ def run_ot_ctl_command_stdio(ot_command, container_name=None):
         f"ot-ctl {ot_command}",
     ]
 
-    ## command line option support to run ot-ctl command without docker exec
+    # command line option support to run ot-ctl command without docker exec
     full_command_no_docker = ["sh", "-c", f"ot-ctl {ot_command}"]
 
     if container_name is not None:
@@ -45,7 +46,8 @@ def run_ot_ctl_command_stdio(ot_command, container_name=None):
 
     try:
         # Run the command and capture output
-        _timeout = int(os.environ.get(TD_OT_CTL_TIMEOUT_ENV, TD_OT_CTL_TIMEOUT_DEFAULT))
+        _timeout = int(os.environ.get(
+            TD_OT_CTL_TIMEOUT_ENV, TD_OT_CTL_TIMEOUT_DEFAULT))
         result = subprocess.run(
             full_command,
             capture_output=True,
@@ -76,8 +78,6 @@ def run_ot_ctl_stdio(command, container_name=TD_OTBR_CONTAINER_NAME_DEFAULT):
     Note:  Default container name "otbr" used by the OpenThread Border Router (OTBR)
            Docker image. This can be overridden by setting the TD_OTBR_CONTAINER_NAME environment variable.
     """
-
-    # TODO add env & command line option support to run ot-ctl command without docker exec
 
     # get container name from environment variable or use default
     container_name_env = os.getenv(TD_OTBR_CONTAINER_NAME_ENV)

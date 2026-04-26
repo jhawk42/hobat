@@ -24,6 +24,7 @@ Dockerfile.ubuntu
 # project artifacts
 tests
 doc
+plan
 downloads
 data
 diag

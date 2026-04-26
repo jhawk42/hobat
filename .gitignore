@@ -101,5 +101,6 @@ docker-compose.override.yml
 docker-compose.*.local.yml
 
 downloads/
+plan/
 data/
 diag/
