@@ -6,15 +6,15 @@ import logging
 from typing import Sequence
 
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
-from extaddr_device_label_map import extaddr_device_label_mapping_load
+from extaddr_device_label_map import load_extaddr_device_label_map
 import util_ot_ctl
-from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
 
 
-def get_thread_router_table():
+def fetch_router_table():
     try:
         # Executes the command: ot-ctl router table
-        output = util_ot_ctl.run_ot_ctl_stdio("router table")
+        output = util_ot_ctl.exec_ot_ctl("router table")
         return output
     except subprocess.CalledProcessError as e:
         logging.error(f"Error running ot-ctl: {e}")
@@ -24,7 +24,7 @@ def get_thread_router_table():
         raise
 
 
-def parse_router_table_output(output, extaddr_map=None):
+def parse_router_table(output, extaddr_map=None):
     """
     Parses the router table output into a list of router dictionaries.
 
@@ -44,7 +44,8 @@ def parse_router_table_output(output, extaddr_map=None):
         TypeError: If output is not a string
     """
     if not isinstance(output, str):
-        raise TypeError(f"Expected output to be a string, got {type(output).__name__}")
+        raise TypeError(
+            f"Expected output to be a string, got {type(output).__name__}")
 
     routers = []
     if extaddr_map is None:
@@ -68,7 +69,7 @@ def parse_router_table_output(output, extaddr_map=None):
     field_names = [f.strip() for f in header_line.split("|")[1:-1]]
 
     # Parse data rows (skip header and separator lines)
-    for line in lines[header_idx + 2 :]:
+    for line in lines[header_idx + 2:]:
         # Skip separator lines (lines starting with +)
         if line.startswith("+") or not line.strip():
             continue
@@ -125,7 +126,7 @@ def parse_router_table_output(output, extaddr_map=None):
     return routers
 
 
-def get_router_table_data(extaddr_map=None):
+def fetch_and_parse_router_table(extaddr_map=None):
     """
     Retrieves and parses the thread router table data.
 
@@ -138,10 +139,10 @@ def get_router_table_data(extaddr_map=None):
     Raises:
         Exception: If retrieving or parsing router table fails
     """
-    raw_output = get_thread_router_table()
+    raw_output = fetch_router_table()
     if not raw_output:
         raise ValueError("Router table output is empty")
-    return parse_router_table_output(raw_output, extaddr_map)
+    return parse_router_table(raw_output, extaddr_map)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -149,7 +150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
-    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
+    td_data_dir = resolve_data_dir(datadir_arg=parse_datadir_from_argv(argv))
 
     try:
         # Load extaddr to nodename mapping from JSON file
@@ -162,12 +163,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             logging.info(
                 f"Loading extended address to node name mapping from {extaddr_json_filename}..."
             )
-            extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
+            extaddr_map = load_extaddr_device_label_map(
+                extaddr_json_filename)
         else:
             extaddr_map = {}
 
-        router_table_data = get_router_table_data(extaddr_map)
-        save_path = data_file_path("td-otbr-cli-router-table.json", td_data_dir)
+        router_table_data = fetch_and_parse_router_table(extaddr_map)
+        save_path = data_file_path(
+            "td-otbr-cli-router-table.json", td_data_dir)
         with open(save_path, "w") as f:
             json.dump(router_table_data, f, indent=4)
         print(json.dumps(router_table_data, indent=4))

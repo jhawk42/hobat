@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
-from util_data import resolve_td_data_dir
+from util_data import resolve_data_dir
 
 
 PRIORITY_FIELDS = [
@@ -339,7 +339,8 @@ def deep_merge(
 
     for key, value in incoming.items():
         if key == "_merge_conflicts":
-            existing_conflicts = conflict_target.setdefault("_merge_conflicts", [])
+            existing_conflicts = conflict_target.setdefault(
+                "_merge_conflicts", [])
             if isinstance(existing_conflicts, list) and isinstance(value, list):
                 for conflict in value:
                     if len(existing_conflicts) >= 20:
@@ -394,7 +395,8 @@ def nested_get(record: dict[str, Any], dotted_key: str) -> Any:
 def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
     identities: dict[str, str] = {}
 
-    rloc16 = normalize_identifier_text(record.get(MERGE_IDENTITY_FIELDS["rloc16"]))
+    rloc16 = normalize_identifier_text(
+        record.get(MERGE_IDENTITY_FIELDS["rloc16"]))
     if rloc16:
         identities["rloc16"] = rloc16
 
@@ -517,7 +519,8 @@ def build_merged_records(
 
             record_extaddr = record.get("extaddr")
             if isinstance(record_extaddr, str):
-                mapped_label = extaddr_to_device_label.get(record_extaddr.lower())
+                mapped_label = extaddr_to_device_label.get(
+                    record_extaddr.lower())
                 if mapped_label and value_is_empty(record.get("device_label")):
                     record["device_label"] = mapped_label
 
@@ -564,7 +567,8 @@ def build_merged_records(
                         by_omr,
                     )
                 deep_merge(nodes[node_id], record)
-                existing_sources = nodes[node_id].setdefault("_source_files", [])
+                existing_sources = nodes[node_id].setdefault(
+                    "_source_files", [])
                 if filename not in existing_sources:
                     existing_sources.append(filename)
 
@@ -613,7 +617,8 @@ def build_merged_records(
         if not isinstance(source_files, list):
             continue
 
-        unique_sources = sorted({s for s in source_files if isinstance(s, str)})
+        unique_sources = sorted(
+            {s for s in source_files if isinstance(s, str)})
         if len(unique_sources) > 1:
             multi_source_nodes += 1
         if len(unique_sources) == 1:
@@ -732,20 +737,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     args = parse_args(argv)
-    td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)
+    td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
     base_dir = td_data_dir if args.base_dir == "." else Path(args.base_dir)
     include_files = parse_file_list_args(args.include_files)
     exclude_files = parse_file_list_args(args.exclude_files)
 
-    input_files = resolve_input_files(DEFAULT_INPUT_FILES, include_files, exclude_files)
+    input_files = resolve_input_files(
+        DEFAULT_INPUT_FILES, include_files, exclude_files)
 
     for filename in input_files:
         if not (base_dir / filename).is_file():
-            raise FileNotFoundError(f"Input file not found: {base_dir / filename}")
+            raise FileNotFoundError(
+                f"Input file not found: {base_dir / filename}")
 
     extaddr_map_path = base_dir / args.extaddr_map_file
     if not extaddr_map_path.is_file():
-        raise FileNotFoundError(f"Reference file not found: {extaddr_map_path}")
+        raise FileNotFoundError(
+            f"Reference file not found: {extaddr_map_path}")
     extaddr_to_device_label = load_extaddr_device_label_map(extaddr_map_path)
 
     dataset = load_json(base_dir / args.dataset_file)
@@ -776,7 +784,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f.write("\n")
         logging.info(f"Wrote merge report to {report_path}")
 
-    logging.info(f"Wrote {len(merged_records)} merged records to {output_path}")
+    logging.info(
+        f"Wrote {len(merged_records)} merged records to {output_path}")
     logging.info(
         "Validation summary: "
         f"multi_source_nodes={report['multi_source_nodes_total']}, "

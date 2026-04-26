@@ -8,11 +8,11 @@ from typing import Sequence
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 import util_ot_ctl
 import util_network
-from extaddr_device_label_map import extaddr_device_label_mapping_load
-from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
+from extaddr_device_label_map import load_extaddr_device_label_map
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
 
 
-def get_meshdiag_topology_ip6addrs_children():
+def fetch_meshdiag_topology():
     """Retrieves the meshdiag topology IP6 addresses and children data from the network.
     Runs: ot-ctl meshdiag topology ip6-addrs children
     Returns: Raw output string from the command
@@ -20,14 +20,15 @@ def get_meshdiag_topology_ip6addrs_children():
     try:
         # Executes the command: ot-ctl meshdiag topology ip6-addrs children
         # This command provides IPv6 addresses and children info for all routers
-        output = util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs children")
+        output = util_ot_ctl.exec_ot_ctl(
+            "meshdiag topology ip6-addrs children")
         return output
     except subprocess.CalledProcessError as e:
         logging.error(f"Error running ot-ctl: {e}")
         return None
 
 
-def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(
+def parse_meshdiag_topology_output(
     output, extaddr_map=None
 ):
     """
@@ -132,7 +133,8 @@ def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(
                         # Child line: "rloc16:0x5002 lq:3, mode:-"
                         if "rloc16:" in stripped:
                             child = {}
-                            rloc_match = re.search(r"rloc16:(0x[0-9a-fA-F]+)", stripped)
+                            rloc_match = re.search(
+                                r"rloc16:(0x[0-9a-fA-F]+)", stripped)
                             lq_match = re.search(r"lq:(\d+)", stripped)
                             mode_match = re.search(r"mode:([^\s,]+)", stripped)
 
@@ -160,7 +162,7 @@ def parse_meshdiag_topology_ip6addrs_children_output_and_enhance(
     return routers
 
 
-def meshdiag_topology_ip6addrs_children_data_enhance_links(
+def enhance_topology_router_links(
     topology_data, network_dataset_info=None
 ):
     """
@@ -185,7 +187,7 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(
 
         # Enhancement: OMR IPv6 address
         if omr_ipv6addr_prefix:
-            enhanced_router["omrIpv6Address"] = util_network.get_omr_addr_from_list(
+            enhanced_router["omrIpv6Address"] = util_network.find_omr_address_in_list(
                 router.get("ipv6_addrs", []), omr_ipv6addr_prefix
             )
 
@@ -209,7 +211,8 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(
             for link_id in link_ids:
                 for linked_router in topology_data:
                     if linked_router.get("id") == link_id:
-                        device_label = linked_router.get("device_label", "Unknown")
+                        device_label = linked_router.get(
+                            "device_label", "Unknown")
                         link_rloc16 = linked_router.get("rloc16", "Unknown")
                         link_objects.append(
                             {
@@ -233,7 +236,7 @@ def meshdiag_topology_ip6addrs_children_data_enhance_links(
     return topology_data_enhanced
 
 
-def meshdiag_topology_ip6addrs_children_data_get(
+def get_meshdiag_topology(
     extaddr_map=None, network_dataset_info=None
 ):
     """
@@ -248,17 +251,17 @@ def meshdiag_topology_ip6addrs_children_data_get(
 
     topology_data_enhanced = []
 
-    output = get_meshdiag_topology_ip6addrs_children()
+    output = fetch_meshdiag_topology()
     if output:
         topology_data_enhanced = (
-            parse_meshdiag_topology_ip6addrs_children_output_and_enhance(
+            parse_meshdiag_topology_output(
                 output, extaddr_map
             )
         )
 
     # enhance links by decoding link IDs to objects with id and device_label
     topology_data_enhanced_links = (
-        meshdiag_topology_ip6addrs_children_data_enhance_links(
+        enhance_topology_router_links(
             topology_data_enhanced, network_dataset_info
         )
     )
@@ -271,7 +274,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
-    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
+    td_data_dir = resolve_data_dir(
+        datadir_arg=parse_datadir_from_argv(argv))
 
     # Load extaddr to nodename mapping from JSON file
     extaddr_json_filename = data_file_path(
@@ -280,16 +284,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
-        extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
+        extaddr_map = load_extaddr_device_label_map(extaddr_json_filename)
     else:
         extaddr_map = {}
 
-    network_dataset_info = util_network.get_network_dataset_info()
+    network_dataset_info = util_network.fetch_network_dataset_info()
 
-    meshdiag_topology_data = meshdiag_topology_ip6addrs_children_data_get(
+    meshdiag_topology_data = get_meshdiag_topology(
         extaddr_map, network_dataset_info
     )
-    save_path = data_file_path("td-otbr-cli-meshdiag-topology.json", td_data_dir)
+    save_path = data_file_path(
+        "td-otbr-cli-meshdiag-topology.json", td_data_dir)
     with open(save_path, mode="w", encoding="utf-8") as f:
         json.dump(meshdiag_topology_data, f, indent=4)
 

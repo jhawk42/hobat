@@ -9,8 +9,8 @@ from typing import Sequence
 from urllib.parse import unquote, urlparse
 
 from util_data import (
-    format_td_data_dir_log_message,
-    resolve_td_data_dir_with_source,
+    format_data_dir_log_message,
+    resolve_data_dir_with_source,
 )
 from const import TD_DATA_DIR_ARG_HELP
 
@@ -58,7 +58,7 @@ class TDashHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urlparse(request_path)
         return parsed.path.lower().endswith(".json")
 
-    def _resolve_json_target_path(self, request_path: str) -> Path:
+    def _resolve_json_file_path(self, request_path: str) -> Path:
         if self.td_data_dir is None:
             raise RuntimeError("TD data directory is not configured")
 
@@ -73,13 +73,14 @@ class TDashHandler(http.server.SimpleHTTPRequestHandler):
 
     def _serve_json_from_data_dir(self, request_path: str) -> None:
         try:
-            target = self._resolve_json_target_path(request_path)
+            target = self._resolve_json_file_path(request_path)
         except ValueError:
             self.send_error(404, "File not found")
             return
 
         if not target.exists() or not target.is_file():
-            logging.warning("JSON file not found in td_data_directory: %s", target)
+            logging.warning(
+                "JSON file not found in td_data_directory: %s", target)
             self.send_error(404, "File not found")
             return
 
@@ -125,10 +126,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     static_root = Path(__file__).resolve().parent
-    td_data_dir_resolution = resolve_td_data_dir_with_source(datadir_arg=args.datadir)
+    td_data_dir_resolution = resolve_data_dir_with_source(
+        datadir_arg=args.datadir)
     td_data_dir = td_data_dir_resolution.path
 
-    logging.info(format_td_data_dir_log_message(td_data_dir_resolution))
+    logging.info(format_data_dir_log_message(td_data_dir_resolution))
 
     Handler = partial(
         TDashHandler,

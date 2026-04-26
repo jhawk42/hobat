@@ -5,20 +5,20 @@ import logging
 from typing import Sequence
 
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
-from otbr_cli_router_table import get_router_table_data
-from extaddr_device_label_map import extaddr_device_label_mapping_load
-from util_ot_ctl import run_ot_ctl_stdio
-from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
+from otbr_cli_router_table import fetch_and_parse_router_table
+from extaddr_device_label_map import load_extaddr_device_label_map
+from util_ot_ctl import exec_ot_ctl
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
 
 
-def _yes_no_to_bool(value):
+def _parse_yes_no_to_bool(value):
     return value.lower() == "yes"
 
 
-def get_meshdiag_childtable_one(parent_rloc16, router=None, extaddr_map=None):
+def fetch_meshdiag_child_table_for_device(parent_rloc16, router=None, extaddr_map=None):
     """Collect and parse `meshdiag childtable` output for one parent router."""
 
-    output = run_ot_ctl_stdio(f"meshdiag childtable {parent_rloc16}")
+    output = exec_ot_ctl(f"meshdiag childtable {parent_rloc16}")
     logging.info(
         f"[DEBUG] Output of 'meshdiag childtable {parent_rloc16}':\n{output}\n"
     )
@@ -96,9 +96,11 @@ def get_meshdiag_childtable_one(parent_rloc16, router=None, extaddr_map=None):
             stripped,
         )
         if rx_type_match:
-            current_child["rx_on"] = _yes_no_to_bool(rx_type_match.group(1))
+            current_child["rx_on"] = _parse_yes_no_to_bool(
+                rx_type_match.group(1))
             current_child["type"] = rx_type_match.group(2)
-            current_child["full_net"] = _yes_no_to_bool(rx_type_match.group(3))
+            current_child["full_net"] = _parse_yes_no_to_bool(
+                rx_type_match.group(3))
             continue
 
         rss_match = re.match(
@@ -116,7 +118,8 @@ def get_meshdiag_childtable_one(parent_rloc16, router=None, extaddr_map=None):
             stripped,
         )
         if err_rate_match:
-            current_child["err_rate_frame_pct"] = float(err_rate_match.group(1))
+            current_child["err_rate_frame_pct"] = float(
+                err_rate_match.group(1))
             current_child["err_rate_msg_pct"] = float(err_rate_match.group(2))
             continue
 
@@ -130,7 +133,8 @@ def get_meshdiag_childtable_one(parent_rloc16, router=None, extaddr_map=None):
             stripped,
         )
         if csl_match:
-            current_child["csl_sync"] = _yes_no_to_bool(csl_match.group(1))
+            current_child["csl_sync"] = _parse_yes_no_to_bool(
+                csl_match.group(1))
             current_child["csl_period"] = int(csl_match.group(2))
             current_child["csl_timeout"] = int(csl_match.group(3))
             current_child["csl_channel"] = int(csl_match.group(4))
@@ -139,15 +143,16 @@ def get_meshdiag_childtable_one(parent_rloc16, router=None, extaddr_map=None):
         router_child_table_data.append(current_child)
 
     router_child_table["router_child_table"] = router_child_table_data
-    router_child_table["router_child_table_count"] = len(router_child_table_data)
+    router_child_table["router_child_table_count"] = len(
+        router_child_table_data)
 
     return router_child_table
 
 
-def get_meshdiag_childtables(extaddr_map):
+def fetch_all_meshdiag_child_tables(extaddr_map):
     """Collect child tables for all active routers in the router table."""
 
-    router_table_data = get_router_table_data(extaddr_map)
+    router_table_data = fetch_and_parse_router_table(extaddr_map)
     router_rlocs = [
         router.get("rloc16") for router in router_table_data if router.get("rloc16")
     ]
@@ -156,12 +161,14 @@ def get_meshdiag_childtables(extaddr_map):
 
     for parent_rloc16 in router_rlocs:
         router = next(
-            (r for r in router_table_data if r.get("rloc16") == parent_rloc16), None
+            (r for r in router_table_data if r.get(
+                "rloc16") == parent_rloc16), None
         )
         if router:
             extaddr = router.get("extaddr")
             device_label = (
-                extaddr_map.get(extaddr, "Unknown") if extaddr_map else "Unknown"
+                extaddr_map.get(
+                    extaddr, "Unknown") if extaddr_map else "Unknown"
             )
             logging.info(
                 f"Getting meshdiag childtable for router rloc16 {parent_rloc16} "
@@ -173,7 +180,7 @@ def get_meshdiag_childtables(extaddr_map):
                 "(Node: Unknown, ExtAddr: Unknown)..."
             )
 
-        router_child_table = get_meshdiag_childtable_one(
+        router_child_table = fetch_meshdiag_child_table_for_device(
             parent_rloc16, router, extaddr_map
         )
         router_child_tables.append(router_child_table)
@@ -185,7 +192,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
-    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
+    td_data_dir = resolve_data_dir(
+        datadir_arg=parse_datadir_from_argv(argv))
 
     extaddr_json_filename = data_file_path(
         EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir
@@ -195,14 +203,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         logging.info(
             f"Loading extended address to device label mapping from {extaddr_json_filename}..."
         )
-        extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
+        extaddr_map = load_extaddr_device_label_map(extaddr_json_filename)
     else:
         logging.warning(
             f"extended address mapping file not found: {extaddr_json_filename}. Continuing with Unknown labels."
         )
         extaddr_map = {}
 
-    router_child_tables = get_meshdiag_childtables(extaddr_map)
+    router_child_tables = fetch_all_meshdiag_child_tables(extaddr_map)
 
     output_filename = data_file_path(
         "td-otbr-cli-meshdiag-router-childtables.json", td_data_dir
@@ -210,7 +218,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     with open(output_filename, "w") as f:
         json.dump(router_child_tables, f, indent=4)
 
-    logging.info(f"Meshdiag router childtables data saved to {output_filename}")
+    logging.info(
+        f"Meshdiag router childtables data saved to {output_filename}")
     print(json.dumps(router_child_tables, indent=4))
 
 

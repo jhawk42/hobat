@@ -4,11 +4,11 @@ import argparse
 import logging
 
 from typing import Any, Sequence
-from util_data import data_file_arg_or_default, resolve_td_data_dir
+from util_data import resolve_data_file_path, resolve_data_dir
 
 from otbr_restapi_client_cli import (
     EXIT_SUCCESS,
-    _load_dataset_input,
+    _parse_dataset_input,
     _parse_typed_values,
     build_parser as build_flattened_parser,
     emit_error,
@@ -49,7 +49,7 @@ def dispatch(args: argparse.Namespace) -> Any:
             if args.dataset_command == "get":
                 return client.get_active_dataset(plain_text=args.text)
             if args.dataset_command == "set":
-                dataset = _load_dataset_input(args)
+                dataset = _parse_dataset_input(args)
                 return client.set_active_dataset(dataset)
 
     if args.resource == "devices":
@@ -122,11 +122,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
-    args.td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)
+    args.td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
 
     output_path = args.output
     if output_path:
-        output_path = str(data_file_arg_or_default(output_path, args.td_data_dir))
+        output_path = str(resolve_data_file_path(
+            output_path, args.td_data_dir))
 
     try:
         result = dispatch(args)

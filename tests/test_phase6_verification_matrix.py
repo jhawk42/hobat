@@ -20,17 +20,18 @@ class Phase6DataDirResolutionTests(unittest.TestCase):
 
     def test_case_2b_cli_relative_datadir_resolves_from_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            resolved = util_data.resolve_td_data_dir(
+            resolved = util_data.resolve_data_dir(
                 datadir_arg="relative-data",
                 env={},
                 cwd=tmpdir,
             )
-            self.assertEqual(resolved, (Path(tmpdir) / "relative-data").resolve())
+            self.assertEqual(
+                resolved, (Path(tmpdir) / "relative-data").resolve())
 
     def test_case_2c_missing_user_supplied_datadir_is_not_auto_created(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             missing = Path(tmpdir) / "does-not-exist"
-            resolved = util_data.resolve_td_data_dir(
+            resolved = util_data.resolve_data_dir(
                 datadir_arg=str(missing),
                 env={},
                 cwd=tmpdir,
@@ -48,7 +49,8 @@ class Phase6DataDirResolutionTests(unittest.TestCase):
                 ),
             ):
                 with self.assertRaises(PermissionError):
-                    util_data.resolve_td_data_dir(datadir_arg=None, env={}, cwd=tmpdir)
+                    util_data.resolve_data_dir(
+                        datadir_arg=None, env={}, cwd=tmpdir)
 
 
 class Phase6WebServerRoutingTests(unittest.TestCase):
@@ -82,7 +84,8 @@ class Phase6WebServerRoutingTests(unittest.TestCase):
 
         cls.server = socketserver.TCPServer(("127.0.0.1", 0), handler)
         cls.port = cls.server.server_address[1]
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread = threading.Thread(
+            target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
 
     @classmethod
@@ -98,7 +101,8 @@ class Phase6WebServerRoutingTests(unittest.TestCase):
     def test_case_5b_static_js_still_served_from_static_root(self) -> None:
         response = self._get("/app.js")
         self.assertEqual(response.status, 200)
-        self.assertIn("javascript", response.getheader("Content-Type", "").lower())
+        self.assertIn("javascript", response.getheader(
+            "Content-Type", "").lower())
 
     def test_case_5c_json_path_traversal_returns_404(self) -> None:
         # Encoded traversal path should be denied and never escape td_data_dir.
@@ -115,12 +119,13 @@ class Phase6DirectModuleInvocationTests(unittest.TestCase):
             expected = datadir.resolve()
 
             def _assert_datadir_and_return(*_args, **_kwargs) -> int:
-                self.assertEqual(otbr_restapi_download._ACTIVE_TD_DATA_DIR, expected)
+                self.assertEqual(
+                    otbr_restapi_download._ACTIVE_TD_DATA_DIR, expected)
                 return 0
 
             with patch.object(
                 otbr_restapi_download,
-                "restapi_downloads",
+                "download_all_restapi_endpoints",
                 side_effect=_assert_datadir_and_return,
             ):
                 rc = otbr_restapi_download.main(["--datadir", str(datadir)])

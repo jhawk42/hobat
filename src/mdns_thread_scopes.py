@@ -10,11 +10,12 @@ import logging
 from typing import Sequence
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
-from util_data import data_file_arg_or_default, resolve_td_data_dir
+from util_data import resolve_data_file_path, resolve_data_dir
 from const import TD_DATA_DIR_ARG_HELP
 
 TD_MDNS_BROWSE_TIMEOUT_ENV_NAME = "TD_MDNS_BROWSE_TIMEOUT"
-TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE = 5  # seconds (default if env var not set)"
+# seconds (default if env var not set)"
+TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE = 5
 
 # Vendor OUI Lookup Table
 VENDORS = {
@@ -128,7 +129,8 @@ def decode_hap_status_flags(sf_value):
             "ip_networking_enabled": not bool(
                 sf_int & (1 << 1)
             ),  # Bit 1: 0 = Enabled, 1 = Disabled
-            "problem_detected": bool(sf_int & (1 << 2)),  # Bit 2: 1 = Problem Detected
+            # Bit 2: 1 = Problem Detected
+            "problem_detected": bool(sf_int & (1 << 2)),
             "reserved_bits": (sf_int >> 3) & 0x1F,  # Bits 3-7: Reserved
         }
         return bits
@@ -146,7 +148,8 @@ def format_hap_status_flags(bits):
     status.append(
         f"IP Networking: {'Enabled' if bits['ip_networking_enabled'] else 'Disabled'}"
     )
-    status.append(f"Problem Detected: {'Yes' if bits['problem_detected'] else 'No'}")
+    status.append(
+        f"Problem Detected: {'Yes' if bits['problem_detected'] else 'No'}")
 
     return " | ".join(status)
 
@@ -271,7 +274,8 @@ def parse_matter_vp(vp_value):
     """Parse Matter Vendor Product (VP) field: VendorID+ProductID"""
     try:
         vp_str = (
-            vp_value.decode("utf-8") if isinstance(vp_value, bytes) else str(vp_value)
+            vp_value.decode("utf-8") if isinstance(vp_value,
+                                                   bytes) else str(vp_value)
         )
         if "+" in vp_str:
             parts = vp_str.split("+")
@@ -341,7 +345,8 @@ def decode_hap_setup_hash(sh_value):
     """Decode HAP Setup Hash (sh) field from Base64 to hex bytes"""
     try:
         sh_b64 = (
-            sh_value.decode("utf-8") if isinstance(sh_value, bytes) else str(sh_value)
+            sh_value.decode("utf-8") if isinstance(sh_value,
+                                                   bytes) else str(sh_value)
         )
         # Decode Base64 to bytes
         hash_bytes = base64.b64decode(sh_b64)
@@ -381,16 +386,19 @@ def decode_thread_beacon_bitmap(bb_value):
             "native_commissioner": bool(
                 bb_int & (1 << 1)
             ),  # Bit 1: Native Commissioner
-            "eth_interface": bool(bb_int & (1 << 2)),  # Bit 2: Ethernet Interface
+            # Bit 2: Ethernet Interface
+            "eth_interface": bool(bb_int & (1 << 2)),
             "wifi_interface": bool(bb_int & (1 << 3)),  # Bit 3: WiFi Interface
-            "thread_interface": bool(bb_int & (1 << 4)),  # Bit 4: Thread Interface
+            # Bit 4: Thread Interface
+            "thread_interface": bool(bb_int & (1 << 4)),
             "thread_ml_eid": bool(
                 bb_int & (1 << 5)
             ),  # Bit 5: Thread Multicast Listener EID
             "thread_dua": bool(
                 bb_int & (1 << 6)
             ),  # Bit 6: Thread Domain Unicast Address
-            "backbone_router": bool(bb_int & (1 << 7)),  # Bit 7: Backbone Router
+            # Bit 7: Backbone Router
+            "backbone_router": bool(bb_int & (1 << 7)),
         }
 
         return bb_int, bb_hex, bits
@@ -444,7 +452,7 @@ def decode_matter_icd_capability(icd_value):
         return None
 
 
-def extract_fabric_and_node_ids_from_name(service_name):
+def parse_fabric_and_node_ids_from_name(service_name):
     """Extract FabricID and NodeID from Matter operational service instance name
 
     Format: [64-bit Compressed Fabric ID]-[64-bit Node ID]._matter._tcp.local
@@ -997,11 +1005,11 @@ class MDNSDumpListener(ServiceListener):
         self._records_by_key = {}
         self._include_matter_tcp_supported = include_matter_tcp_supported
 
-    def _touch(self):
+    def _update_last_event_time(self):
         """Record the time of the most recent service event."""
         self._last_update = time.time()
 
-    def _json_safe(self, value):
+    def _to_json_safe_value(self, value):
         """Convert values to JSON-safe representations."""
         if isinstance(value, bytes):
             return {
@@ -1019,15 +1027,15 @@ class MDNSDumpListener(ServiceListener):
                     if isinstance(k, bytes)
                     else str(k)
                 )
-                safe[key_str] = self._json_safe(v)
+                safe[key_str] = self._to_json_safe_value(v)
             return safe
         if isinstance(value, (list, tuple, set)):
-            return [self._json_safe(v) for v in value]
+            return [self._to_json_safe_value(v) for v in value]
         if hasattr(value, "__dict__"):
-            return self._json_safe(vars(value))
+            return self._to_json_safe_value(vars(value))
         return str(value)
 
-    def _record_from_info(self, type_: str, name: str, info, event: str):
+    def _build_record_from_service_info(self, type_: str, name: str, info, event: str):
         """Build a common JSON record from zeroconf ServiceInfo + metadata."""
         parsed_addresses = []
         if info and hasattr(info, "parsed_addresses"):
@@ -1051,7 +1059,7 @@ class MDNSDumpListener(ServiceListener):
         if type_ == "_matter._tcp.local.":
             if "FabricID" not in properties:
                 fabric_id_hex, node_id_hex, fabric_id_dec, node_id_dec = (
-                    extract_fabric_and_node_ids_from_name(name)
+                    parse_fabric_and_node_ids_from_name(name)
                 )
                 if fabric_id_hex:
                     entry = {
@@ -1064,7 +1072,7 @@ class MDNSDumpListener(ServiceListener):
                     properties["FabricID"] = entry
             if "NodeID" not in properties:
                 fabric_id_hex, node_id_hex, fabric_id_dec, node_id_dec = (
-                    extract_fabric_and_node_ids_from_name(name)
+                    parse_fabric_and_node_ids_from_name(name)
                 )
                 if node_id_hex:
                     entry = {
@@ -1083,7 +1091,7 @@ class MDNSDumpListener(ServiceListener):
                 try:
                     for k, v in vars(info).items():
                         if not k.startswith("_"):
-                            service_info[k] = self._json_safe(v)
+                            service_info[k] = self._to_json_safe_value(v)
                 except TypeError:
                     pass
             for attr_name in dir(info):
@@ -1095,7 +1103,7 @@ class MDNSDumpListener(ServiceListener):
                     continue
                 if callable(attr_value):
                     continue
-                service_info[attr_name] = self._json_safe(attr_value)
+                service_info[attr_name] = self._to_json_safe_value(attr_value)
 
             # Override with explicitly structured / enriched fields.
             service_info.update(
@@ -1110,7 +1118,7 @@ class MDNSDumpListener(ServiceListener):
                     "host_ttl": getattr(info, "host_ttl", None),
                     "other_ttl": getattr(info, "other_ttl", None),
                     "key": getattr(info, "key", None),
-                    "text": self._json_safe(getattr(info, "text", None)),
+                    "text": self._to_json_safe_value(getattr(info, "text", None)),
                     "addresses_raw_hex": raw_addresses,
                     "addresses_parsed": parsed_addresses,
                     "properties": properties,
@@ -1127,7 +1135,7 @@ class MDNSDumpListener(ServiceListener):
             "service_info": service_info,
         }
 
-    def _matter_tcp_is_excluded(self, type_: str, info) -> bool:
+    def _is_matter_tcp_excluded(self, type_: str, info) -> bool:
         """Return True for _matter._tcp records that advertise TCP support (T=1).
 
         By default, Matter operational records with T=1 (TCP supported) are
@@ -1178,28 +1186,31 @@ class MDNSDumpListener(ServiceListener):
                 return
 
     def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
-        self._touch()
+        self._update_last_event_time()
         info = zc.get_service_info(type_, name)
-        if self._matter_tcp_is_excluded(type_, info):
+        if self._is_matter_tcp_excluded(type_, info):
             return
-        self._upsert_record(self._record_from_info(type_, name, info, "update"))
+        self._upsert_record(self._build_record_from_service_info(
+            type_, name, info, "update"))
 
     def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
-        self._touch()
+        self._update_last_event_time()
         # Only record remove events for records we actually stored.
         record_key = f"{type_}|{name}"
         with self._lock:
             if record_key not in self._records_by_key:
                 return
-        self._upsert_record(self._record_from_info(type_, name, None, "remove"))
+        self._upsert_record(self._build_record_from_service_info(
+            type_, name, None, "remove"))
         print(f"Service Removed: {name}")
 
     def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
-        self._touch()
+        self._update_last_event_time()
         info = zc.get_service_info(type_, name)
-        if self._matter_tcp_is_excluded(type_, info):
+        if self._is_matter_tcp_excluded(type_, info):
             return
-        self._upsert_record(self._record_from_info(type_, name, info, "add"))
+        self._upsert_record(
+            self._build_record_from_service_info(type_, name, info, "add"))
         if info:
             print(f"\n[ SCOPE: {type_} ]")
             print(f"  Name:    {name}")
@@ -1208,7 +1219,7 @@ class MDNSDumpListener(ServiceListener):
             )
             if hasattr(info, "parsed_addresses"):
                 print(f"  Parsed Addresses: {info.parsed_addresses()}")
-                ##TODO print out the info.parsed_addresses list
+                # TODO print out the info.parsed_addresses list
 
             # Print TXT Records (where Matter/HAP data lives)
             if info.properties:
@@ -1217,7 +1228,8 @@ class MDNSDumpListener(ServiceListener):
                     "_meshcop._udp.local.",
                     "_trel._udp.local.",
                 ]
-                is_hap_scope = type_ in ["_hap._udp.local.", "_hap._tcp.local."]
+                is_hap_scope = type_ in [
+                    "_hap._udp.local.", "_hap._tcp.local."]
                 is_matter_scope = type_ in [
                     "_matter._tcp.local.",
                     "_matterc._udp.local.",
@@ -1235,7 +1247,8 @@ class MDNSDumpListener(ServiceListener):
                 )
 
                 if is_thread_br_scope:
-                    props = {k.decode("utf-8"): v for k, v in info.properties.items()}
+                    props = {k.decode("utf-8"): v for k,
+                             v in info.properties.items()}
                     print("\n  Thread Border Router Identity & Capabilities:")
 
                     # Revision
@@ -1246,11 +1259,13 @@ class MDNSDumpListener(ServiceListener):
 
                     # Vendor Name
                     if "vn" in props and isinstance(props["vn"], bytes):
-                        print(f"    - Vendor Name (vn): {props['vn'].decode('utf-8')}")
+                        print(
+                            f"    - Vendor Name (vn): {props['vn'].decode('utf-8')}")
 
                     # Model Name
                     if "mn" in props and isinstance(props["mn"], bytes):
-                        print(f"    - Model Name (mn): {props['mn'].decode('utf-8')}")
+                        print(
+                            f"    - Model Name (mn): {props['mn'].decode('utf-8')}")
 
                     # Thread Version (tv)
                     if "tv" in props and isinstance(props["tv"], bytes):
@@ -1260,7 +1275,8 @@ class MDNSDumpListener(ServiceListener):
 
                     # Network Name
                     if "nn" in props and isinstance(props["nn"], bytes):
-                        print(f"    - Network Name (nn): {props['nn'].decode('utf-8')}")
+                        print(
+                            f"    - Network Name (nn): {props['nn'].decode('utf-8')}")
 
                     # Extended PAN ID (xp)
                     if "xp" in props and isinstance(props["xp"], bytes):
@@ -1306,7 +1322,8 @@ class MDNSDumpListener(ServiceListener):
                         sb_bits = decode_state_bitmap_br(sb_hex)
                         print(f"    - State Bitmap (sb): {sb_hex}")
                         if sb_bits:
-                            print(f"      * Status: {format_state_bitmap_br(sb_bits)}")
+                            print(
+                                f"      * Status: {format_state_bitmap_br(sb_bits)}")
                             print(f"      * Individual Bits:")
                             print(
                                 f"        - Bit 0 (Connection Allowed): {sb_bits['connection_allowed']}"
@@ -1350,11 +1367,14 @@ class MDNSDumpListener(ServiceListener):
                     if "bb" in props and isinstance(props["bb"], bytes):
                         bb_val = props["bb"]
                         bb_str = bb_val.hex().upper()
-                        bb_int, bb_hex, bb_bits = decode_thread_beacon_bitmap(bb_val)
+                        bb_int, bb_hex, bb_bits = decode_thread_beacon_bitmap(
+                            bb_val)
                         if bb_int is not None:
-                            print(f"    - Beacon Bitmap (bb): {bb_str} (0x{bb_hex})")
+                            print(
+                                f"    - Beacon Bitmap (bb): {bb_str} (0x{bb_hex})")
                             if bb_bits:
-                                status_str = format_thread_beacon_bitmap(bb_bits)
+                                status_str = format_thread_beacon_bitmap(
+                                    bb_bits)
                                 print(f"      * Status: {status_str}")
                         else:
                             print(f"    - Beacon Bitmap (bb): {bb_str}")
@@ -1399,7 +1419,8 @@ class MDNSDumpListener(ServiceListener):
                             )
                             print(f"    - {key}: {val_str}")
                 elif is_hap_scope:
-                    props = {k.decode("utf-8"): v for k, v in info.properties.items()}
+                    props = {k.decode("utf-8"): v for k,
+                             v in info.properties.items()}
                     print("\n  HomeKit Accessory Protocol (HAP) Attributes:")
 
                     # Device ID (id) - Mandatory
@@ -1441,7 +1462,8 @@ class MDNSDumpListener(ServiceListener):
                             else str(ci_val)
                         )
                         ci_name = get_hap_category_name(ci_str)
-                        print(f"    - Category Identifier (ci): {ci_str} ({ci_name})")
+                        print(
+                            f"    - Category Identifier (ci): {ci_str} ({ci_name})")
 
                     # Configuration Number (c#) - Mandatory
                     if "c#" in props:
@@ -1474,7 +1496,8 @@ class MDNSDumpListener(ServiceListener):
                         sf_bits = decode_hap_status_flags(sf_str)
                         print(f"    - Status Flags (sf): {sf_str}")
                         if sf_bits:
-                            print(f"      * {format_hap_status_flags(sf_bits)}")
+                            print(
+                                f"      * {format_hap_status_flags(sf_bits)}")
                             print(f"      * Individual Bits:")
                             print(
                                 f"        - Bit 0 (Pairing Status): {sf_bits['pairing_status']}"
@@ -1544,7 +1567,8 @@ class MDNSDumpListener(ServiceListener):
                             )
                             print(f"    - {key}: {val_str}")
                 elif is_matter_scope:
-                    props = {k.decode("utf-8"): v for k, v in info.properties.items()}
+                    props = {k.decode("utf-8"): v for k,
+                             v in info.properties.items()}
                     is_commissionable = type_ == "_matterc._udp.local."
                     scope_name = (
                         "Matter Commissionable (Pairing Mode)"
@@ -1561,11 +1585,13 @@ class MDNSDumpListener(ServiceListener):
                             if isinstance(txtvers_val, bytes)
                             else str(txtvers_val)
                         )
-                        print(f"    - TXT Record Version (txtvers): {txtvers_str}")
+                        print(
+                            f"    - TXT Record Version (txtvers): {txtvers_str}")
 
                     # Vendor Product (VP) - VendorID+ProductID
                     if "VP" in props:
-                        vendor_id, product_id, vp_str = parse_matter_vp(props["VP"])
+                        vendor_id, product_id, vp_str = parse_matter_vp(
+                            props["VP"])
                         print(f"    - Vendor Product (VP): {vp_str}")
                         if vendor_id is not None and product_id is not None:
                             print(f"      * Vendor ID: {vendor_id}")
@@ -1638,7 +1664,8 @@ class MDNSDumpListener(ServiceListener):
                         try:
                             d_int = int(d_str)
                             d_hex = format(d_int, "03x")  # 12-bit value
-                            print(f"    - Discriminator (D): {d_str} (0x{d_hex})")
+                            print(
+                                f"    - Discriminator (D): {d_str} (0x{d_hex})")
                         except ValueError:
                             print(f"    - Discriminator (D): {d_str}")
 
@@ -1676,10 +1703,11 @@ class MDNSDumpListener(ServiceListener):
                     else:
                         # Fallback: Extract from service instance name
                         fabric_id_hex, node_id_hex, fabric_id_dec, node_id_dec = (
-                            extract_fabric_and_node_ids_from_name(name)
+                            parse_fabric_and_node_ids_from_name(name)
                         )
                         if fabric_id_hex:
-                            print(f"    - Fabric ID (from name): {fabric_id_hex}")
+                            print(
+                                f"    - Fabric ID (from name): {fabric_id_hex}")
                             if fabric_id_dec is not None:
                                 print(f"      * Decimal: {fabric_id_dec}")
 
@@ -1695,7 +1723,7 @@ class MDNSDumpListener(ServiceListener):
                     else:
                         # Fallback: Extract from service instance name
                         fabric_id_hex, node_id_hex, fabric_id_dec, node_id_dec = (
-                            extract_fabric_and_node_ids_from_name(name)
+                            parse_fabric_and_node_ids_from_name(name)
                         )
                         if node_id_hex:
                             print(f"    - Node ID (from name): {node_id_hex}")
@@ -1717,7 +1745,8 @@ class MDNSDumpListener(ServiceListener):
                                 f"    - Sleepy Idle Interval (SII): {sii_str}ms ({sii_sec:.1f}s)"
                             )
                         except ValueError:
-                            print(f"    - Sleepy Idle Interval (SII): {sii_str}")
+                            print(
+                                f"    - Sleepy Idle Interval (SII): {sii_str}")
 
                     # Sleepy Active Interval (SAI) - Optional, for sleepy end devices
                     if "SAI" in props:
@@ -1734,7 +1763,8 @@ class MDNSDumpListener(ServiceListener):
                                 f"    - Sleepy Active Interval (SAI): {sai_str}ms ({sai_sec:.1f}s)"
                             )
                         except ValueError:
-                            print(f"    - Sleepy Active Interval (SAI): {sai_str}")
+                            print(
+                                f"    - Sleepy Active Interval (SAI): {sai_str}")
 
                     # Sleepy Active Threshold (SAT) - Optional, for sleepy end devices
                     if "SAT" in props:
@@ -1751,7 +1781,8 @@ class MDNSDumpListener(ServiceListener):
                                 f"    - Sleepy Active Threshold (SAT): {sat_str}ms ({sat_sec:.1f}s)"
                             )
                         except ValueError:
-                            print(f"    - Sleepy Active Threshold (SAT): {sat_str}")
+                            print(
+                                f"    - Sleepy Active Threshold (SAT): {sat_str}")
 
                     # TCP Support (T) - Optional flag for Matter-over-TCP support
                     if "T" in props:
@@ -1778,7 +1809,8 @@ class MDNSDumpListener(ServiceListener):
                             else str(icd_val)
                         )
                         icd_desc = decode_matter_icd_capability(icd_val)
-                        print(f"    - Intermittently Connected Device (ICD): {icd_str}")
+                        print(
+                            f"    - Intermittently Connected Device (ICD): {icd_str}")
                         if icd_desc:
                             print(f"      * Description: {icd_desc}")
 
@@ -1819,7 +1851,8 @@ class MDNSDumpListener(ServiceListener):
                     for key, value in info.properties.items():
                         # Decode bytes to string if possible
                         val_str = (
-                            value.decode("utf-8") if isinstance(value, bytes) else value
+                            value.decode(
+                                "utf-8") if isinstance(value, bytes) else value
                         )
                         print(
                             f"    - {key.decode('utf-8') if isinstance(key, bytes) else key}: {val_str}"
@@ -1877,7 +1910,7 @@ options:
         "By default those records are excluded.",
     )
     args = parser.parse_args(argv)
-    td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)
+    td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
 
     scopes_all = [
         "_meshcop._udp.local.",
@@ -1914,7 +1947,8 @@ options:
 
     _default_timeout = float(
         os.environ.get(
-            TD_MDNS_BROWSE_TIMEOUT_ENV_NAME, str(TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE)
+            TD_MDNS_BROWSE_TIMEOUT_ENV_NAME, str(
+                TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE)
         )
     )
     IDLE_TIMEOUT = (
@@ -1922,7 +1956,8 @@ options:
     )
 
     zeroconf = Zeroconf()
-    listener = MDNSDumpListener(include_matter_tcp_supported=args.mattertcpsupported)
+    listener = MDNSDumpListener(
+        include_matter_tcp_supported=args.mattertcpsupported)
 
     # Start browsers for each scope
     browsers = [ServiceBrowser(zeroconf, s, listener) for s in selected_scopes]
@@ -1952,7 +1987,7 @@ options:
         else:
             scope_tag = args.scope.lower()
 
-        output_file = data_file_arg_or_default(
+        output_file = resolve_data_file_path(
             f"td-mdns-scopes-{scope_tag}.json", td_data_dir
         )
         with open(output_file, "w", encoding="utf-8") as f:

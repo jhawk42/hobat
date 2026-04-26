@@ -32,8 +32,8 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
 
     def test_main_passes_parsed_network_options_to_restapi_downloads(self) -> None:
         with patch.object(
-            script_module, "restapi_downloads", return_value=0
-        ) as restapi_downloads:
+            script_module, "download_all_restapi_endpoints", return_value=0
+        ) as download_all_restapi_endpoints:
             exit_code = script_module.main(
                 [
                     "--host",
@@ -50,7 +50,7 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
             )
 
         self.assertEqual(exit_code, 0)
-        restapi_downloads.assert_called_once_with(
+        download_all_restapi_endpoints.assert_called_once_with(
             base_url="http://192.168.4.77:18081",
             headers={
                 "Accept": "application/json",

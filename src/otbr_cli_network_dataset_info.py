@@ -2,7 +2,7 @@ import logging
 import json
 from typing import Sequence
 import util_network
-from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -10,8 +10,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
 
-    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
-    network_dataset_info = util_network.get_network_dataset_info()
+    td_data_dir = resolve_data_dir(
+        datadir_arg=parse_datadir_from_argv(argv))
+    network_dataset_info = util_network.fetch_network_dataset_info()
     save_json_path = data_file_path(
         "td-otbr-cli-network-dataset-info.json", td_data_dir
     )

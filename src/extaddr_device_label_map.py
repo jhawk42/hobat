@@ -4,7 +4,7 @@ import logging
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
 
-def extaddr_device_label_mapping_load(path=EXTADDR_DEVICE_LABEL_MAP_FILENAME):
+def load_extaddr_device_label_map(path=EXTADDR_DEVICE_LABEL_MAP_FILENAME):
     """
     Parses extended address to node name mapping from the configured label map file.
 
@@ -23,11 +23,13 @@ def extaddr_device_label_mapping_load(path=EXTADDR_DEVICE_LABEL_MAP_FILENAME):
         logging.error(f"Failed to open extaddr device label map {path!r}: {e}")
         return mapping
     except json.JSONDecodeError as e:
-        logging.error(f"Invalid JSON in extaddr device label map {path!r}: {e}")
+        logging.error(
+            f"Invalid JSON in extaddr device label map {path!r}: {e}")
         return mapping
 
     if not isinstance(data, list):
-        logging.error(f"Expected a list in {path!r}, got {type(data).__name__}")
+        logging.error(
+            f"Expected a list in {path!r}, got {type(data).__name__}")
         return mapping
 
     for item in data:

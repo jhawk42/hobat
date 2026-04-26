@@ -229,13 +229,14 @@ class OTBRRestApiClient:
         timeout: int | None = None,
         raw: bool = False,
     ) -> Any:
-        identity_fields = [value for value in (eui, discerner, joiner_id) if value]
+        identity_fields = [value for value in (
+            eui, discerner, joiner_id) if value]
         if len(identity_fields) != 1:
             raise OTBRUsageError(
                 "exactly one of eui, discerner, or joiner_id is required"
             )
 
-        self._require_non_empty_string(pskd, "pskd")
+        self._validate_non_empty_string(pskd, "pskd")
 
         attributes: dict[str, Any] = {"pskd": pskd}
         if eui:
@@ -261,12 +262,12 @@ class OTBRRestApiClient:
         destination_type: str | None = None,
         raw: bool = False,
     ) -> Any:
-        self._require_non_empty_string(destination, "destination")
+        self._validate_non_empty_string(destination, "destination")
         attributes = self._build_destination_attributes(
             destination=destination,
             destination_type=destination_type,
         )
-        attributes["types"] = self._require_non_empty_sequence(types, "types")
+        attributes["types"] = self._validate_non_empty_sequence(types, "types")
         if timeout is not None:
             attributes["timeout"] = timeout
 
@@ -285,7 +286,7 @@ class OTBRRestApiClient:
         raw: bool = False,
     ) -> Any:
         attributes: dict[str, Any] = {
-            "types": self._require_non_empty_sequence(types, "types")
+            "types": self._validate_non_empty_sequence(types, "types")
         }
         if destination is not None:
             attributes.update(
@@ -314,14 +315,14 @@ class OTBRRestApiClient:
         destination_type: str | None = None,
         raw: bool = False,
     ) -> Any:
-        self._require_non_empty_string(destination, "destination")
+        self._validate_non_empty_string(destination, "destination")
         attributes = self._build_destination_attributes(
             destination=destination,
             destination_type=destination_type,
         )
         attributes.update(
             {
-                "channelMask": self._require_non_empty_sequence(
+                "channelMask": self._validate_non_empty_sequence(
                     channel_mask, "channel_mask"
                 ),
                 "count": count,
@@ -376,7 +377,8 @@ class OTBRRestApiClient:
         request = Request(
             url=url,
             data=body,
-            headers=self._build_headers(accept=accept, content_type=content_type),
+            headers=self._build_headers(
+                accept=accept, content_type=content_type),
             method=method,
         )
         effective_retries = retries if retries is not None else self.retries
@@ -386,7 +388,7 @@ class OTBRRestApiClient:
             try:
                 with urlopen(request, timeout=timeout or self.timeout) as response:
                     response_body = response.read()
-                    media_type = self._extract_media_type(
+                    media_type = self._parse_media_type(
                         response.headers.get("Content-Type")
                     )
 
@@ -404,19 +406,21 @@ class OTBRRestApiClient:
                 if exc.code < 500:
                     # 4xx errors are not retried — re-raise immediately
                     error_body = exc.read()
-                    media_type = self._extract_media_type(
+                    media_type = self._parse_media_type(
                         exc.headers.get("Content-Type")
                     )
                     payload = None
                     body_text = None
                     if error_body:
-                        body_text = error_body.decode("utf-8", errors="replace")
-                        payload = self._decode_payload_from_text(body_text, media_type)
+                        body_text = error_body.decode(
+                            "utf-8", errors="replace")
+                        payload = self._parse_payload_from_text(
+                            body_text, media_type)
                     raise OTBRHTTPError(
                         status_code=exc.code,
                         reason=exc.reason,
                         url=url,
-                        errors=self._extract_error_details(
+                        errors=self._parse_error_details(
                             payload, exc.code, exc.reason
                         ),
                         payload=payload,
@@ -446,17 +450,19 @@ class OTBRRestApiClient:
         if isinstance(last_exc, HTTPError):
             exc = last_exc
             error_body = exc.read() if hasattr(exc, "read") else b""
-            media_type = self._extract_media_type(exc.headers.get("Content-Type"))
+            media_type = self._parse_media_type(
+                exc.headers.get("Content-Type"))
             payload = None
             body_text = None
             if error_body:
                 body_text = error_body.decode("utf-8", errors="replace")
-                payload = self._decode_payload_from_text(body_text, media_type)
+                payload = self._parse_payload_from_text(body_text, media_type)
             raise OTBRHTTPError(
                 status_code=exc.code,
                 reason=exc.reason,
                 url=url,
-                errors=self._extract_error_details(payload, exc.code, exc.reason),
+                errors=self._parse_error_details(
+                    payload, exc.code, exc.reason),
                 payload=payload,
                 body=body_text,
             ) from last_exc
@@ -490,18 +496,19 @@ class OTBRRestApiClient:
             return data.encode("utf-8")
         if content_type in JSON_CONTENT_TYPES or content_type == "application/json":
             return json.dumps(data).encode("utf-8")
-        raise OTBRUsageError(f"Unsupported request content type: {content_type}")
+        raise OTBRUsageError(
+            f"Unsupported request content type: {content_type}")
 
     def _decode_response_body(
         self, response_body: bytes, media_type: str | None
     ) -> Any:
         body_text = response_body.decode("utf-8", errors="replace")
-        payload = self._decode_payload_from_text(body_text, media_type)
+        payload = self._parse_payload_from_text(body_text, media_type)
         if payload is None:
             return body_text
         return payload
 
-    def _decode_payload_from_text(
+    def _parse_payload_from_text(
         self, body_text: str, media_type: str | None
     ) -> Any | None:
         stripped = body_text.strip()
@@ -511,7 +518,8 @@ class OTBRRestApiClient:
             try:
                 return json.loads(body_text)
             except json.JSONDecodeError as exc:
-                raise OTBRInvalidResponseError(f"Invalid JSON response: {exc}") from exc
+                raise OTBRInvalidResponseError(
+                    f"Invalid JSON response: {exc}") from exc
         return None
 
     def _normalize_response_payload(
@@ -561,7 +569,7 @@ class OTBRRestApiClient:
 
         return flattened
 
-    def _extract_error_details(
+    def _parse_error_details(
         self,
         payload: Any,
         status_code: int,
@@ -588,7 +596,8 @@ class OTBRRestApiClient:
                 return [
                     OTBRErrorDetail(
                         title=str(payload.get("title", reason)),
-                        status=self._coerce_int(payload.get("status")) or status_code,
+                        status=self._coerce_int(
+                            payload.get("status")) or status_code,
                         detail=payload.get("detail"),
                         links=payload.get("links"),
                     )
@@ -620,26 +629,27 @@ class OTBRRestApiClient:
         destination: str,
         destination_type: str | None = None,
     ) -> dict[str, Any]:
-        self._require_non_empty_string(destination, "destination")
+        self._validate_non_empty_string(destination, "destination")
         attributes: dict[str, Any] = {"destination": destination}
         if destination_type:
             attributes["destinationType"] = destination_type
         return attributes
 
-    def _require_non_empty_sequence(
+    def _validate_non_empty_sequence(
         self, values: Sequence[Any], field_name: str
     ) -> list[Any]:
         items = list(values)
         if not items:
-            raise OTBRUsageError(f"{field_name} must contain at least one item")
+            raise OTBRUsageError(
+                f"{field_name} must contain at least one item")
         return items
 
-    def _require_non_empty_string(self, value: str, field_name: str) -> str:
+    def _validate_non_empty_string(self, value: str, field_name: str) -> str:
         if not isinstance(value, str) or not value.strip():
             raise OTBRUsageError(f"{field_name} must be a non-empty string")
         return value
 
-    def _extract_media_type(self, content_type: str | None) -> str | None:
+    def _parse_media_type(self, content_type: str | None) -> str | None:
         if not content_type:
             return None
         return content_type.split(";", 1)[0].strip().lower()

@@ -2,29 +2,29 @@ import util_ot_ctl
 import logging
 
 
-def _extract_prefix_token(command_output):
+def _parse_prefix_token(command_output):
     """Extracts the first token (prefix) from ot-ctl command output."""
     command_output = command_output.strip()
     return command_output.split()[0] if command_output else ""
 
 
-def _normalize_prefix_base(prefix):
+def _strip_prefix_mask(prefix):
     """Normalizes prefix by removing mask and trailing colon(s)."""
     return prefix.split("/")[0].rstrip(":")
 
 
-def _run_prefix_command(command, debug_label):
+def _fetch_prefix_via_ot_ctl(command, debug_label):
     """Runs an ot-ctl prefix command and returns the extracted prefix token."""
-    command_output = util_ot_ctl.run_ot_ctl_stdio(command)
+    command_output = util_ot_ctl.exec_ot_ctl(command)
     # extract the prefix token from the command output and print it for debugging
-    prefix = _extract_prefix_token(command_output)
+    prefix = _parse_prefix_token(command_output)
     logging.debug(f"[DEBUG] {debug_label}: {prefix}\n")
     return prefix
 
 
-def _format_prefix_for_kind(prefix, kind):
+def _build_ipv6_prefix_by_type(prefix, kind):
     """Formats a prefix for a specific address kind."""
-    base_prefix = _normalize_prefix_base(prefix)
+    base_prefix = _strip_prefix_mask(prefix)
 
     if kind == "meshlocal":
         return base_prefix + ":0:ff:fe00:"
@@ -34,16 +34,16 @@ def _format_prefix_for_kind(prefix, kind):
     raise ValueError(f"Unsupported prefix kind: {kind}")
 
 
-def get_prefix_meshlocal():
+def fetch_meshlocal_prefix():
     """
     Retrieves the mesh-local prefix from the Thread network.
     Runs: ot-ctl prefix meshlocal
     Returns: mesh-local prefix string (e.g., "fdde:ad00:beef:0::/64")
     """
-    return _run_prefix_command("prefix meshlocal", "Mesh-Local Prefix")
+    return _fetch_prefix_via_ot_ctl("prefix meshlocal", "Mesh-Local Prefix")
 
 
-def format_prefix_meshlocal_into_ipv6adrr_prefix(meshlocal_prefix):
+def build_rloc_ipv6_address_prefix(meshlocal_prefix):
     """
     Converts a mesh-local prefix into an IPv6 rloc16 address prefix.
 
@@ -56,10 +56,10 @@ def format_prefix_meshlocal_into_ipv6adrr_prefix(meshlocal_prefix):
     Returns:
         IPv6 RLOC address prefix string (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
     """
-    return _format_prefix_for_kind(meshlocal_prefix, "meshlocal")
+    return _build_ipv6_prefix_by_type(meshlocal_prefix, "meshlocal")
 
 
-def conform_rloc_hex_strip(rloc):
+def strip_rloc16_hex_prefix(rloc):
     """
     Strips the '0x' prefix from an rloc16 value.
 
@@ -72,7 +72,7 @@ def conform_rloc_hex_strip(rloc):
     return rloc[2:]
 
 
-def merge_ipv6_rloc_prefix_rloc_hex(ipv6_rloc_prefix, rloc_hex):
+def build_rloc16_ipv6_address(ipv6_rloc_prefix, rloc_hex):
     """
     Merges IPv6 RLOC prefix with rloc16 hex value to form complete IPv6 RLOC address.
 
@@ -86,16 +86,16 @@ def merge_ipv6_rloc_prefix_rloc_hex(ipv6_rloc_prefix, rloc_hex):
     return f"{ipv6_rloc_prefix}{rloc_hex}"
 
 
-def get_prefix_omr():
+def fetch_omr_prefix():
     """
     Retrieves the On-Mesh Routable (OMR) prefix from the Thread network.
     Runs: ot-ctl br omrprefix favored
     Returns: OMR prefix string (e.g., "fda5:494c:9a12:0::/64")
     """
-    return _run_prefix_command("br omrprefix favored", "OMR Prefix")
+    return _fetch_prefix_via_ot_ctl("br omrprefix favored", "OMR Prefix")
 
 
-def format_prefix_omr_into_ipv6adrr_prefix(omr_prefix):
+def build_omr_ipv6_address_prefix(omr_prefix):
     """
     Converts an OMR (On-Mesh Routable) prefix into an IPv6 address prefix.
 
@@ -108,10 +108,10 @@ def format_prefix_omr_into_ipv6adrr_prefix(omr_prefix):
     Returns:
         IPv6 OMR address prefix string (e.g., "fda5:494c:9a12:0:")
     """
-    return _format_prefix_for_kind(omr_prefix, "omr")
+    return _build_ipv6_prefix_by_type(omr_prefix, "omr")
 
 
-def check_if_ipv6_address_in_omr_prefix(ipv6_address, omr_ipv6_prefix):
+def is_ipv6_address_in_omr_prefix(ipv6_address, omr_ipv6_prefix):
     """
     Checks if a given IPv6 address falls within a specified OMR (On-Mesh Routable) ipv6 prefix.
 
@@ -125,7 +125,7 @@ def check_if_ipv6_address_in_omr_prefix(ipv6_address, omr_ipv6_prefix):
     return ipv6_address.startswith(omr_ipv6_prefix)
 
 
-def get_omr_addr_from_list(ipv6_addrs, omr_ipv6_prefix):
+def find_omr_address_in_list(ipv6_addrs, omr_ipv6_prefix):
     """
     Retrieves the OMR (On-Mesh Routable) address from a list of IPv6 addresses based on the OMR prefix.
 
@@ -137,12 +137,12 @@ def get_omr_addr_from_list(ipv6_addrs, omr_ipv6_prefix):
         The first IPv6 address from the list that matches the OMR prefix, or None if no match is found.
     """
     for addr in ipv6_addrs:
-        if check_if_ipv6_address_in_omr_prefix(addr, omr_ipv6_prefix):
+        if is_ipv6_address_in_omr_prefix(addr, omr_ipv6_prefix):
             return addr
     return None
 
 
-def get_dataset_active(hideSensitiveInfo=True):
+def fetch_dataset_active(hideSensitiveInfo=True):
     """
     Retrieves the active Thread dataset from the network.
     Runs: ot-ctl dataset active
@@ -166,7 +166,7 @@ def get_dataset_active(hideSensitiveInfo=True):
     command = "dataset active"
     if hideSensitiveInfo:
         command += " -ns"  # Add -ns flag to hide sensitive info in the output
-    dataset_output = util_ot_ctl.run_ot_ctl_stdio(command).strip()
+    dataset_output = util_ot_ctl.exec_ot_ctl(command).strip()
     logging.debug(f"[DEBUG] Dataset Active Output:\n{dataset_output}\n")
 
     dataset_info = {}
@@ -190,7 +190,7 @@ def get_dataset_active(hideSensitiveInfo=True):
     return dataset_info
 
 
-def get_network_dataset_info():
+def fetch_network_dataset_info():
     """
     Retrieves and formats complete network dataset info from the Thread network.
 
@@ -216,11 +216,11 @@ def get_network_dataset_info():
     network_dataset_info = {}
 
     # Get mesh-local prefix
-    prefix_meshlocal = get_prefix_meshlocal()
+    prefix_meshlocal = fetch_meshlocal_prefix()
     network_dataset_info["prefix_meshlocal"] = prefix_meshlocal
 
     # Format mesh-local prefix into IPv6 address prefix
-    prefix_meshlocal_ipv6addr_prefix = format_prefix_meshlocal_into_ipv6adrr_prefix(
+    prefix_meshlocal_ipv6addr_prefix = build_rloc_ipv6_address_prefix(
         prefix_meshlocal
     )
     network_dataset_info["prefix_meshlocal_ipv6addr_prefix"] = (
@@ -228,14 +228,14 @@ def get_network_dataset_info():
     )
 
     # Get OMR prefix
-    prefix_omr = get_prefix_omr()
+    prefix_omr = fetch_omr_prefix()
     network_dataset_info["prefix_omr"] = prefix_omr
     network_dataset_info["prefix_omr_ipv6addr_prefix"] = (
-        format_prefix_omr_into_ipv6adrr_prefix(prefix_omr)
+        build_omr_ipv6_address_prefix(prefix_omr)
     )
 
     # Get active dataset information and add individual fields to network_dataset_info
-    dataset_active = get_dataset_active()
+    dataset_active = fetch_dataset_active()
     network_dataset_info.update(dataset_active)
 
     return network_dataset_info

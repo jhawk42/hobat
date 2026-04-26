@@ -5,20 +5,20 @@ import logging
 from typing import Sequence
 
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
-from otbr_cli_router_table import get_router_table_data
-from extaddr_device_label_map import extaddr_device_label_mapping_load
-from util_ot_ctl import run_ot_ctl_stdio
-from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
+from otbr_cli_router_table import fetch_and_parse_router_table
+from extaddr_device_label_map import load_extaddr_device_label_map
+from util_ot_ctl import exec_ot_ctl
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
 
 
-def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
+def fetch_meshdiag_router_neighbor_table_for_device(rloc16, router=None, extaddr_map=None):
     """
     Dumps the meshdiag routerneighbortable for each router in
     the network and can be used to identify potential issues with specific nodes
     such as high link error counts, etc
     """
 
-    output = run_ot_ctl_stdio(f"meshdiag routerneighbortable {rloc16}")
+    output = exec_ot_ctl(f"meshdiag routerneighbortable {rloc16}")
 
     timeout_match = re.search(r"Error\s+(\d+):\s+ResponseTimeout", output)
     if timeout_match:
@@ -104,8 +104,10 @@ def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
             stripped,
         )
         if err_rate_match:
-            current_neighbor["err_rate_frame_pct"] = float(err_rate_match.group(1))
-            current_neighbor["err_rate_msg_pct"] = float(err_rate_match.group(2))
+            current_neighbor["err_rate_frame_pct"] = float(
+                err_rate_match.group(1))
+            current_neighbor["err_rate_msg_pct"] = float(
+                err_rate_match.group(2))
             continue
 
         conn_time_match = re.match(r"conn-time:(\S+)", stripped)
@@ -125,10 +127,10 @@ def get_meshdiag_routerneighbortable_one(rloc16, router=None, extaddr_map=None):
     return router_neighbor_table
 
 
-def get_meshdiag_routerneighbortables(extaddr_map=None):
+def fetch_all_meshdiag_router_neighbor_tables(extaddr_map=None):
 
     # 1. Get all active routers (potential parents)
-    router_table_data = get_router_table_data(extaddr_map)
+    router_table_data = fetch_and_parse_router_table(extaddr_map)
     router_rlocs = [
         router.get("rloc16") for router in router_table_data if router.get("rloc16")
     ]
@@ -136,7 +138,8 @@ def get_meshdiag_routerneighbortables(extaddr_map=None):
     router_neighbor_tables = []
 
     for rloc16 in router_rlocs:
-        router = next((r for r in router_table_data if r.get("rloc16") == rloc16), None)
+        router = next(
+            (r for r in router_table_data if r.get("rloc16") == rloc16), None)
         if router:
             extaddr = router.get("extaddr")
             device_label = extaddr_map.get(extaddr, "Unknown")
@@ -148,7 +151,7 @@ def get_meshdiag_routerneighbortables(extaddr_map=None):
                 f"Getting meshdiag routerneighbortable for router rloc16 {rloc16} (Node: Unknown, ExtAddr: Unknown)..."
             )
 
-        router_neighbor_table = get_meshdiag_routerneighbortable_one(
+        router_neighbor_table = fetch_meshdiag_router_neighbor_table_for_device(
             rloc16, router, extaddr_map
         )
         router_neighbor_tables.append(router_neighbor_table)
@@ -160,7 +163,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
-    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
+    td_data_dir = resolve_data_dir(datadir_arg=parse_datadir_from_argv(argv))
 
     # Load extaddr to nodename mapping from JSON file
     extaddr_json_filename = data_file_path(
@@ -172,18 +175,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         logging.info(
             f"Loading extended address to device label mapping from {extaddr_json_filename}..."
         )
-        extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
+        extaddr_map = load_extaddr_device_label_map(extaddr_json_filename)
     else:
         extaddr_map = {}
 
-    router_neighbor_tables = get_meshdiag_routerneighbortables(extaddr_map)
+    router_neighbor_tables = fetch_all_meshdiag_router_neighbor_tables(
+        extaddr_map)
     output_path = data_file_path(
         "td-otbr-cli-meshdiag-router-neighbortables.json", td_data_dir
     )
 
     with open(output_path, "w") as f:
         json.dump(router_neighbor_tables, f, indent=4)
-        logging.info(f"Meshdiag routerneighbortables data saved to {output_path}")
+        logging.info(
+            f"Meshdiag routerneighbortables data saved to {output_path}")
 
     print(json.dumps(router_neighbor_tables, indent=4))
 

@@ -5,10 +5,10 @@ from typing import Sequence
 
 import util_network
 from util_convert import b64_to_extended_address
-from util_data import data_file_path, extract_datadir_arg, resolve_td_data_dir
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
 
 
-def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=None):
+def load_and_parse_eve_file(path, network_dataset_info=None):
     """
     Parses Eve JSON file and preserves all node fields.
 
@@ -58,7 +58,7 @@ def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=Non
 
         # Enhance node with OMR IPv6 address  using OMR prefix
         if omr_ipv6addr_prefix:
-            node["omrIpv6Address"] = util_network.get_omr_addr_from_list(
+            node["omrIpv6Address"] = util_network.find_omr_address_in_list(
                 ipv6_addrs, omr_ipv6addr_prefix
             )
 
@@ -72,7 +72,7 @@ def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=Non
             rloc16_hex  # Patch original rloc16 field to hex string for consistency in the node data structure
         )
         node["rloc16_hex"] = rloc16_hex  # Add hex rloc16 for reference
-        node["rloc16_hexshort"] = util_network.conform_rloc_hex_strip(
+        node["rloc16_hexshort"] = util_network.strip_rloc16_hex_prefix(
             rloc16_hex
         )  # Add short rloc for reference
         node["rloc16_decimal"] = (
@@ -106,7 +106,7 @@ def eve_native_file_parse_and_enhance_id_mappings(path, network_dataset_info=Non
     return out
 
 
-def eve_enhance_routes(eve_network_enhanced_data):
+def enhance_eve_routes(eve_network_enhanced_data):
     """
     Rebuild Eve enhanced data keyed by rloc16_hex and enrich route entries.
 
@@ -173,28 +173,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
-    td_data_dir = resolve_td_data_dir(datadir_arg=extract_datadir_arg(argv))
+    td_data_dir = resolve_data_dir(
+        datadir_arg=parse_datadir_from_argv(argv))
 
-    ## Main execution:
+    # Main execution:
 
-    ## Get network dataset info for reference in parsing and enriching Eve data
-    network_dataset_info = util_network.get_network_dataset_info()
+    # Get network dataset info for reference in parsing and enriching Eve data
+    network_dataset_info = util_network.fetch_network_dataset_info()
 
     # Parse the Eve JSON file to build an enhanced data structure keyed by rloc16_hex with all node fields preserved and extAddress in hex format for easier mapping and reference.
     eve_json_file_path = data_file_path("thread-eve-layout.json", td_data_dir)
-    eve_data_parse_1 = eve_native_file_parse_and_enhance_id_mappings(
+    eve_data_parse_1 = load_and_parse_eve_file(
         eve_json_file_path, network_dataset_info
     )
 
-    ## Enhance the eve_data json data structure to add route destination node names for reference
-    eve_data_enhanced = eve_enhance_routes(eve_data_parse_1)
+    # Enhance the eve_data json data structure to add route destination node names for reference
+    eve_data_enhanced = enhance_eve_routes(eve_data_parse_1)
 
-    ## Save json data structures for reference
+    # Save json data structures for reference
     save_json_filename = data_file_path("td-eve-topology.json", td_data_dir)
     with open(save_json_filename, "w", encoding="utf-8") as f:
         json.dump(eve_data_enhanced, f, indent=4)
 
-    ## Print the parsed data structure with route names
+    # Print the parsed data structure with route names
     logging.info(json.dumps(eve_data_enhanced, indent=4))
 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Iterable, Sequence, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from util_data import data_file_arg_or_default, resolve_td_data_dir
+from util_data import resolve_data_file_path, resolve_data_dir
 from const import TD_DATA_DIR_ARG_HELP
 
 HOST = "127.0.0.1"
@@ -36,9 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Download a fixed set of OTBR REST API endpoints to local JSON files.",
     )
     parser.add_argument("--host", default=HOST, help="OTBR REST API host")
-    parser.add_argument("--port", type=int, default=PORT, help="OTBR REST API port")
+    parser.add_argument("--port", type=int, default=PORT,
+                        help="OTBR REST API port")
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
-    parser.add_argument("--base-url", help="Override host/port with a full base URL")
+    parser.add_argument(
+        "--base-url", help="Override host/port with a full base URL")
     parser.add_argument(
         "--timeout", type=int, default=TIMEOUT, help="HTTP timeout in seconds"
     )
@@ -69,12 +71,14 @@ def build_headers(
     for raw_header in extra_headers or []:
         name, separator, value = raw_header.partition(":")
         if not separator:
-            raise ValueError(f"Invalid header {raw_header!r}; expected NAME:VALUE")
+            raise ValueError(
+                f"Invalid header {raw_header!r}; expected NAME:VALUE")
 
         normalized_name = name.strip()
         normalized_value = value.strip()
         if not normalized_name:
-            raise ValueError(f"Invalid header {raw_header!r}; header name is empty")
+            raise ValueError(
+                f"Invalid header {raw_header!r}; header name is empty")
 
         headers[normalized_name] = normalized_value
 
@@ -139,7 +143,7 @@ def download_json(
     return False
 
 
-def restapi_downloads(
+def download_all_restapi_endpoints(
     base_url: str = BASE_URL,
     headers: dict[str, str] | None = None,
     timeout: int = TIMEOUT,
@@ -152,10 +156,11 @@ def restapi_downloads(
         resolved_output_file = output_file
         if _ACTIVE_TD_DATA_DIR is not None:
             resolved_output_file = str(
-                data_file_arg_or_default(output_file, _ACTIVE_TD_DATA_DIR)
+                resolve_data_file_path(output_file, _ACTIVE_TD_DATA_DIR)
             )
 
-        ok = download_json(url, request_headers, resolved_output_file, timeout=timeout)
+        ok = download_json(url, request_headers,
+                           resolved_output_file, timeout=timeout)
         if not ok:
             failures += 1
 
@@ -177,7 +182,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     global _ACTIVE_TD_DATA_DIR
     previous_td_data_dir = _ACTIVE_TD_DATA_DIR
-    _ACTIVE_TD_DATA_DIR = resolve_td_data_dir(datadir_arg=args.datadir)
+    _ACTIVE_TD_DATA_DIR = resolve_data_dir(datadir_arg=args.datadir)
 
     try:
         base_url = build_base_url(args.host, args.port, args.base_url)
@@ -186,7 +191,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(exc))
 
     try:
-        return restapi_downloads(
+        return download_all_restapi_endpoints(
             base_url=base_url, headers=headers, timeout=args.timeout
         )
     finally:

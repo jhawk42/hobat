@@ -7,7 +7,7 @@ import logging
 
 from pathlib import Path
 from typing import Any, Sequence
-from util_data import data_file_arg_or_default, resolve_td_data_dir
+from util_data import resolve_data_file_path, resolve_data_dir
 from const import TD_DATA_DIR_ARG_HELP
 
 from otbr_restapi_client import (
@@ -37,12 +37,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="CLI wrapper for the OpenThread Border Router REST API.",
     )
-    parser.add_argument("--host", default=DEFAULT_HOST, help="OTBR REST API host")
+    parser.add_argument("--host", default=DEFAULT_HOST,
+                        help="OTBR REST API host")
     parser.add_argument(
         "--port", type=int, default=DEFAULT_PORT, help="OTBR REST API port"
     )
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
-    parser.add_argument("--base-url", help="Override host/port with a full base URL")
+    parser.add_argument(
+        "--base-url", help="Override host/port with a full base URL")
     parser.add_argument(
         "--timeout", type=int, default=DEFAULT_TIMEOUT, help="HTTP timeout in seconds"
     )
@@ -73,18 +75,23 @@ def _add_node_commands(
     node_parser = subparsers.add_parser(
         "node", help="Read or mutate local OTBR node data"
     )
-    node_subparsers = node_parser.add_subparsers(dest="node_command", required=True)
+    node_subparsers = node_parser.add_subparsers(
+        dest="node_command", required=True)
 
     node_get = node_subparsers.add_parser(
         "get", help="Get the OTBR node record from /api/node"
     )
     _add_fields_argument(node_get)
 
-    state_parser = node_subparsers.add_parser("state", help="Get or set Thread state")
-    state_subparsers = state_parser.add_subparsers(dest="state_command", required=True)
+    state_parser = node_subparsers.add_parser(
+        "state", help="Get or set Thread state")
+    state_subparsers = state_parser.add_subparsers(
+        dest="state_command", required=True)
     state_subparsers.add_parser("get", help="Get current Thread state")
-    state_set = state_subparsers.add_parser("set", help="Enable or disable Thread")
-    state_set.add_argument("--value", required=True, choices=["enable", "disable"])
+    state_set = state_subparsers.add_parser(
+        "set", help="Enable or disable Thread")
+    state_set.add_argument("--value", required=True,
+                           choices=["enable", "disable"])
 
     dataset_parser = node_subparsers.add_parser(
         "dataset", help="Operate on node datasets"
@@ -108,7 +115,8 @@ def _add_node_commands(
     )
     group = active_set.add_mutually_exclusive_group(required=True)
     group.add_argument("--json", help="Inline JSON payload for dataset")
-    group.add_argument("--json-file", help="Path to a JSON file containing the dataset")
+    group.add_argument(
+        "--json-file", help="Path to a JSON file containing the dataset")
     group.add_argument("--text", help="Inline TLV dataset string")
     group.add_argument(
         "--text-file", help="Path to a text file containing the TLV dataset"
@@ -131,7 +139,8 @@ def _add_devices_commands(
         help="Include collection meta with flattened items",
     )
 
-    devices_get = devices_subparsers.add_parser("get", help="Get a device by device ID")
+    devices_get = devices_subparsers.add_parser(
+        "get", help="Get a device by device ID")
     devices_get.add_argument("--device-id", required=True)
     _add_fields_argument(devices_get)
 
@@ -196,7 +205,8 @@ def _add_actions_commands(
         "add-thread-device", help="Enqueue addThreadDeviceTask"
     )
     add_thread_device.add_argument("--pskd", required=True)
-    identity_group = add_thread_device.add_mutually_exclusive_group(required=True)
+    identity_group = add_thread_device.add_mutually_exclusive_group(
+        required=True)
     identity_group.add_argument("--eui")
     identity_group.add_argument("--discerner")
     identity_group.add_argument("--joiner-id")
@@ -226,7 +236,8 @@ def _add_actions_commands(
         "get-energy-scan", help="Enqueue getEnergyScanTask"
     )
     energy_scan.add_argument("--destination", required=True)
-    energy_scan.add_argument("--channel-mask", nargs="+", required=True, type=int)
+    energy_scan.add_argument(
+        "--channel-mask", nargs="+", required=True, type=int)
     energy_scan.add_argument("--count", required=True, type=int)
     energy_scan.add_argument("--period", required=True, type=int)
     energy_scan.add_argument("--scan-duration", required=True, type=int)
@@ -276,7 +287,7 @@ def dispatch(args: argparse.Namespace) -> Any:
             if args.dataset_command == "get":
                 return client.get_active_dataset(plain_text=args.text, raw=args.raw)
             if args.dataset_command == "set":
-                dataset = _load_dataset_input(args)
+                dataset = _parse_dataset_input(args)
                 return client.set_active_dataset(dataset)
 
     if args.resource == "devices":
@@ -351,13 +362,13 @@ def dispatch(args: argparse.Namespace) -> Any:
     raise ValueError("Unsupported CLI command")
 
 
-def _load_dataset_input(args: argparse.Namespace) -> dict[str, Any] | str:
+def _parse_dataset_input(args: argparse.Namespace) -> dict[str, Any] | str:
     td_data_dir = getattr(args, "td_data_dir", None)
 
     def _resolve(path_value: str) -> Path:
         if td_data_dir is None:
             return Path(path_value)
-        return data_file_arg_or_default(path_value, td_data_dir)
+        return resolve_data_file_path(path_value, td_data_dir)
 
     try:
         if args.json is not None:
@@ -428,11 +439,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
-    args.td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)
+    args.td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
 
     output_path = args.output
     if output_path:
-        output_path = str(data_file_arg_or_default(output_path, args.td_data_dir))
+        output_path = str(resolve_data_file_path(
+            output_path, args.td_data_dir))
 
     try:
         result = dispatch(args)

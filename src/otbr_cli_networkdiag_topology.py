@@ -11,19 +11,20 @@ from typing import Sequence
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
 import util_ot_ctl
 import util_network
-from otbr_cli_router_table import get_router_table_data
-from extaddr_device_label_map import extaddr_device_label_mapping_load
-from util_data import data_file_path, resolve_td_data_dir
+from otbr_cli_router_table import fetch_and_parse_router_table
+from extaddr_device_label_map import load_extaddr_device_label_map
+from util_data import data_file_path, resolve_data_dir
 
 
-def get_ipv6_addresses():
+def fetch_ipv6_addresses():
     """
     Queries Thread network for IPv6 addresses of all routers.
     Runs: ot-ctl meshdiag topology ip6-addrs
     Returns a dictionary mapping RLOC16 to IPv6 addresses.
     """
-    output = util_ot_ctl.run_ot_ctl_stdio("meshdiag topology ip6-addrs")
-    logging.info(f"[DEBUG] Output of 'meshdiag topology ip6-addrs':\n{output}\n")
+    output = util_ot_ctl.exec_ot_ctl("meshdiag topology ip6-addrs")
+    logging.info(
+        f"[DEBUG] Output of 'meshdiag topology ip6-addrs':\n{output}\n")
 
     ipv6_map = {}
 
@@ -40,7 +41,8 @@ def get_ipv6_addresses():
         rloc_match = re.search(r"0x[0-9a-fA-F]{4}", line)
 
         # Match IPv6 addresses (simplified pattern)
-        ipv6_match = re.search(r"([0-9a-fA-F]{0,4}:){2,}[0-9a-fA-F]{0,4}", line)
+        ipv6_match = re.search(
+            r"([0-9a-fA-F]{0,4}:){2,}[0-9a-fA-F]{0,4}", line)
 
         if rloc_match and ipv6_match:
             rloc = rloc_match.group(0)
@@ -83,10 +85,10 @@ def parse_ipv6_address_list(output):
     return ipv6_list
 
 
-## TLV 2: Mode TLV to get more detailed info about the node's capabilities and role (e.g., if it's a sleepy end device, router-eligible end device, or full router) which can help better understand the topology and identify potential issues with devices that are not behaving as expected. This will also help enrich the topology map with more detailed information about each node's role and capabilities in the network.
+# TLV 2: Mode TLV to get more detailed info about the node's capabilities and role (e.g., if it's a sleepy end device, router-eligible end device, or full router) which can help better understand the topology and identify potential issues with devices that are not behaving as expected. This will also help enrich the topology map with more detailed information about each node's role and capabilities in the network.
 
 
-def determine_device_type_from_mode(mode):
+def device_type_from_mode(mode):
     """Returns device classification from Thread mode flags."""
     if (
         mode.get("rx_on_when_idle") == 1
@@ -138,7 +140,7 @@ def parse_mode_flags(output):
                 mode["network_data"] = int(val_match.group(1))
 
         # Determine device type based on mode flags
-        mode["device"] = determine_device_type_from_mode(mode)
+        mode["device"] = device_type_from_mode(mode)
 
     return mode
 
@@ -166,7 +168,7 @@ def parse_child_table(output, parent_rloc16):
         # Detect end of Child Table section
         if line.strip() and not line.startswith(" ") and "ChildId" not in line:
             if current_child:
-                current_child["mode"]["device"] = determine_device_type_from_mode(
+                current_child["mode"]["device"] = device_type_from_mode(
                     current_child["mode"]
                 )
                 children.append(current_child)
@@ -175,11 +177,12 @@ def parse_child_table(output, parent_rloc16):
         # Match ChildId
         if "ChildId:" in line:
             if current_child:
-                current_child["mode"]["device"] = determine_device_type_from_mode(
+                current_child["mode"]["device"] = device_type_from_mode(
                     current_child["mode"]
                 )
                 children.append(current_child)
-            child_id_match = re.search(r"ChildId:\s*(0x[0-9a-fA-F]+|\d+)", line)
+            child_id_match = re.search(
+                r"ChildId:\s*(0x[0-9a-fA-F]+|\d+)", line)
             child_id = child_id_match.group(1) if child_id_match else "Unknown"
 
             # Child RLOC16 is derived from parent RLOC16 by replacing the last byte with the ChildId (0-255)
@@ -217,18 +220,21 @@ def parse_child_table(output, parent_rloc16):
             elif "RxOnWhenIdle:" in line:
                 val_match = re.search(r"RxOnWhenIdle:\s*(\d+)", line)
                 if val_match:
-                    current_child["mode"]["rx_on_when_idle"] = int(val_match.group(1))
+                    current_child["mode"]["rx_on_when_idle"] = int(
+                        val_match.group(1))
             elif "DeviceType:" in line:
                 val_match = re.search(r"DeviceType:\s*(\d+)", line)
                 if val_match:
-                    current_child["mode"]["device_type"] = int(val_match.group(1))
+                    current_child["mode"]["device_type"] = int(
+                        val_match.group(1))
             elif "NetworkData:" in line:
                 val_match = re.search(r"NetworkData:\s*(\d+)", line)
                 if val_match:
-                    current_child["mode"]["network_data"] = int(val_match.group(1))
+                    current_child["mode"]["network_data"] = int(
+                        val_match.group(1))
 
     if current_child:
-        current_child["mode"]["device"] = determine_device_type_from_mode(
+        current_child["mode"]["device"] = device_type_from_mode(
             current_child["mode"]
         )
         children.append(current_child)
@@ -296,7 +302,7 @@ def parse_mac_counters(output):
                 except ValueError:
                     pass
 
-    ## Enhance MAC counters with totals
+    # Enhance MAC counters with totals
     if counters:
         # Calculate total packets by summing unicast and broadcast packets for both in and out directions.
         # This provides a more comprehensive view of the overall traffic volume at the MAC layer, which can
@@ -336,8 +342,10 @@ def parse_mac_counters(output):
 
         # calc errors pct relative to total errors to help determine if high error counts are significant or just a small fraction of overall traffic. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of errors, which may indicate more severe issues with signal quality or interference that need to be addressed to improve network performance and reliability.
         if totalerrors > 0:
-            counters["ifinerrors_pct"] = round((ifinerrors / totalerrors) * 100, 1)
-            counters["ifouterrors_pct"] = round((ifouterrors / totalerrors) * 100, 1)
+            counters["ifinerrors_pct"] = round(
+                (ifinerrors / totalerrors) * 100, 1)
+            counters["ifouterrors_pct"] = round(
+                (ifouterrors / totalerrors) * 100, 1)
         else:
             counters["ifinerrors_pct"] = 0
             counters["ifouterrors_pct"] = 0
@@ -427,7 +435,7 @@ def parse_mle_counters(output):
                 except ValueError:
                     pass
 
-    ## Enhance MLE counters with totals
+    # Enhance MLE counters with totals
     if counters:
         counters["totalparentpartitionchanges"] = (
             counters.get("parentchanges", 0)
@@ -501,7 +509,7 @@ def parse_time_statistics(output):
     return time_stats
 
 
-def get_networkdiagnostic_one(
+def fetch_network_diag_for_device(
     rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_addresses=None, tlv_detail_level=3
 ):
     """
@@ -521,11 +529,17 @@ def get_networkdiagnostic_one(
     if ipv6_addresses is None:
         ipv6_addresses = {}
 
-    rloc_hex = util_network.conform_rloc_hex_strip(rloc)
-    ipv6_rloc_addr = util_network.merge_ipv6_rloc_prefix_rloc_hex(
+    rloc_hex = util_network.strip_rloc16_hex_prefix(rloc)
+    ipv6_rloc_addr = util_network.build_rloc16_ipv6_address(
         ipv6_rloc_prefix, rloc_hex
     )
 
+    # Define TLV sets for different detail levels
+    # Some devices fail to return any TLV data when TLV list is too long or contains certain TLVs,
+    # so we can try with different sets of TLVs if we don't get a response, to at least get some
+    # basic info about the node instead of no info at all. This way we can still populate the
+    # topology map with at least some data for each node, even if we can't get the full diagnostics
+    # for all nodes due to some of them being unresponsive or having issues with certain TLVs.
     tlv_values_detailed = "0 1 2 28 8 16 9 34"
     tlv_values_medium = "0 1 2 8 16 9"
     tlv_values_simple = "0 1 2 8"
@@ -549,10 +563,11 @@ def get_networkdiagnostic_one(
     # TLV 16 = Child Table,
     # TLV 9 = MAC Counters, TLV 34 = MLE Counters
 
-    output = util_ot_ctl.run_ot_ctl_stdio(
+    output = util_ot_ctl.exec_ot_ctl(
         f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}"
     )
-    logging.info(f"Diagnostic for RLOC {rloc} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
+    logging.info(
+        f"Diagnostic for RLOC {rloc} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
 
     # Extract Ext Address (TLV 0)
     extaddr_match = re.search(r"Ext Address: ([0-9a-fA-F]{16})", output)
@@ -598,7 +613,7 @@ def get_networkdiagnostic_one(
     return network_topology_node
 
 
-def get_networkdiagnostic_topology_data(
+def fetch_network_diag_topology(
     extaddr_map=None, network_dataset_info=None, expand_children=True
 ):
     """Maps the full network topology and returns a Python dictionary."""
@@ -613,30 +628,30 @@ def get_networkdiagnostic_topology_data(
     # Set to False to only get parent nodes without expanding children
 
     # 1. Get mesh-local prefix
-    meshlocal_prefix = util_network.get_prefix_meshlocal()
-    ipv6_rloc_prefix = util_network.format_prefix_meshlocal_into_ipv6adrr_prefix(
+    meshlocal_prefix = util_network.fetch_meshlocal_prefix()
+    ipv6_rloc_prefix = util_network.build_rloc_ipv6_address_prefix(
         meshlocal_prefix
     )
 
     # 2. Get all active routers (potential parents)
-    router_table_data = get_router_table_data(extaddr_map)
+    router_table_data = fetch_and_parse_router_table(extaddr_map)
     router_rlocs = [
         router.get("rloc16") for router in router_table_data if router.get("rloc16")
     ]
 
     # 3. Get IPv6 addresses for all routers
-    ## need this if nodes don't reponse to networkdiagnostic get with TLV 8 for IPv6 address list, then we can at least populate the topology map with known IPv6 addresses for each RLOC16 from this separate query. This way we can still have some reference to IPv6 addresses in the topology even if some nodes don't respond to the full diagnostic query.
-    ipv6_addresses = get_ipv6_addresses()
+    # need this if nodes don't reponse to networkdiagnostic get with TLV 8 for IPv6 address list, then we can at least populate the topology map with known IPv6 addresses for each RLOC16 from this separate query. This way we can still have some reference to IPv6 addresses in the topology even if some nodes don't respond to the full diagnostic query.
+    ipv6_addresses = fetch_ipv6_addresses()
     ipv6_addresses = (
         ipv6_addresses if ipv6_addresses else {}
     )  # Ensure it's a dict even if empty
-    ##ipv6_addresses = {}
+    # ipv6_addresses = {}
 
     network_topology_map = {}
 
-    ## TODO refactor to loop through router_table_data instead of just RLOC16s so we can get more info about each router in the first loop and then enrich with diagnostics data in the second loop. This way we can also handle cases where RLOC16 might be missing or unknown in diagnostics output but we have it from router table.
-    ## Inner loop also handles children and build a more complete topology map with parent-child relationships instead of just a flat map of RLOC16 to data. This way we can represent the full tree structure of the network instead of just a list of nodes.
-    ## TODO refactor inner for loop in a new function that takes a router entry from router_table_data and enriches it with diagnostics data, then adds it to the topology map. This way we can keep the main function cleaner and separate concerns better.
+    # TODO refactor to loop through router_table_data instead of just RLOC16s so we can get more info about each router in the first loop and then enrich with diagnostics data in the second loop. This way we can also handle cases where RLOC16 might be missing or unknown in diagnostics output but we have it from router table.
+    # Inner loop also handles children and build a more complete topology map with parent-child relationships instead of just a flat map of RLOC16 to data. This way we can represent the full tree structure of the network instead of just a list of nodes.
+    # TODO refactor inner for loop in a new function that takes a router entry from router_table_data and enriches it with diagnostics data, then adds it to the topology map. This way we can keep the main function cleaner and separate concerns better.
 
     for rloc16 in router_rlocs:
         # add retry logic for networkdiagnostic get in case of transient errors or unresponsive nodes, retry N times with some delay before giving up and adding with default values
@@ -659,7 +674,7 @@ def get_networkdiagnostic_topology_data(
                     f"Router Node {rloc16} not found after {r} attempts, trying with simple values."
                 )
 
-            network_topology_node = get_networkdiagnostic_one(
+            network_topology_node = fetch_network_diag_for_device(
                 rloc16, ipv6_rloc_prefix, extaddr_map, ipv6_addresses, tlv_detail_level
             )
             if network_topology_node is not None:
@@ -678,7 +693,7 @@ def get_networkdiagnostic_topology_data(
                 "thread_stack_version": "Unknown",
                 "mode": {},
                 "ipv6_addrs": ipv6_addresses.get(rloc16, []),
-                "omrIpv6Address": util_network.get_omr_addr_from_list(
+                "omrIpv6Address": util_network.find_omr_address_in_list(
                     ipv6_addresses.get(rloc16, []), omr_ipv6addr_prefix
                 )
                 if omr_ipv6addr_prefix
@@ -693,8 +708,9 @@ def get_networkdiagnostic_topology_data(
             network_topology_node["type"] = "Router"
             if omr_ipv6addr_prefix:
                 network_topology_node["omrIpv6Address"] = (
-                    util_network.get_omr_addr_from_list(
-                        network_topology_node.get("ipv6_addrs", []), omr_ipv6addr_prefix
+                    util_network.find_omr_address_in_list(
+                        network_topology_node.get(
+                            "ipv6_addrs", []), omr_ipv6addr_prefix
                     )
                 )
             network_topology_map[rloc16] = network_topology_node
@@ -728,7 +744,7 @@ def get_networkdiagnostic_topology_data(
                                     f"Child node {child_rloc} not found after {cr} attempts, trying with simple values."
                                 )
 
-                            child_node = get_networkdiagnostic_one(
+                            child_node = fetch_network_diag_for_device(
                                 child_rloc,
                                 ipv6_rloc_prefix,
                                 extaddr_map,
@@ -752,7 +768,7 @@ def get_networkdiagnostic_topology_data(
                                 "mode": {},
                                 "ipv6_addrs": ipv6_addresses.get(child_rloc, []),
                                 "children": [],
-                                "omrIpv6Address": util_network.get_omr_addr_from_list(
+                                "omrIpv6Address": util_network.find_omr_address_in_list(
                                     ipv6_addresses.get(child_rloc, []),
                                     omr_ipv6addr_prefix,
                                 )
@@ -766,7 +782,7 @@ def get_networkdiagnostic_topology_data(
 
                         else:
                             child_node["omrIpv6Address"] = (
-                                util_network.get_omr_addr_from_list(
+                                util_network.find_omr_address_in_list(
                                     child_node.get("ipv6_addrs", []),
                                     omr_ipv6addr_prefix,
                                 )
@@ -778,7 +794,7 @@ def get_networkdiagnostic_topology_data(
     return network_topology_map
 
 
-def print_networkdiagnostic_topology(topology):
+def print_network_diag_topology(topology):
     """Prints the network topology to console in tree format."""
     logging.info("\n--- Thread Network Topology ---\n")
     for rloc, data in topology.items():
@@ -842,7 +858,7 @@ def print_networkdiagnostic_topology(topology):
         logging.info("")
 
 
-def save_networkdiagnostic_topology_to_json_dict(
+def save_topology_to_json_dict(
     data, filename="td-otbr-cli-networkdiag-topology.json"
 ):
     """Serializes the dictionary to a pretty-printed JSON file."""
@@ -851,16 +867,16 @@ def save_networkdiagnostic_topology_to_json_dict(
     logging.info(f"Successfully exported topology to {filename}")
 
 
-def save_networkdiagnostic_topology_to_json_list(
+def save_topology_to_json_list(
     data, filename="thread-networkdiagnostic-topology-list.json"
 ):
     """Converts dict format to list format and saves to JSON."""
     network_map = []
 
-    ## TODO "type" find a way to filter to router-br, router, REED, FTD, MTD, child
+    # TODO "type" find a way to filter to router-br, router, REED, FTD, MTD, child
 
     for rloc, data in data.items():
-        ##backup nn = deepcopy(data)
+        # backup nn = deepcopy(data)
 
         # set the order of fields in the output JSON for better readability, with key fields like rloc16, extaddr, device_label at the top, and then the more detailed fields like mode, ipv6_addrs, children, counters grouped together below. This way when looking at the JSON output, it's easier to quickly identify the key information about each node before diving into the more detailed data.
         network_node = {
@@ -893,16 +909,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logging.info("Initiating Thread Network Topology Scan...\n")
 
-    ## TODO
-    ## arguments
-    ## all (default)
-    ## br only
-    ## leader only
-    ## router only
-    ## children only
-    ## multicast networkdiagnostic get ff03::1
+    # TODO
+    # arguments
+    # all (default)
+    # br only
+    # leader only
+    # router only
+    # children only
+    # multicast networkdiagnostic get ff03::1
 
-    parser = argparse.ArgumentParser(description="Thread Network Diagnostic Topology")
+    parser = argparse.ArgumentParser(
+        description="Thread Network Diagnostic Topology")
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     children_group = parser.add_mutually_exclusive_group()
     children_group.add_argument(
@@ -921,7 +938,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Do not expand child nodes in the topology map",
     )
     args = parser.parse_args(argv)
-    td_data_dir = resolve_td_data_dir(datadir_arg=args.datadir)
+    td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
 
     # Load extaddr to nodename mapping from JSON file
     extaddr_json_filename = data_file_path(
@@ -930,25 +947,25 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Check if file exists before parsing
     if os.path.exists(extaddr_json_filename):
-        extaddr_map = extaddr_device_label_mapping_load(extaddr_json_filename)
+        extaddr_map = load_extaddr_device_label_map(extaddr_json_filename)
     else:
         extaddr_map = {}
 
-    network_dataset_info = util_network.get_network_dataset_info()
+    network_dataset_info = util_network.fetch_network_dataset_info()
 
     # Get the networkdiagnostic topology data
-    networkdiagnostic_topology_data = get_networkdiagnostic_topology_data(
+    networkdiagnostic_topology_data = fetch_network_diag_topology(
         extaddr_map, network_dataset_info, expand_children=args.expand_children
     )
 
     # print the topology in tree format to console
-    print_networkdiagnostic_topology(networkdiagnostic_topology_data)
+    print_network_diag_topology(networkdiagnostic_topology_data)
 
     # save the topology as JSON to file
     save_json_filename = data_file_path(
         "td-otbr-cli-networkdiag-topology.json", td_data_dir
     )
-    save_networkdiagnostic_topology_to_json_list(
+    save_topology_to_json_list(
         networkdiagnostic_topology_data, save_json_filename
     )
 

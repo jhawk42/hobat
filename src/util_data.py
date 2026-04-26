@@ -41,7 +41,7 @@ def _normalize_path(
     return path.resolve()
 
 
-def _normalize_optional(
+def _normalize_optional_path(
     value: str | os.PathLike[str] | None,
 ) -> str | os.PathLike[str] | None:
     """Return None for blank values so callers can safely pass env/CLI text."""
@@ -53,7 +53,7 @@ def _normalize_optional(
     return value
 
 
-def extract_datadir_arg(argv: Sequence[str] | None) -> str | None:
+def parse_datadir_from_argv(argv: Sequence[str] | None) -> str | None:
     """Extract --datadir value from argv without validating unrelated options."""
     if not argv:
         return None
@@ -73,7 +73,7 @@ def extract_datadir_arg(argv: Sequence[str] | None) -> str | None:
     return None
 
 
-def resolve_td_data_dir_with_source(
+def resolve_data_dir_with_source(
     datadir_arg: str | os.PathLike[str] | None = None,
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
@@ -85,7 +85,7 @@ def resolve_td_data_dir_with_source(
     env_map = os.environ if env is None else env
     base_cwd = _normalize_path(cwd or Path.cwd())
 
-    env_value = _normalize_optional(env_map.get(TD_DATA_DIR_ENV_VAR))
+    env_value = _normalize_optional_path(env_map.get(TD_DATA_DIR_ENV_VAR))
     if env_value is not None:
         return TDDataDirResolution(
             path=_normalize_path(env_value, base_cwd),
@@ -93,7 +93,7 @@ def resolve_td_data_dir_with_source(
             created=False,
         )
 
-    datadir_value = _normalize_optional(datadir_arg)
+    datadir_value = _normalize_optional_path(datadir_arg)
     if datadir_value is not None:
         return TDDataDirResolution(
             path=_normalize_path(datadir_value, base_cwd),
@@ -119,7 +119,7 @@ def resolve_td_data_dir_with_source(
     )
 
 
-def resolve_td_data_dir(
+def resolve_data_dir(
     datadir_arg: str | os.PathLike[str] | None = None,
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
@@ -136,21 +136,21 @@ def resolve_td_data_dir(
     For ENV/CLI values this function resolves and returns the absolute path,
     but does not create directories.
     """
-    return resolve_td_data_dir_with_source(
+    return resolve_data_dir_with_source(
         datadir_arg=datadir_arg,
         env=env,
         cwd=cwd,
     ).path
 
 
-def ensure_td_data_dir(path: Path) -> Path:
+def ensure_data_dir_exists(path: Path) -> Path:
     """Ensure path exists and return it as an absolute Path."""
     resolved = path.expanduser().resolve()
     resolved.mkdir(parents=True, exist_ok=True)
     return resolved
 
 
-def format_td_data_dir_log_message(resolution: TDDataDirResolution) -> str:
+def format_data_dir_log_message(resolution: TDDataDirResolution) -> str:
     """Format a standard log line for effective td_data_dir diagnostics."""
     suffix = " (created)" if resolution.created else ""
     return (
@@ -171,9 +171,9 @@ def data_file_path(filename: str, td_data_dir: Path) -> Path:
     return td_data_dir / file_path
 
 
-def data_file_arg_or_default(path_or_name: str, td_data_dir: Path) -> Path:
+def resolve_data_file_path(path_or_name: str, td_data_dir: Path) -> Path:
     """Resolve an absolute file path or map a relative name under td_data_dir."""
-    normalized = _normalize_optional(path_or_name)
+    normalized = _normalize_optional_path(path_or_name)
     if normalized is None:
         raise ValueError("path_or_name must be a non-empty path")
     value = Path(normalized).expanduser()
