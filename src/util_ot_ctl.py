@@ -4,6 +4,11 @@ import re
 import json
 import logging
 
+# Container use flag default value (1 means use container, 0 means do not use container)
+TD_OTBR_CONTAINER_USE_DEFAULT = 1
+# Environment variable name to determine if default container name should be used
+TD_OTBR_CONTAINER_USE_ENV = "TD_OTBR_CONTAINER_USE"
+
 # Default container name for OTBR Docker image
 TD_OTBR_CONTAINER_NAME_DEFAULT = "otbr"
 TD_OTBR_CONTAINER_NAME_ENV = (
@@ -83,6 +88,17 @@ def exec_ot_ctl(command, container_name=TD_OTBR_CONTAINER_NAME_DEFAULT):
     container_name_env = os.getenv(TD_OTBR_CONTAINER_NAME_ENV)
     if container_name_env:
         container_name = container_name_env
+
+    # get container use flag from environment variable or use default
+    container_use_env = os.getenv(TD_OTBR_CONTAINER_USE_ENV)
+    if container_use_env is not None:
+        container_use = int(container_use_env)
+    else:
+        container_use = TD_OTBR_CONTAINER_USE_DEFAULT
+
+    # if container use flag is set to 0, do not use a container name (i.e. run ot-ctl command without docker exec)
+    if container_use == 0:
+        container_name = None
 
     # use the provided container name or default if not provided
     output = exec_ot_ctl_dispatch(command, container_name)

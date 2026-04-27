@@ -86,6 +86,31 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links",
   },
 
+  {
+    value: "merged_otbr_cli_all_mdns",
+    label: "lab: otbr-cli: mdns: merged [meshdiag, networkdiag, neighbors, children]",
+    files: [
+      "td-otbr-cli-meshdiag-topology.json",
+      "td-otbr-cli-networkdiag-topology.json",
+      "td-otbr-cli-meshdiag-router-neighbortables.json",
+      "td-otbr-cli-meshdiag-router-childtables.json",
+      "td-mdns-scopes-thread.json"
+    ],
+    mergeStrategy: "by-identity",
+    topologyMode: "meshdiag-networkdiag",
+    defaultLinkFilter: "all_links", //all_links, default_links
+  },
+
+  // ── Single-file simple datasets (mdns) ───
+  {
+    value: "mdns_scopes_thread",
+    label: "mdns: thread scopes",
+    files: ["td-mdns-scopes-thread.json"],
+    mergeStrategy: "none",
+    topologyMode: "raw-array",
+    defaultLinkFilter: "all_links",
+  },
+
   // ── Single-file simple dataset ───
   {
     value: "example_small_eve_native_threadlayout",

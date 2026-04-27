@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from platform import node
 import socket
 import sys
 import threading
@@ -8,6 +9,7 @@ import time
 import base64
 import logging
 from typing import Sequence
+import util_network
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 from util_data import resolve_data_file_path, resolve_data_dir
@@ -30,12 +32,6 @@ VENDORS = {
 def get_vendor_from_oui(oui_hex):
     """Extract vendor from OUI (first 3 bytes of Extended Address)"""
     oui = oui_hex[:6].lower()
-    return VENDORS.get(oui, "Unknown Vendor")
-
-
-def get_vendor_from_xa(xa_hex):
-    # Take first 6 chars (3 bytes) for OUI
-    oui = xa_hex[:6].lower()
     return VENDORS.get(oui, "Unknown Vendor")
 
 
@@ -998,12 +994,13 @@ def _enrich_properties(properties: dict) -> dict:
 
 
 class MDNSDumpListener(ServiceListener):
-    def __init__(self, include_matter_tcp_supported: bool = False):
+    def __init__(self, include_matter_tcp_supported: bool = False, omr_ipv6addr_prefix: str = None):
         self._last_update = time.time()
         self.idle_done = threading.Event()
         self._lock = threading.Lock()
         self._records_by_key = {}
         self._include_matter_tcp_supported = include_matter_tcp_supported
+        self._omr_ipv6addr_prefix = omr_ipv6addr_prefix
 
     def _update_last_event_time(self):
         """Record the time of the most recent service event."""
@@ -1038,9 +1035,15 @@ class MDNSDumpListener(ServiceListener):
     def _build_record_from_service_info(self, type_: str, name: str, info, event: str):
         """Build a common JSON record from zeroconf ServiceInfo + metadata."""
         parsed_addresses = []
+        omrIpv6Address = None
         if info and hasattr(info, "parsed_addresses"):
             try:
                 parsed_addresses = info.parsed_addresses()
+                # Enhance node with OMR IPv6 address  using OMR prefix
+                if self._omr_ipv6addr_prefix:
+                    omrIpv6Address = util_network.find_omr_address_in_list(
+                        parsed_addresses, self._omr_ipv6addr_prefix
+                    )
             except Exception:
                 parsed_addresses = []
 
@@ -1125,15 +1128,27 @@ class MDNSDumpListener(ServiceListener):
                 }
             )
 
-        return {
-            "record_key": f"{type_}|{name}",
-            "event": event,
-            "captured_at_epoch": time.time(),
-            "captured_at_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "scope": type_,
-            "name": name,
-            "service_info": service_info,
-        }
+        # Build the final record object with metadata and enriched service info.
+        retobj = {}
+        retobj["record_key"] = f"{type_}|{name}"
+        retobj["record_key"] = f"{type_}|{name}"
+        retobj["event"] = event
+        retobj["captured_at_epoch"] = time.time()
+        retobj["captured_at_iso"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        retobj["scope"] = type_
+        retobj["name"] = name
+        # Add extaddr if xa exists. promote to top level for easier access
+        extaddr = service_info.get("properties", {}).get(
+            "xa", {}).get("hex", None)
+        if extaddr is not None:
+            retobj["extaddr"] = extaddr
+        # Add omrIpv6Address if exists. promote to top level for easier access
+        if omrIpv6Address is not None:
+            retobj["omrIpv6Address"] = omrIpv6Address
+        retobj["service_info"] = service_info
+
+        return retobj
 
     def _is_matter_tcp_excluded(self, type_: str, info) -> bool:
         """Return True for _matter._tcp records that advertise TCP support (T=1).
@@ -1955,9 +1970,19 @@ options:
         args.browse_timeout if args.browse_timeout is not None else _default_timeout
     )
 
+   # Main execution:
+
+    # Get network dataset info for reference in parsing and enriching mdns data
+    network_dataset_info = util_network.fetch_network_dataset_info()
+    omr_ipv6addr_prefix = (
+        network_dataset_info["prefix_omr_ipv6addr_prefix"]
+        if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info
+        else None
+    )
+
     zeroconf = Zeroconf()
     listener = MDNSDumpListener(
-        include_matter_tcp_supported=args.mattertcpsupported)
+        include_matter_tcp_supported=args.mattertcpsupported, omr_ipv6addr_prefix=omr_ipv6addr_prefix)
 
     # Start browsers for each scope
     browsers = [ServiceBrowser(zeroconf, s, listener) for s in selected_scopes]

@@ -348,6 +348,7 @@ export const TABLE_PRIORITY_COLUMNS = [
   "router_child_table_count",
   "mode.device",
   "omrIpv6Address",
+  "scope",
   "thread_stack_version",
   "mac_counters.ifinerrors_pct",
   "mac_counters.ifouterrors_pct",
