@@ -41,7 +41,7 @@ tdash/
 │   ├── tdash.css               # Dashboard stylesheet
 │   ├── js/                     # Dashboard JavaScript modules
 │   │   ├── tdash-adaptors.js       # Topology adaptors (meshdiag/REST/Eve → vis-network)
-│   │   ├── tdash-constants.js      # Merge strategies, link filters, edge category labels
+│   │   ├── tdash-constants.js      # Merge strategies, link filters, edge category labels, vis options
 │   │   ├── tdash-dataset-registry.js # Dataset registry (files, modes, filters)
 │   │   ├── tdash-dataset.js        # Dataset loading and node label enrichment
 │   │   ├── tdash-filters.js        # Node and edge visibility filters
@@ -57,8 +57,9 @@ tdash/
 │   ├── eve_parse.py            # Eve topology parser
 │   ├── dataset_merge.py        # Dataset merge engine
 │   ├── extaddr_device_label_map.py  # Static extaddr→label loader
-│   ├── util_*.py               # Shared utility modules
-│   ├── td_bash_thread_*.sh     # Shell collection helpers / scratch scripts
+│   ├── const.py                # Shared constants (data-dir defaults, env var names, filenames)
+│   ├── util_data.py            # Data-directory resolution utilities
+│   ├── util_*.py               # Other shared utility modules
 ├── tests/                      # Test suite and local mock server
 │   ├── test_*.py               # Unit tests
 │   └── td_mock_otbr_restapi_server.py
@@ -133,6 +134,8 @@ This codebase uses a strict naming split so the data source is visible from the 
 
 | File | Purpose |
 |---|---|
+| `const.py` | Shared constants used across all modules: `TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`, `TD_DATA_DIR_RESOLUTION_SUMMARY`, `TD_DATA_DIR_ARG_HELP`, and `EXTADDR_DEVICE_LABEL_MAP_FILENAME`. |
+| `util_data.py` | Data-directory resolution utilities.  Provides `TDDataDirSource` (enum), `TDDataDirResolution` (dataclass), `resolve_data_dir()`, `resolve_data_dir_with_source()`, `ensure_data_dir_exists()`, `data_file_path()`, and `resolve_data_file_path()`.  Implements the `TD_DATA_DIR` env → `--datadir` CLI → `/data` → `./data` precedence chain. |
 | `util_ot_ctl.py` | Low-level wrapper that runs `ot-ctl <command>` inside a named Docker container via `docker exec`.  The container name defaults to `"otbr"` and can be overridden with the `TD_OTBR_CONTAINER_NAME` environment variable. |
 | `util_network.py` | Network helpers: mesh-local and OMR prefix retrieval, IPv6 address prefix formatting, RLOC16 manipulation, OMR address matching in an address list, and full `get_network_dataset_info()` aggregator. |
 | `util_convert.py` | Base64 ↔ hex conversion for 64-bit extended addresses (handles JSON-escaped slashes and optional byte-order reversal for 802.15.4 little-endianness). |
@@ -143,14 +146,14 @@ This codebase uses a strict naming split so the data source is visible from the 
 |---|---|
 | `tdash.html` | Combined single-page dashboard — replaces the former separate topology and tables HTML files.  See [Dashboard Functions](#dashboard-functions) below. |
 | `tdash.css` | Stylesheet for the browser dashboard.  Defines CSS variables for colours, typography, and layout of all dashboard components. |
-| `web_server.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree with explicit MIME-type overrides.  Has `main(argv)` so it can be invoked standalone or via `td_cli.py web-server`. |
+| `web_server.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree with explicit MIME-type overrides (`.js`, `.mjs`, `.json`, `.css`, `.html`).  Routes `.json` GET requests to the configurable `td_data_dir` (separate from the `src/` static directory), enabling the dashboard to read data files from the data directory without embedding them in the source tree.  Accepts `--datadir` to override the data directory.  Has `main(argv)` so it can be invoked standalone or via `td_cli.py web-server`. |
 
 ### Dashboard JavaScript Modules (`js/`)
 
 | File | Purpose |
 |---|---|
 | `tdash-adaptors.js` | Topology adaptors — converts raw data from each source (meshdiag, networkdiag, REST API, Eve native, Eve enhanced, router-table) into the unified `{nodes, edges}` format consumed by vis-network. |
-| `tdash-constants.js` | Central registry of merge-strategy identifiers, link-filter mode names, edge-category label strings, and dropdown option metadata used across modules. |
+| `tdash-constants.js` | Central registry of merge-strategy identifiers, link-filter mode names, edge-category label strings, link-quality edge styles (`EDGE_LQ_STYLES`), vis-network physics/layout options (`VIS_OPTIONS`), priority column ordering for the table renderer (`TABLE_PRIORITY_COLUMNS`), and dropdown option metadata used across modules. |
 | `tdash-dataset-registry.js` | Defines `DATASET_REGISTRY`: each entry names the JSON file(s) to fetch, the merge strategy, the topology adaptor mode, and the default link filter for that dataset. |
 | `tdash-dataset.js` | Dataset loading pipeline — fetches JSON file(s) from the server, applies the client-side merge, and enriches nodes with static device labels from the extaddr map. |
 | `tdash-filters.js` | Visibility filters — implements edge filtering by link-filter mode and node filtering by device type (FTD/MTD/BR/Router) and diagnostics thresholds. |
@@ -165,20 +168,32 @@ This codebase uses a strict naming split so the data source is visible from the 
 
 | File | Purpose |
 |---|---|
-| `td_cli.py` | Top-level CLI entry point.  Builds the flattened `argparse` tree and dispatches to the appropriate module `main()`.  Supported top-level commands: `otbr-cli`, `mdns`, `otbr-restapi`, `process-eve`, `merge-dataset`, and `web-server`.  Unknown trailing arguments are forwarded via `parse_known_args` to subordinate modules. |
+| `td_cli.py` | Top-level CLI entry point.  Builds the flattened `argparse` tree and dispatches to the appropriate module `main()`.  Supported top-level commands: `otbr-cli`, `mdns`, `otbr-restapi`, `process-eve`, `merge-dataset`, and `web-server`.  Accepts a global `--datadir` option (overridden by `TD_DATA_DIR` env var) that is forwarded to every subcommand.  Unknown trailing arguments are forwarded via `parse_known_args` to subordinate modules. |
 
-### Scratch / Prototype Files
+---
 
-| File | Purpose |
-|---|---|
-| `td_bash_thread_collect.sh` | Shell helper that runs a sequence of `td_cli.py` collection and merge commands with pauses between steps. |
-| `td_bash_thread_scratch.sh` | Scratchpad shell script for ad hoc OTBR, mDNS, Wi-Fi, and raw `ot-ctl` exploration commands. |
+## Data Directory
+
+All JSON data files (collected snapshots, merged output, static label map) are read from and written to a configurable **data directory**.
+
+### Resolution precedence
+
+| Priority | Source | Notes |
+|---|---|---|
+| 1 | `TD_DATA_DIR` environment variable | Highest priority; overrides all other settings |
+| 2 | `--datadir` CLI argument | Passed globally to `td_cli.py` or directly to any module |
+| 3 | `/data` (Docker default) | Used when the path exists (i.e. running inside the Docker container) |
+| 4 | `./data` (local default) | Created under the current working directory if it does not exist |
+
+### Implementation
+
+- `const.py` defines the constant names (`TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`).
+- `util_data.py` implements `resolve_data_dir_with_source()` (returns a `TDDataDirResolution` dataclass with `path` and `source`) and the simpler `resolve_data_dir()` wrapper.  It also provides `data_file_path()` and `resolve_data_file_path()` for locating individual JSON files within the resolved directory.
+- `web_server.py` routes all `.json` GET requests to the resolved data directory so the browser dashboard can read collected data files independent of the static `src/` tree.
 
 ---
 
 ## Dashboard Functions
-
-`tdash.html` is a single-page application with no build step — open it directly in a browser.
 
 ### Dataset Selection
 
@@ -189,17 +204,76 @@ A **Dataset** dropdown (populated from `DATASET_REGISTRY`) lets you choose which
 - `topologyMode` — which topology adaptor to use when drawing the graph
 - `defaultLinkFilter` — the link filter pre-selected when this dataset loads
 
-Pre-configured datasets include single-file views (router table, meshdiag-only, REST API devices) as well as rich multi-file merged views combining CLI collectors, REST API data, and Eve exports.
+The full set of pre-configured datasets is listed below, grouped by category:
+
+**otbr-cli — single-file views**
+
+| Dataset key | Label | Files | Topology mode |
+|---|---|---|---|
+| `meshdiag_only` | otbr-cli: meshdiag topology | `td-otbr-cli-meshdiag-topology.json` | `meshdiag-networkdiag` |
+| `networkdiag_only` | otbr-cli: networkdiag topology | `td-otbr-cli-networkdiag-topology.json` | `meshdiag-networkdiag` |
+| `router_table` | otbr-cli: router table | `td-otbr-cli-router-table.json` | `router-table` |
+| `router_neighbortables` | otbr-cli: meshdiag router neighbortables | `td-otbr-cli-meshdiag-router-neighbortables.json` | `merged-detailed` |
+| `router_childtables` | otbr-cli: meshdiag router childtables | `td-otbr-cli-meshdiag-router-childtables.json` | `merged-detailed` |
+
+**otbr-cli — multi-file merged views**
+
+| Dataset key | Label | Files | Topology mode |
+|---|---|---|---|
+| `merged_otbr_cli_all` | otbr-cli: merged [meshdiag, networkdiag, neighbors, children] | meshdiag + networkdiag + neighbortables + childtables | `meshdiag-networkdiag` |
+| `merged_otbr_cli_all_mdns` | lab: otbr-cli: mdns: merged [meshdiag, networkdiag, neighbors, children] | above + `td-mdns-scopes-thread.json` | `meshdiag-networkdiag` |
+| `merged_all_deep_wide_otbr_cli_restapi_eve` | lab: premerged: all 1 file: [otbr-cli, otbr-restapi, eve] | `td-merged-topology-all.json` | `merged-detailed` |
+
+**otbr-restapi — REST API views**
+
+| Dataset key | Label | Files | Topology mode |
+|---|---|---|---|
+| `restapi_devices_diagnostics` | lab: otbr-restapi: [devices, diagnostics] | `td-otbr-restapi-devices.json` + `td-otbr-restapi-diagnostics.json` | `otbr_restapi` |
+| `restapi_devices` | lab: otbr-restapi: devices | `td-otbr-restapi-devices.json` | `otbr_restapi` |
+| `restapi_diagnostics` | lab: otbr-restapi: diagnostics | `td-otbr-restapi-diagnostics.json` | `otbr_restapi` |
+
+**mDNS**
+
+| Dataset key | Label | Files | Topology mode |
+|---|---|---|---|
+| `mdns_scopes_thread` | mdns: thread scopes | `td-mdns-scopes-thread.json` | `raw-array` |
+
+**Eve App exports**
+
+| Dataset key | Label | Files | Topology mode |
+|---|---|---|---|
+| `example_small_eve_native_threadlayout` | lab: eve native: example | `example-small-Eve Thread Network Layout` | `eve_native` |
+| `eve_native_threadlayout` | lab: eve native: Eve Thread Network Layout | `Eve Thread Network Layout.evethreadlayout` | `eve_native` |
+| `eve_enhanced_topology` | lab: eve enhanced: td-eve-topology.json | `td-eve-topology.json` | `eve_enhanced` |
+
+**Multi-source merged views**
+
+| Dataset key | Label | Sources | Topology mode |
+|---|---|---|---|
+| `merged_otbr_cli_otbr_restapi` | lab: merged: [otbr-cli, otbr-restapi] | meshdiag + networkdiag + neighbortables + childtables + REST API devices + diagnostics | `meshdiag-networkdiag` |
+| `merged_otbr_cli_meshdiag_networkdiag_neighbortables_eve` | lab: merged: [otbr-cli, eve] | meshdiag + networkdiag + neighbortables + Eve enhanced | `meshdiag-networkdiag` |
+| `merged_otbr_cli_meshdiag_networkdiag_neighbortables_restapi_eve` | lab: merged: [otbr-cli, otbr-restapi, eve] | meshdiag + networkdiag + neighbortables + childtables + REST API + Eve enhanced | `meshdiag-networkdiag` |
+
+**System**
+
+| Dataset key | Label | Files | Topology mode |
+|---|---|---|---|
+| `static_extaddr_device_label` | system: Extended MAC to Device Label Mapping | `td-static-extaddr-device-label.json` | `raw-array` |
 
 ### View Modes
 
-| Button | What it shows |
+| Button | What it shows / does |
 |---|---|
+| **Fetch** | Manually re-fetches the currently selected dataset from the server without changing the dataset selection. |
 | **Topology** | Interactive [vis-network](https://visjs.github.io/vis-network/docs/network/) graph of the mesh.  Click any node to see all its properties in the side panel. |
 | **Table** | Flat [sortable](https://github.com/tofsjonas/sortable) table of all rows in the loaded dataset.  Click any column header to sort. |
-| **Physics** | Toggles the vis-network physics simulation on/off (spring-force layout vs. fixed positions). |
-| **Auto Zoom** | Toggles automatic fit-to-view when a dataset loads. |
-| **Animation** | Toggles vis-network fit animation.  Disabled by default — fit-to-view is instant on load. |
+| **Physics** | Toggles the vis-network physics simulation on/off (spring-force layout vs. fixed positions).  Topology view only. |
+| **Auto Zoom** | Toggles automatic fit-to-view when a dataset loads.  Topology view only. |
+| **Animation** | Toggles vis-network fit animation.  Disabled by default — fit-to-view is instant on load.  Topology view only. |
+| **Legend** | Toggles the link-quality colour/style legend panel.  Starts active (legend visible).  Topology view only. |
+| **Enhance** | Toggles device-label enrichment — re-applies the static `extaddr → device_label` map to node labels.  Starts active (enrichment on). |
+| **More Info** | Toggles expanded column display in Table view — shows all discovered columns rather than the priority subset.  Table view only. |
+| **lab** | Placeholder lab/debug toggle (wired to the DOM but no handler yet). |
 
 ### Node Filter
 
@@ -208,12 +282,12 @@ Filters which nodes appear in both Topology and Table views:
 | Option | Criteria |
 |---|---|
 | All Nodes | No filter |
-| Full Thread Devices (FTD) | `mode.device == "FTD"` |
-| Minimal Thread Devices (MTD) | `mode.device == "MTD"` |
-| Border Routers | `br == true` |
-| Routers | `role == "router"` |
-| Routers with Children | `total_children > 0` |
-| Routers without Children | `total_children == 0` |
+| Full Thread Devices (FTD) | `mode.device == "FTD"` (topology: `mode_device`; table: `mode.device`) |
+| Minimal Thread Devices (MTD) | `mode.device == "MTD"` (topology: `mode_device`; table: `mode.device`) |
+| Main Routers | RLOC16 ends in `00` (topology: `isMainRouter` flag; table: RLOC16 suffix check) |
+| Border Routers | `br == true` (topology: `isBorderRouter` flag) |
+| Routers with Children | Router node with at least one child (topology: `isRouter && hasChildren`; table: `total_children > 0`) |
+| Routers without Children | Router node with no children (topology: `isRouter && !hasChildren`; table: router-shaped with zero children) |
 
 ### Link Filter
 
@@ -253,6 +327,7 @@ The `topologyMode` field in each dataset registry entry selects the JavaScript a
 | `eve_enhanced` | `td-eve-topology.json` | Nodes from the pre-processed Eve topology; edges from enriched `routes` and `children` arrays. |
 | `eve_native` | `*.evethreadlayout` | Nodes from a raw Eve App export; edges from the native `routes` and `children` arrays. |
 | `router-table` | `td-otbr-cli-router-table.json` | Nodes from the router table only; edges based on Next Hop column. |
+| `raw-array` | any flat JSON array | Passes rows directly to the table renderer with no topology edges; used for mDNS scopes and the static extaddr→label map. |
 
 ### Link Filters
 
@@ -260,12 +335,18 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 
 | Filter value | Edges drawn |
 |---|---|
+| `all_links` | All available edge types for the current topology mode.  Can produce a dense graph for large networks. |
 | `default_links` | Router-to-router links from the 3/2/1-link quality buckets, plus child links from the `children` array and `childTable` entries. |
 | `default_plus_router_neighbors` | Everything in `default_links`, plus additional edges from the router-neighbour tables (`meshdiag routerneighbortable`). |
 | `otbr_rest_api` | Edges from `routeData` and `childTable` fields in the OTBR REST API payloads. |
 | `eve_enhanced_routes_children` | Edges from the `routes` and `children` arrays in the pre-processed Eve topology. |
 | `eve_native_routes_children` | Edges from the `routes` and `children` arrays in a raw Eve App export. |
-| `all_links` | All available edge types for the current topology mode.  Can produce a dense graph for large networks. |
+| `lq_high` | Only high-quality (LQ3 / 3-link bucket) router-to-router edges. |
+| `lq_medium` | Only medium-quality (LQ2 / 2-link bucket) router-to-router edges. |
+| `lq_low` | Only low-quality (LQ1 / 1-link bucket) router-to-router edges. |
+| `lq_parent_child` | Only parent→child edges from all source types (default children, Eve child, OTBR child). |
+| `lq_otbr_neighbor` | OTBR route edges and router-neighbour table edges only. |
+| `lq_none` | No edges — topology nodes are shown without any connections. |
 
 > **Tip:** When a dataset is selected, its `defaultLinkFilter` is automatically applied.  Switch the link filter after loading to explore different views of the same data without reloading.
 
@@ -281,7 +362,10 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 | `tests/test_otbr_restapi_raw_client.py` | Unit tests for the raw client: raw envelope pass-through, error handling. |
 | `tests/test_td_merge_identity.py` | Unit tests for `build_merged_records()` in `dataset_merge.py`: verifies that `extaddr`, `extAddress`, and `Extended MAC` aliases all resolve to the same canonical record under `by-identity` merge. |
 | `tests/test_td_cli_argparse.py` | Unit tests for `td_cli.py`: covers `build_parser()`, `dispatch()`, and `main()` — argument parsing, subcommand routing, and exit codes. |
+| `tests/test_td_cli_datadir_forwarding.py` | Unit tests for `--datadir` forwarding: verifies the global `--datadir` argument is correctly parsed and forwarded to subcommand modules. |
 | `tests/test_tdash_web_routing.py` | Tests for dashboard/web route handling. |
+| `tests/test_util_data.py` | Unit tests for `util_data.py`: data-directory resolution precedence (env var, CLI arg, Docker default, local default) and path normalisation. |
+| `tests/test_phase6_verification_matrix.py` | Integration tests for Phase 6 data-dir resolution edge cases and web server routing behaviour. |
 | `tests/test_util_convert_base64_extaddr_to_hexnumber.py` | Script exercising `b64_to_extended_address()` for a single Base64 extended-address string. |
 | `tests/test_util_convert_base64_extaddr_list_to_hexnumber_list.py` | Script exercising `b64_to_extended_address()` across a list of Base64 extended-address strings. |
 | `tests/test_util_convert_hexnumber_extaddr_to_base64.py` | Script exercising `convert_hexnumber_extaddr_to_base64()` for a single hex extended-address string. |
@@ -377,6 +461,10 @@ python td_cli.py process-eve
 
 # Merge everything
 python td_cli.py merge-dataset
+
+# Use a custom data directory (overrides TD_DATA_DIR env var)
+python td_cli.py --datadir /path/to/data otbr-cli all
+python td_cli.py --datadir /path/to/data merge-dataset
 ```
 
 ### Collect and merge data — via individual modules
@@ -414,14 +502,18 @@ python src/otbr_restapi_raw_client_cli.py node get
 
 ### Start the web server
 ```bash
-# Via unified CLI (serves src/ on http://localhost:8087)
+# Via unified CLI (serves src/ on http://localhost:8087, data from ./data)
 python src/td_cli.py web-server
 
 # Custom host/port
 python src/td_cli.py web-server --host 0.0.0.0 --port 8090
 
+# Custom data directory (JSON files served from /path/to/data)
+python src/td_cli.py web-server --datadir /path/to/data
+
 # Or run the module directly
 python src/web_server.py --port 8087
+python src/web_server.py --port 8087 --datadir /path/to/data
 ```
 
 ### Open the dashboard
@@ -466,20 +558,20 @@ Identity matching is case-insensitive and ignores leading/trailing whitespace.  
 
 The **Animation** button in `tdash.html` controls whether vis-network uses a smooth animated transition when fitting the graph to the viewport.
 
-### 1. HTML button (`tdash.html:24`)
+### 1. HTML button (`tdash.html:34`)
 ```html
-<button id="btn-animation" class="active" title="Toggle vis.js animation">Animation</button>
+<button id="btn-animation" title="Toggle animation">Animation</button>
 ```
 Starts without `active` class (animation **OFF** by default).
 
-### 2. Click handler wiring (`tdash-ui.js:135`)
+### 2. Click handler wiring (`tdash-ui.js:205`)
 ```js
 document.getElementById('btn-animation')
   .addEventListener('click', () => setAnimation(!isAnimationEnabled()));
 ```
 On click, calls the local `setAnimation(bool)` with the toggled value.
 
-### 3. `setAnimation()` (`tdash-ui.js:125`)
+### 3. `setAnimation()` (`tdash-ui.js:194`)
 ```js
 function setAnimation(enabled) {
   setAnimationEnabled(enabled);              // writes state to renderer module
@@ -490,7 +582,7 @@ function setAnimation(enabled) {
 ```
 Updates the button's visual `active` class, then delegates state storage to the renderer.
 
-### 4. State stored in renderer (`tdash-topology-renderer.js:20`)
+### 4. State stored in renderer (`tdash-topology-renderer.js:31`)
 ```js
 let _animationEnabled = false;   // module-level flag, OFF by default
 
@@ -498,7 +590,7 @@ export function setAnimationEnabled(val) { _animationEnabled = val; }
 export function isAnimationEnabled()     { return _animationEnabled; }
 ```
 
-### 5. vis.js consumption (`tdash-topology-renderer.js:237`)
+### 5. vis.js consumption (`tdash-topology-renderer.js:321`)
 
 `_animationEnabled` is read in `fitIfEnabled()`, stored in `_topologyFilterHandlers`, and called after every dataset load or filter change:
 
@@ -518,7 +610,7 @@ fitIfEnabled: () => {
 
 ### Visibility scoping
 
-The button is shown/hidden when switching views (`tdash-ui.js:70`):
+The button is shown/hidden when switching views (`tdash-ui.js:110`):
 - `topology` view → `display: inline-block`
 - `table` view → `display: none`
 
@@ -526,11 +618,11 @@ The button is shown/hidden when switching views (`tdash-ui.js:70`):
 
 | Layer | File | Role |
 |---|---|---|
-| Button `#btn-animation` | `tdash.html:24` | Toggle UI element, starts active |
-| Click handler + `setAnimation()` | `tdash-ui.js:125,135` | Toggles `active` class, calls renderer setter |
-| `_animationEnabled` flag | `tdash-topology-renderer.js:20` | Module-level boolean state |
-| `setAnimationEnabled()` / `isAnimationEnabled()` | `tdash-topology-renderer.js:27,29` | Exported getter/setter |
-| `_visNetwork.fit({ animation: bool })` | `tdash-topology-renderer.js:239` | Actual vis.js API call — animated vs instant fit |
+| Button `#btn-animation` | `tdash.html:34` | Toggle UI element, starts without `active` (OFF) |
+| Click handler + `setAnimation()` | `tdash-ui.js:194,205` | Toggles `active` class, calls renderer setter |
+| `_animationEnabled` flag | `tdash-topology-renderer.js:31` | Module-level boolean state |
+| `setAnimationEnabled()` / `isAnimationEnabled()` | `tdash-topology-renderer.js:44,50` | Exported getter/setter |
+| `_visNetwork.fit({ animation: bool })` | `tdash-topology-renderer.js:325` | Actual vis.js API call — animated vs instant fit |
 
 ---
 
