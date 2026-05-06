@@ -35,4 +35,4 @@ ENV PORT=8087
 EXPOSE ${PORT}
 
 # Command to run the script
-CMD ["python3", "td_cli.py", "web-server", "--host", "0.0.0.0"]
+CMD ["python3", "td_webserver.py", "--host", "0.0.0.0"]

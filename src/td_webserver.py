@@ -140,6 +140,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer((args.host, args.port), Handler) as httpd:
+        logging.info("Starting tdash webserver dashboard httpd...")
         logging.info(
             f"Serving at http://{args.host or 'localhost'}:{args.port} (/ redirects to /tdash.html)"
         )

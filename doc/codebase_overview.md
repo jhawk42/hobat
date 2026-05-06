@@ -5,10 +5,12 @@
 Thread Mesh Network Dashboard (tdash) is a Python toolkit and browser-based dashboard for visualizing and monitoring [Thread](https://github.com/openthread/openthread) mesh networks.  It collects network data from several sources (OTBR, mDNS, Eve), normalizes and merges that data, and renders it as an interactive topology graph and table in HTML dashboard page.
 
 The tool collects data from various dataset sources including:
-- otbr-cli: Open Thread OTBR cli. Executes ot-ctl command line tool against an OTBR instance to scan for information on thread devices. 
+
+- otbr-cli: Open Thread OTBR cli. Executes ot-ctl command line tool against an OTBR instance to scan for information on thread devices.
 - otbr-restapi: Open Thread OTBR restapi. Web calls to OTBR instance restapi to collect information on thread devices.
 - mDNS: Multicast DNS allows devices on a local network to discover each other and services
 - Eve app: The native Eve JSON file has useful information for Apple Home thread mesh networks. This tool enhances the native Eve app JSON file with RLOC16 in hex format, etc
+
 ---
 
 ## Key Technologies
@@ -36,7 +38,7 @@ tdash/
 │   └── otbr_restapi_clients.md # OTBR REST API client reference
 ├── src/                        # All source code
 │   ├── td_cli.py               # Unified CLI dispatcher (top-level entry point)
-│   ├── web_server.py           # HTTP web server module
+│   ├── td_webserver.py         # HTTP web server module
 │   ├── tdash.html              # Combined single-page browser dashboard
 │   ├── tdash.css               # Dashboard stylesheet
 │   ├── js/                     # Dashboard JavaScript modules
@@ -146,7 +148,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 |---|---|
 | `tdash.html` | Combined single-page dashboard — replaces the former separate topology and tables HTML files.  See [Dashboard Functions](#dashboard-functions) below. |
 | `tdash.css` | Stylesheet for the browser dashboard.  Defines CSS variables for colours, typography, and layout of all dashboard components. |
-| `web_server.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree with explicit MIME-type overrides (`.js`, `.mjs`, `.json`, `.css`, `.html`).  Routes `.json` GET requests to the configurable `td_data_dir` (separate from the `src/` static directory), enabling the dashboard to read data files from the data directory without embedding them in the source tree.  Accepts `--datadir` to override the data directory.  Has `main(argv)` so it can be invoked standalone or via `td_cli.py web-server`. |
+| `td_webserver.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree with explicit MIME-type overrides (`.js`, `.mjs`, `.json`, `.css`, `.html`).  Routes `.json` GET requests to the configurable `td_data_dir` (separate from the `src/` static directory), enabling the dashboard to read data files from the data directory without embedding them in the source tree.  Accepts `--datadir` to override the data directory.  Has `main(argv)` so it can be invoked standalone or via `td_cli.py web-server`. |
 
 ### Dashboard JavaScript Modules (`js/`)
 
@@ -189,7 +191,7 @@ All JSON data files (collected snapshots, merged output, static label map) are r
 
 - `const.py` defines the constant names (`TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`).
 - `util_data.py` implements `resolve_data_dir_with_source()` (returns a `TDDataDirResolution` dataclass with `path` and `source`) and the simpler `resolve_data_dir()` wrapper.  It also provides `data_file_path()` and `resolve_data_file_path()` for locating individual JSON files within the resolved directory.
-- `web_server.py` routes all `.json` GET requests to the resolved data directory so the browser dashboard can read collected data files independent of the static `src/` tree.
+- `td_webserver.py` routes all `.json` GET requests to the resolved data directory so the browser dashboard can read collected data files independent of the static `src/` tree.
 
 ---
 
@@ -425,6 +427,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 ## Running the Tools
 
 ### Prerequisites
+
 - Python 3.10+
 - A running OTBR Docker container named `otbr` (or set `TD_OTBR_CONTAINER_NAME`)
 - For mDNS discovery: `pip install zeroconf`
@@ -468,6 +471,7 @@ python td_cli.py --datadir /path/to/data merge-dataset
 ```
 
 ### Collect and merge data — via individual modules
+
 ```bash
 # Download REST API snapshots
 python src/otbr_restapi_download.py
@@ -487,6 +491,7 @@ python src/dataset_merge.py
 ```
 
 ### Use the REST API clients directly
+
 ```bash
 # Flattened client CLI (via td_cli.py)
 python src/td_cli.py otbr-restapi client node get
@@ -501,6 +506,7 @@ python src/otbr_restapi_raw_client_cli.py node get
 ```
 
 ### Start the web server
+
 ```bash
 # Via unified CLI (serves src/ on http://localhost:8087, data from ./data)
 python src/td_cli.py web-server
@@ -512,14 +518,16 @@ python src/td_cli.py web-server --host 0.0.0.0 --port 8090
 python src/td_cli.py web-server --datadir /path/to/data
 
 # Or run the module directly
-python src/web_server.py --port 8087
-python src/web_server.py --port 8087 --datadir /path/to/data
+python src/td_webserver.py --port 8087
+python src/td_webserver.py --port 8087 --datadir /path/to/data
 ```
 
 ### Open the dashboard
+
 Open `http://localhost:8087/tdash.html` after starting the web server, or open `src/tdash.html` directly in a browser and select a dataset from the dropdown.
 
 ### Run tests
+
 ```bash
 # All tests
 python -m pytest tests/
@@ -532,6 +540,7 @@ python -m unittest tests/test_tdash_web_routing.py
 ```
 
 ### Mock server (no live OTBR needed)
+
 ```bash
 python tests/td_mock_otbr_restapi_server.py --host 127.0.0.1 --port 18081
 # then override client defaults:
@@ -559,19 +568,24 @@ Identity matching is case-insensitive and ignores leading/trailing whitespace.  
 The **Animation** button in `tdash.html` controls whether vis-network uses a smooth animated transition when fitting the graph to the viewport.
 
 ### 1. HTML button (`tdash.html:34`)
+
 ```html
 <button id="btn-animation" title="Toggle animation">Animation</button>
 ```
+
 Starts without `active` class (animation **OFF** by default).
 
 ### 2. Click handler wiring (`tdash-ui.js:205`)
+
 ```js
 document.getElementById('btn-animation')
   .addEventListener('click', () => setAnimation(!isAnimationEnabled()));
 ```
+
 On click, calls the local `setAnimation(bool)` with the toggled value.
 
 ### 3. `setAnimation()` (`tdash-ui.js:194`)
+
 ```js
 function setAnimation(enabled) {
   setAnimationEnabled(enabled);              // writes state to renderer module
@@ -580,9 +594,11 @@ function setAnimation(enabled) {
   else         btn.classList.remove('active');
 }
 ```
+
 Updates the button's visual `active` class, then delegates state storage to the renderer.
 
 ### 4. State stored in renderer (`tdash-topology-renderer.js:31`)
+
 ```js
 let _animationEnabled = false;   // module-level flag, OFF by default
 
@@ -611,6 +627,7 @@ fitIfEnabled: () => {
 ### Visibility scoping
 
 The button is shown/hidden when switching views (`tdash-ui.js:110`):
+
 - `topology` view → `display: inline-block`
 - `table` view → `display: none`
 

@@ -1,10 +1,11 @@
-"""Tests for TDashHandler URI routing in web_server.py.
+"""Tests for TDashHandler URI routing in td_webserver.py.
 
 Run with:
     PYTHONPATH=/workspaces/tdash/src python -m pytest tests/test_tdash_web_routing.py -v
 """
 
 from __future__ import annotations
+import web_server
 
 import http.client
 import os
@@ -18,8 +19,6 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-import web_server
 
 
 class TestTDashHandlerRouting(unittest.TestCase):

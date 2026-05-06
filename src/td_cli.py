@@ -30,7 +30,6 @@ import otbr_restapi_client_cli
 import otbr_restapi_raw_client_cli
 
 import dataset_merge
-import web_server
 
 
 class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
@@ -55,7 +54,6 @@ class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
 #   mdns          – query Thread-related mDNS scopes
 #   process-eve   – process Eve raw data files
 #   merge-dataset – merge datasets
-#   web-server  – start the web dashboard server
 #
 # otbr-cli examples:
 #   td_cli.py otbr-cli network-dataset-info
@@ -102,8 +100,6 @@ class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
 # merge-dataset examples:
 #   td_cli.py merge-dataset --input1 dataset1.json --input2 dataset2.json --output merged_dataset.json
 #
-# web-server examples:
-#   td_cli.py web-server --host localhost --port 8087
 
 
 # type: ignore[type-arg]
@@ -293,16 +289,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_process_commands(subparsers)
     _add_merge_commands(subparsers)
 
-    # web-server — remaining args forwarded to web_server.main()
-    ws_p = subparsers.add_parser(
-        "web-server", help="Start the web dashboard server")
-    ws_p.add_argument(
-        "--host", default="localhost", help="Host to bind to (default: localhost)"
-    )
-    ws_p.add_argument(
-        "--port", type=int, default=8087, help="Port to listen on (default: 8087)"
-    )
-
     # --- hand-crafted "Commands usage:" epilog ---
     parser.epilog = """Commands usage:
     otbr-cli
@@ -320,12 +306,6 @@ def build_parser() -> argparse.ArgumentParser:
     merge-dataset
         usage: td_cli merge-dataset [-h] ...
 
-    web-server
-        usage: td_cli web-server [-h] [--host HOST] [--port PORT]
-        options:
-                --host HOST  Host to bind to (default: localhost)
-                --port PORT  Port to listen on (default: 8087)
-
 """
 
     # Expose subparsers so dispatch() can print targeted help
@@ -333,8 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
         "otbr-cli": subparsers._name_parser_map["otbr-cli"],
         "otbr-restapi": subparsers._name_parser_map["otbr-restapi"],
         "process-eve": subparsers._name_parser_map["process-eve"],
-        "merge-dataset": subparsers._name_parser_map["merge-dataset"],
-        "web-server": ws_p,
+        "merge-dataset": subparsers._name_parser_map["merge-dataset"]
     }
 
     return parser
@@ -485,11 +464,7 @@ def dispatch(
     if args.command in ("merge-dataset", "merge-data"):
         return dataset_merge.main(_forward_with_datadir(sub_argv)) or 0
 
-    # --- web-server ---
-    if args.command == "web-server":
-        web_argv = ["--host", args.host, "--port", str(args.port)]
-        return web_server.main(_forward_with_datadir(web_argv))
-
+    # --- unhandled command ---
     raise ValueError(f"Unhandled command: {args.command}")
 
 
