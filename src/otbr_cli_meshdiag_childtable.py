@@ -8,7 +8,7 @@ from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from otbr_cli_router_table import fetch_and_parse_router_table
 from extaddr_device_label_map import load_extaddr_device_label_map
 from util_ot_ctl import exec_ot_ctl
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
 
 def _parse_yes_no_to_bool(value):
@@ -215,8 +215,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_filename = data_file_path(
         "td-otbr-cli-meshdiag-router-childtables.json", td_data_dir
     )
-    with open(output_filename, "w") as f:
-        json.dump(router_child_tables, f, indent=4)
+    save_json_atomic(router_child_tables, output_filename)
 
     logging.info(
         f"Meshdiag router childtables data saved to {output_filename}")

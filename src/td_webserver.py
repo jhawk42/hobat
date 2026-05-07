@@ -89,8 +89,20 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
     # networkdiag — TLV request per router with retries; up to ~8 min on large networks.
     "td-otbr-cli-networkdiag-topology.json": FileAction(
         max_age_s=3600,
-        action=["otbr-cli", "networkdiag", "topology"],
+        action=["otbr-cli", "networkdiag", "topology-poll"],
         action_cost_s=480,  # ~8 min for ~60 routers with timeout retries
+    ),
+    # networkdiag topology-multicast-network — TLV request per router with retries; up to ~16 seconds on large networks.
+    "td-otbr-cli-networkdiag-topology-multicast-network.json": FileAction(
+        max_age_s=3600,
+        action=["otbr-cli", "networkdiag", "topology-multicast-network"],
+        action_cost_s=16,  # ~16 seconds with timeout retries
+    ),
+    # networkdiag topology-multicast-neighbors — TLV request per router with retries; up to ~16 seconds on large networks.
+    "td-otbr-cli-networkdiag-topology-multicast-neighbors.json": FileAction(
+        max_age_s=3600,
+        action=["otbr-cli", "networkdiag", "topology-multicast-neighbors"],
+        action_cost_s=16,  # ~16 seconds with timeout retries
     ),
     # REST API downloads — single HTTP call, near-instant.
     "td-otbr-restapi-dataset-active.json": FileAction(
@@ -443,13 +455,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("HOST", TD_WEB_HOST_ADDR),
         help=f"Host/address to bind to (default: '{TD_WEB_HOST_ADDR}', env: HOST)",
     )
-    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     parser.add_argument(
         "--port",
         type=int,
         default=int(os.environ.get("PORT", TD_WEB_HOST_PORT)),
         help=f"Port to listen on (default: {TD_WEB_HOST_PORT}, env: PORT)",
     )
+    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     return parser
 
 

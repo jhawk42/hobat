@@ -1,8 +1,9 @@
 import logging
 import json
+import os
 from typing import Sequence
 import util_network
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -16,8 +17,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     save_json_path = data_file_path(
         "td-otbr-cli-network-dataset-info.json", td_data_dir
     )
-    with open(save_json_path, "w", encoding="utf-8") as f:
-        json.dump(network_dataset_info, f, indent=4)
+    save_json_atomic(network_dataset_info, save_json_path)
     print(json.dumps(network_dataset_info, indent=4))
 
 

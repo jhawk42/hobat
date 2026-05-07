@@ -113,14 +113,28 @@ class TestOtbrCliParser(unittest.TestCase):
         self.assertEqual(args.meshdiag_command, "childip6")
 
     def test_networkdiag_topology_default_children(self):
-        args = _parse(["otbr-cli", "networkdiag", "topology"])
+        args = _parse(["otbr-cli", "networkdiag", "topology-poll"])
         self.assertEqual(args.cli_command, "networkdiag")
-        self.assertEqual(args.networkdiag_command, "topology")
+        self.assertEqual(args.networkdiag_command, "topology-poll")
         self.assertTrue(args.expand_children)
 
     def test_networkdiag_topology_children_no(self):
-        args = _parse(["otbr-cli", "networkdiag", "topology", "--children-no"])
+        args = _parse(["otbr-cli", "networkdiag", "topology-poll", "--children-no"])
         self.assertFalse(args.expand_children)
+
+    def test_networkdiag_topology_multicast_network(self):
+        args = _parse(["otbr-cli", "networkdiag", "topology-multicast-network"])
+        self.assertEqual(args.cli_command, "networkdiag")
+        self.assertEqual(args.networkdiag_command, "topology-multicast-network")
+
+    def test_networkdiag_topology_multicast_neighbors(self):
+        args = _parse(["otbr-cli", "networkdiag", "topology-multicast-neighbors"])
+        self.assertEqual(args.cli_command, "networkdiag")
+        self.assertEqual(args.networkdiag_command, "topology-multicast-neighbors")
+
+    def test_networkdiag_old_topology_command_no_longer_valid(self):
+        with self.assertRaises(SystemExit):
+            _parse(["otbr-cli", "networkdiag", "topology"])
 
 
 class TestForwardingParsers(unittest.TestCase):

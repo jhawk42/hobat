@@ -8,7 +8,7 @@ from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from otbr_cli_router_table import fetch_and_parse_router_table
 from extaddr_device_label_map import load_extaddr_device_label_map
 from util_ot_ctl import exec_ot_ctl
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
 
 def fetch_meshdiag_router_neighbor_table_for_device(rloc16, router=None, extaddr_map=None):
@@ -185,10 +185,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "td-otbr-cli-meshdiag-router-neighbortables.json", td_data_dir
     )
 
-    with open(output_path, "w") as f:
-        json.dump(router_neighbor_tables, f, indent=4)
-        logging.info(
-            f"Meshdiag routerneighbortables data saved to {output_path}")
+    save_json_atomic(router_neighbor_tables, output_path)
+    logging.info(
+        f"Meshdiag routerneighbortables data saved to {output_path}")
 
     print(json.dumps(router_neighbor_tables, indent=4))
 

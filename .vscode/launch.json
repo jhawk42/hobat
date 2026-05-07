@@ -12,36 +12,19 @@
             "cwd": "${fileDirname}"
         },
         {
-            "name": "Python Debugger: Python File with args: --debug",
+            "name": "Python Debugger: Python File with args",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
-            "args": ["--debug", "arg2"],
-            "cwd": "${fileDirname}" 
+            "args": "${command:pickArgs}",
+            "cwd": "${fileDirname}"
         },
         {
-            "name": "Python Debugger: Python File with args: --verbose",
+            "name": "Python Debugger: Module",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
-            "args": ["--verbose", "arg2"],
-            "cwd": "${fileDirname}" 
-        },
-        {
-            "name": "Python Debugger: Python File with args: --test",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": ["--test", "arg2"],
-            "cwd": "${fileDirname}" 
-        },
-        {
-            "name": "Python Debugger: Python File with args: --help",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": ["--help", "arg2"],
-            "cwd": "${fileDirname}" 
+            "module": "${input:moduleName}",
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

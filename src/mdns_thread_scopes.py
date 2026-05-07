@@ -12,7 +12,7 @@ from typing import Sequence
 import util_network
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
-from util_data import resolve_data_file_path, resolve_data_dir
+from util_data import resolve_data_file_path, resolve_data_dir, save_json_atomic
 from const import TD_DATA_DIR_ARG_HELP
 
 TD_MDNS_BROWSE_TIMEOUT_ENV_NAME = "TD_MDNS_BROWSE_TIMEOUT"
@@ -2015,8 +2015,7 @@ options:
         output_file = resolve_data_file_path(
             f"td-mdns-scopes-{scope_tag}.json", td_data_dir
         )
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(records, f, indent=2)
+        save_json_atomic(records, output_file, indent=2)
 
         logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
         logging.info(json.dumps(records, indent=2))

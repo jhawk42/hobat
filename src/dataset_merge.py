@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
-from util_data import resolve_data_dir
+from util_data import resolve_data_dir, save_json_atomic
 
 
 PRIORITY_FIELDS = [
@@ -54,6 +54,7 @@ DEFAULT_INPUT_FILES = [
     "td-otbr-cli-router-table.json",
     "td-otbr-cli-meshdiag-topology.json",
     "td-otbr-cli-networkdiag-topology.json",
+    "td-otbr-cli-networkdiag-topology-multicast-network.json",
     "td-otbr-cli-meshdiag-router-neighbortables.json",
     "td-otbr-restapi-devices.json",
     "td-otbr-restapi-diagnostics.json",
@@ -773,15 +774,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     report["reference_extaddr_map_entries"] = len(extaddr_to_device_label)
 
     output_path = base_dir / args.output
-    with output_path.open("w", encoding="utf-8") as f:
-        json.dump(merged_records, f, indent=2)
-        f.write("\n")
+    save_json_atomic(merged_records, output_path, indent=2, add_trailing_newline=True)
 
     if args.report_file:
         report_path = base_dir / args.report_file
-        with report_path.open("w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2)
-            f.write("\n")
+        save_json_atomic(report, report_path, indent=2, add_trailing_newline=True)
         logging.info(f"Wrote merge report to {report_path}")
 
     logging.info(

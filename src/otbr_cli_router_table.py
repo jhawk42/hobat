@@ -8,7 +8,7 @@ from typing import Sequence
 from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from extaddr_device_label_map import load_extaddr_device_label_map
 import util_ot_ctl
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
 
 def fetch_router_table():
@@ -171,8 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         router_table_data = fetch_and_parse_router_table(extaddr_map)
         save_path = data_file_path(
             "td-otbr-cli-router-table.json", td_data_dir)
-        with open(save_path, "w") as f:
-            json.dump(router_table_data, f, indent=4)
+        save_json_atomic(router_table_data, save_path)
         print(json.dumps(router_table_data, indent=4))
 
     except FileNotFoundError as e:

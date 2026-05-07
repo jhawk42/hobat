@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -180,3 +182,36 @@ def resolve_data_file_path(path_or_name: str, td_data_dir: Path) -> Path:
     if value.is_absolute():
         return value.resolve()
     return (td_data_dir / value).resolve()
+
+
+def save_json_atomic(data, filename: str | os.PathLike, indent: int = 4, add_trailing_newline: bool = False) -> None:
+    """Save JSON data to file atomically using temporary file + rename.
+    
+    Writes to a temporary .tmp file first, then uses os.replace() to atomically
+    swap it into place. This prevents incomplete JSON from being read by concurrent
+    processes if the write is interrupted.
+    
+    Args:
+        data: Object to serialize to JSON
+        filename: Target output filename (string or PathLike)
+        indent: JSON indent level (default: 4)
+        add_trailing_newline: Add newline after JSON content (default: False)
+    
+    Raises:
+        IOError, json.JSONEncodeError, OSError: On write failure
+    """
+    tmp_file = os.fspath(filename) + ".tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=indent)
+            if add_trailing_newline:
+                f.write("\n")
+        os.replace(tmp_file, filename)
+    except Exception as e:
+        # Clean up temporary file if it exists
+        try:
+            os.remove(tmp_file)
+        except FileNotFoundError:
+            pass
+        logging.error(f"Failed to save {filename}: {e}")
+        raise

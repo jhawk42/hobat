@@ -8,7 +8,7 @@ from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from extaddr_device_label_map import load_extaddr_device_label_map
 from otbr_cli_router_table import fetch_and_parse_router_table
 from util_ot_ctl import exec_ot_ctl
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
 
 def fetch_meshdiag_child_ip6_for_device(parent_rloc16, router=None, extaddr_map=None):
@@ -147,8 +147,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_filename = data_file_path(
         "td-otbr-cli-meshdiag-router-childip6.json", td_data_dir
     )
-    with open(output_filename, "w") as f:
-        json.dump(router_child_ip6_tables, f, indent=4)
+    save_json_atomic(router_child_ip6_tables, output_filename)
 
     logging.info(f"Meshdiag router childip6 data saved to {output_filename}")
     print(json.dumps(router_child_ip6_tables, indent=4))

@@ -9,7 +9,7 @@ from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 import util_ot_ctl
 import util_network
 from extaddr_device_label_map import load_extaddr_device_label_map
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
 
 def fetch_meshdiag_topology():
@@ -300,8 +300,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     save_path = data_file_path(
         "td-otbr-cli-meshdiag-topology.json", td_data_dir)
-    with open(save_path, mode="w", encoding="utf-8") as f:
-        json.dump(meshdiag_topology_data, f, indent=4)
+    save_json_atomic(meshdiag_topology_data, save_path)
 
     print(json.dumps(meshdiag_topology_data, indent=4))
 

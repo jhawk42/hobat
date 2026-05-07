@@ -13,7 +13,16 @@ import util_ot_ctl
 import util_network
 from otbr_cli_router_table import fetch_and_parse_router_table
 from extaddr_device_label_map import load_extaddr_device_label_map
-from util_data import data_file_path, resolve_data_dir
+from util_data import data_file_path, resolve_data_dir, save_json_atomic
+
+
+# TLV value sets for different detail levels
+# Used by networkdiag functions to request Thread diagnostic information from devices.
+# Some devices fail to return any TLV data when the list is too long or contains certain TLVs,
+# so multiple detail levels allow retries with progressively simpler TLV sets.
+TLV_VALUES_DETAILED = "0 1 2 28 8 16 9 34"
+TLV_VALUES_MEDIUM = "0 1 2 8 16 9"
+TLV_VALUES_SIMPLE = "0 1 2 8"
 
 
 def fetch_ipv6_addresses():
@@ -510,6 +519,196 @@ def parse_time_statistics(output):
     return time_stats
 
 
+def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) -> dict:
+    """
+    Parses multicast network diagnostic output containing responses from multiple devices.
+
+    Multicast commands (ot-ctl networkdiagnostic get ff03::1/ff02::1 ...) return a single
+    combined output with multiple device responses. Each response begins with:
+        DIAG_GET.rsp/ans from <responder-ipv6>: <hex-data>
+    Followed by parsed fields (Ext Address, Rloc16, Mode, IP6 Address List, etc.).
+
+    This function splits the output into per-device blocks and parses each using existing
+    parse functions (parse_mode_flags, parse_ipv6_address_list, parse_child_table, etc.).
+
+    Args:
+        output: Raw multicast diagnostic output string
+        extaddr_map: Optional dict mapping extended addresses to device labels
+
+    Returns:
+        Dict keyed by extaddr (16-char hex string), with device records as values.
+        Each record contains:
+        {
+            "extaddr": str,               # from TLV 0, used as dict key
+            "rloc16": str,                # from TLV 1, e.g. "0x2000"
+            "device_label": str,          # from extaddr_map or f"Unknown-{rloc16}"
+            "thread_stack_version": str,  # from TLV 28 or "Unknown"
+            "mode": dict,                 # from parse_mode_flags()
+            "ipv6_addrs": list,           # from parse_ipv6_address_list()
+            "responder_ipv6": str,        # IPv6 from DIAG_GET.rsp header
+            "children": list,             # from parse_child_table() if present
+            "mac_counters": dict,         # from parse_mac_counters() if present
+            "mle_counters": dict,         # from parse_mle_counters() if present
+            "time_statistics": dict,      # from parse_time_statistics() if present
+        }
+    """
+    if extaddr_map is None:
+        extaddr_map = {}
+
+    result = {}
+
+    # Split output by response marker, discarding the first element (preamble)
+    blocks = output.split("DIAG_GET.rsp/ans from ")
+    blocks = blocks[1:]  # Discard preamble
+
+    for block in blocks:
+        if not block.strip():
+            continue
+
+        # Split on first newline to extract responder IPv6
+        lines = block.split("\n", 1)
+        if not lines:
+            continue
+
+        # Extract responder IPv6 from first line (format: "<ipv6>: <hex-data>")
+        first_line = lines[0]
+        responder_ipv6 = ""
+        if ": " in first_line:
+            responder_ipv6 = first_line.split(": ")[0].strip()
+
+        # Extract Ext Address (TLV 0) - required field
+        extaddr_match = re.search(r"Ext Address:\s*([0-9a-fA-F]{16})", block)
+        if not extaddr_match:
+            logging.warning(
+                f"Malformed multicast response block (no Ext Address): {block[:100]}...")
+            continue
+
+        extaddr = extaddr_match.group(1).lower()
+
+        # Extract Rloc16 (TLV 1)
+        rloc16_match = re.search(r"Rloc16:\s*(0x[0-9a-fA-F]{4})", block)
+        rloc16 = rloc16_match.group(1) if rloc16_match else "Unknown"
+
+        # Extract Thread Stack Version (TLV 28)
+        thread_version_match = re.search(
+            r"Thread Stack Version:\s*(\S+)", block)
+        thread_stack_version = thread_version_match.group(
+            1) if thread_version_match else "Unknown"
+
+        # Resolve device label from extaddr_map
+        device_label = extaddr_map.get(extaddr, f"Unknown-{rloc16}")
+
+        # Parse mode flags and IPv6 addresses (always present in request)
+        mode = parse_mode_flags(block)
+        ipv6_addrs = parse_ipv6_address_list(block)
+
+        # Parse optional TLV data (may be present depending on response)
+        children = parse_child_table(block, rloc16)
+        mac_counters = parse_mac_counters(block)
+        mle_counters = parse_mle_counters(block)
+        time_statistics = parse_time_statistics(block)
+
+        # Build device record
+        device_record = {
+            "extaddr": extaddr,
+            "rloc16": rloc16,
+            "device_label": device_label,
+            "thread_stack_version": thread_stack_version,
+            "mode": mode,
+            "ipv6_addrs": ipv6_addrs,
+            "responder_ipv6": responder_ipv6,
+            "children": children,
+            "mac_counters": mac_counters,
+            "mle_counters": mle_counters,
+            "time_statistics": time_statistics,
+        }
+
+        # Store in result dict, keyed by extaddr (last duplicate wins for now)
+        result[extaddr] = device_record
+
+    logging.info(f"Parsed {len(result)} unique devices from multicast output")
+    return result
+
+
+def merge_device_record(existing: dict, new: dict) -> dict:
+    """
+    Merges a newer device record into an existing one, preserving the most complete information.
+
+    Used when the same device responds to multiple multicast retries with different TLV data.
+    This function applies field-by-field merge rules to combine responses intelligently.
+
+    Args:
+        existing: The existing device record to merge into (mutated in place)
+        new: The new device record to merge from
+
+    Returns:
+        The updated existing dict (mutated and also returned)
+
+    Merge rules (field by field):
+        - extaddr: Keep existing (should be identical, it's the key)
+        - rloc16: Keep existing if not "Unknown", else take new
+        - device_label: Keep existing if not starting with "Unknown-", else take new
+        - thread_stack_version: Keep existing if not "Unknown", else take new
+        - mode: Take new if new mode is non-empty and existing is empty, else keep existing
+        - ipv6_addrs: Union: merge lists, deduplicate preserving order
+        - responder_ipv6: Keep existing (first responder wins)
+        - children: Take new if new is non-empty list and existing is empty, else keep existing
+        - mac_counters: Take new if new is non-empty dict and existing is empty, else keep existing
+        - mle_counters: Take new if new is non-empty dict and existing is empty, else keep existing
+        - time_statistics: Take new if new is non-empty dict and existing is empty, else keep existing
+    """
+    # extaddr: keep existing (it's the key, should be identical)
+    # (no update needed)
+
+    # rloc16: keep existing if not "Unknown", else take new
+    if existing.get("rloc16") == "Unknown" and new.get("rloc16") != "Unknown":
+        existing["rloc16"] = new["rloc16"]
+
+    # device_label: keep existing if not starting with "Unknown-", else take new
+    if existing.get("device_label", "").startswith("Unknown-") and not new.get("device_label", "").startswith("Unknown-"):
+        existing["device_label"] = new["device_label"]
+
+    # thread_stack_version: keep existing if not "Unknown", else take new
+    if existing.get("thread_stack_version") == "Unknown" and new.get("thread_stack_version") != "Unknown":
+        existing["thread_stack_version"] = new["thread_stack_version"]
+
+    # mode: take new if new mode is non-empty dict and existing is empty, else keep existing
+    if not existing.get("mode") and new.get("mode"):
+        existing["mode"] = new["mode"]
+
+    # ipv6_addrs: union merge, deduplicate preserving order
+    if existing.get("ipv6_addrs") and new.get("ipv6_addrs"):
+        # Merge lists, deduplicate while preserving order
+        seen = set(existing["ipv6_addrs"])
+        for addr in new["ipv6_addrs"]:
+            if addr not in seen:
+                existing["ipv6_addrs"].append(addr)
+                seen.add(addr)
+    elif new.get("ipv6_addrs"):
+        existing["ipv6_addrs"] = new["ipv6_addrs"]
+
+    # responder_ipv6: keep existing (first responder wins)
+    # (no update needed)
+
+    # children: take new if new is non-empty list and existing is empty list
+    if not existing.get("children") and new.get("children"):
+        existing["children"] = new["children"]
+
+    # mac_counters: take new if new is non-empty dict and existing is empty
+    if not existing.get("mac_counters") and new.get("mac_counters"):
+        existing["mac_counters"] = new["mac_counters"]
+
+    # mle_counters: take new if new is non-empty dict and existing is empty
+    if not existing.get("mle_counters") and new.get("mle_counters"):
+        existing["mle_counters"] = new["mle_counters"]
+
+    # time_statistics: take new if new is non-empty dict and existing is empty
+    if not existing.get("time_statistics") and new.get("time_statistics"):
+        existing["time_statistics"] = new["time_statistics"]
+
+    return existing
+
+
 def fetch_network_diag_for_device(
     rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_addresses=None, tlv_detail_level=3
 ):
@@ -535,26 +734,16 @@ def fetch_network_diag_for_device(
         ipv6_rloc_prefix, rloc_hex
     )
 
-    # Define TLV sets for different detail levels
-    # Some devices fail to return any TLV data when TLV list is too long or contains certain TLVs,
-    # so we can try with different sets of TLVs if we don't get a response, to at least get some
-    # basic info about the node instead of no info at all. This way we can still populate the
-    # topology map with at least some data for each node, even if we can't get the full diagnostics
-    # for all nodes due to some of them being unresponsive or having issues with certain TLVs.
-    tlv_values_detailed = "0 1 2 28 8 16 9 34"
-    tlv_values_medium = "0 1 2 8 16 9"
-    tlv_values_simple = "0 1 2 8"
-
-    # tlv_values = tlv_values_detailed if tlv_detail_level == 3 else tlv_values_medium if tlv_detail_level == 2 else tlv_values_simple
+    # Select TLV set based on detail level
     match tlv_detail_level:
         case 3:
-            tlv_values = tlv_values_detailed
+            tlv_values = TLV_VALUES_DETAILED
         case 2:
-            tlv_values = tlv_values_medium
+            tlv_values = TLV_VALUES_MEDIUM
         case 1:
-            tlv_values = tlv_values_simple
+            tlv_values = TLV_VALUES_SIMPLE
         case _:
-            tlv_values = tlv_values_detailed
+            tlv_values = TLV_VALUES_DETAILED
 
     # Query each router for its TLV fields: Ext Addr, RLOC16, Thread Stack Version,
     # IPv6 Address List, Child Table, MAC Counters, MLE Counters
@@ -614,6 +803,168 @@ def fetch_network_diag_for_device(
     return network_topology_node
 
 
+def fetch_network_diag_multicast(
+    multicast_addr: str,
+    extaddr_map: dict | None = None,
+    network_dataset_info: dict | None = None,
+) -> dict:
+    """
+    Queries network diagnostic data via multicast with retry and merge strategy.
+
+    Sends networkdiagnostic queries to all devices on a multicast address (ff03::1 for
+    all mesh devices or ff02::1 for immediate neighbors). Retries with progressively
+    simpler TLV sets to maximize device responses, merging results to get the most
+    complete information across all retries.
+
+    Args:
+        multicast_addr: Multicast address to target ("ff03::1" or "ff02::1")
+        extaddr_map: Optional dict mapping extended addresses to device labels
+        network_dataset_info: Optional dict with network info (contains OMR prefix)
+
+    Returns:
+        Dict keyed by rloc16, with device records as values (same format as
+        fetch_network_diag_topology output). Each record includes consolidated
+        data from all retry attempts.
+    """
+    if extaddr_map is None:
+        extaddr_map = {}
+
+    # Extract OMR prefix if available
+    omr_ipv6addr_prefix = (
+        network_dataset_info["prefix_omr_ipv6addr_prefix"]
+        if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info
+        else None
+    )
+
+    retries = 3
+    delay_start = 0.25  # between retries 0.25 0.50 1.0 1.5 1.75 2.0 seconds
+    tlv_detail_level = 3
+    consolidated = {}  # Keyed by extaddr during collection
+
+    # Retry loop with progressively simpler TLV sets
+    for retry_idx in range(retries):
+        # Determine TLV values based on current detail level
+        match tlv_detail_level:
+            case 3:
+                tlv_values = TLV_VALUES_DETAILED
+            case 2:
+                tlv_values = TLV_VALUES_MEDIUM
+            case 1:
+                tlv_values = TLV_VALUES_SIMPLE
+            case _:
+                tlv_values = TLV_VALUES_SIMPLE
+
+        logging.info(
+            f"Multicast retry {retry_idx + 1}/{retries} to {multicast_addr} "
+            f"(TLV level {tlv_detail_level}): {tlv_values}"
+        )
+
+        # Execute multicast query
+        output = util_ot_ctl.exec_ot_ctl(
+            f"networkdiagnostic get {multicast_addr} {tlv_values}"
+        )
+        logging.info(
+            f"[DEBUG] Multicast output (retry {retry_idx + 1}):\n{output}\n")
+
+        # Parse multicast output
+        parsed = parse_multicast_diag_output(output, extaddr_map)
+
+        # Merge results into consolidated dict (keyed by extaddr)
+        for device_record in parsed.values():
+            extaddr = device_record["extaddr"]
+            if extaddr in consolidated:
+                merge_device_record(consolidated[extaddr], device_record)
+            else:
+                consolidated[extaddr] = device_record
+
+        logging.info(
+            f"Multicast retry {retry_idx + 1}: {len(parsed)} responses, "
+            f"{len(consolidated)} unique devices so far"
+        )
+
+        # Sleep before next retry (but not after the last retry)
+        if retry_idx < retries - 1:
+            tlv_detail_level = max(1, tlv_detail_level - 1)  # Floor at 1
+            # Increase delay with each retry
+            r_delay = delay_start * (retry_idx + 1)
+            time.sleep(r_delay)
+
+    # Finalize the consolidated dict
+
+    # Re-key by rloc16 and add type/omrIpv6Address fields
+    result = {}
+    for record in consolidated.values():
+        rloc16 = record.get("rloc16", "Unknown")
+
+        # Add OMR IPv6 address if prefix available
+        if omr_ipv6addr_prefix:
+            record["omrIpv6Address"] = util_network.find_omr_address_in_list(
+                record.get("ipv6_addrs", []), omr_ipv6addr_prefix
+            )
+        else:
+            record["omrIpv6Address"] = None
+
+        # Add device type (multicast reaches routers primarily)
+        record.setdefault("type", "Router")
+
+        # Store in result, keyed by rloc16
+        result[rloc16] = record
+
+    logging.info(
+        f"Multicast consolidation complete: {len(result)} devices (keyed by rloc16)"
+    )
+    return result
+
+
+def fetch_network_diag_topology_multicast_network(
+    extaddr_map: dict | None = None,
+    network_dataset_info: dict | None = None,
+) -> dict:
+    """
+    Queries network diagnostic data via multicast to all Thread devices in the mesh (ff03::1).
+
+    This is a thin wrapper around fetch_network_diag_multicast() that targets the
+    all-thread-devices multicast address, allowing discovery of the entire mesh network.
+
+    Args:
+        extaddr_map: Optional dict mapping extended addresses to device labels
+        network_dataset_info: Optional dict with network info (contains OMR prefix)
+
+    Returns:
+        Dict keyed by rloc16 with device records from all mesh devices
+    """
+    return fetch_network_diag_multicast(
+        multicast_addr="ff03::1",
+        extaddr_map=extaddr_map,
+        network_dataset_info=network_dataset_info,
+    )
+
+
+def fetch_network_diag_topology_multicast_neighbors(
+    extaddr_map: dict | None = None,
+    network_dataset_info: dict | None = None,
+) -> dict:
+    """
+    Queries network diagnostic data via multicast to immediate one-hop neighbors (ff02::1).
+
+    This is a thin wrapper around fetch_network_diag_multicast() that targets the
+    link-local multicast address, allowing discovery of only immediate neighbors
+    reachable in one hop from the querying device.
+
+    Args:
+        extaddr_map: Optional dict mapping extended addresses to device labels
+        network_dataset_info: Optional dict with network info (contains OMR prefix)
+
+    Returns:
+        Dict keyed by rloc16 with device records from immediate one-hop neighbors
+    """
+    return fetch_network_diag_multicast(
+        multicast_addr="ff02::1",
+        extaddr_map=extaddr_map,
+        network_dataset_info=network_dataset_info,
+    )
+
+
 def fetch_network_diag_topology(
     extaddr_map=None, network_dataset_info=None, expand_children=True
 ):
@@ -657,7 +1008,7 @@ def fetch_network_diag_topology(
     for rloc16 in router_rlocs:
         # add retry logic for networkdiagnostic get in case of transient errors or unresponsive nodes, retry N times with some delay before giving up and adding with default values
         retries = 3  # number of retries
-        delay = 1  # seconds
+        delay_start = 0.5  # seconds
         network_topology_node = None
 
         tlv_detail_level = 3
@@ -681,9 +1032,13 @@ def fetch_network_diag_topology(
             if network_topology_node is not None:
                 break
             logging.info(
-                f"Router Node {rloc16} not found, retrying in {delay} seconds..."
+                f"Router Node {rloc16} not found, retrying in {delay_start} seconds..."
             )
-            time.sleep(delay)
+            # if last iteration skip sleep to avoid unnecessary delay before giving up and adding with default values
+            if r < retries - 1:
+                # Increase delay with each retry
+                l_delay = delay_start * (r + 1)
+                time.sleep(l_delay)
 
         if network_topology_node is None:
             # extaddr not found, use default values
@@ -728,7 +1083,10 @@ def fetch_network_diag_topology(
                         # in case the child sleeping (5 seconds), is not fully attached or responsive yet,
                         # otherwise add with default values
                         child_retries = 5  # number of retries
-                        child_delay = 1.75  # seconds
+
+                        child_delay_max = 2.0  # max delay between retries
+                        child_delay_start = 0.25  # seconds 0.25 0.5 1.0 2.0 seconds
+
                         child_tlv_detail_level = 3
 
                         for cr in range(child_retries):
@@ -756,9 +1114,13 @@ def fetch_network_diag_topology(
                                 child_node["type"] = "Child"
                                 break
                             logging.info(
-                                f"Child node {child_rloc} not found, retrying in {child_delay} seconds..."
+                                f"Child node {child_rloc} not found, retrying in {child_delay_start} seconds..."
                             )
-                            time.sleep(child_delay)
+                            if cr < child_retries - 1:
+                                # Increase delay with each retry
+                                c_delay = child_delay_start * (cr + 1)
+                                c_delay = min(c_delay, child_delay_max)
+                                time.sleep(c_delay)
 
                         if child_node is None:
                             network_topology_map[child_rloc] = {
@@ -863,8 +1225,7 @@ def save_topology_to_json_dict(
     data, filename="td-otbr-cli-networkdiag-topology.json"
 ):
     """Serializes the dictionary to a pretty-printed JSON file."""
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
+    save_json_atomic(data, filename)
     logging.info(f"Successfully exported topology to {filename}")
 
 
@@ -892,9 +1253,104 @@ def save_topology_to_json_list(
         }
         network_map.append(network_node)
 
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(network_map, f, indent=4)
+    save_json_atomic(network_map, filename)
     logging.info(f"Successfully exported topology to {filename}")
+
+
+def main_multicast_network(argv: Sequence[str] | None = None) -> int:
+    """Entry point for topology-multicast-network subcommand (ff03::1)."""
+
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
+
+    logging.info(
+        "Initiating Thread Network Topology Scan (Multicast Network)...\n")
+
+    parser = argparse.ArgumentParser(
+        description="Thread Network Diagnostic Topology – Multicast Network (ff03::1)"
+    )
+    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
+    args = parser.parse_args(argv)
+    td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
+
+    # Load extaddr to device label mapping from JSON file
+    extaddr_json_filename = data_file_path(
+        EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir
+    )
+    if os.path.exists(extaddr_json_filename):
+        extaddr_map = load_extaddr_device_label_map(extaddr_json_filename)
+    else:
+        extaddr_map = {}
+
+    network_dataset_info = util_network.fetch_network_dataset_info()
+
+    # Get the multicast topology data
+    data = fetch_network_diag_topology_multicast_network(
+        extaddr_map, network_dataset_info
+    )
+
+    # Print the topology in tree format to console
+    print_network_diag_topology(data)
+
+    # Save the topology as JSON to file
+    save_json_filename = data_file_path(
+        "td-otbr-cli-networkdiag-topology-multicast-network.json", td_data_dir
+    )
+    save_topology_to_json_list(data, save_json_filename)
+
+    # Print the raw topology dictionary as JSON to console for debugging
+    print(json.dumps(data, indent=4))
+
+    return 0
+
+
+def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
+    """Entry point for topology-multicast-neighbors subcommand (ff02::1)."""
+
+    logging.basicConfig(
+        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
+
+    logging.info(
+        "Initiating Thread Network Topology Scan (Multicast Neighbors)...\n")
+
+    parser = argparse.ArgumentParser(
+        description="Thread Network Diagnostic Topology – Multicast Neighbors (ff02::1)"
+    )
+    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
+    args = parser.parse_args(argv)
+    td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
+
+    # Load extaddr to device label mapping from JSON file
+    extaddr_json_filename = data_file_path(
+        EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir
+    )
+    if os.path.exists(extaddr_json_filename):
+        extaddr_map = load_extaddr_device_label_map(extaddr_json_filename)
+    else:
+        extaddr_map = {}
+
+    network_dataset_info = util_network.fetch_network_dataset_info()
+
+    # Get the multicast topology data
+    data = fetch_network_diag_topology_multicast_neighbors(
+        extaddr_map, network_dataset_info
+    )
+
+    # Print the topology in tree format to console
+    print_network_diag_topology(data)
+
+    # Save the topology as JSON to file
+    save_json_filename = data_file_path(
+        "td-otbr-cli-networkdiag-topology-multicast-neighbors.json", td_data_dir
+    )
+    save_topology_to_json_list(data, save_json_filename)
+
+    # Print the raw topology dictionary as JSON to console for debugging
+    print(json.dumps(data, indent=4))
+
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

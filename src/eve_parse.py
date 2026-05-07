@@ -1,11 +1,12 @@
 import copy
 import json
 import logging
+import os
 from typing import Sequence
 
 import util_network
 from util_convert import b64_to_extended_address
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir
+from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
 
 def load_and_parse_eve_file(path, network_dataset_info=None):
@@ -192,8 +193,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Save json data structures for reference
     save_json_filename = data_file_path("td-eve-topology.json", td_data_dir)
-    with open(save_json_filename, "w", encoding="utf-8") as f:
-        json.dump(eve_data_enhanced, f, indent=4)
+    save_json_atomic(eve_data_enhanced, save_json_filename)
 
     # Print the parsed data structure with route names
     logging.info(json.dumps(eve_data_enhanced, indent=4))

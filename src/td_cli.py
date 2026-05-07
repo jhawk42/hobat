@@ -63,7 +63,9 @@ class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
 #   td_cli.py otbr-cli meshdiag childtable
 #   td_cli.py otbr-cli meshdiag childip6
 #   td_cli.py otbr-cli meshdiag all
-#   td_cli.py otbr-cli networkdiag topology
+#   td_cli.py otbr-cli networkdiag topology-poll
+#   td_cli.py otbr-cli networkdiag topology-multicast-network
+#   td_cli.py otbr-cli networkdiag topology-multicast-neighbors
 #   td_cli.py otbr-cli all
 #
 # mdns examples:
@@ -147,7 +149,7 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         dest="networkdiag_command", required=True
     )
     networkdiag_topology_p = networkdiag_sub.add_parser(
-        "topology", help="Scan and save networkdiag topology"
+        "topology-poll", help="Scan and poll networkdiag topology (unicast, router-by-router)"
     )
     networkdiag_children_group = networkdiag_topology_p.add_mutually_exclusive_group()
     networkdiag_children_group.add_argument(
@@ -164,6 +166,14 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         dest="expand_children",
         action="store_false",
         help="Do not expand child nodes in the topology map",
+    )
+    networkdiag_sub.add_parser(
+        "topology-multicast-network",
+        help="Scan networkdiag topology via multicast to all Thread devices (ff03::1)",
+    )
+    networkdiag_sub.add_parser(
+        "topology-multicast-neighbors",
+        help="Scan networkdiag topology via multicast to one-hop neighbors (ff02::1)",
     )
 
     otbr_cli_sub.add_parser("all", help="Run all otbr-cli scans")
@@ -401,13 +411,27 @@ def dispatch(
                 return rc
 
         if cli_cmd == "networkdiag":
-            if args.networkdiag_command == "topology":
+            if args.networkdiag_command == "topology-poll":
                 expand_children_argv = (
                     [] if getattr(args, "expand_children", True) else ["-cno"]
                 )
                 return (
                     otbr_cli_networkdiag_topology.main(
                         _forward_with_datadir(expand_children_argv)
+                    )
+                    or 0
+                )
+            if args.networkdiag_command == "topology-multicast-network":
+                return (
+                    otbr_cli_networkdiag_topology.main_multicast_network(
+                        _forward_with_datadir([])
+                    )
+                    or 0
+                )
+            if args.networkdiag_command == "topology-multicast-neighbors":
+                return (
+                    otbr_cli_networkdiag_topology.main_multicast_neighbors(
+                        _forward_with_datadir([])
                     )
                     or 0
                 )
