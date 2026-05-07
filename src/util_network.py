@@ -142,7 +142,7 @@ def find_omr_address_in_list(ipv6_addrs, omr_ipv6_prefix):
     return None
 
 
-def fetch_dataset_active(hideSensitiveInfo=True):
+def fetch_dataset_active(hide_sensitive_info=True):
     """
     Retrieves the active Thread dataset from the network.
     Runs: ot-ctl dataset active
@@ -162,9 +162,9 @@ def fetch_dataset_active(hideSensitiveInfo=True):
             - security_policy: Security policy info
     """
 
-    # hideSensitiveInfo set to True to exclude sensitive info like network key and PSKc in the output
+    # hide_sensitive_info set to True to exclude sensitive info like network key and PSKc in the output
     command = "dataset active"
-    if hideSensitiveInfo:
+    if hide_sensitive_info:
         command += " -ns"  # Add -ns flag to hide sensitive info in the output
     dataset_output = util_ot_ctl.exec_ot_ctl(command).strip()
     logging.debug(f"[DEBUG] Dataset Active Output:\n{dataset_output}\n")

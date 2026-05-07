@@ -50,14 +50,14 @@ def parse_meshdiag_topology_output(
     for block in router_blocks:
         # Split block into lines
         lines = block.split("\n")
-        first_line = lines[0]
+        first_line = lines[0].strip()
 
         # Extract router info from first line
-        # Format: "20 rloc16:0x5000 ext-addr:1a7fbf0434e4f043 ver:5 - me - br"
-        # Format: "id:34 rloc16:0x8800 ext-addr:16646399eff33994 ver:4 - br"
+        # Format: "08 rloc16:0x2000 ext-addr:1a7fbf0434e4f043 ver:5 - me - br"
         # Format: "25 rloc16:0x6400 ext-addr:8672766ae0578187" (without ver)
+        # Note: "id:" prefix is already removed by the split() on "id:"
         match = re.match(
-            r"(?:id:)?(\d+)\s+rloc16:(0x[0-9a-fA-F]+)\s+ext-addr:([0-9a-fA-F]+)(?:\s+ver:(\d+))?",
+            r"(\d+)\s+rloc16:(0x[0-9a-fA-F]+)\s+ext-addr:([0-9a-fA-F]+)(?:\s+ver:(\d+))?",
             first_line,
         )
 
@@ -70,6 +70,9 @@ def parse_meshdiag_topology_output(
 
             # Check for BR (border router) flag
             router["br"] = "- br" in first_line or "br -" in first_line
+
+            # Check for leader flag
+            router["leader"] = "- leader" in first_line or "leader -" in first_line
 
             # Enhance with device label from extaddr_map if available
             # Add device_label from extaddr_map if available

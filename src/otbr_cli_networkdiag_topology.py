@@ -172,6 +172,7 @@ def parse_child_table(output, parent_rloc16):
                     current_child["mode"]
                 )
                 children.append(current_child)
+                current_child = None  # Prevent duplicate append after loop
             break
 
         # Match ChildId
@@ -873,12 +874,8 @@ def save_topology_to_json_list(
     """Converts dict format to list format and saves to JSON."""
     network_map = []
 
-    # TODO "type" find a way to filter to router-br, router, REED, FTD, MTD, child
-
     for rloc, data in data.items():
-        # backup nn = deepcopy(data)
-
-        # set the order of fields in the output JSON for better readability, with key fields like rloc16, extaddr, device_label at the top, and then the more detailed fields like mode, ipv6_addrs, children, counters grouped together below. This way when looking at the JSON output, it's easier to quickly identify the key information about each node before diving into the more detailed data.
+        # Set the order of priority fields in the output JSON for better readability, with key fields like rloc16, extaddr, device_label at the top, and then the more detailed fields like mode, ipv6_addrs, children, counters grouped together below. This way when looking at the JSON output, it's easier to quickly identify the key information about each node before diving into the more detailed data.
         network_node = {
             "rloc16": rloc,
             "extaddr": data["extaddr"],
@@ -908,15 +905,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     logging.info("Initiating Thread Network Topology Scan...\n")
-
-    # TODO
-    # arguments
-    # all (default)
-    # br only
-    # leader only
-    # router only
-    # children only
-    # multicast networkdiagnostic get ff03::1
 
     parser = argparse.ArgumentParser(
         description="Thread Network Diagnostic Topology")
