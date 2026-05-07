@@ -115,7 +115,7 @@ export const DATASET_REGISTRY = [
   {
     value: "example_small_eve_native_threadlayout",
     label: "lab: eve native: example: eve layout",
-    files: ["example-small-Eve Thread Network Layout"],
+    files: ["example-small-Eve Thread Network Layout.evethreadlayout"],
     mergeStrategy: "none",
     topologyMode: "eve_native",
     defaultLinkFilter: "eve_native_routes_children",

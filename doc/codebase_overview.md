@@ -25,7 +25,8 @@ The tool collects data from various dataset sources including:
 | [Eve App](https://www.evehome.com/) | Optional third-party topology JSON export |
 | [vis-network.js](https://visjs.github.io/vis-network/docs/network/) | Interactive topology graph in the browser dashboard |
 | [sortable.js](https://github.com/tofsjonas/sortable) | Sortable table columns in the browser dashboard |
-| Standard library only (`urllib`, `http.server`, `subprocess`, `argparse`, …) | No third-party Python runtime dependencies (except `zeroconf` for mDNS) |
+| [`aiohttp`](https://docs.aiohttp.org/) | Async HTTP server powering the REST API and static file serving (`td_webserver.py`) |
+| Standard library (`subprocess`, `asyncio`, `argparse`, …) | Core Python runtime; `aiohttp` and `zeroconf` are the only third-party dependencies |
 
 ---
 
@@ -148,7 +149,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 |---|---|
 | `tdash.html` | Combined single-page dashboard — replaces the former separate topology and tables HTML files.  See [Dashboard Functions](#dashboard-functions) below. |
 | `tdash.css` | Stylesheet for the browser dashboard.  Defines CSS variables for colours, typography, and layout of all dashboard components. |
-| `td_webserver.py` | HTTP server module.  Binds to `$HOST`/`$PORT` (default port `8087`) and serves `src/` as a static file tree with explicit MIME-type overrides (`.js`, `.mjs`, `.json`, `.css`, `.html`).  Routes `.json` GET requests to the configurable `td_data_dir` (separate from the `src/` static directory), enabling the dashboard to read data files from the data directory without embedding them in the source tree.  Accepts `--datadir` to override the data directory.  Has `main(argv)` so it can be invoked standalone or via `td_cli.py web-server`. |
+| `td_webserver.py` | Async HTTP server built on `aiohttp`.  Binds to `$HOST`/`$PORT` (default `8087`).  Serves `src/` as a static file tree with explicit MIME-type overrides.  Exposes a REST API (`/api/data/{filename}`, `/api/job/{job_id}`) that checks file freshness, invokes `td_cli.py` subprocesses on demand, and streams results back with `Cache-Control` and CORS headers.  Long-running actions (estimated cost > 300 s) return HTTP 202 immediately and complete as background asyncio tasks that clients poll via `/api/job/{job_id}`.  Accepts `--datadir`; has `main(argv)` for standalone use or via `td_cli.py web-server`. |
 
 ### Dashboard JavaScript Modules (`js/`)
 
@@ -191,7 +192,49 @@ All JSON data files (collected snapshots, merged output, static label map) are r
 
 - `const.py` defines the constant names (`TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`).
 - `util_data.py` implements `resolve_data_dir_with_source()` (returns a `TDDataDirResolution` dataclass with `path` and `source`) and the simpler `resolve_data_dir()` wrapper.  It also provides `data_file_path()` and `resolve_data_file_path()` for locating individual JSON files within the resolved directory.
-- `td_webserver.py` routes all `.json` GET requests to the resolved data directory so the browser dashboard can read collected data files independent of the static `src/` tree.
+- `td_webserver.py` exposes `/api/data/{filename}` which checks the resolved data directory for freshness and invokes `td_cli.py` subprocesses to regenerate stale files on demand.
+
+---
+
+## REST API and Caching Architecture
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/data/{filename}` | GET | Serve or generate a data file.  Checks `FILE_ACTION_MAP` for the filename, validates freshness, optionally invokes `td_cli.py`, and returns the file with `Cache-Control` and `Last-Modified` headers. |
+| `/api/job/{job_id}` | GET | Poll the status of a long-running background job.  Returns `{ status: "running" }`, `{ status: "done", filename }`, or `{ status: "error", detail }`. |
+
+### Server-side cache flow (`/api/data/{filename}`)
+
+1. Reject any filename containing path-traversal characters (`/`, `\`, `..`, null bytes) → 404.
+2. Look up `FILE_ACTION_MAP` by filename (case-insensitive) → 404 if unknown.
+3. Parse `Cache-Control` request header (`no-cache` → force regeneration).
+4. Resolve `data_dir / filename`.
+5. If `action == "STATIC"`: serve the file as-is; 404 if missing.
+6. Otherwise, check freshness (`is_file_fresh`).  If stale or missing:
+   - **Short-cost** (`action_cost_s ≤ 300 s`): run `td_cli.py` synchronously; await exit code; 502 on failure.
+   - **Long-cost** (`action_cost_s > 300 s`): spawn `td_cli.py` as a background asyncio task; return **HTTP 202** with `{ job_id, status, filename }` and `Location: /api/job/{job_id}`.
+7. Return the file with `Cache-Control: max-age=<n>`, `Last-Modified`, and `Access-Control-Allow-Origin: *`.
+
+### Client-side cache flow (`tdash-dataset.js`)
+
+- On page load no data is fetched; the status bar reads *"Select a dataset and press Fetch."*
+- Clicking **Fetch** calls `loadDataset()`, which requests each file via `/api/data/{filename}`.
+- Before each request the per-file `fileMaxAgeCache` map is consulted; if a previous `max-age` was recorded the corresponding `Cache-Control: max-age=<n>` request header is sent, letting the server decide whether the cached file is still fresh.
+- After each successful response the `Cache-Control: max-age=<n>` response header is stored back into `fileMaxAgeCache`.
+- The **Force Refresh** checkbox (`#chk-force-fresh`) sets `_forceFresh = true`, causing all requests to carry `Cache-Control: no-cache` regardless of the local cache.
+- If the server returns **HTTP 202** the client enters polling mode: `pollJobUntilDone()` pings `/api/job/{job_id}` every 5 s, updates the status bar with elapsed time, and fetches the completed file when `status == "done"`.
+
+### `FILE_ACTION_MAP` — filename → action mapping
+
+Defined in `td_webserver.py`.  Each entry is a `FileAction` dataclass:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `max_age_s` | `int` | Seconds before a cached file is considered stale |
+| `action` | `"STATIC"` \| `list[str]` | `"STATIC"` = externally managed; list = CLI args forwarded to `td_cli.py` |
+| `action_cost_s` | `int` | Estimated wall-clock seconds for the action; determines 200 vs 202 response |
 
 ---
 

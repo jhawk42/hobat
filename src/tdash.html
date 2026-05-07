@@ -19,31 +19,28 @@
     <!-- View toggle -->
     <div class="view-toggle-bar">
       <button id="btn-fetch" title="fetch">Fetch</button>
+      <label title="Send Cache-Control: no-cache to force server to regenerate files">
+        <input type="checkbox" id="chk-force-fresh" /> Force Refresh
+      </label>
       <span class="view-toggle-spacer">.</span>
       <button id="btn-topology" class="active" title="Topology view">
         Topology
       </button>
       <button id="btn-table" title="Table view">Table</button>
       <span class="view-toggle-spacer">.</span>
-      <button id="btn-physics" class="active" title="Toggle physics simulation">
-        Physics
+      <button id="btn-physics" class="active" title="Toggle physics simulation" style="font-size: 1.2em;">
+        ⏸
       </button>
-      <button id="btn-auto-zoom" class="active" title="Auto-fit topology in view">
-        Auto Zoom
+      <button id="btn-auto-zoom" title="Auto-fit topology in view" style="font-size: 1.2em;">
+        ☐
       </button>
-      <button id="btn-animation" title="Toggle animation">Animation</button>
       <button id="btn-legend" class="active" title="Toggle link quality legend">
         Legend
       </button>
       <span class="view-toggle-spacer">.</span>
-      <button id="btn-enhance" title="Enhance node labels using static extaddr→device_label map">
-        Enhance
-      </button>
       <button id="btn-more-info" title="Show all columns in table view">
-        More Info
+        Advanced
       </button>
-      <span class="view-toggle-spacer">.</span>
-      <button id="btn-lab" title="lab">lab</button>
     </div>
 
     <!-- Controls bar -->

@@ -54,8 +54,10 @@ def parse_meshdiag_topology_output(
 
         # Extract router info from first line
         # Format: "20 rloc16:0x5000 ext-addr:1a7fbf0434e4f043 ver:5 - me - br"
+        # Format: "id:34 rloc16:0x8800 ext-addr:16646399eff33994 ver:4 - br"
+        # Format: "25 rloc16:0x6400 ext-addr:8672766ae0578187" (without ver)
         match = re.match(
-            r"(\d+)\s+rloc16:(0x[0-9a-fA-F]+)\s+ext-addr:([0-9a-fA-F]+)\s+ver:(\d+)",
+            r"(?:id:)?(\d+)\s+rloc16:(0x[0-9a-fA-F]+)\s+ext-addr:([0-9a-fA-F]+)(?:\s+ver:(\d+))?",
             first_line,
         )
 
@@ -64,7 +66,7 @@ def parse_meshdiag_topology_output(
             router["id"] = match.group(1)
             router["rloc16"] = match.group(2)
             router["extaddr"] = match.group(3)
-            router["ver"] = match.group(4)
+            router["ver"] = match.group(4) if match.group(4) else None
 
             # Check for BR (border router) flag
             router["br"] = "- br" in first_line or "br -" in first_line

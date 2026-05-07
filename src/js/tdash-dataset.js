@@ -22,6 +22,19 @@ export let currentDataset = null;
 // Map<lowercased-extaddr-string, device_label-string> — loaded at startup
 let staticExtaddrLabelMap = new Map();
 
+// Phase 3 — per-file cache-header store (task 3.3)
+// Map<filename, { maxAge: number, fetchedAt: number }>
+const fileMaxAgeCache = new Map();
+
+// Phase 3 — force-fresh flag (DD-1 / task 3.6)
+let _forceFresh = false;
+// Phase 4 — delay after job completion before fetching file (for filesystem sync)
+const _JOB_COMPLETION_WAIT_MS = 1000; // 1 second
+/** When true, all subsequent fetchJson calls send Cache-Control: no-cache. */
+export function setForceFresh(enabled) {
+  _forceFresh = enabled;
+}
+
 // ── Enrichment helpers (used by Enhance toggle) ───────────────────────────────
 
 // Returns an enriched copy of a single node/row; original is not mutated.
@@ -75,17 +88,86 @@ export function enrichRawFiles(rawFiles) {
 
 // ── Core fetch helper ─────────────────────────────────────────────────────────
 
-async function fetchJson(path) {
-  const response = await fetch(path, { cache: "no-store" });
-  if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
-  return response.json();
+// Phase 3 (task 3.2): accepts optional request headers; returns { data, responseMaxAge }.
+// Phase 4 (task 4.3): handles HTTP 202 by delegating to pollJobUntilDone.
+async function fetchJson(url, requestHeaders = {}) {
+  const response = await fetch(url, { headers: requestHeaders });
+  if (response.status === 202) {
+    const job = await response.json();
+    const data = await pollJobUntilDone(job.job_id, job.filename, url, requestHeaders);
+    return { data, responseMaxAge: null };
+  }
+  if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
+  const data = await response.json();
+  const ccHeader = response.headers.get("Cache-Control") || "";
+  const maxAgeMatch = ccHeader.match(/max-age=(\d+)/);
+  const responseMaxAge = maxAgeMatch ? parseInt(maxAgeMatch[1], 10) : null;
+  return { data, responseMaxAge };
+}
+
+// Phase 4 (task 4.4): polls /api/job/{jobId} every 5 s until done or error.
+// On done, fetches /api/data/{filename} (without the original cache-miss headers)
+// and returns the JSON payload.
+const _JOB_POLL_INTERVAL_MS = 5000;
+const _JOB_TIMEOUT_MS = 900_000; // 15 minutes
+
+async function pollJobUntilDone(jobId, filename, originalUrl, originalHeaders) {
+  const statusEl = document.getElementById("status");
+  const startedAt = Date.now();
+
+  while (true) {
+    const elapsed = Math.round((Date.now() - startedAt) / 1000);
+
+    if (elapsed * 1000 > _JOB_TIMEOUT_MS) {
+      throw new Error(
+        `Timed out waiting for ${filename} after ${elapsed}s (job ${jobId})`,
+      );
+    }
+
+    if (statusEl) {
+      statusEl.textContent = `Fetching ${filename}… (${elapsed}s)`;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, _JOB_POLL_INTERVAL_MS));
+
+    const pollResponse = await fetch(`/api/job/${jobId}`);
+    if (!pollResponse.ok) {
+      throw new Error(
+        `/api/job/${jobId} returned HTTP ${pollResponse.status}`,
+      );
+    }
+    const pollBody = await pollResponse.json();
+
+    if (pollBody.status === "done") {
+      // Wait briefly for file to be fully written and synced before fetching.
+      // This prevents race conditions where the job is marked done but the file
+      // hasn't been completely written to disk yet (especially on slower I/O).
+      await new Promise((resolve) => setTimeout(resolve, _JOB_COMPLETION_WAIT_MS));
+
+      // Fetch the completed file directly (no force headers — it's now cached).
+      const finalResponse = await fetch(`/api/data/${filename}`);
+      if (!finalResponse.ok) {
+        throw new Error(
+          `/api/data/${filename} returned HTTP ${finalResponse.status} after job done`,
+        );
+      }
+      return finalResponse.json();
+    }
+
+    if (pollBody.status === "error") {
+      throw new Error(
+        `Server error generating ${filename}: ${pollBody.detail || "unknown"}`,
+      );
+    }
+    // status === "running" — continue polling
+  }
 }
 
 // ── Static label map loader ───────────────────────────────────────────────────
 
 export async function loadStaticLabelMap() {
   try {
-    const data = await fetchJson("td-static-extaddr-device-label.json");
+    const { data } = await fetchJson("/api/data/td-static-extaddr-device-label.json");
     if (Array.isArray(data)) {
       data.forEach((entry) => {
         const key = canonicalIdText(entry?.extaddr);
@@ -119,8 +201,16 @@ export async function loadDataset(entryValue) {
 
   const statusEl = document.getElementById("status");
   const deviceStatsEl = document.getElementById("device_stats");
-  statusEl.textContent = `Loading ${entry.label}…`;
+  const initialLabel = entry.label;
+  const loadStartTime = Date.now();
+  statusEl.textContent = `Loading ${initialLabel}…`;
   deviceStatsEl.textContent = "Devices: 0";
+
+  // Set up an interval to update status bar with elapsed time while loading
+  const elapsedUpdateInterval = setInterval(() => {
+    const elapsed = Math.round((Date.now() - loadStartTime) / 1000);
+    statusEl.textContent = `Loading ${initialLabel}… (${elapsed}s)`;
+  }, 500); // Update every 500ms for smooth counter
 
   // Apply default link-filter for this dataset
   const linkFilterEl = document.getElementById("link-filter");
@@ -128,10 +218,29 @@ export async function loadDataset(entryValue) {
     linkFilterEl.value = entry.defaultLinkFilter;
   }
 
-  // Fetch all files in parallel (settle so a missing optional file doesn't abort)
+  // Phase 3 (task 3.4): fetch via /api/data/{filename} with per-file cache headers.
   const settled = await Promise.allSettled(
-    entry.files.map((f) => fetchJson(f)),
+    entry.files.map((f) => {
+      const reqHeaders = {};
+      if (_forceFresh) {
+        reqHeaders["Cache-Control"] = "no-cache";
+      } else {
+        const cached = fileMaxAgeCache.get(f);
+        if (cached) reqHeaders["Cache-Control"] = `max-age=${cached.maxAge}`;
+      }
+      return fetchJson(`/api/data/${f}`, reqHeaders).then(
+        ({ data, responseMaxAge }) => {
+          if (responseMaxAge !== null) {
+            fileMaxAgeCache.set(f, { maxAge: responseMaxAge, fetchedAt: Date.now() });
+          }
+          return data;
+        },
+      );
+    }),
   );
+
+  // Clear the elapsed time update interval
+  clearInterval(elapsedUpdateInterval);
 
   const rawFiles = [];
   const loadedFiles = [];

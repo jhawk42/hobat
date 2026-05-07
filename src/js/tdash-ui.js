@@ -5,6 +5,7 @@ import {
   loadStaticLabelMap,
   enrichRows,
   enrichRawFiles,
+  setForceFresh,
 } from "./tdash-dataset.js";
 import {
   renderTopologyForDataset,
@@ -71,10 +72,10 @@ function renderCurrentView() {
 
   const effectiveDataset = _enhanceEnabled
     ? {
-        ...currentDataset,
-        rows: enrichRows(currentDataset.rows),
-        rawFiles: enrichRawFiles(currentDataset.rawFiles),
-      }
+      ...currentDataset,
+      rows: enrichRows(currentDataset.rows),
+      rawFiles: enrichRawFiles(currentDataset.rawFiles),
+    }
     : currentDataset;
 
   if (view === "topology") {
@@ -96,7 +97,6 @@ function switchView(newView) {
   const btnTable = document.getElementById("btn-table");
   const btnPhysics = document.getElementById("btn-physics");
   const btnAutoZoom = document.getElementById("btn-auto-zoom");
-  const btnAnimation = document.getElementById("btn-animation");
   const btnLegendBtn = document.getElementById("btn-legend");
   const linkFilterEl = document.getElementById("link-filter");
 
@@ -107,7 +107,6 @@ function switchView(newView) {
     btnTable.classList.remove("active");
     btnPhysics.style.display = "inline-block";
     btnAutoZoom.style.display = "inline-block";
-    btnAnimation.style.display = "inline-block";
     btnLegendBtn.style.display = "inline-block";
     linkFilterEl.classList.remove("filter-disabled");
     document.getElementById("table-details-list").innerHTML =
@@ -119,7 +118,6 @@ function switchView(newView) {
     btnTopology.classList.remove("active");
     btnPhysics.style.display = "none";
     btnAutoZoom.style.display = "none";
-    btnAnimation.style.display = "none";
     btnLegendBtn.style.display = "none";
     linkFilterEl.classList.add("filter-disabled");
   }
@@ -143,8 +141,10 @@ function setPhysics(enabled) {
   const btn = document.getElementById("btn-physics");
   if (enabled) {
     btn.classList.add("active");
+    btn.textContent = "⏸"; // U+23F8 PAUSE
   } else {
     btn.classList.remove("active");
+    btn.textContent = "▶"; // U+25B6 PLAY
   }
   const net = getVisNetwork();
   if (net) net.setOptions({ physics: { enabled } });
@@ -153,24 +153,6 @@ function setPhysics(enabled) {
 document
   .getElementById("btn-physics")
   .addEventListener("click", () => setPhysics(!_physicsEnabled));
-
-// ── Enhance toggle ────────────────────────────────────────────────────────────
-
-function setEnhance(enabled) {
-  _enhanceEnabled = enabled;
-  const btn = document.getElementById("btn-enhance");
-  if (enabled) {
-    btn.classList.add("active");
-  } else {
-    btn.classList.remove("active");
-  }
-  renderCurrentView();
-}
-
-document
-  .getElementById("btn-enhance")
-  .addEventListener("click", () => setEnhance(!_enhanceEnabled));
-setEnhance(_enhanceEnabled); // apply initial state to button
 
 // ── More Info toggle ──────────────────────────────────────────────────
 
@@ -189,22 +171,6 @@ document
   .getElementById("btn-more-info")
   .addEventListener("click", () => setMoreInfo(!isMoreInfoEnabled()));
 
-// ── Animation toggle ──────────────────────────────────────────────────────────
-
-function setAnimation(enabled) {
-  setAnimationEnabled(enabled);
-  const btn = document.getElementById("btn-animation");
-  if (enabled) {
-    btn.classList.add("active");
-  } else {
-    btn.classList.remove("active");
-  }
-}
-
-document
-  .getElementById("btn-animation")
-  .addEventListener("click", () => setAnimation(!isAnimationEnabled()));
-
 // ── Legend toggle ─────────────────────────────────────────────────────────────
 
 const btnLegend = document.getElementById("btn-legend");
@@ -217,25 +183,16 @@ btnLegend.addEventListener("click", () => {
   );
 });
 
-// ── Auto Zoom toggle ──────────────────────────────────────────────────────────
+// ── Auto Zoom trigger ────────────────────────────────────────────────────────────
 
-function setAutoZoom(enabled) {
-  setAutoZoomEnabled(enabled);
-  const btn = document.getElementById("btn-auto-zoom");
-  if (enabled) {
-    btn.classList.add("active");
+document
+  .getElementById("btn-auto-zoom")
+  .addEventListener("click", () => {
     if (currentView === "topology") {
       const handlers = getTopologyFilterHandlers();
       if (handlers) handlers.fitIfEnabled();
     }
-  } else {
-    btn.classList.remove("active");
-  }
-}
-
-document
-  .getElementById("btn-auto-zoom")
-  .addEventListener("click", () => setAutoZoom(!isAutoZoomEnabled()));
+  });
 
 // ── Section 8: Filter Controls + Dataset Select Wiring ───────────────────────
 
@@ -244,8 +201,11 @@ document
   .addEventListener("change", async (event) => {
     document.getElementById("node-filter").value = "all";
     document.getElementById("diagnostic-filter").value = "all";
-    await loadDataset(event.target.value);
-    renderCurrentView();
+    //## make optional to oad dataset and render immediately on select change; for now, 
+    //## require explicit Fetch button click to do so, to avoid accidental dataset loads while exploring the dropdown.
+
+    //## await loadDataset(event.target.value);
+    //## renderCurrentView();
   });
 
 document.getElementById("node-filter").addEventListener("change", () => {
@@ -318,5 +278,19 @@ document.getElementById("diagnostic-filter").addEventListener("change", () => {
 populateDatasetSelect();
 applyLegendLineStylesFromConstants();
 await loadStaticLabelMap();
-await loadDataset(document.getElementById("dataset-select").value);
-renderCurrentView();
+// Phase 3 (task 3.1): do not auto-load on startup; prompt the user instead.
+document.getElementById("status").textContent =
+  "Select a dataset and press Fetch.";
+
+// Phase 3 (task 3.5): Fetch button drives data acquisition.
+document.getElementById("btn-fetch").addEventListener("click", async () => {
+  const selectedDataset = document.getElementById("dataset-select").value;
+  if (!selectedDataset) return;
+  await loadDataset(selectedDataset);
+  renderCurrentView();
+});
+
+// Phase 3 (task 3.6): Force Refresh checkbox wires setForceFresh.
+document.getElementById("chk-force-fresh").addEventListener("change", (e) => {
+  setForceFresh(e.target.checked);
+});
