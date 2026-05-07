@@ -30,9 +30,8 @@ COPY . .
 # Set the working directory to where td_cli.py is located  
 WORKDIR /app/src
 
-# Set environment variable for the port and expose it
-ENV PORT=8087
-EXPOSE ${PORT}
+# Set environment variables
+
 
 # Command to run the script
 CMD ["python3", "td_webserver.py", "--host", "0.0.0.0"]
