@@ -591,9 +591,9 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
 
         # Extract Thread Stack Version (TLV 28)
         thread_version_match = re.search(
-            r"Thread Stack Version:\s*(\S+)", block)
+            r"Thread Stack Version:\s*(.+?)(?:\n|$)", block)
         thread_stack_version = thread_version_match.group(
-            1) if thread_version_match else "Unknown"
+            1).strip() if thread_version_match else "Unknown"
 
         # Resolve device label from extaddr_map
         device_label = extaddr_map.get(extaddr, f"Unknown-{rloc16}")
