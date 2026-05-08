@@ -28,11 +28,17 @@ const fileMaxAgeCache = new Map();
 
 // Phase 3 — force-fresh flag (DD-1 / task 3.6)
 let _forceFresh = false;
+// Only cache mode — send max-age = 365 days to use only cached files
+let _onlyCache = false;
 // Phase 4 — delay after job completion before fetching file (for filesystem sync)
 const _JOB_COMPLETION_WAIT_MS = 1000; // 1 second
 /** When true, all subsequent fetchJson calls send Cache-Control: no-cache. */
 export function setForceFresh(enabled) {
   _forceFresh = enabled;
+}
+/** When true, all subsequent fetchJson calls send Cache-Control: max-age=31536000 (365 days). */
+export function setOnlyCache(enabled) {
+  _onlyCache = enabled;
 }
 
 // ── Enrichment helpers (used by Enhance toggle) ───────────────────────────────
@@ -224,6 +230,9 @@ export async function loadDataset(entryValue) {
       const reqHeaders = {};
       if (_forceFresh) {
         reqHeaders["Cache-Control"] = "no-cache";
+      } else if (_onlyCache) {
+        // 365 days in seconds: 365 * 24 * 60 * 60 = 31536000
+        reqHeaders["Cache-Control"] = "max-age=31536000";
       } else {
         const cached = fileMaxAgeCache.get(f);
         if (cached) reqHeaders["Cache-Control"] = `max-age=${cached.maxAge}`;

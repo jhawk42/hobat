@@ -42,14 +42,54 @@ export const EDGE_CATEGORY_EVE_CHILD = "eve_child";
 export const EDGE_CATEGORY_EVE_NATIVE_ROUTE = "eve_native_route";
 export const EDGE_CATEGORY_EVE_NATIVE_CHILD = "eve_native_child";
 
+// ── Color palette — unified design system ────────────────────────────────────
+//
+// Single source of truth for all theme colors. Keeps CSS tokens, JS constants,
+// and canvas colors in sync. Updated for dark mode at runtime via theme system.
+//
+export const PALETTE = Object.freeze({
+  // Link Quality colors
+  lqHigh: "#0072b2",
+  lqMedium: "#1a86c5",
+  lqLow: "#c62828",
+  lqNone: "#8a8a8a",
+  lqParentChild: "#cc79a7",
+  lqOtbr: "#009e73",
+
+  // Topology node colors
+  routerBg: "#d9ecff",
+  routerBorder: "#1565c0",
+  borderRouterBg: "#ffd9d9",
+  borderRouterBorder: "#c62828",
+  childBg: "#fff4cc",
+  childBorder: "#d9a400",
+  eveBg: "#e8f5e9",
+  eveBorder: "#2e7d32",
+  unknownBg: "#f2f2f2",
+  unknownBorder: "#808080",
+});
+
+// ── Topology node colors — consolidated constants ──────────────────────────
+//
+// Replaces hard-coded color literals scattered throughout tdash-adaptors.js.
+// Each entry maps a node type to background and border colors.
+//
+export const NODE_COLORS = Object.freeze({
+  router: { background: PALETTE.routerBg, border: PALETTE.routerBorder },
+  borderRouter: { background: PALETTE.borderRouterBg, border: PALETTE.borderRouterBorder },
+  child: { background: PALETTE.childBg, border: PALETTE.childBorder },
+  eve: { background: PALETTE.eveBg, border: PALETTE.eveBorder },
+  unknown: { background: PALETTE.unknownBg, border: PALETTE.unknownBorder },
+});
+
 // ── Link Quality edge style constants ─────────────────────────────────────────
 export const EDGE_LQ_STYLES = Object.freeze({
-  high: { width: 8, color: "#0072B2", dashes: false, lqLevel: 3 }, // LQ3 bold blue  (.lq-high)
-  medium: { width: 6, color: "#56B4E9", dashes: false, lqLevel: 2 }, // LQ2 light blue (.lq-medium)
-  low: { width: 4, color: "#c62828", dashes: true, lqLevel: 1 }, // LQ1 red dashed (.lq-low)
-  none: { width: 4, color: "#8a8a8a", dashes: false, lqLevel: 0 }, // fallback (no LQ data)
-  parentChild: { width: 8, color: "#CC79A7", dashes: false, lqLevel: 0 }, // parent–child pink/mauve (.lq-parent-child)
-  noLqPurple: { width: 4, color: "#009E73", dashes: false, lqLevel: 0 }, // OTBR / router-neighbor green (.lq-otbr)
+  high: { width: 8, color: PALETTE.lqHigh, dashes: false, lqLevel: 3 }, // LQ3 bold blue  (.lq-high)
+  medium: { width: 6, color: PALETTE.lqMedium, dashes: false, lqLevel: 2 }, // LQ2 light blue (.lq-medium)
+  low: { width: 4, color: PALETTE.lqLow, dashes: true, lqLevel: 1 }, // LQ1 red dashed (.lq-low)
+  none: { width: 4, color: PALETTE.lqNone, dashes: false, lqLevel: 0 }, // fallback (no LQ data)
+  parentChild: { width: 8, color: PALETTE.lqParentChild, dashes: false, lqLevel: 0 }, // parent–child pink/mauve (.lq-parent-child)
+  noLqPurple: { width: 4, color: PALETTE.lqOtbr, dashes: false, lqLevel: 0 }, // OTBR / router-neighbor green (.lq-otbr)
 });
 
 // ── Filter option metadata registries ────────────────────────────────────────
@@ -299,12 +339,12 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
 export const VIS_OPTIONS = {
   layout: { improvedLayout: true, randomSeed: 7 },
   nodes: {
-    font: { size: 13, face: "monospace", multi: "md" },
+    font: { size: 13, face: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif", multi: "md" },
     margin: 10,
     widthConstraint: { maximum: 260 },
   },
-  groups: { unknown: { color: { background: "#f2f2f2", border: "#808080" } } },
-  edges: { color: "#8a8a8a", width: 1.5, smooth: false },
+  groups: { unknown: { color: NODE_COLORS.unknown } },
+  edges: { color: PALETTE.lqNone, width: 1.5, smooth: false },
   physics: {
     barnesHut: {
       gravitationalConstant: -9500,

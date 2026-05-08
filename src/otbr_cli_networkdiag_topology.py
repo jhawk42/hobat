@@ -618,6 +618,7 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
             "ipv6_addrs": ipv6_addrs,
             "responder_ipv6": responder_ipv6,
             "children": children,
+            "total_children": len(children),
             "mac_counters": mac_counters,
             "mle_counters": mle_counters,
             "time_statistics": time_statistics,
@@ -693,6 +694,7 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     # children: take new if new is non-empty list and existing is empty list
     if not existing.get("children") and new.get("children"):
         existing["children"] = new["children"]
+        existing["total_children"] = len(existing["children"])
 
     # mac_counters: take new if new is non-empty dict and existing is empty
     if not existing.get("mac_counters") and new.get("mac_counters"):
@@ -1185,6 +1187,8 @@ def print_network_diag_topology(topology):
                     logging.info(
                         f"      Mode: RxOnWhenIdle={mode.get('rx_on_when_idle')}, DeviceType={mode.get('device_type')}, NetworkData={mode.get('network_data')}"
                     )
+            logging.info(
+                f"    Total Children: {data.get('total_children', 0)}")
 
         if data.get("mac_counters"):
             logging.info(f"  MAC Counters:")
@@ -1247,6 +1251,7 @@ def save_topology_to_json_list(
             "omrIpv6Address": data.get("omrIpv6Address"),
             "type": data.get("type", "Unknown"),
             "children": data.get("children", []),
+            "total_children": data.get("total_children", 0),
             "mac_counters": data.get("mac_counters", {}),
             "mle_counters": data.get("mle_counters", {}),
             "time_statistics": data.get("time_statistics", {}),

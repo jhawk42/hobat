@@ -57,7 +57,6 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
   const container = document.getElementById("topology-view");
   const statusEl = document.getElementById("status");
   const deviceStatsEl = document.getElementById("device_stats");
-  const detailsList = document.getElementById("details-list");
   const nodeFilterEl = document.getElementById("node-filter");
   const linkFilterEl = document.getElementById("link-filter");
   const diagnosticFilterEl = document.getElementById("diagnostic-filter");
@@ -70,7 +69,18 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     _topologyFilterHandlers = null;
   }
   container.innerHTML = "";
-  detailsList.innerHTML = "<li>Click a node to view its properties.</li>";
+
+  // Reset all details lists
+  document.getElementById("summary-list").innerHTML =
+    "<li>Click a node to view its properties.</li>";
+  document
+    .querySelectorAll(
+      "#identity-list, #highlights-list, #connections-list, #counters-list, #details-list",
+    )
+    .forEach((list) => {
+      list.innerHTML = "";
+      list.classList.add("hidden");
+    });
 
   let adaptorResult;
   try {
@@ -241,19 +251,100 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
       `Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagFilterLabel}.${neighborSuffix}${formatTopologyScale()}`;
   }
 
+  // ── Helper: Populate categorized node details lists ────────────────────
+
+  function populateNodeDetailsLists(mergedDetails) {
+    // Get field mappings from data-fields attributes in HTML
+    const listConfigs = [
+      { listId: "identity-list", required: false },
+      { listId: "highlights-list", required: false },
+      { listId: "connections-list", required: false },
+      { listId: "counters-list", required: false },
+      { listId: "details-list", required: false },
+    ];
+
+    const allUsedFields = new Set();
+    const detailsMap = new Map(mergedDetails);
+
+    // Process each list category
+    listConfigs.forEach(({ listId, required }) => {
+      const listEl = document.getElementById(listId);
+      if (!listEl) return;
+
+      const fieldsAttr = listEl.getAttribute("data-fields");
+      if (!fieldsAttr) {
+        listEl.classList.add("hidden");
+        return;
+      }
+
+      const isCatchAll = fieldsAttr === "*";
+      let fieldNames = [];
+
+      if (!isCatchAll) {
+        fieldNames = fieldsAttr.split(",").map((f) => f.trim());
+        fieldNames.forEach((f) => allUsedFields.add(f));
+      }
+
+      // Clear the list
+      listEl.innerHTML = "";
+
+      if (isCatchAll) {
+        // For catch-all details-list, include all remaining fields
+        mergedDetails.forEach(([key, value]) => {
+          if (!allUsedFields.has(key)) {
+            const li = document.createElement("li");
+            li.textContent = `${key}: ${formatValue(value)}`;
+            listEl.appendChild(li);
+          }
+        });
+      } else {
+        // For categorized lists, include specified fields in order
+        fieldNames.forEach((fieldName) => {
+          const value = detailsMap.get(fieldName);
+          if (value !== undefined) {
+            const li = document.createElement("li");
+            li.textContent = `${fieldName}: ${formatValue(value)}`;
+            listEl.appendChild(li);
+          }
+        });
+      }
+
+      // Hide empty lists
+      if (listEl.children.length === 0) {
+        listEl.classList.add("hidden");
+      } else {
+        listEl.classList.remove("hidden");
+      }
+    });
+  }
+
   // ── Node detail click handler ──────────────────────────────────────────
 
   _visNetwork.on("click", (params) => {
     if (params.nodes.length === 0) {
-      detailsList.innerHTML = "<li>Click a node to view its properties.</li>";
+      document.getElementById("summary-list").innerHTML =
+        "<li>Click a node to view its properties.</li>";
+      document
+        .querySelectorAll(
+          "#identity-list, #highlights-list, #connections-list, #counters-list, #details-list",
+        )
+        .forEach((list) => {
+          list.classList.add("hidden");
+        });
       return;
     }
     const selectedId = params.nodes[0];
     const node = nodeMap.get(selectedId);
-    detailsList.innerHTML = "";
     if (!node) {
-      detailsList.innerHTML =
+      document.getElementById("summary-list").innerHTML =
         "<li>No details available for selected node.</li>";
+      document
+        .querySelectorAll(
+          "#identity-list, #highlights-list, #connections-list, #counters-list, #details-list",
+        )
+        .forEach((list) => {
+          list.classList.add("hidden");
+        });
       return;
     }
 
@@ -275,13 +366,6 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
       },
     };
 
-    // Router-neighbor table gets its own top-level li for readability
-    if (Array.isArray(rawSource.router_neighbor_table)) {
-      const li = document.createElement("li");
-      li.textContent = `router_neighbor_table: ${formatValue(rawSource.router_neighbor_table)}`;
-      detailsList.appendChild(li);
-    }
-
     const mergedDetails = mergeForDisplay(rawSource, graphDetails);
     const details = sortDetailsWithPriority(
       flattenObjectEntries(mergedDetails).filter(
@@ -290,15 +374,20 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     );
 
     if (details.length === 0) {
-      detailsList.innerHTML =
+      document.getElementById("summary-list").innerHTML =
         "<li>No details available for selected node.</li>";
+      document
+        .querySelectorAll(
+          "#identity-list, #highlights-list, #connections-list, #counters-list, #details-list",
+        )
+        .forEach((list) => {
+          list.classList.add("hidden");
+        });
       return;
     }
-    details.forEach(([key, value]) => {
-      const li = document.createElement("li");
-      li.textContent = `${key}: ${formatValue(value)}`;
-      detailsList.appendChild(li);
-    });
+
+    // Populate categorized lists
+    populateNodeDetailsLists(details);
   });
 
   // Capture routerIdsWithChildren for detail panel

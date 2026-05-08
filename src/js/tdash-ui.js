@@ -6,6 +6,7 @@ import {
   enrichRows,
   enrichRawFiles,
   setForceFresh,
+  setOnlyCache,
 } from "./tdash-dataset.js";
 import {
   renderTopologyForDataset,
@@ -26,9 +27,15 @@ import { EDGE_LQ_STYLES } from "./tdash-constants.js";
 
 // ── Section 2: Build dataset <select> ────────────────────────────────────────
 
-function populateDatasetSelect() {
+function populateDatasetSelect(sourceFilter = null) {
   const sel = document.getElementById("dataset-select");
-  DATASET_REGISTRY.forEach((entry) => {
+  sel.innerHTML = ""; // Clear existing options
+
+  const filteredRegistry = sourceFilter
+    ? DATASET_REGISTRY.filter((entry) => entry.source === sourceFilter)
+    : DATASET_REGISTRY;
+
+  filteredRegistry.forEach((entry) => {
     const opt = document.createElement("option");
     opt.value = entry.value;
     opt.textContent = entry.label;
@@ -97,7 +104,6 @@ function switchView(newView) {
   const btnTable = document.getElementById("btn-table");
   const btnPhysics = document.getElementById("btn-physics");
   const btnAutoZoom = document.getElementById("btn-auto-zoom");
-  const btnLegendBtn = document.getElementById("btn-legend");
   const linkFilterEl = document.getElementById("link-filter");
 
   if (newView === "topology") {
@@ -107,10 +113,8 @@ function switchView(newView) {
     btnTable.classList.remove("active");
     btnPhysics.style.display = "inline-block";
     btnAutoZoom.style.display = "inline-block";
-    btnLegendBtn.style.display = "inline-block";
     linkFilterEl.classList.remove("filter-disabled");
-    document.getElementById("table-details-list").innerHTML =
-      "<li>Click a row to view its properties.</li>";
+    resetNodeDetailsLists();
   } else {
     topoPanel.style.display = "none";
     tablePanel.style.display = "block";
@@ -118,8 +122,9 @@ function switchView(newView) {
     btnTopology.classList.remove("active");
     btnPhysics.style.display = "none";
     btnAutoZoom.style.display = "none";
-    btnLegendBtn.style.display = "none";
     linkFilterEl.classList.add("filter-disabled");
+    document.getElementById("table-details-list").innerHTML =
+      "<li>Click a row to view its properties.</li>";
   }
 
   if (currentDataset) {
@@ -171,36 +176,62 @@ document
   .getElementById("btn-more-info")
   .addEventListener("click", () => setMoreInfo(!isMoreInfoEnabled()));
 
-// ── Legend toggle ─────────────────────────────────────────────────────────────
+// ── Legend toggle ────────────────────────────────────────────────────────────
 
-const btnLegend = document.getElementById("btn-legend");
 const lqLegendEl = document.getElementById("lq-legend");
-btnLegend.addEventListener("click", () => {
-  btnLegend.classList.toggle("active");
-  lqLegendEl.classList.toggle(
-    "hidden",
-    !btnLegend.classList.contains("active"),
-  );
-});
-
-// ── Auto Zoom trigger ────────────────────────────────────────────────────────────
-
-document
-  .getElementById("btn-auto-zoom")
-  .addEventListener("click", () => {
-    if (currentView === "topology") {
-      const handlers = getTopologyFilterHandlers();
-      if (handlers) handlers.fitIfEnabled();
-    }
+const btnLegendToggle = document.getElementById("btn-legend-toggle");
+if (btnLegendToggle) {
+  btnLegendToggle.addEventListener("click", () => {
+    lqLegendEl.classList.toggle("hidden");
+    btnLegendToggle.classList.toggle("active");
   });
+}
 
 // ── Section 8: Filter Controls + Dataset Select Wiring ───────────────────────
+
+// Helper: Reset all node details lists
+function resetNodeDetailsLists() {
+  document.getElementById("summary-list").innerHTML =
+    "<li>Click a node to view its properties.</li>";
+  document
+    .querySelectorAll(
+      "#identity-list, #highlights-list, #connections-list, #counters-list, #details-list",
+    )
+    .forEach((list) => {
+      list.innerHTML = "";
+      list.classList.add("hidden");
+    });
+}
+
+document
+  .getElementById("datasource-filter")
+  .addEventListener("change", async (event) => {
+    const selectedSource = event.target.value;
+    populateDatasetSelect(selectedSource);
+    // Reset filter controls when source changes
+    document.getElementById("node-filter").value = "all";
+    document.getElementById("link-filter").value = "default_links";
+    document.getElementById("diagnostic-filter").value = "all";
+
+    // Auto-fetch if enabled (fixes bug where single-dataset source doesn't trigger change event)
+    if (document.getElementById("chk-auto-fetch").checked) {
+      await doFetchDataset();
+    }
+  });
 
 document
   .getElementById("dataset-select")
   .addEventListener("change", async (event) => {
     document.getElementById("node-filter").value = "all";
     document.getElementById("diagnostic-filter").value = "all";
+
+    // Switch view based on the dataset's defaultView field
+    const selectedValue = event.target.value;
+    const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
+    if (selectedDataset && selectedDataset.defaultView) {
+      switchView(selectedDataset.defaultView);
+    }
+
     //## make optional to oad dataset and render immediately on select change; for now, 
     //## require explicit Fetch button click to do so, to avoid accidental dataset loads while exploring the dropdown.
 
@@ -223,8 +254,7 @@ document.getElementById("node-filter").addEventListener("change", () => {
       );
       handlers.updateStatus(counts);
       handlers.fitIfEnabled();
-      document.getElementById("details-list").innerHTML =
-        "<li>Click a node to view its properties.</li>";
+      resetNodeDetailsLists();
     }
   } else {
     applyTableFilters();
@@ -245,8 +275,7 @@ document.getElementById("link-filter").addEventListener("change", () => {
     );
     handlers.updateStatus(counts);
     handlers.fitIfEnabled();
-    document.getElementById("details-list").innerHTML =
-      "<li>Click a node to view its properties.</li>";
+    resetNodeDetailsLists();
   }
 });
 
@@ -265,8 +294,7 @@ document.getElementById("diagnostic-filter").addEventListener("change", () => {
       );
       handlers.updateStatus(counts);
       handlers.fitIfEnabled();
-      document.getElementById("details-list").innerHTML =
-        "<li>Click a node to view its properties.</li>";
+      resetNodeDetailsLists();
     }
   } else {
     applyTableFilters();
@@ -275,22 +303,89 @@ document.getElementById("diagnostic-filter").addEventListener("change", () => {
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
-populateDatasetSelect();
+const initialSource = document.getElementById("datasource-filter").value;
+populateDatasetSelect(initialSource);
 applyLegendLineStylesFromConstants();
 await loadStaticLabelMap();
 // Phase 3 (task 3.1): do not auto-load on startup; prompt the user instead.
 document.getElementById("status").textContent =
   "Select a dataset and press Fetch.";
 
-// Phase 3 (task 3.5): Fetch button drives data acquisition.
-document.getElementById("btn-fetch").addEventListener("click", async () => {
-  const selectedDataset = document.getElementById("dataset-select").value;
-  if (!selectedDataset) return;
-  await loadDataset(selectedDataset);
+// Cache checkbox helper: make checkboxes mutually exclusive
+function updateCacheCheckboxes(changedCheckbox) {
+  const chkAutoFetch = document.getElementById("chk-auto-fetch");
+  const chkForceFresh = document.getElementById("chk-force-fresh");
+  const chkOnlyCache = document.getElementById("chk-only-cache");
+
+  if (changedCheckbox === chkAutoFetch && chkAutoFetch.checked) {
+    chkForceFresh.checked = false;
+    chkOnlyCache.checked = false;
+    setForceFresh(false);
+    setOnlyCache(false);
+  } else if (changedCheckbox === chkForceFresh && chkForceFresh.checked) {
+    chkAutoFetch.checked = false;
+    chkOnlyCache.checked = false;
+    setForceFresh(true);
+    setOnlyCache(false);
+  } else if (changedCheckbox === chkOnlyCache && chkOnlyCache.checked) {
+    chkAutoFetch.checked = false;
+    chkForceFresh.checked = false;
+    setForceFresh(false);
+    setOnlyCache(true);
+  }
+}
+
+// Fetch dataset function
+async function doFetchDataset() {
+  const selectedValue = document.getElementById("dataset-select").value;
+  if (!selectedValue) return;
+
+  // Apply defaultView from registry
+  const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
+  if (selectedDataset && selectedDataset.defaultView) {
+    switchView(selectedDataset.defaultView);
+  }
+
+  await loadDataset(selectedValue);
   renderCurrentView();
+}
+
+// Phase 3 (task 3.5): Fetch button drives data acquisition.
+document.getElementById("btn-fetch").addEventListener("click", doFetchDataset);
+
+// Auto-fetch when dataset is selected and chk-auto-fetch is enabled
+document.getElementById("dataset-select").addEventListener("change", async () => {
+  if (document.getElementById("chk-auto-fetch").checked) {
+    await doFetchDataset();
+  }
 });
 
-// Phase 3 (task 3.6): Force Refresh checkbox wires setForceFresh.
+// Cache control checkboxes (mutually exclusive)
+document.getElementById("chk-auto-fetch").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    updateCacheCheckboxes(e.target);
+  }
+});
+
 document.getElementById("chk-force-fresh").addEventListener("change", (e) => {
-  setForceFresh(e.target.checked);
+  if (e.target.checked) {
+    updateCacheCheckboxes(e.target);
+  }
+});
+
+document.getElementById("chk-only-cache").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    updateCacheCheckboxes(e.target);
+  }
+});
+
+// ── Collapsible Filters Panel ────────────────────────────────────────────────
+
+document.getElementById("btn-toggle-filters").addEventListener("click", () => {
+  const btn = document.getElementById("btn-toggle-filters");
+  const content = document.getElementById("filters-content");
+  const isExpanded = btn.getAttribute("aria-expanded") === "true";
+
+  btn.setAttribute("aria-expanded", !isExpanded);
+  content.classList.toggle("collapsed");
 });

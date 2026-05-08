@@ -4,7 +4,7 @@ import {
   EDGE_CATEGORY_ROUTER_NEIGHBOR, EDGE_CATEGORY_OTBR_ROUTE,
   EDGE_CATEGORY_OTBR_CHILD, EDGE_CATEGORY_EVE_ROUTE,
   EDGE_CATEGORY_EVE_CHILD, EDGE_CATEGORY_EVE_NATIVE_ROUTE,
-  EDGE_CATEGORY_EVE_NATIVE_CHILD
+  EDGE_CATEGORY_EVE_NATIVE_CHILD, NODE_COLORS, PALETTE
 } from './tdash-constants.js';
 import {
   toText, toFiniteNumber, isPlainObject,
@@ -27,8 +27,8 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
   const restApiRaw = rawFiles[3];
   const restApiDiagnostics = (restApiRaw && Array.isArray(restApiRaw.data))
     ? restApiRaw.data
-        .map((item) => ({ id: item.id, type: item.type, ...(item.attributes || {}) }))
-        .filter((item) => item && typeof item === 'object')
+      .map((item) => ({ id: item.id, type: item.type, ...(item.attributes || {}) }))
+      .filter((item) => item && typeof item === 'object')
     : [];
 
   const nodeMap = new Map();
@@ -87,9 +87,9 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
       from_meshdiag: (style.source === 'meshdiag') || (existing ? existing.from_meshdiag === true : false),
       from_networkdiagnostic: (style.source === 'networkdiagnostic') || (existing ? existing.from_networkdiagnostic === true : false),
       shape: style.shape || (existing ? existing.shape : 'box'),
-      color: style.color || (existing ? existing.color : { background: '#d9ecff', border: '#1565c0' })
+      color: style.color || (existing ? existing.color : NODE_COLORS.router)
     };
-    if (merged.br) merged.color = { background: '#ffd9d9', border: '#c62828' };
+    if (merged.br) merged.color = NODE_COLORS.borderRouter;
     nodeMap.set(nodeId, merged);
   }
 
@@ -106,20 +106,20 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     if (meshRawId) meshIdToUnifiedId.set(meshRawId, uid);
     upsertNode(uid, node, {
       source: 'meshdiag', shape: 'box',
-      color: node.br ? { background: '#ffd9d9', border: '#c62828' } : { background: '#d9ecff', border: '#1565c0' }
+      color: node.br ? NODE_COLORS.borderRouter : NODE_COLORS.router
     });
   });
 
   networkDiag.forEach((node, index) => {
     const uid = chooseNodeId(node, 'netdiag-node', index + 1);
     networkDiagById.set(uid, node);
-    upsertNode(uid, node, { source: 'networkdiagnostic', shape: 'box', color: { background: '#d9ecff', border: '#1565c0' } });
+    upsertNode(uid, node, { source: 'networkdiagnostic', shape: 'box', color: NODE_COLORS.router });
   });
 
   restApiDiagnostics.forEach((node, index) => {
     const uid = chooseNodeId(node, 'restapi-node', index + 1);
     restApiById.set(uid, node);
-    upsertNode(uid, node, { source: 'networkdiagnostic', shape: 'box', color: { background: '#d9ecff', border: '#1565c0' } });
+    upsertNode(uid, node, { source: 'networkdiagnostic', shape: 'box', color: NODE_COLORS.router });
   });
 
   routerNeighborTables.forEach((row) => {
@@ -132,7 +132,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
       const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
       upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
-        { source: 'meshdiag', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+        { source: 'meshdiag', shape: 'ellipse', color: NODE_COLORS.child });
       addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
       routerIdsWithChildren.add(fromId);
     });
@@ -145,7 +145,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
         if (!toId) return;
         if (!nodeMap.has(toId)) {
           upsertNode(toId, { device_label: toText(link.device_label), rloc16: toText(link.rloc16), id: linkMeshId || toId },
-            { source: 'meshdiag', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
+            { source: 'meshdiag', shape: 'box', color: NODE_COLORS.eve });
         }
         addEdge(edgeMap, edgeData, fromId, toId, {
           ...lqStyle,
@@ -158,9 +158,11 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     (Array.isArray(neighborRow?.router_neighbor_table) ? neighborRow.router_neighbor_table : []).forEach((neighbor) => {
       const toId = ensureNode(
         toText(neighbor.rloc16) || toText(neighbor.extaddr),
-        { rloc16: toText(neighbor.rloc16), extaddr: toText(neighbor.extaddr), device_label: toText(neighbor.device_label),
-          id: toText(neighbor.rloc16) || toText(neighbor.extaddr) },
-        { source: 'meshdiag', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } }
+        {
+          rloc16: toText(neighbor.rloc16), extaddr: toText(neighbor.extaddr), device_label: toText(neighbor.device_label),
+          id: toText(neighbor.rloc16) || toText(neighbor.extaddr)
+        },
+        { source: 'meshdiag', shape: 'box', color: NODE_COLORS.eve }
       );
       addEdge(edgeMap, edgeData, fromId, toId, { width: 1.5, linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR] });
     });
@@ -171,7 +173,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
       const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
       upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
-        { source: 'networkdiagnostic', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+        { source: 'networkdiagnostic', shape: 'ellipse', color: NODE_COLORS.child });
       addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
       routerIdsWithChildren.add(fromId);
     });
@@ -182,16 +184,18 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
       const toRloc16 = buildMainRouterRloc16(route.routeId);
       const toId = ensureNode(toRloc16, { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
-        { source: 'networkdiagnostic', shape: 'box', color: { background: '#d9ecff', border: '#1565c0' } });
+        { source: 'networkdiagnostic', shape: 'box', color: NODE_COLORS.router });
       addEdge(edgeMap, edgeData, fromId, toId, { width: 1.5, linkCategories: [EDGE_CATEGORY_OTBR_ROUTE] });
     });
     (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
       const childRloc16 = buildChildRloc16(node.rloc16, child.childId);
       const childId = ensureNode(
         childRloc16 || `${fromId}-rest-child-${ci + 1}`,
-        { rloc16: childRloc16, id: childRloc16 || `${fromId}-rest-child-${ci + 1}`,
-          device_label: childRloc16 || `${fromId} child ${child.childId}` },
-        { source: 'networkdiagnostic', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } }
+        {
+          rloc16: childRloc16, id: childRloc16 || `${fromId}-rest-child-${ci + 1}`,
+          device_label: childRloc16 || `${fromId} child ${child.childId}`
+        },
+        { source: 'networkdiagnostic', shape: 'ellipse', color: NODE_COLORS.child }
       );
       addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD] });
       routerIdsWithChildren.add(fromId);
@@ -260,9 +264,9 @@ export function adaptEve(rawFiles) {
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_eve: true,
       shape: style.shape || (existing ? existing.shape : 'box'),
-      color: style.color || (existing ? existing.color : { background: '#e8f5e9', border: '#2e7d32' })
+      color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
-    if (merged.br) merged.color = { background: '#ffd9d9', border: '#c62828' };
+    if (merged.br) merged.color = NODE_COLORS.borderRouter;
     nodeMap.set(nodeId, merged);
   }
 
@@ -274,8 +278,8 @@ export function adaptEve(rawFiles) {
     upsertEveNode(eveNodeId, node, {
       source: 'eve',
       shape: isChildType ? 'ellipse' : 'box',
-      color: node.br ? { background: '#ffd9d9', border: '#c62828' }
-        : (isChildType ? { background: '#fff4cc', border: '#d9a400' } : { background: '#e8f5e9', border: '#2e7d32' })
+      color: node.br ? NODE_COLORS.borderRouter
+        : (isChildType ? NODE_COLORS.child : NODE_COLORS.eve)
     });
   });
 
@@ -286,7 +290,7 @@ export function adaptEve(rawFiles) {
       const toId = toText(route.to);
       if (!toId) return;
       if (!nodeMap.has(toId)) {
-        upsertEveNode(toId, { id: toId }, { source: 'eve', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
+        upsertEveNode(toId, { id: toId }, { source: 'eve', shape: 'box', color: NODE_COLORS.eve });
       }
       const lqiIn = toFiniteNumber(route.in);
       const lqiOut = toFiniteNumber(route.out);
@@ -298,7 +302,7 @@ export function adaptEve(rawFiles) {
       const childId = toText(typeof child === 'string' ? child : child.id);
       if (!childId) return;
       if (!nodeMap.has(childId)) {
-        upsertEveNode(childId, { id: childId }, { source: 'eve', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+        upsertEveNode(childId, { id: childId }, { source: 'eve', shape: 'ellipse', color: NODE_COLORS.child });
       }
       addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_EVE_CHILD] });
       routerIdsWithChildren.add(fromId);
@@ -323,7 +327,7 @@ export function adaptEveNative(rawFiles) {
   // Fall back gracefully if the loader already normalised it to a plain array.
   const eveArray = (raw && Array.isArray(raw.nodes)) ? raw.nodes
     : (Array.isArray(raw) ? raw
-    : (raw && typeof raw === 'object' ? Object.values(raw) : []));
+      : (raw && typeof raw === 'object' ? Object.values(raw) : []));
 
   const nodeMap = new Map();
   const eveNodeById = new Map();
@@ -361,9 +365,9 @@ export function adaptEveNative(rawFiles) {
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_eve_native: true,
       shape: style.shape || (existing ? existing.shape : 'box'),
-      color: style.color || (existing ? existing.color : { background: '#e8f5e9', border: '#2e7d32' })
+      color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
-    if (merged.br) merged.color = { background: '#ffd9d9', border: '#c62828' };
+    if (merged.br) merged.color = NODE_COLORS.borderRouter;
     nodeMap.set(nodeId, merged);
   }
 
@@ -376,8 +380,8 @@ export function adaptEveNative(rawFiles) {
     upsertEveNativeNode(eveNodeId, node, {
       source: 'eve_native',
       shape: isChildType ? 'ellipse' : 'box',
-      color: node.br ? { background: '#ffd9d9', border: '#c62828' }
-        : (isChildType ? { background: '#fff4cc', border: '#d9a400' } : { background: '#e8f5e9', border: '#2e7d32' })
+      color: node.br ? NODE_COLORS.borderRouter
+        : (isChildType ? NODE_COLORS.child : NODE_COLORS.eve)
     });
   });
 
@@ -390,7 +394,7 @@ export function adaptEveNative(rawFiles) {
       const toId = toText(route.to);
       if (!toId) return;
       if (!nodeMap.has(toId)) {
-        upsertEveNativeNode(toId, { id: toId }, { source: 'eve_native', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
+        upsertEveNativeNode(toId, { id: toId }, { source: 'eve_native', shape: 'box', color: NODE_COLORS.eve });
       }
       const lqiIn = toFiniteNumber(route.in);
       const lqiOut = toFiniteNumber(route.out);
@@ -403,7 +407,7 @@ export function adaptEveNative(rawFiles) {
       const childId = toText(typeof child === 'string' ? child : child.id);
       if (!childId) return;
       if (!nodeMap.has(childId)) {
-        upsertEveNativeNode(childId, { id: childId }, { source: 'eve_native', shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+        upsertEveNativeNode(childId, { id: childId }, { source: 'eve_native', shape: 'ellipse', color: NODE_COLORS.child });
       }
       addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_EVE_NATIVE_CHILD] });
       routerIdsWithChildren.add(fromId);
@@ -471,9 +475,9 @@ export function adaptMergedDetailed(rawFiles) {
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_merged_detailed: true,
       shape: style.shape || (existing ? existing.shape : 'box'),
-      color: style.color || (existing ? existing.color : { background: '#e8f5e9', border: '#2e7d32' })
+      color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
-    if (merged.br) merged.color = { background: '#ffd9d9', border: '#c62828' };
+    if (merged.br) merged.color = NODE_COLORS.borderRouter;
     nodeMap.set(nodeId, merged);
   }
 
@@ -484,7 +488,7 @@ export function adaptMergedDetailed(rawFiles) {
       upsertMergedNode(candidateId, {
         rloc16: toText(linkNode.rloc16), id: toText(linkNode.id) || candidateId,
         device_label: toText(linkNode.device_label), name: toText(linkNode.name)
-      }, { source: 'merged-detailed', shape: 'box', color: { background: '#e8f5e9', border: '#2e7d32' } });
+      }, { source: 'merged-detailed', shape: 'box', color: NODE_COLORS.eve });
     }
     return candidateId;
   }
@@ -500,7 +504,7 @@ export function adaptMergedDetailed(rawFiles) {
     upsertMergedNode(nodeId, node, {
       source: 'merged-detailed',
       shape: isChildLike && !isRouterLike ? 'ellipse' : 'box',
-      color: isChildLike && !isRouterLike ? { background: '#fff4cc', border: '#d9a400' } : { background: '#e8f5e9', border: '#2e7d32' }
+      color: isChildLike && !isRouterLike ? NODE_COLORS.child : NODE_COLORS.eve
     });
     // populate routerNeighborByRloc16 for filter support
     if (Array.isArray(node.router_neighbor_table) && rloc16Text) {
@@ -594,7 +598,7 @@ export function adaptRouterTable(rawFiles) {
       mode_device: 'FTD',
       br: isBr,
       shape: 'box',
-      color: isBr ? { background: '#ffd9d9', border: '#c62828' } : { background: '#d9ecff', border: '#1565c0' }
+      color: isBr ? NODE_COLORS.borderRouter : NODE_COLORS.router
     });
     rawByIdForDetails.set(nodeId, row);
   });
@@ -659,8 +663,8 @@ export function adaptRawArray(rawFiles) {
       parentchanges: row.mle_counters?.parentchanges,
       br: row.br === true,
       shape: isChildLike ? 'ellipse' : 'box',
-      color: isBr ? { background: '#ffd9d9', border: '#c62828' }
-        : (isChildLike ? { background: '#fff4cc', border: '#d9a400' } : { background: '#d9ecff', border: '#1565c0' })
+      color: isBr ? NODE_COLORS.borderRouter
+        : (isChildLike ? NODE_COLORS.child : NODE_COLORS.router)
     });
     rawByIdForDetails.set(nodeId, row);
     if (Array.isArray(row.router_neighbor_table) && rloc16Text) {
@@ -743,9 +747,9 @@ export function adaptOtbrRestApi(rawFiles) {
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_otbr_restapi: true,
       shape: style.shape || (existing ? existing.shape : (isChildLike ? 'ellipse' : 'box')),
-      color: style.color || (existing ? existing.color : { background: '#d9ecff', border: '#1565c0' })
+      color: style.color || (existing ? existing.color : NODE_COLORS.router)
     };
-    if (merged.br) merged.color = { background: '#ffd9d9', border: '#c62828' };
+    if (merged.br) merged.color = NODE_COLORS.borderRouter;
     nodeMap.set(nodeId, merged);
   }
 
@@ -757,7 +761,7 @@ export function adaptOtbrRestApi(rawFiles) {
     const isChildLike = roleText === 'child' || roleText.includes('sleepy');
     upsertOtbrRestApiNode(nodeId, node, {
       shape: isChildLike ? 'ellipse' : 'box',
-      color: isChildLike ? { background: '#fff4cc', border: '#d9a400' } : { background: '#d9ecff', border: '#1565c0' }
+      color: isChildLike ? NODE_COLORS.child : NODE_COLORS.router
     });
     rawByIdForDetails.set(nodeId, node);
   });
@@ -768,7 +772,7 @@ export function adaptOtbrRestApi(rawFiles) {
     if (!nodeId) return;
     upsertOtbrRestApiNode(nodeId, node, {
       shape: 'box',
-      color: { background: '#d9ecff', border: '#1565c0' }
+      color: NODE_COLORS.router
     });
     const rloc16Val = toText(node.rloc16).toLowerCase();
     if (rloc16Val) rloc16ToNodeId.set(rloc16Val, nodeId);
@@ -788,7 +792,7 @@ export function adaptOtbrRestApi(rawFiles) {
       let toId = rloc16ToNodeId.get(toRloc16.toLowerCase()) || toRloc16;
       if (!nodeMap.has(toId)) {
         upsertOtbrRestApiNode(toId, { rloc16: toRloc16, id: toId },
-          { shape: 'box', color: { background: '#d9ecff', border: '#1565c0' } });
+          { shape: 'box', color: NODE_COLORS.router });
       }
       const lqi = Math.max(toFiniteNumber(route.linkQualityOut) || 0, toFiniteNumber(route.linkQualityIn) || 0);
       const edgeWidth = lqi >= 3 ? 3 : (lqi >= 2 ? 2 : 1.5);
@@ -802,7 +806,7 @@ export function adaptOtbrRestApi(rawFiles) {
         || `${fromId}-child-${ci + 1}`;
       if (!nodeMap.has(childId)) {
         upsertOtbrRestApiNode(childId, { rloc16: childRloc16, id: childId },
-          { shape: 'ellipse', color: { background: '#fff4cc', border: '#d9a400' } });
+          { shape: 'ellipse', color: NODE_COLORS.child });
       }
       addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD] });
       routerIdsWithChildren.add(fromId);
@@ -825,12 +829,12 @@ export function runAdaptor(dataset) {
   const { entry, rawFiles } = dataset;
   switch (entry.topologyMode) {
     case 'meshdiag-networkdiag': return adaptMeshdiagNetworkdiag(rawFiles);
-    case 'merged-detailed':      return adaptMergedDetailed(rawFiles);
-    case 'eve_enhanced':         return adaptEve(rawFiles);
-    case 'eve_native':           return adaptEveNative(rawFiles);
-    case 'router-table':         return adaptRouterTable(rawFiles);
-    case 'otbr_restapi':         return adaptOtbrRestApi(rawFiles);
+    case 'merged-detailed': return adaptMergedDetailed(rawFiles);
+    case 'eve_enhanced': return adaptEve(rawFiles);
+    case 'eve_native': return adaptEveNative(rawFiles);
+    case 'router-table': return adaptRouterTable(rawFiles);
+    case 'otbr_restapi': return adaptOtbrRestApi(rawFiles);
     case 'raw-array':
-    default:                     return adaptRawArray(rawFiles);
+    default: return adaptRawArray(rawFiles);
   }
 }

@@ -14,204 +14,272 @@
 
 <body>
   <div class="page">
-    <h1>tdash: Thread Mesh Network Dashboard</h1>
-
-    <!-- View toggle -->
-    <div class="view-toggle-bar">
-      <button id="btn-fetch" title="fetch">Fetch</button>
-      <label title="Send Cache-Control: no-cache to force server to regenerate files">
-        <input type="checkbox" id="chk-force-fresh" /> Force Refresh
-      </label>
-      <span class="view-toggle-spacer">.</span>
-      <button id="btn-topology" class="active" title="Topology view">
-        Topology
-      </button>
-      <button id="btn-table" title="Table view">Table</button>
-      <span class="view-toggle-spacer">.</span>
-      <button id="btn-physics" class="active" title="Toggle physics simulation" style="font-size: 1.2em;">
-        ⏸
-      </button>
-      <button id="btn-auto-zoom" title="Auto-fit topology in view" style="font-size: 1.2em;">
-        ☐
-      </button>
-      <button id="btn-legend" class="active" title="Toggle link quality legend">
-        Legend
-      </button>
-      <span class="view-toggle-spacer">.</span>
-      <button id="btn-more-info" title="Show all columns in table view">
-        Advanced
-      </button>
+    <!-- Title bar -->
+    <div id="panel-home" class="controls">
+      <a href="" class="home-link" title="TDash Home">🏠 TDash</a>
     </div>
 
-    <!-- Controls bar -->
-    <div class="controls">
-      <label for="dataset-select">Dataset:</label>
-      <select id="dataset-select">
-        <!-- populated by JS from DATASET_REGISTRY -->
-      </select>
-    </div>
-    <div class="controls">
-      <label for="node-filter">Nodes:</label>
-      <select id="node-filter">
-        <option value="all">All Nodes</option>
-        <option value="border-routers">Border Routers (BR)</option>
-        <option value="main-routers">Routers (R)</option>
-        <option value="routers-with-children">
-          Routers with Child Nodes
-        </option>
-        <option value="routers-without-children">
-          Routers without Child Nodes
-        </option>
-        <option value="ftd-devices">Full Thread Devices (FTD)</option>
-        <option value="mtd-devices">Minimal Thread Devices (MTD)</option>
-      </select>
+    <!-- Source and source selection bar -->
+    <div id="panel-dataset" class="controls">
+      <div class="controls">
+        <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch Dataset</button>
+        <label for="datasource-filter" title="Data source for the mesh network">Source</label>
+        <select id="datasource-filter" title="Data source for the mesh network">
+          <option value="otbr-cli">otbr-cli</option>
+          <option value="mdns">mdns</option>
+          <option value="eve">eve</option>
+          <!--
+          <option value="otbr-restapi">otbr-restapi</option>
+          -->
+          <option value="merged">merged</option>
+          <!--
+          <option value="lab">lab</option>
+           -->
+          <option value="system">system</option>
+        </select>
+        <label for="dataset-select" title="Select a dataset for the mesh network">Dataset</label>
+        <select id="dataset-select" title="Select a dataset for the mesh network">
+          <!-- populated by JS from DATASET_REGISTRY -->
+        </select>
+      </div>
 
-      <label for="link-filter">Links:</label>
-      <select id="link-filter">
-        <option value="all_links">All Links</option>
-        <option value="default_links">
-          Standard: routers, children, 321_links
-        </option>
-        <option value="default_plus_router_neighbors">
-          Standard: +neighbors
-        </option>
-        <option value="otbr_rest_api">
-          OTBR restapi: route routeData, childTable
-        </option>
-        <option value="eve_native_routes_children">
-          Eve Native: routes, children
-        </option>
-        <option value="eve_enhanced_routes_children">
-          Eve Enhanced: routes, children
-        </option>
-        <optgroup label="─ Link Quality ─">
-          <option value="lq_high">High (LQ3)</option>
-          <option value="lq_medium">Medium (LQ2)</option>
-          <option value="lq_low">Low (LQ1)</option>
-          <option value="lq_none">No LQ Data / Unknown</option>
-        </optgroup>
-        <optgroup label="─ Link Types ─">
-          <option value="lq_parent_child">Parent–Child</option>
-          <option value="lq_otbr_neighbor">Router Neighbors</option>
-        </optgroup>
-      </select>
+      <fieldset class="cache-options">
+        <legend>Cache</legend>
+        <label title="Automatically re-fetch data when the dataset selection changes">
+          <input type="checkbox" id="chk-auto-fetch" checked /> Auto
+        </label>
+        <label title="Force the server to regenerate fresh data (bypass cache)">
+          <input type="checkbox" id="chk-force-fresh" /> Force Refresh
+        </label>
+        <label title="Only use locally cached data (skip server refresh)">
+          <input type="checkbox" id="chk-only-cache" /> Only Cache
+        </label>
+      </fieldset>
 
-      <label for="diagnostic-filter">Diagnostics:</label>
-      <select id="diagnostic-filter">
-        <option value="all">All Rows</option>
-        <optgroup label="─ Mac Total Error Packets ─">
-          <option value="medium-total-errors-pct">Medium % (&gt;= 5%)</option>
-          <option value="medium-total-errors-high">High (&gt;= 10%)</option>
-        </optgroup>
-        <optgroup label="─ Mac Discard Packets ─">
-          <option value="medium-discard-pct">Medium % (&gt;= 15%)</option>
-        </optgroup>
-        <optgroup label="─ Mle Partition Changes ─">
-          <option value="medium-partition-changes">Medium (&gt;= 2)</option>
-          <option value="high-partition-changes">High (&gt;= 5)</option>
-        </optgroup>
-        <optgroup label="─ MLE Parent Changes ─">
-          <option value="medium-parent-changes">Medium (&gt;= 2)</option>
-          <option value="high-parent-changes">High (&gt;= 5)</option>
-        </optgroup>
-        <optgroup label="─ Router Neighbor Err Rate Frame ─">
-          <option value="router-neighbor-err-rate-frame-low">
-            Low (&gt;= 2%)
-          </option>
-          <option value="router-neighbor-err-rate-frame-medium">
-            Medium (&gt;= 5%)
-          </option>
-          <option value="router-neighbor-err-rate-frame-high">
-            High (&gt;= 10%)
-          </option>
-        </optgroup>
-        <optgroup label="─ Router Neighbor Err Rate Msg ─">
-          <option value="router-neighbor-err-rate-msg-low">
-            Low (&gt;= 2%)
-          </option>
-          <option value="router-neighbor-err-rate-msg-medium">
-            Medium (&gt;= 5%)
-          </option>
-          <option value="router-neighbor-err-rate-msg-high">
-            High (&gt;= 10%)
-          </option>
-        </optgroup>
-        <optgroup label="─ Router Neighbor RSS Ave ─">
-          <option value="router-neighbor-rss-very-low">
-            Bad (&lt; -80 dBm)
-          </option>
-          <option value="router-neighbor-rss-low">
-            Fair (-70 dBm To -80 dBm)
-          </option>
-          <option value="router-neighbor-rss-medium">
-            Good (-60 dBm To -70 dBm)
-          </option>
-          <option value="router-neighbor-rss-high">
-            Excellent (&gt; -60 dBm)
-          </option>
-        </optgroup>
-      </select>
     </div>
 
-    <!-- Status line -->
-    <div class="status-bar">
-      <div id="device_stats">Devices: 0</div>
-      <div id="status">Select a dataset to load.</div>
-    </div>
+    <!-- Filters bar -->
+    <div id="panel-node-link-filters">
+      <div class="filters-header">
+        <button id="btn-toggle-filters" class="filters-toggle-btn" aria-expanded="false" title="Toggle filters panel">
+          <span class="filters-toggle-arrow">▶</span>
+          <span>Filters</span>
+        </button>
+      </div>
+      <div id="filters-content" class="filters-content collapsed">
+        <div class="controls">
+          <label for="node-filter" title="Filter devices by type or role">Devices</label>
+          <select id="node-filter" title="Filter devices by type or role">
+            <option value="all">All</option>
+            <option value="border-routers">Border Routers</option>
+            <option value="main-routers">Routers</option>
+            <option value="routers-with-children">
+              Routers with Child Nodes
+            </option>
+            <option value="routers-without-children">
+              Routers without Child Nodes
+            </option>
+            <option value="ftd-devices">Full Thread Devices</option>
+            <option value="mtd-devices">Minimal Thread Devices</option>
+          </select>
 
-    <!-- Topology view -->
-    <div id="view-topology">
-      <div class="topology-layout">
-        <div class="topology-canvas-wrap">
-          <div id="topology-view"></div>
-          <div id="lq-legend" class="lq-legend">
-            <span class="lq-legend-title">Link Quality</span>
-            <span class="lq-legend-item lq-high">
-              <span class="lq-legend-line lq-legend-line-high" aria-hidden="true"></span>
-              <span>High (LQ3)</span>
-            </span>
-            <span class="lq-legend-item lq-medium">
-              <span class="lq-legend-line lq-legend-line-medium" aria-hidden="true"></span>
-              <span>Medium (LQ2)</span>
-            </span>
-            <span class="lq-legend-item lq-low">
-              <span class="lq-legend-line lq-legend-line-low" aria-hidden="true"></span>
-              <span>Low (LQ1)</span>
-            </span>
-            <span class="lq-legend-title">Link Type</span>
-            <span class="lq-legend-item lq-parent-child">
-              <span class="lq-legend-line lq-legend-line-parent-child" aria-hidden="true"></span>
-              <span>Parent&#8211;Child</span>
-            </span>
-            <span class="lq-legend-item lq-otbr">
-              <span class="lq-legend-line lq-legend-line-otbr" aria-hidden="true"></span>
-              <span>Router-Neighbor</span>
-            </span>
-          </div>
-        </div>
-        <div id="details" class="node-details-panel">
-          <h2>Device details:</h2>
-          <ul id="details-list" class="node-details-list">
-            <li>Click a node to view its properties.</li>
-          </ul>
+          <label for="link-filter" title="Filter links by type or quality">Links</label>
+          <select id="link-filter" title="Filter links by type or quality">
+            <option value="all_links">All</option>
+            <option value="default_links" title="Shows parent-child relationships and link quality indicators">
+              Standard
+            </option>
+            <option value="default_plus_router_neighbors"
+              title="Shows parent-child relationships, link quality, and router neighbors">
+              Standard & Neighbors
+            </option>
+            <option value="otbr_rest_api" title="OTBR REST API: Shows parent-child relationships and link quality">
+              Standard (restapi)
+            </option>
+            <option value="eve_native_routes_children" title="Shows network routes and child device relationships">
+              Eve Native
+            </option>
+            <option value="eve_enhanced_routes_children" title="Shows enhanced network routes with additional metadata">
+              Eve Enhanced
+            </option>
+            <optgroup label="Link Quality">
+              <option value="lq_high">High (LQ3)</option>
+              <option value="lq_medium">Medium (LQ2)</option>
+              <option value="lq_low">Low (LQ1)</option>
+              <option value="lq_none">No LQ Data / Unknown</option>
+            </optgroup>
+            <optgroup label="Link Types">
+              <option value="lq_parent_child">Parent–Child</option>
+              <option value="lq_otbr_neighbor">Router Neighbors</option>
+            </optgroup>
+          </select>
+
+          <label for="diagnostic-filter" title="Filter diagnostics by type or severity">Diagnostics</label>
+          <select id="diagnostic-filter" title="Filter diagnostics by type or severity">
+            <option value="all">All Rows</option>
+            <optgroup label="Mac Total Error Packets">
+              <option value="medium-total-errors-pct">Medium % (&gt;= 5%)</option>
+              <option value="medium-total-errors-high">High (&gt;= 10%)</option>
+            </optgroup>
+            <optgroup label="Mac Discard Packets">
+              <option value="medium-discard-pct">Medium % (&gt;= 15%)</option>
+            </optgroup>
+            <optgroup label="Mle Partition Changes">
+              <option value="medium-partition-changes">Medium (&gt;= 2)</option>
+              <option value="high-partition-changes">High (&gt;= 5)</option>
+            </optgroup>
+            <optgroup label="MLE Parent Changes">
+              <option value="medium-parent-changes">Medium (&gt;= 2)</option>
+              <option value="high-parent-changes">High (&gt;= 5)</option>
+            </optgroup>
+            <optgroup label="Router Neighbor Err Rate Frame">
+              <option value="router-neighbor-err-rate-frame-low">
+                Low (&gt;= 2%)
+              </option>
+              <option value="router-neighbor-err-rate-frame-medium">
+                Medium (&gt;= 5%)
+              </option>
+              <option value="router-neighbor-err-rate-frame-high">
+                High (&gt;= 10%)
+              </option>
+            </optgroup>
+            <optgroup label="Router Neighbor Err Rate Msg">
+              <option value="router-neighbor-err-rate-msg-low">
+                Low (&gt;= 2%)
+              </option>
+              <option value="router-neighbor-err-rate-msg-medium">
+                Medium (&gt;= 5%)
+              </option>
+              <option value="router-neighbor-err-rate-msg-high">
+                High (&gt;= 10%)
+              </option>
+            </optgroup>
+            <optgroup label="Router Neighbor RSS Ave">
+              <option value="router-neighbor-rss-very-low">
+                Bad (&lt; -80 dBm)
+              </option>
+              <option value="router-neighbor-rss-low">
+                Fair (-70 dBm To -80 dBm)
+              </option>
+              <option value="router-neighbor-rss-medium">
+                Good (-60 dBm To -70 dBm)
+              </option>
+              <option value="router-neighbor-rss-high">
+                Excellent (&gt; -60 dBm)
+              </option>
+            </optgroup>
+          </select>
         </div>
       </div>
     </div>
 
-    <!-- Table view -->
-    <div id="view-table">
-      <div class="table-layout">
-        <div class="table-wrap">
-          <table id="data-table" class="sortable">
-            <thead></thead>
-            <tbody></tbody>
-          </table>
+    <!-- View panel -->
+    <div id="panel-view">
+
+      <!-- View toggle -->
+      <div class="view-toggle-bar">
+
+        <button id="btn-topology" class="active" title="Topology view">
+          Topology
+        </button>
+        <button id="btn-table" title="Table view">
+          Table
+        </button>
+        <span class="toggle-bar-separator" aria-hidden="true"></span>
+        <button id="btn-more-info" title="Show all columns in table view">
+          Advanced
+        </button>
+      </div>
+
+      <!-- Status line -->
+      <div class="status-bar">
+        <div id="device_stats" role="status" aria-live="polite" aria-atomic="true">Devices: 0</div>
+        <div id="status" role="status" aria-live="polite">Select a dataset to load.</div>
+      </div>
+
+      <!-- Topology view -->
+      <div id="view-topology">
+        <div class="topology-layout">
+          <div class="topology-canvas-wrap">
+            <div id="topology-view"></div>
+            <div id="legend-toggle" class="legend-toggle">
+              <button id="btn-legend-toggle" title="Toggle link quality legend">
+                Legend
+              </button>
+              <button id="btn-physics" class="active" title="Toggle physics simulation"
+                aria-label="Pause physics simulation">
+                ⏸
+              </button>
+            </div>
+            <div id="lq-legend" class="lq-legend">
+              <span class="lq-legend-title">Link Quality</span>
+              <span class="lq-legend-item lq-high">
+                <span class="lq-legend-line lq-legend-line-high" aria-hidden="true"></span>
+                <span>High (LQ3)</span>
+              </span>
+              <span class="lq-legend-item lq-medium">
+                <span class="lq-legend-line lq-legend-line-medium" aria-hidden="true"></span>
+                <span>Medium (LQ2)</span>
+              </span>
+              <span class="lq-legend-item lq-low">
+                <span class="lq-legend-line lq-legend-line-low" aria-hidden="true"></span>
+                <span>Low (LQ1)</span>
+              </span>
+              <span class="lq-legend-title">Link Type</span>
+              <span class="lq-legend-item lq-parent-child">
+                <span class="lq-legend-line lq-legend-line-parent-child" aria-hidden="true"></span>
+                <span>Parent&#8211;Child</span>
+              </span>
+              <span class="lq-legend-item lq-otbr">
+                <span class="lq-legend-line lq-legend-line-otbr" aria-hidden="true"></span>
+                <span>Router-Neighbor</span>
+              </span>
+            </div>
+          </div>
+
+          <div id="details" class="node-details-panel">
+            <h2>Device details:</h2>
+            <ul id="summary-list" class="node-details-list">
+              <li>Click a node to view its properties.</li>
+            </ul>
+            <h2>Keys:</h2>
+            <ul id="identity-list" class="node-details-list"
+              data-fields="extaddr,rloc16,omrIpv6Address,device_label,name,id">
+            </ul>
+            <h2>Highlights:</h2>
+            <ul id="highlights-list" class="node-details-list"
+              data-fields="br,leader,type,mode.device,ver,thread_stack_version">
+            </ul>
+            <h2>Connections:</h2>
+            <ul id="connections-list" class="node-details-list"
+              data-fields="total_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count">
+            </ul>
+            <h2>Counters:</h2>
+            <ul id="counters-list" class="node-details-list"
+              data-fields="mac_counters.iftotalpkts,mac_counters.iftotaldiscards,mac_counters.iftotalerrors,mle_counters.leaderrole,mle_counters.routerrole,mle_counters.childrole,mle_counters.partitionidchanges,mle_counters.betterpartitionattachattempts,mle_counters.parentchanges,mle_counters.totalparentpartitionchanges,mle_counters.attachattempts,mle_counters.detachedrole,mle_counters.disabledrole,time_statistics.leader_pct,time_statistics.router_pct,time_statistics.child_pct,time_statistics.detached_disabled_pct,time_statistics.detached_pct,time_statistics.disabled_pct">
+            </ul>
+            <h2>Details:</h2>
+            <ul id="details-list" class="node-details-list" data-fields="*">
+            </ul>
+          </div>
         </div>
-        <div id="table-details" class="node-details-panel">
-          <h2>Row Details</h2>
-          <ul id="table-details-list" class="node-details-list">
-            <li>Click a row to view its properties.</li>
-          </ul>
+      </div>
+
+      <!-- Table view -->
+      <div id="view-table">
+        <div class="table-layout">
+          <div class="table-wrap">
+            <table id="data-table" class="sortable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="table-details" class="node-details-panel">
+            <h2>Row Details</h2>
+            <ul id="table-details-list" class="node-details-list">
+              <li>Click a row to view its properties.</li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>
