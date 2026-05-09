@@ -112,7 +112,7 @@ function switchView(newView) {
     btnTopology.classList.add("active");
     btnTable.classList.remove("active");
     btnPhysics.style.display = "inline-block";
-    btnAutoZoom.style.display = "inline-block";
+    if (btnAutoZoom) btnAutoZoom.style.display = "inline-block";
     linkFilterEl.classList.remove("filter-disabled");
     resetNodeDetailsLists();
   } else {
@@ -121,7 +121,7 @@ function switchView(newView) {
     btnTable.classList.add("active");
     btnTopology.classList.remove("active");
     btnPhysics.style.display = "none";
-    btnAutoZoom.style.display = "none";
+    if (btnAutoZoom) btnAutoZoom.style.display = "none";
     linkFilterEl.classList.add("filter-disabled");
     document.getElementById("table-details-list").innerHTML =
       "<li>Click a row to view its properties.</li>";
