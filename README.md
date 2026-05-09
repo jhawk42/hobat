@@ -15,7 +15,7 @@ Thread Mesh Network Dashboard (tdash) is a Python toolkit for fetching thread de
 The tdash docker container hosts the td_cli and web server.
 
 ```
-docker pull ghcr.io/jhawk42/tdash:stable
+docker pull ghcr.io/jhawk42/tdash:latest
 ```
 
 Note: Needs access to the docker socket to enable calls between docker containers via docker exec for tdash container to call into otbr container to execute ot-ctl commands.
@@ -26,7 +26,7 @@ docker run --name=tdash -d \
   --volume $PWD/data:/data \
   --volume /var/run/docker.sock:/var/run/docker.sock \
   --restart=unless-stopped \
-  tdash:stable 
+  tdash:latest 
 ```
 
 ### tdash cli
