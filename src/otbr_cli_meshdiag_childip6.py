@@ -15,7 +15,7 @@ def fetch_meshdiag_child_ip6_for_device(parent_rloc16, router=None, extaddr_map=
     """Collect and parse `meshdiag childip6` output for one parent router."""
 
     output = exec_ot_ctl(f"meshdiag childip6 {parent_rloc16}")
-    logging.info(
+    logging.debug(
         f"[DEBUG] Output of 'meshdiag childip6 {parent_rloc16}':\n{output}\n")
 
     timeout_match = re.search(r"Error\s+(\d+):\s+ResponseTimeout", output)
@@ -150,7 +150,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     save_json_atomic(router_child_ip6_tables, output_filename)
 
     logging.info(f"Meshdiag router childip6 data saved to {output_filename}")
-    print(json.dumps(router_child_ip6_tables, indent=4))
+    logging.debug("Raw meshdiag router childip6 data as JSON:\n%s",
+                  json.dumps(router_child_ip6_tables, indent=4))
 
     return 0
 

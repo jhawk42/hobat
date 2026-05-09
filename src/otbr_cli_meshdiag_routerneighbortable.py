@@ -19,6 +19,9 @@ def fetch_meshdiag_router_neighbor_table_for_device(rloc16, router=None, extaddr
     """
 
     output = exec_ot_ctl(f"meshdiag routerneighbortable {rloc16}")
+    logging.debug(
+        f"[DEBUG] Output of 'meshdiag routerneighbortable {rloc16}':\n{output}\n"
+    )
 
     timeout_match = re.search(r"Error\s+(\d+):\s+ResponseTimeout", output)
     if timeout_match:
@@ -189,7 +192,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.info(
         f"Meshdiag routerneighbortables data saved to {output_path}")
 
-    print(json.dumps(router_neighbor_tables, indent=4))
+    logging.debug("Raw meshdiag routerneighbortables data as JSON:\n%s",
+                  json.dumps(router_neighbor_tables, indent=4))
 
 
 if __name__ == "__main__":

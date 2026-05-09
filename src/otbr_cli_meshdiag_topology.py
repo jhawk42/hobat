@@ -22,6 +22,9 @@ def fetch_meshdiag_topology():
         # This command provides IPv6 addresses and children info for all routers
         output = util_ot_ctl.exec_ot_ctl(
             "meshdiag topology ip6-addrs children")
+        logging.debug(
+            f"[DEBUG] Output of 'meshdiag topology ip6-addrs children':\n{output}\n")
+
         return output
     except subprocess.CalledProcessError as e:
         logging.error(f"Error running ot-ctl: {e}")
@@ -302,7 +305,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "td-otbr-cli-meshdiag-topology.json", td_data_dir)
     save_json_atomic(meshdiag_topology_data, save_path)
 
-    print(json.dumps(meshdiag_topology_data, indent=4))
+    logging.debug("Meshdiag Topology Data:\n%s",
+                  json.dumps(meshdiag_topology_data, indent=4))
 
 
 if __name__ == "__main__":

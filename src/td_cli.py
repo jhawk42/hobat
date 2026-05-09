@@ -441,6 +441,8 @@ def dispatch(
             rc = otbr_cli_network_dataset_info.main(forwarded) or 0
             rc = rc or otbr_cli_router_table.main(forwarded) or 0
             rc = rc or otbr_cli_meshdiag_topology.main(forwarded) or 0
+            rc = rc or otbr_cli_networkdiag_topology.main_multicast_network(
+                forwarded) or 0
             rc = rc or otbr_cli_meshdiag_routerneighbortable.main(
                 forwarded) or 0
             rc = rc or otbr_cli_meshdiag_childtable.main(forwarded) or 0
@@ -519,8 +521,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     # banner
     logging.info("Thread Network Topology Scanner")
     logging.info("Initiating Thread Network Topology Scan...\n")
+    # log args at debug level
+    logging.debug("Parsed arguments: %s", args)
+    # log command='otbr-cli', cli_command='router-table')
+    logging.info(
+        "Command: %s, sub-command: %s",
+        getattr(args, "command", None),
+        getattr(args, "cli_command", None),
+    )
+    # dispatch command
+    rc = dispatch(args, extras, parser)
 
-    return dispatch(args, extras, parser)
+    # log complete message
+    logging.info("complete.")
+
+    return rc
 
 
 if __name__ == "__main__":

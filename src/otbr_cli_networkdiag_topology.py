@@ -32,7 +32,7 @@ def fetch_ipv6_addresses():
     Returns a dictionary mapping RLOC16 to IPv6 addresses.
     """
     output = util_ot_ctl.exec_ot_ctl("meshdiag topology ip6-addrs")
-    logging.info(
+    logging.debug(
         f"[DEBUG] Output of 'meshdiag topology ip6-addrs':\n{output}\n")
 
     ipv6_map = {}
@@ -541,7 +541,8 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
         {
             "extaddr": str,               # from TLV 0, used as dict key
             "rloc16": str,                # from TLV 1, e.g. "0x2000"
-            "device_label": str,          # from extaddr_map or f"Unknown-{rloc16}"
+            # from extaddr_map or f"Unknown-{rloc16}"
+            "device_label": str,
             "thread_stack_version": str,  # from TLV 28 or "Unknown"
             "mode": dict,                 # from parse_mode_flags()
             "ipv6_addrs": list,           # from parse_ipv6_address_list()
@@ -758,7 +759,7 @@ def fetch_network_diag_for_device(
     output = util_ot_ctl.exec_ot_ctl(
         f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}"
     )
-    logging.info(
+    logging.debug(
         f"Diagnostic for RLOC {rloc} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
 
     # Extract Ext Address (TLV 0)
@@ -839,7 +840,7 @@ def fetch_network_diag_multicast(
     )
 
     retries = 3
-    delay_start = 0.25  # between retries 0.25 0.50 1.0 1.5 1.75 2.0 seconds
+    delay_start = 0.1  # between retries 0.10 0.20 0.50 1.0 1.5 1.75 2.0 seconds
     tlv_detail_level = 3
     consolidated = {}  # Keyed by extaddr during collection
 
@@ -857,7 +858,7 @@ def fetch_network_diag_multicast(
                 tlv_values = TLV_VALUES_SIMPLE
 
         logging.info(
-            f"Multicast retry {retry_idx + 1}/{retries} to {multicast_addr} "
+            f"Multicast attempt {retry_idx + 1}/{retries} to {multicast_addr} "
             f"(TLV level {tlv_detail_level}): {tlv_values}"
         )
 
@@ -865,8 +866,8 @@ def fetch_network_diag_multicast(
         output = util_ot_ctl.exec_ot_ctl(
             f"networkdiagnostic get {multicast_addr} {tlv_values}"
         )
-        logging.info(
-            f"[DEBUG] Multicast output (retry {retry_idx + 1}):\n{output}\n")
+        logging.debug(
+            f"[DEBUG] Multicast output (attempt {retry_idx + 1}):\n{output}\n")
 
         # Parse multicast output
         parsed = parse_multicast_diag_output(output, extaddr_map)
@@ -880,15 +881,15 @@ def fetch_network_diag_multicast(
                 consolidated[extaddr] = device_record
 
         logging.info(
-            f"Multicast retry {retry_idx + 1}: {len(parsed)} responses, "
+            f"Multicast attempt {retry_idx + 1}: {len(parsed)} responses, "
             f"{len(consolidated)} unique devices so far"
         )
 
         # Sleep before next retry (but not after the last retry)
         if retry_idx < retries - 1:
             tlv_detail_level = max(1, tlv_detail_level - 1)  # Floor at 1
-            # Increase delay with each retry
-            r_delay = delay_start * (retry_idx + 1)
+
+            r_delay = delay_start
             time.sleep(r_delay)
 
     # Finalize the consolidated dict
@@ -1010,7 +1011,7 @@ def fetch_network_diag_topology(
     for rloc16 in router_rlocs:
         # add retry logic for networkdiagnostic get in case of transient errors or unresponsive nodes, retry N times with some delay before giving up and adding with default values
         retries = 3  # number of retries
-        delay_start = 0.5  # seconds
+        delay_start = 0.1  # seconds
         network_topology_node = None
 
         tlv_detail_level = 3
@@ -1025,7 +1026,7 @@ def fetch_network_diag_topology(
             if r == retries - 1:
                 tlv_detail_level = 1
                 logging.info(
-                    f"Router Node {rloc16} not found after {r} attempts, trying with simple values."
+                    f"Router Node {rloc16} not found after {r} attempts, trying with simple detail TLV set."
                 )
 
             network_topology_node = fetch_network_diag_for_device(
@@ -1040,6 +1041,8 @@ def fetch_network_diag_topology(
             if r < retries - 1:
                 # Increase delay with each retry
                 l_delay = delay_start * (r + 1)
+                logging.info(
+                    f"Waiting for {l_delay} seconds before next retry...{r + 1} of {retries}")
                 time.sleep(l_delay)
 
         if network_topology_node is None:
@@ -1072,6 +1075,12 @@ def fetch_network_diag_topology(
                     )
                 )
             network_topology_map[rloc16] = network_topology_node
+            logging.info(
+                f"Added router node {rloc16} {network_topology_node.get('extaddr', 'Unknown')} {network_topology_node.get('device_label', 'Unknown')} to topology map. {r+1}/{retries} attempts.  TLV detail level: {tlv_detail_level}"
+            )
+            logging.info(
+                f"Poll {len(network_topology_map)} unique devices so far"
+            )
 
             if expand_children:
                 children_rlocs = [
@@ -1102,7 +1111,7 @@ def fetch_network_diag_topology(
                             if cr == child_retries - 1:
                                 child_tlv_detail_level = 1
                                 logging.info(
-                                    f"Child node {child_rloc} not found after {cr} attempts, trying with simple values."
+                                    f"Child node {child_rloc} not found after {cr} attempts, trying with simple detail TLV set."
                                 )
 
                             child_node = fetch_network_diag_for_device(
@@ -1155,53 +1164,66 @@ def fetch_network_diag_topology(
                                 else None
                             )
                             network_topology_map[child_rloc] = child_node
+                            # logging.info(
+                            #    f"Added child node {child_rloc} {child_node.get('extaddr', 'Unknown')} {child_node.get('device_label', 'Unknown')} to topology map. {r}/{retries} attempts.  TLV detail level: {tlv_detail_level}"
+                            # )
+                            logging.info(
+                                f"Added child node {child_rloc} {child_node.get('extaddr', 'Unknown')} {child_node.get('device_label', 'Unknown')} under parent {rloc16} {network_topology_node.get('extaddr', 'Unknown')} {network_topology_node.get('device_label', 'Unknown')} to topology map. {cr+1}/{child_retries} attempts.  TLV detail level: {child_tlv_detail_level}"
+                            )
+                            logging.info(
+                                f"Poll Child {len(network_topology_map)} unique devices so far"
+                            )
+
+    logging.info(
+        f"Poll consolidation complete: {len(network_topology_map)} unique devices found in topology map."
+    )
 
     return network_topology_map
 
 
 def print_network_diag_topology(topology):
     """Prints the network topology to console in tree format."""
-    logging.info("\n--- Thread Network Topology ---\n")
+    logging.debug("\n--- Thread Network Topology ---\n")
     for rloc, data in topology.items():
-        logging.info(f"Parent [RLOC: {rloc}] (Ext: {data['extaddr']})")
-        logging.info(
+        logging.debug(f"Parent [RLOC: {rloc}] (Ext: {data['extaddr']})")
+        logging.debug(
             f"  Thread Stack Version: {data.get('thread_stack_version', 'Unknown')}"
         )
 
         if data.get("ipv6_addrs"):
-            logging.info(f"  IPv6 Addresses ({len(data['ipv6_addrs'])}):")
+            logging.debug(f"  IPv6 Addresses ({len(data['ipv6_addrs'])}):")
             for ipv6 in data["ipv6_addrs"]:
-                logging.info(f"    - {ipv6}")
+                logging.debug(f"    - {ipv6}")
 
         if data.get("omrIpv6Address"):
-            logging.info(f"  OMR IPv6 Address: {data['omrIpv6Address']}")
+            logging.debug(f"  OMR IPv6 Address: {data['omrIpv6Address']}")
 
         if data.get("children"):
-            logging.info(f"  Children ({len(data['children'])}):")
+            logging.debug(f"  Children ({len(data['children'])}):")
             for child in data["children"]:
-                logging.info(
+                logging.debug(
                     f"    - ID: {child['id']}, Timeout: {child.get('timeout')}, Link Quality: {child.get('link_quality')}"
                 )
                 if child.get("mode"):
                     mode = child["mode"]
-                    logging.info(
+                    logging.debug(
                         f"      Mode: RxOnWhenIdle={mode.get('rx_on_when_idle')}, DeviceType={mode.get('device_type')}, NetworkData={mode.get('network_data')}"
                     )
-            logging.info(
+            logging.debug(
                 f"    Total Children: {data.get('total_children', 0)}")
 
         if data.get("mac_counters"):
-            logging.info(f"  MAC Counters:")
+            logging.debug(f"  MAC Counters:")
             for key, value in sorted(data["mac_counters"].items()):
-                logging.info(f"    {key}: {value}")
+                logging.debug(f"    {key}: {value}")
 
         if data.get("mle_counters"):
-            logging.info(f"  MLE Counters:")
+            logging.debug(f"  MLE Counters:")
             for key, value in sorted(data["mle_counters"].items()):
-                logging.info(f"    {key}: {value}")
+                logging.debug(f"    {key}: {value}")
 
         if data.get("time_statistics"):
-            logging.info(f"  Time Statistics:")
+            logging.debug(f"  Time Statistics:")
             time_stats = data["time_statistics"]
             if time_stats:
                 total_time = time_stats.get("tracked_time", 0)
@@ -1215,14 +1237,14 @@ def print_network_diag_topology(topology):
                     if total_time > 0
                     else 0
                 )
-                logging.info(
+                logging.debug(
                     f"    Tracked: {time_stats.get('tracked_time')}, Router: {time_stats.get('router_time')} ({router_pct:.1f}%), Child: {time_stats.get('child_time')} ({child_pct:.1f}%)"
                 )
-                logging.info(
+                logging.debug(
                     f"    Disabled: {time_stats.get('disabled_time')}, Detached: {time_stats.get('detached_time')}, Leader: {time_stats.get('leader_time')}"
                 )
 
-        logging.info("")
+        logging.debug("")
 
 
 def save_topology_to_json_dict(
@@ -1305,7 +1327,7 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
     save_topology_to_json_list(data, save_json_filename)
 
     # Print the raw topology dictionary as JSON to console for debugging
-    print(json.dumps(data, indent=4))
+    logging.debug(json.dumps(data, indent=4))
 
     return 0
 
@@ -1344,6 +1366,8 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
     )
 
     # Print the topology in tree format to console
+    logging.debug("Final multicast neighbors topology data structure:\n%s", json.dumps(
+        data, indent=4))
     print_network_diag_topology(data)
 
     # Save the topology as JSON to file
@@ -1353,7 +1377,8 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
     save_topology_to_json_list(data, save_json_filename)
 
     # Print the raw topology dictionary as JSON to console for debugging
-    print(json.dumps(data, indent=4))
+    logging.debug("Raw multicast neighbors topology data as JSON:\n%s",
+                  json.dumps(data, indent=4))
 
     return 0
 
@@ -1364,8 +1389,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
-
-    logging.info("Initiating Thread Network Topology Scan...\n")
 
     parser = argparse.ArgumentParser(
         description="Thread Network Diagnostic Topology")
@@ -1419,7 +1442,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     # Print the raw topology dictionary as JSON to console for debugging
-    print(json.dumps(networkdiagnostic_topology_data, indent=4))
+    logging.debug("Raw topology data as JSON:\n%s", json.dumps(
+        networkdiagnostic_topology_data, indent=4))
 
 
 if __name__ == "__main__":

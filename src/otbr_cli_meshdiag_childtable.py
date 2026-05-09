@@ -19,7 +19,7 @@ def fetch_meshdiag_child_table_for_device(parent_rloc16, router=None, extaddr_ma
     """Collect and parse `meshdiag childtable` output for one parent router."""
 
     output = exec_ot_ctl(f"meshdiag childtable {parent_rloc16}")
-    logging.info(
+    logging.debug(
         f"[DEBUG] Output of 'meshdiag childtable {parent_rloc16}':\n{output}\n"
     )
 
@@ -219,7 +219,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logging.info(
         f"Meshdiag router childtables data saved to {output_filename}")
-    print(json.dumps(router_child_tables, indent=4))
+    logging.debug("Raw meshdiag router childtables data as JSON:\n%s",
+                  json.dumps(router_child_tables, indent=4))
 
 
 if __name__ == "__main__":

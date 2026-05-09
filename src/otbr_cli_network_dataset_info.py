@@ -18,7 +18,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "td-otbr-cli-network-dataset-info.json", td_data_dir
     )
     save_json_atomic(network_dataset_info, save_json_path)
-    print(json.dumps(network_dataset_info, indent=4))
+    logging.debug("Raw network dataset info as JSON:\n%s",
+                  json.dumps(network_dataset_info, indent=4))
 
 
 if __name__ == "__main__":

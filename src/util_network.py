@@ -16,9 +16,11 @@ def _strip_prefix_mask(prefix):
 def _fetch_prefix_via_ot_ctl(command, debug_label):
     """Runs an ot-ctl prefix command and returns the extracted prefix token."""
     command_output = util_ot_ctl.exec_ot_ctl(command)
+    logging.debug(f"[DEBUG] Output of 'ot-ctl {command}':\n{command_output}\n")
+
     # extract the prefix token from the command output and print it for debugging
     prefix = _parse_prefix_token(command_output)
-    logging.debug(f"[DEBUG] {debug_label}: {prefix}\n")
+    logging.debug((f"[DEBUG] {debug_label}: {prefix}\n"))
     return prefix
 
 
