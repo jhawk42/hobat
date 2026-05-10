@@ -24,7 +24,6 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
         Dictionary mapping rloc16 (hex format) to all node fields with extaddr_hex added
     """
 
-    rloc16_missing_start = 65535  # Default rloc16 value when missing (0xffff)
     out = {}
 
     omr_ipv6addr_prefix = (
@@ -47,11 +46,6 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
     for node in j.get("nodes", []):
         # Conform rloc16 to hex string for consistent mapping
         rloc16_decimal = node.get("rloc16")
-        if rloc16_decimal is None:
-            rloc16_decimal = (
-                rloc16_missing_start  # Default to 0xffff if rloc16 is missing
-            )
-            rloc16_missing_start -= 1  # Decrement for next missing rloc16
 
         # Conform from 'ip_addresses' to "ipv6_addrs" for consistent naming and mapping
         ipv6_addrs = node.get("ip_addresses", [])
@@ -68,17 +62,18 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
             del node["ip_addresses"]
 
         # Enhance node with hex rloc16 and short rloc for easier mapping
-        rloc16_hex = f"0x{rloc16_decimal:04x}"
-        node["rloc16"] = (
-            rloc16_hex  # Patch original rloc16 field to hex string for consistency in the node data structure
-        )
-        node["rloc16_hex"] = rloc16_hex  # Add hex rloc16 for reference
-        node["rloc16_hexshort"] = util_network.strip_rloc16_hex_prefix(
-            rloc16_hex
-        )  # Add short rloc for reference
-        node["rloc16_decimal"] = (
-            rloc16_decimal  # Preserve original decimal rloc16 for reference
-        )
+        if rloc16_decimal is not None:
+            rloc16_hex = f"0x{rloc16_decimal:04x}"
+            node["rloc16"] = (
+                rloc16_hex  # Patch original rloc16 field to hex string for consistency in the node data structure
+            )
+            node["rloc16_hex"] = rloc16_hex  # Add hex rloc16 for reference
+            node["rloc16_hexshort"] = util_network.strip_rloc16_hex_prefix(
+                rloc16_hex
+            )  # Add short rloc for reference
+            node["rloc16_decimal"] = (
+                rloc16_decimal  # Preserve original decimal rloc16 for reference
+            )
 
         node["node_name_eve"] = node.get(
             "name"
@@ -103,7 +98,8 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
                 threadNetworks[0]["extaddr"] = extAddress_hex
 
         # Preserve all fields from the node
-        out[rloc16_hex] = node
+        if rloc16_decimal is not None:
+            out[rloc16_hex] = node
     return out
 
 
@@ -167,6 +163,11 @@ def enhance_eve_routes(eve_network_enhanced_data):
 
         output[rloc16_hex] = node_copy
 
+    node_count = len(output)
+    logging.info(
+        f"Eve consolidation complete: {node_count} records in eve file."
+    )
+
     return output
 
 
@@ -196,7 +197,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     save_json_atomic(eve_data_enhanced, save_json_filename)
 
     # Print the parsed data structure with route names
-    logging.info(json.dumps(eve_data_enhanced, indent=4))
+    logging.debug("Raw eve data as JSON:\n%s",
+                  json.dumps(eve_data_enhanced, indent=4))
 
 
 if __name__ == "__main__":
