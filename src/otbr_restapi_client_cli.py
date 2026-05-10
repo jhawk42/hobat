@@ -409,14 +409,13 @@ def emit_output(result: Any, output_path: str | None) -> None:
         suffix = "\n" if rendered and not rendered.endswith("\n") else ""
         Path(output_path).write_text(rendered + suffix, encoding="utf-8")
 
-    if rendered:
-        logging.info("Output:\n%s", rendered)
+    if not output_path and rendered:
+        print(rendered)
 
 
 def emit_error(exc: Exception) -> None:
     payload = error_to_dict(exc)
-    logging.error("Error occurred:\n%s", json.dumps(
-        payload, indent=4, sort_keys=True))
+    print(json.dumps(payload, indent=4, sort_keys=True), file=sys.stderr)
 
 
 def exit_code_for_exception(exc: Exception) -> int:

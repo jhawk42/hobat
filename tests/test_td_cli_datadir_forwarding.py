@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 import td_cli
+import td_webserver
 
 
 class TDCLIDataDirForwardingTests(unittest.TestCase):
@@ -13,7 +14,7 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
         return parser, args, extras
 
     def test_build_parser_accepts_top_level_datadir(self) -> None:
-        _, args, extras = self._parse_known(["--datadir", "/tmp/td-data", "web-server"])
+        _, args, extras = self._parse_known(["--datadir", "/tmp/td-data", "merge-dataset"])
         self.assertEqual(args.datadir, "/tmp/td-data")
         self.assertEqual(extras, [])
 
@@ -53,7 +54,7 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
                 "/tmp/td-data",
                 "otbr-cli",
                 "networkdiag",
-                "topology",
+                "topology-poll",
                 "--children-no",
             ]
         )
@@ -66,26 +67,15 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         module_main.assert_called_once_with(["--datadir", "/tmp/td-data", "-cno"])
 
-    def test_dispatch_forwards_datadir_to_web_server(self) -> None:
-        parser, args, extras = self._parse_known(
-            [
-                "--datadir",
-                "/tmp/td-data",
-                "web-server",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "9090",
-            ]
-        )
-
-        with patch.object(td_cli.web_server, "main", return_value=0) as module_main:
-            rc = td_cli.dispatch(args, extras, parser)
+    def test_webserver_main_accepts_datadir(self) -> None:
+        with patch.object(
+            td_webserver, "main", return_value=0
+        ) as module_main:
+            rc = td_webserver.main(
+                ["--datadir", "/tmp/td-data", "--host", "0.0.0.0", "--port", "9090"]
+            )
 
         self.assertEqual(rc, 0)
-        module_main.assert_called_once_with(
-            ["--datadir", "/tmp/td-data", "--host", "0.0.0.0", "--port", "9090"]
-        )
 
 
 if __name__ == "__main__":

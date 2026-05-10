@@ -9,6 +9,7 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import td_cli
+import td_webserver
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +42,8 @@ class TestCommonOptions(unittest.TestCase):
         self.assertTrue(args.debug)
 
     def test_output_and_datadir(self):
-        args = _parse(["--output", "out.json", "--datadir", "/tmp/td", "web-server"])
+        args = _parse(["--output", "out.json", "--datadir",
+                      "/tmp/td", "merge-dataset"])
         self.assertEqual(args.output, "out.json")
         self.assertEqual(args.datadir, "/tmp/td")
 
@@ -85,10 +87,9 @@ class TestTopLevelCommands(unittest.TestCase):
         args = _parse(["merge-dataset"])
         self.assertEqual(args.command, "merge-dataset")
 
-    def test_web_server_defaults(self):
-        args = _parse(["web-server"])
-        self.assertEqual(args.command, "web-server")
-        self.assertEqual(args.host, "localhost")
+    def test_webserver_module_defaults(self):
+        parser = td_webserver.build_parser()
+        args = parser.parse_args([])
         self.assertEqual(args.port, 8087)
 
 
@@ -119,18 +120,23 @@ class TestOtbrCliParser(unittest.TestCase):
         self.assertTrue(args.expand_children)
 
     def test_networkdiag_topology_children_no(self):
-        args = _parse(["otbr-cli", "networkdiag", "topology-poll", "--children-no"])
+        args = _parse(["otbr-cli", "networkdiag",
+                      "topology-poll", "--children-no"])
         self.assertFalse(args.expand_children)
 
     def test_networkdiag_topology_multicast_network(self):
-        args = _parse(["otbr-cli", "networkdiag", "topology-multicast-network"])
+        args = _parse(["otbr-cli", "networkdiag",
+                      "topology-multicast-network"])
         self.assertEqual(args.cli_command, "networkdiag")
-        self.assertEqual(args.networkdiag_command, "topology-multicast-network")
+        self.assertEqual(args.networkdiag_command,
+                         "topology-multicast-network")
 
     def test_networkdiag_topology_multicast_neighbors(self):
-        args = _parse(["otbr-cli", "networkdiag", "topology-multicast-neighbors"])
+        args = _parse(["otbr-cli", "networkdiag",
+                      "topology-multicast-neighbors"])
         self.assertEqual(args.cli_command, "networkdiag")
-        self.assertEqual(args.networkdiag_command, "topology-multicast-neighbors")
+        self.assertEqual(args.networkdiag_command,
+                         "topology-multicast-neighbors")
 
     def test_networkdiag_old_topology_command_no_longer_valid(self):
         with self.assertRaises(SystemExit):
@@ -139,7 +145,8 @@ class TestOtbrCliParser(unittest.TestCase):
 
 class TestForwardingParsers(unittest.TestCase):
     def test_restapi_client_extras_preserved(self):
-        args, extras = _parse_known(["otbr-restapi", "client", "diagnostics", "list"])
+        args, extras = _parse_known(
+            ["otbr-restapi", "client", "diagnostics", "list"])
         self.assertEqual(args.restapi_command, "client")
         self.assertEqual(extras, ["diagnostics", "list"])
 
@@ -208,7 +215,7 @@ class TestDispatchOtbrCli(unittest.TestCase):
             td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
         ) as m:
             rc = self._dispatch(
-                ["otbr-cli", "networkdiag", "topology", "--children-no"]
+                ["otbr-cli", "networkdiag", "topology-poll", "--children-no"]
             )
         m.assert_called_once_with(["-cno"])
         self.assertEqual(rc, 0)
@@ -245,7 +252,8 @@ class TestDispatchOtherCommands(unittest.TestCase):
         ]
         with patch.object(td_cli.otbr_restapi_download, "main", return_value=0) as m:
             rc = self._dispatch(argv)
-        m.assert_called_once_with(["--url", "http://localhost:8080/api/v1/diagnostics"])
+        m.assert_called_once_with(
+            ["--url", "http://localhost:8080/api/v1/diagnostics"])
         self.assertEqual(rc, 0)
 
     def test_process_eve_forwards_extras(self):
@@ -262,11 +270,9 @@ class TestDispatchOtherCommands(unittest.TestCase):
         m.assert_called_once_with(["--input1", "a.json"])
         self.assertEqual(rc, 0)
 
-    def test_web_server_forwards_host_port(self):
-        argv = ["web-server", "--host", "0.0.0.0", "--port", "9090"]
-        with patch.object(td_cli.web_server, "main", return_value=0) as m:
-            rc = self._dispatch(argv)
-        m.assert_called_once_with(["--host", "0.0.0.0", "--port", "9090"])
+    def test_webserver_module_accepts_host_port(self):
+        with patch.object(td_webserver, "main", return_value=0) as m:
+            rc = td_webserver.main(["--host", "0.0.0.0", "--port", "9090"])
         self.assertEqual(rc, 0)
 
 

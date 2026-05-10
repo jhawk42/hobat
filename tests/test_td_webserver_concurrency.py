@@ -87,7 +87,7 @@ class TestSameFilenameDeduplication(ConcurrencyTestBase):
         call_count = 0
         barrier = asyncio.Event()
 
-        async def slow_td_cli(args, data_dir):
+        async def slow_td_cli(args, data_dir, *, timeout_s=None):
             nonlocal call_count
             call_count += 1
             await barrier.wait()  # hold until released
@@ -127,7 +127,7 @@ class TestSameSourceSerializationShortCost(ConcurrencyTestBase):
         currently_running = 0
         max_concurrent = 0
 
-        async def controlled_td_cli(args, data_dir):
+        async def controlled_td_cli(args, data_dir, *, timeout_s=None):
             nonlocal currently_running, max_concurrent, running_at_same_time
             currently_running += 1
             if currently_running > 1:
@@ -180,7 +180,7 @@ class TestCrossSourceConcurrency(ConcurrencyTestBase):
         currently_running = 0
         barrier = asyncio.Barrier(2)  # both must reach it simultaneously
 
-        async def concurrent_td_cli(args, data_dir):
+        async def concurrent_td_cli(args, data_dir, *, timeout_s=None):
             nonlocal currently_running, max_concurrent
             currently_running += 1
             max_concurrent = max(max_concurrent, currently_running)
@@ -218,7 +218,7 @@ class TestPostLockFreshnessRecheck(ConcurrencyTestBase):
         first_running = asyncio.Event()
         proceed = asyncio.Event()
 
-        async def slow_td_cli(args, data_dir):
+        async def slow_td_cli(args, data_dir, *, timeout_s=None):
             nonlocal call_count
             call_count += 1
             first_running.set()
@@ -276,7 +276,7 @@ class TestSameSourceSerializationLongCost(ConcurrencyTestBase):
         running_at_same_time = False
         currently_running = 0
 
-        async def controlled_td_cli(args, data_dir):
+        async def controlled_td_cli(args, data_dir, *, timeout_s=None):
             nonlocal currently_running, running_at_same_time
             currently_running += 1
             if currently_running > 1:
@@ -333,7 +333,7 @@ class TestLongCostBlocksShortCostSameSource(ConcurrencyTestBase):
         long_job_started = asyncio.Event()
         long_job_proceed = asyncio.Event()
 
-        async def controlled_td_cli(args, data_dir):
+        async def controlled_td_cli(args, data_dir, *, timeout_s=None):
             nonlocal currently_running, running_at_same_time
             currently_running += 1
             if currently_running > 1:
