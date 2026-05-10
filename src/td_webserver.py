@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Sequence
 
 import aiohttp.web
+import aiohttp_cors
 
 from util_data import (
     format_data_dir_log_message,
@@ -40,6 +41,10 @@ class FileAction:
     # A list of strings is passed as CLI arguments to td_cli.py.
     action: "str | list[str]"
     action_cost_s: int
+    # When True the action is always dispatched via 202 + polling regardless of
+    # action_cost_s.  Use this for any action whose worst-case duration exceeds
+    # the browser-safe synchronous limit (~30 s) but is under _LONG_COST_THRESHOLD_S.
+    force_async: bool = False
 
 
 FILE_ACTION_MAP: dict[str, FileAction] = {
@@ -76,18 +81,24 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-cli", "meshdiag", "topology"], action_cost_s=5
     ),
     # Per-router meshdiag commands — ~1–2 s each router; 90 s for ~50-router network.
+    # force_async=True: 90 s exceeds the browser-safe synchronous limit (~30 s).
     "td-otbr-cli-meshdiag-router-childip6.json": FileAction(
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-cli", "meshdiag", "childip6"], action_cost_s=90
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
+        action=["otbr-cli", "meshdiag", "childip6"],
+        action_cost_s=90,
+        force_async=True,
     ),
     "td-otbr-cli-meshdiag-router-childtables.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
         action=["otbr-cli", "meshdiag", "childtable"],
         action_cost_s=90,  # ~1–2 s per router
+        force_async=True,
     ),
     "td-otbr-cli-meshdiag-router-neighbortables.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
         action=["otbr-cli", "meshdiag", "routerneighbortable"],
         action_cost_s=90,  # ~1–2 s per router
+        force_async=True,
     ),
     # networkdiag — TLV request per router with retries; up to ~8 min on large networks.
     "td-otbr-cli-networkdiag-topology.json": FileAction(
@@ -134,16 +145,19 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
 }
 
 
+# Normalised lowercase lookup table built once at import time so that
+# get_file_action() is O(1) instead of O(n) for every request.
+_FILE_ACTION_MAP_LOWER: dict[str, FileAction] = {
+    k.lower(): v for k, v in FILE_ACTION_MAP.items()
+}
+
+
 def get_file_action(filename: str) -> FileAction | None:
-    """Case-insensitive lookup in FILE_ACTION_MAP.
+    """Case-insensitive O(1) lookup in FILE_ACTION_MAP.
 
     Returns the matching FileAction, or None if the filename is unknown.
     """
-    lower = filename.lower()
-    for key, action in FILE_ACTION_MAP.items():
-        if key.lower() == lower:
-            return action
-    return None
+    return _FILE_ACTION_MAP_LOWER.get(filename.lower())
 
 
 def is_file_fresh(file_path: Path, max_age_s: int) -> bool:
@@ -187,13 +201,14 @@ def parse_request_cache_control(header_value: str | None) -> dict:
     return result
 
 
-def build_cache_response_headers(max_age_s: int) -> dict[str, str]:
+def build_cache_response_headers(max_age_s: int, file_mtime: float) -> dict[str, str]:
     """Return HTTP response headers for cache control.
 
     Returns a dict with ``Cache-Control`` and ``Last-Modified`` headers.
-    ``Last-Modified`` is set to the current time (UTC) in RFC 2822 format.
+    ``Last-Modified`` reflects the file's actual modification time so that
+    conditional GET (``If-Modified-Since``) works correctly.
     """
-    last_modified = email.utils.formatdate(time.time(), usegmt=True)
+    last_modified = email.utils.formatdate(file_mtime, usegmt=True)
     return {
         "Cache-Control": f"max-age={max_age_s}",
         "Last-Modified": last_modified,
@@ -252,10 +267,49 @@ class JobStatus:
     filename: str
     status: str  # "running" | "done" | "error"
     detail: str = ""
+    created_at: float = dataclasses.field(default_factory=time.time)
 
 
 # Registry of in-flight and recently-completed jobs.
 _job_registry: dict[str, JobStatus] = {}
+
+# Anchor set that keeps references to fire-and-forget background Tasks so the
+# garbage collector cannot collect them before they complete (CPython allows GC
+# of Task objects that have no other referents).
+_background_tasks: set["asyncio.Task[None]"] = set()
+
+# Cleanup schedule for the job registry.
+_JOB_TTL_S = 900       # evict completed/errored jobs after 15 minutes
+_CLEANUP_INTERVAL_S = 60  # run eviction sweep every 60 seconds
+
+
+def _on_background_task_done(task: "asyncio.Task[None]") -> None:
+    """Done-callback: discard the task from the anchor set and log any exception."""
+    _background_tasks.discard(task)
+    if not task.cancelled():
+        exc = task.exception()
+        if exc is not None:
+            logging.error(
+                "Background job task raised an unhandled exception: %s",
+                exc,
+                exc_info=exc,
+            )
+
+
+async def _cleanup_job_registry_loop() -> None:
+    """Periodically evict completed/errored jobs older than _JOB_TTL_S."""
+    while True:
+        await asyncio.sleep(_CLEANUP_INTERVAL_S)
+        now = time.time()
+        expired = [
+            jid
+            for jid, j in list(_job_registry.items())
+            if j.status != "running" and (now - j.created_at) > _JOB_TTL_S
+        ]
+        for jid in expired:
+            _job_registry.pop(jid, None)
+        if expired:
+            logging.debug("Evicted %d expired job(s) from registry", len(expired))
 
 
 def _safe_filename(filename: str) -> bool:
@@ -269,8 +323,19 @@ def _safe_filename(filename: str) -> bool:
     )
 
 
-async def run_td_cli(action_args: list[str], data_dir: Path) -> int:
-    """Invoke td_cli.py as a subprocess and return its exit code."""
+async def run_td_cli(
+    action_args: list[str],
+    data_dir: Path,
+    *,
+    timeout_s: float | None = None,
+) -> int:
+    """Invoke td_cli.py as a subprocess and return its exit code.
+
+    *timeout_s* is the hard wall-clock deadline for the subprocess.  When the
+    deadline expires the process is killed and ``asyncio.TimeoutError`` is
+    re-raised to the caller.  Pass ``None`` (the default) to disable the
+    timeout.
+    """
     td_cli_path = Path(__file__).parent / "td_cli.py"  # DD-5
     # logging.debug("Running td_cli with args: %s", " ".join(action_args))
     logging.debug("Spawning subprocess: %s %s %s", sys.executable,
@@ -283,7 +348,22 @@ async def run_td_cli(action_args: list[str], data_dir: Path) -> int:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await process.communicate()
+    try:
+        if timeout_s is not None:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=timeout_s
+            )
+        else:
+            stdout, stderr = await process.communicate()
+    except asyncio.TimeoutError:
+        logging.warning(
+            "td_cli timed out after %.1f s (args: %s); killing process",
+            timeout_s,
+            action_args,
+        )
+        process.kill()
+        await process.communicate()  # reap the child to avoid zombie
+        raise
     if stdout:
         logging.info("td_cli stdout: %s", stdout.decode(errors="replace"))
     if stderr:
@@ -338,8 +418,8 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
             # type: ignore[assignment]
             action_args: list[str] = file_action.action
 
-            # Long-cost actions get 202 + polling job API.
-            if file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
+            # Long-cost actions (or those explicitly marked force_async) get 202 + polling.
+            if file_action.force_async or file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
                 # Re-use an existing job for the same filename if already running.
                 existing_job = next(
                     (
@@ -361,6 +441,7 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
                         jid: str = job_id,
                         args: list[str] = action_args,
                         ddir: Path = data_dir,
+                        tmo: float = file_action.action_cost_s * 1.5,
                     ) -> None:
                         # Acquire per-source lock so that only one long-cost
                         # subprocess per source runs at a time.  The 202 was
@@ -368,7 +449,7 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
                         # is transparent to the caller.
                         source = args[0]
                         async with _get_source_lock(source):
-                            exit_code = await run_td_cli(args, ddir)
+                            exit_code = await run_td_cli(args, ddir, timeout_s=tmo)
                         j = _job_registry.get(jid)
                         if j is None:
                             return
@@ -378,7 +459,9 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
                             j.status = "error"
                             j.detail = f"td_cli exit code {exit_code}"
 
-                    asyncio.ensure_future(_run_job())
+                    _t = asyncio.create_task(_run_job())
+                    _background_tasks.add(_t)
+                    _t.add_done_callback(_on_background_task_done)
 
                 body = json.dumps(
                     {
@@ -391,10 +474,7 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
                     status=202,
                     content_type="application/json",
                     text=body,
-                    headers={
-                        "Location": f"/api/job/{job_id}",
-                        "Access-Control-Allow-Origin": "*",
-                    },
+                    headers={"Location": f"/api/job/{job_id}"},
                 )
 
             # Short-cost action: run synchronously.
@@ -404,9 +484,11 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
                 logging.info("Awaiting existing td_cli task for %s", filename)
                 try:
                     await _active_processes[filename]
-                except Exception:
-                    # Error handling is done by the originating coroutine.
-                    pass
+                except Exception as exc:
+                    logging.warning(
+                        "In-flight task for %s failed: %s", filename, exc
+                    )
+                    raise
                 if not file_path.is_file():
                     raise aiohttp.web.HTTPBadGateway(
                         reason=f"td_cli failed for {filename}"
@@ -423,8 +505,12 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
                     if is_file_fresh(file_path, file_action.max_age_s) and not no_cache:
                         pass  # fall through to serve the now-fresh file
                     else:
-                        task: asyncio.Task[int] = asyncio.ensure_future(
-                            run_td_cli(action_args, data_dir)
+                        task: asyncio.Task[int] = asyncio.create_task(
+                            run_td_cli(
+                                action_args,
+                                data_dir,
+                                timeout_s=file_action.action_cost_s * 1.5,
+                            )
                         )
                         _active_processes[filename] = task
                         try:
@@ -443,18 +529,16 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
         logging.error("Failed to read %s: %s", file_path, exc)
         raise aiohttp.web.HTTPInternalServerError()
 
-    # 2i. Send response with cache and CORS headers.
-    cache_headers = build_cache_response_headers(file_action.max_age_s)
+    # 2i. Send response with cache headers (CORS headers added by middleware).
+    file_mtime = file_path.stat().st_mtime
+    cache_headers = build_cache_response_headers(file_action.max_age_s, file_mtime)
     suffix = file_path.suffix.lower()
     content_type = "application/json" if suffix == ".json" else "application/octet-stream"
 
     return aiohttp.web.Response(
         body=payload,
         content_type=content_type,
-        headers={
-            **cache_headers,
-            "Access-Control-Allow-Origin": "*",  # 2.6 CORS
-        },
+        headers=cache_headers,
     )
 
 
@@ -475,7 +559,6 @@ async def handle_job_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     return aiohttp.web.Response(
         content_type="application/json",
         text=json.dumps(body),
-        headers={"Access-Control-Allow-Origin": "*"},
     )
 
 
@@ -494,7 +577,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Start the Thread Network Topology Dashboard web server.",
     )
     parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Enable verbose (INFO) logging"
+        "--verbose", "-v", action="store_true",
+        help="No-op: INFO logging is the default. Only --debug changes behaviour."
     )
     parser.add_argument(
         "--debug", "-d", action="store_true", help="Enable debug logging"
@@ -538,10 +622,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     app = aiohttp.web.Application()
     app["td_data_dir"] = td_data_dir
 
+    async def _start_cleanup(app: aiohttp.web.Application) -> None:
+        app["_cleanup_task"] = asyncio.create_task(_cleanup_job_registry_loop())
+
+    async def _on_shutdown(app: aiohttp.web.Application) -> None:
+        # Cancel the periodic cleanup task.
+        cleanup_task: asyncio.Task | None = app.get("_cleanup_task")
+        if cleanup_task is not None:
+            cleanup_task.cancel()
+        # Cancel all in-flight background job tasks and wait for them to finish.
+        tasks = list(_background_tasks)
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    app.on_startup.append(_start_cleanup)
+    app.on_shutdown.append(_on_shutdown)
+
+    # Configure CORS before registering routes so OPTIONS preflights are handled
+    # automatically for all API endpoints.  Static assets and the root redirect
+    # are not CORS-wrapped (same-origin by design).
+    cors = aiohttp_cors.setup(
+        app,
+        defaults={
+            "*": aiohttp_cors.ResourceOptions(
+                allow_credentials=False,
+                expose_headers="*",
+                allow_headers="*",
+            )
+        },
+    )
+
     # Specific routes are registered before the static catch-all.
     app.router.add_get("/", handle_root)
-    app.router.add_get("/api/data/{filename}", handle_data_api)
-    app.router.add_get("/api/job/{job_id}", handle_job_api)
+    cors.add(app.router.add_get("/api/data/{filename}", handle_data_api))
+    cors.add(app.router.add_get("/api/job/{job_id}", handle_job_api))
     # Serve all static assets (HTML, JS, CSS, …) from the src/ directory.
     app.router.add_static(
         "/", static_root, show_index=False, follow_symlinks=False)
