@@ -217,3 +217,68 @@ export function getColumnValue(row, columnName) {
   }
   return current;
 }
+
+// ── Shared details-panel renderer ─────────────────────────────────────────────
+
+// Populates the categorised node/row details lists in the given panel.
+// `listIdPrefix` distinguishes panels: "" for topology, "table-" for the table.
+// Each list element must carry a `data-fields` attribute (comma-separated field
+// paths, or "*" for the catch-all remainder list).
+export function populateNodeDetailsLists(details, listIdPrefix = "") {
+  const listIds = [
+    `${listIdPrefix}identity-list`,
+    `${listIdPrefix}highlights-list`,
+    `${listIdPrefix}connections-list`,
+    `${listIdPrefix}counters-list`,
+    `${listIdPrefix}details-list`,
+  ];
+
+  const allUsedFields = new Set();
+  const detailsMap = new Map(details);
+
+  listIds.forEach((listId) => {
+    const listEl = document.getElementById(listId);
+    if (!listEl) return;
+
+    const fieldsAttr = listEl.getAttribute("data-fields");
+    if (!fieldsAttr) {
+      listEl.classList.add("hidden");
+      return;
+    }
+
+    const isCatchAll = fieldsAttr === "*";
+    let fieldNames = [];
+
+    if (!isCatchAll) {
+      fieldNames = fieldsAttr.split(",").map((f) => f.trim());
+      fieldNames.forEach((f) => allUsedFields.add(f));
+    }
+
+    listEl.innerHTML = "";
+
+    if (isCatchAll) {
+      details.forEach(([key, value]) => {
+        if (!allUsedFields.has(key)) {
+          const li = document.createElement("li");
+          li.textContent = `${key}: ${formatValue(value)}`;
+          listEl.appendChild(li);
+        }
+      });
+    } else {
+      fieldNames.forEach((fieldName) => {
+        const value = detailsMap.get(fieldName);
+        if (value !== undefined) {
+          const li = document.createElement("li");
+          li.textContent = `${fieldName}: ${formatValue(value)}`;
+          listEl.appendChild(li);
+        }
+      });
+    }
+
+    if (listEl.children.length === 0) {
+      listEl.classList.add("hidden");
+    } else {
+      listEl.classList.remove("hidden");
+    }
+  });
+}

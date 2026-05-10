@@ -7,6 +7,7 @@ import {
   flattenObjectEntries,
   shouldExcludeDetailPath,
   sortDetailsWithPriority,
+  populateNodeDetailsLists,
 } from "./tdash-utils.js";
 import {
   computeTableCapabilities,
@@ -153,9 +154,7 @@ function renderTableRows(rows, columns) {
       const prev = tbodyEl.querySelector("tr.selected-row");
       if (prev) prev.classList.remove("selected-row");
       tr.classList.add("selected-row");
-      const detailsListEl = document.getElementById("table-details-list");
-      if (!detailsListEl) return;
-      detailsListEl.innerHTML = "";
+      const summaryListEl = document.getElementById("table-summary-list");
       const rawRow = _lastFilteredRows[idx] ?? row;
       const details = sortDetailsWithPriority(
         flattenObjectEntries(rawRow).filter(
@@ -163,15 +162,13 @@ function renderTableRows(rows, columns) {
         ),
       );
       if (details.length === 0) {
-        detailsListEl.innerHTML =
-          "<li>No details available for selected row.</li>";
+        if (summaryListEl)
+          summaryListEl.innerHTML =
+            "<li>No details available for selected row.</li>";
         return;
       }
-      details.forEach(([key, value]) => {
-        const li = document.createElement("li");
-        li.textContent = `${key}: ${formatValue(value)}`;
-        detailsListEl.appendChild(li);
-      });
+      if (summaryListEl) summaryListEl.innerHTML = "";
+      populateNodeDetailsLists(details, "table-");
     });
     fragment.appendChild(tr);
   });
@@ -211,8 +208,10 @@ export function applyTableFilters() {
     ? _tableColumns
     : TABLE_PRIORITY_COLUMNS.filter((col) => _tableColumns.includes(col));
   const detailsListEl = document.getElementById("table-details-list");
-  if (detailsListEl)
-    detailsListEl.innerHTML = "<li>Click a row to view its properties.</li>";
+  if (detailsListEl) detailsListEl.innerHTML = "";
+  const summaryListEl = document.getElementById("table-summary-list");
+  if (summaryListEl)
+    summaryListEl.innerHTML = "<li>Click a row to view its properties.</li>";
   renderTableRows(filtered, activeColumns);
   updateTableStatus(filtered.length, activeColumns.length);
 }

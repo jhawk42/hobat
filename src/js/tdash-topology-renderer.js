@@ -10,6 +10,7 @@ import {
   sortDetailsWithPriority,
   formatValue,
   areNodeIdsEquivalent,
+  populateNodeDetailsLists,
 } from "./tdash-utils.js";
 import {
   computeTopologyCapabilities,
@@ -110,8 +111,8 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
   const effectiveOptions = physicsEnabled
     ? VIS_OPTIONS
     : Object.assign({}, VIS_OPTIONS, {
-        physics: Object.assign({}, VIS_OPTIONS.physics, { enabled: false }),
-      });
+      physics: Object.assign({}, VIS_OPTIONS.physics, { enabled: false }),
+    });
   _visNetwork = new vis.Network(
     container,
     { nodes: nodesDataset, edges: edgesDataset },
@@ -249,73 +250,6 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
       `Loaded ${sourceNames.join(", ")}. Total: ${nodeData.length} nodes, ${edgeData.length} links. ` +
       `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. ` +
       `Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagFilterLabel}.${neighborSuffix}${formatTopologyScale()}`;
-  }
-
-  // ── Helper: Populate categorized node details lists ────────────────────
-
-  function populateNodeDetailsLists(mergedDetails) {
-    // Get field mappings from data-fields attributes in HTML
-    const listConfigs = [
-      { listId: "identity-list", required: false },
-      { listId: "highlights-list", required: false },
-      { listId: "connections-list", required: false },
-      { listId: "counters-list", required: false },
-      { listId: "details-list", required: false },
-    ];
-
-    const allUsedFields = new Set();
-    const detailsMap = new Map(mergedDetails);
-
-    // Process each list category
-    listConfigs.forEach(({ listId, required }) => {
-      const listEl = document.getElementById(listId);
-      if (!listEl) return;
-
-      const fieldsAttr = listEl.getAttribute("data-fields");
-      if (!fieldsAttr) {
-        listEl.classList.add("hidden");
-        return;
-      }
-
-      const isCatchAll = fieldsAttr === "*";
-      let fieldNames = [];
-
-      if (!isCatchAll) {
-        fieldNames = fieldsAttr.split(",").map((f) => f.trim());
-        fieldNames.forEach((f) => allUsedFields.add(f));
-      }
-
-      // Clear the list
-      listEl.innerHTML = "";
-
-      if (isCatchAll) {
-        // For catch-all details-list, include all remaining fields
-        mergedDetails.forEach(([key, value]) => {
-          if (!allUsedFields.has(key)) {
-            const li = document.createElement("li");
-            li.textContent = `${key}: ${formatValue(value)}`;
-            listEl.appendChild(li);
-          }
-        });
-      } else {
-        // For categorized lists, include specified fields in order
-        fieldNames.forEach((fieldName) => {
-          const value = detailsMap.get(fieldName);
-          if (value !== undefined) {
-            const li = document.createElement("li");
-            li.textContent = `${fieldName}: ${formatValue(value)}`;
-            listEl.appendChild(li);
-          }
-        });
-      }
-
-      // Hide empty lists
-      if (listEl.children.length === 0) {
-        listEl.classList.add("hidden");
-      } else {
-        listEl.classList.remove("hidden");
-      }
-    });
   }
 
   // ── Node detail click handler ──────────────────────────────────────────

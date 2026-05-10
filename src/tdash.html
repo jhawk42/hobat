@@ -275,9 +275,28 @@
             </table>
           </div>
           <div id="table-details" class="node-details-panel">
-            <h2>Row Details</h2>
-            <ul id="table-details-list" class="node-details-list">
+            <h2>Device details:</h2>
+            <ul id="table-summary-list" class="node-details-list">
               <li>Click a row to view its properties.</li>
+            </ul>
+            <h2>Keys:</h2>
+            <ul id="table-identity-list" class="node-details-list"
+              data-fields="extaddr,rloc16,omrIpv6Address,device_label,name,id">
+            </ul>
+            <h2>Highlights:</h2>
+            <ul id="table-highlights-list" class="node-details-list"
+              data-fields="br,leader,type,mode.device,ver,thread_stack_version">
+            </ul>
+            <h2>Connections:</h2>
+            <ul id="table-connections-list" class="node-details-list"
+              data-fields="total_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count">
+            </ul>
+            <h2>Counters:</h2>
+            <ul id="table-counters-list" class="node-details-list"
+              data-fields="mac_counters.iftotalpkts,mac_counters.iftotaldiscards,mac_counters.iftotalerrors,mle_counters.leaderrole,mle_counters.routerrole,mle_counters.childrole,mle_counters.partitionidchanges,mle_counters.betterpartitionattachattempts,mle_counters.parentchanges,mle_counters.totalparentpartitionchanges,mle_counters.attachattempts,mle_counters.detachedrole,mle_counters.disabledrole,time_statistics.leader_pct,time_statistics.router_pct,time_statistics.child_pct,time_statistics.detached_disabled_pct,time_statistics.detached_pct,time_statistics.disabled_pct">
+            </ul>
+            <h2>Details:</h2>
+            <ul id="table-details-list" class="node-details-list" data-fields="*">
             </ul>
           </div>
         </div>
