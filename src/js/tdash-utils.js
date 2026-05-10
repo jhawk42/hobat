@@ -158,6 +158,7 @@ export function sortDetailsWithPriority(details) {
     "mode.device",
     "omrIpv6Address",
     "thread_stack_version",
+    "tlv_values",
     "mac_counters.ifinerrors_pct",
     "mac_counters.ifouterrors_pct",
     "mac_counters.ifindiscards_pct",

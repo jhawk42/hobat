@@ -68,7 +68,15 @@ def exec_ot_ctl_dispatch(ot_command, container_name=None):
         return f"Error: command timed out after {_timeout}s"
     except subprocess.CalledProcessError as e:
         err_str = e.stderr.strip() if e.stderr else "Unknown error"
-        logging.error(f"[ERROR] {err_str}")
+
+        # log return code and output for debugging
+        logging.error(
+            f"[ERROR] ot-ctl command failed: Return code: {e.returncode} Error: {err_str}")
+        logging.error(f"[ERROR] Command: {full_command}")
+
+        logging.error(
+            f"[ERROR] Output: {e.output.strip() if e.output else 'No output'}")
+
         return f"Error: {err_str}"
 
 

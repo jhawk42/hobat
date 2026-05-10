@@ -99,13 +99,13 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
     "td-otbr-cli-networkdiag-topology-multicast-network.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
         action=["otbr-cli", "networkdiag", "topology-multicast-network"],
-        action_cost_s=16,  # ~16 seconds with timeout retries
+        action_cost_s=16,  # ~11 seconds with timeout retries
     ),
     # networkdiag topology-multicast-neighbors — TLV request per router with retries; up to ~16 seconds on large networks.
     "td-otbr-cli-networkdiag-topology-multicast-neighbors.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
         action=["otbr-cli", "networkdiag", "topology-multicast-neighbors"],
-        action_cost_s=16,  # ~16 seconds with timeout retries
+        action_cost_s=16,  # ~11 seconds with timeout retries
     ),
     # REST API downloads — single HTTP call, near-instant.
     "td-otbr-restapi-dataset-active.json": FileAction(
@@ -217,9 +217,30 @@ mimetypes.add_type("application/json", ".json")
 mimetypes.add_type("text/css", ".css")
 mimetypes.add_type("text/html", ".html")
 
-# Keyed by filename; value is an asyncio.Task running run_td_cli for that file.
-# Prevents duplicate concurrent subprocess invocations for the same file.
+# Keyed by *filename*; value is the asyncio.Task running run_td_cli for that file.
+# Serves two purposes for the short-cost synchronous path:
+#   1. Deduplication key — detect whether this exact file is already being generated.
+#   2. Awaitable handle — late-arriving requests for the same file can join (await)
+#      the in-flight task instead of spawning a second subprocess.
+# Note: source-level serialization (preventing two different files of the same source
+# from running concurrently) is handled separately via _source_locks / _get_source_lock.
 _active_processes: dict[str, "asyncio.Task[int]"] = {}
+
+# Keyed by source name (action[0], e.g. "otbr-cli", "mdns", "otbr-restapi").
+# Each lock serializes all td_cli subprocesses for that source so that only one
+# runs at a time, preventing hardware/socket conflicts in the underlying CLI layer.
+# TODO: In a long-lived server with many unique source keys this dict could grow
+# unbounded. If that becomes a concern, add periodic cleanup (e.g. evict locks
+# that are not locked and have not been used recently).
+_source_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_source_lock(source: str) -> asyncio.Lock:
+    """Return the asyncio.Lock for *source*, creating it lazily if absent."""
+    if source not in _source_locks:
+        _source_locks[source] = asyncio.Lock()
+    return _source_locks[source]
+
 
 # Phase 4 — async job tracking (DD-2 Option B)
 _LONG_COST_THRESHOLD_S = 300  # actions with cost > this get 202 + polling
@@ -252,7 +273,8 @@ async def run_td_cli(action_args: list[str], data_dir: Path) -> int:
     """Invoke td_cli.py as a subprocess and return its exit code."""
     td_cli_path = Path(__file__).parent / "td_cli.py"  # DD-5
     # logging.debug("Running td_cli with args: %s", " ".join(action_args))
-    logging.debug("Spawning subprocess: %s %s", sys.executable, td_cli_path)
+    logging.debug("Spawning subprocess: %s %s %s", sys.executable,
+                  td_cli_path, " ".join(action_args))
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         str(td_cli_path),
@@ -307,11 +329,16 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
             or not is_file_fresh(file_path, file_action.max_age_s)
         )
         if needs_regen:
-            # 2g / 4.1: Run td_cli; deduplicate concurrent requests for the same file.
+            # 2g: Run td_cli; two-level concurrency control is enforced:
+            #   1. Same-filename deduplication — if this exact file is already being
+            #      generated, join the in-flight task (see _active_processes).
+            #   2. Per-source serialization — only one subprocess per source (e.g.
+            #      "otbr-cli") runs at a time via _source_locks / _get_source_lock.
+            #      Different sources (e.g. "otbr-cli" vs "mdns") run concurrently.
             # type: ignore[assignment]
             action_args: list[str] = file_action.action
 
-            # Phase 4 (task 4.1): long-cost actions get 202 + polling job API.
+            # Long-cost actions get 202 + polling job API.
             if file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
                 # Re-use an existing job for the same filename if already running.
                 existing_job = next(
@@ -335,7 +362,13 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
                         args: list[str] = action_args,
                         ddir: Path = data_dir,
                     ) -> None:
-                        exit_code = await run_td_cli(args, ddir)
+                        # Acquire per-source lock so that only one long-cost
+                        # subprocess per source runs at a time.  The 202 was
+                        # already returned to the client; this serialization
+                        # is transparent to the caller.
+                        source = args[0]
+                        async with _get_source_lock(source):
+                            exit_code = await run_td_cli(args, ddir)
                         j = _job_registry.get(jid)
                         if j is None:
                             return
@@ -364,8 +397,10 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
                     },
                 )
 
-            # Short-cost action: run synchronously (original Phase 2 path).
+            # Short-cost action: run synchronously.
             if filename in _active_processes:
+                # Same file already in flight — join the existing task rather
+                # than spawning a second subprocess.
                 logging.info("Awaiting existing td_cli task for %s", filename)
                 try:
                     await _active_processes[filename]
@@ -377,18 +412,29 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
                         reason=f"td_cli failed for {filename}"
                     )
             else:
-                task: asyncio.Task[int] = asyncio.ensure_future(
-                    run_td_cli(action_args, data_dir)
-                )
-                _active_processes[filename] = task
-                try:
-                    exit_code = await task
-                finally:
-                    _active_processes.pop(filename, None)
-                if exit_code != 0:
-                    raise aiohttp.web.HTTPBadGateway(
-                        reason=f"td_cli failed for {filename} (exit {exit_code})"
-                    )
+                # Different file but possibly same source — acquire the
+                # per-source lock so that only one otbr-cli (or mdns, etc.)
+                # subprocess runs at a time.
+                source = action_args[0]
+                lock = _get_source_lock(source)
+                async with lock:
+                    # Re-check freshness: another coroutine may have generated
+                    # this file while we waited for the source lock.
+                    if is_file_fresh(file_path, file_action.max_age_s) and not no_cache:
+                        pass  # fall through to serve the now-fresh file
+                    else:
+                        task: asyncio.Task[int] = asyncio.ensure_future(
+                            run_td_cli(action_args, data_dir)
+                        )
+                        _active_processes[filename] = task
+                        try:
+                            exit_code = await task
+                        finally:
+                            _active_processes.pop(filename, None)
+                        if exit_code != 0:
+                            raise aiohttp.web.HTTPBadGateway(
+                                reason=f"td_cli failed for {filename} (exit {exit_code})"
+                            )
 
     # 2h. Read file from data_dir.
     try:
