@@ -46,25 +46,34 @@ Common commands:
 
 ```bash
 # OTBR CLI
+python3 -m td_cli otbr-cli network-dataset-info
 python3 -m td_cli otbr-cli router-table
 python3 -m td_cli otbr-cli meshdiag topology
-python3 -m td_cli otbr-cli networkdiag topology
+python3 -m td_cli otbr-cli meshdiag routerneighbortable
+python3 -m td_cli otbr-cli meshdiag childtable
+python3 -m td_cli otbr-cli meshdiag childip6
+python3 -m td_cli otbr-cli meshdiag all
+python3 -m td_cli otbr-cli networkdiag topology-poll
+python3 -m td_cli otbr-cli networkdiag topology-multicast-network
+python3 -m td_cli otbr-cli networkdiag topology-multicast-neighbors
 python3 -m td_cli otbr-cli all
 
 # OTBR REST API
 python3 -m td_cli otbr-restapi download
+python3 -m td_cli otbr-restapi client diagnostics list
+python3 -m td_cli otbr-restapi rawclient diagnostics list
 
 # mDNS
 python3 -m td_cli mdns thread
 
-# Eve processing
-python3 -m td_cli process-eve --input "data/Eve Thread Network Layout.evethreadlayout"
+# Eve processing (reads thread-eve-layout.json from data dir)
+python3 -m td_cli process-eve
 
 # Dataset merge
 python3 -m td_cli merge-dataset
 
-# Dashboard server
-python3 -m td_cli web-server --host localhost --port 8087
+# Dashboard server (separate module)
+python3 -m td_webserver --host localhost --port 8087
 ```
 
 ## Data Directory Model

@@ -36,7 +36,9 @@ The tool collects data from various dataset sources including:
 tdash/
 ├── doc/                        # Documentation
 │   ├── codebase_overview.md    # This file
-│   └── otbr_restapi_clients.md # OTBR REST API client reference
+│   ├── help_td_cli.md          # td_cli --help snapshot
+│   ├── help_td_webserver.md    # td_webserver --help snapshot
+│   └── merge_strategy.md       # Merge strategy reference
 ├── src/                        # All source code
 │   ├── td_cli.py               # Unified CLI dispatcher (top-level entry point)
 │   ├── td_webserver.py         # HTTP web server module
@@ -63,6 +65,9 @@ tdash/
 │   ├── const.py                # Shared constants (data-dir defaults, env var names, filenames)
 │   ├── util_data.py            # Data-directory resolution utilities
 │   ├── util_*.py               # Other shared utility modules
+│   ├── td-fetch.sh             # Shell helper for fetching data
+│   ├── td-monitor-data.sh      # Shell helper for monitoring data files
+│   └── td-scratch.sh           # Scratch/dev shell script
 ├── tests/                      # Test suite and local mock server
 │   ├── test_*.py               # Unit tests
 │   └── td_mock_otbr_restapi_server.py
@@ -138,7 +143,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 | File | Purpose |
 |---|---|
 | `const.py` | Shared constants used across all modules: `TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`, `TD_DATA_DIR_RESOLUTION_SUMMARY`, `TD_DATA_DIR_ARG_HELP`, and `EXTADDR_DEVICE_LABEL_MAP_FILENAME`. |
-| `util_data.py` | Data-directory resolution utilities.  Provides `TDDataDirSource` (enum), `TDDataDirResolution` (dataclass), `resolve_data_dir()`, `resolve_data_dir_with_source()`, `ensure_data_dir_exists()`, `data_file_path()`, and `resolve_data_file_path()`.  Implements the `TD_DATA_DIR` env → `--datadir` CLI → `/data` → `./data` precedence chain. |
+| `util_data.py` | Data-directory resolution utilities.  Provides `TDDataDirSource` (enum), `TDDataDirResolution` (dataclass), `parse_datadir_from_argv()`, `resolve_data_dir()`, `resolve_data_dir_with_source()`, `ensure_data_dir_exists()`, `format_data_dir_log_message()`, `data_file_path()`, `resolve_data_file_path()`, and `save_json_atomic()`.  Implements the `TD_DATA_DIR` env → `--datadir` CLI → `/data` → `./data` precedence chain. |
 | `util_ot_ctl.py` | Low-level wrapper that runs `ot-ctl <command>` inside a named Docker container via `docker exec`.  The container name defaults to `"otbr"` and can be overridden with the `TD_OTBR_CONTAINER_NAME` environment variable. |
 | `util_network.py` | Network helpers: mesh-local and OMR prefix retrieval, IPv6 address prefix formatting, RLOC16 manipulation, OMR address matching in an address list, and full `get_network_dataset_info()` aggregator. |
 | `util_convert.py` | Base64 ↔ hex conversion for 64-bit extended addresses (handles JSON-escaped slashes and optional byte-order reversal for 802.15.4 little-endianness). |
@@ -149,7 +154,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 |---|---|
 | `tdash.html` | Combined single-page dashboard — replaces the former separate topology and tables HTML files.  See [Dashboard Functions](#dashboard-functions) below. |
 | `tdash.css` | Stylesheet for the browser dashboard.  Defines CSS variables for colours, typography, and layout of all dashboard components. |
-| `td_webserver.py` | Async HTTP server built on `aiohttp`.  Binds to `$HOST`/`$PORT` (default `8087`).  Serves `src/` as a static file tree with explicit MIME-type overrides.  Exposes a REST API (`/api/data/{filename}`, `/api/job/{job_id}`) that checks file freshness, invokes `td_cli.py` subprocesses on demand, and streams results back with `Cache-Control` and CORS headers.  Long-running actions (estimated cost > 300 s) return HTTP 202 immediately and complete as background asyncio tasks that clients poll via `/api/job/{job_id}`.  Accepts `--datadir`; has `main(argv)` for standalone use or via `td_cli.py web-server`. |
+| `td_webserver.py` | Async HTTP server built on `aiohttp`.  Binds to `$HOST`/`$PORT` (default `8087`).  Serves `src/` as a static file tree with explicit MIME-type overrides.  Exposes a REST API (`/api/data/{filename}`, `/api/job/{job_id}`) that checks file freshness, invokes `td_cli.py` subprocesses on demand, and streams results back with `Cache-Control` and CORS headers.  Actions with `action_cost_s > 300 s` or `force_async=True` return HTTP 202 immediately and complete as background asyncio tasks that clients poll via `/api/job/{job_id}`.  Accepts `--datadir`; run standalone as `python -m td_webserver`. |
 
 ### Dashboard JavaScript Modules (`js/`)
 
@@ -171,7 +176,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 
 | File | Purpose |
 |---|---|
-| `td_cli.py` | Top-level CLI entry point.  Builds the flattened `argparse` tree and dispatches to the appropriate module `main()`.  Supported top-level commands: `otbr-cli`, `mdns`, `otbr-restapi`, `process-eve`, `merge-dataset`, and `web-server`.  Accepts a global `--datadir` option (overridden by `TD_DATA_DIR` env var) that is forwarded to every subcommand.  Unknown trailing arguments are forwarded via `parse_known_args` to subordinate modules. |
+| `td_cli.py` | Top-level CLI entry point.  Builds the flattened `argparse` tree and dispatches to the appropriate module `main()`.  Supported top-level commands: `otbr-cli`, `mdns`, `otbr-restapi`, `process-eve`, `merge-dataset`.  The web server is a separate module (`td_webserver.py`) and is **not** a `td_cli.py` subcommand.  Accepts a global `--datadir` option (overridden by `TD_DATA_DIR` env var) that is forwarded to every subcommand.  Unknown trailing arguments are forwarded via `parse_known_args` to subordinate modules. |
 
 ---
 
@@ -235,6 +240,7 @@ Defined in `td_webserver.py`.  Each entry is a `FileAction` dataclass:
 | `max_age_s` | `int` | Seconds before a cached file is considered stale |
 | `action` | `"STATIC"` \| `list[str]` | `"STATIC"` = externally managed; list = CLI args forwarded to `td_cli.py` |
 | `action_cost_s` | `int` | Estimated wall-clock seconds for the action; determines 200 vs 202 response |
+| `force_async` | `bool` | When `True`, always dispatches via 202 + polling regardless of `action_cost_s` (used for actions whose worst-case duration exceeds the browser-safe synchronous limit but is under the 300 s threshold) |
 
 ---
 
@@ -408,6 +414,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 | `tests/test_td_merge_identity.py` | Unit tests for `build_merged_records()` in `dataset_merge.py`: verifies that `extaddr`, `extAddress`, and `Extended MAC` aliases all resolve to the same canonical record under `by-identity` merge. |
 | `tests/test_td_cli_argparse.py` | Unit tests for `td_cli.py`: covers `build_parser()`, `dispatch()`, and `main()` — argument parsing, subcommand routing, and exit codes. |
 | `tests/test_td_cli_datadir_forwarding.py` | Unit tests for `--datadir` forwarding: verifies the global `--datadir` argument is correctly parsed and forwarded to subcommand modules. |
+| `tests/test_td_webserver_concurrency.py` | Unit tests for web server concurrency: verifies that long-running background jobs are tracked correctly and that concurrent requests to the same file do not spawn duplicate subprocesses. |
 | `tests/test_tdash_web_routing.py` | Tests for dashboard/web route handling. |
 | `tests/test_util_data.py` | Unit tests for `util_data.py`: data-directory resolution precedence (env var, CLI arg, Docker default, local default) and path normalisation. |
 | `tests/test_phase6_verification_matrix.py` | Integration tests for Phase 6 data-dir resolution edge cases and web server routing behaviour. |
@@ -449,7 +456,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 1. **Collect**: Run individual `otbr_restapi_*`, `otbr_cli_*`, and `mdns_*` scripts directly, or via `td_cli.py`.  Each saves data as a local JSON file (e.g. `td-otbr-restapi-devices.json`, `td-otbr-cli-router-table.json`, `td-eve-topology.json`).
 2. **Normalize**: Each collector normalises its data — RLOC16 values are hex strings (`0x5000`), extended addresses are lowercase hex (`1a7fbf0434e4f043`), field aliases are canonicalised (`extAddress` → `extaddr`).
 3. **Merge**: `dataset_merge.py` (or `td_cli.py merge-dataset`) reads the JSON files and merges records using the configured strategy.  Non-empty values are never silently overwritten; conflicts are recorded.  The output JSON (`td-merged-topology-all.json`) retains a `_source_files` list per row.
-4. **Visualise**: Open `src/tdash.html` in a browser, select a dataset from the dropdown, and explore the interactive topology graph or table.  Alternatively, serve the `src/` directory with `td_cli.py web-server` and open `http://localhost:8087/tdash.html`.
+4. **Visualise**: Open `src/tdash.html` in a browser, select a dataset from the dropdown, and explore the interactive topology graph or table.  Alternatively, serve the `src/` directory with `python src/td_webserver.py` and open `http://localhost:8087/tdash.html`.
 
 ---
 
@@ -497,7 +504,7 @@ python td_cli.py otbr-cli meshdiag topology
 python td_cli.py otbr-cli meshdiag childtable
 python td_cli.py otbr-cli meshdiag childip6
 python td_cli.py otbr-cli meshdiag routerneighbortable
-python td_cli.py otbr-cli networkdiag topology
+python td_cli.py otbr-cli networkdiag topology-poll
 
 # Scan mDNS (optional)
 python td_cli.py mdns thread
@@ -555,18 +562,18 @@ python src/otbr_restapi_raw_client_cli.py node get
 ### Start the web server
 
 ```bash
-# Via unified CLI (serves src/ on http://localhost:8087, data from ./data)
-python src/td_cli.py web-server
+# Run the web server module directly (serves src/ on http://localhost:8087, data from ./data)
+python src/td_webserver.py
 
 # Custom host/port
-python src/td_cli.py web-server --host 0.0.0.0 --port 8090
+python src/td_webserver.py --host 0.0.0.0 --port 8090
 
 # Custom data directory (JSON files served from /path/to/data)
-python src/td_cli.py web-server --datadir /path/to/data
+python src/td_webserver.py --datadir /path/to/data
 
-# Or run the module directly
-python src/td_webserver.py --port 8087
-python src/td_webserver.py --port 8087 --datadir /path/to/data
+# Or as a module (from the repository root)
+python -m td_webserver --port 8087
+python -m td_webserver --port 8087 --datadir /path/to/data
 ```
 
 ### Open the dashboard
