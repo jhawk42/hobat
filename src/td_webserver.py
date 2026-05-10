@@ -371,165 +371,212 @@ async def run_td_cli(
     return process.returncode  # type: ignore[return-value]
 
 
-async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    """GET /api/data/{filename} — serve or generate a data file."""
-    # logging.debug("Received request for %s", request.path)
-    filename = request.match_info["filename"]
+# ---------------------------------------------------------------------------
+# R1b — pure freshness / regen decision (no asyncio, no shared state)
+# ---------------------------------------------------------------------------
 
-    # 2a. Reject path traversal.
+def _should_regenerate(file_path: Path, file_action: "FileAction", no_cache: bool) -> bool:
+    """Return True if the dynamic file needs to be (re)generated.
+
+    True when the file is absent, ``no_cache`` is set, or the cached copy is stale.
+    Callers must not call this for STATIC actions.
+    """
+    return (
+        not file_path.is_file()
+        or no_cache
+        or not is_file_fresh(file_path, file_action.max_age_s)
+    )
+
+
+# ---------------------------------------------------------------------------
+# R1a — pure validation / lookup helper (no asyncio, no shared state)
+# ---------------------------------------------------------------------------
+
+def _resolve_and_validate(filename: str, data_dir: Path) -> tuple["FileAction", Path]:
+    """Validate *filename* and return ``(file_action, file_path)``.
+
+    Raises ``HTTPNotFound`` for path-traversal attempts or unknown filenames.
+    Does NOT check whether the file exists on disk.
+    """
     if not _safe_filename(filename):
         raise aiohttp.web.HTTPNotFound()
-
-    # 2b. Look up FileAction.
     file_action = get_file_action(filename)
     if file_action is None:
         raise aiohttp.web.HTTPNotFound(reason=f"Unknown filename: {filename}")
+    return file_action, data_dir / filename
 
-    # 2c. Parse Cache-Control request header.
+
+# ---------------------------------------------------------------------------
+# R2a — long-cost (202 + polling) dispatch (touches _job_registry, _background_tasks)
+# ---------------------------------------------------------------------------
+
+async def _dispatch_long_cost(
+    filename: str,
+    action_args: list[str],
+    data_dir: Path,
+    file_action: "FileAction",
+) -> aiohttp.web.Response:
+    """Dispatch a long-cost or force_async action via 202 + polling.
+
+    Deduplicates against an already-running job for the same filename.
+    Spawns a background Task anchored in ``_background_tasks``.
+    Returns a 202 Response immediately.
+    Touches: ``_job_registry``, ``_background_tasks``.
+    """
+    # Re-use an existing job for the same filename if already running.
+    existing_job = next(
+        (
+            j for j in _job_registry.values()
+            if j.filename == filename and j.status == "running"
+        ),
+        None,
+    )
+    if existing_job is not None:
+        job_id = existing_job.job_id
+    else:
+        job_id = str(uuid.uuid4())
+        job = JobStatus(job_id=job_id, filename=filename, status="running")
+        _job_registry[job_id] = job
+
+        async def _run_job(
+            jid: str = job_id,
+            args: list[str] = action_args,
+            ddir: Path = data_dir,
+            tmo: float = file_action.action_cost_s * 1.5,
+        ) -> None:
+            # Acquire per-source lock so that only one long-cost subprocess
+            # per source runs at a time.  The 202 was already returned to the
+            # client; this serialization is transparent to the caller.
+            source = args[0]
+            async with _get_source_lock(source):
+                exit_code = await run_td_cli(args, ddir, timeout_s=tmo)
+            j = _job_registry.get(jid)
+            if j is None:
+                return
+            if exit_code == 0:
+                j.status = "done"
+            else:
+                j.status = "error"
+                j.detail = f"td_cli exit code {exit_code}"
+
+        _t = asyncio.create_task(_run_job())
+        _background_tasks.add(_t)
+        _t.add_done_callback(_on_background_task_done)
+
+    body = json.dumps(
+        {"job_id": job_id, "status": "running", "filename": filename}
+    )
+    return aiohttp.web.Response(
+        status=202,
+        content_type="application/json",
+        text=body,
+        headers={"Location": f"/api/job/{job_id}"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# R2b — short-cost (synchronous) dispatch (touches _active_processes, _source_locks)
+# ---------------------------------------------------------------------------
+
+async def _dispatch_short_cost(
+    filename: str,
+    action_args: list[str],
+    data_dir: Path,
+    file_action: "FileAction",
+    no_cache: bool,
+) -> None:
+    """Run a short-cost action synchronously, blocking until td_cli exits.
+
+    Joins an in-flight task for the same filename when one exists.
+    Acquires the per-source lock to prevent concurrent subprocess collisions.
+    Raises ``HTTPBadGateway`` on subprocess failure.
+    Touches: ``_active_processes``, ``_source_locks``.
+    """
+    file_path = data_dir / filename
+
+    if filename in _active_processes:
+        # Same file already in flight — join the existing task rather than
+        # spawning a second subprocess.
+        logging.info("Awaiting existing td_cli task for %s", filename)
+        try:
+            await _active_processes[filename]
+        except Exception as exc:
+            logging.warning("In-flight task for %s failed: %s", filename, exc)
+            raise
+        if not file_path.is_file():
+            raise aiohttp.web.HTTPBadGateway(reason=f"td_cli failed for {filename}")
+    else:
+        # Different file but possibly same source — acquire the per-source lock
+        # so that only one otbr-cli (or mdns, etc.) subprocess runs at a time.
+        source = action_args[0]
+        lock = _get_source_lock(source)
+        async with lock:
+            # Re-check freshness: another coroutine may have generated this
+            # file while we waited for the source lock.
+            if is_file_fresh(file_path, file_action.max_age_s) and not no_cache:
+                pass  # fall through to serve the now-fresh file
+            else:
+                task: asyncio.Task[int] = asyncio.create_task(
+                    run_td_cli(
+                        action_args,
+                        data_dir,
+                        timeout_s=file_action.action_cost_s * 1.5,
+                    )
+                )
+                _active_processes[filename] = task
+                try:
+                    exit_code = await task
+                finally:
+                    _active_processes.pop(filename, None)
+                if exit_code != 0:
+                    raise aiohttp.web.HTTPBadGateway(
+                        reason=f"td_cli failed for {filename} (exit {exit_code})"
+                    )
+
+
+async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """GET /api/data/{filename} — serve or regenerate a data file.
+
+    Validation and lookup  → _resolve_and_validate
+    Freshness decision     → _should_regenerate
+    Long-cost dispatch     → _dispatch_long_cost  (202 + polling)
+    Short-cost dispatch    → _dispatch_short_cost (synchronous)
+    Response building      → _build_file_response
+    """
+    filename = request.match_info["filename"]
+    data_dir: Path = request.app["td_data_dir"]
     cc = parse_request_cache_control(request.headers.get("Cache-Control"))
     no_cache = bool(cc.get("no-cache", False))
 
-    # 2d. Resolve full file path.
-    data_dir: Path = request.app["td_data_dir"]
-    file_path = data_dir / filename
+    file_action, file_path = _resolve_and_validate(filename, data_dir)
 
-    # 2e/2f. Determine whether to regenerate.
-    is_static = file_action.action == "STATIC"
-    file_exists = file_path.is_file()
+    if file_action.action == "STATIC":
+        if not file_path.is_file():
+            raise aiohttp.web.HTTPNotFound(reason=f"Static file not found: {filename}")
+    elif _should_regenerate(file_path, file_action, no_cache):
+        action_args: list[str] = file_action.action  # type: ignore[assignment]
+        if file_action.force_async or file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
+            return await _dispatch_long_cost(filename, action_args, data_dir, file_action)
+        await _dispatch_short_cost(filename, action_args, data_dir, file_action, no_cache)
 
-    if is_static:
-        # STATIC files are managed externally; never regenerated.
-        if not file_exists:
-            raise aiohttp.web.HTTPNotFound(
-                reason=f"Static file not found: {filename}")
-    else:
-        needs_regen = (
-            not file_exists
-            or no_cache
-            or not is_file_fresh(file_path, file_action.max_age_s)
-        )
-        if needs_regen:
-            # 2g: Run td_cli; two-level concurrency control is enforced:
-            #   1. Same-filename deduplication — if this exact file is already being
-            #      generated, join the in-flight task (see _active_processes).
-            #   2. Per-source serialization — only one subprocess per source (e.g.
-            #      "otbr-cli") runs at a time via _source_locks / _get_source_lock.
-            #      Different sources (e.g. "otbr-cli" vs "mdns") run concurrently.
-            # type: ignore[assignment]
-            action_args: list[str] = file_action.action
+    return _build_file_response(file_path, file_action)
 
-            # Long-cost actions (or those explicitly marked force_async) get 202 + polling.
-            if file_action.force_async or file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
-                # Re-use an existing job for the same filename if already running.
-                existing_job = next(
-                    (
-                        j for j in _job_registry.values()
-                        if j.filename == filename and j.status == "running"
-                    ),
-                    None,
-                )
-                if existing_job is not None:
-                    job_id = existing_job.job_id
-                else:
-                    job_id = str(uuid.uuid4())
-                    job = JobStatus(
-                        job_id=job_id, filename=filename, status="running"
-                    )
-                    _job_registry[job_id] = job
 
-                    async def _run_job(
-                        jid: str = job_id,
-                        args: list[str] = action_args,
-                        ddir: Path = data_dir,
-                        tmo: float = file_action.action_cost_s * 1.5,
-                    ) -> None:
-                        # Acquire per-source lock so that only one long-cost
-                        # subprocess per source runs at a time.  The 202 was
-                        # already returned to the client; this serialization
-                        # is transparent to the caller.
-                        source = args[0]
-                        async with _get_source_lock(source):
-                            exit_code = await run_td_cli(args, ddir, timeout_s=tmo)
-                        j = _job_registry.get(jid)
-                        if j is None:
-                            return
-                        if exit_code == 0:
-                            j.status = "done"
-                        else:
-                            j.status = "error"
-                            j.detail = f"td_cli exit code {exit_code}"
+# ---------------------------------------------------------------------------
+# R1c — pure file-read / response builder (no asyncio, no shared state)
+# ---------------------------------------------------------------------------
 
-                    _t = asyncio.create_task(_run_job())
-                    _background_tasks.add(_t)
-                    _t.add_done_callback(_on_background_task_done)
+def _build_file_response(file_path: Path, file_action: "FileAction") -> aiohttp.web.Response:
+    """Read *file_path* from disk and return a Response with cache headers.
 
-                body = json.dumps(
-                    {
-                        "job_id": job_id,
-                        "status": "running",
-                        "filename": filename,
-                    }
-                )
-                return aiohttp.web.Response(
-                    status=202,
-                    content_type="application/json",
-                    text=body,
-                    headers={"Location": f"/api/job/{job_id}"},
-                )
-
-            # Short-cost action: run synchronously.
-            if filename in _active_processes:
-                # Same file already in flight — join the existing task rather
-                # than spawning a second subprocess.
-                logging.info("Awaiting existing td_cli task for %s", filename)
-                try:
-                    await _active_processes[filename]
-                except Exception as exc:
-                    logging.warning(
-                        "In-flight task for %s failed: %s", filename, exc
-                    )
-                    raise
-                if not file_path.is_file():
-                    raise aiohttp.web.HTTPBadGateway(
-                        reason=f"td_cli failed for {filename}"
-                    )
-            else:
-                # Different file but possibly same source — acquire the
-                # per-source lock so that only one otbr-cli (or mdns, etc.)
-                # subprocess runs at a time.
-                source = action_args[0]
-                lock = _get_source_lock(source)
-                async with lock:
-                    # Re-check freshness: another coroutine may have generated
-                    # this file while we waited for the source lock.
-                    if is_file_fresh(file_path, file_action.max_age_s) and not no_cache:
-                        pass  # fall through to serve the now-fresh file
-                    else:
-                        task: asyncio.Task[int] = asyncio.create_task(
-                            run_td_cli(
-                                action_args,
-                                data_dir,
-                                timeout_s=file_action.action_cost_s * 1.5,
-                            )
-                        )
-                        _active_processes[filename] = task
-                        try:
-                            exit_code = await task
-                        finally:
-                            _active_processes.pop(filename, None)
-                        if exit_code != 0:
-                            raise aiohttp.web.HTTPBadGateway(
-                                reason=f"td_cli failed for {filename} (exit {exit_code})"
-                            )
-
-    # 2h. Read file from data_dir.
+    Raises ``HTTPInternalServerError`` on read failure.
+    """
     try:
         payload = file_path.read_bytes()
     except OSError as exc:
         logging.error("Failed to read %s: %s", file_path, exc)
         raise aiohttp.web.HTTPInternalServerError()
 
-    # 2i. Send response with cache headers (CORS headers added by middleware).
     file_mtime = file_path.stat().st_mtime
     cache_headers = build_cache_response_headers(file_action.max_age_s, file_mtime)
     suffix = file_path.suffix.lower()
