@@ -1,4 +1,4 @@
-# Merge Strategy for Thread Node information
+# Merge plan for Thread Node identity value information
 
 The dashboard and Python merge pipeline support canonical identity matching across these fields:
 
