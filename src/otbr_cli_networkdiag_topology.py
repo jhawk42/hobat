@@ -335,12 +335,17 @@ def parse_mac_counters(output):
         # concerning if the total packet count is low, while it may be less significant if the total packet
         # count is very high. By having the total packet count, we can better assess the health and performance
         # of the network and identify potential issues that may need to be addressed.
-        counters["iftotalpkts"] = (
-            counters.get("ifinucastpkts", 0)
-            + counters.get("ifinbroadcastpkts", 0)
-            + counters.get("ifoutucastpkts", 0)
-            + counters.get("ifoutbroadcastpkts", 0)
-        )
+
+        # total IN packets = IN unicast + IN broadcast
+        ifintotalpkts = counters.get("ifinucastpkts", 0) + counters.get("ifinbroadcastpkts", 0)
+        counters["ifintotalpkts"] = ifintotalpkts
+
+        # total OUT packets = OUT unicast + OUT broadcast
+        ifouttotalpkts = counters.get("ifoutucastpkts", 0) + counters.get("ifoutbroadcastpkts", 0)
+        counters["ifouttotalpkts"] = ifouttotalpkts
+
+        # total IN and OUT packets = IN unicast + IN broadcast + OUT unicast + OUT broadcast
+        counters["iftotalpkts"] = ifintotalpkts + ifouttotalpkts
 
         # Errors are from malformed packets, interference, or weak signal strength causing corruption during
         # transmission, while discards typically indicate congestion or buffer overflows where packets are
@@ -356,43 +361,114 @@ def parse_mac_counters(output):
         # counts are significant issues that need to be addressed or if they are just a small fraction of
         # the overall traffic and may not be as concerning.
 
-        # Calculate percentages for each errors, discards counter relative to totalerrors and totaldiscards. To help identify if high error/discard counts are significant or just a small fraction. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of errors or discards, which may indicate more severe issues with signal quality, interference, or congestion that need to be addressed to improve network performance and reliability.
-
-        # Help determine if high error counts are significant
-        # Format the percentages to 1 decimal place when printing
+        # IN Errors
         ifinerrors = counters.get("ifinerrors", 0)
+        # OUT Errors
         ifouterrors = counters.get("ifouterrors", 0)
+        # TOTAL Errors
         totalerrors = ifinerrors + ifouterrors
         counters["iftotalerrors"] = totalerrors
 
-        # calc errors pct relative to total errors to help determine if high error counts are significant or just a small fraction of overall traffic. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of errors, which may indicate more severe issues with signal quality or interference that need to be addressed to improve network performance and reliability.
-        if totalerrors > 0:
-            counters["ifinerrors_pct"] = round(
-                (ifinerrors / totalerrors) * 100, 1)
-            counters["ifouterrors_pct"] = round(
-                (ifouterrors / totalerrors) * 100, 1)
-        else:
-            counters["ifinerrors_pct"] = 0
-            counters["ifouterrors_pct"] = 0
-
-        # Help determine if high discard counts are significant
-        # Format the percentages to 1 decimal place when printing
+        # Discards
+        # IN Discards
         ifindiscards = counters.get("ifindiscards", 0)
+        # OUT Discards
         ifoutdiscards = counters.get("ifoutdiscards", 0)
+        # TOTAL Discards
         totaldiscards = ifindiscards + ifoutdiscards
         counters["iftotaldiscards"] = totaldiscards
 
+        # TOTAL IN  errdiscs (errors and discards)
+        iftotal_inerrdiscs = ifinerrors + ifindiscards
+        counters["iftotal_inerrdiscs"] = iftotal_inerrdiscs
+        
+        # TOTAL OUT errdiscs (errors and discards)
+        iftotal_outerrdiscs = ifouterrors + ifoutdiscards
+        counters["iftotal_outerrdiscs"] = iftotal_outerrdiscs
+
+        # TOTAL IN AND OUT errdiscs (errors and discards)
+        iftotal_errdiscs = totalerrors + totaldiscards
+        counters["iftotal_errdiscs"] = iftotal_errdiscs
+
+        # Calc Ratios
+
+        # TOTAL IN ERRORS DISCARDS
+        if iftotal_inerrdiscs > 0:
+            # Calc ratio of ifinerrors to total in errors and discards
+            ifinerrors_totalinerrdiscs_ratio = round((ifinerrors / iftotal_inerrdiscs), 1)
+            counters["ifinerrors_totalinerrdiscs_ratio"] = ifinerrors_totalinerrdiscs_ratio
+
+            # Calc ratio of ifindiscards to total in errors and discards
+            ifindiscards_totalinerrdiscs_ratio = round((ifindiscards / iftotal_inerrdiscs), 1)
+            counters["ifindiscards_totalinerrdiscs_ratio"] = ifindiscards_totalinerrdiscs_ratio
+
+        # TOTAL OUT ERRORS DISCARDS
+        if iftotal_outerrdiscs > 0:
+            # Calc ratio of ifouterrors to total out errors and discards
+            ifouterrors_totalouterrdiscs_ratio = round((ifouterrors / iftotal_outerrdiscs), 1)
+            counters["ifouterrors_totalouterrdiscs_ratio"] = ifouterrors_totalouterrdiscs_ratio
+
+            # Calc ratio of ifoutdiscards to total out errors and discards
+            ifoutdiscards_totalouterrdiscs_ratio = round((ifoutdiscards / iftotal_outerrdiscs), 1)
+            counters["ifoutdiscards_totalouterrdiscs_ratio"] = ifoutdiscards_totalouterrdiscs_ratio
+
+        # TOTAL IN AND OUT ERRORS DISCARDS
+        if iftotal_errdiscs > 0:
+            # Calc ratio of total errors to total errors and discards
+            iftotalerrors_totalerrdiscs_ratio = round((totalerrors / iftotal_errdiscs), 1)
+            counters["iftotalerrors_totalerrdiscs_ratio"] = iftotalerrors_totalerrdiscs_ratio
+
+            # Calc ratio of total discards to total errors and discards
+            iftotaldiscards_totalerrdiscs_ratio = round((totaldiscards / iftotal_errdiscs), 1)
+            counters["iftotaldiscards_totalerrdiscs_ratio"] = iftotaldiscards_totalerrdiscs_ratio
+
+        # Help determine if high error counts are significant
+        # Format the percentages to 1 decimal place when printing
+        
+        # Calc errors ratio of inerrors to IN total packets
+        if ifintotalpkts > 0:
+            counters["ifinerrors_intotalpkts_ratio"] = round(
+                (ifinerrors / ifintotalpkts), 1)
+
+        # Calc errors ratio of outerrors to OUT total packets
+        if ifouttotalpkts > 0:
+            counters["ifouterrors_outtotalpkts_ratio"] = round(
+                (ifouterrors / ifouttotalpkts), 1)
+
+        # calc errors pct relative to total errors to help determine if high error counts are significant or just a small fraction of overall traffic. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of errors, which may indicate more severe issues with signal quality or interference that need to be addressed to improve network performance and reliability.
+        if totalerrors > 0:
+            counters["ifinerrors_totalerrors_pct"] = round(
+                (ifinerrors / totalerrors) * 100, 1)
+            counters["ifouterrors_totalerrors_pct"] = round(
+                (ifouterrors / totalerrors) * 100, 1)
+        else:
+            counters["ifinerrors_totalerrors_pct"] = 0
+            counters["ifouterrors_totalerrors_pct"] = 0
+
+        # Help determine if high discard counts are significant
+        # Format the percentages to 1 decimal place when printing
+
+        # Calc discards ratio of indiscards to IN total packets
+        if ifintotalpkts > 0:
+            counters["ifindiscards_intotalpkts_ratio"] = round(
+                (ifindiscards / ifintotalpkts), 1)
+
+        # Calc discards ratio of outdiscards to OUT total packets
+        if ifouttotalpkts > 0:
+            counters["ifoutdiscards_outtotalpkts_ratio"] = round(
+                (ifoutdiscards / ifouttotalpkts), 1)
+
         # calc discards pct relative to total discards to help determine if high discard counts are significant or just a small fraction of overall traffic. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of discards, which may indicate more severe issues with congestion or insufficient buffering capacity that need to be addressed to improve network performance and reliability.
         if totaldiscards > 0:
-            counters["ifindiscards_pct"] = round(
+            counters["ifindiscards_totaldiscards_pct"] = round(
                 (ifindiscards / totaldiscards) * 100, 1
             )
-            counters["ifoutdiscards_pct"] = round(
+            counters["ifoutdiscards_totaldiscards_pct"] = round(
                 (ifoutdiscards / totaldiscards) * 100, 1
             )
         else:
-            counters["ifindiscards_pct"] = 0
-            counters["ifoutdiscards_pct"] = 0
+            counters["ifindiscards_totaldiscards_pct"] = 0
+            counters["ifoutdiscards_totaldiscards_pct"] = 0
 
     return counters
 
@@ -506,9 +582,11 @@ def parse_time_statistics(output):
         tracked_time = time_stats.get("tracked_time", 0)
         if tracked_time > 0:
             # Combine detached and disabled time for overall "non-connected" time
-            time_stats["detached_disabled_time"] = time_stats.get(
-                "detached_time", 0
-            ) + time_stats.get("disabled_time", 0)
+            detached_disabled_time = time_stats.get("detached_time", 0) + time_stats.get("disabled_time", 0)
+            time_stats["detached_disabled_time"] = detached_disabled_time
+
+            detached_disabled_time_pct = round((detached_disabled_time / tracked_time) * 100, 1)
+            time_stats["detached_disabled_pct"] = detached_disabled_time_pct
 
             # Calculate percentages for each role time relative to tracked time
             # format the percentages to 1 decimal place when printing
@@ -1375,7 +1453,7 @@ def save_topology_to_json_dict(
 ):
     """Serializes the dictionary to a pretty-printed JSON file."""
     save_json_atomic(data, filename)
-    logging.info(f"Successfully exported topology to {filename}")
+    logging.info(f"Successfully exported {len(data)} records for topology to {filename}")
 
 
 def save_topology_to_json_list(
@@ -1405,7 +1483,7 @@ def save_topology_to_json_list(
         network_map.append(network_node)
 
     save_json_atomic(network_map, filename)
-    logging.info(f"Successfully exported topology to {filename}")
+    logging.info(f"Successfully exported {len(network_map)} records for topology to {filename}")
 
 
 def main_multicast_network(argv: Sequence[str] | None = None) -> int:
