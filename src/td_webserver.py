@@ -309,7 +309,8 @@ async def _cleanup_job_registry_loop() -> None:
         for jid in expired:
             _job_registry.pop(jid, None)
         if expired:
-            logging.debug("Evicted %d expired job(s) from registry", len(expired))
+            logging.debug(
+                "Evicted %d expired job(s) from registry", len(expired))
 
 
 def _safe_filename(filename: str) -> bool:
@@ -504,7 +505,8 @@ async def _dispatch_short_cost(
             logging.warning("In-flight task for %s failed: %s", filename, exc)
             raise
         if not file_path.is_file():
-            raise aiohttp.web.HTTPBadGateway(reason=f"td_cli failed for {filename}")
+            raise aiohttp.web.HTTPBadGateway(
+                reason=f"td_cli failed for {filename}")
     else:
         # Different file but possibly same source — acquire the per-source lock
         # so that only one otbr-cli (or mdns, etc.) subprocess runs at a time.
@@ -552,33 +554,90 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
 
     if file_action.action == "STATIC":
         if not file_path.is_file():
-            raise aiohttp.web.HTTPNotFound(reason=f"Static file not found: {filename}")
+            raise aiohttp.web.HTTPNotFound(
+                reason=f"Static file not found: {filename}")
     elif _should_regenerate(file_path, file_action, no_cache):
         action_args: list[str] = file_action.action  # type: ignore[assignment]
         if file_action.force_async or file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
             return await _dispatch_long_cost(filename, action_args, data_dir, file_action)
         await _dispatch_short_cost(filename, action_args, data_dir, file_action, no_cache)
 
-    return _build_file_response(file_path, file_action)
+    return _build_file_response(file_path, file_action, request)
 
 
 # ---------------------------------------------------------------------------
 # R1c — pure file-read / response builder (no asyncio, no shared state)
 # ---------------------------------------------------------------------------
 
-def _build_file_response(file_path: Path, file_action: "FileAction") -> aiohttp.web.Response:
+def _etag_matches(etag: str, header: str) -> bool:
+    """Weak ETag comparison for If-None-Match (RFC 9110 §8.8.3).
+
+    Returns True if *etag* (bare, unquoted strong ETag value) matches any
+    token in the comma-separated *header* string using weak comparison:
+    the ``W/`` prefix and surrounding quotes are stripped before comparing.
+    A wildcard ``*`` always matches.
+    """
+    header = header.strip()
+    if header == "*":
+        return True
+    for token in header.split(","):
+        token = token.strip()
+        if token.startswith("W/"):
+            token = token[2:]
+        if token.startswith('"') and token.endswith('"'):
+            token = token[1:-1]
+        if token == etag:
+            return True
+    return False
+
+
+def _build_file_response(
+    file_path: Path,
+    file_action: "FileAction",
+    request: aiohttp.web.Request,
+) -> aiohttp.web.Response:
     """Read *file_path* from disk and return a Response with cache headers.
 
-    Raises ``HTTPInternalServerError`` on read failure.
+    Checks ``If-None-Match`` and ``If-Modified-Since`` request headers and
+    returns ``304 Not Modified`` when the cached copy is still valid,
+    avoiding retransmission of unchanged data files.
+    Raises ``HTTPInternalServerError`` on OS failure.
     """
+    try:
+        st = file_path.stat()
+    except OSError as exc:
+        logging.error("Failed to stat %s: %s", file_path, exc)
+        raise aiohttp.web.HTTPInternalServerError()
+
+    file_mtime: float = st.st_mtime
+    etag = f"{st.st_mtime_ns:x}-{st.st_size:x}"
+    cache_headers = build_cache_response_headers(
+        file_action.max_age_s, file_mtime)
+    cache_headers["ETag"] = f'"{etag}"'
+
+    # Conditional GET — If-None-Match takes precedence over If-Modified-Since
+    # per RFC 9110 §13.1.2 and §13.1.3.
+    ifnonematch = request.headers.get("If-None-Match")
+    if ifnonematch is not None:
+        if _etag_matches(etag, ifnonematch):
+            return aiohttp.web.Response(status=304, headers=cache_headers)
+    else:
+        ifsince = request.headers.get("If-Modified-Since")
+        if ifsince:
+            try:
+                modsince_ts = email.utils.parsedate_to_datetime(
+                    ifsince).timestamp()
+                if file_mtime <= modsince_ts:
+                    return aiohttp.web.Response(status=304, headers=cache_headers)
+            except Exception:
+                pass  # malformed header; fall through to serve the full response
+
     try:
         payload = file_path.read_bytes()
     except OSError as exc:
         logging.error("Failed to read %s: %s", file_path, exc)
         raise aiohttp.web.HTTPInternalServerError()
 
-    file_mtime = file_path.stat().st_mtime
-    cache_headers = build_cache_response_headers(file_action.max_age_s, file_mtime)
     suffix = file_path.suffix.lower()
     content_type = "application/json" if suffix == ".json" else "application/octet-stream"
 
@@ -612,6 +671,25 @@ async def handle_job_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
 async def handle_root(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Redirect / to /tdash.html."""
     raise aiohttp.web.HTTPFound("/tdash.html")
+
+
+async def _set_static_cache_headers(
+    request: aiohttp.web.Request,
+    response: aiohttp.web.StreamResponse,
+) -> None:
+    """Add Cache-Control: no-cache to static asset responses.
+
+    Skips /api/ routes (which set their own Cache-Control via
+    build_cache_response_headers) and any response that already carries a
+    Cache-Control header.  Because aiohttp's FileResponse always emits ETag
+    and Last-Modified, no-cache causes browsers to revalidate with a
+    conditional GET (If-None-Match / If-Modified-Since) and receive a 304
+    when the file is unchanged — correct behaviour without wasted bandwidth.
+    """
+    if request.path.startswith("/api/"):
+        return
+    if "Cache-Control" not in response.headers:
+        response.headers["Cache-Control"] = "no-cache"
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +748,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     app["td_data_dir"] = td_data_dir
 
     async def _start_cleanup(app: aiohttp.web.Application) -> None:
-        app["_cleanup_task"] = asyncio.create_task(_cleanup_job_registry_loop())
+        app["_cleanup_task"] = asyncio.create_task(
+            _cleanup_job_registry_loop())
 
     async def _on_shutdown(app: aiohttp.web.Application) -> None:
         # Cancel the periodic cleanup task.
@@ -686,6 +765,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     app.on_startup.append(_start_cleanup)
     app.on_shutdown.append(_on_shutdown)
+    app.on_response_prepare.append(_set_static_cache_headers)
 
     # Configure CORS before registering routes so OPTIONS preflights are handled
     # automatically for all API endpoints.  Static assets and the root redirect
