@@ -1176,12 +1176,27 @@ def fetch_network_diag_topology(
                 )
 
             if expand_children:
+                # 8. Expand child nodes in topology:
+                # - If expand_children is True, loop through child nodes from this router's child table
+                # - Query each child's diagnostic data and add to topology map with parent-child relationships
+                # - Tradeoff: More complete topology but significantly more queries/runtime (especially in large networks)
+                # - Implement retry logic for child node queries similar to parent router logic
+                # - Gather RLOC16 values from child table and perform direct queries for each
+                # - Result: Topology map shows parent-child relationships instead of flat RLOC16-only map
+
                 children_rlocs = [
                     child.get("rloc16")
                     for child in network_topology_node.get("children", [])
                     if child.get("rloc16")
                 ]
                 for child_rloc in children_rlocs:
+                    # Check if child RLOC16 is already in topology map (e.g. from multicast query), 
+                    # if so skip the direct query and use the existing data to populate the topology map 
+                    # for this child node. This way we can avoid unnecessary queries for child nodes that 
+                    # already responded to the multicast request, which can help reduce overall runtime and 
+                    # network load. If we don't have data for this child RLOC16 from the multicast query, then 
+                    # we proceed with the direct query with retries to try to get the data for this child node.
+
                     if child_rloc not in network_topology_map:
                         # If child_node returns none, retry N times with some delay
                         # in case the child sleeping (5 seconds), is not fully attached or responsive yet,
@@ -1192,13 +1207,10 @@ def fetch_network_diag_topology(
                         child_delay_max = 2.0  # max delay between retries
                         child_delay_start = 0.25  # seconds 0.25 0.5 1.0 2.0 seconds
 
-                        # Start with detailed TLV set for child nodes, since they might not respond at all
-                        # if we use a simpler TLV set that doesn't include the child table or IPv6 address list,
-                        # but if we do get responses with the detailed TLV set then we can get more complete information
-                        # about the child nodes. If we don't get responses with the detailed TLV set after a few retries,
-                        # then we can try with a simpler TLV set to at least get some basic information about the child nodes,
-                        # even if we miss some of the details. This way we can maximize our chances of getting some information
-                        # about the child nodes while still trying to get as much detail as possible when they do respond.
+                        # Child TLV strategy - progressively simplify to maximize response rate:
+                        # - Start with detailed TLV (includes child table, IPv6 list); may not respond to simpler sets
+                        # - Fall back to simpler TLV if detailed responses fail; still get basic node info
+                        # - Maximize response chances while attempting to maximize detail level
                         child_tlv_detail_level = 3
 
                         for cr in range(child_retries):
