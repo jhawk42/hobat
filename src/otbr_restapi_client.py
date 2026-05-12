@@ -77,6 +77,146 @@ class OTBRHTTPError(OTBRClientError):
         super().__init__(message)
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 – Action Lifecycle Exception Types
+# ---------------------------------------------------------------------------
+
+class OTBRActionError(OTBRClientError):
+    """Base for action execution errors."""
+
+    def __init__(self, message: str, action_id: str, status: str, action: Any = None) -> None:
+        self.action_id = action_id
+        self.status = status
+        self.action = action
+        super().__init__(message)
+
+
+class OTBRActionFailedError(OTBRActionError):
+    """Raised when an action reaches status 'failed' or 'stopped'."""
+
+
+class OTBRActionTimeoutError(OTBRActionError):
+    """Raised when wait_for_action() exceeds its wall-clock timeout."""
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 – TLV Catalog & Protocol Constants
+# ---------------------------------------------------------------------------
+
+# 1.1 – Standard network-diagnostic TLV name constants (mirrors diagnostic_types.hpp)
+DIAG_TLV_EXT_ADDRESS = "extAddress"        # TLV 0
+DIAG_TLV_RLOC16 = "rloc16"             # TLV 1
+DIAG_TLV_MODE = "mode"               # TLV 2
+DIAG_TLV_TIMEOUT = "timeout"            # TLV 3 (omittable)
+DIAG_TLV_CONNECTIVITY = "connectivity"       # TLV 4
+DIAG_TLV_ROUTE = "route"              # TLV 5
+DIAG_TLV_LEADER_DATA = "leaderData"         # TLV 6
+DIAG_TLV_NETWORK_DATA = "networkData"        # TLV 7
+DIAG_TLV_IPV6_ADDRESSES = "ipv6Addresses"      # TLV 8
+DIAG_TLV_MAC_COUNTERS = "macCounters"        # TLV 9 (resettable)
+DIAG_TLV_BATTERY_LEVEL = "batteryLevel"       # TLV 14 (omittable)
+DIAG_TLV_SUPPLY_VOLTAGE = "supplyVoltage"      # TLV 15 (omittable)
+DIAG_TLV_CHILD_TABLE = "childTable"         # TLV 16
+DIAG_TLV_CHANNEL_PAGES = "channelPages"       # TLV 17
+DIAG_TLV_MAX_CHILD_TIMEOUT = "maxChildTimeout"    # TLV 19 (omittable)
+DIAG_TLV_LDEV_ID_SUBJECT = "lDevIdSubject"      # TLV 20
+DIAG_TLV_IDEV_ID_CERT = "iDevIdCert"         # TLV 21
+DIAG_TLV_EUI64 = "eui64"              # TLV 23
+DIAG_TLV_VERSION = "version"            # TLV 24
+DIAG_TLV_VENDOR_NAME = "vendorName"         # TLV 25
+DIAG_TLV_VENDOR_MODEL = "vendorModel"        # TLV 26
+DIAG_TLV_VENDOR_SW_VERSION = "vendorSwVersion"    # TLV 27
+DIAG_TLV_THREAD_STACK_VER = "threadStackVersion"  # TLV 28
+DIAG_TLV_MLE_COUNTERS = "mleCounters"        # TLV 34 (resettable)
+
+# Mesh-diagnostic query TLVs (require additional otMeshDiag round-trip, slower)
+DIAG_TLV_CHILDREN = "children"           # TLV 29
+DIAG_TLV_CHILD_IPV6_ADDRS = "childIpv6Addresses"  # TLV 30
+DIAG_TLV_ROUTER_NEIGHBORS = "routerNeighbors"    # TLV 31
+
+# 1.2 – Recommended TLV preset lists
+
+# Comprehensive set for per-device diagnostics (no mesh-diag query types)
+RECOMMENDED_DIAGNOSTIC_TLVS: list[str] = [
+    DIAG_TLV_EXT_ADDRESS,
+    DIAG_TLV_RLOC16,
+    DIAG_TLV_MODE,
+    DIAG_TLV_IPV6_ADDRESSES,
+    DIAG_TLV_MAC_COUNTERS,
+    DIAG_TLV_MLE_COUNTERS,
+    DIAG_TLV_CHILD_TABLE,
+    DIAG_TLV_THREAD_STACK_VER,
+    DIAG_TLV_EUI64,
+    DIAG_TLV_VERSION,
+    DIAG_TLV_VENDOR_NAME,
+    DIAG_TLV_VENDOR_MODEL,
+    DIAG_TLV_VENDOR_SW_VERSION,
+    DIAG_TLV_CONNECTIVITY,
+    DIAG_TLV_ROUTE,
+    DIAG_TLV_LEADER_DATA,
+    DIAG_TLV_CHANNEL_PAGES,
+]
+
+# Includes mesh-diag query types for full topology detail (slower)
+FULL_DIAGNOSTIC_TLVS: list[str] = RECOMMENDED_DIAGNOSTIC_TLVS + [
+    DIAG_TLV_CHILDREN,
+    DIAG_TLV_CHILD_IPV6_ADDRS,
+    DIAG_TLV_ROUTER_NEIGHBORS,
+]
+
+# Minimal lightweight set for quick enumeration
+MINIMAL_DIAGNOSTIC_TLVS: list[str] = [
+    DIAG_TLV_EXT_ADDRESS,
+    DIAG_TLV_RLOC16,
+    DIAG_TLV_MODE,
+    DIAG_TLV_IPV6_ADDRESSES,
+    DIAG_TLV_EUI64,
+    DIAG_TLV_THREAD_STACK_VER,
+]
+
+# Mesh-diagnostic TLVs as a frozenset for validation
+MESH_DIAGNOSTIC_TLVS: frozenset[str] = frozenset({
+    DIAG_TLV_CHILDREN,
+    DIAG_TLV_CHILD_IPV6_ADDRS,
+    DIAG_TLV_ROUTER_NEIGHBORS,
+})
+
+# 1.3 – Protocol string constants
+
+
+class ActionStatus:
+    PENDING = "pending"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    STOPPED = "stopped"
+    FAILED = "failed"
+    # addThreadDeviceTask-specific
+    UNDISCOVERED = "undiscovered"
+    ATTEMPTED = "attempted"
+
+    TERMINAL: frozenset[str] = frozenset({COMPLETED, STOPPED, FAILED})
+
+
+class DestinationType:
+    EXTENDED = "extended"   # extAddress (16-char hex)
+    ML_EID_IID = "mlEidIid"   # Mesh-Local EID IID
+
+
+class DeviceType:
+    THREAD_DEVICE = "threadDevice"
+    THREAD_BORDER_ROUTER = "threadBorderRouter"
+
+
+class DiagnosticType:
+    NETWORK_DIAGNOSTICS = "networkDiagnostics"
+    ENERGY_SCAN_REPORT = "energyScanReport"
+
+
+# ---------------------------------------------------------------------------
+# Sentinel used by _resolve_raw: means "use instance default_raw, not an explicit value"
+_RAW_UNSET = object()
+
+
 class OTBRRestApiClient:
     """Minimal OTBR REST client with flattened JSON:API responses by default."""
 
@@ -89,19 +229,28 @@ class OTBRRestApiClient:
         retries: int = DEFAULT_RETRIES,
         accept: str = DEFAULT_ACCEPT,
         user_agent: str = "td-otbr-restapi-client/1.0",
+        default_raw: bool = False,
     ) -> None:
         self.base_url = (base_url or f"http://{host}:{port}").rstrip("/")
         self.timeout = timeout
         self.retries = retries
         self.accept = accept
         self.user_agent = user_agent
+        self._default_raw = default_raw
+
+    def _resolve_raw(self, raw: object) -> bool:
+        """Resolve the raw parameter: if _RAW_UNSET, use the instance default_raw."""
+        if raw is _RAW_UNSET:
+            return self._default_raw
+        return bool(raw)
 
     def get_node(
         self,
         fields: Mapping[str, str | Sequence[str] | None] | None = None,
         *,
-        raw: bool = False,
+        raw: object = _RAW_UNSET,
     ) -> Any:
+        raw = self._resolve_raw(raw)
         return self._request(
             "/api/node",
             query=self._build_fields_query(fields),
@@ -124,7 +273,8 @@ class OTBRRestApiClient:
             raw=True,
         )
 
-    def get_active_dataset(self, *, plain_text: bool = False, raw: bool = False) -> Any:
+    def get_active_dataset(self, *, plain_text: bool = False, raw: object = _RAW_UNSET) -> Any:
+        raw = self._resolve_raw(raw)
         accept = "text/plain" if plain_text else "application/json"
         return self._request("/node/dataset/active", accept=accept, raw=raw)
 
@@ -149,9 +299,10 @@ class OTBRRestApiClient:
         self,
         fields: Mapping[str, str | Sequence[str] | None] | None = None,
         *,
-        raw: bool = False,
+        raw: object = _RAW_UNSET,
         with_meta: bool = False,
     ) -> Any:
+        raw = self._resolve_raw(raw)
         return self._request(
             "/api/devices",
             query=self._build_fields_query(fields),
@@ -164,8 +315,9 @@ class OTBRRestApiClient:
         device_id: str,
         fields: Mapping[str, str | Sequence[str] | None] | None = None,
         *,
-        raw: bool = False,
+        raw: object = _RAW_UNSET,
     ) -> Any:
+        raw = self._resolve_raw(raw)
         return self._request(
             f"/api/devices/{device_id}",
             query=self._build_fields_query(fields),
@@ -176,9 +328,10 @@ class OTBRRestApiClient:
         self,
         fields: Mapping[str, str | Sequence[str] | None] | None = None,
         *,
-        raw: bool = False,
+        raw: object = _RAW_UNSET,
         with_meta: bool = False,
     ) -> Any:
+        raw = self._resolve_raw(raw)
         return self._request(
             "/api/diagnostics",
             query=self._build_fields_query(fields),
@@ -186,16 +339,18 @@ class OTBRRestApiClient:
             with_meta=with_meta,
         )
 
-    def get_diagnostic(self, diagnostics_id: str, *, raw: bool = False) -> Any:
+    def get_diagnostic(self, diagnostics_id: str, *, raw: object = _RAW_UNSET) -> Any:
+        raw = self._resolve_raw(raw)
         return self._request(f"/api/diagnostics/{diagnostics_id}", raw=raw)
 
     def list_actions(
         self,
         fields: Mapping[str, str | Sequence[str] | None] | None = None,
         *,
-        raw: bool = False,
+        raw: object = _RAW_UNSET,
         with_meta: bool = False,
     ) -> Any:
+        raw = self._resolve_raw(raw)
         return self._request(
             "/api/actions",
             query=self._build_fields_query(fields),
@@ -203,12 +358,14 @@ class OTBRRestApiClient:
             with_meta=with_meta,
         )
 
-    def get_action(self, action_id: str, *, raw: bool = False) -> Any:
+    def get_action(self, action_id: str, *, raw: object = _RAW_UNSET) -> Any:
+        raw = self._resolve_raw(raw)
         return self._request(f"/api/actions/{action_id}", raw=raw)
 
     def enqueue_actions(
-        self, tasks: Sequence[Mapping[str, Any]], *, raw: bool = False
+        self, tasks: Sequence[Mapping[str, Any]], *, raw: object = _RAW_UNSET
     ) -> Any:
+        raw = self._resolve_raw(raw)
         payload = {"data": list(tasks)}
         return self._request(
             "/api/actions",
@@ -227,8 +384,9 @@ class OTBRRestApiClient:
         discerner: str | None = None,
         joiner_id: str | None = None,
         timeout: int | None = None,
-        raw: bool = False,
+        raw: object = _RAW_UNSET,
     ) -> Any:
+        raw = self._resolve_raw(raw)
         identity_fields = [value for value in (
             eui, discerner, joiner_id) if value]
         if len(identity_fields) != 1:
@@ -260,8 +418,9 @@ class OTBRRestApiClient:
         types: Sequence[str | int],
         timeout: int | None = None,
         destination_type: str | None = None,
-        raw: bool = False,
+        raw: object = _RAW_UNSET,
     ) -> Any:
+        raw = self._resolve_raw(raw)
         self._validate_non_empty_string(destination, "destination")
         attributes = self._build_destination_attributes(
             destination=destination,
@@ -283,8 +442,9 @@ class OTBRRestApiClient:
         destination: str | None = None,
         timeout: int | None = None,
         destination_type: str | None = None,
-        raw: bool = False,
+        raw: object = _RAW_UNSET,
     ) -> Any:
+        raw = self._resolve_raw(raw)
         attributes: dict[str, Any] = {
             "types": self._validate_non_empty_sequence(types, "types")
         }
@@ -313,8 +473,9 @@ class OTBRRestApiClient:
         scan_duration: int,
         timeout: int,
         destination_type: str | None = None,
-        raw: bool = False,
+        raw: object = _RAW_UNSET,
     ) -> Any:
+        raw = self._resolve_raw(raw)
         self._validate_non_empty_string(destination, "destination")
         attributes = self._build_destination_attributes(
             destination=destination,
@@ -344,8 +505,9 @@ class OTBRRestApiClient:
         max_retries: int,
         device_count: int,
         timeout: int,
-        raw: bool = False,
+        raw: object = _RAW_UNSET,
     ) -> Any:
+        raw = self._resolve_raw(raw)
         attributes = {
             "maxAge": max_age,
             "maxRetries": max_retries,
@@ -357,6 +519,454 @@ class OTBRRestApiClient:
             [{"type": "updateDeviceCollectionTask", "attributes": attributes}],
             raw=raw,
         )
+
+    # -----------------------------------------------------------------------
+    # Phase 2 – Action Lifecycle: Polling Helper
+    # -----------------------------------------------------------------------
+
+    def wait_for_action(
+        self,
+        action_id: str,
+        *,
+        poll_interval: float = 2.0,
+        poll_timeout: float = 120.0,
+        raise_on_stopped: bool = True,
+        raw: object = _RAW_UNSET,
+    ) -> Any:
+        """
+        Poll GET /api/actions/{action_id} until the action reaches a terminal
+        status (completed, stopped, or failed), then return the action item.
+
+        Args:
+            action_id: UUID returned when the action was enqueued.
+            poll_interval: Seconds between polls (default 2.0).
+            poll_timeout: Wall-clock seconds before raising OTBRActionTimeoutError
+                          (default 120.0).
+            raise_on_stopped: If True (default), raise OTBRActionFailedError when
+                              status is 'stopped' or 'failed'.
+            raw: If True, return raw JSON:API envelope; else return flattened item.
+
+        Returns:
+            The action item dict at terminal state.
+
+        Raises:
+            OTBRActionTimeoutError: poll_timeout exceeded.
+            OTBRActionFailedError: Action stopped or failed (when raise_on_stopped=True).
+            OTBRConnectionError, OTBRHTTPError, OTBRInvalidResponseError: propagated.
+        """
+        raw = self._resolve_raw(raw)
+        deadline = time.monotonic() + poll_timeout
+
+        while True:
+            action = self.get_action(action_id, raw=raw)
+
+            if raw:
+                data_node = action.get("data") if isinstance(
+                    action, dict) else None
+                attrs = data_node.get("attributes", {}) if isinstance(
+                    data_node, dict) else {}
+                status = attrs.get("status")
+            else:
+                status = action.get("status") if isinstance(
+                    action, dict) else None
+
+            if status in ActionStatus.TERMINAL:
+                if raise_on_stopped and status in (ActionStatus.STOPPED, ActionStatus.FAILED):
+                    raise OTBRActionFailedError(
+                        f"Action {action_id} ended with status '{status}'",
+                        action_id=action_id,
+                        status=status,
+                        action=action,
+                    )
+                return action
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise OTBRActionTimeoutError(
+                    f"Action {action_id} did not complete within {poll_timeout}s",
+                    action_id=action_id,
+                    status=status or "unknown",
+                    action=action,
+                )
+
+            time.sleep(min(poll_interval, remaining))
+
+    # -----------------------------------------------------------------------
+    # Phase 3 – Device Collection Workflow Methods
+    # -----------------------------------------------------------------------
+
+    def trigger_and_wait_device_collection(
+        self,
+        *,
+        device_count: int = 50,
+        max_age: int = 30,
+        max_retries: int = 5,
+        task_timeout: int = 60,
+        poll_interval: float = 3.0,
+        poll_timeout: float = 90.0,
+        raise_on_stopped: bool = False,
+        raw: object = _RAW_UNSET,
+    ) -> Any:
+        """
+        Enqueue an updateDeviceCollectionTask, wait for completion, and return
+        the action item.
+
+        Does NOT return the device list itself — call list_devices() after this
+        to retrieve devices. Use fetch_device_collection() for the combined
+        enqueue + wait + list workflow.
+
+        Args:
+            device_count: Maximum number of devices to discover.
+            max_age: Maximum age (seconds) for cached device entries.
+            max_retries: Maximum retries per device.
+            task_timeout: Task timeout passed to the server (seconds).
+            poll_interval: Seconds between status polls.
+            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError.
+            raise_on_stopped: If True, raise OTBRActionFailedError on stopped/failed.
+            raw: Return raw action item.
+        """
+        raw = self._resolve_raw(raw)
+        enqueued = self.enqueue_update_device_collection_task(
+            max_age=max_age,
+            max_retries=max_retries,
+            device_count=device_count,
+            timeout=task_timeout,
+            raw=False,
+        )
+        # enqueued is a list of flattened action items
+        action_id: str = enqueued[0]["id"]
+
+        return self.wait_for_action(
+            action_id,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            raise_on_stopped=raise_on_stopped,
+            raw=raw,
+        )
+
+    def fetch_device_collection(
+        self,
+        *,
+        device_count: int = 50,
+        max_age: int = 30,
+        max_retries: int = 5,
+        task_timeout: int = 60,
+        poll_interval: float = 3.0,
+        poll_timeout: float = 90.0,
+        fields: Mapping[str, str | Sequence[str] | None] | None = None,
+        with_meta: bool = False,
+        raw: object = _RAW_UNSET,
+    ) -> Any:
+        """
+        Convenience workflow: enqueue updateDeviceCollectionTask → wait for
+        completion → return the device list.
+
+        Equivalent to:
+            trigger_and_wait_device_collection(...)
+            list_devices(fields=fields, with_meta=with_meta, raw=raw)
+        """
+        raw = self._resolve_raw(raw)
+        try:
+            action = self.trigger_and_wait_device_collection(
+                device_count=device_count,
+                max_age=max_age,
+                max_retries=max_retries,
+                task_timeout=task_timeout,
+                poll_interval=poll_interval,
+                poll_timeout=poll_timeout,
+                raise_on_stopped=False,
+                raw=False,
+            )
+            status = action.get("status") if isinstance(action, dict) else None
+            if status in (ActionStatus.STOPPED, ActionStatus.FAILED):
+                logging.warning(
+                    "updateDeviceCollectionTask ended with status '%s'; "
+                    "returning partial device list",
+                    status,
+                )
+        except OTBRActionTimeoutError as exc:
+            logging.warning(
+                "updateDeviceCollectionTask timed out (%s); "
+                "returning partial device list",
+                exc,
+            )
+
+        return self.list_devices(fields=fields, with_meta=with_meta, raw=raw)
+
+    # -----------------------------------------------------------------------
+    # Phase 4 – Network Diagnostics Workflow Methods
+    # -----------------------------------------------------------------------
+
+    def fetch_device_diagnostics(
+        self,
+        device_id: str,
+        *,
+        types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
+        destination_type: str = DestinationType.EXTENDED,
+        task_timeout: int = 93,
+        poll_interval: float = 2.0,
+        poll_timeout: float = 120.0,
+        raw: object = _RAW_UNSET,
+    ) -> Any:
+        """
+        Enqueue getNetworkDiagnosticTask for device_id, wait for completion,
+        then fetch and return the resulting diagnostic item from /api/diagnostics.
+
+        Args:
+            device_id: Device extAddress (16-char hex), the item ID from /api/devices.
+            types: TLV name list. Defaults to RECOMMENDED_DIAGNOSTIC_TLVS.
+            destination_type: Addressing mode. Use DestinationType.EXTENDED (default)
+                              for device extAddress IDs.
+            task_timeout: Server-side task timeout in seconds (default 93s).
+            poll_interval: Seconds between action status polls.
+            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError is raised.
+            raw: If True, return raw JSON:API envelope for the diagnostic item.
+
+        Returns:
+            Flattened diagnostic item dict (or raw envelope when raw=True).
+
+        Raises:
+            OTBRActionFailedError: Action stopped or failed.
+            OTBRActionTimeoutError: Polling timed out.
+            OTBRHTTPError: HTTP-level error from server.
+            OTBRConnectionError: Server unreachable.
+        """
+        raw = self._resolve_raw(raw)
+        enqueued = self.enqueue_get_network_diagnostic_task(
+            destination=device_id,
+            types=list(types),
+            timeout=task_timeout,
+            destination_type=destination_type,
+            raw=False,
+        )
+        action_id: str = enqueued[0]["id"]
+
+        action = self.wait_for_action(
+            action_id,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            raise_on_stopped=True,
+        )
+
+        result_id = extract_action_result_id(action)
+        if result_id is None:
+            raise OTBRInvalidResponseError(
+                f"Completed action {action_id} has no result relationship"
+            )
+
+        return self.get_diagnostic(result_id, raw=raw)
+
+    def fetch_all_devices_diagnostics(
+        self,
+        device_ids: Sequence[str],
+        *,
+        types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
+        destination_type: str = DestinationType.EXTENDED,
+        task_timeout: int = 93,
+        poll_interval: float = 2.0,
+        poll_timeout: float = 120.0,
+        skip_on_failure: bool = True,
+        raw: object = _RAW_UNSET,
+    ) -> list[Any]:
+        """
+        Fetch diagnostics for a list of device IDs, one device at a time.
+
+        Args:
+            device_ids: List of device extAddress strings.
+            types: TLV name list.
+            destination_type: Addressing mode for all devices.
+            task_timeout: Server-side task timeout per device.
+            poll_interval: Seconds between polls per device action.
+            poll_timeout: Wall-clock seconds per device before timeout.
+            skip_on_failure: If True (default), log and skip devices that fail or
+                             time out; if False, raise on first failure.
+            raw: Return raw diagnostic envelopes.
+
+        Returns:
+            List of diagnostic items, one per successfully queried device.
+            Failed devices are omitted when skip_on_failure=True.
+        """
+        raw = self._resolve_raw(raw)
+        results: list[Any] = []
+        for device_id in device_ids:
+            try:
+                diag = self.fetch_device_diagnostics(
+                    device_id,
+                    types=types,
+                    destination_type=destination_type,
+                    task_timeout=task_timeout,
+                    poll_interval=poll_interval,
+                    poll_timeout=poll_timeout,
+                    raw=raw,
+                )
+                results.append(diag)
+            except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+                if not skip_on_failure:
+                    raise
+                logging.warning(
+                    "Skipping device %s: %s", device_id, exc
+                )
+        return results
+
+    def fetch_network_diagnostics_all_devices(
+        self,
+        *,
+        update_devices: bool = True,
+        device_count: int = 50,
+        types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
+        destination_type: str = DestinationType.EXTENDED,
+        task_timeout: int = 93,
+        poll_interval: float = 2.0,
+        poll_timeout: float = 120.0,
+        skip_on_failure: bool = True,
+        raw: object = _RAW_UNSET,
+    ) -> tuple[list[Any], list[Any]]:
+        """
+        Full workflow:
+        1. Optionally trigger updateDeviceCollectionTask and wait for it.
+        2. GET /api/devices to get the device list.
+        3. For each device, enqueue getNetworkDiagnosticTask, wait, fetch result.
+
+        Returns:
+            Tuple of (devices, diagnostics):
+            - devices: list of device items from /api/devices
+            - diagnostics: list of diagnostic items, one per device that responded
+        """
+        raw = self._resolve_raw(raw)
+        if update_devices:
+            devices = self.fetch_device_collection(
+                device_count=device_count, raw=False)
+        else:
+            devices = self.list_devices(raw=False)
+
+        device_ids = [d["id"]
+                      for d in devices if isinstance(d, dict) and d.get("id")]
+
+        diagnostics = self.fetch_all_devices_diagnostics(
+            device_ids,
+            types=types,
+            destination_type=destination_type,
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            skip_on_failure=skip_on_failure,
+            raw=raw,
+        )
+
+        return devices, diagnostics
+
+    # -----------------------------------------------------------------------
+    # Phase 4.4 – Mesh Diagnostics Method
+    # -----------------------------------------------------------------------
+
+    def fetch_mesh_diagnostics(
+        self,
+        device_id: str,
+        *,
+        types: Sequence[str] = (
+            DIAG_TLV_CHILDREN,
+            DIAG_TLV_CHILD_IPV6_ADDRS,
+            DIAG_TLV_ROUTER_NEIGHBORS,
+        ),
+        destination_type: str = DestinationType.EXTENDED,
+        task_timeout: int = 300,
+        poll_interval: float = 3.0,
+        poll_timeout: float = 360.0,
+        raw: object = _RAW_UNSET,
+    ) -> Any:
+        """
+        Enqueue getNetworkDiagnosticTask restricted to mesh-diagnostic TLVs
+        (children, childIpv6Addresses, routerNeighbors), wait for completion,
+        then fetch and return the resulting diagnostic item.
+
+        These TLVs require an additional otMeshDiag round-trip on the server and
+        have higher latency than standard diagnostic TLVs. The default task_timeout
+        (300s) and poll_timeout (360s) reflect this.
+
+        Args:
+            device_id: Device extAddress (16-char hex), the item ID from /api/devices.
+            types: Subset of {"children", "childIpv6Addresses", "routerNeighbors"}.
+                   Defaults to all three. Passing any other TLV name raises OTBRUsageError.
+            destination_type: Addressing mode. Defaults to DestinationType.EXTENDED.
+            task_timeout: Server-side task timeout in seconds (default 300).
+            poll_interval: Seconds between action status polls (default 3.0).
+            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError (default 360.0).
+            raw: If True, return raw JSON:API envelope.
+
+        Returns:
+            Flattened diagnostic item dict containing requested mesh-diagnostic fields
+            (or raw envelope when raw=True).
+
+        Raises:
+            OTBRUsageError: Any item in types is not a mesh-diagnostic TLV.
+            OTBRActionFailedError: Action stopped or failed.
+            OTBRActionTimeoutError: Polling timed out.
+            OTBRHTTPError, OTBRConnectionError: propagated from HTTP layer.
+        """
+        raw = self._resolve_raw(raw)
+        invalid = [t for t in types if t not in MESH_DIAGNOSTIC_TLVS]
+        if invalid:
+            raise OTBRUsageError(
+                f"Invalid mesh-diagnostic TLV(s): {invalid!r}. "
+                f"Allowed: {sorted(MESH_DIAGNOSTIC_TLVS)!r}"
+            )
+        if not types:
+            raise OTBRUsageError(
+                "types must contain at least one mesh-diagnostic TLV")
+
+        return self.fetch_device_diagnostics(
+            device_id,
+            types=list(types),
+            destination_type=destination_type,
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            raw=raw,
+        )
+
+    def fetch_mesh_diagnostics_all_devices(
+        self,
+        device_ids: Sequence[str],
+        *,
+        types: Sequence[str] = (
+            DIAG_TLV_CHILDREN,
+            DIAG_TLV_CHILD_IPV6_ADDRS,
+            DIAG_TLV_ROUTER_NEIGHBORS,
+        ),
+        destination_type: str = DestinationType.EXTENDED,
+        task_timeout: int = 300,
+        poll_interval: float = 3.0,
+        poll_timeout: float = 360.0,
+        skip_on_failure: bool = True,
+        raw: object = _RAW_UNSET,
+    ) -> list[Any]:
+        """
+        Fetch mesh diagnostics for a list of device IDs, one device at a time.
+
+        Thin wrapper: iterates device_ids and calls fetch_mesh_diagnostics() for each.
+        Same skip_on_failure semantics as fetch_all_devices_diagnostics().
+        """
+        raw = self._resolve_raw(raw)
+        results: list[Any] = []
+        for device_id in device_ids:
+            try:
+                diag = self.fetch_mesh_diagnostics(
+                    device_id,
+                    types=types,
+                    destination_type=destination_type,
+                    task_timeout=task_timeout,
+                    poll_interval=poll_interval,
+                    poll_timeout=poll_timeout,
+                    raw=raw,
+                )
+                results.append(diag)
+            except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+                if not skip_on_failure:
+                    raise
+                logging.warning(
+                    "Skipping device %s (mesh diagnostics): %s", device_id, exc
+                )
+        return results
 
     def _request(
         self,
@@ -663,6 +1273,43 @@ class OTBRRestApiClient:
             return None
 
 
+def extract_action_result_id(action: Any) -> str | None:
+    """
+    Extract the result item ID from a completed action item (flattened or raw).
+
+    Works with both flattened items (where relationships is preserved as a dict)
+    and raw JSON:API items (where the envelope structure is intact).
+
+    Returns the result UUID string, or None if not present.
+    """
+    if not isinstance(action, dict):
+        return None
+
+    # Flattened form: action["relationships"]["result"]["data"]["id"]
+    relationships = action.get("relationships")
+    if isinstance(relationships, dict):
+        result = relationships.get("result")
+        if isinstance(result, dict):
+            data = result.get("data")
+            if isinstance(data, dict):
+                result_id = data.get("id")
+                if result_id is not None:
+                    return result_id
+
+    # Raw JSON:API form: action["data"]["relationships"]["result"]["data"]["id"]
+    data_node = action.get("data")
+    if isinstance(data_node, dict):
+        raw_relationships = data_node.get("relationships")
+        if isinstance(raw_relationships, dict):
+            result = raw_relationships.get("result")
+            if isinstance(result, dict):
+                inner_data = result.get("data")
+                if isinstance(inner_data, dict):
+                    return inner_data.get("id")
+
+    return None
+
+
 def build_fields_mapping(items: Iterable[str] | None) -> dict[str, str] | None:
     """Convert CLI field selectors like 'threadDevice=hostname,role' into query mappings."""
     if not items:
@@ -695,6 +1342,33 @@ def error_to_dict(exc: Exception) -> dict[str, Any]:
         return {"error": {"type": "connection", "message": str(exc)}}
     if isinstance(exc, OTBRInvalidResponseError):
         return {"error": {"type": "invalid-response", "message": str(exc)}}
+    if isinstance(exc, OTBRActionTimeoutError):
+        return {
+            "error": {
+                "type": "action-timeout",
+                "action_id": exc.action_id,
+                "status": exc.status,
+                "message": str(exc),
+            }
+        }
+    if isinstance(exc, OTBRActionFailedError):
+        return {
+            "error": {
+                "type": "action-failed",
+                "action_id": exc.action_id,
+                "status": exc.status,
+                "message": str(exc),
+            }
+        }
+    if isinstance(exc, OTBRActionError):
+        return {
+            "error": {
+                "type": "action-error",
+                "action_id": exc.action_id,
+                "status": exc.status,
+                "message": str(exc),
+            }
+        }
     if isinstance(exc, OTBRClientError):
         return {"error": {"type": "client", "message": str(exc)}}
     return {"error": {"type": "unexpected", "message": str(exc)}}

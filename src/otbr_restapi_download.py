@@ -2,175 +2,256 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import sys
-import time
 import logging
+import sys
 from pathlib import Path
+from typing import Any, Sequence, Tuple
 
-from typing import Iterable, Sequence, Tuple
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-from util_data import resolve_data_file_path, resolve_data_dir
 from const import TD_DATA_DIR_ARG_HELP
+from otbr_restapi_client import (
+    RECOMMENDED_DIAGNOSTIC_TLVS,
+    OTBRActionFailedError,
+    OTBRActionTimeoutError,
+    OTBRClientError,
+    OTBRRestApiClient,
+)
+from util_data import resolve_data_dir, resolve_data_file_path
 
 HOST = "127.0.0.1"
 PORT = 8081
-BASE_URL = f"http://{HOST}:{PORT}"
-HEADERS = {"Accept": "application/vnd.api+json"}
 TIMEOUT = 10
-RETRIES = 3
+DEFAULT_ACCEPT = "application/vnd.api+json"
 
-# (endpoint path, output file)
-DOWNLOAD_TARGETS: Iterable[Tuple[str, str]] = [
-    ("/node/dataset/active", "td-otbr-restapi-dataset-active.json"),
-    ("/api/devices", "td-otbr-restapi-devices.json"),
-    ("/api/diagnostics", "td-otbr-restapi-diagnostics.json"),
+# (client method name, output filename) – static endpoints downloaded unconditionally
+_STATIC_ENDPOINTS: Sequence[Tuple[str, str]] = [
+    ("get_active_dataset", "td-otbr-restapi-dataset-active.json"),
+    ("list_devices",       "td-otbr-restapi-devices.json"),
+    ("list_diagnostics",   "td-otbr-restapi-diagnostics.json"),
 ]
 
-_ACTIVE_TD_DATA_DIR: Path | None = None
 
+# ---------------------------------------------------------------------------
+# 5.3 – Atomic JSON write helper
+# ---------------------------------------------------------------------------
+
+def save_json_to_file(data: Any, output_file: Path) -> None:
+    """Atomically write data to output_file as formatted JSON."""
+    tmp = output_file.with_suffix(".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+        tmp.replace(output_file)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+# ---------------------------------------------------------------------------
+# CLI parser
+# ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Download a fixed set of OTBR REST API endpoints to local JSON files.",
+        description=(
+            "Download OTBR REST API endpoints to local JSON files. "
+            "Optionally trigger a device collection update and fetch "
+            "per-device network diagnostics."
+        ),
     )
     parser.add_argument("--host", default=HOST, help="OTBR REST API host")
     parser.add_argument("--port", type=int, default=PORT,
                         help="OTBR REST API port")
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
-    parser.add_argument(
-        "--base-url", help="Override host/port with a full base URL")
-    parser.add_argument(
-        "--timeout", type=int, default=TIMEOUT, help="HTTP timeout in seconds"
-    )
-    parser.add_argument(
-        "--accept",
-        default=HEADERS["Accept"],
-        help="Accept header sent with each request",
-    )
+    parser.add_argument("--base-url",
+                        help="Override host/port with a full base URL")
+    parser.add_argument("--timeout", type=int, default=TIMEOUT,
+                        help="HTTP timeout in seconds")
+    parser.add_argument("--accept", default=DEFAULT_ACCEPT,
+                        help="Accept header sent with each request")
     parser.add_argument(
         "--header",
         action="append",
         default=[],
         metavar="NAME:VALUE",
-        help="Repeatable extra request header, for example 'Authorization: Bearer token'",
+        help="Repeatable extra request header, e.g. 'Authorization: Bearer token'",
+    )
+    # 5.4 – optional device collection update
+    parser.add_argument(
+        "--update-devices",
+        action="store_true",
+        default=False,
+        help=(
+            "Trigger updateDeviceCollectionTask before downloading /api/devices, "
+            "then wait for it to complete."
+        ),
+    )
+    # 5.5 – optional per-device diagnostics
+    parser.add_argument(
+        "--fetch-diagnostics",
+        action="store_true",
+        default=False,
+        help=(
+            "For each device in the device collection, enqueue and wait for "
+            "getNetworkDiagnosticTask and save each result to a separate file."
+        ),
+    )
+    parser.add_argument(
+        "--diag-types",
+        nargs="+",
+        default=None,
+        metavar="TLV",
+        help=(
+            "TLV names to request for --fetch-diagnostics. "
+            "Defaults to RECOMMENDED_DIAGNOSTIC_TLVS when omitted."
+        ),
     )
     return parser
 
 
-def build_base_url(host: str, port: int, base_url: str | None = None) -> str:
-    return (base_url or f"http://{host}:{port}").rstrip("/")
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
-
-def build_headers(
-    accept: str, extra_headers: Sequence[str] | None = None
-) -> dict[str, str]:
-    headers = {"Accept": accept}
-
-    for raw_header in extra_headers or []:
-        name, separator, value = raw_header.partition(":")
+def _parse_extra_headers(raw_headers: Sequence[str]) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for raw in raw_headers:
+        name, separator, value = raw.partition(":")
         if not separator:
-            raise ValueError(
-                f"Invalid header {raw_header!r}; expected NAME:VALUE")
-
+            raise ValueError(f"Invalid header {raw!r}; expected NAME:VALUE")
         normalized_name = name.strip()
-        normalized_value = value.strip()
         if not normalized_name:
-            raise ValueError(
-                f"Invalid header {raw_header!r}; header name is empty")
-
-        headers[normalized_name] = normalized_value
-
+            raise ValueError(f"Invalid header {raw!r}; header name is empty")
+        headers[normalized_name] = value.strip()
     return headers
 
 
-def download_json(
-    url: str,
-    headers: dict[str, str],
-    output_file: str,
-    timeout: int = TIMEOUT,
-    retries: int = RETRIES,
-) -> bool:
-    """Download JSON from a URL and save it to a file."""
-    request = Request(url=url, headers=headers, method="GET")
-    last_exc: Exception | None = None
+def _build_client(args: argparse.Namespace, extra_headers: dict[str, str]) -> OTBRRestApiClient:
+    """Construct a client from parsed args."""
+    if extra_headers:
+        logging.warning(
+            "Extra headers beyond Accept are not forwarded by OTBRRestApiClient: %s",
+            list(extra_headers.keys()),
+        )
+    base_url = (args.base_url or f"http://{args.host}:{args.port}").rstrip("/")
+    return OTBRRestApiClient(
+        base_url=base_url,
+        timeout=args.timeout,
+        accept=args.accept,
+    )
 
-    for attempt in range(max(1, retries)):
-        try:
-            with urlopen(request, timeout=timeout) as response:
-                charset = response.headers.get_content_charset() or "utf-8"
-                payload = response.read().decode(charset)
 
-            data = json.loads(payload)
-
-            tmp_file = output_file + ".tmp"
-            with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4)
-            os.replace(tmp_file, output_file)
-
-            logging.info(f"OK: {url} -> {output_file}")
-            # log the json data in a human readable format
-            logging.info(json.dumps(data, indent=4))
-            return True
-        except HTTPError as e:
-            if e.code < 500:
-                logging.error(f"HTTP error for {url}: {e.code} {e.reason}")
-                return False
-            last_exc = e
-            logging.warning(
-                f"HTTP {e.code} on attempt {attempt + 1}/{retries} for {url}: {e.reason}"
-            )
-        except URLError as e:
-            last_exc = e
-            logging.warning(
-                f"Network error on attempt {attempt + 1}/{retries} for {url}: {e.reason}"
-            )
-        except json.JSONDecodeError as e:
-            logging.error(f"Invalid JSON from {url}: {e}")
-            return False
-        except OSError as e:
-            logging.error(f"File write error for {output_file}: {e}")
-            return False
-        except Exception:
-            logging.error(f"Unexpected error for {url}", exc_info=True)
-            raise
-
-        if attempt < retries - 1:
-            time.sleep(2**attempt)
-
-    logging.error(f"All {retries} attempt(s) failed for {url}: {last_exc}")
-    return False
-
+# ---------------------------------------------------------------------------
+# Core download logic
+# ---------------------------------------------------------------------------
 
 def download_all_restapi_endpoints(
-    base_url: str = BASE_URL,
-    headers: dict[str, str] | None = None,
-    timeout: int = TIMEOUT,
+    client: OTBRRestApiClient,
+    data_dir: Path,
+    *,
+    update_devices: bool = False,
 ) -> int:
+    """
+    Download the three fixed static endpoints to local JSON files.
+
+    Args:
+        client: Configured OTBRRestApiClient instance.
+        data_dir: Directory where output files are written.
+        update_devices: When True, trigger updateDeviceCollectionTask before
+                        downloading /api/devices.
+
+    Returns:
+        Exit code: 0 on full success, 1 if any download failed.
+    """
     failures = 0
-    request_headers = dict(headers or HEADERS)
 
-    for endpoint, output_file in DOWNLOAD_TARGETS:
-        url = f"{base_url}{endpoint}"
-        resolved_output_file = output_file
-        if _ACTIVE_TD_DATA_DIR is not None:
-            resolved_output_file = str(
-                resolve_data_file_path(output_file, _ACTIVE_TD_DATA_DIR)
-            )
+    # 5.4 – optionally refresh device collection first
+    if update_devices:
+        logging.info("Triggering updateDeviceCollectionTask …")
+        try:
+            client.trigger_and_wait_device_collection()
+            logging.info("Device collection update completed.")
+        except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+            logging.warning(
+                "Device collection update did not complete cleanly: %s", exc)
+        except OTBRClientError as exc:
+            logging.warning("Device collection update failed: %s", exc)
 
-        ok = download_json(url, request_headers,
-                           resolved_output_file, timeout=timeout)
-        if not ok:
+    for method_name, filename in _STATIC_ENDPOINTS:
+        output_file = resolve_data_file_path(filename, data_dir)
+        method = getattr(client, method_name)
+        try:
+            data = method(raw=True)
+            save_json_to_file(data, output_file)
+            logging.info("OK: %s -> %s", method_name, output_file)
+        except OTBRClientError as exc:
+            logging.error("Failed to download %s: %s", method_name, exc)
+            failures += 1
+        except OSError as exc:
+            logging.error("File write error for %s: %s", output_file, exc)
             failures += 1
 
     if failures:
-        logging.error(f"Completed with {failures} failure(s).")
+        logging.error("Completed with %d failure(s).", failures)
         return 1
 
     logging.info("All downloads completed successfully.")
     return 0
 
+
+def fetch_and_save_diagnostics(
+    client: OTBRRestApiClient,
+    data_dir: Path,
+    diag_types: list[str],
+) -> int:
+    """
+    5.5 – For each device in /api/devices, enqueue getNetworkDiagnosticTask,
+    wait for the result, and save to td-otbr-restapi-diagnostic-{device_id}.json.
+
+    Returns:
+        Exit code: 0 on full success, 1 if any device diagnostic failed.
+    """
+    try:
+        devices = client.list_devices(raw=False)
+    except OTBRClientError as exc:
+        logging.error("Failed to list devices for diagnostics: %s", exc)
+        return 1
+
+    if not devices:
+        logging.info("No devices found; skipping diagnostics.")
+        return 0
+
+    failures = 0
+    for device in devices:
+        device_id = device.get("id") if isinstance(device, dict) else None
+        if not device_id:
+            continue
+        filename = f"td-otbr-restapi-diagnostic-{device_id}.json"
+        output_file = resolve_data_file_path(filename, data_dir)
+        try:
+            diag = client.fetch_device_diagnostics(
+                device_id, types=diag_types, raw=True
+            )
+            save_json_to_file(diag, output_file)
+            logging.info("Diagnostic saved: %s -> %s", device_id, output_file)
+        except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+            logging.warning("Diagnostic skipped for %s: %s", device_id, exc)
+            failures += 1
+        except OTBRClientError as exc:
+            logging.error("Diagnostic error for %s: %s", device_id, exc)
+            failures += 1
+        except OSError as exc:
+            logging.error("File write error for %s: %s", output_file, exc)
+            failures += 1
+
+    if failures:
+        logging.warning("Diagnostics completed with %d failure(s).", failures)
+        return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
@@ -180,22 +261,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    global _ACTIVE_TD_DATA_DIR
-    previous_td_data_dir = _ACTIVE_TD_DATA_DIR
-    _ACTIVE_TD_DATA_DIR = resolve_data_dir(datadir_arg=args.datadir)
-
     try:
-        base_url = build_base_url(args.host, args.port, args.base_url)
-        headers = build_headers(args.accept, args.header)
+        extra_headers = _parse_extra_headers(args.header)
     except ValueError as exc:
         parser.error(str(exc))
 
-    try:
-        return download_all_restapi_endpoints(
-            base_url=base_url, headers=headers, timeout=args.timeout
-        )
-    finally:
-        _ACTIVE_TD_DATA_DIR = previous_td_data_dir
+    data_dir = resolve_data_dir(datadir_arg=args.datadir)
+    client = _build_client(args, extra_headers)
+
+    exit_code = download_all_restapi_endpoints(
+        client,
+        data_dir,
+        update_devices=args.update_devices,
+    )
+
+    if args.fetch_diagnostics:
+        diag_types = args.diag_types or list(RECOMMENDED_DIAGNOSTIC_TLVS)
+        diag_exit = fetch_and_save_diagnostics(client, data_dir, diag_types)
+        if diag_exit != 0:
+            exit_code = diag_exit
+
+    return exit_code
 
 
 if __name__ == "__main__":
