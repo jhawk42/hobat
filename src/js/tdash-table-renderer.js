@@ -72,6 +72,133 @@ function formatCellValue(value, columnName) {
   return String(value);
 }
 
+// ── Table cell structured value renderer ────────────────────────────────────
+
+function _isTdScalar(value) {
+  return (
+    value === null ||
+    value === undefined ||
+    typeof value !== "object" ||
+    (Array.isArray(value) && value.length === 0) ||
+    (!Array.isArray(value) && Object.keys(value).length === 0)
+  );
+}
+
+function _scalarText(value) {
+  if (value === null || value === undefined) return "n/a";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+}
+
+function _createTdKvRow(keyText, value, depth) {
+  const li = document.createElement("li");
+  // Complex child at depth ≤ 1 gets its own sub-structure
+  if (!_isTdScalar(value) && depth <= 1) {
+    const keySpan = document.createElement("span");
+    keySpan.className = "td-kv-key";
+    keySpan.textContent = keyText + ":";
+    li.appendChild(keySpan);
+    const child = _createTdValueNode(value, depth + 1);
+    if (child) li.appendChild(child);
+  } else {
+    li.className = "td-kv-row";
+    const keySpan = document.createElement("span");
+    keySpan.className = "td-kv-key";
+    keySpan.textContent = keyText + ":";
+    const valSpan = document.createElement("span");
+    valSpan.className = "td-kv-value";
+    if (_isTdScalar(value)) {
+      valSpan.textContent =
+        value === null || value === undefined
+          ? "n/a"
+          : Array.isArray(value) && value.length === 0
+            ? "[]"
+            : typeof value === "object"
+              ? "{}"
+              : _scalarText(value);
+    } else {
+      try {
+        valSpan.textContent = JSON.stringify(value);
+      } catch (_e) {
+        valSpan.textContent = "[object]";
+      }
+    }
+    li.appendChild(keySpan);
+    li.appendChild(valSpan);
+  }
+  return li;
+}
+
+function _createTdValueNode(value, depth) {
+  if (_isTdScalar(value)) return null;
+
+  // Array of primitives
+  if (
+    Array.isArray(value) &&
+    value.every((item) => item === null || typeof item !== "object")
+  ) {
+    const ul = document.createElement("ul");
+    ul.className = "td-value-list";
+    value.forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = item === null ? "null" : String(item);
+      ul.appendChild(li);
+    });
+    return ul;
+  }
+
+  // Array of objects/mixed
+  if (Array.isArray(value)) {
+    const div = document.createElement("div");
+    div.className = "td-value-array";
+    value.forEach((item, idx) => {
+      const idxSpan = document.createElement("span");
+      idxSpan.className = "td-array-idx";
+      idxSpan.textContent = `[${idx}]`;
+      div.appendChild(idxSpan);
+      if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+        const ul = document.createElement("ul");
+        ul.className = "td-value-list";
+        Object.entries(item).forEach(([k, v]) => {
+          ul.appendChild(_createTdKvRow(k, v, depth));
+        });
+        div.appendChild(ul);
+      } else {
+        const span = document.createElement("span");
+        span.textContent = item === null ? "null" : String(item);
+        div.appendChild(span);
+      }
+    });
+    return div;
+  }
+
+  // Plain object
+  const ul = document.createElement("ul");
+  ul.className = "td-value-list";
+  Object.entries(value).forEach(([k, v]) => {
+    ul.appendChild(_createTdKvRow(k, v, depth));
+  });
+  return ul;
+}
+
+function renderTdContent(td, value, columnName) {
+  if (columnName === "routes") {
+    td.textContent = formatCellValue(value, columnName);
+    return;
+  }
+  if (_isTdScalar(value)) {
+    td.textContent =
+      value === null || value === undefined
+        ? ""
+        : typeof value === "boolean"
+          ? value ? "true" : "false"
+          : String(value);
+    return;
+  }
+  const node = _createTdValueNode(value, 0);
+  if (node) td.appendChild(node);
+}
+
 // ── Column collection ─────────────────────────────────────────────────────────
 
 function collectColumns(rows) {
@@ -146,7 +273,7 @@ function renderTableRows(rows, columns) {
     tr.dataset.rowIndex = idx;
     columns.forEach((col) => {
       const td = document.createElement("td");
-      td.textContent = formatCellValue(getColumnValue(row, col), col);
+      renderTdContent(td, getColumnValue(row, col), col);
       Object.assign(td.style, columnWidths.get(col));
       tr.appendChild(td);
     });

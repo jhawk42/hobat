@@ -548,6 +548,38 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 
 /* ── Table view ───────────────────────────────────────────── */
 
+/* Complex value rendering inside table cells */
+td .td-value-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  font-size: inherit;
+}
+
+td .td-value-list li {
+  margin: 1px 0;
+}
+
+td .td-kv-row {
+  display: block;
+}
+
+td .td-kv-key {
+  font-weight: 600;
+}
+
+td .td-kv-value {
+  margin-left: 0.3em;
+  word-break: break-all;
+}
+
+td .td-array-idx {
+  display: block;
+  font-weight: 700;
+  margin-top: 3px;
+  color: var(--fg, inherit);
+}
+
 /* ── LQ Legend ────────────────────────────────────────────── */
 
 .lq-legend {
