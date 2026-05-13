@@ -183,6 +183,29 @@ label {
   margin: 0;
 }
 
+.view-options {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 10px;
+  margin: 0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 0;
+}
+
+.view-options legend {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0 4px;
+}
+
+.view-options label {
+  font-size: 14px;
+  margin: 0;
+}
+
 select {
   padding: 6px 10px;
   border: 1px solid var(--line);
@@ -384,7 +407,7 @@ button.active {
   height: 20px;
   background: var(--line);
   align-self: center;
-  margin: 0 4px;
+  margin: 0 4px 0 auto;
 }
 
 /* ── Status line ──────────────────────────────────────────── */

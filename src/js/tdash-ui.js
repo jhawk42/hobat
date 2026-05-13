@@ -226,11 +226,14 @@ document
     document.getElementById("node-filter").value = "all";
     document.getElementById("diagnostic-filter").value = "all";
 
-    // Switch view based on the dataset's defaultView field
-    const selectedValue = event.target.value;
-    const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
-    if (selectedDataset && selectedDataset.defaultView) {
-      switchView(selectedDataset.defaultView);
+    // Switch view based on the dataset's defaultView field if auto-view is enabled
+    const autoViewEnabled = document.getElementById("chk-auto-view").checked;
+    if (autoViewEnabled) {
+      const selectedValue = event.target.value;
+      const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
+      if (selectedDataset && selectedDataset.defaultView) {
+        switchView(selectedDataset.defaultView);
+      }
     }
 
     //## make optional to oad dataset and render immediately on select change; for now, 
@@ -344,10 +347,13 @@ async function doFetchDataset() {
   const selectedValue = document.getElementById("dataset-select").value;
   if (!selectedValue) return;
 
-  // Apply defaultView from registry
-  const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
-  if (selectedDataset && selectedDataset.defaultView) {
-    switchView(selectedDataset.defaultView);
+  // Apply defaultView from registry if auto-view is enabled
+  const autoViewEnabled = document.getElementById("chk-auto-view").checked;
+  if (autoViewEnabled) {
+    const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
+    if (selectedDataset && selectedDataset.defaultView) {
+      switchView(selectedDataset.defaultView);
+    }
   }
 
   await loadDataset(selectedValue);
