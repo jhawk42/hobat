@@ -453,6 +453,9 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 }
 
 .node-details-panel h2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin: 0 0 8px 0;
   font-size: inherit;
   font-weight: 600;
@@ -481,6 +484,48 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 
 .node-details-list.hidden {
   display: none;
+}
+
+/* Collapsible section heading toggle */
+.node-details-panel .detail-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.node-details-panel .detail-section-toggle:hover {
+  color: var(--accent, #0078d4);
+}
+
+.node-details-panel .detail-section-arrow {
+  font-size: 10px;
+  min-width: 10px;
+}
+
+/* Collapse All / Expand All button */
+.node-details-panel .detail-toggle-all {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.node-details-panel .detail-toggle-all:hover {
+  color: var(--fg, inherit);
+  border-color: var(--muted);
 }
 
 /* Complex value tree inside detail lists */

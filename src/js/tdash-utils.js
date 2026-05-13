@@ -141,26 +141,29 @@ export function createDetailValueNode(key, value) {
     value.every((item) => item === null || typeof item !== "object")
   ) {
     const li = document.createElement("li");
-    const keySpan = document.createElement("span");
-    keySpan.className = "detail-kv-key";
-    keySpan.textContent = `${key}:`;
-    li.appendChild(keySpan);
+    const details = document.createElement("details");
+    details.className = "detail-value-collapsible";
+    const summary = document.createElement("summary");
+    summary.textContent = `${key}:`;
+    details.appendChild(summary);
     const items = value.map((item) => {
       const subLi = document.createElement("li");
       subLi.textContent = item === null ? "null" : String(item);
       return subLi;
     });
-    li.appendChild(_createSubList(items));
+    details.appendChild(_createSubList(items));
+    li.appendChild(details);
     return li;
   }
 
   // Array of objects (or mixed array) — flat indexed sections
   if (Array.isArray(value)) {
     const li = document.createElement("li");
-    const keySpan = document.createElement("span");
-    keySpan.className = "detail-kv-key";
-    keySpan.textContent = `${key}:`;
-    li.appendChild(keySpan);
+    const details = document.createElement("details");
+    details.className = "detail-value-collapsible";
+    const summary = document.createElement("summary");
+    summary.textContent = `${key}:`;
+    details.appendChild(summary);
     const items = value.map((item, idx) => {
       const subLi = document.createElement("li");
       if (item === null || typeof item !== "object") {
@@ -174,7 +177,8 @@ export function createDetailValueNode(key, value) {
       subLi.appendChild(_createSubList(_renderObjectEntries(item)));
       return subLi;
     });
-    li.appendChild(_createSubList(items));
+    details.appendChild(_createSubList(items));
+    li.appendChild(details);
     return li;
   }
 
@@ -221,14 +225,17 @@ function _groupEntriesByPrefix(entries) {
 
 function _createGroupNode(prefix, children) {
   const li = document.createElement("li");
-  const keySpan = document.createElement("span");
-  keySpan.className = "detail-kv-key detail-group-header";
-  keySpan.textContent = `${prefix}:`;
-  li.appendChild(keySpan);
+  const details = document.createElement("details");
+  details.className = "detail-value-collapsible";
+  const summary = document.createElement("summary");
+  summary.className = "detail-group-header";
+  summary.textContent = `${prefix}:`;
+  details.appendChild(summary);
   const subItems = children.map(([subkey, value]) =>
     createDetailValueNode(subkey, value)
   );
-  li.appendChild(_createSubList(subItems));
+  details.appendChild(_createSubList(subItems));
+  li.appendChild(details);
   return li;
 }
 
@@ -238,6 +245,78 @@ function _appendGrouped(entries, listEl) {
       listEl.appendChild(createDetailValueNode(item.key, item.value));
     } else {
       listEl.appendChild(_createGroupNode(item.prefix, item.children));
+    }
+  });
+}
+
+// ── Detail panel section toggles ─────────────────────────────────────────────
+
+// Sets up collapsible section headings and a global collapse/expand-all control
+// for the given panel element. Call once after the DOM is ready.
+export function initDetailPanelToggles(panelEl) {
+  const headings = Array.from(panelEl.querySelectorAll("h2"));
+  let isAllCollapsed = false;
+
+  headings.forEach((h2, idx) => {
+    const listEl = h2.nextElementSibling;
+    if (!listEl || listEl.tagName !== "UL") return;
+
+    const label = h2.textContent.trim();
+    h2.textContent = "";
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.className = "detail-section-toggle";
+    toggleBtn.setAttribute("aria-expanded", "true");
+
+    const arrow = document.createElement("span");
+    arrow.className = "detail-section-arrow";
+    arrow.setAttribute("aria-hidden", "true");
+    arrow.textContent = "▼";
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = label;
+
+    toggleBtn.appendChild(arrow);
+    toggleBtn.appendChild(labelSpan);
+    h2.appendChild(toggleBtn);
+
+    toggleBtn.addEventListener("click", () => {
+      const nowHidden = !listEl.classList.contains("hidden");
+      listEl.classList.toggle("hidden", nowHidden);
+      arrow.textContent = nowHidden ? "▶" : "▼";
+      toggleBtn.setAttribute("aria-expanded", String(!nowHidden));
+    });
+
+    // First heading gets the global "Collapse All / Expand All" button
+    if (idx === 0) {
+      const allBtn = document.createElement("button");
+      allBtn.className = "detail-toggle-all";
+      allBtn.textContent = "Collapse All";
+      allBtn.title = "Collapse or expand all sections and nested items";
+
+      allBtn.addEventListener("click", () => {
+        isAllCollapsed = !isAllCollapsed;
+        allBtn.textContent = isAllCollapsed ? "Expand All" : "Collapse All";
+
+        panelEl.querySelectorAll("ul.node-details-list").forEach((ul) => {
+          ul.classList.toggle("hidden", isAllCollapsed);
+          const prevH2 = ul.previousElementSibling;
+          if (prevH2 && prevH2.tagName === "H2") {
+            const btn = prevH2.querySelector(".detail-section-toggle");
+            const a = prevH2.querySelector(".detail-section-arrow");
+            if (btn) btn.setAttribute("aria-expanded", String(!isAllCollapsed));
+            if (a) a.textContent = isAllCollapsed ? "▶" : "▼";
+          }
+        });
+
+        panelEl
+          .querySelectorAll("details.detail-value-collapsible")
+          .forEach((d) => {
+            d.open = !isAllCollapsed;
+          });
+      });
+
+      h2.appendChild(allBtn);
     }
   });
 }

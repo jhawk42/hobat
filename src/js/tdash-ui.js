@@ -24,6 +24,7 @@ import {
   isMoreInfoEnabled,
 } from "./tdash-table-renderer.js";
 import { EDGE_LQ_STYLES } from "./tdash-constants.js";
+import { initDetailPanelToggles } from "./tdash-utils.js";
 
 // ── Section 2: Build dataset <select> ────────────────────────────────────────
 
@@ -310,6 +311,9 @@ await loadStaticLabelMap();
 // Phase 3 (task 3.1): do not auto-load on startup; prompt the user instead.
 document.getElementById("status").textContent =
   "Select a dataset and press Fetch.";
+
+initDetailPanelToggles(document.getElementById("details"));
+initDetailPanelToggles(document.getElementById("table-details"));
 
 // Cache checkbox helper: make checkboxes mutually exclusive
 function updateCacheCheckboxes(changedCheckbox) {
