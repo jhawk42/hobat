@@ -254,6 +254,10 @@ export function adaptEve(rawFiles) {
         ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifindiscards_pct),
       iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
         ? rawNode.mac_counters.iftotalerrors_pct : (existing?.iftotalerrors_pct),
+      iftotalerrors_totalpkts_ratio: Number.isFinite(rawNode.mac_counters?.iftotalerrors_totalpkts_ratio)
+        ? rawNode.mac_counters.iftotalerrors_totalpkts_ratio : (existing?.iftotalerrors_totalpkts_ratio),
+      iftotaldiscards_totalpkts_ratio: Number.isFinite(rawNode.mac_counters?.iftotaldiscards_totalpkts_ratio)
+        ? rawNode.mac_counters.iftotaldiscards_totalpkts_ratio : (existing?.iftotaldiscards_totalpkts_ratio),
       mode_device: toText(rawNode.mode?.device)
         || (rawNode.type === 'router' ? 'FTD' : (rawNode.type === 'child' || rawNode.type === 'sleepy-child' ? 'MTD' : ''))
         || (existing ? existing.mode_device : ''),
@@ -467,6 +471,10 @@ export function adaptMergedDetailed(rawFiles) {
         ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifindiscards_pct),
       iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
         ? rawNode.mac_counters.iftotalerrors_pct : (existing?.iftotalerrors_pct),
+      iftotalerrors_totalpkts_ratio: Number.isFinite(rawNode.mac_counters?.iftotalerrors_totalpkts_ratio)
+        ? rawNode.mac_counters.iftotalerrors_totalpkts_ratio : (existing?.iftotalerrors_totalpkts_ratio),
+      iftotaldiscards_totalpkts_ratio: Number.isFinite(rawNode.mac_counters?.iftotaldiscards_totalpkts_ratio)
+        ? rawNode.mac_counters.iftotaldiscards_totalpkts_ratio : (existing?.iftotaldiscards_totalpkts_ratio),
       mode_device: toText(rawNode['mode.device']) || toText(rawNode.mode?.device) || (existing ? existing.mode_device : ''),
       partitionidchanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges)
         ? rawNode.mle_counters.partitionidchanges : (existing?.partitionidchanges),
@@ -659,6 +667,8 @@ export function adaptRawArray(rawFiles) {
       mode_device: toText(row.mode?.device) || (row.type === 'router' ? 'FTD' : (isChildLike ? 'MTD' : '')),
       ifindiscards_pct: row.mac_counters?.ifindiscards_pct,
       iftotalerrors_pct: row.mac_counters?.iftotalerrors_pct,
+      iftotalerrors_totalpkts_ratio: row.mac_counters?.iftotalerrors_totalpkts_ratio,
+      iftotaldiscards_totalpkts_ratio: row.mac_counters?.iftotaldiscards_totalpkts_ratio,
       partitionidchanges: row.mle_counters?.partitionidchanges,
       parentchanges: row.mle_counters?.parentchanges,
       br: row.br === true,

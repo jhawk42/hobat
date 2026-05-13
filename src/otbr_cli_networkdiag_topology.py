@@ -345,11 +345,11 @@ def parse_mac_counters(output):
         counters["ifouttotalpkts"] = ifouttotalpkts
 
         # total IN and OUT packets = IN unicast + IN broadcast + OUT unicast + OUT broadcast
-        counters["iftotalpkts"] = ifintotalpkts + ifouttotalpkts
+        iftotalpkts = ifintotalpkts + ifouttotalpkts
+        counters["iftotalpkts"] = iftotalpkts
 
         # Errors are from malformed packets, interference, or weak signal strength causing corruption during
         # transmission, while discards typically indicate congestion or buffer overflows where packets are
-        # dropped due to lack of resources to process them. By calculating the total packets, errors, and
         # discards, we can get a clearer picture of the overall health and performance of the network at
         # the MAC layer. High error counts relative to total packets may indicate issues with signal quality
         # or interference, while high discard counts may point to congestion or insufficient buffering
@@ -434,6 +434,12 @@ def parse_mac_counters(output):
         if ifouttotalpkts > 0:
             counters["ifouterrors_outtotalpkts_ratio"] = round(
                 (ifouterrors / ifouttotalpkts), 1)
+            
+        if iftotalpkts > 0:
+            counters["iftotalerrors_totalpkts_ratio"] = round(
+                (totalerrors / iftotalpkts), 1)
+            counters["iftotaldiscards_totalpkts_ratio"] = round(
+                (totaldiscards / iftotalpkts), 1)
 
         # calc errors pct relative to total errors to help determine if high error counts are significant or just a small fraction of overall traffic. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of errors, which may indicate more severe issues with signal quality or interference that need to be addressed to improve network performance and reliability.
         if totalerrors > 0:
