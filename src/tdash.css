@@ -483,6 +483,69 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   display: none;
 }
 
+/* Complex value tree inside detail lists */
+.node-details-list .detail-value-list {
+  margin: 2px 0 2px 12px;
+  padding-left: 0;
+  list-style: none;
+  font-size: inherit;
+}
+
+.node-details-list .detail-value-list li {
+  margin: 1px 0;
+}
+
+/* Two-column key/value row: key left-justified, value right-justified */
+.node-details-list .detail-kv-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.node-details-list .detail-kv-key {
+  flex-shrink: 0;
+  font-weight: 600;
+  text-align: left;
+}
+
+.node-details-list .detail-kv-value {
+  flex: 1;
+  text-align: right;
+  word-break: break-all;
+  color: var(--fg, inherit);
+}
+
+.node-details-list .detail-value-collapsible > summary {
+  cursor: pointer;
+  font-weight: 600;
+  user-select: none;
+}
+
+.node-details-list .detail-value-collapsible > summary:hover {
+  color: var(--accent, #0078d4);
+}
+
+.node-details-list .detail-value-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Group header for dotted-prefix entries (e.g. mac_counters:) */
+.node-details-list .detail-group-header {
+  display: block;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+/* Array item index label ([0], [1], ...) */
+.node-details-list .detail-array-idx {
+  display: block;
+  font-weight: 700;
+  margin-top: 3px;
+  color: var(--fg, inherit);
+}
+
 /* ── Table view ───────────────────────────────────────────── */
 
 /* ── LQ Legend ────────────────────────────────────────────── */

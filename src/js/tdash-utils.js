@@ -85,6 +85,163 @@ export function formatValue(value) {
   return toText(value) || "n/a";
 }
 
+// ── Detail-panel structured value renderer ────────────────────────────────────
+
+function _createKvRow(keyText, valueText, isEmpty = false) {
+  const li = document.createElement("li");
+  li.className = "detail-kv-row";
+  const keySpan = document.createElement("span");
+  keySpan.className = "detail-kv-key";
+  keySpan.textContent = keyText + ":";
+  const valSpan = document.createElement("span");
+  valSpan.className = isEmpty
+    ? "detail-value-empty detail-kv-value"
+    : "detail-kv-value";
+  valSpan.textContent = valueText;
+  li.appendChild(keySpan);
+  li.appendChild(valSpan);
+  return li;
+}
+
+function _createSubList(items) {
+  const ul = document.createElement("ul");
+  ul.className = "detail-value-list";
+  items.forEach((item) => ul.appendChild(item));
+  return ul;
+}
+
+function _renderObjectEntries(obj) {
+  return Object.entries(obj).map(([k, v]) => createDetailValueNode(k, v));
+}
+
+export function createDetailValueNode(key, value) {
+  // Scalar (string, number, boolean, null, undefined)
+  if (value === null || value === undefined) {
+    return _createKvRow(key, "n/a");
+  }
+  if (typeof value !== "object") {
+    const text =
+      typeof value === "boolean" ? (value ? "true" : "false") : String(value);
+    return _createKvRow(key, text);
+  }
+
+  // Empty array
+  if (Array.isArray(value) && value.length === 0) {
+    return _createKvRow(key, "empty []", true);
+  }
+
+  // Empty object
+  if (!Array.isArray(value) && Object.keys(value).length === 0) {
+    return _createKvRow(key, "empty {}", true);
+  }
+
+  // Array of primitives (no element is an object/array)
+  if (
+    Array.isArray(value) &&
+    value.every((item) => item === null || typeof item !== "object")
+  ) {
+    const li = document.createElement("li");
+    const keySpan = document.createElement("span");
+    keySpan.className = "detail-kv-key";
+    keySpan.textContent = `${key}:`;
+    li.appendChild(keySpan);
+    const items = value.map((item) => {
+      const subLi = document.createElement("li");
+      subLi.textContent = item === null ? "null" : String(item);
+      return subLi;
+    });
+    li.appendChild(_createSubList(items));
+    return li;
+  }
+
+  // Array of objects (or mixed array) — flat indexed sections
+  if (Array.isArray(value)) {
+    const li = document.createElement("li");
+    const keySpan = document.createElement("span");
+    keySpan.className = "detail-kv-key";
+    keySpan.textContent = `${key}:`;
+    li.appendChild(keySpan);
+    const items = value.map((item, idx) => {
+      const subLi = document.createElement("li");
+      if (item === null || typeof item !== "object") {
+        subLi.textContent = item === null ? "null" : String(item);
+        return subLi;
+      }
+      const idxSpan = document.createElement("span");
+      idxSpan.className = "detail-array-idx";
+      idxSpan.textContent = `[${idx}]`;
+      subLi.appendChild(idxSpan);
+      subLi.appendChild(_createSubList(_renderObjectEntries(item)));
+      return subLi;
+    });
+    li.appendChild(_createSubList(items));
+    return li;
+  }
+
+  // Plain object
+  const li = document.createElement("li");
+  const details = document.createElement("details");
+  details.className = "detail-value-collapsible";
+  const summary = document.createElement("summary");
+  summary.textContent = `${key}:`;
+  details.appendChild(summary);
+  details.appendChild(_createSubList(_renderObjectEntries(value)));
+  li.appendChild(details);
+  return li;
+}
+
+// Groups [[key, value], ...] entries by the segment before the first '.'
+// Returns an ordered array of { type: "flat", key, value }
+//   or { type: "group", prefix, children: [[subkey, value], ...] }
+function _groupEntriesByPrefix(entries) {
+  const order = [];
+  const seen = new Map(); // prefix or "flat:key" → index in order
+
+  entries.forEach(([key, value]) => {
+    const dotIdx = key.indexOf(".");
+    if (dotIdx === -1) {
+      const mapKey = `flat:${key}`;
+      if (!seen.has(mapKey)) {
+        seen.set(mapKey, order.length);
+        order.push({ type: "flat", key, value });
+      }
+    } else {
+      const prefix = key.slice(0, dotIdx);
+      const subkey = key.slice(dotIdx + 1);
+      if (!seen.has(prefix)) {
+        seen.set(prefix, order.length);
+        order.push({ type: "group", prefix, children: [] });
+      }
+      order[seen.get(prefix)].children.push([subkey, value]);
+    }
+  });
+
+  return order;
+}
+
+function _createGroupNode(prefix, children) {
+  const li = document.createElement("li");
+  const keySpan = document.createElement("span");
+  keySpan.className = "detail-kv-key detail-group-header";
+  keySpan.textContent = `${prefix}:`;
+  li.appendChild(keySpan);
+  const subItems = children.map(([subkey, value]) =>
+    createDetailValueNode(subkey, value)
+  );
+  li.appendChild(_createSubList(subItems));
+  return li;
+}
+
+function _appendGrouped(entries, listEl) {
+  _groupEntriesByPrefix(entries).forEach((item) => {
+    if (item.type === "flat") {
+      listEl.appendChild(createDetailValueNode(item.key, item.value));
+    } else {
+      listEl.appendChild(_createGroupNode(item.prefix, item.children));
+    }
+  });
+}
+
 export function mergeForDisplay(primary, secondary) {
   if (primary === undefined || primary === null) return secondary;
   if (secondary === undefined || secondary === null) return primary;
@@ -257,22 +414,16 @@ export function populateNodeDetailsLists(details, listIdPrefix = "") {
     listEl.innerHTML = "";
 
     if (isCatchAll) {
+      const catchAllEntries = [];
       details.forEach(([key, value]) => {
-        if (!allUsedFields.has(key)) {
-          const li = document.createElement("li");
-          li.textContent = `${key}: ${formatValue(value)}`;
-          listEl.appendChild(li);
-        }
+        if (!allUsedFields.has(key)) catchAllEntries.push([key, value]);
       });
+      _appendGrouped(catchAllEntries, listEl);
     } else {
-      fieldNames.forEach((fieldName) => {
-        const value = detailsMap.get(fieldName);
-        if (value !== undefined) {
-          const li = document.createElement("li");
-          li.textContent = `${fieldName}: ${formatValue(value)}`;
-          listEl.appendChild(li);
-        }
-      });
+      const namedEntries = fieldNames
+        .map((f) => [f, detailsMap.get(f)])
+        .filter(([, v]) => v !== undefined);
+      _appendGrouped(namedEntries, listEl);
     }
 
     if (listEl.children.length === 0) {
