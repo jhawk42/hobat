@@ -143,6 +143,7 @@ export function createDetailValueNode(key, value) {
     const li = document.createElement("li");
     const details = document.createElement("details");
     details.className = "detail-value-collapsible";
+    details.open = true;
     const summary = document.createElement("summary");
     summary.textContent = `${key}:`;
     details.appendChild(summary);
@@ -161,6 +162,7 @@ export function createDetailValueNode(key, value) {
     const li = document.createElement("li");
     const details = document.createElement("details");
     details.className = "detail-value-collapsible";
+    details.open = true;
     const summary = document.createElement("summary");
     summary.textContent = `${key}:`;
     details.appendChild(summary);
@@ -186,6 +188,7 @@ export function createDetailValueNode(key, value) {
   const li = document.createElement("li");
   const details = document.createElement("details");
   details.className = "detail-value-collapsible";
+  details.open = true;
   const summary = document.createElement("summary");
   summary.textContent = `${key}:`;
   details.appendChild(summary);
@@ -227,6 +230,7 @@ function _createGroupNode(prefix, children) {
   const li = document.createElement("li");
   const details = document.createElement("details");
   details.className = "detail-value-collapsible";
+  details.open = true;
   const summary = document.createElement("summary");
   summary.className = "detail-group-header";
   summary.textContent = `${prefix}:`;
