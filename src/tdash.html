@@ -29,26 +29,30 @@
 
     <!-- Source and source selection bar -->
     <div id="panel-dataset" class="controls">
-      <div class="controls">
+      <div class="controls dataset-controls">
         <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch Dataset</button>
-        <label for="datasource-filter" title="Data source for the mesh network">Source</label>
-        <select id="datasource-filter" title="Data source for the mesh network">
-          <option value="otbr-cli">otbr-cli</option>
-          <option value="mdns">mdns</option>
-          <option value="eve">eve</option>
-          <!--
-          <option value="otbr-restapi">otbr-restapi</option>
-          -->
-          <option value="merged">merged</option>
-          <!--
-          <option value="lab">lab</option>
-           -->
-          <option value="system">system</option>
-        </select>
-        <label for="dataset-select" title="Select a dataset for the mesh network">Dataset</label>
-        <select id="dataset-select" title="Select a dataset for the mesh network">
-          <!-- populated by JS from DATASET_REGISTRY -->
-        </select>
+        <div class="control-pair control-pair-source">
+          <label for="datasource-filter" title="Data source for the mesh network">Source</label>
+          <select id="datasource-filter" title="Data source for the mesh network">
+            <option value="otbr-cli">otbr-cli</option>
+            <option value="mdns">mdns</option>
+            <option value="eve">eve</option>
+            <!--
+            <option value="otbr-restapi">otbr-restapi</option>
+            -->
+            <option value="merged">merged</option>
+            <!--
+            <option value="lab">lab</option>
+             -->
+            <option value="system">system</option>
+          </select>
+        </div>
+        <div class="control-pair control-pair-dataset">
+          <label for="dataset-select" title="Select a dataset for the mesh network">Dataset</label>
+          <select id="dataset-select" title="Select a dataset for the mesh network">
+            <!-- populated by JS from DATASET_REGISTRY -->
+          </select>
+        </div>
       </div>
 
       <fieldset class="cache-options">
@@ -214,7 +218,7 @@
               <button id="btn-legend-toggle" title="Toggle link quality legend">
                 Legend
               </button>
-              <button id="btn-physics" class="active" title="Toggle physics simulation"
+              <button id="btn-physics" title="Toggle physics simulation"
                 aria-label="Pause physics simulation">
                 ⏸
               </button>

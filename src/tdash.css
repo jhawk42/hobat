@@ -53,17 +53,28 @@ body {
 
 h1 {
   margin: 0 0 10px 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-h2 {
-  margin: 0 0 10px 0;
-  font-size: 14px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+    div.vis-network div.vis-navigation div.vis-button {
+      background: transparent;
+      border: 2px solid #fff;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+      color: #fff;
+      filter: none;
+      opacity: 1;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    div.vis-network div.vis-navigation div.vis-button:hover,
+    div.vis-network div.vis-navigation div.vis-button:focus {
+      background: transparent;
+      color: #fff;
+      border-color: #fff;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.55);
+    }
+    div.vis-network div.vis-navigation div.vis-button:active {
+      background: transparent;
+      color: #fff;
+      border-color: var(--accent);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    }
 }
 
 /* ── Home link ────────────────────────────────────────────── */
@@ -95,6 +106,41 @@ h2 {
   gap: 10px;
   align-items: center;
   margin-bottom: 8px;
+}
+
+.dataset-controls {
+  flex: 1 1 540px;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.control-pair {
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.control-pair label {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.control-pair select {
+  min-width: 0;
+  width: 100%;
+}
+
+.control-pair-source {
+  flex: 0 1 auto;
+  grid-template-columns: auto minmax(140px, max-content);
+}
+
+.control-pair-dataset {
+  flex: 1 1 420px;
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
 #panel-dataset,
@@ -164,6 +210,7 @@ select:focus-visible {
 }
 
 #dataset-select {
+  flex: 1 1 360px;
   min-width: 360px;
 }
 
@@ -311,6 +358,13 @@ button.active {
 
 #btn-physics {
   font-size: 16px;
+  height: 40px;
+  min-width: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ── View toggle bar ──────────────────────────────────────── */
@@ -513,11 +567,16 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 
 /* Collapse All / Expand All button */
 .node-details-panel .detail-toggle-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: none;
   border: 1px solid var(--line);
   border-radius: 3px;
-  padding: 1px 6px;
-  font-size: 11px;
+  padding: 3px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
   color: var(--muted);
   cursor: pointer;
   flex-shrink: 0;
@@ -704,6 +763,13 @@ td .td-array-idx {
 
 #btn-legend-toggle {
   font-size: 14px;
+  height: 40px;
+  min-width: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .lq-high {
@@ -805,11 +871,25 @@ td:last-child {
     padding: 10px;
   }
 
+  .dataset-controls {
+    width: 100%;
+  }
+
+  .control-pair,
+  .control-pair-dataset {
+    width: 100%;
+  }
+
+  .control-pair {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  #datasource-filter,
   #dataset-select,
   #node-filter,
   #link-filter,
   #diagnostic-filter {
-    min-width: 100%;
+    min-width: 0;
     width: 100%;
   }
 }
@@ -817,6 +897,34 @@ td:last-child {
 /* ── Dark Mode ─────────────────────────────────────────────── */
 
 @media (prefers-color-scheme: dark) {
+  /* High-contrast vis.js navigation buttons in dark mode */
+  div.vis-network div.vis-navigation div.vis-button {
+    background: transparent;
+    border: 2px solid #fff;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+    color: #fff;
+    filter: none;
+    opacity: 1;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  div.vis-network div.vis-navigation div.vis-button:hover,
+  div.vis-network div.vis-navigation div.vis-button:focus {
+    background: var(--accent-hover);
+    color: #fff;
+    border-color: #fff;
+  }
+  div.vis-network div.vis-navigation div.vis-button:active {
+    background: #222b;
+    color: #fff;
+    border-color: var(--accent);
+  }
+  div.vis-network div.vis-navigation div.vis-button:after,
+  div.vis-network div.vis-navigation div.vis-button:before,
+  div.vis-network div.vis-navigation div.vis-button > * {
+    color: #fff !important;
+    fill: #fff !important;
+    stroke: #fff !important;
+  }
   :root {
     --bg: #111827;
     --surface: #1f2937;

@@ -295,12 +295,22 @@ export function initDetailPanelToggles(panelEl) {
     if (idx === 0) {
       const allBtn = document.createElement("button");
       allBtn.className = "detail-toggle-all";
-      allBtn.textContent = "Collapse All";
+      const allArrow = document.createElement("span");
+      allArrow.className = "detail-section-arrow";
+      allArrow.setAttribute("aria-hidden", "true");
+      allArrow.textContent = "▼";
+
+      const allLabel = document.createElement("span");
+      allLabel.textContent = "Collapse All";
+
+      allBtn.appendChild(allArrow);
+      allBtn.appendChild(allLabel);
       allBtn.title = "Collapse or expand all sections and nested items";
 
       allBtn.addEventListener("click", () => {
         isAllCollapsed = !isAllCollapsed;
-        allBtn.textContent = isAllCollapsed ? "Expand All" : "Collapse All";
+        allArrow.textContent = isAllCollapsed ? "▶" : "▼";
+        allLabel.textContent = isAllCollapsed ? "Expand All" : "Collapse All";
 
         panelEl.querySelectorAll("ul.node-details-list").forEach((ul) => {
           ul.classList.toggle("hidden", isAllCollapsed);
