@@ -168,13 +168,13 @@ def fetch_dataset_active(hide_sensitive_info=True):
     command = "dataset active"
     if hide_sensitive_info:
         command += " -ns"  # Add -ns flag to hide sensitive info in the output
-    dataset_output = util_ot_ctl.exec_ot_ctl(command).strip()
-    logging.debug(f"[DEBUG] Dataset Active Output:\n{dataset_output}\n")
+    raw_output = util_ot_ctl.exec_ot_ctl(command).strip()
+    logging.debug(f"[DEBUG] Dataset Active Output:\n{raw_output}\n")
 
     dataset_info = {}
 
     # Parse key: value pairs from output
-    for line in dataset_output.split("\n"):
+    for line in raw_output.split("\n"):
         line = line.strip()
 
         # Skip empty lines and "Done" line

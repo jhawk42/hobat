@@ -27,7 +27,7 @@ def exec_ot_ctl_dispatch(cmd, container_name=None):
 
     # Construct the docker exec command
     # 'sh -c' is often used to ensure the command executes correctly in the container shell
-    full_command_docker_container = [
+    docker_cmd = [
         "docker",
         "exec",
         container_name,
@@ -37,42 +37,42 @@ def exec_ot_ctl_dispatch(cmd, container_name=None):
     ]
 
     # command line option support to run ot-ctl command without docker exec
-    full_command_no_docker = ["sh", "-c", f"ot-ctl {cmd}"]
+    local_cmd = ["sh", "-c", f"ot-ctl {cmd}"]
 
     if container_name is not None:
         # Use the docker command for now, but this can be extended to support non-docker execution
         # in the future
-        full_command = full_command_docker_container
+        command = docker_cmd
     else:
-        full_command = full_command_no_docker
+        command = local_cmd
 
     # log the command being executed
-    logging.debug(f"[DEBUG] {full_command}")
+    logging.debug(f"[DEBUG] {command}")
 
     try:
         # Run the command and capture output
-        _timeout = int(os.environ.get(
+        timeout_sec = int(os.environ.get(
             TD_OT_CTL_TIMEOUT_ENV, TD_OT_CTL_TIMEOUT_DEFAULT))
         result = subprocess.run(
-            full_command,
+            command,
             capture_output=True,
             text=True,
             check=True,
-            timeout=_timeout,
+            timeout=timeout_sec,
         )
         return result.stdout.strip()
     except subprocess.TimeoutExpired:
         logging.error(
-            f"[ERROR] ot-ctl command timed out after {_timeout}s: {full_command}"
+            f"[ERROR] ot-ctl command timed out after {timeout_sec}s: {command}"
         )
-        return f"Error: command timed out after {_timeout}s"
+        return f"Error: command timed out after {timeout_sec}s"
     except subprocess.CalledProcessError as e:
         err_str = e.stderr.strip() if e.stderr else "Unknown error"
 
         # log return code and output for debugging
         logging.error(
             f"[ERROR] ot-ctl command failed: Return code: {e.returncode} Error: {err_str}")
-        logging.error(f"[ERROR] Command: {full_command}")
+        logging.error(f"[ERROR] Command: {command}")
 
         logging.error(
             f"[ERROR] Output: {e.output.strip() if e.output else 'No output'}")
@@ -93,14 +93,14 @@ def exec_ot_ctl(command, container_name=TD_OTBR_CONTAINER_NAME_DEFAULT):
     """
 
     # get container name from environment variable or use default
-    container_name_env = os.getenv(TD_OTBR_CONTAINER_NAME_ENV)
-    if container_name_env:
-        container_name = container_name_env
+    env_container_name = os.getenv(TD_OTBR_CONTAINER_NAME_ENV)
+    if env_container_name:
+        container_name = env_container_name
 
     # get container use flag from environment variable or use default
-    container_use_env = os.getenv(TD_OTBR_CONTAINER_USE_ENV)
-    if container_use_env is not None:
-        container_use = int(container_use_env)
+    env_container_use = os.getenv(TD_OTBR_CONTAINER_USE_ENV)
+    if env_container_use is not None:
+        container_use = int(env_container_use)
     else:
         container_use = TD_OTBR_CONTAINER_USE_DEFAULT
 

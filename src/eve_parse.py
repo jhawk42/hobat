@@ -24,7 +24,7 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
         Dictionary mapping rloc16 (hex format) to all node fields with extaddr_hex added
     """
 
-    out = {}
+    result = {}
 
     omr_ipv6addr_prefix = (
         network_dataset_info["prefix_omr_ipv6addr_prefix"]
@@ -35,15 +35,15 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
     # Load the Eve JSON file
     try:
         with open(path, encoding="utf-8") as f:
-            j = json.load(f)
+            data = json.load(f)
     except OSError as e:
         logging.error(f"Failed to open Eve JSON file {path!r}: {e}")
-        return out
+        return result
     except json.JSONDecodeError as e:
         logging.error(f"Invalid JSON in Eve file {path!r}: {e}")
-        return out
+        return result
 
-    for node in j.get("nodes", []):
+    for node in data.get("nodes", []):
         # Conform rloc16 to hex string for consistent mapping
         rloc16_decimal = node.get("rloc16")
 
@@ -83,24 +83,24 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
         )  # Preserve original node ID from Eve for reference
 
         # Convert base64 extAddress to hex string for consistent mapping
-        threadNetworks = node.get("threadNetworks", [])
-        if threadNetworks:
-            extAddress_b64 = threadNetworks[0].get("extAddress")
-            if extAddress_b64:
+        thread_networks = node.get("threadNetworks", [])
+        if thread_networks:
+            ext_addr_b64 = thread_networks[0].get("extAddress")
+            if ext_addr_b64:
                 # Convert base64 extAddress to hex string
-                extAddress_hex = b64_to_extended_address(extAddress_b64)
+                ext_addr_hex = b64_to_extended_address(ext_addr_b64)
 
                 # store enhanced hex extAddress for reference
                 # Add hex extAddress to threadNetworks for reference
-                threadNetworks[0]["extAddress_hex"] = extAddress_hex
+                thread_networks[0]["extAddress_hex"] = ext_addr_hex
 
                 # Add extaddr in hex format for consistent mapping
-                threadNetworks[0]["extaddr"] = extAddress_hex
+                thread_networks[0]["extaddr"] = ext_addr_hex
 
         # Preserve all fields from the node
         if rloc16_decimal is not None:
-            out[rloc16_hex] = node
-    return out
+            result[rloc16_hex] = node
+    return result
 
 
 def enhance_eve_routes(eve_data):
@@ -135,7 +135,7 @@ def enhance_eve_routes(eve_data):
         if node_id:
             id_to_name[node_id] = node_name
             id_to_rloc16_hex[node_id] = original_node.get("rloc16_hex")
-    output = {}
+    result = {}
 
     # Rebuild nodes keyed by rloc16_hex while preserving all original fields.
     for original_key, original_node in eve_data.items():
@@ -161,14 +161,14 @@ def enhance_eve_routes(eve_data):
                     destination, f"Unknown({destination})"
                 )
 
-        output[rloc16_hex] = node_copy
+        result[rloc16_hex] = node_copy
 
-    node_count = len(output)
+    node_count = len(result)
     logging.info(
         f"Eve consolidation complete: {node_count} records in eve file."
     )
 
-    return output
+    return result
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -185,16 +185,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Parse the Eve JSON file to build an enhanced data structure keyed by rloc16_hex with all node fields preserved and extAddress in hex format for easier mapping and reference.
     eve_json_file_path = data_file_path("thread-eve-layout.json", td_data_dir)
-    eve_data_parse_1 = load_and_parse_eve_file(
+    eve_data_raw = load_and_parse_eve_file(
         eve_json_file_path, network_dataset_info
     )
 
     # Enhance the eve_data json data structure to add route destination node names for reference
-    eve_data_enhanced = enhance_eve_routes(eve_data_parse_1)
+    eve_data_enhanced = enhance_eve_routes(eve_data_raw)
 
     # Save json data structures for reference
-    save_json_filename = data_file_path("td-eve-topology.json", td_data_dir)
-    save_json_atomic(eve_data_enhanced, save_json_filename)
+    file_path = data_file_path("td-eve-topology.json", td_data_dir)
+    save_json_atomic(eve_data_enhanced, file_path)
 
     # Print the parsed data structure with route names
     logging.debug("Raw eve data as JSON:\n%s",

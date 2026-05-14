@@ -331,13 +331,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _load_extaddr_device_label_map() -> dict:
     """lazily load the extaddr-to-device-label map for scan commands."""
-    EXTADDR_JSON_FILENAME_DEFAULT = "threadstatic-extaddr.json"
-    if os.path.exists(EXTADDR_JSON_FILENAME_DEFAULT):
+    default_filename = "threadstatic-extaddr.json"
+    if os.path.exists(default_filename):
         return extaddr_device_label_map.load_extaddr_device_label_map(
-            EXTADDR_JSON_FILENAME_DEFAULT
+            default_filename
         )
     logging.debug(
-        f"Extaddr JSON file '{EXTADDR_JSON_FILENAME_DEFAULT}' not found; using empty mapping."
+        f"Extaddr JSON file '{default_filename}' not found; using empty mapping."
     )
     return {}
 
@@ -351,7 +351,7 @@ def dispatch(
     For scan commands it should be empty.  For forwarding commands (web, process,
     merge) it is passed directly to the subordinate module's main().
     """
-    _sub = parser._subcommand_parsers  # type: ignore[attr-defined]
+    sub_parsers = parser._subcommand_parsers  # type: ignore[attr-defined]
 
     def _forward_with_datadir(argv: list[str]) -> list[str]:
         if getattr(args, "datadir", None):
@@ -362,7 +362,7 @@ def dispatch(
     if args.command == "otbr-cli":
         cli_cmd = args.cli_command
         if not cli_cmd:
-            _sub["otbr-cli"].print_help()
+            sub_parsers["otbr-cli"].print_help()
             return 0
 
         if cli_cmd == "network-dataset-info":
@@ -469,7 +469,7 @@ def dispatch(
     if args.command == "otbr-restapi":
         restapi_cmd = args.restapi_command
         if not restapi_cmd:
-            _sub["otbr-restapi"].print_help()
+            sub_parsers["otbr-restapi"].print_help()
             return 0
 
         if restapi_cmd == "download":

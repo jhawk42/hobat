@@ -92,7 +92,6 @@ def parse_meshdiag_topology_output(
 
             # Parse the rest of the block
             current_section = None
-            current_lq = None
 
             for line in lines[1:]:
                 stripped = line.strip()
@@ -268,23 +267,23 @@ def get_meshdiag_topology(
         )
 
     # enhance links by decoding link IDs to objects with id and device_label
-    topology_data_enhanced_links = (
+    enhanced_links = (
         enhance_topology_router_links(
             topology_data_enhanced, network_dataset_info
         )
     )
 
     # routers counted by unique rloc16 values in the final enhanced topology data with links
-    routers_count = len(topology_data_enhanced_links)
+    routers_count = len(enhanced_links)
     children_count = sum(router.get("total_children", 0)
-                         for router in topology_data_enhanced_links)
-    total_devices_count = len(topology_data_enhanced_links) + children_count
+                         for router in enhanced_links)
+    total_devices_count = len(enhanced_links) + children_count
 
     logging.info(
         f"Meshdiag consolidation complete: {routers_count} unique routers, {children_count} unique children, and {total_devices_count} total devices found in topology map."
     )
 
-    return topology_data_enhanced_links
+    return enhanced_links
 
 
 def main(argv: Sequence[str] | None = None) -> int:

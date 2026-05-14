@@ -68,9 +68,9 @@ def extended_address_to_b64(hex_addr, reverse=False):
     b64_str = base64.b64encode(raw_bytes).decode("utf-8")
 
     # 4. Escape slashes for JSON if needed
-    escaped_b64_str = b64_str.replace("/", r"\/")
+    escaped = b64_str.replace("/", r"\/")
 
-    return escaped_b64_str
+    return escaped
 
 
 def extaddr_hex_to_base64(hex_addr, reverse=False):
