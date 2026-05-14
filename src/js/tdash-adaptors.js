@@ -711,7 +711,7 @@ export function adaptRawArray(rawFiles) {
 // ── Adaptor 6: OTBR REST API (devices + diagnostics) ─────────────────────────
 //
 // Both files use { "data": [ { "id", "type", "attributes": {...} } ] } shape.
-// Devices provide: extAddress, mlEidIid, omrIpv6Address, hostName, role, mode.
+// Devices provide: extAddress, mlEidIid, omr_ipv6_addr, hostName, role, mode.
 // Diagnostics provide: extAddress, rloc16, route.routeData[], childTable[].
 // Primary node ID = extAddress (lowercase). Merged by extAddress identity.
 
@@ -753,7 +753,7 @@ export function adaptOtbrRestApi(rawFiles) {
       extaddr: extaddrVal,
       type: roleText || toText(rawNode.type) || (existing ? existing.type : ''),
       mode_device: modeDevice || (existing ? existing.mode_device : ''),
-      omrIpv6Address: toText(rawNode.omrIpv6Address) || (existing ? existing.omrIpv6Address : ''),
+      omr_ipv6_addr: toText(rawNode.omr_ipv6_addr) || (existing ? existing.omr_ipv6_addr : ''),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_otbr_restapi: true,
       shape: style.shape || (existing ? existing.shape : (isChildLike ? 'ellipse' : 'box')),

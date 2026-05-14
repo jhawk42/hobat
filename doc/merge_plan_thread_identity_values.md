@@ -4,13 +4,13 @@ The dashboard and Python merge pipeline support canonical identity matching acro
 
 - `rloc16`
 - `extaddr`, `extAddress`, and `Extended MAC` as one canonical `extaddr` identity
-- `omrIpv6Address`
+- `omr_ipv6_addr`
 
 ## Supported dashboard merge strategies:
 
 - `none`: pass loaded JSON through without dashboard row merging
 - `by-rloc16`: merge rows only when `rloc16` matches
-- `by-identity`: merge rows when any canonical identity matches in this order of use: `rloc16`, canonical `extaddr`, `omrIpv6Address`
+- `by-identity`: merge rows when any canonical identity matches in this order of use: `rloc16`, canonical `extaddr`, `omr_ipv6_addr`
 
 ## Merge normalization rules:
 

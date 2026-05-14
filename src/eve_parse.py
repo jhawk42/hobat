@@ -53,7 +53,7 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
 
         # Enhance node with OMR IPv6 address  using OMR prefix
         if omr_ipv6addr_prefix:
-            node["omrIpv6Address"] = util_network.find_omr_address_in_list(
+            node["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
                 ipv6_addrs, omr_ipv6addr_prefix
             )
 

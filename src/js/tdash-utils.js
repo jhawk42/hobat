@@ -36,7 +36,7 @@ export function getCanonicalExtaddr(row) {
 }
 
 export function getCanonicalOmrIpv6Address(row) {
-  return canonicalIdText(row?.[MERGE_IDENTITY_FIELDS.omrIpv6Address]);
+  return canonicalIdText(row?.[MERGE_IDENTITY_FIELDS.omr_ipv6_addr]);
 }
 
 // ── Row normalisation helpers ─────────────────────────────────────────────────
@@ -45,10 +45,10 @@ export function normalizeRowMergeAliases(row) {
   if (!isPlainObject(row)) return row;
   const normalized = { ...row };
   const extaddr = getCanonicalExtaddr(row);
-  const omrIpv6Address = getCanonicalOmrIpv6Address(row);
+  const omr_ipv6_addr = getCanonicalOmrIpv6Address(row);
 
   if (extaddr) normalized.extaddr = extaddr;
-  if (omrIpv6Address) normalized.omrIpv6Address = omrIpv6Address;
+  if (omr_ipv6_addr) normalized.omr_ipv6_addr = omr_ipv6_addr;
 
   return normalized;
 }
@@ -406,7 +406,7 @@ export function sortDetailsWithPriority(details) {
     "router_child_table_count",
     "mode",
     "mode.device",
-    "omrIpv6Address",
+    "omr_ipv6_addr",
     "thread_stack_version",
     "tlv_values",
     "mac_counters.ifinerrors_pct",

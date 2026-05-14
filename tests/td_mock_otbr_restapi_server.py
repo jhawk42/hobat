@@ -40,7 +40,7 @@ class MockOTBRStore:
                 "rloc16": "0xf000",
                 "extAddress": "96518e5497d5b9f3",
                 "mlEidIid": "731f529f1266a17d",
-                "omrIpv6Address": ["fd11:22:0:0:92de:b397:5758:368"],
+                "omr_ipv6_addr": ["fd11:22:0:0:92de:b397:5758:368"],
                 "hostname": "otbr.local",
                 "eui": "9035eafffef3e09c",
                 "role": "router",
@@ -72,7 +72,7 @@ class MockOTBRStore:
             "attributes": {
                 "extAddress": "2a55d952bc7b4008",
                 "mlEidIid": "3abd123497a87083",
-                "omrIpv6Address": ["fd11:22:0:0:3abd:e522:97a8:7083"],
+                "omr_ipv6_addr": ["fd11:22:0:0:3abd:e522:97a8:7083"],
                 "hostname": "sensor-01.local",
                 "eui": "f4ce36dbdca16d79",
                 "role": "child",

@@ -594,7 +594,7 @@ def _etag_matches(etag: str, header: str) -> bool:
 def _build_file_response(
     file_path: Path,
     file_action: "FileAction",
-    request: aiohttp.web.Request,
+    request: aiohttp.web.Request | None = None,
 ) -> aiohttp.web.Response:
     """Read *file_path* from disk and return a Response with cache headers.
 
@@ -617,20 +617,21 @@ def _build_file_response(
 
     # Conditional GET — If-None-Match takes precedence over If-Modified-Since
     # per RFC 9110 §13.1.2 and §13.1.3.
-    ifnonematch = request.headers.get("If-None-Match")
-    if ifnonematch is not None:
-        if _etag_matches(etag, ifnonematch):
-            return aiohttp.web.Response(status=304, headers=cache_headers)
-    else:
-        ifsince = request.headers.get("If-Modified-Since")
-        if ifsince:
-            try:
-                modsince_ts = email.utils.parsedate_to_datetime(
-                    ifsince).timestamp()
-                if file_mtime <= modsince_ts:
-                    return aiohttp.web.Response(status=304, headers=cache_headers)
-            except Exception:
-                pass  # malformed header; fall through to serve the full response
+    if request is not None:
+        ifnonematch = request.headers.get("If-None-Match")
+        if ifnonematch is not None:
+            if _etag_matches(etag, ifnonematch):
+                return aiohttp.web.Response(status=304, headers=cache_headers)
+        else:
+            ifsince = request.headers.get("If-Modified-Since")
+            if ifsince:
+                try:
+                    modsince_ts = email.utils.parsedate_to_datetime(
+                        ifsince).timestamp()
+                    if file_mtime <= modsince_ts:
+                        return aiohttp.web.Response(status=304, headers=cache_headers)
+                except Exception:
+                    pass  # malformed header; fall through to serve the full response
 
     try:
         payload = file_path.read_bytes()

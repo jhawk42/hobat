@@ -782,7 +782,7 @@ Used with `devices list`, `devices get`, `devices fetch`.
 |---|---|---|
 | `extAddress` | string (hex) | 64-bit IEEE 802.15.4 extended address — device ID |
 | `mlEidIid` | string (hex) | Mesh-Local EID Interface Identifier |
-| `omrIpv6Address` | string (IPv6) | Off-Mesh-Routable IPv6 address |
+| `omr_ipv6_addr` | string (IPv6) | Off-Mesh-Routable IPv6 address |
 | `hostName` | string | mDNS hostname (`.local`) |
 | `role` | string | Thread role: `leader`, `router`, `child`, `sleepy-child` |
 | `mode` | object | Device mode flags (see sub-fields below) |

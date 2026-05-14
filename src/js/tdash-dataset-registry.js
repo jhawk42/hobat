@@ -9,7 +9,7 @@
 //   mergeStrategy    — 'none' | 'by-rloc16' | 'by-identity'
 //                       'none'        → pass raw arrays straight to the adaptor
 //                       'by-rloc16'   → merge all fetched arrays by rloc16 key
-//                       'by-identity' → merge by rloc16, canonical extaddr, or omrIpv6Address
+//                       'by-identity' → merge by rloc16, canonical extaddr, or omr_ipv6_addr
 //   topologyMode     — which topology adaptor to call:
 //                       'meshdiag-networkdiag' | 'merged-detailed' | 'eve'
 //                       'router-table' | 'raw-array'

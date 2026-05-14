@@ -9,7 +9,7 @@ export const MERGE_STRATEGIES = Object.freeze({
 export const MERGE_IDENTITY_FIELDS = Object.freeze({
   rloc16: "rloc16",
   extaddrAliases: ["extaddr", "extAddress", "Extended MAC"],
-  omrIpv6Address: "omrIpv6Address",
+  omr_ipv6_addr: "omr_ipv6_addr",
 });
 
 // ── Link filter constants ─────────────────────────────────────────────────────
@@ -387,7 +387,7 @@ export const TABLE_PRIORITY_COLUMNS = [
   "router_neighbor_table_count",
   "router_child_table_count",
   "mode.device",
-  "omrIpv6Address",
+  "omr_ipv6_addr",
   "scope",
   "thread_stack_version",
   "tlv_values",

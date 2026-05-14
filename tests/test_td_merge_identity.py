@@ -53,12 +53,12 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.write_json(
                 base_dir,
                 "one.json",
-                [{"omrIpv6Address": "FD00:ABCD::1234", "name": "node-a"}],
+                [{"omr_ipv6_addr": "FD00:ABCD::1234", "name": "node-a"}],
             )
             self.write_json(
                 base_dir,
                 "two.json",
-                [{"omrIpv6Address": "fd00:abcd::1234", "device_label": "Bedroom"}],
+                [{"omr_ipv6_addr": "fd00:abcd::1234", "device_label": "Bedroom"}],
             )
 
             merged_records, report = build_merged_records(
@@ -70,7 +70,7 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
 
             self.assertEqual(len(merged_records), 1)
             record = merged_records[0]
-            self.assertEqual(record["omrIpv6Address"], "fd00:abcd::1234")
+            self.assertEqual(record["omr_ipv6_addr"], "fd00:abcd::1234")
             self.assertEqual(record["name"], "node-a")
             self.assertEqual(record["device_label"], "Bedroom")
             self.assertCountEqual(record["_source_files"], ["one.json", "two.json"])

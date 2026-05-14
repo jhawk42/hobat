@@ -47,9 +47,9 @@ export function getRowMergeIdentityKeys(row, strategy) {
 
   if (strategy === MERGE_STRATEGIES.byIdentity) {
     const extaddr = getCanonicalExtaddr(row);
-    const omrIpv6Address = getCanonicalOmrIpv6Address(row);
+    const omr_ipv6_addr = getCanonicalOmrIpv6Address(row);
     if (extaddr) keys.push(`extaddr:${extaddr}`);
-    if (omrIpv6Address) keys.push(`omrIpv6Address:${omrIpv6Address}`);
+    if (omr_ipv6_addr) keys.push(`omr_ipv6_addr:${omr_ipv6_addr}`);
   }
 
   return [...new Set(keys)];

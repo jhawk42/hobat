@@ -1010,18 +1010,18 @@ def fetch_network_diag_multicast(
 
     # Finalize the consolidated dict
 
-    # Re-key by rloc16 and add type/omrIpv6Address fields
+    # Re-key by rloc16 and add type/omr_ipv6_addr fields
     result = {}
     for record in consolidated.values():
         rloc16 = record.get("rloc16", "Unknown")
 
         # Add OMR IPv6 address if prefix available
         if omr_ipv6addr_prefix:
-            record["omrIpv6Address"] = util_network.find_omr_address_in_list(
+            record["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
                 record.get("ipv6_addrs", []), omr_ipv6addr_prefix
             )
         else:
-            record["omrIpv6Address"] = None
+            record["omr_ipv6_addr"] = None
 
         # Add device type (multicast reaches routers primarily)
         # If rloc16 ends in 00 it's likely a router, if it ends in 01-ff it's likely a child, but since this is from multicast responses which are primarily from routers, we can default to "Router" for all records here. For more accurate type classification, we would need to analyze the mode flags or other TLV data, but for simplicity in this consolidated view, we can assume these are primarily router responses.
@@ -1222,7 +1222,7 @@ def fetch_network_diag_topology(
                 "thread_stack_version": "Unknown",
                 "mode": {},
                 "ipv6_addrs": ipv6_addresses.get(rloc16, []),
-                "omrIpv6Address": util_network.find_omr_address_in_list(
+                "omr_ipv6_addr": util_network.find_omr_address_in_list(
                     ipv6_addresses.get(rloc16, []), omr_ipv6addr_prefix
                 )
                 if omr_ipv6addr_prefix
@@ -1236,7 +1236,7 @@ def fetch_network_diag_topology(
         else:
             network_topology_node["type"] = "Router"
             if omr_ipv6addr_prefix:
-                network_topology_node["omrIpv6Address"] = (
+                network_topology_node["omr_ipv6_addr"] = (
                     util_network.find_omr_address_in_list(
                         network_topology_node.get(
                             "ipv6_addrs", []), omr_ipv6addr_prefix
@@ -1349,7 +1349,7 @@ def fetch_network_diag_topology(
                                 "mode": {},
                                 "ipv6_addrs": ipv6_addresses.get(child_rloc, []),
                                 "children": [],
-                                "omrIpv6Address": util_network.find_omr_address_in_list(
+                                "omr_ipv6_addr": util_network.find_omr_address_in_list(
                                     ipv6_addresses.get(child_rloc, []),
                                     omr_ipv6addr_prefix,
                                 )
@@ -1362,7 +1362,7 @@ def fetch_network_diag_topology(
                             }
 
                         else:
-                            child_node["omrIpv6Address"] = (
+                            child_node["omr_ipv6_addr"] = (
                                 util_network.find_omr_address_in_list(
                                     child_node.get("ipv6_addrs", []),
                                     omr_ipv6addr_prefix,
@@ -1402,8 +1402,8 @@ def print_network_diag_topology(topology):
             for ipv6 in data["ipv6_addrs"]:
                 logging.debug(f"    - {ipv6}")
 
-        if data.get("omrIpv6Address"):
-            logging.debug(f"  OMR IPv6 Address: {data['omrIpv6Address']}")
+        if data.get("omr_ipv6_addr"):
+            logging.debug(f"  OMR IPv6 Address: {data['omr_ipv6_addr']}")
 
         if data.get("children"):
             logging.debug(f"  Children ({len(data['children'])}):")
@@ -1478,7 +1478,7 @@ def save_topology_to_json_list(
             "thread_stack_version": data.get("thread_stack_version", "Unknown"),
             "mode": data.get("mode", {}),
             "ipv6_addrs": data.get("ipv6_addrs", []),
-            "omrIpv6Address": data.get("omrIpv6Address"),
+            "omr_ipv6_addr": data.get("omr_ipv6_addr"),
             "type": data.get("type", "Unknown"),
             "children": data.get("children", []),
             "total_children": data.get("total_children", 0),

@@ -194,7 +194,7 @@ def enhance_topology_router_links(
 
         # Enhancement: OMR IPv6 address
         if omr_ipv6addr_prefix:
-            enhanced_router["omrIpv6Address"] = util_network.find_omr_address_in_list(
+            enhanced_router["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
                 router.get("ipv6_addrs", []), omr_ipv6addr_prefix
             )
 

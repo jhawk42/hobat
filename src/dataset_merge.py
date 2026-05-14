@@ -19,7 +19,7 @@ from util_data import resolve_data_dir, save_json_atomic
 PRIORITY_FIELDS = [
     "rloc16",
     "extaddr",
-    "omrIpv6Address",
+    "omr_ipv6_addr",
     "device_label",
     "name",
     "room",
@@ -47,7 +47,7 @@ MERGE_STRATEGIES = {
 MERGE_IDENTITY_FIELDS = {
     "rloc16": "rloc16",
     "extaddr_aliases": ("extaddr", "extAddress", "Extended MAC"),
-    "omrIpv6Address": "omrIpv6Address",
+    "omr_ipv6_addr": "omr_ipv6_addr",
 }
 
 DEFAULT_INPUT_FILES = [
@@ -87,7 +87,7 @@ def get_canonical_extaddr(record: dict[str, Any]) -> str:
 
 def get_canonical_omr(record: dict[str, Any]) -> str:
     return normalize_identifier_text(
-        record.get(MERGE_IDENTITY_FIELDS["omrIpv6Address"])
+        record.get(MERGE_IDENTITY_FIELDS["omr_ipv6_addr"])
     )
 
 
@@ -98,7 +98,7 @@ def normalize_record_aliases(record: dict[str, Any]) -> dict[str, Any]:
     if extaddr:
         record["extaddr"] = extaddr
     if omr_addr:
-        record["omrIpv6Address"] = omr_addr
+        record["omr_ipv6_addr"] = omr_addr
 
     return record
 
@@ -164,7 +164,7 @@ def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, 
                     break
 
     if omr_addr:
-        record["omrIpv6Address"] = omr_addr
+        record["omr_ipv6_addr"] = omr_addr
 
     mode_device = derive_mode_device(record)
     if mode_device:
@@ -407,7 +407,7 @@ def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
 
     omr = get_canonical_omr(record)
     if omr:
-        identities["omrIpv6Address"] = omr
+        identities["omr_ipv6_addr"] = omr
 
     return identities
 
@@ -422,7 +422,7 @@ def find_candidate_node_ids(
 
     rloc16 = identity_values.get("rloc16")
     extaddr = identity_values.get("extaddr")
-    omr = identity_values.get("omrIpv6Address")
+    omr = identity_values.get("omr_ipv6_addr")
 
     if isinstance(rloc16, str) and rloc16 in by_rloc16:
         candidate_ids.add(by_rloc16[rloc16])
@@ -445,7 +445,7 @@ def index_node_identity_values(
 
     rloc16 = identity_values.get("rloc16")
     extaddr = identity_values.get("extaddr")
-    omr = identity_values.get("omrIpv6Address")
+    omr = identity_values.get("omr_ipv6_addr")
 
     if isinstance(rloc16, str):
         node["rloc16"] = rloc16
@@ -454,7 +454,7 @@ def index_node_identity_values(
         node["extaddr"] = extaddr
         add_identifier(by_extaddr, extaddr, node_id)
     if isinstance(omr, str):
-        node["omrIpv6Address"] = omr
+        node["omr_ipv6_addr"] = omr
         add_identifier(by_omr, omr, node_id)
 
     return identity_values
@@ -532,7 +532,7 @@ def build_merged_records(
             identity_values = collect_merge_identity_values(record)
             rloc16 = identity_values.get("rloc16")
             extaddr = identity_values.get("extaddr")
-            omr = identity_values.get("omrIpv6Address")
+            omr = identity_values.get("omr_ipv6_addr")
 
             candidate_ids = find_candidate_node_ids(
                 identity_values, by_rloc16, by_extaddr, by_omr
@@ -554,7 +554,7 @@ def build_merged_records(
                                 "candidate_node_ids": sorted(candidate_ids),
                                 "rloc16": rloc16,
                                 "extaddr": extaddr,
-                                "omrIpv6Address": omr,
+                                "omr_ipv6_addr": omr,
                             }
                         )
                 node_id = min(candidate_ids)

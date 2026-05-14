@@ -1035,13 +1035,13 @@ class MDNSDumpListener(ServiceListener):
     def _build_record_from_service_info(self, type_: str, name: str, info, event: str):
         """Build a common JSON record from zeroconf ServiceInfo + metadata."""
         parsed_addresses = []
-        omrIpv6Address = None
+        omr_ipv6_addr = None
         if info and hasattr(info, "parsed_addresses"):
             try:
                 parsed_addresses = info.parsed_addresses()
                 # Enhance node with OMR IPv6 address  using OMR prefix
                 if self._omr_ipv6addr_prefix:
-                    omrIpv6Address = util_network.find_omr_address_in_list(
+                    omr_ipv6_addr = util_network.find_omr_address_in_list(
                         parsed_addresses, self._omr_ipv6addr_prefix
                     )
             except Exception:
@@ -1143,9 +1143,9 @@ class MDNSDumpListener(ServiceListener):
             "xa", {}).get("hex", None)
         if extaddr is not None:
             retobj["extaddr"] = extaddr
-        # Add omrIpv6Address if exists. promote to top level for easier access
-        if omrIpv6Address is not None:
-            retobj["omrIpv6Address"] = omrIpv6Address
+        # Add omr_ipv6_addr if exists. promote to top level for easier access
+        if omr_ipv6_addr is not None:
+            retobj["omr_ipv6_addr"] = omr_ipv6_addr
         retobj["service_info"] = service_info
 
         return retobj

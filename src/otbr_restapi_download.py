@@ -128,18 +128,35 @@ def _parse_extra_headers(raw_headers: Sequence[str]) -> dict[str, str]:
     return headers
 
 
-def _build_client(args: argparse.Namespace, extra_headers: dict[str, str]) -> OTBRRestApiClient:
-    """Construct a client from parsed args."""
-    if extra_headers:
+def build_base_url(host: str, port: int, base_url: str | None = None) -> str:
+    """Build normalized base URL, preferring explicit base_url when provided."""
+    return (base_url or f"http://{host}:{port}").rstrip("/")
+
+
+def build_headers(accept: str, raw_headers: Sequence[str]) -> dict[str, str]:
+    """Build request headers dict from Accept plus repeatable NAME:VALUE pairs."""
+    headers = {"Accept": accept}
+    headers.update(_parse_extra_headers(raw_headers))
+    return headers
+
+
+def _build_client_from_options(
+    *,
+    base_url: str,
+    timeout: int,
+    headers: dict[str, str],
+) -> OTBRRestApiClient:
+    """Construct OTBRRestApiClient from normalized network options."""
+    extra_header_names = [k for k in headers.keys() if k.lower() != "accept"]
+    if extra_header_names:
         logging.warning(
             "Extra headers beyond Accept are not forwarded by OTBRRestApiClient: %s",
-            list(extra_headers.keys()),
+            extra_header_names,
         )
-    base_url = (args.base_url or f"http://{args.host}:{args.port}").rstrip("/")
     return OTBRRestApiClient(
         base_url=base_url,
-        timeout=args.timeout,
-        accept=args.accept,
+        timeout=timeout,
+        accept=headers.get("Accept", DEFAULT_ACCEPT),
     )
 
 
@@ -148,9 +165,12 @@ def _build_client(args: argparse.Namespace, extra_headers: dict[str, str]) -> OT
 # ---------------------------------------------------------------------------
 
 def download_all_restapi_endpoints(
-    client: OTBRRestApiClient,
-    data_dir: Path,
+    client: OTBRRestApiClient | None = None,
+    data_dir: Path | None = None,
     *,
+    base_url: str | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: int = TIMEOUT,
     update_devices: bool = False,
 ) -> int:
     """
@@ -165,6 +185,18 @@ def download_all_restapi_endpoints(
     Returns:
         Exit code: 0 on full success, 1 if any download failed.
     """
+    if client is None:
+        effective_base_url = (base_url or f"http://{HOST}:{PORT}").rstrip("/")
+        effective_headers = headers or {"Accept": DEFAULT_ACCEPT}
+        client = _build_client_from_options(
+            base_url=effective_base_url,
+            timeout=timeout,
+            headers=effective_headers,
+        )
+
+    if data_dir is None:
+        data_dir = _ACTIVE_TD_DATA_DIR or resolve_data_dir(data_dir=None)
+
     failures = 0
 
     # 5.4 – optionally refresh device collection first
@@ -265,24 +297,37 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        extra_headers = _parse_extra_headers(args.header)
+        headers = build_headers(args.accept, args.header)
     except ValueError as exc:
         parser.error(str(exc))
 
     data_dir = resolve_data_dir(data_dir=args.datadir)
-    client = _build_client(args, extra_headers)
+    base_url = build_base_url(args.host, args.port, args.base_url)
 
     global _ACTIVE_TD_DATA_DIR
     _ACTIVE_TD_DATA_DIR = data_dir
     try:
-        exit_code = download_all_restapi_endpoints(
-            client,
-            data_dir,
-            update_devices=args.update_devices,
-        )
+        if args.update_devices:
+            exit_code = download_all_restapi_endpoints(
+                base_url=base_url,
+                headers=headers,
+                timeout=args.timeout,
+                update_devices=True,
+            )
+        else:
+            exit_code = download_all_restapi_endpoints(
+                base_url=base_url,
+                headers=headers,
+                timeout=args.timeout,
+            )
 
         if args.fetch_diagnostics:
             diag_types = args.diag_types or list(RECOMMENDED_DIAGNOSTIC_TLVS)
+            client = _build_client_from_options(
+                base_url=base_url,
+                timeout=args.timeout,
+                headers=headers,
+            )
             diag_exit = fetch_and_save_diagnostics(client, data_dir, diag_types)
             if diag_exit != 0:
                 exit_code = diag_exit

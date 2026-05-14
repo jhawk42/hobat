@@ -16,8 +16,8 @@ export function chooseNodeId(node, fallbackPrefix, index) {
   if (idField) return idField;
   const extAddr = getCanonicalExtaddr(node);
   if (extAddr) return extAddr;
-  const omrIpv6Address = getCanonicalOmrIpv6Address(node);
-  if (omrIpv6Address) return omrIpv6Address;
+  const omr_ipv6_addr = getCanonicalOmrIpv6Address(node);
+  if (omr_ipv6_addr) return omr_ipv6_addr;
   return `${fallbackPrefix}-${index}`;
 }
 
