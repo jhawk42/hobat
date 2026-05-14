@@ -11,6 +11,7 @@ from util_data import resolve_data_file_path, resolve_data_dir
 from const import TD_DATA_DIR_ARG_HELP
 
 from otbr_restapi_client import (
+    
     DEFAULT_ACCEPT,
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -21,6 +22,7 @@ from otbr_restapi_client import (
     FULL_DIAGNOSTIC_TLVS,
     MESH_DIAGNOSTIC_TLVS,
     MINIMAL_DIAGNOSTIC_TLVS,
+    BASIC_DIAGNOSTIC_TLVS,
     RECOMMENDED_DIAGNOSTIC_TLVS,
     DestinationType,
     OTBRActionError,
@@ -235,7 +237,7 @@ def _add_diagnostics_commands(
         help="Diagnostic TLV names (default: RECOMMENDED_DIAGNOSTIC_TLVS)",
     )
     diagnostics_fetch.add_argument(
-        "--preset", choices=["recommended", "full", "minimal"],
+        "--preset", choices=["recommended", "full", "minimal", "basic"],
         help="Use a predefined TLV preset; overrides --types",
     )
     diagnostics_fetch.add_argument(
@@ -263,7 +265,7 @@ def _add_diagnostics_commands(
         help="Diagnostic TLV names (default: RECOMMENDED_DIAGNOSTIC_TLVS)",
     )
     diagnostics_fetch_all.add_argument(
-        "--preset", choices=["recommended", "full", "minimal"],
+        "--preset", choices=["recommended", "full", "minimal", "basic"],
         help="Use a predefined TLV preset; overrides --types",
     )
     diagnostics_fetch_all.add_argument(
@@ -330,7 +332,7 @@ def _add_actions_commands(
         help="Diagnostic TLVs by name or integer (required unless --preset is given)",
     )
     get_network_diag.add_argument(
-        "--preset", choices=["recommended", "full", "minimal"],
+        "--preset", choices=["recommended", "full", "minimal", "basic"],
         help="Use a predefined TLV preset; overrides --types",
     )
     get_network_diag.add_argument("--timeout", type=int,
@@ -739,6 +741,8 @@ def _resolve_types(args: argparse.Namespace) -> list[str | int]:
         return list(FULL_DIAGNOSTIC_TLVS)
     if preset == "minimal":
         return list(MINIMAL_DIAGNOSTIC_TLVS)
+    if preset == "basic":
+        return list(BASIC_DIAGNOSTIC_TLVS)
     types_raw = getattr(args, "types", None)
     if types_raw:
         return _parse_typed_values(types_raw)

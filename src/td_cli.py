@@ -26,8 +26,7 @@ import otbr_cli_meshdiag_routerneighbortable
 import otbr_cli_networkdiag_topology
 
 import otbr_restapi_download
-import otbr_restapi_client_cli
-import otbr_restapi_raw_client_cli
+import otbr_restapi_cli
 
 import dataset_merge
 
@@ -88,12 +87,12 @@ class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
 #   td_cli.py otbr-restapi client actions enqueue get-network-diagnostic --destination 123456789 --types 1,2,3 --timeout 60 --destination-type extaddr
 #   td_cli.py otbr-restapi client actions enqueue reset-network-diag-counter --destination 123456789 --types 1,2,3 --timeout 60 --destination-type extaddr
 #   td_cli.py otbr-restapi client actions enqueue get-energy-scan --destination 123456789 --channel-mask 0x1FFF800 --count 5 --period
-#   td_cli.py otbr-restapi rawclient diagnostics list
-#   td_cli.py otbr-restapi rawclient diagnostics get --diagnostics-id 123456789
-#   td_cli.py otbr-restapi rawclient actions list
-#   td_cli.py otbr-restapi rawclient actions get --action-id 123456789
-#   td_cli.py otbr-restapi rawclient actions enqueue add-thread-device --pskd 12345678 --eui 123456789 --discerner 123
-#   td_cli.py otbr-restapi rawclient actions enqueue get-network-diagnostic --destination 123456789 --types 1,2,3 --timeout 60 --destination-type
+#   td_cli.py otbr-restapi --raw  diagnostics list
+#   td_cli.py otbr-restapi --raw  diagnostics get --diagnostics-id 123456789
+#   td_cli.py otbr-restapi --raw  actions list
+#   td_cli.py otbr-restapi --raw  actions get --action-id 123456789
+#   td_cli.py otbr-restapi --raw  actions enqueue add-thread-device --pskd 12345678 --eui 123456789 --discerner 123
+#   td_cli.py otbr-restapi --raw  actions enqueue get-network-diagnostic --destination 123456789 --types 1,2,3 --timeout 60 --destination-type
 #
 # process-eve examples:
 #   td_cli.py process-eve --input eve_data.json --output td-eve-topology.json
@@ -231,11 +230,6 @@ def _add_otbr_restapi_commands(subparsers: argparse._SubParsersAction) -> None:
     # otbr-restapi client  — remaining args forwarded to otbr_restapi_client_cli.main()
     restapi_sub.add_parser(
         "client", help="Call OTBR REST API client commands (flattened output)"
-    )
-
-    # otbr-restapi rawclient  — remaining args forwarded to otbr_restapi_raw_client_cli.main()
-    restapi_sub.add_parser(
-        "rawclient", help="Call OTBR REST API client commands (raw envelopes)"
     )
 
 
@@ -475,12 +469,8 @@ def dispatch(
         if restapi_cmd == "download":
             return otbr_restapi_download.main(_forward_with_datadir(extra_args)) or 0
         if restapi_cmd == "client":
-            return otbr_restapi_client_cli.main(_forward_with_datadir(extra_args)) or 0
-        if restapi_cmd == "rawclient":
-            return (
-                otbr_restapi_raw_client_cli.main(
-                    _forward_with_datadir(extra_args)) or 0
-            )
+            return otbr_restapi_cli.main(_forward_with_datadir(extra_args)) or 0
+
 
     # --- process-eve ---
     if args.command == "process-eve":

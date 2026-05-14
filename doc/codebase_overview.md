@@ -103,9 +103,8 @@ This codebase uses a strict naming split so the data source is visible from the 
 |---|---|
 | `otbr_restapi_download.py` | Fixed-target downloader: fetches `/node/dataset/active`, `/api/devices`, and `/api/diagnostics` and writes them to local JSON files.  Accepts CLI overrides for host, port, base URL, timeout, and headers. |
 | `otbr_restapi_client.py` | Full-featured REST API client (`OTBRRestApiClient`).  Returns **flattened** Python objects by default (JSON:API `id`/`type`/`attributes` merged into a single dict). Also contains the shared exception hierarchy (`OTBRHTTPError`, `OTBRConnectionError`, etc.). |
-| `otbr_restapi_raw_client.py` | Thin subclass (`OTBRRawRestApiClient`) that defaults to returning raw JSON:API envelopes (`{"data": …, "meta": …}`) rather than flattening them. |
-| `otbr_restapi_client_cli.py` | CLI front-end for the flattened client.  Supports sub-commands: `node get/state get/state set/dataset get`, `devices list/get`, `diagnostics list/get`, `actions list/get/enqueue`. |
-| `otbr_restapi_raw_client_cli.py` | Identical command surface as the flattened CLI but routes through the raw client. |
+| `otbr_restapi_cli.py` | CLI front-end for the flattened client.  Supports sub-commands: `node get/state get/state set/dataset get`, `devices list/get`, `diagnostics list/get`, `actions list/get/enqueue`. |
+
 
 ### Data Collection — ot-ctl CLI (via Docker)
 
@@ -555,8 +554,7 @@ python src/td_cli.py otbr-restapi client devices list --with-meta
 python src/td_cli.py otbr-restapi rawclient node get
 
 # Or invoke the modules directly
-python src/otbr_restapi_client_cli.py node get
-python src/otbr_restapi_raw_client_cli.py node get
+python src/otbr_restapi_cli.py node get
 ```
 
 ### Start the web server
@@ -587,7 +585,7 @@ Open `http://localhost:8087/tdash.html` after starting the web server, or open `
 python -m pytest tests/
 
 # Specific test modules
-python -m unittest tests/test_otbr_restapi_download.py tests/test_otbr_restapi_client.py tests/test_otbr_restapi_raw_client.py
+python -m unittest tests/test_otbr_restapi_download.py tests/test_otbr_restapi_client.py 
 python -m unittest tests/test_td_merge_identity.py
 python -m unittest tests/test_td_cli_argparse.py
 python -m unittest tests/test_tdash_web_routing.py
@@ -598,7 +596,7 @@ python -m unittest tests/test_tdash_web_routing.py
 ```bash
 python tests/td_mock_otbr_restapi_server.py --host 127.0.0.1 --port 18081
 # then override client defaults:
-python src/otbr_restapi_client_cli.py --host 127.0.0.1 --port 18081 node get
+python src/otbr_restapi_cli.py --host 127.0.0.1 --port 18081 node get
 # or via td_cli.py:
 python src/td_cli.py otbr-restapi client --host 127.0.0.1 --port 18081 node get
 ```
@@ -699,7 +697,7 @@ The button is shown/hidden when switching views (`tdash-ui.js:110`):
 
 ## REST API Client Exit Codes
 
-Both CLI pairs (`otbr_restapi_client_cli.py` and `otbr_restapi_raw_client_cli.py`) use the same exit codes:
+The `otbr_restapi_cli.py` exit codes:
 
 | Code | Meaning |
 |---|---|

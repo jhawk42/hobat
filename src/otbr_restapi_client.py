@@ -174,6 +174,15 @@ MINIMAL_DIAGNOSTIC_TLVS: list[str] = [
     DIAG_TLV_THREAD_STACK_VER,
 ]
 
+# Minimal lightweight set for quick enumeration
+BASIC_DIAGNOSTIC_TLVS: list[str] = [
+    DIAG_TLV_EXT_ADDRESS,
+    DIAG_TLV_RLOC16,
+    DIAG_TLV_MODE,
+    DIAG_TLV_IPV6_ADDRESSES,
+    DIAG_TLV_EUI64
+]
+
 # Mesh-diagnostic TLVs as a frozenset for validation
 MESH_DIAGNOSTIC_TLVS: frozenset[str] = frozenset({
     DIAG_TLV_CHILDREN,
@@ -598,10 +607,10 @@ class OTBRRestApiClient:
     def trigger_and_wait_device_collection(
         self,
         *,
-        device_count: int = 50,
+        device_count: int = 200,
         max_age: int = 30,
         max_retries: int = 5,
-        task_timeout: int = 60,
+        task_timeout: int = 120, #60,
         poll_interval: float = 3.0,
         poll_timeout: float = 90.0,
         raise_on_stopped: bool = False,

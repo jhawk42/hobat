@@ -6,8 +6,7 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import otbr_restapi_client as base_client_module
-import otbr_restapi_raw_client as raw_client_module
-import otbr_restapi_raw_client_cli as raw_cli_module
+import otbr_restapi__cli as cli_module
 
 
 class FakeHeaders:
