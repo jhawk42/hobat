@@ -7,24 +7,36 @@
 	"image": "mcr.microsoft.com/devcontainers/python:3-3.14-bookworm",
 	"features": {
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
-		//"ghcr.io/devcontainers/features/node:1": {
-		//	"version": "lts"
-		// }
+		"ghcr.io/devcontainers/features/node:2": {
+			"version": "lts"
+		}
 	},
+	"customizations": {
+		"vscode": {}
+	},
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y ripgrep && python -m pip install -r requirements.txt",
 	"runArgs": [
 		"--network=host"
-	],
+	]
+
+	// git worktree support - mount workspace parent root to enable access to peer worktree directories
+	//"workspaceMount": "source=${localWorkspaceFolder}/..,target=/workspaces,type=bind",
+	//"workspaceFolder": "${localWorkspaceFolder}"
+
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
+	//
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
+	//
+	//
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "pip3 install --user -r requirements.txt",
 	// Configure tool-specific properties.
+	//
 	// "customizations": {},
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
-	// mount workspace parent root to enable peer worktree directories
-	"workspaceMount": "source=${localWorkspaceFolder}/..,target=/workspaces,type=bind",
-	"workspaceFolder": "${localWorkspaceFolder}"
+	
+
 }
