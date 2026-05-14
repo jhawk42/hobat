@@ -19,16 +19,21 @@ from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
 
-def merge_extaddr_files(extaddr_json_path, topology_file_path):
+def _is_valid_label(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def merge_extaddr_files(extaddr_json_path, topology_file_path, merge_name_override=False):
     """
     Merge missing extaddr entries from topology file into static extaddr file.
     
     Args:
         extaddr_json_path: Path to td-static-extaddr-device-label.json
         topology_file_path: Path to thread-networkdiagnostic-topology-rloc16-extaddr-device_label.json
+        merge_name_override: If True, replace static Unknown labels with topology name when available
     
     Returns:
-        Tuple of (num_added, added_entries)
+        Tuple of (num_added, added_entries, num_overridden, overridden_entries)
     """
     # Load static extaddr file
     with open(extaddr_json_path, 'r') as f:
@@ -43,22 +48,76 @@ def merge_extaddr_files(extaddr_json_path, topology_file_path):
     # Extract extaddr values
     static_extaddrs = {item['extaddr'] for item in static_data}
     
-    # Build topology entries dict, skipping items without required fields
+    # Build topology entries dict, skipping items without required fields.
+    # Prefer device_label; fall back to name when device_label is not usable.
     topology_entries = {}
+    topology_names_by_extaddr = {}
     for i, item in enumerate(topology_data):
+        if item.get('scope') == '_trel._udp.local.':
+            continue
+
         if 'extaddr' not in item:
             logging.warning(f"Topology entry {i} missing 'extaddr' field: {item} %s", json.dumps(item, indent=4))
             continue
-        if 'device_label' not in item:
-            logging.warning(f"Topology entry {i} (extaddr={item.get('extaddr')}) missing 'device_label' field")
+        extaddr = item['extaddr']
+        if not _is_valid_label(extaddr):
+            logging.warning(f"Topology entry {i} has invalid 'extaddr' value: {item.get('extaddr')!r}")
             continue
-        topology_entries[item['extaddr']] = item['device_label']
+
+        device_label = item.get('device_label')
+        name = item.get('name')
+
+        if _is_valid_label(name):
+            topology_names_by_extaddr[extaddr] = name.strip()
+
+        if _is_valid_label(device_label):
+            topology_entries[extaddr] = device_label.strip()
+            continue
+        if _is_valid_label(name):
+            topology_entries[extaddr] = topology_names_by_extaddr[extaddr]
+            continue
+
+        logging.warning(
+            "Topology entry %s (extaddr=%s) missing usable 'device_label' and 'name' fields",
+            i,
+            extaddr,
+        )
     
     # Find missing extaddrs
     missing_extaddrs = set(topology_entries.keys()) - static_extaddrs
     
-    if not missing_extaddrs:
-        return 0, []
+    # Optionally replace static Unknown labels with topology name for matching extaddr entries.
+    overridden_entries = []
+    if merge_name_override:
+        for item in static_data:
+            extaddr = item.get('extaddr')
+            if not _is_valid_label(extaddr):
+                continue
+
+            static_label = item.get('device_label', '')
+            if not isinstance(static_label, str):
+                continue
+            if 'unknown' not in static_label.lower():
+                continue
+
+            name = topology_names_by_extaddr.get(extaddr)
+            if not _is_valid_label(name):
+                continue
+
+            name = name.strip()
+            if item['device_label'] != name:
+                old_label = item['device_label']
+                item['device_label'] = name
+                overridden_entries.append(
+                    {
+                        "extaddr": extaddr,
+                        "old_device_label": old_label,
+                        "new_device_label": name,
+                    }
+                )
+
+    if not missing_extaddrs and not overridden_entries:
+        return 0, [], 0, []
     
     # Create entries for missing extaddrs
     added_entries = []
@@ -82,7 +141,7 @@ def merge_extaddr_files(extaddr_json_path, topology_file_path):
     # Write updated data back to static file
     save_json_atomic(static_data, extaddr_json_path)
     
-    return len(added_entries), added_entries
+    return len(added_entries), added_entries, len(overridden_entries), overridden_entries
 
 
 def main():
@@ -101,6 +160,14 @@ def main():
         '--topology-file',
         default='td-otbr-cli-networkdiag-topology.json',
         help='Topology file name (default: td-otbr-cli-networkdiag-topology.json)'
+    )
+    parser.add_argument(
+        '--merge_name_override',
+        action='store_true',
+        help=(
+            'If set, replace static Unknown device_label values with topology name '
+            'for matching extaddr entries'
+        ),
     )
     args = parser.parse_args()
     
@@ -132,15 +199,27 @@ def main():
     
     # Perform merge
     try:
-        num_added, added_entries = merge_extaddr_files(extaddr_json_filename, topology_file)
+        num_added, added_entries, num_overridden, overridden_entries = merge_extaddr_files(
+            extaddr_json_filename,
+            topology_file,
+            merge_name_override=args.merge_name_override,
+        )
         
-        if num_added == 0:
+        if num_added == 0 and num_overridden == 0:
             print("No missing extaddr entries found. No changes made.")
             return 0
-        
-        print(f"Added {num_added} new extaddr entry/entries:")
-        for entry in added_entries:
-            print(f"  {entry['extaddr']}: {entry['device_label']}")
+
+        if num_added > 0:
+            print(f"Added {num_added} new extaddr entry/entries:")
+            for entry in added_entries:
+                print(f"  {entry['extaddr']}: {entry['device_label']}")
+
+        if num_overridden > 0:
+            print(f"Updated {num_overridden} existing Unknown device_label value(s) using topology name:")
+            for entry in overridden_entries:
+                print(
+                    f"  {entry['extaddr']}: {entry['old_device_label']} -> {entry['new_device_label']}"
+                )
         
         return 0
     
