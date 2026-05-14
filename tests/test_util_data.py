@@ -15,7 +15,7 @@ class ResolveTdDataDirTests(unittest.TestCase):
             cli_dir = Path(tmpdir) / "cli_data"
 
             resolved = util_data.resolve_data_dir(
-                datadir_arg=str(cli_dir),
+                data_dir=str(cli_dir),
                 env={"TD_DATA_DIR": str(env_dir)},
                 cwd=tmpdir,
             )
@@ -23,7 +23,7 @@ class ResolveTdDataDirTests(unittest.TestCase):
             self.assertEqual(resolved, env_dir.resolve())
 
             detailed = util_data.resolve_data_dir_with_source(
-                datadir_arg=str(cli_dir),
+                data_dir=str(cli_dir),
                 env={"TD_DATA_DIR": str(env_dir)},
                 cwd=tmpdir,
             )
@@ -35,7 +35,7 @@ class ResolveTdDataDirTests(unittest.TestCase):
             cli_dir = Path(tmpdir) / "cli_data"
 
             resolved = util_data.resolve_data_dir(
-                datadir_arg=str(cli_dir),
+                data_dir=str(cli_dir),
                 env={},
                 cwd=tmpdir,
             )
@@ -43,7 +43,7 @@ class ResolveTdDataDirTests(unittest.TestCase):
             self.assertEqual(resolved, cli_dir.resolve())
 
             detailed = util_data.resolve_data_dir_with_source(
-                datadir_arg=str(cli_dir),
+                data_dir=str(cli_dir),
                 env={},
                 cwd=tmpdir,
             )
@@ -54,12 +54,12 @@ class ResolveTdDataDirTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("util_data.Path.exists", return_value=True):
                 resolved = util_data.resolve_data_dir(
-                    datadir_arg=None,
+                    data_dir=None,
                     env={},
                     cwd=tmpdir,
                 )
                 detailed = util_data.resolve_data_dir_with_source(
-                    datadir_arg=None,
+                    data_dir=None,
                     env={},
                     cwd=tmpdir,
                 )
@@ -73,12 +73,12 @@ class ResolveTdDataDirTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("util_data.Path.exists", return_value=False):
                 resolved = util_data.resolve_data_dir(
-                    datadir_arg=None,
+                    data_dir=None,
                     env={},
                     cwd=tmpdir,
                 )
                 detailed = util_data.resolve_data_dir_with_source(
-                    datadir_arg=None,
+                    data_dir=None,
                     env={},
                     cwd=tmpdir,
                 )
@@ -94,7 +94,7 @@ class ResolveTdDataDirTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             cli_dir = Path(tmpdir) / "cli_data"
             detailed = util_data.resolve_data_dir_with_source(
-                datadir_arg=str(cli_dir),
+                data_dir=str(cli_dir),
                 env={"TD_DATA_DIR": "   "},
                 cwd=tmpdir,
             )

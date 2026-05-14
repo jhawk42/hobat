@@ -849,7 +849,7 @@ def run_cli(
     )
     parser = build_parser_fn()
     args = parser.parse_args(argv)
-    args.td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
+    args.td_data_dir = resolve_data_dir(data_dir=args.datadir)
     output_path = args.output
     if output_path:
         output_path = str(resolve_data_file_path(

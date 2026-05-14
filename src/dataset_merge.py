@@ -276,7 +276,7 @@ def values_equivalent(left: Any, right: Any) -> bool:
 
 
 def append_merge_conflict(
-    base: dict[str, Any], path: str, current_value: Any, incoming_value: Any
+    base: dict[str, Any], path: str, cur_val: Any, new_value: Any
 ) -> None:
     if not path:
         return
@@ -290,10 +290,10 @@ def append_merge_conflict(
         return
 
     current_text = json.dumps(
-        current_value, sort_keys=True, ensure_ascii=True, default=str
+        cur_val, sort_keys=True, ensure_ascii=True, default=str
     )
     incoming_text = json.dumps(
-        incoming_value, sort_keys=True, ensure_ascii=True, default=str
+        new_value, sort_keys=True, ensure_ascii=True, default=str
     )
 
     for entry in conflicts:
@@ -315,11 +315,11 @@ def append_merge_conflict(
     )
 
 
-def merge_lists(a_list: list[Any], b_list: list[Any]) -> list[Any]:
+def merge_lists(left: list[Any], right: list[Any]) -> list[Any]:
     seen: set[str] = set()
     merged: list[Any] = []
 
-    for item in a_list + b_list:
+    for item in left + right:
         key = json.dumps(item, sort_keys=True, ensure_ascii=True)
         if key in seen:
             continue
@@ -497,7 +497,7 @@ def build_merged_records(
     base_dir: Path,
     omr_prefix: str,
     input_files: list[str],
-    extaddr_to_device_label: dict[str, str],
+    device_label_map: dict[str, str],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     nodes: dict[int, dict[str, Any]] = {}
     by_rloc16: dict[str, int] = {}
@@ -520,7 +520,7 @@ def build_merged_records(
 
             record_extaddr = record.get("extaddr")
             if isinstance(record_extaddr, str):
-                mapped_label = extaddr_to_device_label.get(
+                mapped_label = device_label_map.get(
                     record_extaddr.lower())
                 if mapped_label and value_is_empty(record.get("device_label")):
                     record["device_label"] = mapped_label
@@ -580,7 +580,7 @@ def build_merged_records(
             )
             active_extaddr = active_identity_values.get("extaddr")
             if isinstance(active_extaddr, str):
-                mapped_label = extaddr_to_device_label.get(active_extaddr)
+                mapped_label = device_label_map.get(active_extaddr)
                 if mapped_label and value_is_empty(active.get("device_label")):
                     active["device_label"] = mapped_label
 
@@ -738,7 +738,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     args = parse_args(argv)
-    td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
+    td_data_dir = resolve_data_dir(data_dir=args.datadir)
     base_dir = td_data_dir if args.base_dir == "." else Path(args.base_dir)
     include_files = parse_file_list_args(args.include_files)
     exclude_files = parse_file_list_args(args.exclude_files)
@@ -755,7 +755,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not extaddr_map_path.is_file():
         raise FileNotFoundError(
             f"Reference file not found: {extaddr_map_path}")
-    extaddr_to_device_label = load_extaddr_device_label_map(extaddr_map_path)
+    device_label_map = load_extaddr_device_label_map(extaddr_map_path)
 
     dataset = load_json(base_dir / args.dataset_file)
     omr_prefix = dataset.get("prefix_omr_ipv6addr_prefix", "")
@@ -768,10 +768,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         base_dir,
         omr_prefix,
         input_files,
-        extaddr_to_device_label,
+        device_label_map,
     )
     report["reference_extaddr_map_file"] = args.extaddr_map_file
-    report["reference_extaddr_map_entries"] = len(extaddr_to_device_label)
+    report["reference_extaddr_map_entries"] = len(device_label_map)
 
     output_path = base_dir / args.output
     save_json_atomic(merged_records, output_path, indent=2, add_trailing_newline=True)

@@ -343,11 +343,11 @@ def _load_extaddr_device_label_map() -> dict:
 
 
 def dispatch(
-    args: argparse.Namespace, sub_argv: list[str], parser: argparse.ArgumentParser
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
 ) -> int:
     """Dispatch parsed arguments to the appropriate module entry point.
 
-    sub_argv contains the unrecognised arguments returned by parse_known_args.
+    extra_args contains the unrecognised arguments returned by parse_known_args.
     For scan commands it should be empty.  For forwarding commands (web, process,
     merge) it is passed directly to the subordinate module's main().
     """
@@ -368,41 +368,41 @@ def dispatch(
         if cli_cmd == "network-dataset-info":
             return (
                 otbr_cli_network_dataset_info.main(
-                    _forward_with_datadir(sub_argv)) or 0
+                    _forward_with_datadir(extra_args)) or 0
             )
 
         if cli_cmd == "router-table":
-            return otbr_cli_router_table.main(_forward_with_datadir(sub_argv)) or 0
+            return otbr_cli_router_table.main(_forward_with_datadir(extra_args)) or 0
 
         if cli_cmd == "meshdiag":
             meshdiag_cmd = args.meshdiag_command
             if meshdiag_cmd == "topology":
                 return (
                     otbr_cli_meshdiag_topology.main(
-                        _forward_with_datadir(sub_argv))
+                        _forward_with_datadir(extra_args))
                     or 0
                 )
             if meshdiag_cmd == "routerneighbortable":
                 return (
                     otbr_cli_meshdiag_routerneighbortable.main(
-                        _forward_with_datadir(sub_argv)
+                        _forward_with_datadir(extra_args)
                     )
                     or 0
                 )
             if meshdiag_cmd == "childtable":
                 return (
                     otbr_cli_meshdiag_childtable.main(
-                        _forward_with_datadir(sub_argv))
+                        _forward_with_datadir(extra_args))
                     or 0
                 )
             if meshdiag_cmd == "childip6":
                 return (
                     otbr_cli_meshdiag_childip6.main(
-                        _forward_with_datadir(sub_argv))
+                        _forward_with_datadir(extra_args))
                     or 0
                 )
             if meshdiag_cmd == "all":
-                forwarded = _forward_with_datadir(sub_argv)
+                forwarded = _forward_with_datadir(extra_args)
                 rc = otbr_cli_meshdiag_topology.main(forwarded) or 0
                 rc = rc or otbr_cli_meshdiag_routerneighbortable.main(
                     forwarded) or 0
@@ -437,7 +437,7 @@ def dispatch(
                 )
 
         if cli_cmd == "all":
-            forwarded = _forward_with_datadir(sub_argv)
+            forwarded = _forward_with_datadir(extra_args)
             rc = otbr_cli_network_dataset_info.main(forwarded) or 0
             rc = rc or otbr_cli_router_table.main(forwarded) or 0
             rc = rc or otbr_cli_meshdiag_topology.main(forwarded) or 0
@@ -461,7 +461,7 @@ def dispatch(
             )
             + (["--haptcp"] if args.haptcp else [])
             + (["--mattertcpsupported"] if args.mattertcpsupported else [])
-            + sub_argv
+            + extra_args
         )
         return mdns_thread_scopes.main(_forward_with_datadir(mdns_argv)) or 0
 
@@ -473,22 +473,22 @@ def dispatch(
             return 0
 
         if restapi_cmd == "download":
-            return otbr_restapi_download.main(_forward_with_datadir(sub_argv)) or 0
+            return otbr_restapi_download.main(_forward_with_datadir(extra_args)) or 0
         if restapi_cmd == "client":
-            return otbr_restapi_client_cli.main(_forward_with_datadir(sub_argv)) or 0
+            return otbr_restapi_client_cli.main(_forward_with_datadir(extra_args)) or 0
         if restapi_cmd == "rawclient":
             return (
                 otbr_restapi_raw_client_cli.main(
-                    _forward_with_datadir(sub_argv)) or 0
+                    _forward_with_datadir(extra_args)) or 0
             )
 
     # --- process-eve ---
     if args.command == "process-eve":
-        return eve_parse.main(_forward_with_datadir(sub_argv)) or 0
+        return eve_parse.main(_forward_with_datadir(extra_args)) or 0
 
     # --- merge-dataset ---
     if args.command in ("merge-dataset", "merge-data"):
-        return dataset_merge.main(_forward_with_datadir(sub_argv)) or 0
+        return dataset_merge.main(_forward_with_datadir(extra_args)) or 0
 
     # --- unhandled command ---
     raise ValueError(f"Unhandled command: {args.command}")

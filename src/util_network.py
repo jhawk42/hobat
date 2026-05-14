@@ -2,10 +2,10 @@ import util_ot_ctl
 import logging
 
 
-def _parse_prefix_token(command_output):
+def _parse_prefix_token(output):
     """Extracts the first token (prefix) from ot-ctl command output."""
-    command_output = command_output.strip()
-    return command_output.split()[0] if command_output else ""
+    output = output.strip()
+    return output.split()[0] if output else ""
 
 
 def _strip_prefix_mask(prefix):
@@ -13,14 +13,14 @@ def _strip_prefix_mask(prefix):
     return prefix.split("/")[0].rstrip(":")
 
 
-def _fetch_prefix_via_ot_ctl(command, debug_label):
+def _fetch_prefix_via_ot_ctl(command, label):
     """Runs an ot-ctl prefix command and returns the extracted prefix token."""
     command_output = util_ot_ctl.exec_ot_ctl(command)
     logging.debug(f"[DEBUG] Output of 'ot-ctl {command}':\n{command_output}\n")
 
     # extract the prefix token from the command output and print it for debugging
     prefix = _parse_prefix_token(command_output)
-    logging.debug((f"[DEBUG] {debug_label}: {prefix}\n"))
+    logging.debug((f"[DEBUG] {label}: {prefix}\n"))
     return prefix
 
 
@@ -74,18 +74,18 @@ def strip_rloc16_hex_prefix(rloc):
     return rloc[2:]
 
 
-def build_rloc16_ipv6_address(ipv6_rloc_prefix, rloc_hex):
+def build_rloc16_ipv6_address(rloc_prefix, rloc_hex):
     """
     Merges IPv6 RLOC prefix with rloc16 hex value to form complete IPv6 RLOC address.
 
     Args:
-        ipv6_rloc_prefix: IPv6 RLOC prefix string (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
+        rloc_prefix: IPv6 RLOC prefix string (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
         rloc_hex: rloc16 hex value without '0x' prefix (e.g., "5000")
 
     Returns:
         Complete IPv6 RLOC address (e.g., "fdde:ad00:beef:0:0:ff:fe00:5000")
     """
-    return f"{ipv6_rloc_prefix}{rloc_hex}"
+    return f"{rloc_prefix}{rloc_hex}"
 
 
 def fetch_omr_prefix():
@@ -113,33 +113,33 @@ def build_omr_ipv6_address_prefix(omr_prefix):
     return _build_ipv6_prefix_by_type(omr_prefix, "omr")
 
 
-def is_ipv6_address_in_omr_prefix(ipv6_address, omr_ipv6_prefix):
+def is_ipv6_address_in_omr_prefix(addr, omr_prefix):
     """
     Checks if a given IPv6 address falls within a specified OMR (On-Mesh Routable) ipv6 prefix.
 
     Args:
-        ipv6_address: The IPv6 address to check (e.g., "fdde:ad00:beef:0:0:ff:fe00:5000")
-        omr_ipv6_prefix: The OMR (On-Mesh Routable) IPv6 prefix to check against (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
+        addr: The IPv6 address to check (e.g., "fdde:ad00:beef:0:0:ff:fe00:5000")
+        omr_prefix: The OMR (On-Mesh Routable) IPv6 prefix to check against (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
 
     Returns:
         True if the IPv6 address is within the prefix, False otherwise.
     """
-    return ipv6_address.startswith(omr_ipv6_prefix)
+    return addr.startswith(omr_prefix)
 
 
-def find_omr_address_in_list(ipv6_addrs, omr_ipv6_prefix):
+def find_omr_address_in_list(ipv6_addrs, omr_prefix):
     """
     Retrieves the OMR (On-Mesh Routable) address from a list of IPv6 addresses based on the OMR prefix.
 
     Args:
         ipv6_addrs: List of IPv6 address strings to check (e.g., ["fdde:ad00:beef:0:0:ff:fe00:5000", "fdde:ad00:beef:0:0:ff:fe00:6000"])
-        omr_ipv6_prefix: The OMR (On-Mesh Routable) IPv6 prefix to check against (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
+        omr_prefix: The OMR (On-Mesh Routable) IPv6 prefix to check against (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
 
     Returns:
         The first IPv6 address from the list that matches the OMR prefix, or None if no match is found.
     """
     for addr in ipv6_addrs:
-        if is_ipv6_address_in_omr_prefix(addr, omr_ipv6_prefix):
+        if is_ipv6_address_in_omr_prefix(addr, omr_prefix):
             return addr
     return None
 

@@ -29,6 +29,9 @@ _STATIC_ENDPOINTS: Sequence[Tuple[str, str]] = [
     ("list_diagnostics",   "td-otbr-restapi-diagnostics.json"),
 ]
 
+# Active data-dir context used by direct-entry verification tests.
+_ACTIVE_TD_DATA_DIR: Path | None = None
+
 
 # ---------------------------------------------------------------------------
 # 5.3 – Atomic JSON write helper
@@ -266,22 +269,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
-    data_dir = resolve_data_dir(datadir_arg=args.datadir)
+    data_dir = resolve_data_dir(data_dir=args.datadir)
     client = _build_client(args, extra_headers)
 
-    exit_code = download_all_restapi_endpoints(
-        client,
-        data_dir,
-        update_devices=args.update_devices,
-    )
+    global _ACTIVE_TD_DATA_DIR
+    _ACTIVE_TD_DATA_DIR = data_dir
+    try:
+        exit_code = download_all_restapi_endpoints(
+            client,
+            data_dir,
+            update_devices=args.update_devices,
+        )
 
-    if args.fetch_diagnostics:
-        diag_types = args.diag_types or list(RECOMMENDED_DIAGNOSTIC_TLVS)
-        diag_exit = fetch_and_save_diagnostics(client, data_dir, diag_types)
-        if diag_exit != 0:
-            exit_code = diag_exit
+        if args.fetch_diagnostics:
+            diag_types = args.diag_types or list(RECOMMENDED_DIAGNOSTIC_TLVS)
+            diag_exit = fetch_and_save_diagnostics(client, data_dir, diag_types)
+            if diag_exit != 0:
+                exit_code = diag_exit
 
-    return exit_code
+        return exit_code
+    finally:
+        _ACTIVE_TD_DATA_DIR = None
 
 
 if __name__ == "__main__":

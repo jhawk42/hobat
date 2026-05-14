@@ -739,7 +739,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     static_root = Path(__file__).resolve().parent
     td_data_dir_resolution = resolve_data_dir_with_source(
-        datadir_arg=args.datadir)
+        data_dir=args.datadir)
     td_data_dir = td_data_dir_resolution.path
 
     logging.info(format_data_dir_log_message(td_data_dir_resolution))

@@ -29,9 +29,9 @@ VENDORS = {
 }
 
 
-def get_vendor_from_oui(oui_hex):
+def get_vendor_from_oui(oui):
     """Extract vendor from OUI (first 3 bytes of Extended Address)"""
-    oui = oui_hex[:6].lower()
+    oui = oui[:6].lower()
     return VENDORS.get(oui, "Unknown Vendor")
 
 
@@ -1925,7 +1925,7 @@ options:
         "By default those records are excluded.",
     )
     args = parser.parse_args(argv)
-    td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
+    td_data_dir = resolve_data_dir(data_dir=args.datadir)
 
     scopes_all = [
         "_meshcop._udp.local.",

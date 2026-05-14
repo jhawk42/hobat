@@ -34,10 +34,10 @@ class TDDataDirResolution:
 
 
 def _normalize_path(
-    path_value: str | os.PathLike[str], cwd: Path | None = None
+    path: str | os.PathLike[str], cwd: Path | None = None
 ) -> Path:
-    """Normalize path_value to an absolute Path, resolving relative paths against cwd."""
-    path = Path(path_value).expanduser()
+    """Normalize path to an absolute Path, resolving relative paths against cwd."""
+    path = Path(path).expanduser()
     if not path.is_absolute():
         path = (cwd or Path.cwd()) / path
     return path.resolve()
@@ -76,7 +76,7 @@ def parse_datadir_from_argv(argv: Sequence[str] | None) -> str | None:
 
 
 def resolve_data_dir_with_source(
-    datadir_arg: str | os.PathLike[str] | None = None,
+    data_dir: str | os.PathLike[str] | None = None,
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
 ) -> TDDataDirResolution:
@@ -95,7 +95,7 @@ def resolve_data_dir_with_source(
             created=False,
         )
 
-    datadir_value = _normalize_optional_path(datadir_arg)
+    datadir_value = _normalize_optional_path(data_dir)
     if datadir_value is not None:
         return TDDataDirResolution(
             path=_normalize_path(datadir_value, base_cwd),
@@ -122,7 +122,7 @@ def resolve_data_dir_with_source(
 
 
 def resolve_data_dir(
-    datadir_arg: str | os.PathLike[str] | None = None,
+    data_dir: str | os.PathLike[str] | None = None,
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
 ) -> Path:
@@ -139,7 +139,7 @@ def resolve_data_dir(
     but does not create directories.
     """
     return resolve_data_dir_with_source(
-        datadir_arg=datadir_arg,
+        data_dir=data_dir,
         env=env,
         cwd=cwd,
     ).path
@@ -173,11 +173,11 @@ def data_file_path(filename: str, td_data_dir: Path) -> Path:
     return td_data_dir / file_path
 
 
-def resolve_data_file_path(path_or_name: str, td_data_dir: Path) -> Path:
+def resolve_data_file_path(file_path: str, td_data_dir: Path) -> Path:
     """Resolve an absolute file path or map a relative name under td_data_dir."""
-    normalized = _normalize_optional_path(path_or_name)
+    normalized = _normalize_optional_path(file_path)
     if normalized is None:
-        raise ValueError("path_or_name must be a non-empty path")
+        raise ValueError("file_path must be a non-empty path")
     value = Path(normalized).expanduser()
     if value.is_absolute():
         return value.resolve()

@@ -20,7 +20,7 @@ TD_OT_CTL_TIMEOUT_ENV = (
 TD_OT_CTL_TIMEOUT_DEFAULT = 30  # Default subprocess timeout in seconds
 
 
-def exec_ot_ctl_dispatch(ot_command, container_name=None):
+def exec_ot_ctl_dispatch(cmd, container_name=None):
     """
     Executes an ot-ctl command inside a running OTBR Docker container.
     """
@@ -33,11 +33,11 @@ def exec_ot_ctl_dispatch(ot_command, container_name=None):
         container_name,
         "sh",
         "-c",
-        f"ot-ctl {ot_command}",
+        f"ot-ctl {cmd}",
     ]
 
     # command line option support to run ot-ctl command without docker exec
-    full_command_no_docker = ["sh", "-c", f"ot-ctl {ot_command}"]
+    full_command_no_docker = ["sh", "-c", f"ot-ctl {cmd}"]
 
     if container_name is not None:
         # Use the docker command for now, but this can be extended to support non-docker execution

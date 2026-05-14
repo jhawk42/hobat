@@ -166,7 +166,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
-    td_data_dir = resolve_data_dir(datadir_arg=parse_datadir_from_argv(argv))
+    td_data_dir = resolve_data_dir(data_dir=parse_datadir_from_argv(argv))
 
     # Load extaddr to nodename mapping from JSON file
     extaddr_json_filename = data_file_path(

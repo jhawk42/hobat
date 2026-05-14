@@ -847,14 +847,14 @@ def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
 
 
 def fetch_network_diag_for_device(
-    rloc, ipv6_rloc_prefix, extaddr_map=None, ipv6_addresses=None, tlv_detail_level=6
+    rloc16, rloc_prefix, extaddr_map=None, ipv6_addresses=None, tlv_detail_level=6
 ):
     """
     Queries and parses network diagnostic data for a single router.
 
     Args:
-        rloc: RLOC16 value for the router (e.g., "0x0400")
-        ipv6_rloc_prefix: IPv6 prefix for building RLOC IPv6 address
+        rloc16: RLOC16 value for the router (e.g., "0x0400")
+        rloc_prefix: IPv6 prefix for building RLOC IPv6 address
         extaddr_map: Dictionary mapping extended addresses to node names
         ipv6_addresses: Dictionary of IPv6 addresses by RLOC
 
@@ -866,9 +866,9 @@ def fetch_network_diag_for_device(
     if ipv6_addresses is None:
         ipv6_addresses = {}
 
-    rloc_hex = util_network.strip_rloc16_hex_prefix(rloc)
+    rloc_hex = util_network.strip_rloc16_hex_prefix(rloc16)
     ipv6_rloc_addr = util_network.build_rloc16_ipv6_address(
-        ipv6_rloc_prefix, rloc_hex
+        rloc_prefix, rloc_hex
     )
 
     # Get TLV values for the requested detail level
@@ -880,7 +880,7 @@ def fetch_network_diag_for_device(
         f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}"
     )
     logging.debug(
-        f"Diagnostic for RLOC {rloc} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
+        f"Diagnostic for RLOC {rloc16} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
 
     # Extract Ext Address (TLV 0)
     extaddr_match = re.search(r"Ext Address: ([0-9a-fA-F]{16})", output)
@@ -889,13 +889,13 @@ def fetch_network_diag_for_device(
     if not extaddr_match:
         return None
 
-    # Try resolve device_label from extaddr_map, if not found use "Unknown-{rloc}"
+    # Try resolve device_label from extaddr_map, if not found use "Unknown-{rloc16}"
     device_label = extaddr_map.get(extaddr_match.group(1))
     if not device_label:
-        device_label = f"Unknown-{rloc}"
+        device_label = f"Unknown-{rloc16}"
 
     # Extract Rloc16 (TLV 1)
-    rloc16 = re.search(r"Rloc16: (0x[0-9a-fA-F]{4})", output)
+    rloc16_match = re.search(r"Rloc16: (0x[0-9a-fA-F]{4})", output)
 
     # Extract Thread Stack Version (TLV 28)
     thread_version = re.search(r"Thread Stack Version: (.+?)(?:\n|$)", output)
@@ -903,21 +903,21 @@ def fetch_network_diag_for_device(
     # Parse detailed structures
     mode_flags = parse_mode_flags(output)
     ipv6_list = parse_ipv6_address_list(output)
-    children = parse_child_table(output, rloc)
+    children = parse_child_table(output, rloc16)
     mac_counters = parse_mac_counters(output)
     mle_counters = parse_mle_counters(output)
     time_stats = parse_time_statistics(output)
 
     network_topology_node = {
         "extaddr": extaddr_match.group(1) if extaddr_match else "Unknown",
-        "rloc16": rloc16.group(1) if rloc16 else rloc,
+        "rloc16": rloc16_match.group(1) if rloc16_match else rloc16,
         "device_label": device_label,
         "tlv_values": tlv_values,
         "thread_stack_version": thread_version.group(1).strip()
         if thread_version
         else "Unknown",
         "mode": mode_flags,
-        "ipv6_addrs": ipv6_list if ipv6_list else ipv6_addresses.get(rloc, []),
+        "ipv6_addrs": ipv6_list if ipv6_list else ipv6_addresses.get(rloc16, []),
         "children": children,
         "mac_counters": mac_counters,
         "mle_counters": mle_counters,
@@ -1507,7 +1507,7 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     args = parser.parse_args(argv)
-    td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
+    td_data_dir = resolve_data_dir(data_dir=args.datadir)
 
     # Load extaddr to device label mapping from JSON file
     extaddr_json_filename = data_file_path(
@@ -1555,7 +1555,7 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     args = parser.parse_args(argv)
-    td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
+    td_data_dir = resolve_data_dir(data_dir=args.datadir)
 
     # Load extaddr to device label mapping from JSON file
     extaddr_json_filename = data_file_path(
@@ -1618,7 +1618,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Do not expand child nodes in the topology map",
     )
     args = parser.parse_args(argv)
-    td_data_dir = resolve_data_dir(datadir_arg=args.datadir)
+    td_data_dir = resolve_data_dir(data_dir=args.datadir)
 
     # Load extaddr to nodename mapping from JSON file
     extaddr_json_filename = data_file_path(

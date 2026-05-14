@@ -21,7 +21,7 @@ class Phase6DataDirResolutionTests(unittest.TestCase):
     def test_case_2b_cli_relative_datadir_resolves_from_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             resolved = util_data.resolve_data_dir(
-                datadir_arg="relative-data",
+                data_dir="relative-data",
                 env={},
                 cwd=tmpdir,
             )
@@ -32,7 +32,7 @@ class Phase6DataDirResolutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             missing = Path(tmpdir) / "does-not-exist"
             resolved = util_data.resolve_data_dir(
-                datadir_arg=str(missing),
+                data_dir=str(missing),
                 env={},
                 cwd=tmpdir,
             )
@@ -50,7 +50,7 @@ class Phase6DataDirResolutionTests(unittest.TestCase):
             ):
                 with self.assertRaises(PermissionError):
                     util_data.resolve_data_dir(
-                        datadir_arg=None, env={}, cwd=tmpdir)
+                        data_dir=None, env={}, cwd=tmpdir)
 
 
 @unittest.skip("td_webserver uses aiohttp; TDashHandler-based tests superseded by test_td_webserver_concurrency.py")

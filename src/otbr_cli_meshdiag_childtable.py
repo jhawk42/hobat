@@ -193,7 +193,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
     td_data_dir = resolve_data_dir(
-        datadir_arg=parse_datadir_from_argv(argv))
+        data_dir=parse_datadir_from_argv(argv))
 
     extaddr_json_filename = data_file_path(
         EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir

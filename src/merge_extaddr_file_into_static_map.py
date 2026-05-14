@@ -106,7 +106,7 @@ def main():
     
     # Use datadir
     td_data_dir = resolve_data_dir(
-    datadir_arg=parse_datadir_from_argv(sys.argv))
+    data_dir=parse_datadir_from_argv(sys.argv))
 
     extaddr_json_filename = data_file_path(
         EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir

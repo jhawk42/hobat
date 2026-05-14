@@ -103,14 +103,14 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
     return out
 
 
-def enhance_eve_routes(eve_network_enhanced_data):
+def enhance_eve_routes(eve_data):
     """
     Rebuild Eve enhanced data keyed by rloc16_hex and enrich route entries.
 
     - Preserves all fields from original nodes.
     - Keys output by each node's rloc16_hex.
         - Adds route field "to_name" by resolving each route["to"] to a node name
-      using the original eve_network_enhanced_data structure.
+    using the original eve_data structure.
     """
 
     # Build lookup maps from original data for route destination resolution.
@@ -122,7 +122,7 @@ def enhance_eve_routes(eve_network_enhanced_data):
     # TODO map off mesh ipaddr to node name
     # TODO map on mesh ipaddr to node name
 
-    for original_key, original_node in eve_network_enhanced_data.items():
+    for original_key, original_node in eve_data.items():
         if not isinstance(original_node, dict):
             continue
 
@@ -138,7 +138,7 @@ def enhance_eve_routes(eve_network_enhanced_data):
     output = {}
 
     # Rebuild nodes keyed by rloc16_hex while preserving all original fields.
-    for original_key, original_node in eve_network_enhanced_data.items():
+    for original_key, original_node in eve_data.items():
         if not isinstance(original_node, dict):
             continue
 
@@ -176,7 +176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
     td_data_dir = resolve_data_dir(
-        datadir_arg=parse_datadir_from_argv(argv))
+        data_dir=parse_datadir_from_argv(argv))
 
     # Main execution:
 

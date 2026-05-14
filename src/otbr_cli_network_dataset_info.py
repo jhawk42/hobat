@@ -12,7 +12,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     td_data_dir = resolve_data_dir(
-        datadir_arg=parse_datadir_from_argv(argv))
+        data_dir=parse_datadir_from_argv(argv))
     network_dataset_info = util_network.fetch_network_dataset_info()
     save_json_path = data_file_path(
         "td-otbr-cli-network-dataset-info.json", td_data_dir
