@@ -249,7 +249,7 @@ select.filter-disabled {
   cursor: not-allowed;
 }
 
-/* Hide options that are unavailable for the active dataset (Phase 6) */
+/* Hide options that are unavailable for the active dataset */
 #node-filter option:disabled,
 #link-filter option:disabled,
 #diagnostic-filter option:disabled {

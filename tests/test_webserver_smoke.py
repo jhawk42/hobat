@@ -1,7 +1,7 @@
-"""Issue-12 refactor smoke tests — Phase R0.
+"""Refactor smoke tests 
 
 Exercises the three primary execution paths through handle_data_api so that
-every subsequent refactor phase (R1–R3) can be verified against them.
+every subsequent refactor phase can be verified against them.
 
   Path A — STATIC file served: file exists on disk → 200 with its contents.
   Path B — Short-cost regen:   dynamic file missing, low action_cost_s → td_cli

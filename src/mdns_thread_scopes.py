@@ -1234,7 +1234,6 @@ class MDNSDumpListener(ServiceListener):
             )
             if hasattr(info, "parsed_addresses"):
                 print(f"  Parsed Addresses: {info.parsed_addresses()}")
-                # TODO print out the info.parsed_addresses list
 
             # Print TXT Records (where Matter/HAP data lives)
             if info.properties:

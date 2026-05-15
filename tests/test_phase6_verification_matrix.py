@@ -15,8 +15,8 @@ import td_webserver
 import otbr_restapi_download
 
 
-class Phase6DataDirResolutionTests(unittest.TestCase):
-    """Verification coverage for Phase 6 matrix cases around path resolution."""
+class DataDirResolutionTests(unittest.TestCase):
+    """Verification coverage for matrix cases around path resolution."""
 
     def test_case_2b_cli_relative_datadir_resolves_from_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -54,8 +54,8 @@ class Phase6DataDirResolutionTests(unittest.TestCase):
 
 
 @unittest.skip("td_webserver uses aiohttp; TDashHandler-based tests superseded by test_td_webserver_concurrency.py")
-class Phase6WebServerRoutingTests(unittest.TestCase):
-    """Verification coverage for Phase 6 matrix web-server behavior checks."""
+class WebServerRoutingTests(unittest.TestCase):
+    """Verification coverage for matrix web-server behavior checks."""
 
     server: socketserver.TCPServer
     port: int
@@ -111,7 +111,7 @@ class Phase6WebServerRoutingTests(unittest.TestCase):
         self.assertEqual(response.status, 404)
 
 
-class Phase6DirectModuleInvocationTests(unittest.TestCase):
+class DirectModuleInvocationTests(unittest.TestCase):
     """Verification coverage for direct module entry points bypassing td_cli."""
 
     def test_case_6b_restapi_download_main_uses_datadir_arg_directly(self) -> None:

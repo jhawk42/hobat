@@ -416,7 +416,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 | `tests/test_td_webserver_concurrency.py` | Unit tests for web server concurrency: verifies that long-running background jobs are tracked correctly and that concurrent requests to the same file do not spawn duplicate subprocesses. |
 | `tests/test_tdash_web_routing.py` | Tests for dashboard/web route handling. |
 | `tests/test_util_data.py` | Unit tests for `util_data.py`: data-directory resolution precedence (env var, CLI arg, Docker default, local default) and path normalisation. |
-| `tests/test_phase6_verification_matrix.py` | Integration tests for Phase 6 data-dir resolution edge cases and web server routing behaviour. |
+| `tests/test_phase6_verification_matrix.py` | Integration tests for data-dir resolution edge cases and web server routing behaviour. |
 | `tests/test_util_convert_base64_extaddr_to_hexnumber.py` | Script exercising `b64_to_extended_address()` for a single Base64 extended-address string. |
 | `tests/test_util_convert_base64_extaddr_list_to_hexnumber_list.py` | Script exercising `b64_to_extended_address()` across a list of Base64 extended-address strings. |
 | `tests/test_util_convert_hexnumber_extaddr_to_base64.py` | Script exercising `convert_hexnumber_extaddr_to_base64()` for a single hex extended-address string. |

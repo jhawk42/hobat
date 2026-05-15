@@ -351,7 +351,7 @@ export function renderTableForDataset(dataset) {
   _tableColumns = columns;
   _tableDatasetLabel = dataset.loadedFiles.join(", ");
 
-  // ── Phase 5.2: compute and apply dynamic filter option visibility ────────
+  // ── compute and apply dynamic filter option visibility ────────
   const capabilities = computeTableCapabilities(rows);
   dataset.capabilities = capabilities;
   updateFilterOptionVisibility(capabilities, "table");

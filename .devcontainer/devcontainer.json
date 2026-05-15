@@ -6,10 +6,7 @@
 	// https://mcr.microsoft.com/en-us/artifact/mar/devcontainers/python/about
 	"image": "mcr.microsoft.com/devcontainers/python:3-3.14-bookworm",
 	"features": {
-		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
-		"ghcr.io/devcontainers/features/node:2": {
-			"version": "lts"
-		}
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
 	},
 	"customizations": {
 		"vscode": {}
@@ -18,6 +15,14 @@
 	"runArgs": [
 		"--network=host"
 	]
+
+	// "features": {
+	// 	"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+	// 	"ghcr.io/devcontainers/features/node:2": {
+	// 		"version": "lts"
+	// 	}
+	// },
+
 
 	// git worktree support - mount workspace parent root to enable access to peer worktree directories
 	//"workspaceMount": "source=${localWorkspaceFolder}/..,target=/workspaces,type=bind",

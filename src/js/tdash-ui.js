@@ -235,12 +235,6 @@ document
         switchView(selectedDataset.defaultView);
       }
     }
-
-    //## make optional to oad dataset and render immediately on select change; for now, 
-    //## require explicit Fetch button click to do so, to avoid accidental dataset loads while exploring the dropdown.
-
-    //## await loadDataset(event.target.value);
-    //## renderCurrentView();
   });
 
 document.getElementById("node-filter").addEventListener("change", () => {
@@ -311,7 +305,7 @@ const initialSource = document.getElementById("datasource-filter").value;
 populateDatasetSelect(initialSource);
 applyLegendLineStylesFromConstants();
 await loadStaticLabelMap();
-// Phase 3 (task 3.1): do not auto-load on startup; prompt the user instead.
+// do not auto-load on startup; prompt the user instead.
 document.getElementById("status").textContent =
   "Select a dataset and press Fetch.";
 
@@ -360,7 +354,7 @@ async function doFetchDataset() {
   renderCurrentView();
 }
 
-// Phase 3 (task 3.5): Fetch button drives data acquisition.
+// Fetch button drives data acquisition.
 document.getElementById("btn-fetch").addEventListener("click", doFetchDataset);
 
 // Auto-fetch when dataset is selected and chk-auto-fetch is enabled

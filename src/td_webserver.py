@@ -28,7 +28,7 @@ TD_WEB_HOST_PORT = 8087
 TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT = 86400  # 1 day in seconds
 
 # ---------------------------------------------------------------------------
-# Phase 1 — Mapping table and cache helpers
+# Mapping table and cache helpers
 # ---------------------------------------------------------------------------
 
 
@@ -216,12 +216,12 @@ def build_cache_response_headers(max_age_s: int, file_mtime: float) -> dict[str,
 
 
 # ---------------------------------------------------------------------------
-# End Phase 1
+# End
 # ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — aiohttp async server
+# aiohttp async server
 # ---------------------------------------------------------------------------
 
 # Ensure .mjs and other types are served with the right Content-Type on
@@ -244,7 +244,7 @@ _active_processes: dict[str, "asyncio.Task[int]"] = {}
 # Keyed by source name (action[0], e.g. "otbr-cli", "mdns", "otbr-restapi").
 # Each lock serializes all td_cli subprocesses for that source so that only one
 # runs at a time, preventing hardware/socket conflicts in the underlying CLI layer.
-# TODO: In a long-lived server with many unique source keys this dict could grow
+# In a long-lived server with many unique source keys this dict could grow
 # unbounded. If that becomes a concern, add periodic cleanup (e.g. evict locks
 # that are not locked and have not been used recently).
 _source_locks: dict[str, asyncio.Lock] = {}
@@ -257,7 +257,7 @@ def _get_source_lock(source: str) -> asyncio.Lock:
     return _source_locks[source]
 
 
-# Phase 4 — async job tracking (DD-2 Option B)
+# async job tracking (DD-2 Option B)
 _LONG_COST_THRESHOLD_S = 300  # actions with cost > this get 202 + polling
 
 
@@ -694,7 +694,7 @@ async def _set_static_cache_headers(
 
 
 # ---------------------------------------------------------------------------
-# End Phase 2
+# End 
 # ---------------------------------------------------------------------------
 
 

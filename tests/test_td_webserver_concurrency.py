@@ -1,6 +1,6 @@
 """Tests for source-level process serialization in td_webserver.py.
 
-Covers the two-level concurrency control introduced in Phases 1–6:
+Covers the two-level concurrency control:
   - Same-filename deduplication (short-cost path)
   - Per-source serialization (short-cost path)
   - Cross-source concurrency (short-cost path)

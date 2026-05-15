@@ -119,9 +119,6 @@ def enhance_eve_routes(eve_data):
     id_to_rloc16_hex = {}
     key_to_name = {}
 
-    # TODO map off mesh ipaddr to node name
-    # TODO map on mesh ipaddr to node name
-
     for original_key, original_node in eve_data.items():
         if not isinstance(original_node, dict):
             continue

@@ -101,7 +101,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     sourceNames,
   } = adaptorResult;
 
-  // ── Phase 5.1: compute and apply dynamic filter option visibility ────────
+  // ── compute and apply dynamic filter option visibility ────────
   const capabilities = computeTopologyCapabilities(nodeData, edgeData);
   dataset.capabilities = capabilities;
   updateFilterOptionVisibility(capabilities, "topology");

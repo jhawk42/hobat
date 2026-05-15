@@ -78,7 +78,7 @@ class OTBRHTTPError(OTBRClientError):
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 – Action Lifecycle Exception Types
+# Action Lifecycle Exception Types
 # ---------------------------------------------------------------------------
 
 class OTBRActionError(OTBRClientError):
@@ -100,7 +100,7 @@ class OTBRActionTimeoutError(OTBRActionError):
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 – TLV Catalog & Protocol Constants
+# TLV Catalog & Protocol Constants
 # ---------------------------------------------------------------------------
 
 # 1.1 – Standard network-diagnostic TLV name constants (mirrors diagnostic_types.hpp)
@@ -530,7 +530,7 @@ class OTBRRestApiClient:
         )
 
     # -----------------------------------------------------------------------
-    # Phase 2 – Action Lifecycle: Polling Helper
+    # Action Lifecycle: Polling Helper
     # -----------------------------------------------------------------------
 
     def wait_for_action(
@@ -601,7 +601,7 @@ class OTBRRestApiClient:
             time.sleep(min(poll_interval, remaining))
 
     # -----------------------------------------------------------------------
-    # Phase 3 – Device Collection Workflow Methods
+    # Device Collection Workflow Methods
     # -----------------------------------------------------------------------
 
     def trigger_and_wait_device_collection(
@@ -703,7 +703,7 @@ class OTBRRestApiClient:
         return self.list_devices(fields=fields, with_meta=with_meta, raw=raw)
 
     # -----------------------------------------------------------------------
-    # Phase 4 – Network Diagnostics Workflow Methods
+    # Network Diagnostics Workflow Methods
     # -----------------------------------------------------------------------
 
     def fetch_device_diagnostics(
@@ -865,7 +865,7 @@ class OTBRRestApiClient:
         return devices, diagnostics
 
     # -----------------------------------------------------------------------
-    # Phase 4.4 – Mesh Diagnostics Method
+    # Mesh Diagnostics Method
     # -----------------------------------------------------------------------
 
     def fetch_mesh_diagnostics(

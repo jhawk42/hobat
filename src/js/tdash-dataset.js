@@ -22,15 +22,15 @@ export let currentDataset = null;
 // Map<lowercased-extaddr-string, device_label-string> — loaded at startup
 let staticExtaddrLabelMap = new Map();
 
-// Phase 3 — per-file cache-header store (task 3.3)
+// per-file cache-header store (task 3.3)
 // Map<filename, { maxAge: number, fetchedAt: number }>
 const fileMaxAgeCache = new Map();
 
-// Phase 3 — force-fresh flag (DD-1 / task 3.6)
+// force-fresh flag (DD-1 / task 3.6)
 let _forceFresh = false;
 // Only cache mode — send max-age = 365 days to use only cached files
 let _onlyCache = false;
-// Phase 4 — delay after job completion before fetching file (for filesystem sync)
+// delay after job completion before fetching file (for filesystem sync)
 const _JOB_COMPLETION_WAIT_MS = 1000; // 1 second
 /** When true, all subsequent fetchJson calls send Cache-Control: no-cache. */
 export function setForceFresh(enabled) {
@@ -94,8 +94,8 @@ export function enrichRawFiles(rawFiles) {
 
 // ── Core fetch helper ─────────────────────────────────────────────────────────
 
-// Phase 3 (task 3.2): accepts optional request headers; returns { data, responseMaxAge }.
-// Phase 4 (task 4.3): handles HTTP 202 by delegating to pollJobUntilDone.
+// accepts optional request headers; returns { data, responseMaxAge }.
+// handles HTTP 202 by delegating to pollJobUntilDone.
 async function fetchJson(url, requestHeaders = {}) {
   const response = await fetch(url, { headers: requestHeaders });
   if (response.status === 202) {
@@ -111,7 +111,7 @@ async function fetchJson(url, requestHeaders = {}) {
   return { data, responseMaxAge };
 }
 
-// Phase 4 (task 4.4): polls /api/job/{jobId} every 5 s until done or error.
+// Polls /api/job/{jobId} every 5 s until done or error.
 // On done, fetches /api/data/{filename} (without the original cache-miss headers)
 // and returns the JSON payload.
 const _JOB_POLL_INTERVAL_MS = 5000;
@@ -224,7 +224,7 @@ export async function loadDataset(entryValue) {
     linkFilterEl.value = entry.defaultLinkFilter;
   }
 
-  // Phase 3 (task 3.4): fetch via /api/data/{filename} with per-file cache headers.
+  // fetch via /api/data/{filename} with per-file cache headers.
   const settled = await Promise.allSettled(
     entry.files.map((f) => {
       const reqHeaders = {};
