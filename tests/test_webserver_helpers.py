@@ -242,7 +242,7 @@ class TestDispatchLongCost(unittest.IsolatedAsyncioTestCase):
         self._tmpdir.cleanup()
 
     async def test_new_job_returns_202_with_job_id(self) -> None:
-        filename = "td-otbr-cli-networkdiag-topology.json"
+        filename = "td-otbr-cli-networkdiag-topology-poll.json"
         fa = _make_file_action(action_cost_s=480)
         proceed = asyncio.Event()
 
@@ -271,7 +271,7 @@ class TestDispatchLongCost(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*list(td_webserver._background_tasks), return_exceptions=True)
 
     async def test_duplicate_in_flight_request_reuses_same_job_id(self) -> None:
-        filename = "td-otbr-cli-networkdiag-topology.json"
+        filename = "td-otbr-cli-networkdiag-topology-poll.json"
         fa = _make_file_action(action_cost_s=480)
         proceed = asyncio.Event()
 
@@ -295,7 +295,7 @@ class TestDispatchLongCost(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*list(td_webserver._background_tasks), return_exceptions=True)
 
     async def test_background_task_anchored_in_background_tasks_set(self) -> None:
-        filename = "td-otbr-cli-networkdiag-topology.json"
+        filename = "td-otbr-cli-networkdiag-topology-poll.json"
         fa = _make_file_action(action_cost_s=480)
         proceed = asyncio.Event()
 
@@ -313,7 +313,7 @@ class TestDispatchLongCost(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*list(td_webserver._background_tasks), return_exceptions=True)
 
     async def test_job_status_transitions_to_done_on_success(self) -> None:
-        filename = "td-otbr-cli-networkdiag-topology.json"
+        filename = "td-otbr-cli-networkdiag-topology-poll.json"
         fa = _make_file_action(action_cost_s=480)
 
         async def instant_td_cli(args, data_dir, *, timeout_s=None):
@@ -329,7 +329,7 @@ class TestDispatchLongCost(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(jobs[0].status, "done")
 
     async def test_job_status_transitions_to_error_on_failure(self) -> None:
-        filename = "td-otbr-cli-networkdiag-topology.json"
+        filename = "td-otbr-cli-networkdiag-topology-poll.json"
         fa = _make_file_action(action_cost_s=480)
 
         async def failing_td_cli(args, data_dir, *, timeout_s=None):

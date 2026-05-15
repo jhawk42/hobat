@@ -266,7 +266,7 @@ class TestSameSourceSerializationLongCost(ConcurrencyTestBase):
         # (cost=16) are both otbr-cli but multicast is short-cost.
         # Use two long-cost files: networkdiag-topology and mdns files.
         # Actually let's use a short-cost threshold patch so we can use real files.
-        file_a = "td-otbr-cli-networkdiag-topology.json"             # cost=480, long
+        file_a = "td-otbr-cli-networkdiag-topology-poll.json"             # cost=480, long
         file_b = "td-otbr-cli-networkdiag-topology-multicast-network.json"  # cost=16, short
 
         # Temporarily lower the threshold so file_b also goes through the job path.
@@ -325,7 +325,7 @@ class TestLongCostBlocksShortCostSameSource(ConcurrencyTestBase):
     """A running long-cost job must block a short-cost request for the same source."""
 
     async def test_short_cost_waits_for_long_cost_lock(self) -> None:
-        file_long = "td-otbr-cli-networkdiag-topology.json"    # cost=480, long
+        file_long = "td-otbr-cli-networkdiag-topology-poll.json"    # cost=480, long
         file_short = "td-otbr-cli-router-table.json"           # cost=1, short
 
         running_at_same_time = False

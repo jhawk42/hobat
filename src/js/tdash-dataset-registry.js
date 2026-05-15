@@ -44,7 +44,7 @@ export const DATASET_REGISTRY = [
     source: "otbr-cli",
     value: "networkdiag_only",
     label: "networkdiag topo (poll devices)",
-    files: ["td-otbr-cli-networkdiag-topology.json"],
+    files: ["td-otbr-cli-networkdiag-topology-poll.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
@@ -88,7 +88,7 @@ export const DATASET_REGISTRY = [
     label: "mesh, network (poll), neighbors, children",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology.json",
+      "td-otbr-cli-networkdiag-topology-poll.json",
       "td-otbr-cli-meshdiag-router-neighbortables.json",
       "td-otbr-cli-meshdiag-router-childtables.json",
     ],
@@ -149,7 +149,7 @@ export const DATASET_REGISTRY = [
     label: "otbr-cli, mdns",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology.json",
+      "td-otbr-cli-networkdiag-topology-poll.json",
       "td-otbr-cli-meshdiag-router-neighbortables.json",
       "td-otbr-cli-meshdiag-router-childtables.json",
       "td-mdns-scopes-thread.json"
@@ -172,17 +172,6 @@ export const DATASET_REGISTRY = [
     defaultView: "table"
   },
 
-  // ── Single-file simple dataset ───
-  {
-    source: "eve",
-    value: "example_small_eve_native_threadlayout",
-    label: "native: example: eve layout",
-    files: ["example-small-Eve Thread Network Layout.evethreadlayout"],
-    mergeStrategy: "none",
-    topologyMode: "eve_native",
-    defaultView: "topology",
-    defaultLinkFilter: "eve_native_routes_children"
-  },
   // ── Single-file simple dataset ───
   {
     source: "eve",
@@ -213,7 +202,7 @@ export const DATASET_REGISTRY = [
     label: "otbr-cli, otbr-restapi",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology.json",
+      "td-otbr-cli-networkdiag-topology-poll.json",
       "td-otbr-cli-meshdiag-router-neighbortables.json",
       "td-otbr-cli-meshdiag-router-childtables.json",
       "td-otbr-restapi-devices.json",
@@ -232,7 +221,7 @@ export const DATASET_REGISTRY = [
     label: "otbr-cli, eve",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology.json",
+      "td-otbr-cli-networkdiag-topology-poll.json",
       "td-otbr-cli-meshdiag-router-neighbortables.json",
       "td-otbr-cli-meshdiag-router-childtables.json",
       "td-eve-topology.json",
@@ -250,7 +239,7 @@ export const DATASET_REGISTRY = [
     label: "otbr-cli, otbr-restapi, eve",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology.json",
+      "td-otbr-cli-networkdiag-topology-poll.json",
       "td-otbr-cli-meshdiag-router-neighbortables.json",
       "td-otbr-cli-meshdiag-router-childtables.json",
       "td-otbr-restapi-devices.json",

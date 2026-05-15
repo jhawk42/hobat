@@ -444,7 +444,7 @@ export function adaptMergedDetailed(rawFiles) {
     if (!sources.includes('td-eve-topology.json')) return false;
     return !sources.some((s) => s === 'td-otbr-cli-router-table.json'
       || s === 'td-otbr-cli-meshdiag-topology.json'
-      || s === 'td-otbr-cli-networkdiag-topology.json'
+      || s === 'td-otbr-cli-networkdiag-topology-poll.json'
       || s === 'td-otbr-cli-meshdiag-router-neighbortables.json'
       || s === 'td-otbr-restapi-devices.json'
       || s === 'td-otbr-restapi-diagnostics.json');

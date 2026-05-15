@@ -1455,7 +1455,7 @@ def print_network_diag_topology(topology):
 
 
 def save_topology_to_json_dict(
-    data, filename="td-otbr-cli-networkdiag-topology.json"
+    data, filename="td-otbr-cli-networkdiag-topology-poll.json"
 ):
     """Serializes the dictionary to a pretty-printed JSON file."""
     save_json_atomic(data, filename)
@@ -1643,7 +1643,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # save the topology as JSON to file
     save_json_filename = data_file_path(
-        "td-otbr-cli-networkdiag-topology.json", td_data_dir
+        "td-otbr-cli-networkdiag-topology-poll.json", td_data_dir
     )
     save_topology_to_json_list(
         networkdiagnostic_topology_data, save_json_filename

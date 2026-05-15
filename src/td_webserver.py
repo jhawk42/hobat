@@ -101,7 +101,7 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
         force_async=True,
     ),
     # networkdiag — TLV request per router with retries; up to ~8 min on large networks.
-    "td-otbr-cli-networkdiag-topology.json": FileAction(
+    "td-otbr-cli-networkdiag-topology-poll.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
         action=["otbr-cli", "networkdiag", "topology-poll"],
         action_cost_s=480,  # ~8 min for ~60 routers with timeout retries

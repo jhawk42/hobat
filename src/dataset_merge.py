@@ -53,7 +53,7 @@ MERGE_IDENTITY_FIELDS = {
 DEFAULT_INPUT_FILES = [
     "td-otbr-cli-router-table.json",
     "td-otbr-cli-meshdiag-topology.json",
-    "td-otbr-cli-networkdiag-topology.json",
+    "td-otbr-cli-networkdiag-topology-poll.json",
     "td-otbr-cli-networkdiag-topology-multicast-network.json",
     "td-otbr-cli-meshdiag-router-neighbortables.json",
     "td-otbr-restapi-devices.json",
