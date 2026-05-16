@@ -1,9 +1,9 @@
 # tdash - thread mesh network dashboard
 
-This is a Python cli toolkit that fetches thread device info and a browser dashboard for visualizing and monitoring Thread mesh networks.  [openthread](https://github.com/openthread/openthread) 
+This tdash repo has a Python cli toolkit that fetches thread device info from a thread network and a browser dashboard for visualizing and monitoring Thread mesh networks.  [openthread](https://github.com/openthread/openthread) 
 
 
-It fetches thread device info from sources like: otbr-cli, otbr-restapi, mDNS (Multicast DNS) records and the eve thread json format layout file shared from the Eve app. The td_cli tool can also merge these various sources for consolidated thread info and visualization.
+It fetches thread device info from sources like: otbr-cli, otbr-restapi, mDNS (Multicast DNS) records and the eve thread json format layout file shared from the Eve app. The td_cli tool can also merge these various sources for consolidated thread info and visualization. It also provides a device labeling mechanism using a extaddr (Extended MAC Address) to device_label lookup file. See below for details.
 
 ## Dataset Sources
 - otbr-cli: Fetches info from an OpenThread Border Router (OTBR) instance via ot-ctl commands for thread device info. By default use docker exec to call into the "otbr" docker container. Also support calling otbr on the host. Common ot-ctl commands used:
@@ -150,3 +150,28 @@ python3 -m td_webserver --host localhost --port 8087
 python3 -m td_webserver --host 0.0.0.0 --port 8087
 ```
 
+# Device Labeling
+
+To do manual device labeling, add a file named td-static-extaddr-device-label.json with the format below into the data directory.
+
+The td_cli commands will use the file to lookip extaddr (Extended MAC Address) per device and enhance the collect thread device info. It is also used in the thread dashboard to lookup human readable device labels.
+
+```
+#td-static-extaddr-device-label.json
+
+[
+    {
+        "extaddr": "eeeaffeaffeaffe1",
+        "device_label": "Device 1"
+    },
+    {
+        "extaddr": "eeeaffeaffeaffe2",
+        "device_label": "Device 2"
+    },
+    {
+        "extaddr": "eeeaffeaffeaffe3",
+        "device_label": "Device 3"
+    }
+]
+```
+end

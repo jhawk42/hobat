@@ -32,7 +32,7 @@ Commands usage:
         usage: td_cli otbr-cli [-h] {network-dataset-info,router-table,meshdiag,networkdiag,all} ...
 
     otbr-restapi
-        usage: td_cli otbr-restapi [-h] {download,client,rawclient} ...
+        usage: td_cli otbr-restapi [-h] [--raw] {download,client} ...
 
     mdns
         usage: td_cli mdns [-h] [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
@@ -103,14 +103,13 @@ Subcommand help snapshots:
                             supported). By default those records are excluded.
 
   otbr-restapi
-    usage: td_cli otbr-restapi [-h] {download,client,rawclient} ...
+    usage: td_cli otbr-restapi [-h] [--raw] {download,client} ...
 
     positional arguments:
-      {download,client,rawclient}
+      {download,client}
         download            Download OTBR REST API endpoints to JSON files
         client              Call OTBR REST API client commands (flattened output)
-        rawclient           Call OTBR REST API client commands (raw envelopes)
-
+ 
   process-eve
     usage: td_cli process-eve [-h]
 

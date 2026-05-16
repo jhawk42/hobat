@@ -21,10 +21,10 @@ Important behavior:
 TD_DATA_DIR=/tmp/td-data python3 -m td_cli otbr-restapi download
 
 # CLI argument when TD_DATA_DIR is not set
-python3 -m td_cli --datadir ./my-data mdns thread
+python3 -m td_cli --datadir ./data mdns thread
 
 # web-server JSON reads from the effective data directory
-python3 -m td_cli --datadir ./my-data web-server
+python3 -m td_cli --datadir ./data web-server
 ```
 
 ## Data Directory Note

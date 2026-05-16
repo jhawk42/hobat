@@ -551,7 +551,7 @@ python src/td_cli.py otbr-restapi client node get
 python src/td_cli.py otbr-restapi client devices list --with-meta
 
 # Raw client CLI (via td_cli.py)
-python src/td_cli.py otbr-restapi rawclient node get
+python src/td_cli.py otbr-restapi --raw node get
 
 # Or invoke the modules directly
 python src/otbr_restapi_cli.py node get
