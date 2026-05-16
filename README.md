@@ -1,6 +1,6 @@
-# Thread Mesh Network Dashboard
+# tdash - thread mesh network dashboard
 
-Thread Mesh Network Dashboard (tdash) is a Python toolkit for fetching thread device info and a browser dashboard for visualizing and monitoring Thread mesh networks.  [openthread](https://github.com/openthread/openthread) 
+The tdash is a cli collection tool and a thread mesh network web dashboard. It is a Python toolkit for fetching thread device info and a browser dashboard for visualizing and monitoring Thread mesh networks.  [openthread](https://github.com/openthread/openthread) 
 
 It collects thread device info from sources like: otbr-cli, otbr-restapi, mDNS (Multicast DNS) records, and the eve thread json format layout file shared from the Eve app. The td_cli tool can also merge these various sources for enhanced thread info and  visualization.
 
