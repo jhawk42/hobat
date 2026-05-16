@@ -1,20 +1,27 @@
-# Thread Mesh Network Dashboard
+# tdash - thread mesh network dashboard
 
-Thread Mesh Network Dashboard (tdash) is a Python toolkit for fetching thread device info and a browser dashboard for visualizing and monitoring Thread mesh networks.  [openthread](https://github.com/openthread/openthread) 
+This is a Python cli toolkit that fetches thread device info and a browser dashboard for visualizing and monitoring Thread mesh networks.  [openthread](https://github.com/openthread/openthread) 
 
-It collects thread device info from sources like: otbr-cli, otbr-restapi, mDNS (Multicast DNS) records, and the eve thread json format layout file shared from the Eve app. The td_cli tool can also merge these various sources for enhanced thread info and  visualization.
+
+It fetches thread device info from sources like: otbr-cli, otbr-restapi, mDNS (Multicast DNS) records and the eve thread json format layout file shared from the Eve app. The td_cli tool can also merge these various sources for consolidated thread info and visualization.
 
 ## Dataset Sources
-- otbr-cli: Fetches info from an OpenThread Border Router (OTBR) instance via ot-ctl commands for thread device info. By default calls  "otbr" docker container. Also support calling otbr on the host. Main ot-ctl commands used:
+- otbr-cli: Fetches info from an OpenThread Border Router (OTBR) instance via ot-ctl commands for thread device info. By default use docker exec to call into the "otbr" docker container. Also support calling otbr on the host. Common ot-ctl commands used:
   - router table (quick, seconds, summary)
   - meshdiag topology (quick, seconds, summary). 
     - Optionally also calls these sub commands (long, more detailed info) routerneighbortable, childtable, childip6
-  - networkdiag (takes time, minutes, detailed). The td_cli networkdiag supports multicast (quick, ftd) and poll (all devices) 
+  - networkdiag (takes time, minutes, detailed). The td_cli networkdiag supports multicast (quick, full thread devices) and poll (all devices including routes, full thread devices, minimal thread devices) 
 - otbr-restapi: Fetches info from an OpenThread Border Router REST API for thread device info.
 - mdns: Fetches thread-related mdns scope records: _meshcop, _trel, _hap, _matter for thread device info.
 - eve layout json file: Enhances and visualizes the eve layout file info. The Eve app (iOS) supports querying a thread network for devices and sharing device info to a JSON layout file. Note: Eve app needs at least one Eve thread device like a smart outlet to collect info as the eve device has diagnostics code in device firmware to collect thread device info. Eve app works well with Apple Home (HAP) thread networks.
 
 ## Getting Started
+
+The tdash can be run in a docker container or manually run on a host.
+
+### Setup - manual on a host
+
+To run manually on the host, git clone this repro onto the host. Details below to manually run td_cli.py and td_webserver.py commands.
 
 ### Setup - docker container
 
@@ -37,19 +44,25 @@ docker run --name=tdash -d \
   tdash:latest 
 ```
 
-### Connect to TDash dashboard
+### Open the tdash web dashboard in a browser
+
+Open the tdash web dashboard in a browser
 
 ```
-#localhost
+# localhost
 http://localhost:8087/
 
 # ip address
 http://<your-host-ip-addr>:8087/
 ```
 
+Note: The tdash webserver will automatically use td_cli.py to refresh the thread network cached info files:
+- When cached info files don't exist.
+- When cached info files are stale beyond a certain threshold.
+
 ### tdash cli examples
 
-See below for more direct on host td_cli.py commands 
+See below for additional manual run on host td_cli.py commands 
 
 ```
 # direct on host
@@ -59,11 +72,11 @@ python3 td_cli.py --help
 The tdash docker container cli entry point is td_cli.py.
 
 ```
-# docker exec into tdash container, run bash and then td_cli.py commands.
+# docker exec into tdash container: run bash and then td_cli.py commands.
 
 docker exec -it tdash /bin/bash $*
 
-# bash in tdash docker container examples:
+# bash in tdash docker container: td_cli.py examples:
 python3 td_cli.py --help
 
 usage: td_cli [-h] [--verbose] [--debug] [--output FILE] [--datadir DIR] {otbr-cli,mdns,otbr-restapi,process-eve,merge-dataset} ...
@@ -71,7 +84,7 @@ usage: td_cli [-h] [--verbose] [--debug] [--output FILE] [--datadir DIR] {otbr-c
 python3 td_cli.py otbr-cli router-table
 ```
 
-docker exec into tdash and run td_cli.py commands
+docker exec into tdash: run td_cli.py commands
 ```
 docker exec -it tdash /usr/local/bin/python3 td_cli.py otbr-cli router-table
 docker exec -it tdash /usr/local/bin/python3 td_cli.py --debug otbr-cli router-table
@@ -113,19 +126,21 @@ python3 -m td_cli otbr-restapi download
 python3 -m td_cli mdns --help
 python3 -m td_cli mdns thread # includes br, hap, matter
 python3 -m td_cli mdns br     # border routers
-python3 -m td_cli mdns hap.   # Apple HomeKit Accessory Protocol (HAP) thread devices
+python3 -m td_cli mdns hap    # Apple HomeKit Accessory Protocol (HAP) thread devices
 python3 -m td_cli mdns matter # Matter thread devices
 
 # Eve processing 
-python3 -m td_cli process-eve # Reads thread-eve-layout.json from data dir, enhances data and outputs td-eve-topology.json
+# Reads thread-eve-layout.json from data dir, enhances data and outputs td-eve-topology.json
+python3 -m td_cli process-eve 
 
 # Dataset merge
-python3 -m td_cli merge-dataset # Merge multiple thread topology JSON files into one consolidated merged file.
+# Merge multiple thread topology JSON files into one consolidated file
+python3 -m td_cli merge-dataset 
 ```
 
 # Dashboard Webserver
 
-Note: The tdash docker container automatically runs td_webserver.py on container startup.
+Note: The tdash docker container automatically runs td_webserver.py when the on container starts up.
 
 tdash dashboard webserver commands
 ```bash
