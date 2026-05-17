@@ -425,6 +425,13 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     topoNodeField: "router_neighbor_max_err_rate_frame_pct",
     tableNeighborField: "err_rate_frame_pct",
   },
+  {
+    value: "router-neighbor-err-rate-frame-critical",
+    label: "Critical (>= 30%)",
+    group: "Router Neighbor Err Rate Frame",
+    topoNodeField: "router_neighbor_max_err_rate_frame_pct",
+    tableNeighborField: "err_rate_frame_pct",
+  },
   // ── Router-neighbor: message error rate ───────────────────────────────
   {
     source: "link_quality",
@@ -454,6 +461,13 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     source: "link_quality",
     value: "router-neighbor-err-rate-msg-critical",
     label: "Router Neighbor Err Rate Msg: Critical (>= 30%)",
+    group: "Router Neighbor Err Rate Msg",
+    topoNodeField: "router_neighbor_max_err_rate_msg_pct",
+    tableNeighborField: "err_rate_msg_pct",
+  },
+  {
+    value: "router-neighbor-err-rate-msg-critical",
+    label: "Critical (>= 30%)",
     group: "Router Neighbor Err Rate Msg",
     topoNodeField: "router_neighbor_max_err_rate_msg_pct",
     tableNeighborField: "err_rate_msg_pct",
