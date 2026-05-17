@@ -563,6 +563,10 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   display: none;
 }
 
+.node-details-panel h2.hidden {
+  display: none;
+}
+
 /* Collapsible section heading toggle */
 .node-details-panel .detail-section-toggle {
   display: flex;

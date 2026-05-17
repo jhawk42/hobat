@@ -365,16 +365,6 @@ export function flattenObjectEntries(value, path = "", entries = []) {
     return entries;
   }
   if (Array.isArray(value)) {
-    if (value.length === 0) {
-      entries.push([path, []]);
-      return entries;
-    }
-    if (value.every((item) => isPlainObject(item))) {
-      value.forEach((item, i) =>
-        flattenObjectEntries(item, `${path}[${i}]`, entries),
-      );
-      return entries;
-    }
     entries.push([path, value]);
     return entries;
   }
@@ -479,6 +469,10 @@ export function populateNodeDetailsLists(details, listIdPrefix = "") {
     `${listIdPrefix}identity-list`,
     `${listIdPrefix}highlights-list`,
     `${listIdPrefix}connections-list`,
+    `${listIdPrefix}mdns-list`,
+    `${listIdPrefix}routes-links-list`,
+    `${listIdPrefix}neighbors-list`,
+    `${listIdPrefix}children-list`,
     `${listIdPrefix}counters-list`,
     `${listIdPrefix}details-list`,
   ];
@@ -493,6 +487,8 @@ export function populateNodeDetailsLists(details, listIdPrefix = "") {
     const fieldsAttr = listEl.getAttribute("data-fields");
     if (!fieldsAttr) {
       listEl.classList.add("hidden");
+      const prevH2 = listEl.previousElementSibling;
+      if (prevH2?.tagName === "H2") prevH2.classList.add("hidden");
       return;
     }
 
@@ -521,8 +517,12 @@ export function populateNodeDetailsLists(details, listIdPrefix = "") {
 
     if (listEl.children.length === 0) {
       listEl.classList.add("hidden");
+      const prevH2 = listEl.previousElementSibling;
+      if (prevH2?.tagName === "H2") prevH2.classList.add("hidden");
     } else {
       listEl.classList.remove("hidden");
+      const prevH2 = listEl.previousElementSibling;
+      if (prevH2?.tagName === "H2") prevH2.classList.remove("hidden");
     }
   });
 }

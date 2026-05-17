@@ -164,8 +164,41 @@ export const DATASET_REGISTRY = [
   {
     source: "mdns",
     value: "mdns_scopes_thread",
-    label: "thread scopes",
+    label: "Thread scopes (BR, HAP, Matter)",
     files: ["td-mdns-scopes-thread.json"],
+    mergeStrategy: "none",
+    topologyMode: "raw-array",
+    defaultLinkFilter: "all_links",
+    defaultView: "table"
+  },
+
+  {
+    source: "mdns",
+    value: "mdns_scopes_br",
+    label: "BR scope",
+    files: ["td-mdns-scopes-br.json"],
+    mergeStrategy: "none",
+    topologyMode: "raw-array",
+    defaultLinkFilter: "all_links",
+    defaultView: "table"
+  },
+
+   {
+    source: "mdns",
+    value: "mdns_scopes_hap",
+    label: "HAP scope",
+    files: ["td-mdns-scopes-hap.json"],
+    mergeStrategy: "none",
+    topologyMode: "raw-array",
+    defaultLinkFilter: "all_links",
+    defaultView: "table"
+  },
+  
+  {
+    source: "mdns",
+    value: "mdns_scopes_matter",
+    label: "Matter scope",
+    files: ["td-mdns-scopes-matter.json"],
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultLinkFilter: "all_links",

@@ -242,7 +242,7 @@ function resetNodeDetailsLists() {
     "<li>Click a node to view its properties.</li>";
   document
     .querySelectorAll(
-      "#identity-list, #highlights-list, #connections-list, #counters-list, #details-list",
+      "#identity-list, #highlights-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
     )
     .forEach((list) => {
       list.innerHTML = "";

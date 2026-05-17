@@ -198,12 +198,34 @@
             </ul>
             <h2>Highlights:</h2>
             <ul id="highlights-list" class="node-details-list"
-              data-fields="br,leader,type,mode.device,ver,thread_stack_version">
+              data-fields="br,leader,type,mode.device,ver,thread_stack_version,server">
             </ul>
+            
             <h2>Connections:</h2>
             <ul id="connections-list" class="node-details-list"
               data-fields="total_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count">
             </ul>
+
+            <h2>MDNS:</h2>
+            <ul id="mdns-list" class="node-details-list"
+              data-fields="scope,service_info.type,service_info.server,service_info.port,service_info.properties.mdns_scopes_thread,service_info.properties.mdns_scopes_br,service_info.properties.mdns_scopes_hap,service_info.properties.mdns_scopes_matter,service_info.properties.pt.full_name,service_info.properties.pt.int_value,service_info.properties.mn.decoded,service_info.properties.pv.full_name,service_info.properties.pv.decoded,service_info.properties.FabricID.full_name,service_info.properties.FabricID.decoded,service_info.decoded_properties.SAI,service_info.decoded_properties.SAT,service_info.decoded_properties.SII,service_info.properties.NodeID.full_name,service_info.properties.NodeID.decoded,service_info.properties.SAI.full_name,service_info.properties.SAI.milliseconds,service_info.properties.SAT.full_name,service_info.properties.SAT.milliseconds,service_info.properties.SII.full_name,service_info.properties.SII.milliseconds">
+            </ul>
+
+            <h2>Routes & Links:</h2>
+            <ul id="routes-links-list" class="node-details-list"
+              data-fields="routes, 3_links,2_links,1_links">
+            </ul>
+
+            <h2>Neighbors:</h2>
+            <ul id="neighbors-list" class="node-details-list"
+              data-fields="router_neighbor_table">
+            </ul>
+
+            <h2>Children:</h2>
+            <ul id="children-list" class="node-details-list"
+              data-fields="children,router_child_table">
+            </ul>            
+
             <h2>Counters:</h2>
             <ul id="counters-list" class="node-details-list"
               data-fields="mac_counters.iftotalpkts,mac_counters.iftotaldiscards,mac_counters.iftotalerrors,mac_counters.iftotalerrors_totalpkts_ratio,mac_counters.iftotaldiscards_totalpkts_ratio,mle_counters.leaderrole,mle_counters.routerrole,mle_counters.childrole,mle_counters.partitionidchanges,mle_counters.betterpartitionattachattempts,mle_counters.parentchanges,mle_counters.totalparentpartitionchanges,mle_counters.attachattempts,mle_counters.detachedrole,mle_counters.disabledrole,time_statistics.leader_pct,time_statistics.router_pct,time_statistics.child_pct,time_statistics.detached_disabled_pct,time_statistics.detached_pct,time_statistics.disabled_pct">
@@ -240,6 +262,22 @@
             <h2>Connections:</h2>
             <ul id="table-connections-list" class="node-details-list"
               data-fields="total_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count">
+            </ul>
+            <h2>MDNS:</h2>
+            <ul id="table-mdns-list" class="node-details-list"
+              data-fields="scope,service_info.type,service_info.server,service_info.port,service_info.properties.mdns_scopes_thread,service_info.properties.mdns_scopes_br,service_info.properties.mdns_scopes_hap,service_info.properties.mdns_scopes_matter,service_info.properties.pt.full_name,service_info.properties.pt.int_value,service_info.properties.mn.decoded,service_info.properties.pv.full_name,service_info.properties.pv.decoded,service_info.properties.ci.category_name,service_info.properties.FabricID.full_name,service_info.properties.FabricID.decoded,service_info.decoded_properties.SAI,service_info.decoded_properties.SAT,service_info.decoded_properties.SII,service_info.properties.NodeID.full_name,service_info.properties.NodeID.decoded,service_info.properties.SAI.full_name,service_info.properties.SAI.milliseconds,service_info.properties.SAT.full_name,service_info.properties.SAT.milliseconds,service_info.properties.SII.full_name,service_info.properties.SII.milliseconds">
+            </ul>
+            <h2>Routes & Links:</h2>
+            <ul id="table-routes-links-list" class="node-details-list"
+              data-fields="routes, 3_links,2_links,1_links">
+            </ul>
+            <h2>Neighbors:</h2>
+            <ul id="table-neighbors-list" class="node-details-list"
+              data-fields="router_neighbor_table">
+            </ul>
+            <h2>Children:</h2>
+            <ul id="table-children-list" class="node-details-list"
+              data-fields="children,router_child_table">
             </ul>
             <h2>Counters:</h2>
             <ul id="table-counters-list" class="node-details-list"
