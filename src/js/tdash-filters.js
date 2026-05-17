@@ -461,7 +461,6 @@ export function populateFilterSelects() {
 
 // ── Check if any nodes match a diagnostic filter option ───────────────────────
 //
-// Validates that at least one node in the dataset matches the given filter option.
 // This prevents showing filter options that have no matching rows.
 
 function anyNodesMatchDiagnosticFilter(nodeData, filterMode) {
