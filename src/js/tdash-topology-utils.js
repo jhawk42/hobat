@@ -155,6 +155,42 @@ export function computeRouterNeighborStats(routerNeighborTable) {
   };
 }
 
+// ── Router-child statistics ───────────────────────────────────────────────────
+
+export function computeRouterChildStats(routerChildTable) {
+  const rows = Array.isArray(routerChildTable) ? routerChildTable : [];
+  let maxFrame, maxMsg;
+  let hasRssVeryLow = false,
+    hasRssLow = false,
+    hasRssMarginLow = false,
+    hasQueuedMsgs = false;
+  rows.forEach((row) => {
+    const fp = toFiniteNumber(row?.err_rate_frame_pct);
+    if (Number.isFinite(fp))
+      maxFrame = Number.isFinite(maxFrame) ? Math.max(maxFrame, fp) : fp;
+    const mp = toFiniteNumber(row?.err_rate_msg_pct);
+    if (Number.isFinite(mp))
+      maxMsg = Number.isFinite(maxMsg) ? Math.max(maxMsg, mp) : mp;
+    const rss = toFiniteNumber(row?.rss_ave);
+    if (Number.isFinite(rss)) {
+      if (rss < -80) hasRssVeryLow = true;
+      else if (rss >= -80 && rss < -70) hasRssLow = true;
+    }
+    const margin = toFiniteNumber(row?.rss_margin);
+    if (Number.isFinite(margin) && margin < 20) hasRssMarginLow = true;
+    const qMsg = toFiniteNumber(row?.q_msg);
+    if (Number.isFinite(qMsg) && qMsg > 0) hasQueuedMsgs = true;
+  });
+  return {
+    router_child_max_err_rate_frame_pct: maxFrame,
+    router_child_max_err_rate_msg_pct: maxMsg,
+    router_child_has_rss_very_low: hasRssVeryLow,
+    router_child_has_rss_low: hasRssLow,
+    router_child_has_rss_margin_low: hasRssMarginLow,
+    router_child_has_queued_msgs: hasQueuedMsgs,
+  };
+}
+
 // ── Isolated-node clustering ──────────────────────────────────────────────────
 //
 // Groups isolated (degree-0) nodes with phantom hidden edges to keep the
@@ -229,6 +265,7 @@ export function buildVisNodeData(
   routerIdsWithChildren,
   routerNeighborByRloc16,
   labelFn,
+  routerChildByRloc16 = new Map(),
 ) {
   return Array.from(nodeMap.values()).map((node) => {
     const displayName = toText(node.device_label) || toText(node.name);
@@ -237,6 +274,10 @@ export function buildVisNodeData(
     const rloc16Text = toText(node.rloc16).toLowerCase();
     const neighborStats = computeRouterNeighborStats(
       routerNeighborByRloc16.get(rloc16Text)?.router_neighbor_table,
+    );
+    const childTableRow = routerChildByRloc16.get(rloc16Text);
+    const childStats = computeRouterChildStats(
+      childTableRow?.router_child_table,
     );
     const isRouter = effectiveShape !== "ellipse";
     const hasChildren = routerIdsWithChildren.has(node.id);
@@ -274,9 +315,23 @@ export function buildVisNodeData(
       ifindiscards_pct: node.ifindiscards_pct,
       ifinerrors_pct: node.ifinerrors_pct,
       ifouterrors_pct: node.ifouterrors_pct,
+      iftotalerrors_totalpkts_ratio: node.iftotalerrors_totalpkts_ratio,
+      iftotaldiscards_totalpkts_ratio: node.iftotaldiscards_totalpkts_ratio,
       mode_device: node.mode_device,
+      total_link_3: node.total_link_3,
+      total_link_2: node.total_link_2,
+      total_link_1: node.total_link_1,
+      lq3_ratio: node.lq3_ratio,
+      lq1_ratio: node.lq1_ratio,
+      has_child_lq_medium: node.has_child_lq_medium,
+      has_child_lq_poor: node.has_child_lq_poor,
       partitionidchanges: node.partitionidchanges,
       parentchanges: node.parentchanges,
+      betterpartitionattachattempts: node.betterpartitionattachattempts,
+      totalparentpartitionchanges: node.totalparentpartitionchanges,
+      router_pct: node.router_pct,
+      detached_disabled_pct: node.detached_disabled_pct,
+      is_ftd_router: node.is_ftd_router,
       router_neighbor_max_err_rate_frame_pct:
         neighborStats.router_neighbor_max_err_rate_frame_pct,
       router_neighbor_max_err_rate_msg_pct:
@@ -289,6 +344,15 @@ export function buildVisNodeData(
       router_neighbor_has_rss_medium:
         neighborStats.router_neighbor_has_rss_medium,
       router_neighbor_has_rss_high: neighborStats.router_neighbor_has_rss_high,
+      router_child_max_err_rate_frame_pct:
+        childStats.router_child_max_err_rate_frame_pct,
+      router_child_max_err_rate_msg_pct:
+        childStats.router_child_max_err_rate_msg_pct,
+      router_child_has_rss_very_low: childStats.router_child_has_rss_very_low,
+      router_child_has_rss_low: childStats.router_child_has_rss_low,
+      router_child_has_rss_margin_low:
+        childStats.router_child_has_rss_margin_low,
+      router_child_has_queued_msgs: childStats.router_child_has_queued_msgs,
     };
   });
 }

@@ -24,6 +24,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
   const meshdiag = Array.isArray(rawFiles[0]) ? rawFiles[0] : [];
   const networkDiag = Array.isArray(rawFiles[1]) ? rawFiles[1] : [];
   const routerNeighborTables = Array.isArray(rawFiles[2]) ? rawFiles[2] : [];
+  const routerChildTables = Array.isArray(rawFiles[3]) ? rawFiles[3] : [];
   const restApiRaw = rawFiles[3];
   const restApiDiagnostics = (restApiRaw && Array.isArray(restApiRaw.data))
     ? restApiRaw.data
@@ -40,6 +41,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
   const edgeData = [];
   const routerIdsWithChildren = new Set();
   const routerNeighborByRloc16 = new Map();
+  const routerChildByRloc16 = new Map();
 
   function upsertNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
@@ -60,6 +62,41 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
       ? rawNode.mle_counters.partitionidchanges : undefined;
     const rawParentChanges = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.parentchanges)
       ? rawNode.mle_counters.parentchanges : undefined;
+    // Phase 1a: new fields
+    const mergedTotalLink3 = Number.isFinite(rawNode.total_link_3) ? rawNode.total_link_3
+      : (existing && Number.isFinite(existing.total_link_3) ? existing.total_link_3 : undefined);
+    const mergedTotalLink2 = Number.isFinite(rawNode.total_link_2) ? rawNode.total_link_2
+      : (existing && Number.isFinite(existing.total_link_2) ? existing.total_link_2 : undefined);
+    const mergedTotalLink1 = Number.isFinite(rawNode.total_link_1) ? rawNode.total_link_1
+      : (existing && Number.isFinite(existing.total_link_1) ? existing.total_link_1 : undefined);
+    const mergedTotalLinks = Number.isFinite(rawNode.total_links) ? rawNode.total_links
+      : (existing ? existing.total_links : 0);
+    const lq3Ratio = (Number.isFinite(mergedTotalLink3) && mergedTotalLinks > 0)
+      ? mergedTotalLink3 / mergedTotalLinks : undefined;
+    const lq1Ratio = (Number.isFinite(mergedTotalLink1) && mergedTotalLinks > 0)
+      ? mergedTotalLink1 / mergedTotalLinks : undefined;
+    let hasChildLqMedium = false;
+    let hasChildLqPoor = false;
+    rawChildren.forEach((child) => {
+      const lqRaw = child.lq !== undefined ? child.lq : child.link_quality;
+      const lqNum = Number.parseInt(lqRaw, 10);
+      if (Number.isFinite(lqNum)) {
+        if (lqNum <= 2) hasChildLqMedium = true;
+        if (lqNum === 1) hasChildLqPoor = true;
+      }
+    });
+    const rawTotalErrorsRatio = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotalerrors_totalpkts_ratio)
+      ? rawNode.mac_counters.iftotalerrors_totalpkts_ratio : undefined;
+    const rawTotalDiscardsRatio = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotaldiscards_totalpkts_ratio)
+      ? rawNode.mac_counters.iftotaldiscards_totalpkts_ratio : undefined;
+    const rawBetterPartition = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.betterpartitionattachattempts)
+      ? rawNode.mle_counters.betterpartitionattachattempts : undefined;
+    const rawTotalParentPartition = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.totalparentpartitionchanges)
+      ? rawNode.mle_counters.totalparentpartitionchanges : undefined;
+    const rawRouterPct = rawNode.time_statistics && Number.isFinite(rawNode.time_statistics.router_pct)
+      ? rawNode.time_statistics.router_pct : undefined;
+    const rawDetachedDisabledPct = rawNode.time_statistics && Number.isFinite(rawNode.time_statistics.detached_disabled_pct)
+      ? rawNode.time_statistics.detached_disabled_pct : undefined;
     const merged = {
       id: nodeId,
       device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
@@ -71,24 +108,44 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
       ipv6_addrs: mergedIpv6,
       total_children: Number.isFinite(rawNode.total_children)
         ? rawNode.total_children : (rawChildren.length || (existing ? existing.total_children : 0)),
-      total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
+      total_links: mergedTotalLinks,
+      total_link_3: mergedTotalLink3,
+      total_link_2: mergedTotalLink2,
+      total_link_1: mergedTotalLink1,
+      lq3_ratio: lq3Ratio,
+      lq1_ratio: lq1Ratio,
+      has_child_lq_medium: hasChildLqMedium || (existing ? existing.has_child_lq_medium === true : false),
+      has_child_lq_poor: hasChildLqPoor || (existing ? existing.has_child_lq_poor === true : false),
       ifindiscards_pct: Number.isFinite(rawPacketErrorDiscardPct) ? rawPacketErrorDiscardPct
         : (existing && Number.isFinite(existing.ifindiscards_pct) ? existing.ifindiscards_pct : undefined),
       ifinerrors_pct: Number.isFinite(rawInerrorsPct) ? rawInerrorsPct
         : (existing && Number.isFinite(existing.ifinerrors_pct) ? existing.ifinerrors_pct : undefined),
       ifouterrors_pct: Number.isFinite(rawOuterrorsPct) ? rawOuterrorsPct
         : (existing && Number.isFinite(existing.ifouterrors_pct) ? existing.ifouterrors_pct : undefined),
+      iftotalerrors_totalpkts_ratio: rawTotalErrorsRatio !== undefined ? rawTotalErrorsRatio
+        : (existing && Number.isFinite(existing.iftotalerrors_totalpkts_ratio) ? existing.iftotalerrors_totalpkts_ratio : undefined),
+      iftotaldiscards_totalpkts_ratio: rawTotalDiscardsRatio !== undefined ? rawTotalDiscardsRatio
+        : (existing && Number.isFinite(existing.iftotaldiscards_totalpkts_ratio) ? existing.iftotaldiscards_totalpkts_ratio : undefined),
       mode_device: rawModeDevice || (existing ? existing.mode_device : ''),
       partitionidchanges: Number.isFinite(rawPartitionIdChanges) ? rawPartitionIdChanges
         : (existing && Number.isFinite(existing.partitionidchanges) ? existing.partitionidchanges : undefined),
       parentchanges: Number.isFinite(rawParentChanges) ? rawParentChanges
         : (existing && Number.isFinite(existing.parentchanges) ? existing.parentchanges : undefined),
+      betterpartitionattachattempts: rawBetterPartition !== undefined ? rawBetterPartition
+        : (existing && Number.isFinite(existing.betterpartitionattachattempts) ? existing.betterpartitionattachattempts : undefined),
+      totalparentpartitionchanges: rawTotalParentPartition !== undefined ? rawTotalParentPartition
+        : (existing && Number.isFinite(existing.totalparentpartitionchanges) ? existing.totalparentpartitionchanges : undefined),
+      router_pct: rawRouterPct !== undefined ? rawRouterPct
+        : (existing && Number.isFinite(existing.router_pct) ? existing.router_pct : undefined),
+      detached_disabled_pct: rawDetachedDisabledPct !== undefined ? rawDetachedDisabledPct
+        : (existing && Number.isFinite(existing.detached_disabled_pct) ? existing.detached_disabled_pct : undefined),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_meshdiag: (style.source === 'meshdiag') || (existing ? existing.from_meshdiag === true : false),
       from_networkdiagnostic: (style.source === 'networkdiagnostic') || (existing ? existing.from_networkdiagnostic === true : false),
       shape: style.shape || (existing ? existing.shape : 'box'),
       color: style.color || (existing ? existing.color : NODE_COLORS.router)
     };
+    merged.is_ftd_router = merged.mode_device === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
     if (merged.br) merged.color = NODE_COLORS.borderRouter;
     nodeMap.set(nodeId, merged);
   }
@@ -125,6 +182,11 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
   routerNeighborTables.forEach((row) => {
     const rloc16 = toText(row.rloc16).toLowerCase();
     if (rloc16) routerNeighborByRloc16.set(rloc16, row);
+  });
+
+  routerChildTables.forEach((row) => {
+    const rloc16 = toText(row.parent_rloc16 || row.rloc16).toLowerCase();
+    if (rloc16) routerChildByRloc16.set(rloc16, row);
   });
 
   for (const node of meshdiag) {
@@ -202,7 +264,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     });
   });
 
-  const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
+  const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel, routerChildByRloc16);
 
   const rawByIdForDetails = new Map();
   nodeMap.forEach((_, id) => {
@@ -216,11 +278,12 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
   if (meshdiag.length > 0) sourceNames.push('meshdiag');
   if (networkDiag.length > 0) sourceNames.push('networkdiagnostic');
   if (routerNeighborTables.length > 0) sourceNames.push('routerneighbortables');
+  if (routerChildTables.length > 0) sourceNames.push('routerchildtables');
   if (restApiDiagnostics.length > 0) sourceNames.push('restapi');
 
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 
-  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames };
+  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, routerChildByRloc16, sourceNames };
 }
 
 // ── Adaptor 2: Eve topology ───────────────────────────────────────────────────
@@ -438,6 +501,7 @@ export function adaptMergedDetailed(rawFiles) {
   const edgeData = [];
   const routerIdsWithChildren = new Set();
   const routerNeighborByRloc16 = new Map();
+  const routerChildByRloc16 = new Map();
 
   function isMergedRowEveOnly(node) {
     const sources = Array.isArray(node?._sources) ? node._sources : [];
@@ -456,6 +520,29 @@ export function adaptMergedDetailed(rawFiles) {
 
   function upsertMergedNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
+    const rawMergedChildren = Array.isArray(rawNode.children) ? rawNode.children : [];
+    const mergedTotalLink3 = Number.isFinite(rawNode.total_link_3) ? rawNode.total_link_3
+      : (existing && Number.isFinite(existing.total_link_3) ? existing.total_link_3 : undefined);
+    const mergedTotalLink2 = Number.isFinite(rawNode.total_link_2) ? rawNode.total_link_2
+      : (existing && Number.isFinite(existing.total_link_2) ? existing.total_link_2 : undefined);
+    const mergedTotalLink1 = Number.isFinite(rawNode.total_link_1) ? rawNode.total_link_1
+      : (existing && Number.isFinite(existing.total_link_1) ? existing.total_link_1 : undefined);
+    const mergedTotalLinks = Number.isFinite(rawNode.total_links) ? rawNode.total_links
+      : (existing ? existing.total_links : 0);
+    const lq3Ratio = (Number.isFinite(mergedTotalLink3) && mergedTotalLinks > 0)
+      ? mergedTotalLink3 / mergedTotalLinks : undefined;
+    const lq1Ratio = (Number.isFinite(mergedTotalLink1) && mergedTotalLinks > 0)
+      ? mergedTotalLink1 / mergedTotalLinks : undefined;
+    let hasChildLqMedium = false;
+    let hasChildLqPoor = false;
+    rawMergedChildren.forEach((child) => {
+      const lqRaw = child.lq !== undefined ? child.lq : child.link_quality;
+      const lqNum = Number.parseInt(lqRaw, 10);
+      if (Number.isFinite(lqNum)) {
+        if (lqNum <= 2) hasChildLqMedium = true;
+        if (lqNum === 1) hasChildLqPoor = true;
+      }
+    });
     const merged = {
       id: nodeId,
       name: toText(rawNode.name) || (existing ? existing.name : ''),
@@ -466,7 +553,14 @@ export function adaptMergedDetailed(rawFiles) {
       type: toText(rawNode.type) || (existing ? existing.type : ''),
       thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
       total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
-      total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
+      total_links: mergedTotalLinks,
+      total_link_3: mergedTotalLink3,
+      total_link_2: mergedTotalLink2,
+      total_link_1: mergedTotalLink1,
+      lq3_ratio: lq3Ratio,
+      lq1_ratio: lq1Ratio,
+      has_child_lq_medium: hasChildLqMedium || (existing ? existing.has_child_lq_medium === true : false),
+      has_child_lq_poor: hasChildLqPoor || (existing ? existing.has_child_lq_poor === true : false),
       ifindiscards_pct: Number.isFinite(rawNode.mac_counters?.ifindiscards_pct)
         ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifindiscards_pct),
       iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
@@ -480,11 +574,20 @@ export function adaptMergedDetailed(rawFiles) {
         ? rawNode.mle_counters.partitionidchanges : (existing?.partitionidchanges),
       parentchanges: Number.isFinite(rawNode.mle_counters?.parentchanges)
         ? rawNode.mle_counters.parentchanges : (existing?.parentchanges),
+      betterpartitionattachattempts: Number.isFinite(rawNode.mle_counters?.betterpartitionattachattempts)
+        ? rawNode.mle_counters.betterpartitionattachattempts : (existing?.betterpartitionattachattempts),
+      totalparentpartitionchanges: Number.isFinite(rawNode.mle_counters?.totalparentpartitionchanges)
+        ? rawNode.mle_counters.totalparentpartitionchanges : (existing?.totalparentpartitionchanges),
+      router_pct: Number.isFinite(rawNode.time_statistics?.router_pct)
+        ? rawNode.time_statistics.router_pct : (existing?.router_pct),
+      detached_disabled_pct: Number.isFinite(rawNode.time_statistics?.detached_disabled_pct)
+        ? rawNode.time_statistics.detached_disabled_pct : (existing?.detached_disabled_pct),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_merged_detailed: true,
       shape: style.shape || (existing ? existing.shape : 'box'),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
+    merged.is_ftd_router = merged.mode_device === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
     if (merged.br) merged.color = NODE_COLORS.borderRouter;
     nodeMap.set(nodeId, merged);
   }
@@ -517,6 +620,11 @@ export function adaptMergedDetailed(rawFiles) {
     // populate routerNeighborByRloc16 for filter support
     if (Array.isArray(node.router_neighbor_table) && rloc16Text) {
       routerNeighborByRloc16.set(rloc16Text, node);
+    }
+    // populate routerChildByRloc16 for filter support
+    const rloc16ForChild = toText(node.parent_rloc16 || node.rloc16).toLowerCase();
+    if (Array.isArray(node.router_child_table) && rloc16ForChild) {
+      routerChildByRloc16.set(rloc16ForChild, node);
     }
   });
 
@@ -566,13 +674,13 @@ export function adaptMergedDetailed(rawFiles) {
     });
   });
 
-  const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
+  const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel, routerChildByRloc16);
 
   const rawByIdForDetails = new Map(rawNodeById);
 
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 
-  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['merged-detailed'] };
+  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, routerChildByRloc16, sourceNames: ['merged-detailed'] };
 }
 
 // ── Adaptor 4: Router table (Nodes from ID/rloc16, edges from Next Hop) ───────

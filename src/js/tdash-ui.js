@@ -12,6 +12,7 @@ import {
   renderTopologyForDataset,
   getVisNetwork,
   getTopologyFilterHandlers,
+  getTopologyNodeData,
   setAutoZoomEnabled,
   setAnimationEnabled,
   isAutoZoomEnabled,
@@ -25,6 +26,11 @@ import {
 } from "./tdash-table-renderer.js";
 import { EDGE_LQ_STYLES } from "./tdash-constants.js";
 import { initDetailPanelToggles } from "./tdash-utils.js";
+import {
+  populateFilterSelects,
+  populateDiagnosticFilterBySource,
+  populateDiagnosticFilterBySourceWithCapabilities,
+} from "./tdash-filters.js";
 
 // ── Section 2: Build dataset <select> ────────────────────────────────────────
 
@@ -74,6 +80,36 @@ function applyLegendLineStylesFromConstants() {
   );
 }
 
+// ── Refresh diagnostic filter based on current source and dataset capabilities ──
+
+function refreshDiagnosticFilterForCurrentSource() {
+  if (!currentDataset || !currentDataset.capabilities) return;
+  const diagSourceSelect = document.getElementById("diagnostic-source-filter");
+  const selectedSource = diagSourceSelect.value;
+  const currentDiagValue = document.getElementById("diagnostic-filter").value;
+  
+  // Get the appropriate node data for validation
+  let nodeDataForValidation = null;
+  if (currentView === "topology") {
+    nodeDataForValidation = getTopologyNodeData();
+  } else if (currentView === "table") {
+    // For table view, use the raw rows
+    nodeDataForValidation = currentDataset.rows;
+  }
+  
+  // Repopulate with capability-aware filtering and data validation
+  populateDiagnosticFilterBySourceWithCapabilities(selectedSource, currentDataset.capabilities, nodeDataForValidation);
+  
+  // Restore the previously selected value if it's still available
+  const diagFilterEl = document.getElementById("diagnostic-filter");
+  const optionExists = Array.from(diagFilterEl.options).some(opt => opt.value === currentDiagValue);
+  if (optionExists) {
+    diagFilterEl.value = currentDiagValue;
+  } else {
+    diagFilterEl.value = "all";
+  }
+}
+
 function renderCurrentView() {
   if (!currentDataset) return;
   const view = currentView;
@@ -91,6 +127,16 @@ function renderCurrentView() {
   } else {
     renderTableForDataset(effectiveDataset);
   }
+
+  // Sync capabilities back to currentDataset when effectiveDataset is a spread copy
+  // (happens when _enhanceEnabled is true). The renderers set dataset.capabilities on
+  // effectiveDataset, so we need to propagate it back so change-event handlers can use it.
+  if (effectiveDataset !== currentDataset && effectiveDataset.capabilities) {
+    currentDataset.capabilities = effectiveDataset.capabilities;
+  }
+
+  // Refresh diagnostic filter to show only relevant options for this dataset
+  refreshDiagnosticFilterForCurrentSource();
 }
 
 // ── Section 7: View Toggle ────────────────────────────────────────────────────
@@ -299,10 +345,50 @@ document.getElementById("diagnostic-filter").addEventListener("change", () => {
   }
 });
 
+document.getElementById("diagnostic-source-filter").addEventListener("change", (event) => {
+  const selectedSource = event.target.value;
+  // Use capability-aware population if dataset is loaded and has capabilities
+  if (currentDataset && currentDataset.capabilities) {
+    // Use view-aware node data so computed fields (lq3_ratio, etc.) are available
+    const nodeDataForValidation = currentView === "topology"
+      ? getTopologyNodeData()
+      : currentDataset.rows;
+    populateDiagnosticFilterBySourceWithCapabilities(selectedSource, currentDataset.capabilities, nodeDataForValidation);
+  } else {
+    populateDiagnosticFilterBySource(selectedSource);
+  }
+  // Reset diagnostic filter to "all" when source changes
+  document.getElementById("diagnostic-filter").value = "all";
+  // Trigger a change event on the diagnostic-filter to apply the new filters
+  if (!currentDataset) return;
+  if (currentView === "topology") {
+    const handlers = getTopologyFilterHandlers();
+    if (handlers) {
+      const linkFilterEl = document.getElementById("link-filter");
+      const nodeFilterEl = document.getElementById("node-filter");
+      const diagFilterEl = document.getElementById("diagnostic-filter");
+      const counts = handlers.applyFilters(
+        nodeFilterEl.value,
+        linkFilterEl.value,
+        diagFilterEl.value,
+      );
+      handlers.updateStatus(counts);
+      handlers.fitIfEnabled();
+      resetNodeDetailsLists();
+    }
+  } else {
+    applyTableFilters();
+  }
+});
+
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 const initialSource = document.getElementById("datasource-filter").value;
 populateDatasetSelect(initialSource);
+populateFilterSelects();
+// Initialize diagnostic-filter with the default diagnostic source
+const initialDiagSource = document.getElementById("diagnostic-source-filter").value;
+populateDiagnosticFilterBySource(initialDiagSource);
 applyLegendLineStylesFromConstants();
 await loadStaticLabelMap();
 // do not auto-load on startup; prompt the user instead.

@@ -100,6 +100,12 @@ export const EDGE_LQ_STYLES = Object.freeze({
 //
 // Fields:
 //   value          — must match the <option value="..."> in the HTML
+//   label          — display text rendered as the <option> text content
+//   group          — <optgroup> label string; null means no group.
+//                    Consecutive entries sharing the same group string are
+//                    placed inside one <optgroup>. Group labels must be
+//                    unique within each registry.
+//   title          — optional tooltip rendered as the <option title="">
 //   alwaysShow     — when true the option is never hidden regardless of data
 //
 // NODE_FILTER_OPTIONS
@@ -118,9 +124,39 @@ export const EDGE_LQ_STYLES = Object.freeze({
 //                        (used instead of tableRowField when set)
 
 export const NODE_FILTER_OPTIONS = Object.freeze([
-  { value: "all", alwaysShow: true },
+  { value: "all",                      label: "All",                         alwaysShow: true, group: null },
+  {
+    value: "border-routers",
+    label: "Border Routers",
+    group: null,
+    topoNodeField: "isBorderRouter",
+    tableRowField: "br",
+  },
+  {
+    value: "main-routers",
+    label: "Routers",
+    group: null,
+    topoNodeField: "isMainRouter",
+    tableRowField: "rloc16", // rloc16 ending in '00' → main router
+  },
+  {
+    value: "routers-with-children",
+    label: "Routers with Child Nodes",
+    group: null,
+    topoNodeField: "isRouter", // isRouter && hasChildren
+    tableRowField: "total_children", // > 0, or children[] length > 0
+  },
+  {
+    value: "routers-without-children",
+    label: "Routers without Child Nodes",
+    group: null,
+    topoNodeField: "isRouter", // isRouter && !hasChildren
+    tableRowField: "rloc16", // router-shaped, checked by predicate
+  },
   {
     value: "ftd-devices",
+    label: "Full Thread Devices",
+    group: null,
     topoNodeField: "mode_device",
     topoNodeValue: "FTD",
     tableRowField: "mode.device",
@@ -128,37 +164,22 @@ export const NODE_FILTER_OPTIONS = Object.freeze([
   },
   {
     value: "mtd-devices",
+    label: "Minimal Thread Devices",
+    group: null,
     topoNodeField: "mode_device",
     topoNodeValue: "MTD",
     tableRowField: "mode.device",
     tableRowValue: "MTD",
   },
-  {
-    value: "main-routers",
-    topoNodeField: "isMainRouter",
-    tableRowField: "rloc16", // rloc16 ending in '00' → main router
-  },
-  {
-    value: "border-routers",
-    topoNodeField: "isBorderRouter",
-    tableRowField: "br",
-  },
-  {
-    value: "routers-with-children",
-    topoNodeField: "isRouter", // isRouter && hasChildren
-    tableRowField: "total_children", // > 0, or children[] length > 0
-  },
-  {
-    value: "routers-without-children",
-    topoNodeField: "isRouter", // isRouter && !hasChildren
-    tableRowField: "rloc16", // router-shaped, checked by predicate
-  },
 ]);
 
 export const LINK_FILTER_OPTIONS = Object.freeze([
-  { value: LINK_FILTER_ALL, alwaysShow: true },
+  { value: LINK_FILTER_ALL,                   label: "All",                    alwaysShow: true, group: null },
   {
     value: LINK_FILTER_DEFAULT,
+    label: "Standard",
+    title: "Shows parent-child relationships and link quality indicators",
+    group: null,
     requiredEdgeCategories: [
       EDGE_CATEGORY_DEFAULT_CHILDREN,
       EDGE_CATEGORY_DEFAULT_1,
@@ -169,6 +190,9 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
   },
   {
     value: LINK_FILTER_DEFAULT_PLUS_NEIGHBORS,
+    label: "Standard & Neighbors",
+    title: "Shows parent-child relationships, link quality, and router neighbors",
+    group: null,
     requiredEdgeCategories: [
       EDGE_CATEGORY_DEFAULT_CHILDREN,
       EDGE_CATEGORY_DEFAULT_1,
@@ -180,25 +204,36 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
   },
   {
     value: LINK_FILTER_OTBR_REST_API,
+    label: "Standard (restapi)",
+    title: "OTBR REST API: Shows parent-child relationships and link quality",
+    group: null,
     requiredEdgeCategories: [
       EDGE_CATEGORY_OTBR_ROUTE,
       EDGE_CATEGORY_OTBR_CHILD,
     ],
   },
   {
-    value: LINK_FILTER_EVE_ENHANCED,
-    requiredEdgeCategories: [EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD],
-  },
-  {
     value: LINK_FILTER_EVE_NATIVE,
+    label: "Eve Native",
+    title: "Shows network routes and child device relationships",
+    group: null,
     requiredEdgeCategories: [
       EDGE_CATEGORY_EVE_NATIVE_ROUTE,
       EDGE_CATEGORY_EVE_NATIVE_CHILD,
     ],
   },
+  {
+    value: LINK_FILTER_EVE_ENHANCED,
+    label: "Eve Enhanced",
+    title: "Shows enhanced network routes with additional metadata",
+    group: null,
+    requiredEdgeCategories: [EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD],
+  },
   // ── Link Quality filters ──────────────────────────────────────────────
   {
     value: LINK_FILTER_LQ_HIGH,
+    label: "High (LQ3)",
+    group: "Link Quality",
     requiredEdgeCategories: [
       EDGE_CATEGORY_DEFAULT_3,
       EDGE_CATEGORY_EVE_ROUTE,
@@ -207,6 +242,8 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
   },
   {
     value: LINK_FILTER_LQ_MEDIUM,
+    label: "Medium (LQ2)",
+    group: "Link Quality",
     requiredEdgeCategories: [
       EDGE_CATEGORY_DEFAULT_2,
       EDGE_CATEGORY_EVE_ROUTE,
@@ -215,14 +252,20 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
   },
   {
     value: LINK_FILTER_LQ_LOW,
+    label: "Low (LQ1)",
+    group: "Link Quality",
     requiredEdgeCategories: [
       EDGE_CATEGORY_DEFAULT_1,
       EDGE_CATEGORY_EVE_ROUTE,
       EDGE_CATEGORY_EVE_NATIVE_ROUTE,
     ],
   },
+  { value: LINK_FILTER_LQ_NONE,             label: "No LQ Data / Unknown",   alwaysShow: true, group: "Link Quality" },
+  // ── Link Type filters ─────────────────────────────────────────────────
   {
     value: LINK_FILTER_PARENT_CHILD,
+    label: "Parent\u2013Child",
+    group: "Link Types",
     requiredEdgeCategories: [
       EDGE_CATEGORY_DEFAULT_CHILDREN,
       EDGE_CATEGORY_EVE_CHILD,
@@ -232,105 +275,369 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
   },
   {
     value: LINK_FILTER_OTBR_NEIGHBOR,
+    label: "Router Neighbors",
+    group: "Link Types",
     requiredEdgeCategories: [
       EDGE_CATEGORY_OTBR_ROUTE,
       EDGE_CATEGORY_ROUTER_NEIGHBOR,
     ],
   },
-  { value: LINK_FILTER_LQ_NONE, alwaysShow: true },
 ]);
 
 export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
-  { value: "all", alwaysShow: true },
+  { value: "all", label: "All Rows", alwaysShow: true, group: null },
   // ── Mac counters ──────────────────────────────────────────────────────
+  // ── Mac total errors ratio ────────────────────────────────────────────
   {
-    value: "medium-total-errors-pct",
-    topoNodeField: "ifinerrors_pct",
-    tableRowField: "mac_counters.ifinerrors_pct",
+    source: "mac_counters",
+    value: "mac-total-errors-ratio-medium",
+    label: "Mac Total Errors Ratio: Medium (>= 1.0)",
+    group: "Mac Total Errors Ratio",
+    topoNodeField: "iftotalerrors_totalpkts_ratio",
+    tableRowField: "mac_counters.iftotalerrors_totalpkts_ratio",
   },
   {
-    value: "medium-total-errors-high",
-    topoNodeField: "ifinerrors_pct",
-    tableRowField: "mac_counters.ifinerrors_pct",
+    source: "mac_counters",
+    value: "mac-total-errors-ratio-high",
+    label: "Mac Total Errors Ratio: High (>= 5.0)",
+    group: "Mac Total Errors Ratio",
+    topoNodeField: "iftotalerrors_totalpkts_ratio",
+    tableRowField: "mac_counters.iftotalerrors_totalpkts_ratio",
+  },
+  // ── Mac total discards ratio ──────────────────────────────────────────
+  {
+    source: "mac_counters",
+    value: "mac-total-discards-ratio-medium",
+    label: "Mac Total Discards Ratio: Medium (>= 2.0)",
+    group: "Mac Total Discards Ratio",
+    topoNodeField: "iftotaldiscards_totalpkts_ratio",
+    tableRowField: "mac_counters.iftotaldiscards_totalpkts_ratio",
   },
   {
-    value: "medium-discard-pct",
-    topoNodeField: "ifindiscards_pct",
-    tableRowField: "mac_counters.ifindiscards_pct",
+    source: "mac_counters",
+    value: "mac-total-discards-ratio-high",
+    label: "Mac Total Discards Ratio: High (>= 8.0)",
+    group: "Mac Total Discards Ratio",
+    topoNodeField: "iftotaldiscards_totalpkts_ratio",
+    tableRowField: "mac_counters.iftotaldiscards_totalpkts_ratio",
   },
+
   // ── Mle counters ──────────────────────────────────────────────────────
   {
+    source: "mle_counters",
     value: "medium-partition-changes",
+    label: "Partition Changes: Medium (>= 2)",
+    group: "Mle Partition Changes",
     topoNodeField: "partitionidchanges",
     tableRowField: "mle_counters.partitionidchanges",
   },
   {
+    source: "mle_counters",
     value: "high-partition-changes",
+    label: "Partition Changes: High (>= 5)",
+    group: "Mle Partition Changes",
     topoNodeField: "partitionidchanges",
     tableRowField: "mle_counters.partitionidchanges",
   },
   {
+    source: "mle_counters",
     value: "medium-parent-changes",
+    label: "Parent Changes: Medium (>= 2)",
+    group: "MLE Parent Changes",
     topoNodeField: "parentchanges",
     tableRowField: "mle_counters.parentchanges",
   },
   {
+    source: "mle_counters",
     value: "high-parent-changes",
+    label: "Parent Changes: High (>= 5)",
+    group: "MLE Parent Changes",
     topoNodeField: "parentchanges",
     tableRowField: "mle_counters.parentchanges",
   },
+ 
+  // ── Mle better partition attach ───────────────────────────────────────
+  {
+    source: "mle_counters",
+    value: "mle-better-partition-medium",
+    label: "Better Partition Attach: Medium (>= 2)",
+    group: "Mle Better Partition Attach",
+    topoNodeField: "betterpartitionattachattempts",
+    tableRowField: "mle_counters.betterpartitionattachattempts",
+  },
+  {
+    source: "mle_counters",
+    value: "mle-better-partition-high",
+    label: "Better Partition Attach: High (>= 5)",
+    group: "Mle Better Partition Attach",
+    topoNodeField: "betterpartitionattachattempts",
+    tableRowField: "mle_counters.betterpartitionattachattempts",
+  },
+  // ── Mle total parent partition changes ────────────────────────────────
+  {
+    source: "mle_counters",
+    value: "mle-total-parent-partition-medium",
+    label: "Total Parent Partition Changes: Medium (>= 3)",
+    group: "Mle Total Parent Partition Changes",
+    topoNodeField: "totalparentpartitionchanges",
+    tableRowField: "mle_counters.totalparentpartitionchanges",
+  },
+  {
+    source: "mle_counters",
+    value: "mle-total-parent-partition-high",
+    label: "Total Parent Partition Changes: High (>= 8)",
+    group: "Mle Total Parent Partition Changes",
+    topoNodeField: "totalparentpartitionchanges",
+    tableRowField: "mle_counters.totalparentpartitionchanges",
+  },
+
+  // ── link_quality ──────────────────────────────────────────────────────
   // ── Router-neighbor: frame error rate ─────────────────────────────────
   {
+    source: "link_quality",
     value: "router-neighbor-err-rate-frame-low",
+    label: "Router Neighbor Err Rate Frame: Low (>= 2%)",
+    group: "Router Neighbor Err Rate Frame",
     topoNodeField: "router_neighbor_max_err_rate_frame_pct",
     tableNeighborField: "err_rate_frame_pct",
   },
   {
+    source: "link_quality",
     value: "router-neighbor-err-rate-frame-medium",
+    label: "Router Neighbor Err Rate Frame: Medium (>= 5%)",
+    group: "Router Neighbor Err Rate Frame",
     topoNodeField: "router_neighbor_max_err_rate_frame_pct",
     tableNeighborField: "err_rate_frame_pct",
   },
   {
+    source: "link_quality",
     value: "router-neighbor-err-rate-frame-high",
+    label: "Router Neighbor Err Rate Frame: High (>= 10%)",
+    group: "Router Neighbor Err Rate Frame",
+    topoNodeField: "router_neighbor_max_err_rate_frame_pct",
+    tableNeighborField: "err_rate_frame_pct",
+  },
+  {
+    source: "link_quality",
+    value: "router-neighbor-err-rate-frame-critical",
+    label: "Router Neighbor Err Rate Frame: Critical (>= 30%)",
+    group: "Router Neighbor Err Rate Frame",
     topoNodeField: "router_neighbor_max_err_rate_frame_pct",
     tableNeighborField: "err_rate_frame_pct",
   },
   // ── Router-neighbor: message error rate ───────────────────────────────
   {
+    source: "link_quality",
     value: "router-neighbor-err-rate-msg-low",
+    label: "Router Neighbor Err Rate Msg: Low (>= 2%)",
+    group: "Router Neighbor Err Rate Msg",
     topoNodeField: "router_neighbor_max_err_rate_msg_pct",
     tableNeighborField: "err_rate_msg_pct",
   },
   {
+    source: "link_quality",
     value: "router-neighbor-err-rate-msg-medium",
+    label: "Router Neighbor Err Rate Msg: Medium (>= 5%)",
+    group: "Router Neighbor Err Rate Msg",
     topoNodeField: "router_neighbor_max_err_rate_msg_pct",
     tableNeighborField: "err_rate_msg_pct",
   },
   {
+    source: "link_quality",
     value: "router-neighbor-err-rate-msg-high",
+    label: "Router Neighbor Err Rate Msg: High (>= 10%)",
+    group: "Router Neighbor Err Rate Msg",
+    topoNodeField: "router_neighbor_max_err_rate_msg_pct",
+    tableNeighborField: "err_rate_msg_pct",
+  },
+  {
+    source: "link_quality",
+    value: "router-neighbor-err-rate-msg-critical",
+    label: "Router Neighbor Err Rate Msg: Critical (>= 30%)",
+    group: "Router Neighbor Err Rate Msg",
     topoNodeField: "router_neighbor_max_err_rate_msg_pct",
     tableNeighborField: "err_rate_msg_pct",
   },
   // ── Router-neighbor: RSS ──────────────────────────────────────────────
   {
+    source: "link_quality",
     value: "router-neighbor-rss-very-low",
+    label: "Router Neighbor RSS Ave: Bad (< -80 dBm)",
+    group: "Router Neighbor RSS Ave",
     topoNodeField: "router_neighbor_has_rss_very_low",
     tableNeighborField: "rss_ave",
   },
   {
+    source: "link_quality",
     value: "router-neighbor-rss-low",
+    label: "Router Neighbor RSS Ave: Fair (-70 dBm To -80 dBm)",
+    group: "Router Neighbor RSS Ave",
     topoNodeField: "router_neighbor_has_rss_low",
     tableNeighborField: "rss_ave",
   },
   {
+    source: "link_quality",
     value: "router-neighbor-rss-medium",
+    label: "Router Neighbor RSS Ave: Good (-60 dBm To -70 dBm)",
+    group: "Router Neighbor RSS Ave",
     topoNodeField: "router_neighbor_has_rss_medium",
     tableNeighborField: "rss_ave",
   },
   {
+    source: "link_quality",
     value: "router-neighbor-rss-high",
+    label: "Router Neighbor RSS Ave: Excellent (> -60 dBm)",
+    group: "Router Neighbor RSS Ave",
     topoNodeField: "router_neighbor_has_rss_high",
     tableNeighborField: "rss_ave",
+  },
+  // ── Router link quality distribution ─────────────────────────────────
+  {
+    source: "link_quality",
+    value: "low-lq3-ratio-medium",
+    label: "Router Link Quality Ratio: Low LQ3 (< 60%)",
+    group: "Router Link Quality Distribution",
+    topoNodeField: "lq3_ratio",
+  },
+  {
+    source: "link_quality",
+    value: "low-lq3-ratio-high",
+    label: "Router Link Quality Ratio: Very Low LQ3 (< 35%)",
+    group: "Router Link Quality Distribution",
+    topoNodeField: "lq3_ratio",
+  },
+  {
+    source: "link_quality",
+    value: "high-lq1-ratio-medium",
+    label: "Router Link Quality Ratio: High LQ1 (>= 20%)",
+    group: "Router Link Quality Distribution",
+    topoNodeField: "lq1_ratio",
+  },
+  {
+    source: "link_quality",
+    value: "high-lq1-ratio-high",
+    label: "Router Link Quality Ratio: Very High LQ1 (>= 35%)",
+    group: "Router Link Quality Distribution",
+    topoNodeField: "lq1_ratio",
+  },
+  // ── Children link quality ─────────────────────────────────────────────
+  {
+    source: "link_quality",
+    value: "child-lq-medium",
+    label: "Children Link: Child LQ <= 2",
+    group: "Children Link Quality",
+    topoNodeField: "has_child_lq_medium",
+  },
+  {
+    source: "link_quality",
+    value: "child-lq-poor",
+    label: "Children Link: Child LQ = 1",
+    group: "Children Link Quality",
+    topoNodeField: "has_child_lq_poor",
+  },
+  // ── Router child err rate frame ───────────────────────────────────────
+  {
+    source: "link_quality",
+    value: "router-child-err-rate-frame-medium",
+    label: "Router Child Err Rate Frame: Medium (>= 10%)",
+    group: "Router Child Err Rate Frame",
+    topoNodeField: "router_child_max_err_rate_frame_pct",
+    tableChildField: "err_rate_frame_pct",
+  },
+  {
+    source: "link_quality",
+    value: "router-child-err-rate-frame-high",
+    label: "Router Child Err Rate Frame: High (>= 25%)",
+    group: "Router Child Err Rate Frame",
+    topoNodeField: "router_child_max_err_rate_frame_pct",
+    tableChildField: "err_rate_frame_pct",
+  },
+  // ── Router child err rate msg ─────────────────────────────────────────
+  {
+    source: "link_quality",
+    value: "router-child-err-rate-msg-low",
+    label: "Router Child Err Rate Msg: Low (>= 1%)",
+    group: "Router Child Err Rate Msg",
+    topoNodeField: "router_child_max_err_rate_msg_pct",
+    tableChildField: "err_rate_msg_pct",
+  },
+  {
+    source: "link_quality",
+    value: "router-child-err-rate-msg-high",
+    label: "Router Child Err Rate Msg: High (>= 5%)",
+    group: "Router Child Err Rate Msg",
+    topoNodeField: "router_child_max_err_rate_msg_pct",
+    tableChildField: "err_rate_msg_pct",
+  },
+  // ── Router child RSS ──────────────────────────────────────────────────
+  {
+    source: "link_quality",
+    value: "router-child-rss-very-low",
+    label: "Router Child RSS Ave: Bad (< -80 dBm)",
+    group: "Router Child RSS Ave",
+    topoNodeField: "router_child_has_rss_very_low",
+    tableChildField: "rss_ave",
+  },
+  {
+    source: "link_quality",
+    value: "router-child-rss-low",
+    label: "Router Child RSS Ave: Fair (-80 to -70 dBm)",
+    group: "Router Child RSS Ave",
+    topoNodeField: "router_child_has_rss_low",
+    tableChildField: "rss_ave",
+  },
+  {
+    source: "link_quality",
+    value: "router-child-rss-margin-low",
+    label: "Router Child RSS: Low Margin (< 20 dB)",
+    group: "Router Child RSS Margin",
+    topoNodeField: "router_child_has_rss_margin_low",
+    tableChildField: "rss_margin",
+  },
+  // ── Router child queued messages ──────────────────────────────────────
+  {
+    source: "link_quality",
+    value: "router-child-has-queued-msgs",
+    label: "Router Child Has Queued Messages",
+    group: "Router Child Queued Messages",
+    topoNodeField: "router_child_has_queued_msgs",
+    tableChildField: "q_msg",
+  },
+ 
+  // ── time_statistics────────────────────────────────────────────────────
+  // ── Time: FTD Router uptime % ─────────────────────────────────────────
+  {
+    source: "time_statistics",
+    value: "ftd-router-pct-low",
+    label: "FTD Router < 80% Uptime",
+    group: "Time FTD Router Uptime",
+    topoNodeField: "router_pct",
+    tableRowField: "time_statistics.router_pct",
+  },
+  {
+    source: "time_statistics",
+    value: "ftd-router-pct-very-low",
+    label: "Router Uptime: FTD Router < 50% Uptime",
+    group: "Time FTD Router Uptime",
+    topoNodeField: "router_pct",
+    tableRowField: "time_statistics.router_pct",
+  },
+  // ── Time: Detached/Disabled % ─────────────────────────────────────────
+  {
+    source: "time_statistics",
+    value: "detached-disabled-pct-medium",
+    label: "Time Detached/Disabled: Medium (>= 1%)",
+    group: "Time Detached Disabled",
+    topoNodeField: "detached_disabled_pct",
+    tableRowField: "time_statistics.detached_disabled_pct",
+  },
+  {
+    source: "time_statistics",
+    value: "detached-disabled-pct-high",
+    label: "Time Detached/Disabled: High (>= 5%)",
+    group: "Time Detached Disabled",
+    topoNodeField: "detached_disabled_pct",
+    tableRowField: "time_statistics.detached_disabled_pct",
   },
 ]);
 
@@ -397,5 +704,10 @@ export const TABLE_PRIORITY_COLUMNS = [
   "mac_counters.ifoutdiscards_pct",
   "mle_counters.partitionidchanges",
   "mle_counters.betterpartitionattachattempts",
+  "mle_counters.totalparentpartitionchanges",
   "mle_counters.parentchanges",
+  "mac_counters.iftotalerrors_totalpkts_ratio",
+  "mac_counters.iftotaldiscards_totalpkts_ratio",
+  "time_statistics.router_pct",
+  "time_statistics.detached_disabled_pct",
 ];

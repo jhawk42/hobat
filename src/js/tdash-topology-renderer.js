@@ -30,6 +30,7 @@ let _visNetwork = null;
 let _topologyFilterHandlers = null;
 let _autoZoomEnabled = true;
 let _animationEnabled = false;
+let _topologyNodeData = null;  // Store nodeData from last render for filter validation
 
 // ── Exported accessors / setters ──────────────────────────────────────────────
 
@@ -38,6 +39,9 @@ export function getVisNetwork() {
 }
 export function getTopologyFilterHandlers() {
   return _topologyFilterHandlers;
+}
+export function getTopologyNodeData() {
+  return _topologyNodeData;
 }
 export function setAutoZoomEnabled(val) {
   _autoZoomEnabled = val;
@@ -100,6 +104,9 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     routerNeighborByRloc16,
     sourceNames,
   } = adaptorResult;
+
+  // Store nodeData for filter validation
+  _topologyNodeData = nodeData;
 
   // ── compute and apply dynamic filter option visibility ────────
   const capabilities = computeTopologyCapabilities(nodeData, edgeData);
