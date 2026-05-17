@@ -50,10 +50,10 @@ Open the tdash web dashboard in a browser
 
 ```
 # localhost
-http://localhost:8087/
+http://localhost:9165/
 
 # ip address
-http://<your-host-ip-addr>:8087/
+http://<your-host-ip-addr>:9165/
 ```
 
 Note: The tdash webserver will automatically use td_cli.py to refresh the thread network cached info files:
@@ -145,9 +145,9 @@ Note: The tdash docker container automatically runs td_webserver.py when the on 
 tdash dashboard webserver commands
 ```bash
 # localhost
-python3 -m td_webserver --host localhost --port 8087
+python3 -m td_webserver --host localhost --port 9165
 # listen on all available network interfaces
-python3 -m td_webserver --host 0.0.0.0 --port 8087
+python3 -m td_webserver --host 0.0.0.0 --port 9165
 ```
 
 # Device Labeling

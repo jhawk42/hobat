@@ -90,7 +90,7 @@ class TestTopLevelCommands(unittest.TestCase):
     def test_webserver_module_defaults(self):
         parser = td_webserver.build_parser()
         args = parser.parse_args([])
-        self.assertEqual(args.port, 8087)
+        self.assertEqual(args.port, 9165)
 
 
 # ---------------------------------------------------------------------------

@@ -153,7 +153,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 |---|---|
 | `tdash.html` | Combined single-page dashboard — replaces the former separate topology and tables HTML files.  See [Dashboard Functions](#dashboard-functions) below. |
 | `tdash.css` | Stylesheet for the browser dashboard.  Defines CSS variables for colours, typography, and layout of all dashboard components. |
-| `td_webserver.py` | Async HTTP server built on `aiohttp`.  Binds to `$HOST`/`$PORT` (default `8087`).  Serves `src/` as a static file tree with explicit MIME-type overrides.  Exposes a REST API (`/api/data/{filename}`, `/api/job/{job_id}`) that checks file freshness, invokes `td_cli.py` subprocesses on demand, and streams results back with `Cache-Control` and CORS headers.  Actions with `action_cost_s > 300 s` or `force_async=True` return HTTP 202 immediately and complete as background asyncio tasks that clients poll via `/api/job/{job_id}`.  Accepts `--datadir`; run standalone as `python -m td_webserver`. |
+| `td_webserver.py` | Async HTTP server built on `aiohttp`.  Binds to `$HOST`/`$PORT` (default `9165`).  Serves `src/` as a static file tree with explicit MIME-type overrides.  Exposes a REST API (`/api/data/{filename}`, `/api/job/{job_id}`) that checks file freshness, invokes `td_cli.py` subprocesses on demand, and streams results back with `Cache-Control` and CORS headers.  Actions with `action_cost_s > 300 s` or `force_async=True` return HTTP 202 immediately and complete as background asyncio tasks that clients poll via `/api/job/{job_id}`.  Accepts `--datadir`; run standalone as `python -m td_webserver`. |
 
 ### Dashboard JavaScript Modules (`js/`)
 
@@ -455,7 +455,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 1. **Collect**: Run individual `otbr_restapi_*`, `otbr_cli_*`, and `mdns_*` scripts directly, or via `td_cli.py`.  Each saves data as a local JSON file (e.g. `td-otbr-restapi-devices.json`, `td-otbr-cli-router-table.json`, `td-eve-topology.json`).
 2. **Normalize**: Each collector normalises its data — RLOC16 values are hex strings (`0x5000`), extended addresses are lowercase hex (`1a7fbf0434e4f043`), field aliases are canonicalised (`extAddress` → `extaddr`).
 3. **Merge**: `dataset_merge.py` (or `td_cli.py merge-dataset`) reads the JSON files and merges records using the configured strategy.  Non-empty values are never silently overwritten; conflicts are recorded.  The output JSON (`td-merged-topology-all.json`) retains a `_source_files` list per row.
-4. **Visualise**: Open `src/tdash.html` in a browser, select a dataset from the dropdown, and explore the interactive topology graph or table.  Alternatively, serve the `src/` directory with `python src/td_webserver.py` and open `http://localhost:8087/tdash.html`.
+4. **Visualise**: Open `src/tdash.html` in a browser, select a dataset from the dropdown, and explore the interactive topology graph or table.  Alternatively, serve the `src/` directory with `python src/td_webserver.py` and open `http://localhost:9165/tdash.html`.
 
 ---
 
@@ -560,7 +560,7 @@ python src/otbr_restapi_cli.py node get
 ### Start the web server
 
 ```bash
-# Run the web server module directly (serves src/ on http://localhost:8087, data from ./data)
+# Run the web server module directly (serves src/ on http://localhost:9165, data from ./data)
 python src/td_webserver.py
 
 # Custom host/port
@@ -570,13 +570,13 @@ python src/td_webserver.py --host 0.0.0.0 --port 8090
 python src/td_webserver.py --datadir /path/to/data
 
 # Or as a module (from the repository root)
-python -m td_webserver --port 8087
-python -m td_webserver --port 8087 --datadir /path/to/data
+python -m td_webserver --port 9165
+python -m td_webserver --port 9165 --datadir /path/to/data
 ```
 
 ### Open the dashboard
 
-Open `http://localhost:8087/tdash.html` after starting the web server, or open `src/tdash.html` directly in a browser and select a dataset from the dropdown.
+Open `http://localhost:9165/tdash.html` after starting the web server, or open `src/tdash.html` directly in a browser and select a dataset from the dropdown.
 
 ### Run tests
 

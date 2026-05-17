@@ -22,7 +22,7 @@ from util_data import (
 from const import TD_DATA_DIR_ARG_HELP
 
 TD_WEB_HOST_ADDR = ""
-TD_WEB_HOST_PORT = 8087
+TD_WEB_HOST_PORT = 9165
 
 # Default max-age for data files in seconds; can be overridden per-file in FILE_ACTION_MAP.
 TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT = 86400  # 1 day in seconds
