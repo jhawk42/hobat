@@ -584,6 +584,18 @@ document.getElementById("chk-only-cache").addEventListener("change", (e) => {
   }
 });
 
+// ── Collapsible cache-options fieldsets ─────────────────────────────────────
+
+["btn-toggle-cache", "btn-toggle-status", "btn-toggle-devices"].forEach((id) => {
+  document.getElementById(id)?.addEventListener("click", () => {
+    const btn = document.getElementById(id);
+    const fieldset = btn.closest("fieldset");
+    const isExpanded = btn.getAttribute("aria-expanded") === "true";
+    btn.setAttribute("aria-expanded", String(!isExpanded));
+    fieldset.classList.toggle("collapsed");
+  });
+});
+
 // ── Collapsible Filters Panel ────────────────────────────────────────────────
 
 document.getElementById("btn-toggle-filters").addEventListener("click", () => {

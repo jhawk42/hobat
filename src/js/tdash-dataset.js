@@ -203,16 +203,13 @@ export async function loadDataset(entryValue) {
   if (!entry) {
     document.getElementById("status").textContent =
       `Unknown dataset: ${entryValue}`;
-    document.getElementById("device_stats").textContent = "Devices: 0";
     return;
   }
 
   const statusEl = document.getElementById("status");
-  const deviceStatsEl = document.getElementById("device_stats");
   const initialLabel = entry.label;
   const loadStartTime = Date.now();
   statusEl.textContent = `Loading ${initialLabel}…`;
-  deviceStatsEl.textContent = "Devices: 0";
 
   // Set up an interval to update status bar with elapsed time while loading
   const elapsedUpdateInterval = setInterval(() => {
@@ -269,7 +266,6 @@ export async function loadDataset(entryValue) {
 
   if (loadedFiles.length === 0) {
     statusEl.textContent = `Error: could not load any file for "${entry.label}". Failed: ${failedFiles.join(", ")}`;
-    deviceStatsEl.textContent = "Devices: 0";
     return;
   }
 

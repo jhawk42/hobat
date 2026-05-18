@@ -54,8 +54,8 @@
         </div>
       </div>
 
-      <fieldset class="cache-options">
-        <legend>Cache</legend>
+      <fieldset class="cache-options" id="fieldset-cache">
+        <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="true"><span class="legend-toggle-arrow">▶</span>Cache</button></legend>
         <label title="Automatically re-fetch data when the dataset selection changes">
           <input type="checkbox" id="chk-auto-fetch" checked /> Auto
         </label>
@@ -70,19 +70,19 @@
       <!-- Fetch status -->
       <div id="fetch-status" role="status" aria-live="polite">
         <!-- Last: 3 min ago | Took: 15 seconds | Cache file age: 6hr 45min -->
-        <fieldset class="cache-options">
-          <legend>Status</legend>
+        <fieldset class="cache-options" id="fieldset-status">
+          <legend><button class="legend-toggle-btn" id="btn-toggle-status" aria-expanded="true"><span class="legend-toggle-arrow">▶</span>Status</button></legend>
           <label title="Last time browser called the server to fetch or generate data for this dataset">
             <span id="fetch-last-label">Last:</span>
-            <span id="fetch-last-value">3 min ago</span>
+            <span id="fetch-last-value">-</span>
           </label>
           <label title="Time taken to fetch or generate data for this dataset">
             <span id="fetch-timetaken-label">Took:</span>
-            <span id="fetch-timetaken-value">15 sec</span>
+            <span id="fetch-timetaken-value">-</span>
           </label>
           <label title="Age of the cached data for this dataset">
             <span id="fetch-cache-age-label">Dataset Age:</span>
-            <span id="fetch-cache-age-value">6hr45m</span>
+            <span id="fetch-cache-age-value">-</span>
           </label>
         </fieldset>
       </div>
@@ -93,8 +93,8 @@
             Fetched Devices: nn Border Routers: nn Routers: nn Child nodes: nn Links: LQ3: nn nn LQ2: nn LQ1: nn 
             Fetched: 🖥 12 Nodes | 🛤 3 Border Routers | NN Routers |NN Child nodes| ⚠ 2 Low-Quality Links | 
             -->
-        <fieldset class="cache-options">
-          <legend>Devices</legend>
+        <fieldset class="cache-options" id="fieldset-devices">
+          <legend><button class="legend-toggle-btn" id="btn-toggle-devices" aria-expanded="true"><span class="legend-toggle-arrow">▶</span>Devices</button></legend>
           <label title="Fetched number of devices in the dataset">
             <span id="device-status-devices">Devices: <span id="device-count">0</span></span>
           </label>
@@ -198,7 +198,6 @@
 
       <!-- Status line -->
       <div class="status-bar">
-        <div id="device_stats" role="status" aria-live="polite" aria-atomic="true">Devices: 0</div>
         <div id="status" role="status" aria-live="polite">Select a dataset to load.</div>
       </div>
 

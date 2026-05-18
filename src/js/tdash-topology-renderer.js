@@ -66,7 +66,6 @@ export function isAnimationEnabled() {
 export function renderTopologyForDataset(dataset, physicsEnabled) {
   const container = document.getElementById("topology-view");
   const statusEl = document.getElementById("status");
-  const deviceStatsEl = document.getElementById("device_stats");
   const nodeFilterEl = document.getElementById("node-filter");
   const linkFilterEl = document.getElementById("link-filter");
   const diagnosticFilterEl = document.getElementById("diagnostic-filter");
@@ -97,7 +96,6 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     adaptorResult = runAdaptor(dataset);
   } catch (err) {
     statusEl.textContent = `Topology error: ${err.message}`;
-    deviceStatsEl.textContent = "Devices: 0";
     return;
   }
 
@@ -259,11 +257,9 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     )
       ? ` Neighbor Match: targets ${matchedTargetNodeCount}, links ${forcedVisibleLinkCount}.`
       : "";
-    deviceStatsEl.textContent = `Devices: ${nodeData.length}`;
     statusEl.textContent =
-      `Loaded ${sourceNames.join(", ")}. Total: ${nodeData.length} nodes, ${edgeData.length} links. ` +
-      `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. ` +
-      `Node Filter: ${nodeFilterLabel}. Link Filter: ${linkFilterLabel}. Diagnostic Filter: ${diagFilterLabel}.${neighborSuffix}${formatTopologyScale()}`;
+      `Loaded ${sourceNames.join(", ")}. ` +
+      `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links.${neighborSuffix}`;
   }
 
   // ── Node detail click handler ──────────────────────────────────────────
