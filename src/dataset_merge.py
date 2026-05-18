@@ -129,7 +129,7 @@ def derive_mode_device(record: dict[str, Any]) -> str:
     role = record.get("role")
     if isinstance(role, str):
         role_text = role.strip().lower()
-        if role_text == "router":
+        if role_text in ("router", "border router"):
             return "FTD"
         if role_text == "child":
             return "MTD"
@@ -137,7 +137,7 @@ def derive_mode_device(record: dict[str, Any]) -> str:
     node_type = record.get("type")
     if isinstance(node_type, str):
         type_text = node_type.strip().lower()
-        if type_text == "router":
+        if type_text in ("router", "border router"):
             return "FTD"
         if "child" in type_text:
             return "MTD"

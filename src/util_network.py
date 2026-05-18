@@ -1,6 +1,19 @@
 import util_ot_ctl
 import logging
 
+def is_router(rloc16):
+    """
+    Determines if a given rloc16 value corresponds to a router based on its hexadecimal suffix.
+
+    In Thread networks, devices with rloc16 values ending in "00" are typically routers, while those with other suffixes are usually end devices (children). This function checks the last two characters of the rloc16 value to determine if it is a router.
+
+    Args:
+        rloc16: The rloc16 value as a string (e.g., "0x5000")
+
+    Returns:
+        True if the rloc16 value indicates a router (ends with "00"), False otherwise.
+    """
+    return rloc16.lower().endswith("00")
 
 def _parse_prefix_token(output):
     """Extracts the first token (prefix) from ot-ctl command output."""
@@ -87,6 +100,19 @@ def build_rloc16_ipv6_address(rloc_prefix, rloc_hex):
     """
     return f"{rloc_prefix}{rloc_hex}"
 
+def is_ipv6_address_in_meshlocal_prefix(addr, meshlocal_prefix):
+    """
+    Checks if a given IPv6 address falls within a specified mesh-local ipv6 prefix.
+
+    Args:
+        addr: The IPv6 address to check (e.g., "fdde:ad00:beef:0:0:ff:fe00:5000")
+        meshlocal_prefix: The mesh-local IPv6 prefix to check against (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
+
+    Returns:
+        True if the IPv6 address is within the prefix, False otherwise.
+    """
+    return addr.startswith(meshlocal_prefix)
+
 
 def fetch_omr_prefix():
     """
@@ -143,6 +169,41 @@ def find_omr_address_in_list(ipv6_addrs, omr_prefix):
             return addr
     return None
 
+def is_border_router_from_ipv6_addrs(ipv6_addrs, meshlocal_prefix):
+    """
+    fcXX - The suffix fcXX is a specific Service Anycast Address used to reach an available 
+    Border Router that provides external network connectivity (IPv6 infrastructure reachability).
+
+    What is happening under the hood?
+    Service Anycast (fcXX): In the Thread specification, addresses ending in fc10 through fc1f are 
+    reserved for Border Router services. Specifically, fc11 is used to route packets to the nearest 
+    device acting as a Border Router. When a Thread device sends a packet to an address ending in 
+    fcXX, the Thread network routes that packet to the closest Border Router that has advertised 
+    an OMR prefix. This allows devices within the Thread network to access external IPv6 
+    networks (like the local LAN) through the Border Router without needing 
+    to know its specific address.
+    """
+
+    # AnyCast https://openthread.io/guides/thread-primer/ipv6-addressing#anycast
+    # ALOC Service Anycast Address Range: fc10 to fc1f
+    aloc_service_anycast_suffix_range_start = "fc10"
+    aloc_service_anycast_suffix_range_end = "fc1f"
+    
+    # Check if any ip address in the list start with meshlocal prefix and ends with fcXX suffix
+    for addr in ipv6_addrs:        
+        is_meshlocal_addr = is_ipv6_address_in_meshlocal_prefix(addr, meshlocal_prefix)
+        if is_meshlocal_addr:
+            suffix = addr.split(":")[-1]  # Get the last segment of the IPv6 address
+            logging.warning(f"[DEBUG] Checking if address {addr} is a Border Router address with prefix {meshlocal_prefix} and suffix {suffix}\n")
+            
+            # Check if suffix is in the range of fc10 to fc1f
+            if aloc_service_anycast_suffix_range_start <= suffix <= aloc_service_anycast_suffix_range_end:
+                logging.warning(f"[DEBUG] Address {addr} has suffix {suffix} in the range of {aloc_service_anycast_suffix_range_start} to {aloc_service_anycast_suffix_range_end}.\n")
+
+                # This address is a Service Anycast address for Border Router, so we consider it as a Border Router address
+                return True  
+
+    return False
 
 def fetch_dataset_active(hide_sensitive_info=True):
     """

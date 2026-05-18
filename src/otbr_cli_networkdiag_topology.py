@@ -796,6 +796,14 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     # responder_ipv6: keep existing (first responder wins)
     # (no update needed)
 
+    # "br": take new if new is non-empty dict and existing is empty, else keep existing
+    if not existing.get("br") and new.get("br"):
+        existing["br"] = new["br"]
+
+    # "type": take new if new is non-empty dict and existing is empty, else keep existing
+    if not existing.get("type") and new.get("type"):
+        existing["type"] = new["type"]
+
     # children: take new if new is non-empty list and existing is empty list
     if not existing.get("children") and new.get("children"):
         existing["children"] = new["children"]
@@ -953,12 +961,19 @@ def fetch_network_diag_multicast(
     if extaddr_map is None:
         extaddr_map = {}
 
-    # Extract OMR prefix if available
+    # Get OMR prefix from network_dataset_info 
     omr_ipv6addr_prefix = (
         network_dataset_info["prefix_omr_ipv6addr_prefix"]
         if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info
         else None
     )
+
+    ## Get meshlocal prefix from network_dataset_info 
+    meshlocal_prefix = (
+        network_dataset_info["prefix_meshlocal_ipv6addr_prefix"]
+        if network_dataset_info and "prefix_meshlocal_ipv6addr_prefix" in network_dataset_info
+        else None
+    )   
 
     # 3 attempts gives {DETAILED, MEDIUM, SIMPLE}, 2 attempts gives {DETAILED, MEDIUM}, 1 attempt gives {DETAILED}
     retries = 2
@@ -1022,16 +1037,28 @@ def fetch_network_diag_multicast(
             )
         else:
             record["omr_ipv6_addr"] = None
-
-        # Add device type (multicast reaches routers primarily)
-        # If rloc16 ends in 00 it's likely a router, if it ends in 01-ff it's likely a child, but since this is from multicast responses which are primarily from routers, we can default to "Router" for all records here. For more accurate type classification, we would need to analyze the mode flags or other TLV data, but for simplicity in this consolidated view, we can assume these are primarily router responses.
+        
+        # Check if Router or Child
         if record.get("rloc16", "Unknown") != "Unknown":
-            if record["rloc16"].lower().endswith("00"):
+            if util_network.is_router(record["rloc16"]):
                 record["type"] = "Router"
             else:
                 record["type"] = "Child"
         else:
             record["type"] = "Unknown"
+
+        # Check if Border Router
+        if meshlocal_prefix:
+            border_router = util_network.is_border_router_from_ipv6_addrs(
+                record.get("ipv6_addrs", []), meshlocal_prefix
+            )
+            if border_router:
+                record["br"] = True
+                record["type"] = "Border Router"
+            else:
+                record["br"] = None
+        else:
+            record["br"] = None
 
         # Store in result, keyed by rloc16
         result[rloc16] = record
@@ -1103,18 +1130,19 @@ def fetch_network_diag_topology(
     # 1. Initialize topology map
     network_topology_map = {}
 
-    # 2. Extract OMR prefix
+    # 2. Get OMR prefix
     omr_ipv6addr_prefix = (
         network_dataset_info["prefix_omr_ipv6addr_prefix"]
         if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info
         else None
     )
 
-    # 3. Get mesh-local prefix
-    meshlocal_prefix = util_network.fetch_meshlocal_prefix()
-    ipv6_rloc_prefix = util_network.build_rloc_ipv6_address_prefix(
-        meshlocal_prefix
-    )
+    # 3. Get meshlocal prefix / rloc prefix from network_dataset_info for building RLOC IPv6 addresses
+    meshlocal_prefix = (
+        network_dataset_info["prefix_meshlocal_ipv6addr_prefix"]
+        if network_dataset_info and "prefix_meshlocal_ipv6addr_prefix" in network_dataset_info
+        else None
+    )     
 
     # 4. Get all active routers (potential parents)
     router_table_data = fetch_and_parse_router_table(extaddr_map)
@@ -1198,7 +1226,7 @@ def fetch_network_diag_topology(
                 )
 
             network_topology_node = fetch_network_diag_for_device(
-                rloc16, ipv6_rloc_prefix, extaddr_map, ipv6_addresses, tlv_detail_level
+                rloc16, meshlocal_prefix, extaddr_map, ipv6_addresses, tlv_detail_level
             )
             if network_topology_node is not None:
                 break
@@ -1227,8 +1255,20 @@ def fetch_network_diag_topology(
                 )
                 if omr_ipv6addr_prefix
                 else None,
+
+                "br": util_network.is_border_router_from_ipv6_addrs(
+                    ipv6_addresses.get(rloc16, []), meshlocal_prefix
+                )
+                if meshlocal_prefix
+                else None,
+
+                "type": "Border Router" if util_network.is_border_router_from_ipv6_addrs(
+                    ipv6_addresses.get(rloc16, []), meshlocal_prefix
+                )
+                else "Router",
+
                 "children": [],
-                "type": "Unknown-Router",
+               
                 "mac_counters": {},
                 "mle_counters": {},
                 "time_statistics": {},
@@ -1242,6 +1282,20 @@ def fetch_network_diag_topology(
                             "ipv6_addrs", []), omr_ipv6addr_prefix
                     )
                 )
+            else:
+                network_topology_node["omr_ipv6_addr"] = None
+
+            if meshlocal_prefix:
+                border_router = util_network.is_border_router_from_ipv6_addrs(
+                    network_topology_node.get(
+                        "ipv6_addrs", []), meshlocal_prefix
+                )
+                network_topology_node["br"] = border_router
+                if border_router:
+                    network_topology_node["type"] = "Border Router"
+            else:
+                network_topology_node["br"] = None
+
             # Merge with existing data in topology map if present (e.g. from multicast query) to enrich the node data with any missing fields that we couldn't get from the direct query due to unresponsive node or TLV issues, this way we can have the most complete data possible for each node by combining the results from both the multicast and direct queries, and we can also handle cases where some nodes might only respond to one of the query types but not the other.
             if rloc16 in network_topology_map:
                 merge_device_record(
@@ -1323,7 +1377,7 @@ def fetch_network_diag_topology(
 
                             child_node = fetch_network_diag_for_device(
                                 child_rloc,
-                                ipv6_rloc_prefix,
+                                meshlocal_prefix,
                                 extaddr_map,
                                 ipv6_addresses,
                                 child_tlv_detail_level,
@@ -1480,6 +1534,7 @@ def save_topology_to_json_list(
             "ipv6_addrs": data.get("ipv6_addrs", []),
             "omr_ipv6_addr": data.get("omr_ipv6_addr"),
             "type": data.get("type", "Unknown"),
+            "br": data.get("br", None),
             "children": data.get("children", []),
             "total_children": data.get("total_children", 0),
             "mac_counters": data.get("mac_counters", {}),
