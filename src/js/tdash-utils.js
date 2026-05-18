@@ -93,7 +93,8 @@ export function formatValue(value) {
 export function formatAgo(timestampMs) {
   if (timestampMs == null || !Number.isFinite(timestampMs)) return "—";
   const elapsed = Date.now() - timestampMs;
-  if (elapsed < 5_000)       return "just now";
+  if (elapsed < 1_000)       return "just now";
+  if (elapsed < 5_000)       return `${Math.floor(elapsed / 1_000)} sec ago`; 
   if (elapsed < 60_000)      return `${Math.floor(elapsed / 1_000)} sec ago`;
   if (elapsed < 3_600_000) {
     const m = Math.floor(elapsed / 60_000);
