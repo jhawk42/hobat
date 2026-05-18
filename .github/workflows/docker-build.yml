@@ -1,7 +1,11 @@
 name: Build Docker Image
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
+  schedule:
+    # Nightly build at 11:30am UTC on dev branch
+    - cron: '30 11 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -9,6 +13,7 @@ jobs:
     permissions:
       packages: write
       contents: read
+    if: github.event_name != 'schedule' || github.ref == 'refs/heads/dev'
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -25,11 +30,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Determine image tags
+        id: tags
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "tags=ghcr.io/${{ github.repository_owner }}/tdash:nightly" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            echo "tags=ghcr.io/${{ github.repository_owner }}/tdash:dev,ghcr.io/${{ github.repository_owner }}/tdash:dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "tags=ghcr.io/${{ github.repository_owner }}/tdash:latest,ghcr.io/${{ github.repository_owner }}/tdash:${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push image
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/tdash:latest
-            ghcr.io/${{ github.repository_owner }}/tdash:${{ github.sha }}
+          tags: ${{ steps.tags.outputs.tags }}
