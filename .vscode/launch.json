@@ -17,7 +17,7 @@
             "request": "launch",
             "program": "${file}",
             "args": "${command:pickArgs}",
-            "cwd": "${fileDirname}/src"
+            "cwd": "${fileDirname}"
         },
         {
             "name": "Python Debugger: Module",
