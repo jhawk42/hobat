@@ -108,7 +108,9 @@ async function fetchJson(url, requestHeaders = {}) {
   const ccHeader = response.headers.get("Cache-Control") || "";
   const maxAgeMatch = ccHeader.match(/max-age=(\d+)/);
   const responseMaxAge = maxAgeMatch ? parseInt(maxAgeMatch[1], 10) : null;
-  return { data, responseMaxAge };
+  const lastModifiedHeader = response.headers.get("Last-Modified");
+  const lastModifiedAt = lastModifiedHeader ? Date.parse(lastModifiedHeader) : null;
+  return { data, responseMaxAge, lastModifiedAt };
 }
 
 // Polls /api/job/{jobId} every 5 s until done or error.
@@ -238,9 +240,9 @@ export async function loadDataset(entryValue) {
         if (cached) reqHeaders["Cache-Control"] = `max-age=${cached.maxAge}`;
       }
       return fetchJson(`/api/data/${f}`, reqHeaders).then(
-        ({ data, responseMaxAge }) => {
+        ({ data, responseMaxAge, lastModifiedAt }) => {
           if (responseMaxAge !== null) {
-            fileMaxAgeCache.set(f, { maxAge: responseMaxAge, fetchedAt: Date.now() });
+            fileMaxAgeCache.set(f, { maxAge: responseMaxAge, fetchedAt: Date.now(), lastModifiedAt });
           }
           return data;
         },
@@ -311,7 +313,19 @@ export async function loadDataset(entryValue) {
         : [];
   }
 
-  currentDataset = { entry, rawFiles, rows, loadedFiles };
+  const fetchDurationMs = Date.now() - loadStartTime;
+  // Use the oldest lastModifiedAt across all loaded files (most stale piece of the dataset)
+  let oldestLastModifiedAt = null;
+  for (const f of loadedFiles) {
+    const cached = fileMaxAgeCache.get(f);
+    if (cached?.lastModifiedAt != null) {
+      if (oldestLastModifiedAt === null || cached.lastModifiedAt < oldestLastModifiedAt) {
+        oldestLastModifiedAt = cached.lastModifiedAt;
+      }
+    }
+  }
+
+  currentDataset = { entry, rawFiles, rows, loadedFiles, fetchDurationMs, fileLastModifiedAt: oldestLastModifiedAt };
 
   // Warn about any files that failed to load but don't hard-fail
   if (failedFiles.length > 0) {

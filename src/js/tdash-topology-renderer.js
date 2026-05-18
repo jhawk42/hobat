@@ -23,6 +23,7 @@ import {
   normalizeLinkCategories,
 } from "./tdash-filters.js";
 import { runAdaptor } from "./tdash-adaptors.js";
+import { computeDatasetCounts } from "./tdash-topology-utils.js";
 
 // ── Module-level state ────────────────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ let _topologyFilterHandlers = null;
 let _autoZoomEnabled = true;
 let _animationEnabled = false;
 let _topologyNodeData = null;  // Store nodeData from last render for filter validation
+let _topologyDatasetCounts = null;  // Counts derived from last topology render
 
 // ── Exported accessors / setters ──────────────────────────────────────────────
 
@@ -42,6 +44,9 @@ export function getTopologyFilterHandlers() {
 }
 export function getTopologyNodeData() {
   return _topologyNodeData;
+}
+export function getTopologyDatasetCounts() {
+  return _topologyDatasetCounts;
 }
 export function setAutoZoomEnabled(val) {
   _autoZoomEnabled = val;
@@ -107,6 +112,8 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
 
   // Store nodeData for filter validation
   _topologyNodeData = nodeData;
+  // Compute and store dataset counts for the status bar
+  _topologyDatasetCounts = computeDatasetCounts(nodeData, edgeData);
 
   // ── compute and apply dynamic filter option visibility ────────
   const capabilities = computeTopologyCapabilities(nodeData, edgeData);

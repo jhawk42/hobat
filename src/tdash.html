@@ -66,6 +66,61 @@
           <input type="checkbox" id="chk-only-cache" /> Only Cache
         </label>
       </fieldset>
+      
+      <!-- Fetch status -->
+      <div id="fetch-status" role="status" aria-live="polite">
+        <!-- Last: 3 min ago | Took: 15 seconds | Cache file age: 6hr 45min -->
+        <fieldset class="cache-options">
+          <legend>Status</legend>
+          <label title="Last time browser called the server to fetch or generate data for this dataset">
+            <span id="fetch-last-label">Last:</span>
+            <span id="fetch-last-value">3 min ago</span>
+          </label>
+          <label title="Time taken to fetch or generate data for this dataset">
+            <span id="fetch-timetaken-label">Took:</span>
+            <span id="fetch-timetaken-value">15 sec</span>
+          </label>
+          <label title="Age of the cached data for this dataset">
+            <span id="fetch-cache-age-label">Dataset Age:</span>
+            <span id="fetch-cache-age-value">6hr45m</span>
+          </label>
+        </fieldset>
+      </div>
+
+      <!-- Fetch device status and network health bar -->
+      <div id="device-status" role="status" aria-live="polite">
+        <!--
+            Fetched Devices: nn Border Routers: nn Routers: nn Child nodes: nn Links: LQ3: nn nn LQ2: nn LQ1: nn 
+            Fetched: 🖥 12 Nodes | 🛤 3 Border Routers | NN Routers |NN Child nodes| ⚠ 2 Low-Quality Links | 
+            -->
+        <fieldset class="cache-options">
+          <legend>Devices</legend>
+          <label title="Fetched number of devices in the dataset">
+            <span id="device-status-devices">Devices: <span id="device-count">0</span></span>
+          </label>
+          <label title="Fetched number of border routers in the dataset">
+            <span id="device-status-brs">Border Routers: <span id="br-count">0</span></span>
+          </label>
+          <label title="Fetched number of routers in the dataset">
+            <span id="device-status-routers">Routers: <span id="router-count">0</span></span>
+          </label>
+          <label title="Fetched number of child nodes in the dataset">
+            <span id="device-status-children">Child nodes: <span id="child-count">0</span></span>
+          </label>
+          <label title="Fetched number of links in the dataset">
+            <span id="device-status-links"> 🔗 Links: <span id="link-count">0</span></span>
+          </label>
+          <label title="Fetched number of LQ3 links in the dataset">
+            <span id="device-status-lq3">LQ3: <span id="lq3-count">0</span></span>
+          </label>
+          <label title="Fetched number of LQ2 links in the dataset">
+            <span id="device-status-lq2">LQ2: <span id="lq2-count">0</span></span>
+          </label>
+          <label title="Fetched number of LQ1 links in the dataset">
+            <span id="device-status-lq1">LQ1: <span id="lq1-count">0</span></span>
+          </label>
+        </fieldset>
+      </div>
 
     </div>
 

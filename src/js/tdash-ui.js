@@ -13,6 +13,7 @@ import {
   getVisNetwork,
   getTopologyFilterHandlers,
   getTopologyNodeData,
+  getTopologyDatasetCounts,
   setAutoZoomEnabled,
   setAnimationEnabled,
   isAutoZoomEnabled,
@@ -25,7 +26,7 @@ import {
   isMoreInfoEnabled,
 } from "./tdash-table-renderer.js";
 import { EDGE_LQ_STYLES } from "./tdash-constants.js";
-import { initDetailPanelToggles } from "./tdash-utils.js";
+import { initDetailPanelToggles, formatAgo, formatDuration, toFiniteNumber } from "./tdash-utils.js";
 import {
   populateFilterSelects,
   populateDiagnosticFilterBySource,
@@ -55,6 +56,7 @@ function populateDatasetSelect(sourceFilter = null) {
 let currentView = "topology";
 let _physicsEnabled = true;
 let _enhanceEnabled = true;
+let _lastFetchStartedAt = null;
 
 function applyLegendLineStylesFromConstants() {
   const root = document.documentElement;
@@ -124,8 +126,11 @@ function renderCurrentView() {
 
   if (view === "topology") {
     renderTopologyForDataset(effectiveDataset, _physicsEnabled);
+    const counts = getTopologyDatasetCounts();
+    if (counts) updateDeviceStatusBar(counts);
   } else {
     renderTableForDataset(effectiveDataset);
+    updateDeviceStatusBar(computeRowCounts(currentDataset.rows));
   }
 
   // Sync capabilities back to currentDataset when effectiveDataset is a spread copy
@@ -422,10 +427,104 @@ function updateCacheCheckboxes(changedCheckbox) {
   }
 }
 
+// ── Status bar updaters ───────────────────────────────────────────────────────
+
+// Mirrors isChildNode() in tdash-topology-utils.js but operates on row objects.
+// Comparison is case-insensitive because some sources emit "Child" (capitalised).
+function isChildRow(r) {
+  const t = (r.type || "").toLowerCase();
+  return t === "child" || t === "sleepy-child";
+}
+
+// Derives device and link counts from a flat rows array (table-view path).
+// Link counts are halved because each undirected link appears in both endpoints.
+// Returns null for link fields when no row carries the link-count fields.
+// Returns null for classification fields when no row carries Thread topology fields
+// (rloc16 / br / type), which is the case for non-Thread sources such as mDNS.
+function computeRowCounts(rows) {
+  const hasThreadClassification = rows.some(
+    (r) => r.rloc16 != null || r.br != null || r.type != null,
+  );
+  if (!hasThreadClassification) {
+    return {
+      devices: rows.length,
+      borderRouters: null, routers: null, children: null,
+      links: null, lq3: null, lq2: null, lq1: null,
+    };
+  }
+  let tl3 = 0, tl2 = 0, tl1 = 0, tl = 0, hasLinkFields = false;
+  const routerRows = rows.filter((r) => !isChildRow(r));
+  routerRows.forEach((r) => {
+    const v3 = toFiniteNumber(r.total_link_3);
+    const v2 = toFiniteNumber(r.total_link_2);
+    const v1 = toFiniteNumber(r.total_link_1);
+    const vt = toFiniteNumber(r.total_links);
+    if (Number.isFinite(v3)) { tl3 += v3; hasLinkFields = true; }
+    if (Number.isFinite(v2)) { tl2 += v2; hasLinkFields = true; }
+    if (Number.isFinite(v1)) { tl1 += v1; hasLinkFields = true; }
+    if (Number.isFinite(vt)) { tl  += vt; hasLinkFields = true; }
+  });
+  return {
+    devices:       rows.length,
+    borderRouters: rows.filter((r) => r.br === true).length,
+    routers:       routerRows.filter((r) => !r.br).length,
+    children:      rows.filter((r) => isChildRow(r)).length,
+    links: hasLinkFields ? Math.round(tl  / 2) : null,
+    lq3:   hasLinkFields ? Math.round(tl3 / 2) : null,
+    lq2:   hasLinkFields ? Math.round(tl2 / 2) : null,
+    lq1:   hasLinkFields ? Math.round(tl1 / 2) : null,
+  };
+}
+
+function updateDeviceStatusBar(counts) {
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val != null ? String(val) : "—";
+  };
+  set("device-count",  counts.devices);
+  set("br-count",      counts.borderRouters);
+  set("router-count",  counts.routers);
+  set("child-count",   counts.children);
+  set("link-count",    counts.links);
+  set("lq3-count",     counts.lq3);
+  set("lq2-count",     counts.lq2);
+  set("lq1-count",     counts.lq1);
+}
+
+function updateFetchStatusBar(fetchStartedAt) {
+  document.getElementById("fetch-last-value").textContent =
+    formatAgo(fetchStartedAt);
+  document.getElementById("fetch-timetaken-value").textContent =
+    currentDataset?.fetchDurationMs != null
+      ? formatDuration(currentDataset.fetchDurationMs)
+      : "—";
+  document.getElementById("fetch-cache-age-value").textContent =
+    currentDataset?.fileLastModifiedAt != null
+      ? formatAgo(currentDataset.fileLastModifiedAt)
+      : "—";
+}
+
+// Reusable list of all status-bar span IDs for bulk updates.
+const _FETCH_STATUS_IDS = ["fetch-last-value", "fetch-timetaken-value", "fetch-cache-age-value"];
+const _DEVICE_STATUS_IDS = ["device-count", "br-count", "router-count", "child-count",
+                             "link-count", "lq3-count", "lq2-count", "lq1-count"];
+
+function _setStatusSpans(ids, text) {
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  });
+}
+
 // Fetch dataset function
 async function doFetchDataset() {
+  _lastFetchStartedAt = Date.now();
   const selectedValue = document.getElementById("dataset-select").value;
   if (!selectedValue) return;
+
+  // Reset status bars to loading state
+  _setStatusSpans(_FETCH_STATUS_IDS, "…");
+  _setStatusSpans(_DEVICE_STATUS_IDS, "…");
 
   // Apply defaultView from registry if auto-view is enabled
   const autoViewEnabled = document.getElementById("chk-auto-view").checked;
@@ -436,8 +535,24 @@ async function doFetchDataset() {
     }
   }
 
-  await loadDataset(selectedValue);
+  try {
+    await loadDataset(selectedValue);
+  } catch (err) {
+    console.error("loadDataset threw:", err);
+    _setStatusSpans(_FETCH_STATUS_IDS, "—");
+    _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+    return;
+  }
+
+  // loadDataset returns early without updating currentDataset when all files fail.
+  if (!currentDataset || currentDataset.entry?.value !== selectedValue) {
+    _setStatusSpans(_FETCH_STATUS_IDS, "—");
+    _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+    return;
+  }
+
   renderCurrentView();
+  updateFetchStatusBar(_lastFetchStartedAt);
 }
 
 // Fetch button drives data acquisition.

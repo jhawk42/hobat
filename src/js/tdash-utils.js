@@ -85,6 +85,50 @@ export function formatValue(value) {
   return toText(value) || "n/a";
 }
 
+/**
+ * Returns a human-readable string describing how long ago `timestampMs` was.
+ * @param {number|null|undefined} timestampMs - Unix timestamp in milliseconds.
+ * @returns {string}
+ */
+export function formatAgo(timestampMs) {
+  if (timestampMs == null || !Number.isFinite(timestampMs)) return "—";
+  const elapsed = Date.now() - timestampMs;
+  if (elapsed < 5_000)       return "just now";
+  if (elapsed < 60_000)      return `${Math.floor(elapsed / 1_000)} sec ago`;
+  if (elapsed < 3_600_000) {
+    const m = Math.floor(elapsed / 60_000);
+    const s = Math.floor((elapsed % 60_000) / 1_000);
+    return s > 0 ? `${m}m ${s}s ago` : `${m} min ago`;
+  }
+  if (elapsed < 86_400_000) {
+    const h = Math.floor(elapsed / 3_600_000);
+    const m = Math.floor((elapsed % 3_600_000) / 60_000);
+    return m > 0 ? `${h}hr ${m}m ago` : `${h}hr ago`;
+  }
+  const d = Math.floor(elapsed / 86_400_000);
+  const h = Math.floor((elapsed % 86_400_000) / 3_600_000);
+  return h > 0 ? `${d}d ${h}hr ago` : `${d}d ago`;
+}
+
+/**
+ * Returns a human-readable string describing a duration in milliseconds.
+ * @param {number|null|undefined} ms - Duration in milliseconds.
+ * @returns {string}
+ */
+export function formatDuration(ms) {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  if (ms < 1_000)         return "< 1 sec";
+  if (ms < 60_000)        return `${Math.floor(ms / 1_000)} sec`;
+  if (ms < 3_600_000) {
+    const m = Math.floor(ms / 60_000);
+    const s = Math.floor((ms % 60_000) / 1_000);
+    return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  }
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  return m > 0 ? `${h}hr ${m}m` : `${h}hr`;
+}
+
 // ── Detail-panel structured value renderer ────────────────────────────────────
 
 function _createKvRow(keyText, valueText, isEmpty = false) {

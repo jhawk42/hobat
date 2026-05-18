@@ -356,3 +356,32 @@ export function buildVisNodeData(
     };
   });
 }
+
+// ── Dataset counts helper ─────────────────────────────────────────────────────
+
+/**
+ * Derives device and link counts from topology nodeData and edgeData arrays.
+ * Uses the semantic vis-node fields (`isRouter`, `isBorderRouter`) that are
+ * set by buildVisNodeData — these are authoritative and consistent with the
+ * filter/capabilities system.
+ *
+ * @param {Array} nodeData - Array of vis.js node objects
+ * @param {Array} edgeData - Array of vis.js edge objects
+ * @returns {{ devices, borderRouters, routers, children, links, lq3, lq2, lq1 }}
+ */
+export function computeDatasetCounts(nodeData, edgeData) {
+  const borderRouters = nodeData.filter((n) => n.isBorderRouter === true).length;
+  const routers       = nodeData.filter((n) => n.isRouter === true && !n.isBorderRouter).length;
+  const children      = nodeData.filter((n) => n.isRouter !== true).length;
+  const visibleEdges  = edgeData.filter((e) => !e.baseHidden);
+  return {
+    devices:       nodeData.length,
+    borderRouters,
+    routers,
+    children,
+    links:         visibleEdges.length,
+    lq3:           visibleEdges.filter((e) => e.lqLevel === 3).length,
+    lq2:           visibleEdges.filter((e) => e.lqLevel === 2).length,
+    lq1:           visibleEdges.filter((e) => e.lqLevel === 1).length,
+  };
+}
