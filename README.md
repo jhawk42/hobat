@@ -105,7 +105,7 @@ usage: td_cli [-h] [--verbose] [--debug] [--output FILE] [--datadir DIR] {otbr-c
 
 # OTBR CLI
 python3 -m td_cli otbr-cli --help
-python3 -m td_cli otbr-cli network-dataset-info
+python3 -m td_cli otbr-cli thread-network-info
 python3 -m td_cli otbr-cli router-table
 python3 -m td_cli otbr-cli meshdiag topology
 python3 -m td_cli otbr-cli meshdiag routerneighbortable

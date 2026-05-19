@@ -172,7 +172,7 @@ def parse_meshdiag_topology_output(
 
 
 def enhance_topology_router_links(
-    topology_data, network_dataset_info=None
+    topology_data, thread_network_info=None
 ):
     """
     Enhances thread topology IP6 addresses and children data with additional processing.
@@ -185,8 +185,8 @@ def enhance_topology_router_links(
     """
 
     omr_ipv6addr_prefix = (
-        network_dataset_info["prefix_omr_ipv6addr_prefix"]
-        if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info
+        thread_network_info["prefix_omr_ipv6addr_prefix"]
+        if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
         else None
     )
 
@@ -246,14 +246,14 @@ def enhance_topology_router_links(
 
 
 def get_meshdiag_topology(
-    extaddr_map=None, network_dataset_info=None
+    extaddr_map=None, thread_network_info=None
 ):
     """
     Retrieves, parses, and enhances the thread topology IP6 addresses and children data.
 
     Args:
         extaddr_map: Optional dictionary mapping extended MAC to node name.
-        network_dataset_info: Optional dictionary containing network dataset information.
+        thread_network_info: Optional dictionary containing thread network information.
     Returns:
         Enhanced topology data with decoded link IDs and additional fields
     """
@@ -271,7 +271,7 @@ def get_meshdiag_topology(
     # enhance links by decoding link IDs to objects with id and device_label
     enhanced_links = (
         enhance_topology_router_links(
-            topology_data_enhanced, network_dataset_info
+            topology_data_enhanced, thread_network_info
         )
     )
 
@@ -307,10 +307,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         extaddr_map = {}
 
-    network_dataset_info = util_network.fetch_network_dataset_info()
+    thread_network_info = util_network.fetch_thread_network_info()
 
     meshdiag_topology_data = get_meshdiag_topology(
-        extaddr_map, network_dataset_info
+        extaddr_map, thread_network_info
     )
     save_path = data_file_path(
         "td-otbr-cli-meshdiag-topology.json", td_data_dir)

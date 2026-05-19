@@ -70,8 +70,8 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["mdns", "matter"], action_cost_s=600
     ),
     # Single ot-ctl commands — near-instant.
-    "td-otbr-cli-network-dataset-info.json": FileAction(
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-cli", "network-dataset-info"], action_cost_s=1
+    "td-otbr-cli-thread-network-info.json": FileAction(
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-cli", "thread-network-info"], action_cost_s=1
     ),
     "td-otbr-cli-router-table.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-cli", "router-table"], action_cost_s=1

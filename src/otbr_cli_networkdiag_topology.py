@@ -938,7 +938,7 @@ def fetch_network_diag_for_device(
 def fetch_network_diag_multicast(
     multicast_addr: str,
     extaddr_map: dict | None = None,
-    network_dataset_info: dict | None = None,
+    thread_network_info: dict | None = None,
 ) -> dict:
     """
     Queries network diagnostic data via multicast with retry and merge strategy.
@@ -951,7 +951,7 @@ def fetch_network_diag_multicast(
     Args:
         multicast_addr: Multicast address to target ("ff03::1" or "ff02::1")
         extaddr_map: Optional dict mapping extended addresses to device labels
-        network_dataset_info: Optional dict with network info (contains OMR prefix)
+        thread_network_info: Optional dict with network info (contains OMR prefix)
 
     Returns:
         Dict keyed by rloc16, with device records as values (same format as
@@ -961,17 +961,17 @@ def fetch_network_diag_multicast(
     if extaddr_map is None:
         extaddr_map = {}
 
-    # Get OMR prefix from network_dataset_info 
+    # Get OMR prefix from thread_network_info 
     omr_ipv6addr_prefix = (
-        network_dataset_info["prefix_omr_ipv6addr_prefix"]
-        if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info
+        thread_network_info["prefix_omr_ipv6addr_prefix"]
+        if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
         else None
     )
 
-    ## Get meshlocal prefix from network_dataset_info 
+    ## Get meshlocal prefix from thread_network_info 
     meshlocal_prefix = (
-        network_dataset_info["prefix_meshlocal_ipv6addr_prefix"]
-        if network_dataset_info and "prefix_meshlocal_ipv6addr_prefix" in network_dataset_info
+        thread_network_info["prefix_meshlocal_ipv6addr_prefix"]
+        if thread_network_info and "prefix_meshlocal_ipv6addr_prefix" in thread_network_info
         else None
     )   
 
@@ -1071,7 +1071,7 @@ def fetch_network_diag_multicast(
 
 def fetch_network_diag_topology_multicast_network(
     extaddr_map: dict | None = None,
-    network_dataset_info: dict | None = None,
+    thread_network_info: dict | None = None,
 ) -> dict:
     """
     Queries network diagnostic data via multicast to all Thread devices in the mesh (ff03::1).
@@ -1081,7 +1081,7 @@ def fetch_network_diag_topology_multicast_network(
 
     Args:
         extaddr_map: Optional dict mapping extended addresses to device labels
-        network_dataset_info: Optional dict with network info (contains OMR prefix)
+        thread_network_info: Optional dict with network info (contains OMR prefix)
 
     Returns:
         Dict keyed by rloc16 with device records from all mesh devices
@@ -1089,13 +1089,13 @@ def fetch_network_diag_topology_multicast_network(
     return fetch_network_diag_multicast(
         multicast_addr="ff03::1",
         extaddr_map=extaddr_map,
-        network_dataset_info=network_dataset_info,
+        thread_network_info=thread_network_info,
     )
 
 
 def fetch_network_diag_topology_multicast_neighbors(
     extaddr_map: dict | None = None,
-    network_dataset_info: dict | None = None,
+    thread_network_info: dict | None = None,
 ) -> dict:
     """
     Queries network diagnostic data via multicast to immediate one-hop neighbors (ff02::1).
@@ -1106,7 +1106,7 @@ def fetch_network_diag_topology_multicast_neighbors(
 
     Args:
         extaddr_map: Optional dict mapping extended addresses to device labels
-        network_dataset_info: Optional dict with network info (contains OMR prefix)
+        thread_network_info: Optional dict with network info (contains OMR prefix)
 
     Returns:
         Dict keyed by rloc16 with device records from immediate one-hop neighbors
@@ -1114,12 +1114,12 @@ def fetch_network_diag_topology_multicast_neighbors(
     return fetch_network_diag_multicast(
         multicast_addr="ff02::1",
         extaddr_map=extaddr_map,
-        network_dataset_info=network_dataset_info,
+        thread_network_info=thread_network_info,
     )
 
 
 def fetch_network_diag_topology(
-    extaddr_map=None, network_dataset_info=None, expand_children=True
+    extaddr_map=None, thread_network_info=None, expand_children=True
 ):
     """Maps the full network topology and returns a Python dictionary."""
 
@@ -1132,15 +1132,15 @@ def fetch_network_diag_topology(
 
     # 2. Get OMR prefix
     omr_ipv6addr_prefix = (
-        network_dataset_info["prefix_omr_ipv6addr_prefix"]
-        if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info
+        thread_network_info["prefix_omr_ipv6addr_prefix"]
+        if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
         else None
     )
 
-    # 3. Get meshlocal prefix / rloc prefix from network_dataset_info for building RLOC IPv6 addresses
+    # 3. Get meshlocal prefix / rloc prefix from thread_network_info for building RLOC IPv6 addresses
     meshlocal_prefix = (
-        network_dataset_info["prefix_meshlocal_ipv6addr_prefix"]
-        if network_dataset_info and "prefix_meshlocal_ipv6addr_prefix" in network_dataset_info
+        thread_network_info["prefix_meshlocal_ipv6addr_prefix"]
+        if thread_network_info and "prefix_meshlocal_ipv6addr_prefix" in thread_network_info
         else None
     )     
 
@@ -1160,7 +1160,7 @@ def fetch_network_diag_topology(
     # 6. Get the multicast topology data
     # This will give us a starting point with data from all devices that responded to the multicast query, which we can then enrich with additional direct queries for any missing data or child information as needed. The multicast query can help reduce the number of direct queries needed by providing data for many devices in one go, especially for those that respond with more detailed TLV sets in the initial retries.
     network_topology_map_multicast = fetch_network_diag_topology_multicast_network(
-        extaddr_map, network_dataset_info
+        extaddr_map, thread_network_info
     )
 
     if network_topology_map_multicast:
@@ -1573,11 +1573,11 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
     else:
         extaddr_map = {}
 
-    network_dataset_info = util_network.fetch_network_dataset_info()
+    thread_network_info = util_network.fetch_thread_network_info()
 
     # Get the multicast topology data
     data = fetch_network_diag_topology_multicast_network(
-        extaddr_map, network_dataset_info
+        extaddr_map, thread_network_info
     )
 
     # Print the topology in tree format to console
@@ -1621,11 +1621,11 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
     else:
         extaddr_map = {}
 
-    network_dataset_info = util_network.fetch_network_dataset_info()
+    thread_network_info = util_network.fetch_thread_network_info()
 
     # Get the multicast topology data
     data = fetch_network_diag_topology_multicast_neighbors(
-        extaddr_map, network_dataset_info
+        extaddr_map, thread_network_info
     )
 
     # Print the topology in tree format to console
@@ -1686,11 +1686,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         extaddr_map = {}
 
-    network_dataset_info = util_network.fetch_network_dataset_info()
+    thread_network_info = util_network.fetch_thread_network_info()
 
     # Get the networkdiagnostic topology data
     networkdiagnostic_topology_data = fetch_network_diag_topology(
-        extaddr_map, network_dataset_info, expand_children=args.expand_children
+        extaddr_map, thread_network_info, expand_children=args.expand_children
     )
 
     # print the topology in tree format to console

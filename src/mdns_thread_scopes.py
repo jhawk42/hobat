@@ -1969,11 +1969,11 @@ options:
 
    # Main execution:
 
-    # Get network dataset info for reference in parsing and enriching mdns data
-    network_dataset_info = util_network.fetch_network_dataset_info()
+    # Get thread network info for reference in parsing and enriching mdns data
+    thread_network_info = util_network.fetch_thread_network_info()
     omr_ipv6addr_prefix = (
-        network_dataset_info["prefix_omr_ipv6addr_prefix"]
-        if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info
+        thread_network_info["prefix_omr_ipv6addr_prefix"]
+        if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
         else None
     )
 

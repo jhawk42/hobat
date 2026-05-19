@@ -9,7 +9,7 @@ from util_convert import b64_to_extended_address
 from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
 
-def load_and_parse_eve_file(path, network_dataset_info=None):
+def load_and_parse_eve_file(path, thread_network_info=None):
     """
     Parses Eve JSON file and preserves all node fields.
 
@@ -18,7 +18,7 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
 
     Args:
         path: Path to thread JSON file
-        network_dataset_info: Network dataset information for reference
+        thread_network_info: Network dataset information for reference
 
     Returns:
         Dictionary mapping rloc16 (hex format) to all node fields with extaddr_hex added
@@ -27,8 +27,8 @@ def load_and_parse_eve_file(path, network_dataset_info=None):
     result = {}
 
     omr_ipv6addr_prefix = (
-        network_dataset_info["prefix_omr_ipv6addr_prefix"]
-        if network_dataset_info and "prefix_omr_ipv6addr_prefix" in network_dataset_info
+        thread_network_info["prefix_omr_ipv6addr_prefix"]
+        if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
         else None
     )
 
@@ -177,13 +177,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Main execution:
 
-    # Get network dataset info for reference in parsing and enriching Eve data
-    network_dataset_info = util_network.fetch_network_dataset_info()
+    # Get thread network info for reference in parsing and enriching Eve data
+    thread_network_info = util_network.fetch_thread_network_info()
 
     # Parse the Eve JSON file to build an enhanced data structure keyed by rloc16_hex with all node fields preserved and extAddress in hex format for easier mapping and reference.
     eve_json_file_path = data_file_path("thread-eve-layout.json", td_data_dir)
     eve_data_raw = load_and_parse_eve_file(
-        eve_json_file_path, network_dataset_info
+        eve_json_file_path, thread_network_info
     )
 
     # Enhance the eve_data json data structure to add route destination node names for reference

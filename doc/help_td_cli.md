@@ -29,7 +29,7 @@ Data directory behavior:
 
 Commands usage:
     otbr-cli
-        usage: td_cli otbr-cli [-h] {network-dataset-info,router-table,meshdiag,networkdiag,all} ...
+        usage: td_cli otbr-cli [-h] {thread-network-info,router-table,meshdiag,networkdiag,all} ...
 
     otbr-restapi
         usage: td_cli otbr-restapi [-h] [--raw] {download,client} ...
@@ -46,12 +46,12 @@ Commands usage:
 Subcommand help snapshots:
   otbr-cli
     usage: td_cli otbr-cli [-h]
-                           {network-dataset-info,router-table,meshdiag,networkdiag,all}
+                           {thread-network-info,router-table,meshdiag,networkdiag,all}
                            ...
 
     positional arguments:
-      {network-dataset-info,router-table,meshdiag,networkdiag,all}
-        network-dataset-info        Scan and save network dataset info
+      {thread-network-info,router-table,meshdiag,networkdiag,all}
+        thread-network-info        Scan and save thread network info
         router-table                Scan and save router table
         meshdiag                    Mesh diagnostic scans
         networkdiag                 Network diagnostic scans

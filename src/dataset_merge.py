@@ -694,7 +694,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     parser.add_argument(
         "--dataset-file",
-        default="td-otbr-cli-network-dataset-info.json",
+        default="td-otbr-cli-thread-network-info.json",
         help="File that contains prefix_omr_ipv6addr_prefix.",
     )
     parser.add_argument(

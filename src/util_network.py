@@ -273,9 +273,9 @@ def fetch_dataset_active(hide_sensitive_info=True):
     return dataset_info
 
 
-def fetch_network_dataset_info():
+def fetch_thread_network_info():
     """
-    Retrieves and formats complete network dataset info from the Thread network.
+    Retrieves and formats complete thread network info from the Thread network.
 
     Returns:
         Dictionary with keys:
@@ -296,29 +296,29 @@ def fetch_network_dataset_info():
                 - pskc: Pre-Shared Key for the Commissioner (hex)
                 - security_policy: Security policy info
     """
-    network_dataset_info = {}
+    thread_network_info = {}
 
     # Get mesh-local prefix
     prefix_meshlocal = fetch_meshlocal_prefix()
-    network_dataset_info["prefix_meshlocal"] = prefix_meshlocal
+    thread_network_info["prefix_meshlocal"] = prefix_meshlocal
 
     # Format mesh-local prefix into IPv6 address prefix
     prefix_meshlocal_ipv6addr_prefix = build_rloc_ipv6_address_prefix(
         prefix_meshlocal
     )
-    network_dataset_info["prefix_meshlocal_ipv6addr_prefix"] = (
+    thread_network_info["prefix_meshlocal_ipv6addr_prefix"] = (
         prefix_meshlocal_ipv6addr_prefix
     )
 
     # Get OMR prefix
     prefix_omr = fetch_omr_prefix()
-    network_dataset_info["prefix_omr"] = prefix_omr
-    network_dataset_info["prefix_omr_ipv6addr_prefix"] = (
+    thread_network_info["prefix_omr"] = prefix_omr
+    thread_network_info["prefix_omr_ipv6addr_prefix"] = (
         build_omr_ipv6_address_prefix(prefix_omr)
     )
 
-    # Get active dataset information and add individual fields to network_dataset_info
+    # Get active dataset information and add individual fields to thread_network_info
     dataset_active = fetch_dataset_active()
-    network_dataset_info.update(dataset_active)
+    thread_network_info.update(dataset_active)
 
-    return network_dataset_info
+    return thread_network_info

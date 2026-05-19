@@ -16,7 +16,7 @@ import extaddr_device_label_map
 import mdns_thread_scopes
 import eve_parse
 
-import otbr_cli_network_dataset_info
+import otbr_cli_thread_network_info
 import otbr_cli_router_table
 import otbr_cli_meshdiag_topology
 import otbr_cli_meshdiag_childtable
@@ -55,7 +55,7 @@ class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
 #   merge-dataset – merge datasets
 #
 # otbr-cli examples:
-#   td_cli.py otbr-cli network-dataset-info
+#   td_cli.py otbr-cli thread-network-info
 #   td_cli.py otbr-cli router-table
 #   td_cli.py otbr-cli meshdiag topology
 #   td_cli.py otbr-cli meshdiag routerneighbortable
@@ -117,7 +117,7 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         dest="cli_command", required=False)
 
     otbr_cli_sub.add_parser(
-        "network-dataset-info", help="Scan and save network dataset info"
+        "thread-network-info", help="Scan and save thread network info"
     )
     otbr_cli_sub.add_parser("router-table", help="Scan and save router table")
 
@@ -296,7 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- hand-crafted "Commands usage:" epilog ---
     parser.epilog = """Commands usage:
     otbr-cli
-        usage: td_cli otbr-cli [-h] {network-dataset-info,router-table,meshdiag,networkdiag,all} ...
+        usage: td_cli otbr-cli [-h] {thread-network-info,router-table,meshdiag,networkdiag,all} ...
 
     otbr-restapi
         usage: td_cli otbr-restapi [-h] {download,client} ...
@@ -359,9 +359,9 @@ def dispatch(
             sub_parsers["otbr-cli"].print_help()
             return 0
 
-        if cli_cmd == "network-dataset-info":
+        if cli_cmd == "thread-network-info":
             return (
-                otbr_cli_network_dataset_info.main(
+                otbr_cli_thread_network_info.main(
                     _forward_with_datadir(extra_args)) or 0
             )
 
@@ -432,7 +432,7 @@ def dispatch(
 
         if cli_cmd == "all":
             forwarded = _forward_with_datadir(extra_args)
-            rc = otbr_cli_network_dataset_info.main(forwarded) or 0
+            rc = otbr_cli_thread_network_info.main(forwarded) or 0
             rc = rc or otbr_cli_router_table.main(forwarded) or 0
             rc = rc or otbr_cli_meshdiag_topology.main(forwarded) or 0
             rc = rc or otbr_cli_networkdiag_topology.main_multicast_network(

@@ -13,13 +13,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     td_data_dir = resolve_data_dir(
         data_dir=parse_datadir_from_argv(argv))
-    network_dataset_info = util_network.fetch_network_dataset_info()
+    thread_network_info = util_network.fetch_thread_network_info()
     save_json_path = data_file_path(
-        "td-otbr-cli-network-dataset-info.json", td_data_dir
+        "td-otbr-cli-thread-network-info.json", td_data_dir
     )
-    save_json_atomic(network_dataset_info, save_json_path)
-    logging.debug("Raw network dataset info as JSON:\n%s",
-                  json.dumps(network_dataset_info, indent=4))
+    save_json_atomic(thread_network_info, save_json_path)
+    logging.debug("Raw thread network info as JSON:\n%s",
+                  json.dumps(thread_network_info, indent=4))
 
 
 if __name__ == "__main__":

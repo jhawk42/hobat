@@ -278,7 +278,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | `otbr_cli_meshdiag_childip6.py` | `meshdiag childip6 <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childip6.json` | For every router in the router table, collects child IPv6 address lists grouped by child RLOC16 and records per-child IP address counts.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_meshdiag_routerneighbortable.py` | `meshdiag routerneighbortable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-neighbortables.json` | For every router in the router table, collects per-neighbour details: RLOC16, extaddr, Thread version, RSS (avg/last/margin), frame/message error rates, and connection time.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (unicast per router) or `networkdiag get ff03::1/ff02::1 <tlvs>` (multicast) | `td-otbr-cli-networkdiag-topology-poll.json` (unicast poll), `td-otbr-cli-networkdiag-topology-multicast-network.json` (multicast all), `td-otbr-cli-networkdiag-topology-multicast-neighbors.json` (multicast neighbors) | Collects network diagnostic data from Thread devices via three modes: (1) Unicast topology-poll: polls each router individually via rloc IPv6. (2) Multicast network: broadcasts to all mesh devices (ff03::1) with retry strategy and TLV merging. (3) Multicast neighbors: broadcasts to one-hop neighbors (ff02::1) with retry strategy and TLV merging. For every device, parses: IPv6 address list, Mode TLV (RxOnWhenIdle / DeviceType / NetworkData → FTD/MTD classification), child table (IDs, timeouts, link quality, mode flags), MAC counters (error/discard totals and percentages), MLE counters (role changes, partition ID changes, parent changes, attach attempts), and time-in-role statistics. |
-| `otbr_cli_network_dataset_info.py` | `dataset active`, `prefix meshlocal`, `br omrprefix favored` | `td-otbr-cli-network-dataset-info.json` | Collects the active Thread dataset (channel, PAN ID, extended PAN ID, mesh-local prefix, network name, etc.) and derives the mesh-local IPv6 RLOC prefix and the OMR prefix for use by other collectors. |
+| `otbr_cli_thread_network_info.py` | `dataset active`, `prefix meshlocal`, `br omrprefix favored` | `td-otbr-cli-thread-network-info.json` | Collects the active Thread dataset (channel, PAN ID, extended PAN ID, mesh-local prefix, network name, etc.) and derives the mesh-local IPv6 RLOC prefix and the OMR prefix for use by other collectors. |
 
 ### Data Collection — Other Sources
 
@@ -673,8 +673,8 @@ cd src
 # Download REST API snapshots
 python td_cli.py otbr-restapi download
 
-# Collect network dataset info (provides OMR / mesh-local prefixes used by other collectors)
-python td_cli.py otbr-cli network-dataset-info
+# Collect thread network info (provides OMR / mesh-local prefixes used by other collectors)
+python td_cli.py otbr-cli thread-network-info
 
 # Collect all CLI topology data in one shot
 python td_cli.py otbr-cli all
@@ -707,8 +707,8 @@ python td_cli.py --datadir /path/to/data merge-dataset
 # Download REST API snapshots
 python src/otbr_restapi_download.py
 
-# Collect network dataset info (provides OMR / mesh-local prefixes used by other collectors)
-python src/otbr_cli_network_dataset_info.py
+# Collect thread network info (provides OMR / mesh-local prefixes used by other collectors)
+python src/otbr_cli_thread_network_info.py
 
 # Collect CLI topology data (unicast polling)
 python src/otbr_cli_router_table.py
