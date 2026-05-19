@@ -9,6 +9,7 @@ import {
 import {
   toText, toFiniteNumber, isPlainObject,
   getCanonicalRloc16, getCanonicalExtaddr,
+  getCanonicalOmrIpv6Address,
   mergeForDisplay
 } from './tdash-utils.js';
 import {
@@ -273,6 +274,36 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     const r = restApiById.get(id) || {};
     rawByIdForDetails.set(id, mergeForDisplay(mergeForDisplay(m, n), r));
   });
+
+  // Merge supplementary files (rawFiles[4+], e.g. mdns) into rawByIdForDetails.
+  // MTD/FTD mdns records match by omr_ipv6_addr; BR mdns records match by extaddr.
+  const omrToNodeId = new Map();
+  const extaddrToNodeId = new Map();
+  rawByIdForDetails.forEach((raw, id) => {
+    const omr = getCanonicalOmrIpv6Address(raw);
+    if (omr) omrToNodeId.set(omr, id);
+    const ea = getCanonicalExtaddr(raw);
+    if (ea) extaddrToNodeId.set(ea, id);
+  });
+  nodeMap.forEach((node, id) => {
+    const omr = getCanonicalOmrIpv6Address(node);
+    if (omr && !omrToNodeId.has(omr)) omrToNodeId.set(omr, id);
+    const ea = getCanonicalExtaddr(node);
+    if (ea && !extaddrToNodeId.has(ea)) extaddrToNodeId.set(ea, id);
+  });
+  for (let i = 4; i < rawFiles.length; i++) {
+    const extraFile = rawFiles[i];
+    if (!Array.isArray(extraFile)) continue;
+    extraFile.forEach((record) => {
+      if (!isPlainObject(record)) return;
+      const omr = getCanonicalOmrIpv6Address(record);
+      const ea = getCanonicalExtaddr(record);
+      const nodeId = (omr && omrToNodeId.get(omr)) || (ea && extaddrToNodeId.get(ea));
+      if (!nodeId) return;
+      const existing = rawByIdForDetails.get(nodeId) || {};
+      rawByIdForDetails.set(nodeId, mergeForDisplay(existing, record));
+    });
+  }
 
   const sourceNames = [];
   if (meshdiag.length > 0) sourceNames.push('meshdiag');

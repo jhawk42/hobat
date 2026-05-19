@@ -1928,16 +1928,14 @@ options:
 
     scopes_all = [
         "_meshcop._udp.local.",
-        "_trel._udp.local.",
         "_hap._udp.local.",
         "_matterc._udp.local.",
         "_matter._tcp.local.",
     ]
 
-    scopes_br = ["_meshcop._udp.local.", "_trel._udp.local."]
-
+    scopes_br = ["_meshcop._udp.local."]
+    scopes_br_trel = ["_trel._udp.local."]
     scopes_apple_hap = ["_hap._udp.local."]
-
     scopes_matter = ["_matterc._udp.local.", "_matter._tcp.local."]
 
     scope_map = {
