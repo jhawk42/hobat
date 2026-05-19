@@ -51,7 +51,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast",
-    label: "otbr-cli-*, networkdiag-multicast (rapid, secs)",
+    label: "otbr-cli-*, networkdiag-multicast (medium, mins)",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-topology-multicast-network.json",
@@ -67,7 +67,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast_mdns",
-    label: "otbr-cli-*, networkdiag-multicast, mdns (rapid, secs)",
+    label: "otbr-cli-*, networkdiag-multicast, mdns (medium, mins)",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-topology-multicast-network.json",
