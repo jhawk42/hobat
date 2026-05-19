@@ -19,14 +19,49 @@ import {
   lqStyleFromField, lqStyleFromAvgLqi
 } from './tdash-topology-utils.js';
 
+// ── File name constants ───────────────────────────────────────────────────────
+
+const FILE_MESHDIAG              = 'td-otbr-cli-meshdiag-topology.json';
+const FILE_NETWORKDIAG_POLL      = 'td-otbr-cli-networkdiag-topology-poll.json';
+const FILE_NETWORKDIAG_MULTICAST = 'td-otbr-cli-networkdiag-topology-multicast-network.json';
+const FILE_ROUTER_NEIGHBORTABLES = 'td-otbr-cli-meshdiag-router-neighbortables.json';
+const FILE_ROUTER_CHILDTABLES    = 'td-otbr-cli-meshdiag-router-childtables.json';
+const FILE_RESTAPI_DEVICES       = 'td-otbr-restapi-devices.json';
+const FILE_RESTAPI_DIAGNOSTICS   = 'td-otbr-restapi-diagnostics.json';
+
+// Files consumed as named primary slots in adaptMeshdiagNetworkdiag;
+// anything not in this set is treated as supplementary (e.g. mdns, eve).
+const MESHDIAG_PRIMARY_FILES = new Set([
+  FILE_MESHDIAG, FILE_NETWORKDIAG_POLL, FILE_NETWORKDIAG_MULTICAST,
+  FILE_ROUTER_NEIGHBORTABLES, FILE_ROUTER_CHILDTABLES,
+  FILE_RESTAPI_DIAGNOSTICS,
+]);
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/** Coerce a value to an array; returns [] if value is not already an array. */
+function asArray(value) { return Array.isArray(value) ? value : []; }
+
+/**
+ * Build a Map<filename, loadedData> from the registry entry's files list and
+ * the parallel array of loaded file contents.
+ */
+function buildFileMap(fileNames, rawFiles) {
+  const map = new Map();
+  fileNames.forEach((name, i) => { if (name) map.set(name, rawFiles[i]); });
+  return map;
+}
+
 // ── Adaptor 1: meshdiag + networkdiag + routerNeighbors + restApi ─────────────
 
-export function adaptMeshdiagNetworkdiag(rawFiles) {
-  const meshdiag = Array.isArray(rawFiles[0]) ? rawFiles[0] : [];
-  const networkDiag = Array.isArray(rawFiles[1]) ? rawFiles[1] : [];
-  const routerNeighborTables = Array.isArray(rawFiles[2]) ? rawFiles[2] : [];
-  const routerChildTables = Array.isArray(rawFiles[3]) ? rawFiles[3] : [];
-  const restApiRaw = rawFiles[3];
+export function adaptMeshdiagNetworkdiag(fileMap) {
+  const meshdiag = asArray(fileMap.get(FILE_MESHDIAG));
+  const networkDiag = asArray(
+    fileMap.get(FILE_NETWORKDIAG_POLL) ?? fileMap.get(FILE_NETWORKDIAG_MULTICAST)
+  );
+  const routerNeighborTables = asArray(fileMap.get(FILE_ROUTER_NEIGHBORTABLES));
+  const routerChildTables = asArray(fileMap.get(FILE_ROUTER_CHILDTABLES));
+  const restApiRaw = fileMap.get(FILE_RESTAPI_DIAGNOSTICS);
   const restApiDiagnostics = (restApiRaw && Array.isArray(restApiRaw.data))
     ? restApiRaw.data
       .map((item) => ({ id: item.id, type: item.type, ...(item.attributes || {}) }))
@@ -275,7 +310,7 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     rawByIdForDetails.set(id, mergeForDisplay(mergeForDisplay(m, n), r));
   });
 
-  // Merge supplementary files (rawFiles[4+], e.g. mdns) into rawByIdForDetails.
+  // Merge supplementary files (non-primary fileMap entries, e.g. mdns) into rawByIdForDetails.
   // MTD/FTD mdns records match by omr_ipv6_addr; BR mdns records match by extaddr.
   const omrToNodeId = new Map();
   const extaddrToNodeId = new Map();
@@ -291,8 +326,8 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
     const ea = getCanonicalExtaddr(node);
     if (ea && !extaddrToNodeId.has(ea)) extaddrToNodeId.set(ea, id);
   });
-  for (let i = 4; i < rawFiles.length; i++) {
-    const extraFile = rawFiles[i];
+  for (const [supplementaryFileName, extraFile] of fileMap) {
+    if (MESHDIAG_PRIMARY_FILES.has(supplementaryFileName)) continue;
     if (!Array.isArray(extraFile)) continue;
     extraFile.forEach((record) => {
       if (!isPlainObject(record)) return;
@@ -319,8 +354,8 @@ export function adaptMeshdiagNetworkdiag(rawFiles) {
 
 // ── Adaptor 2: Eve topology ───────────────────────────────────────────────────
 
-export function adaptEve(rawFiles) {
-  const eveRaw = rawFiles[0];
+export function adaptEve(fileMap) {
+  const eveRaw = fileMap.values().next().value;
   const eveArray = Array.isArray(eveRaw) ? eveRaw
     : (eveRaw && typeof eveRaw === 'object' ? Object.values(eveRaw) : []);
 
@@ -419,8 +454,8 @@ export function adaptEve(rawFiles) {
 
 // ── Adaptor 2b: Eve native topology (Eve Thread Network Layout.evethreadlayout) ──
 
-export function adaptEveNative(rawFiles) {
-  const raw = rawFiles[0];
+export function adaptEveNative(fileMap) {
+  const raw = fileMap.values().next().value;
   // Native file shape: { version, nodes: [...] }
   // Fall back gracefully if the loader already normalised it to a plain array.
   const eveArray = (raw && Array.isArray(raw.nodes)) ? raw.nodes
@@ -524,8 +559,8 @@ export function adaptEveNative(rawFiles) {
 
 // ── Adaptor 3: Merged detailed topology ──────────────────────────────────────
 
-export function adaptMergedDetailed(rawFiles) {
-  const rows = Array.isArray(rawFiles[0]) ? rawFiles[0] : [];
+export function adaptMergedDetailed(fileMap) {
+  const rows = asArray(fileMap.values().next().value);
   const nodeMap = new Map();
   const rawNodeById = new Map();
   const edgeMap = new Map();
@@ -716,8 +751,8 @@ export function adaptMergedDetailed(rawFiles) {
 
 // ── Adaptor 4: Router table (Nodes from ID/rloc16, edges from Next Hop) ───────
 
-export function adaptRouterTable(rawFiles) {
-  const rows = Array.isArray(rawFiles[0]) ? rawFiles[0] : [];
+export function adaptRouterTable(fileMap) {
+  const rows = asArray(fileMap.values().next().value);
   const nodeMap = new Map();
   const rawByIdForDetails = new Map();
   const edgeMap = new Map();
@@ -780,8 +815,8 @@ export function adaptRouterTable(rawFiles) {
 
 // ── Adaptor 5: Raw array generic fallback ─────────────────────────────────────
 
-export function adaptRawArray(rawFiles) {
-  const raw = rawFiles.find((f) => f !== null);
+export function adaptRawArray(fileMap) {
+  const raw = [...fileMap.values()].find((f) => f !== null);
   const rows = Array.isArray(raw) ? raw : (raw && typeof raw === 'object' ? Object.values(raw) : []);
   const nodeMap = new Map();
   const rawByIdForDetails = new Map();
@@ -854,9 +889,11 @@ export function adaptRawArray(rawFiles) {
 // Diagnostics provide: extAddress, rloc16, route.routeData[], childTable[].
 // Primary node ID = extAddress (lowercase). Merged by extAddress identity.
 
-export function adaptOtbrRestApi(rawFiles) {
-  const devicesData = (rawFiles[0] && Array.isArray(rawFiles[0].data)) ? rawFiles[0].data : [];
-  const diagData = (rawFiles[1] && Array.isArray(rawFiles[1].data)) ? rawFiles[1].data : [];
+export function adaptOtbrRestApi(fileMap) {
+  const devicesRaw = fileMap.get(FILE_RESTAPI_DEVICES);
+  const diagRaw = fileMap.get(FILE_RESTAPI_DIAGNOSTICS);
+  const devicesData = (devicesRaw && Array.isArray(devicesRaw.data)) ? devicesRaw.data : [];
+  const diagData = (diagRaw && Array.isArray(diagRaw.data)) ? diagRaw.data : [];
 
   // Flatten each item: merge top-level fields + attributes sub-object
   function flattenRestApiItem(item) {
@@ -976,14 +1013,15 @@ export function adaptOtbrRestApi(rawFiles) {
 
 export function runAdaptor(dataset) {
   const { entry, rawFiles } = dataset;
+  const fileMap = buildFileMap(entry.files || [], rawFiles);
   switch (entry.topologyMode) {
-    case 'meshdiag-networkdiag': return adaptMeshdiagNetworkdiag(rawFiles);
-    case 'merged-detailed': return adaptMergedDetailed(rawFiles);
-    case 'eve_enhanced': return adaptEve(rawFiles);
-    case 'eve_native': return adaptEveNative(rawFiles);
-    case 'router-table': return adaptRouterTable(rawFiles);
-    case 'otbr_restapi': return adaptOtbrRestApi(rawFiles);
+    case 'meshdiag-networkdiag': return adaptMeshdiagNetworkdiag(fileMap);
+    case 'merged-detailed': return adaptMergedDetailed(fileMap);
+    case 'eve_enhanced': return adaptEve(fileMap);
+    case 'eve_native': return adaptEveNative(fileMap);
+    case 'router-table': return adaptRouterTable(fileMap);
+    case 'otbr_restapi': return adaptOtbrRestApi(fileMap);
     case 'raw-array':
-    default: return adaptRawArray(rawFiles);
+    default: return adaptRawArray(fileMap);
   }
 }

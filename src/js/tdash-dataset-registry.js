@@ -16,46 +16,12 @@
 //   defaultLinkFilter — value pre-selected in #link-filter when this dataset loads
 
 export const DATASET_REGISTRY = [
-  // ── Single-file simple datasets (otbr-cli) ───  
-  {
-    source: "otbr-cli",
-    value: "meshdiag_only",
-    label: "meshdiag topo",
-    files: ["td-otbr-cli-meshdiag-topology.json"],
-    mergeStrategy: "none",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links"
-  },
-
-  // ── Single-file simple datasets (otbr-cli) ───
-  {
-    source: "otbr-cli",
-    value: "networkdiag_multicast_network_only",
-    label: "networkdiag topo (multicast)",
-    files: ["td-otbr-cli-networkdiag-topology-multicast-network.json"],
-    mergeStrategy: "none",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links"
-  },
-
-  {
-    source: "otbr-cli",
-    value: "networkdiag_only",
-    label: "networkdiag topo (poll devices)",
-    files: ["td-otbr-cli-networkdiag-topology-poll.json"],
-    mergeStrategy: "none",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links"
-  },
 
   // ── Multi-file merged (otbr-cli) ──
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast",
-    label: "meshdiag, networkdiag (multicast)",
+    label: "meshdiag, networkdiag-multicast (rapid, secs)",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-topology-multicast-network.json"
@@ -66,10 +32,26 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links"
   },
 
+  // ── Multi-file merged (otbr-cli, mdns) ──
+  {
+    source: "otbr-cli",
+    value: "merged_otbr_cli_meshdiag_networkdiag_multicast_mdns",
+    label: "meshdiag, networkdiag-multicast, mdns (rapid, secs)",
+    files: [
+      "td-otbr-cli-meshdiag-topology.json",
+      "td-otbr-cli-networkdiag-topology-multicast-network.json",
+      "td-mdns-scopes-thread.json",
+    ],
+    mergeStrategy: "by-identity",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  },
+
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast",
-    label: "mesh, network (multicast), neighbors, children",
+    label: "otbr-cli-*, networkdiag-multicast (rapid, secs)",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-topology-multicast-network.json",
@@ -80,12 +62,44 @@ export const DATASET_REGISTRY = [
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
     defaultLinkFilter: "all_links"
+  },  
+
+  {
+    source: "otbr-cli",
+    value: "merged_otbr_cli_all_multicast_mdns",
+    label: "otbr-cli-*, networkdiag-multicast, mdns (rapid, secs)",
+    files: [
+      "td-otbr-cli-meshdiag-topology.json",
+      "td-otbr-cli-networkdiag-topology-multicast-network.json",
+      "td-otbr-cli-meshdiag-router-neighbortables.json",
+      "td-otbr-cli-meshdiag-router-childtables.json",
+      "td-mdns-scopes-thread.json"
+    ],
+    mergeStrategy: "by-identity",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  }, 
+
+  // ── Multi-file merged (otbr-cli) ──
+  {
+    source: "otbr-cli",
+    value: "merged_otbr_cli_meshdiag_networkdiag_poll",
+    label: "meshdiag, networkdiag-poll (detailed, mins)",
+    files: [
+      "td-otbr-cli-meshdiag-topology.json",
+      "td-otbr-cli-networkdiag-topology-poll.json"
+    ],
+    mergeStrategy: "by-identity",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
   },
 
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all",
-    label: "mesh, network (poll), neighbors, children",
+    label: "otbr-cli-*, network-poll (detailed, mins)",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-topology-poll.json",
@@ -100,8 +114,60 @@ export const DATASET_REGISTRY = [
 
   {
     source: "otbr-cli",
+    value: "merged_otbr_cli_poll_all_mdns",
+    label: "otbr-cli-*, network-poll, mdns (detailed, mins),",
+    files: [
+      "td-otbr-cli-meshdiag-topology.json",
+      "td-otbr-cli-networkdiag-topology-poll.json",
+      "td-otbr-cli-meshdiag-router-neighbortables.json",
+      "td-otbr-cli-meshdiag-router-childtables.json",
+      "td-mdns-scopes-thread.json"
+    ],
+    mergeStrategy: "by-identity",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  },
+
+  // ── Single-file simple datasets (otbr-cli) ───  
+  {
+    source: "otbr-cli",
+    value: "meshdiag_only",
+    label: "meshdiag topo (rapid, secs)",
+    files: ["td-otbr-cli-meshdiag-topology.json"],
+    mergeStrategy: "none",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links"
+  },
+
+  // ── Single-file simple datasets (otbr-cli) ───
+  {
+    source: "otbr-cli",
+    value: "networkdiag_multicast_network_only",
+    label: "networkdiag-multicast (rapid, secs)",
+    files: ["td-otbr-cli-networkdiag-topology-multicast-network.json"],
+    mergeStrategy: "none",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links"
+  },
+
+  {
+    source: "otbr-cli",
+    value: "networkdiag_only",
+    label: "networkdiag-poll (detailed, mins)",
+    files: ["td-otbr-cli-networkdiag-topology-poll.json"],
+    mergeStrategy: "none",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links"
+  },
+
+  {
+    source: "otbr-cli",
     value: "router_neighbortables",
-    label: "mesh neighbors",
+    label: "meshdiag neighbors",
     files: ["td-otbr-cli-meshdiag-router-neighbortables.json"],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
@@ -111,7 +177,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "router_childtables",
-    label: "mesh children",
+    label: "meshdiag children",
     files: ["td-otbr-cli-meshdiag-router-childtables.json"],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
@@ -143,23 +209,6 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links"
   },
 
-  {
-    source: "merged",
-    value: "merged_otbr_cli_all_mdns",
-    label: "otbr-cli, mdns",
-    files: [
-      "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-poll.json",
-      "td-otbr-cli-meshdiag-router-neighbortables.json",
-      "td-otbr-cli-meshdiag-router-childtables.json",
-      "td-mdns-scopes-thread.json"
-    ],
-    mergeStrategy: "by-identity",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links"
-  },
-
   // ── Single-file simple datasets (mdns) ───
   {
     source: "mdns",
@@ -183,7 +232,7 @@ export const DATASET_REGISTRY = [
     defaultView: "table"
   },
 
-   {
+  {
     source: "mdns",
     value: "mdns_scopes_hap",
     label: "HAP scope",
@@ -193,7 +242,7 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links",
     defaultView: "table"
   },
-  
+
   {
     source: "mdns",
     value: "mdns_scopes_matter",
