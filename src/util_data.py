@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from const import (
+from td_const import (
     TD_DATA_DIR_DOCKER_DEFAULT,
     TD_DATA_DIR_ENV_VAR,
     TD_DATA_DIR_LOCAL_DEFAULT,

@@ -13,7 +13,7 @@ import util_network
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 from util_data import resolve_data_file_path, resolve_data_dir, save_json_atomic
-from const import TD_DATA_DIR_ARG_HELP
+from td_const import TD_DATA_DIR_ARG_HELP
 
 TD_MDNS_BROWSE_TIMEOUT_ENV_NAME = "TD_MDNS_BROWSE_TIMEOUT"
 # seconds (default if env var not set)"

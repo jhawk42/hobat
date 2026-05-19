@@ -8,7 +8,7 @@ import logging
 
 from copy import deepcopy
 from typing import Sequence
-from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
 import util_ot_ctl
 import util_network
 from otbr_cli_router_table import fetch_and_parse_router_table

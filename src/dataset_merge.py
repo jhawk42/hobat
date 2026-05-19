@@ -12,7 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Sequence
 
-from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
 from util_data import resolve_data_dir, save_json_atomic
 
 
@@ -24,10 +24,11 @@ PRIORITY_FIELDS = [
     "name",
     "room",
     "ver",
+    "thread_version",
+    "thread_stack_version",
     "type",
     "br",
     "mode.device",
-    "thread_stack_version",
     "total_children",
     "total_links",
     "mac_counters.ifinerrors_pct",

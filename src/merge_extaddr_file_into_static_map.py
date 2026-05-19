@@ -15,7 +15,7 @@ import logging
 import sys
 from pathlib import Path
 
-from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
 

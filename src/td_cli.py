@@ -7,7 +7,7 @@ import time
 import logging
 import argparse
 from typing import Sequence
-from const import TD_DATA_DIR_ARG, TD_DATA_DIR_ARG_HELP, TD_DATA_DIR_RESOLUTION_SUMMARY
+from td_const import TD_DATA_DIR_ARG, TD_DATA_DIR_ARG_HELP, TD_DATA_DIR_RESOLUTION_SUMMARY
 
 # Note: The imports below are organized to reflect the different components of the project, such as OTBR CLI parsing, REST API interactions, dataset merging, and the web interface. This structure helps maintain clarity and separation of concerns within the codebase.
 import util_network

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence, Tuple
 
-from const import TD_DATA_DIR_ARG_HELP
+from td_const import TD_DATA_DIR_ARG_HELP
 from otbr_restapi_client import (
     RECOMMENDED_DIAGNOSTIC_TLVS,
     OTBRActionFailedError,

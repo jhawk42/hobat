@@ -1,7 +1,7 @@
 import json
 import logging
 
-from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
 
 def load_extaddr_device_label_map(path=EXTADDR_DEVICE_LABEL_MAP_FILENAME):

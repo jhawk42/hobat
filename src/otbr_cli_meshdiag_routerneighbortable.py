@@ -4,9 +4,10 @@ import re
 import logging
 from typing import Sequence
 
-from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from otbr_cli_router_table import fetch_and_parse_router_table
 from extaddr_device_label_map import load_extaddr_device_label_map
+import util_network
 from util_ot_ctl import exec_ot_ctl
 from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
@@ -85,6 +86,9 @@ def fetch_meshdiag_router_neighbor_table_for_device(rloc16, router=None, extaddr
                 if extaddr_map
                 else "Unknown",
                 "ver": int(match.group(3)),
+                "thread_version": util_network.decode_short_thread_version(
+                    int(match.group(3))                )
+                if match.group(3) else "Unknown",
             }
             continue
 

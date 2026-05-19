@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Any, Sequence
 from util_data import resolve_data_file_path, resolve_data_dir
-from const import TD_DATA_DIR_ARG_HELP
+from td_const import TD_DATA_DIR_ARG_HELP
 
 from otbr_restapi_client import (
     

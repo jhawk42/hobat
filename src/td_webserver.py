@@ -19,7 +19,7 @@ from util_data import (
     format_data_dir_log_message,
     resolve_data_dir_with_source,
 )
-from const import TD_DATA_DIR_ARG_HELP
+from td_const import TD_DATA_DIR_ARG_HELP
 
 TD_WEB_HOST_ADDR = ""
 TD_WEB_HOST_PORT = 9165

@@ -4,7 +4,7 @@ import os
 import re
 from typing import Sequence
 
-from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from extaddr_device_label_map import load_extaddr_device_label_map
 from otbr_cli_router_table import fetch_and_parse_router_table
 from util_ot_ctl import exec_ot_ctl

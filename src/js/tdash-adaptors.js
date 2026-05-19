@@ -140,6 +140,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
       extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
+      thread_version: toText(rawNode.thread_version) || (existing ? existing.thread_version : ''),
       thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
       ipv6_addrs: mergedIpv6,
       total_children: Number.isFinite(rawNode.total_children)
@@ -376,6 +377,7 @@ export function adaptEve(fileMap) {
       source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
       extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
+      thread_version: toText(rawNode.thread_version) || (existing ? existing.thread_version : ''),
       thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
       total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
       total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
@@ -617,6 +619,7 @@ export function adaptMergedDetailed(fileMap) {
       source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
       extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
+      thread_version: toText(rawNode.thread_version) || (existing ? existing.thread_version : ''),
       thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
       total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
       total_links: mergedTotalLinks,

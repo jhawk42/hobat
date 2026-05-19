@@ -1,3 +1,5 @@
+from unittest import case
+
 import util_ot_ctl
 import logging
 
@@ -14,6 +16,24 @@ def is_router(rloc16):
         True if the rloc16 value indicates a router (ends with "00"), False otherwise.
     """
     return rloc16.lower().endswith("00")
+
+def decode_short_thread_version(version):
+    """
+    Decodes a short Thread version number into a human-readable format.
+    """
+
+    match version:
+        case 2:
+            return "1.1"
+        case 3:
+            return "1.2"
+        case 4:
+            return "1.3"
+        case 5:
+            return "1.4"
+        case _:
+            return f"unknown"
+
 
 def _parse_prefix_token(output):
     """Extracts the first token (prefix) from ot-ctl command output."""

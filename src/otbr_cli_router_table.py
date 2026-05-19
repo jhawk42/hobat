@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Sequence
 
-from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from extaddr_device_label_map import load_extaddr_device_label_map
 import util_ot_ctl
 from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic

@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Sequence
 
-from const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 import util_ot_ctl
 import util_network
 from extaddr_device_label_map import load_extaddr_device_label_map
@@ -70,6 +70,8 @@ def parse_meshdiag_topology_output(
             router["rloc16"] = match.group(2)
             router["extaddr"] = match.group(3)
             router["ver"] = match.group(4) if match.group(4) else None
+            router["thread_version"] = util_network.decode_short_thread_version(
+                int(router["ver"])) if router["ver"] else "Unknown"
 
             # Check for BR (border router) flag
             router["br"] = "- br" in first_line or "br -" in first_line
