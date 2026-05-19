@@ -61,10 +61,13 @@ tdash/
 │   ├── mdns_thread_scopes.py   # mDNS discovery collector
 │   ├── eve_parse.py            # Eve topology parser
 │   ├── dataset_merge.py        # Dataset merge engine
+│   ├── merge_extaddr_file_into_static_map.py  # Admin utility: merge extaddr entries into static label map
 │   ├── extaddr_device_label_map.py  # Static extaddr→label loader
-│   ├── const.py                # Shared constants (data-dir defaults, env var names, filenames)
+│   ├── td_const.py             # Shared constants (data-dir defaults, env var names, filenames)
 │   ├── util_data.py            # Data-directory resolution utilities
 │   ├── util_*.py               # Other shared utility modules
+│   ├── profile_wrapper_td_cli.py      # cProfile wrapper for td_cli.py
+│   ├── profile_wrapper_td_webserver.py # cProfile wrapper for td_webserver.py
 │   ├── td-fetch.sh             # Shell helper for fetching data
 │   ├── td-monitor-data.sh      # Shell helper for monitoring data files
 │   └── td-scratch.sh           # Scratch/dev shell script
@@ -92,6 +95,165 @@ This codebase uses a strict naming split so the data source is visible from the 
 | `mdns_` | Zeroconf/mDNS discovery collectors | `mdns_thread_scopes.py` |
 | `eve_` | Eve topology parsing helpers | `eve_parse.py` |
 | `util_` | Shared helpers used across collectors/parsers | `util_network.py` |
+
+---
+
+## Architecture: Layers and Data Flow
+
+### How the Code Is Layered
+
+The Python codebase has six distinct layers, each with a single responsibility.  Dependencies flow strictly downward — upper layers call lower layers, never the reverse.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Layer 6 — Browser Dashboard (JS, not Python)                           │
+│  tdash.html + js/*.js + tdash.css                                       │
+│  Fetch → merge → adapt → render (topology graph / sortable table)       │
+└──────────────────────────────────┬──────────────────────────────────────┘
+                                   │ HTTP (fetch API)
+┌──────────────────────────────────▼──────────────────────────────────────┐
+│  Layer 5 — HTTP Server  (td_webserver.py)                               │
+│  aiohttp + aiohttp_cors; routes: /, /api/data/{f}, /api/job/{id}, /**   │
+│  • FILE_ACTION_MAP: filename → FileAction (max_age_s, action, cost)     │
+│  • Cache gating: freshness check → serve 200/304 or regenerate          │
+│  • Short-cost (≤300 s): sync subprocess → 200                           │
+│  • Long-cost (>300 s) or force_async: background Task → 202 + polling   │
+│  • ETag / If-None-Match / If-Modified-Since conditional GET support     │
+│  • Per-source asyncio.Lock serialises concurrent subprocess calls       │
+│  • _job_registry TTL cleanup (evict after 15 min)                       │
+└──────────────────────────────────┬──────────────────────────────────────┘
+                                   │ subprocess (sys.executable td_cli.py)
+┌──────────────────────────────────▼──────────────────────────────────────┐
+│  Layer 4 — CLI Dispatcher  (td_cli.py)                                  │
+│  argparse tree: otbr-cli / mdns / otbr-restapi / process-eve /          │
+│  merge-dataset → forwards --datadir to every subcommand module          │
+└──┬───────────────┬───────────────┬───────────────┬──────────────────────┘
+   │               │               │               │
+┌──▼──────────┐ ┌──▼──────────┐ ┌──▼──────────┐ ┌──▼──────────────────────┐
+│ Layer 3a    │ │ Layer 3b    │ │ Layer 3c    │ │ Layer 3d                │
+│ ot-ctl CLI  │ │ REST API    │ │ mDNS / Eve  │ │ Data Processing         │
+│ Collectors  │ │ Collectors  │ │ Collectors  │ │ (Merge / Parse)         │
+│             │ │             │ │             │ │                         │
+│ otbr_cli_   │ │ otbr_       │ │ mdns_       │ │ dataset_merge.py        │
+│ router_     │ │ restapi_    │ │ thread_     │ │ merge_extaddr_file_     │
+│ table.py    │ │ download.py │ │ scopes.py   │ │ into_static_map.py      │
+│ otbr_cli_   │ │ otbr_       │ │ eve_        │ │ extaddr_device_         │
+│ meshdiag_   │ │ restapi_    │ │ parse.py    │ │ label_map.py            │
+│ *.py        │ │ client.py   │ │             │ │                         │
+│ otbr_cli_   │ │ otbr_       │ │             │ │                         │
+│ networkdiag │ │ restapi_    │ │             │ │                         │
+│ _topology   │ │ cli.py      │ │             │ │                         │
+└──┬──────────┘ └──┬──────────┘ └─────────────┘ └─────────────────────────┘
+   │               │
+┌──▼───────────────▼──────────────────────────────────────────────────────┐
+│  Layer 2 — Shared Utilities                                             │
+│  td_const.py      — project-wide constants                              │
+│  util_data.py     — data-dir resolution, atomic JSON writes             │
+│  util_ot_ctl.py   — docker exec / local ot-ctl subprocess wrapper       │
+│  util_network.py  — IPv6 / RLOC16 / prefix helpers                     │
+│  util_convert.py  — base64 ↔ hex for extended addresses                │
+└──────────────────────────────────┬──────────────────────────────────────┘
+                                   │ reads / writes
+┌──────────────────────────────────▼──────────────────────────────────────┐
+│  Layer 1 — Data Directory  (data/ on disk)                              │
+│  JSON snapshot files written by collectors; read by the server/browser  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+| Layer | Python files | Responsibility |
+|---|---|---|
+| **1 — Data Directory** | `data/` (files on disk) | JSON snapshots: written by collectors, read by server and browser |
+| **2 — Shared Utilities** | `td_const.py`, `util_data.py`, `util_ot_ctl.py`, `util_network.py`, `util_convert.py` | Constants, data-dir resolution, subprocess wrapper, network math |
+| **3a — ot-ctl Collectors** | `otbr_cli_*.py` | Run `ot-ctl` inside the OTBR Docker container; parse output; write JSON |
+| **3b — REST API Collectors** | `otbr_restapi_*.py` | HTTP calls to OTBR REST API; flatten JSON:API envelopes; write JSON |
+| **3c — mDNS / Eve Collectors** | `mdns_thread_scopes.py`, `eve_parse.py` | Zeroconf browse and Eve App export parsing; write JSON |
+| **3d — Data Processing** | `dataset_merge.py`, `merge_extaddr_file_into_static_map.py`, `extaddr_device_label_map.py` | Normalise identifiers, merge multi-source records, manage label map |
+| **4 — CLI Dispatcher** | `td_cli.py` | `argparse` tree; forward `--datadir`; call Layer 3 `main()` functions |
+| **5 — HTTP Server** | `td_webserver.py` | aiohttp server; cache gating; subprocess dispatch of Layer 4 |
+| **6 — Browser Dashboard** | `tdash.html`, `js/*.js`, `tdash.css` | Fetch JSON via Layer 5; merge, adapt, and render in-browser |
+
+### How Data Flows Through the Layers
+
+#### Offline CLI path (direct use)
+
+```
+User / shell script
+    │  python td_cli.py otbr-cli meshdiag topology --datadir ./data
+    ▼
+Layer 4 — td_cli.py (argparse dispatch)
+    │  calls otbr_cli_meshdiag_topology.main(["--datadir", "./data"])
+    ▼
+Layer 3a — otbr_cli_meshdiag_topology.py
+    │  calls util_ot_ctl.exec_ot_ctl("meshdiag topology ip6-addrs children")
+    ▼
+Layer 2 — util_ot_ctl.py
+    │  docker exec otbr sh -c "ot-ctl meshdiag topology ip6-addrs children"
+    ▼
+OTBR Docker container  →  raw text output
+    │  returned to Layer 3a parser
+    ▼
+Layer 3a — parse text → list of dicts → save_json_atomic()
+    ▼
+Layer 1 — data/td-otbr-cli-meshdiag-topology.json  (written atomically)
+```
+
+#### Server-driven path (browser Fetch button)
+
+```
+Browser  →  GET /api/data/td-otbr-cli-meshdiag-topology.json
+    ▼
+Layer 5 — td_webserver.py handle_data_api()
+    │  _resolve_and_validate() → FILE_ACTION_MAP lookup
+    │  _should_regenerate()    → mtime vs max_age_s
+    │  if stale / absent:
+    │    short-cost  → _dispatch_short_cost()  → await asyncio subprocess
+    │    long-cost   → _dispatch_long_cost()   → 202 + background Task
+    │  ETag / If-None-Match check → 304 if unchanged
+    ▼
+Layer 4 — td_cli.py (subprocess)
+    │  dispatches to Layer 3 as in the offline path above
+    ▼
+Layer 1 — data/*.json  (file written; server reads it back)
+    ▼
+Layer 5 — _build_file_response()  →  200 JSON + Cache-Control + ETag
+    ▼
+Browser  →  tdash-dataset.js loadDataset()
+    │  mergeRowsByIdentity() / mergeRowsByRloc16()  (tdash-merge.js)
+    │  runAdaptor()  →  { nodeData, edgeData }      (tdash-adaptors.js)
+    │  new vis.Network() / renderTable()             (topology/table renderer)
+    ▼
+Interactive topology graph or sortable table in the browser
+```
+
+#### Merge / label-enrichment path (offline admin)
+
+```
+python dataset_merge.py --datadir ./data
+    │  loads multiple JSON files from Layer 1
+    │  normalize_identifiers() → canonical rloc16 / extaddr / omr_ipv6_addr
+    │  derive_mode_device()    → infer FTD/MTD from various field shapes
+    │  build_merged_records()  → first-value-wins, conflict log
+    ▼
+Layer 1 — data/td-merged-topology-all.json
+
+python merge_extaddr_file_into_static_map.py --topology td-mdns-scopes-thread.json
+    │  reads topology file + td-static-extaddr-device-label.json
+    │  adds missing extaddr entries (prefers device_label, falls back to name)
+    ▼
+Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
+```
+
+### Key Design Decisions
+
+| Decision | Where enforced | Why |
+|---|---|---|
+| `td_` prefix on project-level files | `td_const.py`, `td_cli.py`, `td_webserver.py` | Distinguishes project entry-points from collector/utility modules |
+| Atomic JSON writes (`save_json_atomic`) | `util_data.py` | Prevents partial files being read by the server when a collector is interrupted |
+| Per-source `asyncio.Lock` in the server | `td_webserver.py` `_source_locks` | Prevents two `otbr-cli` (or `mdns`) subprocesses from hitting the hardware simultaneously |
+| `force_async=True` for 30–300 s actions | `FILE_ACTION_MAP` entries | Avoids blocking an aiohttp worker for browser-unsafe durations without hitting the long-cost threshold |
+| ETag + conditional GET | `td_webserver.py` `_build_file_response` | Allows browsers to revalidate cheaply without re-downloading unchanged JSON |
+| `TD_OTBR_CONTAINER_USE=0` | `util_ot_ctl.py` | Allows running `ot-ctl` locally without Docker (development / bare-metal OTBR) |
+| `_cleanup_job_registry_loop` | `td_webserver.py` | Prevents unbounded growth of `_job_registry` in long-lived server processes |
 
 ---
 
@@ -135,17 +297,25 @@ This codebase uses a strict naming split so the data source is visible from the 
 
 | File | Purpose |
 |---|---|
-| `dataset_merge.py` | Reads multiple JSON data files (OTBR CLI, REST API, Eve) and merges all records into a single output file.  Supports three merge strategies: `none` (pass-through), `by-rloc16`, and `by-identity` (matches on RLOC16, canonical `extaddr`, or `omr_ipv6_addr`).  Tracks source provenance in `_source_files` and records conflicts without overwriting existing values. |
+| `dataset_merge.py` | Reads multiple JSON data files (OTBR CLI, REST API, Eve) and merges all records into a single output file.  Supports three merge strategies: `none` (pass-through), `by-rloc16`, and `by-identity` (matches on RLOC16, canonical `extaddr`, or `omr_ipv6_addr`).  Tracks source provenance in `_source_files` and records conflicts without overwriting existing values.  Also provides `normalize_identifiers()` (canonicalises RLOC16, extaddr aliases, and OMR address) and `derive_mode_device()` (infers FTD/MTD from multiple field shapes). |
+| `merge_extaddr_file_into_static_map.py` | Admin utility that reads a topology JSON file (e.g. an mDNS or networkdiag output) and adds any previously unseen `extaddr` entries to `td-static-extaddr-device-label.json`.  Falls back from `device_label` to `name` for the label text.  Accepts `--merge-name-override` to overwrite existing `Unknown` labels with the topology name. |
 
 ### Utilities
 
 | File | Purpose |
 |---|---|
-| `const.py` | Shared constants used across all modules: `TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`, `TD_DATA_DIR_RESOLUTION_SUMMARY`, `TD_DATA_DIR_ARG_HELP`, and `EXTADDR_DEVICE_LABEL_MAP_FILENAME`. |
+| `td_const.py` | Shared constants used across all modules: `TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`, `TD_DATA_DIR_RESOLUTION_SUMMARY`, `TD_DATA_DIR_ARG_HELP`, and `EXTADDR_DEVICE_LABEL_MAP_FILENAME`.  The `td_` prefix aligns this project-level file with `td_cli.py` and `td_webserver.py`. |
 | `util_data.py` | Data-directory resolution utilities.  Provides `TDDataDirSource` (enum), `TDDataDirResolution` (dataclass), `parse_datadir_from_argv()`, `resolve_data_dir()`, `resolve_data_dir_with_source()`, `ensure_data_dir_exists()`, `format_data_dir_log_message()`, `data_file_path()`, `resolve_data_file_path()`, and `save_json_atomic()`.  Implements the `TD_DATA_DIR` env → `--datadir` CLI → `/data` → `./data` precedence chain. |
-| `util_ot_ctl.py` | Low-level wrapper that runs `ot-ctl <command>` inside a named Docker container via `docker exec`.  The container name defaults to `"otbr"` and can be overridden with the `TD_OTBR_CONTAINER_NAME` environment variable. |
+| `util_ot_ctl.py` | Low-level wrapper that runs `ot-ctl <command>` inside a named Docker container via `docker exec`.  The container name defaults to `"otbr"` and can be overridden with `TD_OTBR_CONTAINER_NAME`.  Docker container use itself can be disabled via `TD_OTBR_CONTAINER_USE=0`, which falls back to running `ot-ctl` locally without `docker exec`.  The subprocess timeout defaults to 30 s and is overridable via `TD_OT_CTL_TIMEOUT`. |
 | `util_network.py` | Network helpers: mesh-local and OMR prefix retrieval, IPv6 address prefix formatting, RLOC16 manipulation, OMR address matching in an address list, and full `get_network_dataset_info()` aggregator. |
 | `util_convert.py` | Base64 ↔ hex conversion for 64-bit extended addresses (handles JSON-escaped slashes and optional byte-order reversal for 802.15.4 little-endianness). |
+
+### Development / Profiling Wrappers
+
+| File | Purpose |
+|---|---|
+| `profile_wrapper_td_cli.py` | Runs `td_cli.main()` under `cProfile`.  Dumps a `.prof` file (`profile_td_cli.prof`) and prints the top-20 cumulative hotspots to stderr.  Invoked like `td_cli.py` but with profiling active. |
+| `profile_wrapper_td_webserver.py` | Runs `td_webserver.main()` under `cProfile`.  Dumps `profile_td_webserver.prof` and prints the top-20 hotspots.  Used for benchmarking server startup or request handling. |
 
 ### Web Dashboard and Server
 
@@ -194,7 +364,7 @@ All JSON data files (collected snapshots, merged output, static label map) are r
 
 ### Implementation
 
-- `const.py` defines the constant names (`TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`).
+- `td_const.py` defines the constant names (`TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`).
 - `util_data.py` implements `resolve_data_dir_with_source()` (returns a `TDDataDirResolution` dataclass with `path` and `source`) and the simpler `resolve_data_dir()` wrapper.  It also provides `data_file_path()` and `resolve_data_file_path()` for locating individual JSON files within the resolved directory.
 - `td_webserver.py` exposes `/api/data/{filename}` which checks the resolved data directory for freshness and invokes `td_cli.py` subprocesses to regenerate stale files on demand.
 
@@ -240,6 +410,20 @@ Defined in `td_webserver.py`.  Each entry is a `FileAction` dataclass:
 | `action` | `"STATIC"` \| `list[str]` | `"STATIC"` = externally managed; list = CLI args forwarded to `td_cli.py` |
 | `action_cost_s` | `int` | Estimated wall-clock seconds for the action; determines 200 vs 202 response |
 | `force_async` | `bool` | When `True`, always dispatches via 202 + polling regardless of `action_cost_s` (used for actions whose worst-case duration exceeds the browser-safe synchronous limit but is under the 300 s threshold) |
+
+### HTTP Cache Revalidation (ETag / Conditional GET)
+
+`_build_file_response()` computes an ETag as `"{mtime_ns:x}-{size:x}"` and sets `Last-Modified`.  Browsers and API clients can send `If-None-Match` or `If-Modified-Since`; the server returns **304 Not Modified** (no body retransmitted) when the cached copy is still valid.  `If-None-Match` takes precedence over `If-Modified-Since` per RFC 9110.
+
+Static assets (`tdash.html`, `js/*.js`, `tdash.css`) receive `Cache-Control: no-cache` from the `_set_static_cache_headers` middleware so browsers always revalidate via ETag before serving a cached file.
+
+### CORS
+
+CORS is configured via `aiohttp_cors` (an explicit third-party dependency).  The `/api/data/{filename}` and `/api/job/{job_id}` routes are wrapped to allow all origins (`*`) with any request headers and exposed response headers.  Static routes are same-origin by design and not CORS-wrapped.
+
+### Job Registry TTL Cleanup
+
+A background asyncio task (`_cleanup_job_registry_loop`) runs every 60 s and evicts completed or errored jobs older than 15 minutes (`_JOB_TTL_S = 900`) from `_job_registry`.  On server shutdown, the cleanup task and all in-flight background job tasks are cancelled and awaited via `app.on_shutdown`.
 
 ---
 
@@ -319,10 +503,8 @@ The full set of pre-configured datasets is listed below, grouped by category:
 | **Table** | Flat [sortable](https://github.com/tofsjonas/sortable) table of all rows in the loaded dataset.  Click any column header to sort. |
 | **Physics** | Toggles the vis-network physics simulation on/off (spring-force layout vs. fixed positions).  Topology view only. |
 | **Auto Zoom** | Toggles automatic fit-to-view when a dataset loads.  Topology view only. |
-| **Animation** | Toggles vis-network fit animation.  Disabled by default — fit-to-view is instant on load.  Topology view only. |
 | **Legend** | Toggles the link-quality colour/style legend panel.  Starts active (legend visible).  Topology view only. |
-| **Enhance** | Toggles device-label enrichment — re-applies the static `extaddr → device_label` map to node labels.  Starts active (enrichment on). |
-| **More Info** | Toggles expanded column display in Table view — shows all discovered columns rather than the priority subset.  Table view only. |
+| **Advanced** | Toggles expanded column display in Table view — shows all discovered columns rather than the priority subset.  Table view only. |
 | **lab** | Placeholder lab/debug toggle (wired to the DOM but no handler yet). |
 
 ### Node Filter
@@ -612,86 +794,6 @@ python src/td_cli.py otbr-restapi client --host 127.0.0.1 --port 18081 node get
 | `by-identity` | Merge when any canonical identity matches (checked in order: `rloc16` → canonical `extaddr` → `omr_ipv6_addr`) |
 
 Identity matching is case-insensitive and ignores leading/trailing whitespace.  Empty identifiers are never used for matching.
-
----
-
-## Animation Button — Call Chain
-
-The **Animation** button in `tdash.html` controls whether vis-network uses a smooth animated transition when fitting the graph to the viewport.
-
-### 1. HTML button (`tdash.html:34`)
-
-```html
-<button id="btn-animation" title="Toggle animation">Animation</button>
-```
-
-Starts without `active` class (animation **OFF** by default).
-
-### 2. Click handler wiring (`tdash-ui.js:205`)
-
-```js
-document.getElementById('btn-animation')
-  .addEventListener('click', () => setAnimation(!isAnimationEnabled()));
-```
-
-On click, calls the local `setAnimation(bool)` with the toggled value.
-
-### 3. `setAnimation()` (`tdash-ui.js:194`)
-
-```js
-function setAnimation(enabled) {
-  setAnimationEnabled(enabled);              // writes state to renderer module
-  const btn = document.getElementById('btn-animation');
-  if (enabled) btn.classList.add('active');
-  else         btn.classList.remove('active');
-}
-```
-
-Updates the button's visual `active` class, then delegates state storage to the renderer.
-
-### 4. State stored in renderer (`tdash-topology-renderer.js:31`)
-
-```js
-let _animationEnabled = false;   // module-level flag, OFF by default
-
-export function setAnimationEnabled(val) { _animationEnabled = val; }
-export function isAnimationEnabled()     { return _animationEnabled; }
-```
-
-### 5. vis.js consumption (`tdash-topology-renderer.js:321`)
-
-`_animationEnabled` is read in `fitIfEnabled()`, stored in `_topologyFilterHandlers`, and called after every dataset load or filter change:
-
-```js
-fitIfEnabled: () => {
-  if (_autoZoomEnabled && _visNetwork) {
-    requestAnimationFrame(() => {
-      if (_visNetwork) {
-        _visNetwork.fit({ animation: _animationEnabled });  // vis.js call
-      }
-    });
-  }
-}
-```
-
-`_visNetwork.fit({ animation: true })` tells vis-network to **smoothly pan/zoom** the graph to fit all visible nodes.  When `animation: false`, the fit is **instant** with no transition.
-
-### Visibility scoping
-
-The button is shown/hidden when switching views (`tdash-ui.js:110`):
-
-- `topology` view → `display: inline-block`
-- `table` view → `display: none`
-
-### Layer summary
-
-| Layer | File | Role |
-|---|---|---|
-| Button `#btn-animation` | `tdash.html:34` | Toggle UI element, starts without `active` (OFF) |
-| Click handler + `setAnimation()` | `tdash-ui.js:194,205` | Toggles `active` class, calls renderer setter |
-| `_animationEnabled` flag | `tdash-topology-renderer.js:31` | Module-level boolean state |
-| `setAnimationEnabled()` / `isAnimationEnabled()` | `tdash-topology-renderer.js:44,50` | Exported getter/setter |
-| `_visNetwork.fit({ animation: bool })` | `tdash-topology-renderer.js:325` | Actual vis.js API call — animated vs instant fit |
 
 ---
 
