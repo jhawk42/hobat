@@ -84,7 +84,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     "<li>Click a node to view its properties.</li>";
   document
     .querySelectorAll(
-      "#identity-list, #highlights-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
+      "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list, #table-identity-list, #table-highlights-list, #table-network-list, #table-connections-list, #table-mdns-list, #table-routes-links-list, #table-neighbors-list, #table-children-list, #table-counters-list, #table-details-list",
     )
     .forEach((list) => {
       list.innerHTML = "";
@@ -270,7 +270,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
         "<li>Click a node to view its properties.</li>";
       document
         .querySelectorAll(
-          "#identity-list, #highlights-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
+          "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list, #table-identity-list, #table-highlights-list, #table-network-list, #table-connections-list, #table-mdns-list, #table-routes-links-list, #table-neighbors-list, #table-children-list, #table-counters-list, #table-details-list",
         )
         .forEach((list) => {
           list.classList.add("hidden");
@@ -284,7 +284,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
         "<li>No details available for selected node.</li>";
       document
         .querySelectorAll(
-          "#identity-list, #highlights-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
+          "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list, #table-identity-list, #table-highlights-list, #table-network-list, #table-connections-list, #table-mdns-list, #table-routes-links-list, #table-neighbors-list, #table-children-list, #table-counters-list, #table-details-list",
         )
         .forEach((list) => {
           list.classList.add("hidden");
@@ -322,7 +322,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
         "<li>No details available for selected node.</li>";
       document
         .querySelectorAll(
-          "#identity-list, #highlights-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
+          "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list, #table-identity-list, #table-highlights-list, #table-network-list, #table-connections-list, #table-mdns-list, #table-routes-links-list, #table-neighbors-list, #table-children-list, #table-counters-list, #table-details-list",
         )
         .forEach((list) => {
           list.classList.add("hidden");

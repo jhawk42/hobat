@@ -513,6 +513,7 @@ export function populateNodeDetailsLists(details, listIdPrefix = "") {
   const listIds = [
     `${listIdPrefix}identity-list`,
     `${listIdPrefix}highlights-list`,
+    `${listIdPrefix}network-list`,
     `${listIdPrefix}connections-list`,
     `${listIdPrefix}mdns-list`,
     `${listIdPrefix}routes-links-list`,
