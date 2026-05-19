@@ -7,9 +7,9 @@ export const MERGE_STRATEGIES = Object.freeze({
 });
 
 export const MERGE_IDENTITY_FIELDS = Object.freeze({
-  rloc16: "rloc16",
   extaddrAliases: ["extaddr", "extAddress", "Extended MAC"],
   omr_ipv6_addr: "omr_ipv6_addr",
+  rloc16: "rloc16",
 });
 
 // ── Link filter constants ─────────────────────────────────────────────────────

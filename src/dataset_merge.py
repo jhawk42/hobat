@@ -46,9 +46,9 @@ MERGE_STRATEGIES = {
 }
 
 MERGE_IDENTITY_FIELDS = {
-    "rloc16": "rloc16",
     "extaddr_aliases": ("extaddr", "extAddress", "Extended MAC"),
     "omr_ipv6_addr": "omr_ipv6_addr",
+    "rloc16": "rloc16",
 }
 
 DEFAULT_INPUT_FILES = [
@@ -397,11 +397,6 @@ def nested_get(record: dict[str, Any], dotted_key: str) -> Any:
 def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
     identities: dict[str, str] = {}
 
-    rloc16 = normalize_identifier_text(
-        record.get(MERGE_IDENTITY_FIELDS["rloc16"]))
-    if rloc16:
-        identities["rloc16"] = rloc16
-
     extaddr = get_canonical_extaddr(record)
     if extaddr:
         identities["extaddr"] = extaddr
@@ -409,6 +404,11 @@ def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
     omr = get_canonical_omr(record)
     if omr:
         identities["omr_ipv6_addr"] = omr
+
+    rloc16 = normalize_identifier_text(
+        record.get(MERGE_IDENTITY_FIELDS["rloc16"]))
+    if rloc16:
+        identities["rloc16"] = rloc16
 
     return identities
 
@@ -425,12 +425,12 @@ def find_candidate_node_ids(
     extaddr = identity_values.get("extaddr")
     omr = identity_values.get("omr_ipv6_addr")
 
-    if isinstance(rloc16, str) and rloc16 in by_rloc16:
-        candidate_ids.add(by_rloc16[rloc16])
     if isinstance(extaddr, str) and extaddr in by_extaddr:
         candidate_ids.add(by_extaddr[extaddr])
     if isinstance(omr, str) and omr in by_omr:
         candidate_ids.add(by_omr[omr])
+    if isinstance(rloc16, str) and rloc16 in by_rloc16:
+        candidate_ids.add(by_rloc16[rloc16])
 
     return candidate_ids
 
@@ -448,15 +448,15 @@ def index_node_identity_values(
     extaddr = identity_values.get("extaddr")
     omr = identity_values.get("omr_ipv6_addr")
 
-    if isinstance(rloc16, str):
-        node["rloc16"] = rloc16
-        add_identifier(by_rloc16, rloc16, node_id)
     if isinstance(extaddr, str):
         node["extaddr"] = extaddr
         add_identifier(by_extaddr, extaddr, node_id)
     if isinstance(omr, str):
         node["omr_ipv6_addr"] = omr
         add_identifier(by_omr, omr, node_id)
+    if isinstance(rloc16, str):
+        node["rloc16"] = rloc16
+        add_identifier(by_rloc16, rloc16, node_id)
 
     return identity_values
 

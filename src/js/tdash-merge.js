@@ -42,8 +42,6 @@ export function normalizeRloc16(value) {
 
 export function getRowMergeIdentityKeys(row, strategy) {
   const keys = [];
-  const rloc16 = getCanonicalRloc16(row);
-  if (rloc16) keys.push(`rloc16:${rloc16}`);
 
   if (strategy === MERGE_STRATEGIES.byIdentity) {
     const extaddr = getCanonicalExtaddr(row);
@@ -51,6 +49,9 @@ export function getRowMergeIdentityKeys(row, strategy) {
     if (extaddr) keys.push(`extaddr:${extaddr}`);
     if (omr_ipv6_addr) keys.push(`omr_ipv6_addr:${omr_ipv6_addr}`);
   }
+
+  const rloc16 = getCanonicalRloc16(row);
+  if (rloc16) keys.push(`rloc16:${rloc16}`);
 
   return [...new Set(keys)];
 }
