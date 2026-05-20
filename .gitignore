@@ -103,5 +103,7 @@ docker-compose.*.local.yml
 script/
 downloads/
 plan/
+!plan/
+!plan/thread-docs-improvement-draft.md
 data/
 diag/
