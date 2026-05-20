@@ -729,8 +729,8 @@ python src/dataset_merge.py
 
 ```bash
 # Flattened client CLI (via td_cli.py)
-python src/td_cli.py otbr-restapi client node get
-python src/td_cli.py otbr-restapi client devices list --with-meta
+python src/td_cli.py otbr-restapi node get
+python src/td_cli.py otbr-restapi devices list --with-meta
 
 # Raw client CLI (via td_cli.py)
 python src/td_cli.py otbr-restapi --raw node get
@@ -780,7 +780,7 @@ python tests/td_mock_otbr_restapi_server.py --host 127.0.0.1 --port 18081
 # then override client defaults:
 python src/otbr_restapi_cli.py --host 127.0.0.1 --port 18081 node get
 # or via td_cli.py:
-python src/td_cli.py otbr-restapi client --host 127.0.0.1 --port 18081 node get
+python src/td_cli.py otbr-restapi --host 127.0.0.1 --port 18081 node get
 ```
 
 ---

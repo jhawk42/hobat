@@ -40,6 +40,8 @@ These options apply to every command and must be placed **before** the subcomman
 | `--datadir DIR` | auto | Data directory for file reads/writes (falls back to `$TD_DATA_DIR`, then `/data`, then `./data`) |
 | `--poll-interval FLOAT` | `2.0` | Seconds between action status polls |
 | `--poll-timeout FLOAT` | `120.0` | Max wall-clock seconds to wait for an action to complete |
+| `--no-progress` | off | Suppress per-device `[N/T] id → status (Xs)` progress lines on `fetch-all` commands |
+| `--no-auto-output` | off | Disable automatic output file naming; send JSON to stdout instead of `<datadir>/td-otbr-restapi-<resource>-<command>.json` |
 
 ---
 
@@ -227,9 +229,9 @@ devices fetch [--device-count N] [--task-timeout SECS] [--max-age SECS] [--max-r
 
 | Option | Default | Description |
 |---|---|---|
-| `--device-count` | `50` | Max devices to discover |
-| `--task-timeout` | `60` | Server-side task timeout in seconds |
-| `--max-age` | `30` | Max age of cached device entries in seconds |
+| `--device-count` | `200` | Max devices to discover |
+| `--task-timeout` | `300` | Server-side task timeout in seconds |
+| `--max-age` | `60` | Max age of cached device entries in seconds |
 | `--max-retries` | `5` | Max retries per device |
 
 **Examples:**
@@ -292,75 +294,103 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 
 #### `diagnostics fetch`
 
-Enqueue `getNetworkDiagnosticTask` for one device, wait for completion, and return the diagnostic result.
+Enqueue `getNetworkDiagnosticTask` for one device, wait for completion, and return the diagnostic result. MAC counter enrichment is applied by default (see `--no-enrich-mac-counters`).
 
 ```
 diagnostics fetch --device-id DEVICE_ID
                   [--types TLV ...]
-                  [--preset {recommended,full,minimal}]
+                  [--preset {recommended,full,minimal,basic}]
                   [--task-timeout SECS]
                   [--destination-type TYPE]
+                  [--no-fallback]
+                  [--fallback-preset {medium,minimal,basic}]
+                  [--no-enrich-mac-counters]
 ```
 
 | Option | Default | Description |
 |---|---|---|
 | `--device-id` | required | Device extAddress (16-char hex) |
 | `--types` | recommended set | Space-separated diagnostic TLV names |
-| `--preset` | — | `recommended`, `full`, or `minimal`; overrides `--types` |
+| `--preset` | — | `recommended`, `full`, `minimal`, or `basic`; overrides `--types` |
 | `--task-timeout` | `93` | Server-side task timeout in seconds |
 | `--destination-type` | `extended` | Destination addressing mode |
+| `--no-fallback` | off | Disable TLV fallback retry; on failure, skip the device immediately |
+| `--fallback-preset` | `minimal` | TLV preset to retry with when the primary request fails (`medium`, `minimal`, or `basic`) |
+| `--no-enrich-mac-counters` | off | Return raw `macCounters` values only; skip computed totals and ratios |
+
+By default, if a device fails to respond to the primary TLV set, the command automatically retries with the `--fallback-preset` TLV set before giving up (P1). Pass `--no-fallback` to disable this retry.
 
 **Examples:**
 
 ```bash
-# Fetch diagnostics for a device using the recommended preset
+# Fetch diagnostics for a device using the recommended preset (auto-saved to file)
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
     diagnostics fetch --device-id aabbccddeeff0011 --preset recommended
 
-# Fetch only macCounters and mleCounters for a specific device
+# Fetch only macCounters and mleCounters; disable enrichment
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
     diagnostics fetch --device-id aabbccddeeff0011 \
-    --types extAddress rloc16 macCounters mleCounters
+    --types extAddress rloc16 macCounters mleCounters \
+    --no-enrich-mac-counters
+
+# Fetch with no fallback retry and print to stdout only
+PYTHONPATH=src python3 src/otbr_restapi_cli.py --no-auto-output \
+    diagnostics fetch --device-id aabbccddeeff0011 \
+    --preset recommended --no-fallback
 ```
 
 #### `diagnostics fetch-all`
 
-Fetch diagnostics for all known devices (or a given list), one device at a time.
+Fetch diagnostics for all known devices (or a given list), one device at a time. The device list is automatically refreshed via `updateDeviceCollectionTask` before fetching (pass `--no-update-devices` to skip). MAC counter enrichment and per-device progress are on by default.
 
 ```
 diagnostics fetch-all [--device-ids ID ...]
                       [--types TLV ...]
-                      [--preset {recommended,full,minimal}]
+                      [--preset {recommended,full,minimal,basic}]
                       [--task-timeout SECS]
                       [--destination-type TYPE]
-                      [--update-devices]
+                      [--no-update-devices]
+                      [--no-fallback]
+                      [--fallback-preset {medium,minimal,basic}]
+                      [--no-enrich-mac-counters]
 ```
 
 | Option | Default | Description |
 |---|---|---|
 | `--device-ids` | all devices | Space-separated extAddress IDs to query |
 | `--types` | recommended set | Diagnostic TLV names |
-| `--preset` | — | `recommended`, `full`, or `minimal` |
+| `--preset` | — | `recommended`, `full`, `minimal`, or `basic`; overrides `--types` |
 | `--task-timeout` | `93` | Server-side task timeout per device |
 | `--destination-type` | `extended` | Destination addressing mode |
-| `--update-devices` | off | Run `updateDeviceCollectionTask` first to refresh device list |
+| `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list as-is |
+| `--no-fallback` | off | Disable per-device TLV fallback retry on failure |
+| `--fallback-preset` | `minimal` | TLV preset to retry with when a device fails (`medium`, `minimal`, or `basic`) |
+| `--no-enrich-mac-counters` | off | Return raw `macCounters` without computed totals and ratios |
+
+> **Breaking change from earlier versions:** `--update-devices` has been replaced by `--no-update-devices`. Device list refresh now runs by default; pass `--no-update-devices` to opt out.
+
+Results are automatically written to `<datadir>/td-otbr-restapi-diagnostics-fetch-all.json` unless `--no-auto-output` or `--output` is specified. Per-device progress (`[N/T] id → status (Xs)`) is printed to stderr.
 
 **Examples:**
 
 ```bash
-# Fetch diagnostics for all known devices using the recommended TLV preset
+# Fetch diagnostics for all devices — refresh device list, enrich MAC counters, auto-save
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
     diagnostics fetch-all --preset recommended
 
-# Refresh device list first, then fetch diagnostics for all, save to file
+# Skip device refresh (device list was just updated)
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
-    --output data/all-diagnostics.json \
-    diagnostics fetch-all --update-devices --preset recommended
+    diagnostics fetch-all --preset recommended --no-update-devices
 
-# Fetch diagnostics for two specific devices only
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+# Fetch for two specific devices, raw counters only, suppress progress
+PYTHONPATH=src python3 src/otbr_restapi_cli.py --no-progress \
     diagnostics fetch-all \
-    --device-ids aabbccddeeff0011 aabbccddeeff0022
+    --device-ids aabbccddeeff0011 aabbccddeeff0022 \
+    --no-enrich-mac-counters
+
+# Print to stdout only (no file write)
+PYTHONPATH=src python3 src/otbr_restapi_cli.py --no-auto-output \
+    diagnostics fetch-all --preset recommended
 ```
 
 ---
@@ -567,6 +597,15 @@ actions enqueue update-device-collection
 | `--max-retries` | `5` | Max retries per device |
 | `--timeout` | `60` | Server-side task timeout in seconds |
 
+**Polling / waiting for completion:**
+
+This command has no `--wait` flag. It returns as soon as the action is enqueued. To wait for the task:
+
+- **Recommended:** use `devices fetch` — it enqueues, polls, and returns the device list in one call.
+- **Manual:** capture the `id` from the returned action record, then call `actions get --action-id <id>` in a loop until `status` is `completed`, `stopped`, or `failed`. Use the global `--poll-interval` and `--poll-timeout` options when issuing subsequent `actions get` calls.
+
+Action `status` values: `running` · `completed` · `stopped` · `failed`
+
 **Examples:**
 
 ```bash
@@ -578,6 +617,32 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
     actions enqueue update-device-collection \
     --device-count 20 --max-age 60 --max-retries 3 --timeout 90
+
+# Enqueue and capture the action ID (output is a JSON array; id is at index 0)
+ACTION_ID=$(PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    actions enqueue update-device-collection | jq -r '.[0].id')
+echo "Enqueued action: $ACTION_ID"
+
+# Poll until the action reaches a terminal status
+while true; do
+    STATUS=$(PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+        actions get --action-id "$ACTION_ID" | jq -r '.status')
+    echo "status: $STATUS"
+    [[ "$STATUS" == "completed" || "$STATUS" == "stopped" || "$STATUS" == "failed" ]] && break
+    sleep 2
+done
+
+# Once completed, list the refreshed devices
+PYTHONPATH=src python3 src/otbr_restapi_cli.py devices list
+
+# Preferred: enqueue + wait + list devices in one shot
+PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    devices fetch --device-count 20 --task-timeout 90
+
+# Combined enqueue + wait with custom poll tuning
+PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    --poll-interval 3.0 --poll-timeout 120.0 \
+    devices fetch --device-count 50 --max-age 30
 ```
 
 ---
@@ -716,7 +781,7 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 
 #### `mesh-diagnostics fetch-all`
 
-Fetch mesh diagnostics for all known devices (or a given list), one device at a time.
+Fetch mesh diagnostics for all known devices (or a given list), one device at a time. The device list is automatically refreshed before fetching (pass `--no-update-devices` to skip).
 
 ```
 mesh-diagnostics fetch-all [--device-ids ID ...]
@@ -724,26 +789,99 @@ mesh-diagnostics fetch-all [--device-ids ID ...]
     [--task-timeout SECS]
     [--poll-timeout FLOAT]
     [--destination-type TYPE]
-    [--update-devices]
+    [--no-update-devices]
+    [--routers-only]
 ```
+
+| Option | Default | Description |
+|---|---|---|
+| `--device-ids` | all devices | Space-separated extAddress IDs to query |
+| `--types` | all three | `children`, `childIpv6Addresses`, `routerNeighbors` |
+| `--task-timeout` | `300` | Server-side task timeout per device |
+| `--poll-timeout` | `360.0` | Max wall-clock seconds per device action |
+| `--destination-type` | `extended` | Destination addressing mode |
+| `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list as-is |
+| `--routers-only` | off | Filter device list to router devices only (`rloc16` lower 10 bits == 0); skips child devices that would return empty records |
+
+> **Breaking change from earlier versions:** `--update-devices` has been replaced by `--no-update-devices`. Device list refresh now runs by default.
+
+Results are automatically written to `<datadir>/td-otbr-restapi-mesh-diagnostics-fetch-all.json` unless `--no-auto-output` or `--output` is specified.
 
 **Examples:**
 
 ```bash
-# Fetch all mesh-diagnostic TLVs for all known devices
+# Fetch all mesh-diagnostic TLVs for router devices only (recommended usage)
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
-    mesh-diagnostics fetch-all
+    mesh-diagnostics fetch-all --routers-only
 
-# Refresh device list first, then fetch mesh diagnostics for all, save to file
+# Fetch for all devices, skip device refresh
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
-    --output data/mesh-diag-all.json \
-    mesh-diagnostics fetch-all --update-devices
+    mesh-diagnostics fetch-all --no-update-devices
 
 # Fetch only router neighbor tables for two specific devices
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
     mesh-diagnostics fetch-all \
     --device-ids aabbccddeeff0011 aabbccddeeff0022 \
     --types routerNeighbors
+```
+
+---
+
+### `topology`
+
+Run the full topology sweep in a single command. Executes three steps in sequence and writes all output files automatically under `--datadir`:
+
+| Step | Action | Output file |
+|---|---|---|
+| 1 | `devices fetch` (updateDeviceCollectionTask) | `td-otbr-restapi-devices-fetch.json` |
+| 2 | `diagnostics fetch-all --preset recommended` | `td-otbr-restapi-diagnostics-fetch-all.json` |
+| 3 | `mesh-diagnostics fetch-all --routers-only` | `td-otbr-restapi-mesh-diagnostics-fetch-all.json` |
+
+```
+topology [--preset {recommended,full,minimal,basic}]
+         [--skip-devices]
+         [--skip-diagnostics]
+         [--skip-mesh-diagnostics]
+         [--no-update-devices]
+         [--no-enrich-mac-counters]
+         [--no-fallback]
+         [--fallback-preset {medium,minimal,basic}]
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--preset` | `recommended` | TLV preset for the diagnostics step |
+| `--skip-devices` | off | Skip Step 1 (device refresh); use the current device list for subsequent steps |
+| `--skip-diagnostics` | off | Skip Step 2 (network diagnostics fetch-all) |
+| `--skip-mesh-diagnostics` | off | Skip Step 3 (mesh diagnostics fetch-all) |
+| `--no-update-devices` | off | When `--skip-devices` is set, also skip `updateDeviceCollectionTask` in Steps 2 and 3 |
+| `--no-enrich-mac-counters` | off | Disable MAC counter enrichment on diagnostic results |
+| `--no-fallback` | off | Disable per-device TLV fallback retry in the diagnostics step |
+| `--fallback-preset` | `minimal` | Fallback TLV preset for Step 2 |
+
+Progress for each step and each device is printed to stderr. Pass `--no-progress` (global flag) to suppress. The command returns `None`; all data is written to files rather than printed to stdout.
+
+**Examples:**
+
+```bash
+# Run the full topology sweep with defaults
+PYTHONPATH=src python3 src/otbr_restapi_cli.py topology
+
+# Run on a remote OTBR, save to a custom data directory
+PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    --host 192.168.1.10 --datadir /tmp/topology \
+    topology
+
+# Skip device refresh (already done by a prior command)
+PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    topology --skip-devices
+
+# Diagnostics step only, no mesh diagnostics
+PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    topology --skip-mesh-diagnostics
+
+# Silent (no progress output)
+PYTHONPATH=src python3 src/otbr_restapi_cli.py --no-progress topology
 ```
 
 ---
@@ -829,7 +967,7 @@ These correspond directly to the Thread network diagnostic TLVs requested via `-
 | `leaderData` | 6 | Leader data object (same sub-fields as device `leaderData`) |
 | `networkData` | 7 | Network data (hex string) |
 | `ipv6Addresses` | 8 | List of IPv6 addresses |
-| `macCounters` | 9 | MAC packet counters (`ifInUnknownProtos`, `ifInErrors`, `ifOutErrors`, `ifInUcastPkts`, `ifInBroadcastPkts`, `ifInDiscards`, `ifOutUcastPkts`, `ifOutBroadcastPkts`, `ifOutDiscards`) |
+| `macCounters` | 9 | MAC packet counters (raw: `ifInUnknownProtos`, `ifInErrors`, `ifOutErrors`, `ifInUcastPkts`, `ifInBroadcastPkts`, `ifInDiscards`, `ifOutUcastPkts`, `ifOutBroadcastPkts`, `ifOutDiscards`; enriched: `ifintotalpkts`, `ifouttotalpkts`, `iftotalpkts`, `iftotalerrors`, `iftotaldiscards`, plus per-direction ratio and pct fields) |
 | `batteryLevel` | 14 | Battery level (0–100) |
 | `supplyVoltage` | 15 | Supply voltage (mV) |
 | `childTable` | 16 | Array of child entries (`childId`, `timeout`, `linkQuality`, `mode`) |
@@ -926,24 +1064,31 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 
 ### 2. Discover devices — manual enqueue → poll → list
 
-**Step 1 — Enqueue the task:**
+**Step 1 — Enqueue and capture the action ID:**
+
+The enqueue output is a JSON array; the action `id` is at index 0.
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
-    actions enqueue update-device-collection
-# Output: JSON with "id": "<action-id>"
+ACTION_ID=$(PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    actions enqueue update-device-collection | jq -r '.[0].id')
+echo "Enqueued action: $ACTION_ID"
 ```
 
-**Step 2 — Poll until `status` is `completed`:**
+**Step 2 — Poll until the action reaches a terminal status:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
-    actions get --action-id <action-id>
+while true; do
+    STATUS=$(PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+        actions get --action-id "$ACTION_ID" | jq -r '.status')
+    echo "status: $STATUS"
+    [[ "$STATUS" == "completed" || "$STATUS" == "stopped" || "$STATUS" == "failed" ]] && break
+    sleep 2
+done
 ```
 
-Repeat until `"status": "completed"`.
+Terminal values for `status`: `completed` · `stopped` · `failed`.
 
-**Step 3 — List the devices:**
+**Step 3 — List the refreshed devices:**
 
 ```bash
 PYTHONPATH=src python3 src/otbr_restapi_cli.py devices list
@@ -967,26 +1112,35 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 
 ---
 
-### 4. Fetch diagnostics for all devices — with auto device refresh
+### 4. Fetch diagnostics for all devices
 
-Refresh the device list first, then fetch diagnostics for every device:
+Refresh the device list and fetch diagnostics for every device (device refresh is on by default):
 
 ```bash
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
-    diagnostics fetch-all --update-devices --preset recommended
+    diagnostics fetch-all --preset recommended
 ```
 
-Save results:
+Results are auto-saved to `<datadir>/td-otbr-restapi-diagnostics-fetch-all.json`.
+
+Skip device refresh when the list was just updated:
+
+```bash
+PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    diagnostics fetch-all --preset recommended --no-update-devices
+```
+
+Explicit output path (overrides auto-naming):
 
 ```bash
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
     --output data/all-diagnostics.json \
-    diagnostics fetch-all --update-devices --preset recommended
+    diagnostics fetch-all --preset recommended
 ```
 
 ---
 
-### 5. Fetch diagnostics for all devices — manual flow
+### 5. Fetch diagnostics — manual multi-step flow
 
 **Step 1 — Refresh devices:**
 
@@ -994,11 +1148,11 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 PYTHONPATH=src python3 src/otbr_restapi_cli.py devices fetch
 ```
 
-**Step 2 — Fetch diagnostics for all:**
+**Step 2 — Fetch diagnostics (skip device refresh since Step 1 just ran it):**
 
 ```bash
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
-    diagnostics fetch-all --preset recommended
+    diagnostics fetch-all --preset recommended --no-update-devices
 ```
 
 ---
@@ -1051,11 +1205,11 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
     mesh-diagnostics children --device-id aabbccddeeff0011
 ```
 
-All mesh diagnostics for every known device (with device refresh):
+All mesh diagnostics for every router device (recommended — skips child devices):
 
 ```bash
 PYTHONPATH=src python3 src/otbr_restapi_cli.py \
-    mesh-diagnostics fetch-all --update-devices
+    mesh-diagnostics fetch-all --routers-only
 ```
 
 ---
@@ -1114,4 +1268,28 @@ Get the raw JSON:API envelope from the server instead of the flattened list:
 
 ```bash
 PYTHONPATH=src python3 src/otbr_restapi_cli.py --raw devices list
+```
+
+---
+
+### 13. Full topology sweep
+
+Run device discovery, network diagnostics, and mesh diagnostics in one command, writing all three output files automatically:
+
+```bash
+PYTHONPATH=src python3 src/otbr_restapi_cli.py topology
+```
+
+Skip the mesh-diagnostics step (faster when only network diagnostics are needed):
+
+```bash
+PYTHONPATH=src python3 src/otbr_restapi_cli.py topology --skip-mesh-diagnostics
+```
+
+Run against a remote OTBR and save to a specific data directory:
+
+```bash
+PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    --host 192.168.1.10 --datadir /tmp/scan \
+    topology
 ```

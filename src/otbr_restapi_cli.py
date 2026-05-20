@@ -4,13 +4,14 @@ import argparse
 import json
 import sys
 import logging
+import time
 
 from pathlib import Path
 from typing import Any, Sequence
-from util_data import resolve_data_file_path, resolve_data_dir
+from util_data import resolve_data_file_path, resolve_data_dir, save_json_atomic
 from td_const import TD_DATA_DIR_ARG_HELP
 
-from otbr_restapi_client import (
+from otbr_restapi_util import (
     
     DEFAULT_ACCEPT,
     DEFAULT_HOST,
@@ -89,6 +90,21 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FLOAT",
         help="Max wall-clock seconds to wait for an action to complete (default: 120.0)",
     )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        default=False,
+        help="Suppress per-device progress output to stderr on fetch-all commands (P6)",
+    )
+    parser.add_argument(
+        "--no-auto-output",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable automatic output file naming. By default, fetch/fetch-all commands "
+            "write results to <datadir>/td-otbr-restapi-<resource>-<command>.json (P5)"
+        ),
+    )
 
     subparsers = parser.add_subparsers(dest="resource", required=True)
     _add_node_commands(subparsers)
@@ -96,6 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_diagnostics_commands(subparsers)
     _add_actions_commands(subparsers)
     _add_mesh_diagnostics_commands(subparsers)
+    _add_topology_commands(subparsers)
     return parser
 
 
@@ -182,15 +199,15 @@ def _add_devices_commands(
         ),
     )
     devices_fetch.add_argument(
-        "--device-count", type=int, default=50, help="Max devices to discover (default: 50)"
+        "--device-count", type=int, default=200, help="Max devices to discover (default: 200)"
     )
     devices_fetch.add_argument(
-        "--task-timeout", type=int, default=60,
-        help="Server-side task timeout in seconds (default: 60)",
+        "--task-timeout", type=int, default=600,
+        help="Server-side task timeout in seconds (default: 600)",
     )
     devices_fetch.add_argument(
-        "--max-age", type=int, default=30,
-        help="Max age of cached device entries in seconds (default: 30)",
+        "--max-age", type=int, default=60,
+        help="Max age of cached device entries in seconds (default: 60)",
     )
     devices_fetch.add_argument(
         "--max-retries", type=int, default=5,
@@ -241,12 +258,30 @@ def _add_diagnostics_commands(
         help="Use a predefined TLV preset; overrides --types",
     )
     diagnostics_fetch.add_argument(
-        "--task-timeout", type=int, default=93,
-        help="Server-side task timeout in seconds (default: 93)",
+        "--task-timeout", type=int, default=600,
+        help="Server-side task timeout in seconds (default: 600)",
     )
     diagnostics_fetch.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
         help=f"Destination addressing mode (default: {DestinationType.EXTENDED})",
+    )
+    diagnostics_fetch.add_argument(
+        "--no-fallback",
+        action="store_true",
+        default=False,
+        help="Disable per-device TLV fallback retry on failure (P1)",
+    )
+    diagnostics_fetch.add_argument(
+        "--fallback-preset",
+        choices=["medium", "minimal", "basic"],
+        default="minimal",
+        help="TLV preset to retry with on device failure (default: minimal) (P1)",
+    )
+    diagnostics_fetch.add_argument(
+        "--no-enrich-mac-counters",
+        action="store_true",
+        default=False,
+        help="Return raw macCounters values without computed totals and ratios (P3)",
     )
 
     diagnostics_fetch_all = diagnostics_subparsers.add_parser(
@@ -269,16 +304,39 @@ def _add_diagnostics_commands(
         help="Use a predefined TLV preset; overrides --types",
     )
     diagnostics_fetch_all.add_argument(
-        "--task-timeout", type=int, default=93,
-        help="Server-side task timeout per device in seconds (default: 93)",
+        "--task-timeout", type=int, default=600,
+        help="Server-side task timeout per device in seconds (default: 600)",
     )
     diagnostics_fetch_all.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
         help=f"Destination addressing mode (default: {DestinationType.EXTENDED})",
     )
     diagnostics_fetch_all.add_argument(
-        "--update-devices", action="store_true", default=False,
-        help="Trigger updateDeviceCollectionTask before fetching diagnostics",
+        "--no-update-devices",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip updateDeviceCollectionTask before fetching diagnostics. "
+            "By default the device list is refreshed first (P7)"
+        ),
+    )
+    diagnostics_fetch_all.add_argument(
+        "--no-fallback",
+        action="store_true",
+        default=False,
+        help="Disable per-device TLV fallback retry on failure (P1)",
+    )
+    diagnostics_fetch_all.add_argument(
+        "--fallback-preset",
+        choices=["medium", "minimal", "basic"],
+        default="minimal",
+        help="TLV preset to retry with on device failure (default: minimal) (P1)",
+    )
+    diagnostics_fetch_all.add_argument(
+        "--no-enrich-mac-counters",
+        action="store_true",
+        default=False,
+        help="Return raw macCounters values without computed totals and ratios (P3)",
     )
 
 
@@ -380,12 +438,12 @@ def _add_actions_commands(
         help="Maximum retries per device (default: 5)"
     )
     update_devices.add_argument(
-        "--device-count", type=int, default=50,
-        help="Maximum number of devices to discover (default: 50)"
+        "--device-count", type=int, default=200,
+        help="Maximum number of devices to discover (default: 200)"
     )
     update_devices.add_argument(
-        "--timeout", type=int, default=60,
-        help="Task timeout passed to the server in seconds (default: 60)"
+        "--timeout", type=int, default=300,
+        help="Task timeout passed to the server in seconds (default: 300)"
     )
 
 
@@ -412,7 +470,7 @@ def _add_mesh_diagnostics_commands(
         dest="mesh_diag_command", required=True
     )
 
-    def _mesh_device_args(p: argparse.ArgumentParser, task_timeout: int = 300) -> None:
+    def _mesh_device_args(p: argparse.ArgumentParser, task_timeout: int = 600) -> None:
         p.add_argument("--device-id", required=True,
                        help="Device extAddress (16-char hex)")
         p.add_argument(
@@ -497,8 +555,8 @@ def _add_mesh_diagnostics_commands(
         ),
     )
     mesh_fetch_all_p.add_argument(
-        "--task-timeout", type=int, default=300,
-        help="Server-side task timeout per device in seconds (default: 300)",
+        "--task-timeout", type=int, default=600,
+        help="Server-side task timeout per device in seconds (default: 600)",
     )
     mesh_fetch_all_p.add_argument(
         "--poll-timeout", type=float, default=360.0, metavar="FLOAT",
@@ -509,9 +567,372 @@ def _add_mesh_diagnostics_commands(
         help=f"Destination addressing mode (default: {DestinationType.EXTENDED})",
     )
     mesh_fetch_all_p.add_argument(
-        "--update-devices", action="store_true", default=False,
-        help="Trigger updateDeviceCollectionTask before fetching mesh diagnostics",
+        "--no-update-devices",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip updateDeviceCollectionTask before fetching mesh diagnostics. "
+            "By default the device list is refreshed first (P7)"
+        ),
     )
+    mesh_fetch_all_p.add_argument(
+        "--routers-only",
+        action="store_true",
+        default=False,
+        help=(
+            "Restrict queries to router devices only (rloc16 lower-10-bits == 0). "
+            "Avoids wasting task slots on child devices for mesh-diagnostic TLVs (P2)"
+        ),
+    )
+
+
+def _add_topology_commands(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """P4 — Combined topology sweep: devices → diagnostics → mesh-diagnostics."""
+    topo_p = subparsers.add_parser(
+        "topology",
+        help=(
+            "Full topology sweep: (1) devices fetch, (2) diagnostics fetch-all "
+            "--preset recommended, (3) mesh-diagnostics fetch-all --routers-only. "
+            "All three output files are written under --datadir automatically."
+        ),
+    )
+    topo_p.add_argument(
+        "--preset",
+        choices=["recommended", "full", "minimal", "basic"],
+        default="recommended",
+        help="TLV preset for the diagnostics step (default: recommended)",
+    )
+    topo_p.add_argument(
+        "--skip-devices",
+        action="store_true",
+        help="Skip Step 1 (device refresh via updateDeviceCollectionTask)",
+    )
+    topo_p.add_argument(
+        "--skip-diagnostics",
+        action="store_true",
+        help="Skip Step 2 (network diagnostics fetch-all)",
+    )
+    topo_p.add_argument(
+        "--skip-mesh-diagnostics",
+        action="store_true",
+        help="Skip Step 3 (mesh diagnostics fetch-all)",
+    )
+    topo_p.add_argument(
+        "--no-update-devices",
+        action="store_true",
+        default=False,
+        help="Skip updateDeviceCollectionTask before diagnostics/mesh steps (P7)",
+    )
+    topo_p.add_argument(
+        "--no-enrich-mac-counters",
+        action="store_true",
+        default=False,
+        help="Disable MAC counter enrichment on the diagnostics result (P3)",
+    )
+    topo_p.add_argument(
+        "--no-fallback",
+        action="store_true",
+        default=False,
+        help="Disable per-device TLV fallback retry on failure (P1)",
+    )
+    topo_p.add_argument(
+        "--fallback-preset",
+        choices=["medium", "minimal", "basic"],
+        default="minimal",
+        help="TLV preset to retry with on per-device failure (default: minimal) (P1)",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Medium TLV preset: RECOMMENDED minus threadStackVersion and mleCounters (P1)
+# ---------------------------------------------------------------------------
+_MEDIUM_DIAGNOSTIC_TLVS: list[str] = [
+    t for t in RECOMMENDED_DIAGNOSTIC_TLVS
+    if t not in {"threadStackVersion", "mleCounters"}
+]
+
+# ---------------------------------------------------------------------------
+# MAC Counter Enrichment (P3)
+# REST API macCounters keys are camelCase (ifInErrors, ifInUcastPkts, …).
+# Derived fields use the same lowercase names as parse_mac_counters() in
+# otbr_cli_networkdiag_topology.py for cross-tool consistency.
+# ---------------------------------------------------------------------------
+
+def enrich_mac_counters(mac: dict[str, Any]) -> None:
+    """Enrich a macCounters dict in-place with derived totals and ratios.
+
+    Accepts the camelCase key format returned by the OTBR REST API and adds
+    the same computed fields that parse_mac_counters() produces for ot-ctl
+    text output.
+    """
+    in_ucast   = mac.get("ifInUcastPkts", 0)
+    in_bcast   = mac.get("ifInBroadcastPkts", 0)
+    out_ucast  = mac.get("ifOutUcastPkts", 0)
+    out_bcast  = mac.get("ifOutBroadcastPkts", 0)
+    in_errors  = mac.get("ifInErrors", 0)
+    out_errors = mac.get("ifOutErrors", 0)
+    in_disc    = mac.get("ifInDiscards", 0)
+    out_disc   = mac.get("ifOutDiscards", 0)
+
+    ifintotalpkts  = in_ucast  + in_bcast
+    ifouttotalpkts = out_ucast + out_bcast
+    iftotalpkts    = ifintotalpkts + ifouttotalpkts
+    totalerrors    = in_errors + out_errors
+    totaldiscards  = in_disc   + out_disc
+
+    mac["ifintotalpkts"]  = ifintotalpkts
+    mac["ifouttotalpkts"] = ifouttotalpkts
+    mac["iftotalpkts"]    = iftotalpkts
+    mac["iftotalerrors"]  = totalerrors
+    mac["iftotaldiscards"] = totaldiscards
+
+    iftotal_inerrdiscs  = in_errors  + in_disc
+    iftotal_outerrdiscs = out_errors + out_disc
+    iftotal_errdiscs    = totalerrors + totaldiscards
+
+    mac["iftotal_inerrdiscs"]  = iftotal_inerrdiscs
+    mac["iftotal_outerrdiscs"] = iftotal_outerrdiscs
+    mac["iftotal_errdiscs"]    = iftotal_errdiscs
+
+    if iftotal_inerrdiscs > 0:
+        mac["ifinerrors_totalinerrdiscs_ratio"]   = round(in_errors / iftotal_inerrdiscs, 1)
+        mac["ifindiscards_totalinerrdiscs_ratio"] = round(in_disc   / iftotal_inerrdiscs, 1)
+    if iftotal_outerrdiscs > 0:
+        mac["ifouterrors_totalouterrdiscs_ratio"]   = round(out_errors / iftotal_outerrdiscs, 1)
+        mac["ifoutdiscards_totalouterrdiscs_ratio"] = round(out_disc   / iftotal_outerrdiscs, 1)
+    if iftotal_errdiscs > 0:
+        mac["iftotalerrors_totalerrdiscs_ratio"]   = round(totalerrors   / iftotal_errdiscs, 1)
+        mac["iftotaldiscards_totalerrdiscs_ratio"] = round(totaldiscards / iftotal_errdiscs, 1)
+
+    if ifintotalpkts > 0:
+        mac["ifinerrors_intotalpkts_ratio"]   = round(in_errors / ifintotalpkts, 1)
+        mac["ifindiscards_intotalpkts_ratio"] = round(in_disc   / ifintotalpkts, 1)
+    if ifouttotalpkts > 0:
+        mac["ifouterrors_outtotalpkts_ratio"]   = round(out_errors / ifouttotalpkts, 1)
+        mac["ifoutdiscards_outtotalpkts_ratio"] = round(out_disc   / ifouttotalpkts, 1)
+    if iftotalpkts > 0:
+        mac["iftotalerrors_totalpkts_ratio"]   = round(totalerrors   / iftotalpkts, 1)
+        mac["iftotaldiscards_totalpkts_ratio"] = round(totaldiscards / iftotalpkts, 1)
+
+    mac["ifinerrors_totalerrors_pct"] = (
+        round((in_errors  / totalerrors) * 100, 1) if totalerrors > 0 else 0
+    )
+    mac["ifouterrors_totalerrors_pct"] = (
+        round((out_errors / totalerrors) * 100, 1) if totalerrors > 0 else 0
+    )
+    mac["ifindiscards_totaldiscards_pct"] = (
+        round((in_disc  / totaldiscards) * 100, 1) if totaldiscards > 0 else 0
+    )
+    mac["ifoutdiscards_totaldiscards_pct"] = (
+        round((out_disc / totaldiscards) * 100, 1) if totaldiscards > 0 else 0
+    )
+
+
+def _apply_mac_enrichment(diagnostics: list[Any]) -> list[Any]:
+    """Apply enrich_mac_counters in-place to each diagnostic record's macCounters."""
+    for record in diagnostics:
+        if not isinstance(record, dict):
+            continue
+        mac = record.get("macCounters")
+        if isinstance(mac, dict):
+            enrich_mac_counters(mac)
+    return diagnostics
+
+
+# ---------------------------------------------------------------------------
+# Progress Reporting (P6)
+# ---------------------------------------------------------------------------
+
+def _make_progress_fn(total: int, enabled: bool):
+    """Return a progress callback for fetch_all_devices_* client methods.
+
+    When enabled=True, prints one line per device to stderr:
+        [3/12] aabbccddeeff0011 → completed (2.4s)
+    When enabled=False or total==0, returns None.
+    """
+    if not enabled or total == 0:
+        return None
+
+    def _cb(count: int, total_: int, device_id: str, elapsed: float, status: str) -> None:
+        print(
+            f"[{count}/{total_}] {device_id} \u2192 {status} ({elapsed:.1f}s)",
+            file=sys.stderr,
+        )
+    return _cb
+
+
+# ---------------------------------------------------------------------------
+# Auto-output naming (P5)
+# ---------------------------------------------------------------------------
+
+_AUTO_OUTPUT_NAMES: dict[tuple[str, str], str] = {
+    ("devices", "list"):                "td-otbr-restapi-devices-list.json",
+    ("devices", "fetch"):               "td-otbr-restapi-devices-fetch.json",
+    ("diagnostics", "list"):             "td-otbr-restapi-diagnostics-list.json",
+    ("diagnostics", "fetch"):           "td-otbr-restapi-diagnostics-fetch.json",
+    ("diagnostics", "fetch-all"):       "td-otbr-restapi-diagnostics-fetch-all.json",
+    ("actions", "list"):                 "td-otbr-restapi-actions-list.json",
+    ("mesh-diagnostics", "fetch"):      "td-otbr-restapi-mesh-diagnostics-fetch.json",
+    ("mesh-diagnostics", "fetch-all"):  "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+}
+
+
+def _auto_output_path(args: argparse.Namespace, data_dir: Path) -> str | None:
+    """Return the auto-named output path when P5 auto-output is active.
+
+    Returns None when --no-auto-output is set, --output was explicitly provided,
+    or the resource/command pair has no auto-naming rule.
+    """
+    if getattr(args, "no_auto_output", False):
+        return None
+    if getattr(args, "output", None):
+        return None  # explicit --output overrides auto-naming
+
+    resource = getattr(args, "resource", None)
+    if resource == "diagnostics":
+        command = getattr(args, "diagnostics_command", None)
+    elif resource == "mesh-diagnostics":
+        command = getattr(args, "mesh_diag_command", None)
+    elif resource == "devices":
+        command = getattr(args, "devices_command", None)
+    elif resource == "actions":
+        command = getattr(args, "actions_command", None)
+    else:
+        return None
+
+    filename = _AUTO_OUTPUT_NAMES.get((resource, command))
+    if filename is None:
+        return None
+    return str(data_dir / filename)
+
+
+# ---------------------------------------------------------------------------
+# Router-only device filter (P2)
+# ---------------------------------------------------------------------------
+
+def _filter_router_device_ids(devices: list[Any], device_ids: list[str]) -> list[str]:
+    """Return device IDs whose rloc16 lower-10-bits are zero (router devices).
+
+    Devices whose rloc16 is missing or un-parseable are kept (safe default).
+    """
+    rloc16_by_id: dict[str, int] = {}
+    for d in devices:
+        if not isinstance(d, dict):
+            continue
+        dev_id = d.get("id")
+        rloc16_raw = d.get("rloc16")
+        if dev_id is None or rloc16_raw is None:
+            continue
+        try:
+            rloc16_by_id[dev_id] = (
+                int(rloc16_raw, 16) if isinstance(rloc16_raw, str) else int(rloc16_raw)
+            )
+        except (ValueError, TypeError):
+            pass
+
+    result = []
+    for dev_id in device_ids:
+        rloc16 = rloc16_by_id.get(dev_id)
+        if rloc16 is None or (rloc16 & 0x03FF) == 0:
+            result.append(dev_id)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# TLV fallback helpers (P1)
+# ---------------------------------------------------------------------------
+
+def _resolve_fallback_types(args: argparse.Namespace) -> list[str | int] | None:
+    """Return the fallback TLV list, or None when --no-fallback is set."""
+    if getattr(args, "no_fallback", False):
+        return None
+    preset = getattr(args, "fallback_preset", "minimal")
+    if preset == "medium":
+        return list(_MEDIUM_DIAGNOSTIC_TLVS)
+    if preset == "basic":
+        return list(BASIC_DIAGNOSTIC_TLVS)
+    return list(MINIMAL_DIAGNOSTIC_TLVS)  # default: minimal
+
+
+def _fetch_device_with_fallback(
+    client: OTBRRestApiClient,
+    device_id: str,
+    primary_types: list[str | int],
+    fallback_types: list[str | int] | None,
+    *,
+    destination_type: str,
+    task_timeout: int,
+    poll_interval: float,
+    poll_timeout: float,
+    raw: object,
+) -> Any:
+    """Fetch diagnostics for one device, retrying with fallback_types on failure."""
+    try:
+        return client.fetch_device_diagnostics(
+            device_id,
+            types=primary_types,
+            destination_type=destination_type,
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            raw=raw,
+        )
+    except (OTBRActionFailedError, OTBRActionTimeoutError):
+        if not fallback_types:
+            raise
+        logging.warning(
+            "Device %s failed with primary TLVs; retrying with fallback preset",
+            device_id,
+        )
+        return client.fetch_device_diagnostics(
+            device_id,
+            types=fallback_types,
+            destination_type=destination_type,
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            raw=raw,
+        )
+
+
+def _fetch_all_with_fallback(
+    client: OTBRRestApiClient,
+    device_ids: list[str],
+    primary_types: list[str | int],
+    fallback_types: list[str | int] | None,
+    *,
+    destination_type: str,
+    task_timeout: int,
+    poll_interval: float,
+    poll_timeout: float,
+    raw: object,
+    on_progress=None,
+) -> list[Any]:
+    """Fetch diagnostics for all devices with per-device TLV fallback and progress."""
+    results: list[Any] = []
+    total = len(device_ids)
+    for idx, device_id in enumerate(device_ids, start=1):
+        t_start = time.monotonic()
+        status = "completed"
+        try:
+            diag = _fetch_device_with_fallback(
+                client, device_id, primary_types, fallback_types,
+                destination_type=destination_type,
+                task_timeout=task_timeout,
+                poll_interval=poll_interval,
+                poll_timeout=poll_timeout,
+                raw=raw,
+            )
+            results.append(diag)
+        except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+            status = "skipped"
+            logging.warning("Skipping device %s: %s", device_id, exc)
+        elapsed = time.monotonic() - t_start
+        if on_progress is not None:
+            on_progress(idx, total, device_id, elapsed, status)
+    return results
 
 
 def build_client(args: argparse.Namespace) -> OTBRRestApiClient:
@@ -570,40 +991,56 @@ def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:
         if args.diagnostics_command == "get":
             return client.get_diagnostic(args.diagnostics_id, raw=raw_arg)
         if args.diagnostics_command == "fetch":
-            return client.fetch_device_diagnostics(
-                args.device_id,
-                types=_resolve_types(args),
+            primary_types = _resolve_types(args)
+            fallback_types = _resolve_fallback_types(args)
+            result = _fetch_device_with_fallback(
+                client, args.device_id, primary_types, fallback_types,
                 destination_type=args.destination_type,
                 task_timeout=args.task_timeout,
                 poll_interval=args.poll_interval,
                 poll_timeout=args.poll_timeout,
                 raw=raw_arg,
             )
+            if not getattr(args, "no_enrich_mac_counters", False):
+                _apply_mac_enrichment([result])
+            return result
         if args.diagnostics_command == "fetch-all":
             resolved_types = _resolve_types(args)
-            if getattr(args, "update_devices", False):
-                _devices, diagnostics = client.fetch_network_diagnostics_all_devices(
-                    update_devices=True,
+            fallback_types = _resolve_fallback_types(args)
+            do_enrich = not getattr(args, "no_enrich_mac_counters", False)
+            do_update = not getattr(args, "no_update_devices", False)
+            progress_fn = _make_progress_fn(
+                0,  # total unknown until device list retrieved
+                not getattr(args, "no_progress", False),
+            )
+
+            if do_update:
+                devices = client.fetch_device_collection(
                     device_count=getattr(args, "device_count", 50),
-                    types=resolved_types,
-                    destination_type=args.destination_type,
-                    task_timeout=args.task_timeout,
-                    poll_interval=args.poll_interval,
-                    poll_timeout=args.poll_timeout,
-                    raw=raw_arg,
                 )
-                return diagnostics
-            device_ids = getattr(args, "device_ids",
-                                 None) or _get_all_device_ids(client)
-            return client.fetch_all_devices_diagnostics(
-                device_ids,
-                types=resolved_types,
+            else:
+                devices = client.list_devices(raw=False)
+
+            device_ids = (
+                getattr(args, "device_ids", None)
+                or [d["id"] for d in devices if isinstance(d, dict) and d.get("id")]
+            )
+            progress_fn = _make_progress_fn(
+                len(device_ids),
+                not getattr(args, "no_progress", False),
+            )
+            diagnostics = _fetch_all_with_fallback(
+                client, device_ids, resolved_types, fallback_types,
                 destination_type=args.destination_type,
                 task_timeout=args.task_timeout,
                 poll_interval=args.poll_interval,
                 poll_timeout=args.poll_timeout,
                 raw=raw_arg,
+                on_progress=progress_fn,
             )
+            if do_enrich:
+                _apply_mac_enrichment(diagnostics)
+            return diagnostics
 
     if args.resource == "actions":
         if args.actions_command == "list":
@@ -720,16 +1157,132 @@ def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:
         if cmd == "fetch-all":
             types = _parse_mesh_diag_types(
                 args.types or list(MESH_DIAGNOSTIC_TLVS))
-            device_ids = getattr(args, "device_ids",
-                                 None) or _get_all_device_ids(client)
+            do_update = not getattr(args, "no_update_devices", False)
+            routers_only = getattr(args, "routers_only", False)
+
+            if do_update:
+                devices = client.fetch_device_collection()
+            else:
+                devices = client.list_devices(raw=False)
+
+            device_ids = getattr(args, "device_ids", None) or [
+                d["id"] for d in devices if isinstance(d, dict) and d.get("id")
+            ]
+            if routers_only:
+                device_ids = _filter_router_device_ids(devices, device_ids)
+                logging.info(
+                    "--routers-only: %d router device(s) selected from device list",
+                    len(device_ids),
+                )
+
+            progress_fn = _make_progress_fn(
+                len(device_ids),
+                not getattr(args, "no_progress", False),
+            )
             return client.fetch_mesh_diagnostics_all_devices(
                 device_ids, types=types,
                 destination_type=dest_type, task_timeout=task_timeout,
                 poll_interval=poll_interval, poll_timeout=poll_timeout,
+                on_progress=progress_fn,
                 raw=raw_arg,
             )
 
+    if args.resource == "topology":
+        return _dispatch_topology(client, args, raw_arg)
+
     raise ValueError("Unsupported CLI command")
+
+
+def _dispatch_topology(
+    client: OTBRRestApiClient,
+    args: argparse.Namespace,
+    raw_arg: object,
+) -> None:
+    """P4 — Execute the full topology sweep and write all three output files."""
+    data_dir: Path = args.td_data_dir
+    do_update = not getattr(args, "no_update_devices", False)
+    do_enrich = not getattr(args, "no_enrich_mac_counters", False)
+    fallback_types = _resolve_fallback_types(args)
+    primary_types = _resolve_types(args)
+    progress_enabled = not getattr(args, "no_progress", False)
+
+    # ------------------------------------------------------------------
+    # Step 1: Device refresh
+    # ------------------------------------------------------------------
+    devices: list[Any] = []
+    if not getattr(args, "skip_devices", False):
+        logging.info("topology step 1: devices fetch ...")
+        devices = client.fetch_device_collection()
+        path = data_dir / "td-otbr-restapi-devices-fetch.json"
+        save_json_atomic(devices, path)
+        logging.info("topology step 1 done: %d device(s) → %s", len(devices), path)
+    else:
+        logging.info("topology step 1 skipped (--skip-devices); fetching device list quietly")
+        devices = client.list_devices(raw=False)
+
+    device_ids = [d["id"] for d in devices if isinstance(d, dict) and d.get("id")]
+
+    # ------------------------------------------------------------------
+    # Step 2: Network diagnostics fetch-all
+    # ------------------------------------------------------------------
+    if not getattr(args, "skip_diagnostics", False):
+        logging.info("topology step 2: diagnostics fetch-all --preset %s ...", args.preset)
+        if do_update and not getattr(args, "skip_devices", False):
+            # Device list already refreshed in step 1; avoid a second refresh
+            diag_device_ids = device_ids
+        elif do_update:
+            diag_devices = client.fetch_device_collection()
+            diag_device_ids = [
+                d["id"] for d in diag_devices if isinstance(d, dict) and d.get("id")
+            ]
+        else:
+            diag_device_ids = device_ids
+
+        progress_fn = _make_progress_fn(len(diag_device_ids), progress_enabled)
+        diagnostics = _fetch_all_with_fallback(
+            client, diag_device_ids, primary_types, fallback_types,
+            destination_type=args.destination_type if hasattr(args, "destination_type")
+            else DestinationType.EXTENDED,
+            task_timeout=args.task_timeout if hasattr(args, "task_timeout") else 93,
+            poll_interval=args.poll_interval,
+            poll_timeout=args.poll_timeout,
+            raw=raw_arg,
+            on_progress=progress_fn,
+        )
+        if do_enrich:
+            _apply_mac_enrichment(diagnostics)
+        path = data_dir / "td-otbr-restapi-diagnostics-fetch-all.json"
+        save_json_atomic(diagnostics, path)
+        logging.info(
+            "topology step 2 done: %d diagnostic(s) → %s", len(diagnostics), path
+        )
+    else:
+        logging.info("topology step 2 skipped (--skip-diagnostics)")
+
+    # ------------------------------------------------------------------
+    # Step 3: Mesh diagnostics fetch-all --routers-only
+    # ------------------------------------------------------------------
+    if not getattr(args, "skip_mesh_diagnostics", False):
+        logging.info("topology step 3: mesh-diagnostics fetch-all --routers-only ...")
+        router_ids = _filter_router_device_ids(devices, device_ids)
+        logging.info(
+            "topology step 3: %d router device(s) selected", len(router_ids)
+        )
+        mesh_progress_fn = _make_progress_fn(len(router_ids), progress_enabled)
+        mesh_results = client.fetch_mesh_diagnostics_all_devices(
+            router_ids,
+            types=list(MESH_DIAGNOSTIC_TLVS),
+            on_progress=mesh_progress_fn,
+        )
+        path = data_dir / "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
+        save_json_atomic(mesh_results, path)
+        logging.info(
+            "topology step 3 done: %d mesh diagnostic(s) → %s", len(mesh_results), path
+        )
+    else:
+        logging.info("topology step 3 skipped (--skip-mesh-diagnostics)")
+
+    return None  # emit_output handles None by writing nothing
 
 
 def _resolve_types(args: argparse.Namespace) -> list[str | int]:
@@ -854,10 +1407,14 @@ def run_cli(
     parser = build_parser_fn()
     args = parser.parse_args(argv)
     args.td_data_dir = resolve_data_dir(data_dir=args.datadir)
-    output_path = args.output
+
+    # P5 — resolve output path: explicit --output > auto-naming > stdout
+    output_path = getattr(args, "output", None)
     if output_path:
-        output_path = str(resolve_data_file_path(
-            output_path, args.td_data_dir))
+        output_path = str(resolve_data_file_path(output_path, args.td_data_dir))
+    else:
+        output_path = _auto_output_path(args, args.td_data_dir)
+
     try:
         client = build_client_fn(args)
         result = dispatch_fn(client, args)

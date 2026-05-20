@@ -6,7 +6,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-import otbr_restapi_client as client_module
+import otbr_restapi_util as client_module
 import otbr_restapi_client_cli as cli_module
 
 

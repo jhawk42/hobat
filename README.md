@@ -119,7 +119,7 @@ python3 -m td_cli otbr-cli all
 
 # OTBR REST API
 python3 -m td_cli otbr-restapi --help
-python3 -m td_cli otbr-restapi client diagnostics list
+python3 -m td_cli otbr-restapi diagnostics list
 python3 -m td_cli otbr-restapi download
 
 # mDNS

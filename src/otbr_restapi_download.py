@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Sequence, Tuple
 
 from td_const import TD_DATA_DIR_ARG_HELP
-from otbr_restapi_client import (
+from otbr_restapi_util import (
     RECOMMENDED_DIAGNOSTIC_TLVS,
     OTBRActionFailedError,
     OTBRActionTimeoutError,

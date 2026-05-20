@@ -144,11 +144,20 @@ class TestOtbrCliParser(unittest.TestCase):
 
 
 class TestForwardingParsers(unittest.TestCase):
-    def test_restapi_client_extras_preserved(self):
+    def test_restapi_devices_extras_preserved(self):
         args, extras = _parse_known(
-            ["otbr-restapi", "client", "diagnostics", "list"])
-        self.assertEqual(args.restapi_command, "client")
-        self.assertEqual(extras, ["diagnostics", "list"])
+            ["otbr-restapi", "devices", "list"])
+        self.assertEqual(args.restapi_command, "devices")
+        self.assertEqual(extras, ["list"])
+
+    def test_restapi_node_extras_preserved(self):
+        args, extras = _parse_known(["otbr-restapi", "node", "get"])
+        self.assertEqual(args.restapi_command, "node")
+        self.assertEqual(extras, ["get"])
+
+    def test_restapi_client_subcommand_is_removed(self):
+        with self.assertRaises(SystemExit):
+            _parse(["otbr-restapi", "client", "devices", "list"])
 
     def test_process_eve_extras_preserved(self):
         args, extras = _parse_known(["process-eve", "--input", "layout.json"])
@@ -254,6 +263,42 @@ class TestDispatchOtherCommands(unittest.TestCase):
             rc = self._dispatch(argv)
         m.assert_called_once_with(
             ["--url", "http://localhost:8080/api/v1/diagnostics"])
+        self.assertEqual(rc, 0)
+
+    def test_restapi_devices_list_dispatches_to_restapi_cli(self):
+        with patch.object(td_cli.otbr_restapi_cli, "main", return_value=0) as m:
+            rc = self._dispatch(["otbr-restapi", "devices", "list"])
+        m.assert_called_once_with(["devices", "list"])
+        self.assertEqual(rc, 0)
+
+    def test_restapi_diagnostics_fetch_all_dispatches(self):
+        with patch.object(td_cli.otbr_restapi_cli, "main", return_value=0) as m:
+            rc = self._dispatch(
+                ["otbr-restapi", "diagnostics", "fetch-all", "--preset", "recommended"]
+            )
+        m.assert_called_once_with(
+            ["diagnostics", "fetch-all", "--preset", "recommended"]
+        )
+        self.assertEqual(rc, 0)
+
+    def test_restapi_global_host_forwarded_before_resource(self):
+        """Global --host must appear before the resource name in forwarded argv."""
+        with patch.object(td_cli.otbr_restapi_cli, "main", return_value=0) as m:
+            rc = self._dispatch(
+                ["otbr-restapi", "--host", "192.168.1.1", "devices", "list"]
+            )
+        forwarded = m.call_args[0][0]
+        self.assertIn("--host", forwarded)
+        self.assertIn("devices", forwarded)
+        self.assertLess(forwarded.index("--host"), forwarded.index("devices"))
+        self.assertEqual(rc, 0)
+
+    def test_restapi_raw_flag_forwarded(self):
+        with patch.object(td_cli.otbr_restapi_cli, "main", return_value=0) as m:
+            rc = self._dispatch(["otbr-restapi", "--raw", "devices", "list"])
+        forwarded = m.call_args[0][0]
+        self.assertIn("--raw", forwarded)
+        self.assertLess(forwarded.index("--raw"), forwarded.index("devices"))
         self.assertEqual(rc, 0)
 
     def test_process_eve_forwards_extras(self):

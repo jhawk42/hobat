@@ -32,7 +32,7 @@ Commands usage:
         usage: td_cli otbr-cli [-h] {thread-network-info,router-table,meshdiag,networkdiag,all} ...
 
     otbr-restapi
-        usage: td_cli otbr-restapi [-h] [--raw] {download,client} ...
+        usage: td_cli otbr-restapi [-h] {download,node,devices,diagnostics,actions,mesh-diagnostics,topology} ...
 
     mdns
         usage: td_cli mdns [-h] [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
@@ -103,13 +103,41 @@ Subcommand help snapshots:
                             supported). By default those records are excluded.
 
   otbr-restapi
-    usage: td_cli otbr-restapi [-h] [--raw] {download,client} ...
+    usage: td_cli otbr-restapi [-h] [--host HOST] [--port PORT] [--base-url URL]
+                               [--timeout SECS] [--accept MIME] [--raw]
+                               [--poll-interval FLOAT] [--poll-timeout FLOAT]
+                               [--no-progress] [--no-auto-output]
+                               {download,node,devices,diagnostics,actions,mesh-diagnostics,topology}
+                               ...
 
     positional arguments:
-      {download,client}
+      {download,node,devices,diagnostics,actions,mesh-diagnostics,topology}
         download            Download OTBR REST API endpoints to JSON files
-        client              Call OTBR REST API client commands (flattened output)
- 
+        node                Read or mutate local OTBR node data
+        devices             Read OTBR devices
+        diagnostics         Read OTBR network diagnostics
+        actions             Read or enqueue OTBR task actions
+        mesh-diagnostics    Fetch mesh-diagnostic TLVs (children, childIpv6,
+                            routerNeighbors)
+        topology            Full topology sweep: devices fetch + diagnostics
+                            fetch-all + mesh-diagnostics fetch-all
+
+    options:
+      -h, --help            show this help message and exit
+      --host HOST           OTBR REST API host (forwarded to otbr_restapi_cli)
+      --port PORT           OTBR REST API port (forwarded to otbr_restapi_cli)
+      --base-url URL        Override host/port with a full base URL (forwarded)
+      --timeout SECS        HTTP request timeout in seconds (forwarded)
+      --accept MIME         Default Accept header (forwarded)
+      --raw                 Return raw API envelopes instead of flattened output
+                            (forwarded)
+      --poll-interval FLOAT
+                            Seconds between action status polls (forwarded)
+      --poll-timeout FLOAT  Max seconds to wait for an action to complete
+                            (forwarded)
+      --no-progress         Suppress per-device progress output (forwarded)
+      --no-auto-output      Disable automatic output file naming (forwarded)
+
   process-eve
     usage: td_cli process-eve [-h]
 

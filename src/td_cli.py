@@ -79,14 +79,17 @@ class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
 #
 # otbr-restapi examples:
 #   td_cli.py otbr-restapi download --url http://localhost:8080/api/v1/diagnostics --output td-otbr-restapi-diagnostics.json
-#   td_cli.py otbr-restapi client diagnostics list
-#   td_cli.py otbr-restapi client diagnostics get --diagnostics-id 123456789
-#   td_cli.py otbr-restapi client actions list
-#   td_cli.py otbr-restapi client actions get --action-id 123456789
-#   td_cli.py otbr-restapi client actions enqueue add-thread-device --pskd 12345678 --eui 123456789 --discerner 123
-#   td_cli.py otbr-restapi client actions enqueue get-network-diagnostic --destination 123456789 --types 1,2,3 --timeout 60 --destination-type extaddr
-#   td_cli.py otbr-restapi client actions enqueue reset-network-diag-counter --destination 123456789 --types 1,2,3 --timeout 60 --destination-type extaddr
-#   td_cli.py otbr-restapi client actions enqueue get-energy-scan --destination 123456789 --channel-mask 0x1FFF800 --count 5 --period
+#   td_cli.py otbr-restapi devices list
+#   td_cli.py otbr-restapi diagnostics list
+#   td_cli.py otbr-restapi diagnostics get --diagnostics-id 123456789
+#   td_cli.py otbr-restapi actions list
+#   td_cli.py otbr-restapi actions get --action-id 123456789
+#   td_cli.py otbr-restapi actions enqueue add-thread-device --pskd 12345678 --eui 123456789 --discerner 123
+#   td_cli.py otbr-restapi actions enqueue get-network-diagnostic --destination 123456789 --types 1,2,3 --timeout 60 --destination-type extaddr
+#   td_cli.py otbr-restapi actions enqueue reset-network-diag-counter --destination 123456789 --types 1,2,3 --timeout 60 --destination-type extaddr
+#   td_cli.py otbr-restapi actions enqueue get-energy-scan --destination 123456789 --channel-mask 0x1FFF800 --count 5 --period
+#   td_cli.py otbr-restapi node get
+#   td_cli.py otbr-restapi mesh-diagnostics fetch-all --routers-only
 #   td_cli.py otbr-restapi --raw  diagnostics list
 #   td_cli.py otbr-restapi --raw  diagnostics get --diagnostics-id 123456789
 #   td_cli.py otbr-restapi --raw  actions list
@@ -219,6 +222,29 @@ def _add_otbr_restapi_commands(subparsers: argparse._SubParsersAction) -> None:
     restapi_p = subparsers.add_parser(
         "otbr-restapi", help="Query otbr-restapi sub commands"
     )
+
+    # Pass-through global options forwarded to otbr_restapi_cli before the resource name
+    restapi_p.add_argument("--host", default=None, metavar="HOST",
+        help="OTBR REST API host (forwarded to otbr_restapi_cli)")
+    restapi_p.add_argument("--port", type=int, default=None, metavar="PORT",
+        help="OTBR REST API port (forwarded to otbr_restapi_cli)")
+    restapi_p.add_argument("--base-url", default=None, metavar="URL",
+        help="Override host/port with a full base URL (forwarded)")
+    restapi_p.add_argument("--timeout", type=int, default=None, metavar="SECS",
+        help="HTTP request timeout in seconds (forwarded)")
+    restapi_p.add_argument("--accept", default=None, metavar="MIME",
+        help="Default Accept header (forwarded)")
+    restapi_p.add_argument("--raw", action="store_true", default=False,
+        help="Return raw API envelopes instead of flattened output (forwarded)")
+    restapi_p.add_argument("--poll-interval", type=float, default=None, metavar="FLOAT",
+        help="Seconds between action status polls (forwarded)")
+    restapi_p.add_argument("--poll-timeout", type=float, default=None, metavar="FLOAT",
+        help="Max seconds to wait for an action to complete (forwarded)")
+    restapi_p.add_argument("--no-progress", action="store_true", default=False,
+        help="Suppress per-device progress output (forwarded)")
+    restapi_p.add_argument("--no-auto-output", action="store_true", default=False,
+        help="Disable automatic output file naming (forwarded)")
+
     restapi_sub = restapi_p.add_subparsers(
         dest="restapi_command", required=False)
 
@@ -227,9 +253,24 @@ def _add_otbr_restapi_commands(subparsers: argparse._SubParsersAction) -> None:
         "download", help="Download OTBR REST API endpoints to JSON files"
     )
 
-    # otbr-restapi client  — remaining args forwarded to otbr_restapi_client_cli.main()
+    # Promoted resource sub-commands — name-only stubs; all resource-level args
+    # captured as extra_args via parse_known_args and forwarded to otbr_restapi_cli.main()
+    restapi_sub.add_parser("node",
+        help="Read or mutate local OTBR node data", add_help=False)
+    restapi_sub.add_parser("devices",
+        help="Read OTBR devices", add_help=False)
+    restapi_sub.add_parser("diagnostics",
+        help="Read OTBR network diagnostics", add_help=False)
+    restapi_sub.add_parser("actions",
+        help="Read or enqueue OTBR task actions", add_help=False)
+    restapi_sub.add_parser("mesh-diagnostics",
+        help="Fetch mesh-diagnostic TLVs (children, childIpv6, routerNeighbors)", add_help=False)
+
+    # otbr-restapi topology  — shortcut for otbr_restapi_cli.main(["topology", ...])
     restapi_sub.add_parser(
-        "client", help="Call OTBR REST API client commands (flattened output)"
+        "topology",
+        help="Full topology sweep: devices fetch + diagnostics fetch-all + mesh-diagnostics fetch-all",
+        add_help=False,
     )
 
 
@@ -299,7 +340,7 @@ def build_parser() -> argparse.ArgumentParser:
         usage: td_cli otbr-cli [-h] {thread-network-info,router-table,meshdiag,networkdiag,all} ...
 
     otbr-restapi
-        usage: td_cli otbr-restapi [-h] {download,client} ...
+        usage: td_cli otbr-restapi [-h] {download,node,devices,diagnostics,actions,mesh-diagnostics,topology} ...
 
     mdns
         usage: td_cli mdns [-h] [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
@@ -468,8 +509,50 @@ def dispatch(
 
         if restapi_cmd == "download":
             return otbr_restapi_download.main(_forward_with_datadir(extra_args)) or 0
-        if restapi_cmd == "client":
-            return otbr_restapi_cli.main(_forward_with_datadir(extra_args)) or 0
+
+        # Build the base global-option args that otbr_restapi_cli expects before the
+        # resource subcommand.  --output and --datadir are td_cli globals consumed by
+        # parse_known_args and handled separately; all other pass-through options are
+        # collected here so they land before the resource name in forwarded argv.
+        def _restapi_globals() -> list[str]:
+            fwd: list[str] = []
+            if getattr(args, "output", None):
+                fwd += ["--output", args.output]
+            if getattr(args, "host", None):
+                fwd += ["--host", args.host]
+            if getattr(args, "port", None) is not None:
+                fwd += ["--port", str(args.port)]
+            if getattr(args, "base_url", None):
+                fwd += ["--base-url", args.base_url]
+            if getattr(args, "timeout", None) is not None:
+                fwd += ["--timeout", str(args.timeout)]
+            if getattr(args, "accept", None):
+                fwd += ["--accept", args.accept]
+            if getattr(args, "raw", False):
+                fwd += ["--raw"]
+            if getattr(args, "poll_interval", None) is not None:
+                fwd += ["--poll-interval", str(args.poll_interval)]
+            if getattr(args, "poll_timeout", None) is not None:
+                fwd += ["--poll-timeout", str(args.poll_timeout)]
+            if getattr(args, "no_progress", False):
+                fwd += ["--no-progress"]
+            if getattr(args, "no_auto_output", False):
+                fwd += ["--no-auto-output"]
+            return fwd
+
+        _RESTAPI_RESOURCE_CMDS = frozenset(
+            {"node", "devices", "diagnostics", "actions", "mesh-diagnostics"}
+        )
+
+        if restapi_cmd in _RESTAPI_RESOURCE_CMDS:
+            return otbr_restapi_cli.main(
+                _forward_with_datadir(_restapi_globals() + [restapi_cmd] + extra_args)
+            ) or 0
+
+        if restapi_cmd == "topology":
+            return otbr_restapi_cli.main(
+                _forward_with_datadir(_restapi_globals() + ["topology"] + extra_args)
+            ) or 0
 
 
     # --- process-eve ---

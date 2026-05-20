@@ -5,7 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-import otbr_restapi_client as base_client_module
+import otbr_restapi_util as base_client_module
 import otbr_restapi__cli as cli_module
 
 

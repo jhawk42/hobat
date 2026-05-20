@@ -5,7 +5,7 @@ import logging
 import time
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -656,7 +656,7 @@ class OTBRRestApiClient:
     def fetch_device_collection(
         self,
         *,
-        device_count: int = 50,
+        device_count: int = 200,
         max_age: int = 30,
         max_retries: int = 5,
         task_timeout: int = 60,
@@ -775,6 +775,7 @@ class OTBRRestApiClient:
         poll_interval: float = 2.0,
         poll_timeout: float = 120.0,
         skip_on_failure: bool = True,
+        on_progress: Callable[[int, int, str, float, str], None] | None = None,
         raw: object = _RAW_UNSET,
     ) -> list[Any]:
         """
@@ -797,7 +798,10 @@ class OTBRRestApiClient:
         """
         raw = self._resolve_raw(raw)
         results: list[Any] = []
-        for device_id in device_ids:
+        total = len(device_ids)
+        for idx, device_id in enumerate(device_ids, start=1):
+            t_start = time.monotonic()
+            status = "completed"
             try:
                 diag = self.fetch_device_diagnostics(
                     device_id,
@@ -810,18 +814,22 @@ class OTBRRestApiClient:
                 )
                 results.append(diag)
             except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+                status = "skipped"
                 if not skip_on_failure:
                     raise
                 logging.warning(
                     "Skipping device %s: %s", device_id, exc
                 )
+            finally:
+                if on_progress is not None:
+                    on_progress(idx, total, device_id, time.monotonic() - t_start, status)
         return results
 
     def fetch_network_diagnostics_all_devices(
         self,
         *,
         update_devices: bool = True,
-        device_count: int = 50,
+        device_count: int = 200,
         types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
         destination_type: str = DestinationType.EXTENDED,
         task_timeout: int = 93,
@@ -947,6 +955,7 @@ class OTBRRestApiClient:
         poll_interval: float = 3.0,
         poll_timeout: float = 360.0,
         skip_on_failure: bool = True,
+        on_progress: Callable[[int, int, str, float, str], None] | None = None,
         raw: object = _RAW_UNSET,
     ) -> list[Any]:
         """
@@ -957,7 +966,10 @@ class OTBRRestApiClient:
         """
         raw = self._resolve_raw(raw)
         results: list[Any] = []
-        for device_id in device_ids:
+        total = len(device_ids)
+        for idx, device_id in enumerate(device_ids, start=1):
+            t_start = time.monotonic()
+            status = "completed"
             try:
                 diag = self.fetch_mesh_diagnostics(
                     device_id,
@@ -970,11 +982,15 @@ class OTBRRestApiClient:
                 )
                 results.append(diag)
             except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+                status = "skipped"
                 if not skip_on_failure:
                     raise
                 logging.warning(
                     "Skipping device %s (mesh diagnostics): %s", device_id, exc
                 )
+            finally:
+                if on_progress is not None:
+                    on_progress(idx, total, device_id, time.monotonic() - t_start, status)
         return results
 
     def _request(
