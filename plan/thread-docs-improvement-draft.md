@@ -25,3 +25,49 @@ Status: Draft for review only. Do not execute until approved.
 9. Add a **Known limitations and performance expectations** section (sync vs async jobs, action durations, large network behavior, timeouts).
 10. Add a **Documentation IA cleanup** with cross-links, reduced duplication, a central command index, and versioned change notes for breaking CLI behavior.
 
+## Implementation Findings (No Code Changes)
+
+This pass implemented the plan as a documentation audit and gap analysis only.
+
+### Current Coverage Snapshot
+
+- **Strong coverage exists** for deep technical reference:
+  - `doc/help_td_restapi_cli.md` provides detailed command reference depth.
+  - `doc/codebase_overview.md` covers architecture, data flow, and testing entry points.
+  - `doc/help_td_cli.md` and `doc/datadir_model.md` document CLI behavior and data-dir precedence.
+- **Partial coverage exists** in `README.md` for setup and command examples.
+- **Major gaps remain** for beginner onboarding and operational guidance:
+  - No role-based "Start Here" path.
+  - No explicit 10-minute quickstart to first topology visualization.
+  - No consolidated troubleshooting playbook.
+  - No "known limitations/performance expectations" section.
+  - No centralized docs index mapping user goals to files.
+
+### Findings Mapped to Top 10 Items
+
+1. **Start Here guide**: Not present (gap).
+2. **10-minute Quickstart**: Not present as a focused flow (gap).
+3. **Prerequisites/environment matrix**: Partially present, fragmented across docs (partial).
+4. **Data-source decision guide**: Not present as decision matrix/tradeoff doc (gap).
+5. **Thread concepts primer mapped to tdash fields**: Partially present in overview, not user-oriented (partial).
+6. **End-to-end workflows**: Partially present as command examples, not goal-driven guides (partial).
+7. **Troubleshooting section**: Not present in consolidated form (gap).
+8. **Diagnostics interpretation guide**: Not present as interpretation-focused guidance (gap).
+9. **Known limitations/performance expectations**: Not present as dedicated section (gap).
+10. **IA cleanup with command index/cross-links/change notes**: Partial; significant consolidation opportunity remains (partial).
+
+## Feedback and Recommendations
+
+1. **Prioritize onboarding before adding more reference depth.** Existing docs are strong for experienced operators but high-friction for first-time users.
+2. **Create a single navigation hub** (README "Docs Index") that points to setup, quickstart, operations, troubleshooting, and reference.
+3. **Split documentation by audience and intent**:
+   - "Operator quick wins" (run, fetch, view topology).
+   - "Engineer deep dive" (architecture, merge strategy, diagnostic semantics).
+4. **Standardize command examples** around one canonical invocation style and datadir handling to reduce ambiguity.
+5. **Add troubleshooting + limits early** to reduce repeated support/debug loops.
+
+## Validation Notes
+
+- No source code changes were made in this pass.
+- Updates are limited to this plan markdown file.
+- Baseline test run in this environment identified pre-existing test/module issues unrelated to this documentation-only update.
