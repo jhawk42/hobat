@@ -28,6 +28,10 @@ const FILE_ROUTER_NEIGHBORTABLES = 'td-otbr-cli-meshdiag-router-neighbortables.j
 const FILE_ROUTER_CHILDTABLES    = 'td-otbr-cli-meshdiag-router-childtables.json';
 const FILE_RESTAPI_DEVICES       = 'td-otbr-restapi-devices.json';
 const FILE_RESTAPI_DIAGNOSTICS   = 'td-otbr-restapi-diagnostics.json';
+const FILE_RESTAPI_DEVICES_LIST      = 'td-otbr-restapi-devices-list.json';
+const FILE_RESTAPI_DEVICES_FETCH     = 'td-otbr-restapi-devices-fetch.json';
+const FILE_RESTAPI_DIAGNOSTICS_LIST  = 'td-otbr-restapi-diagnostics-list.json';
+const FILE_RESTAPI_DIAGNOSTICS_FETCH = 'td-otbr-restapi-diagnostics-fetch.json';
 
 // Files consumed as named primary slots in adaptMeshdiagNetworkdiag;
 // anything not in this set is treated as supplementary (e.g. mdns, eve).
@@ -893,10 +897,18 @@ export function adaptRawArray(fileMap) {
 // Primary node ID = extAddress (lowercase). Merged by extAddress identity.
 
 export function adaptOtbrRestApi(fileMap) {
-  const devicesRaw = fileMap.get(FILE_RESTAPI_DEVICES);
-  const diagRaw = fileMap.get(FILE_RESTAPI_DIAGNOSTICS);
-  const devicesData = (devicesRaw && Array.isArray(devicesRaw.data)) ? devicesRaw.data : [];
-  const diagData = (diagRaw && Array.isArray(diagRaw.data)) ? diagRaw.data : [];
+  const devicesRaw = fileMap.get(FILE_RESTAPI_DEVICES) ?? fileMap.get(FILE_RESTAPI_DEVICES_LIST) ?? fileMap.get(FILE_RESTAPI_DEVICES_FETCH);
+  const diagRaw = fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH);
+  // Accept JSON:API envelope ({data:[...]}), pre-flattened array, or a single diagnostic object
+  function extractItems(raw) {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (Array.isArray(raw.data)) return raw.data;
+    if (isPlainObject(raw) && raw.extAddress) return [raw]; // single diagnostic record
+    return [];
+  }
+  const devicesData = extractItems(devicesRaw);
+  const diagData = extractItems(diagRaw);
 
   // Flatten each item: merge top-level fields + attributes sub-object
   function flattenRestApiItem(item) {

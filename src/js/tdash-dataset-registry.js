@@ -334,17 +334,69 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "default_links"
   },
 
+  // ── Single-file simple datasets ───
+  {
+    source: "otbr-restapi",
+    value: "restapi_devices_list",
+    label: "devices list",
+    files: ["td-otbr-restapi-devices-list.json"],
+    mergeStrategy: "none",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  },
+
+ // ── Single-file simple datasets ───
+  {
+    source: "otbr-restapi",
+    value: "restapi_devices_fetch",
+    label: "devices fetch",
+    files: ["td-otbr-restapi-devices-fetch.json"],
+    mergeStrategy: "none",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  },
+
+  // ── Multi-file topology datasets (otbr-restapi) ────────────
+  {
+    source: "otbr-restapi",
+    value: "restapi_devices_diagnostics_list",
+    label: "devices, diagnostics list",
+    files: ["td-otbr-restapi-devices-list.json", "td-otbr-restapi-diagnostics-list.json"],
+    mergeStrategy: "by-identity",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "otbr_rest_api",
+  },
+
   // ── Multi-file topology datasets (otbr-restapi) ────────────
   {
     source: "otbr-restapi",
     value: "restapi_devices_diagnostics",
     label: "devices, diagnostics",
     files: ["td-otbr-restapi-devices.json", "td-otbr-restapi-diagnostics.json"],
-    mergeStrategy: "none",
+    mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "otbr_rest_api",
   },
+
+
+
+  // ── Single-file simple datasets ───
+  {
+    source: "otbr-restapi",
+    value: "restapi_diagnostics_list",
+    label: "diagnostics list",
+    files: ["td-otbr-restapi-diagnostics-list.json"],
+    mergeStrategy: "none",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  },
+
+  // ── Single-file simple datasets ───
   {
     source: "otbr-restapi",
     value: "restapi_devices",
@@ -365,6 +417,30 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  },
+
+  // ── Single-file simple datasets ───
+  {
+    source: "otbr-restapi",
+    value: "restapi_actions_list",
+    label: "actions list",
+    files: ["td-otbr-restapi-actions-list.json"],
+    mergeStrategy: "none",
+    topologyMode: "raw-array",
+    defaultView: "table",
+    defaultLinkFilter: "all_links"
+  },
+
+  // ── Single-file simple datasets ───
+  {
+    source: "otbr-restapi",
+    value: "restapi_dataset_active",
+    label: "dataset active",
+    files: ["td-otbr-restapi-dataset-active.json"],
+    mergeStrategy: "none",
+    topologyMode: "raw-array",
+    defaultView: "table",
     defaultLinkFilter: "all_links"
   },
 

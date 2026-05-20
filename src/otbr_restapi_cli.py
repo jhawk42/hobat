@@ -770,10 +770,10 @@ def _make_progress_fn(total: int, enabled: bool):
 _AUTO_OUTPUT_NAMES: dict[tuple[str, str], str] = {
     ("devices", "list"):                "td-otbr-restapi-devices-list.json",
     ("devices", "fetch"):               "td-otbr-restapi-devices-fetch.json",
-    ("diagnostics", "list"):             "td-otbr-restapi-diagnostics-list.json",
+    ("diagnostics", "list"):            "td-otbr-restapi-diagnostics-list.json",
     ("diagnostics", "fetch"):           "td-otbr-restapi-diagnostics-fetch.json",
     ("diagnostics", "fetch-all"):       "td-otbr-restapi-diagnostics-fetch-all.json",
-    ("actions", "list"):                 "td-otbr-restapi-actions-list.json",
+    ("actions", "list"):                "td-otbr-restapi-actions-list.json",
     ("mesh-diagnostics", "fetch"):      "td-otbr-restapi-mesh-diagnostics-fetch.json",
     ("mesh-diagnostics", "fetch-all"):  "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
 }
