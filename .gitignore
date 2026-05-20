@@ -103,5 +103,6 @@ docker-compose.*.local.yml
 script/
 downloads/
 plan/
+!plan/draft_architecture_reliability_assessment_plan.md
 data/
 diag/
