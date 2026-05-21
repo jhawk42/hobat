@@ -15,7 +15,7 @@ from otbr_restapi_util import (
     OTBRClientError,
     OTBRRestApiClient,
 )
-from util_data import resolve_data_dir, resolve_data_file_path
+from util_data import resolve_data_dir, resolve_data_file_path, save_json_atomic
 
 HOST = "127.0.0.1"
 PORT = 8081
@@ -31,22 +31,6 @@ _STATIC_ENDPOINTS: Sequence[Tuple[str, str]] = [
 
 # Active data-dir context used by direct-entry verification tests.
 _ACTIVE_TD_DATA_DIR: Path | None = None
-
-
-# ---------------------------------------------------------------------------
-# 5.3 – Atomic JSON write helper
-# ---------------------------------------------------------------------------
-
-def save_json_to_file(data: Any, output_file: Path) -> None:
-    """Atomically write data to output_file as formatted JSON."""
-    tmp = output_file.with_suffix(".tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4)
-        tmp.replace(output_file)
-    except OSError:
-        tmp.unlink(missing_ok=True)
-        raise
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +183,7 @@ def download_all_restapi_endpoints(
 
     failures = 0
 
-    # 5.4 – optionally refresh device collection first
+    # Optionally refresh device collection first
     if update_devices:
         logging.info("Triggering updateDeviceCollectionTask …")
         try:
@@ -216,8 +200,10 @@ def download_all_restapi_endpoints(
         method = getattr(client, method_name)
         try:
             data = method(raw=True)
-            save_json_to_file(data, output_file)
+            save_json_atomic(data, output_file)
             logging.info("OK: %s -> %s", method_name, output_file)
+            logging.debug("Saved %s data into %s as JSON:\n%s",
+                method_name, output_file, json.dumps(data, indent=4))
         except OTBRClientError as exc:
             logging.error("Failed to download %s: %s", method_name, exc)
             failures += 1
@@ -266,8 +252,10 @@ def fetch_and_save_diagnostics(
             diag = client.fetch_device_diagnostics(
                 device_id, types=diag_types, raw=True
             )
-            save_json_to_file(diag, output_file)
+            save_json_atomic(diag, output_file)
             logging.info("Diagnostic saved: %s -> %s", device_id, output_file)
+            logging.debug("Saved diagnostic data for %s into %s as JSON:\n%s",
+                device_id, output_file, json.dumps(diag, indent=4))
         except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
             logging.warning("Diagnostic skipped for %s: %s", device_id, exc)
             failures += 1

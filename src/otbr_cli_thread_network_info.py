@@ -18,9 +18,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "td-otbr-cli-thread-network-info.json", td_data_dir
     )
     save_json_atomic(thread_network_info, save_json_path)
-    logging.debug("Raw thread network info as JSON:\n%s",
-                  json.dumps(thread_network_info, indent=4))
-
+    logging.debug("Saved thread network info data into %s as JSON:\n%s",
+            save_json_path, json.dumps(thread_network_info, indent=4))
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -194,9 +194,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     save_json_atomic(eve_data_enhanced, file_path)
 
     # Print the parsed data structure with route names
-    logging.debug("Raw eve data as JSON:\n%s",
-                  json.dumps(eve_data_enhanced, indent=4))
-
+    logging.debug("Saved eve topology data into %s as JSON:\n%s",
+            file_path, json.dumps(eve_data_enhanced, indent=4))
 
 if __name__ == "__main__":
     raise SystemExit(main())

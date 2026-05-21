@@ -174,9 +174,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         save_path = data_file_path(
             "td-otbr-cli-router-table.json", td_data_dir)
         save_json_atomic(router_table_data, save_path)
-        logging.debug("Raw router table data as JSON:\n%s",
-                      json.dumps(router_table_data, indent=4))
-
+        logging.debug("Saved router-table data into %s as JSON:\n%s",
+                save_path, json.dumps(router_table_data, indent=4))
     except FileNotFoundError as e:
         logging.error(f"Error: File not found - {e}")
     except json.JSONDecodeError as e:

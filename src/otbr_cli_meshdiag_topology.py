@@ -316,8 +316,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "td-otbr-cli-meshdiag-topology.json", td_data_dir)
     save_json_atomic(meshdiag_topology_data, save_path)
 
-    logging.debug("Meshdiag Topology Data:\n%s",
-                  json.dumps(meshdiag_topology_data, indent=4))
+    logging.debug("Saved meshdiag topology data into %s as JSON:\n%s",
+                  save_path, json.dumps(meshdiag_topology_data, indent=4))
 
 
 if __name__ == "__main__":

@@ -1514,6 +1514,7 @@ def save_topology_to_json_dict(
     """Serializes the dictionary to a pretty-printed JSON file."""
     save_json_atomic(data, filename)
     logging.info(f"Successfully exported {len(data)} records for topology to {filename}")
+    logging.debug("Saved topology data into %s as JSON:\n%s", filename, json.dumps(data, indent=4))
 
 
 def save_topology_to_json_list(
@@ -1545,7 +1546,8 @@ def save_topology_to_json_list(
 
     save_json_atomic(network_map, filename)
     logging.info(f"Successfully exported {len(network_map)} records for topology to {filename}")
-
+    logging.debug("Saved topology data into %s as JSON:\n%s",
+            filename, json.dumps(network_map, indent=4))
 
 def main_multicast_network(argv: Sequence[str] | None = None) -> int:
     """Entry point for topology-multicast-network subcommand (ff03::1)."""

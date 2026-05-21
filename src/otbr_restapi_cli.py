@@ -41,6 +41,8 @@ from otbr_restapi_util import (
     extract_action_result_id,
 )
 
+# Reference: https://github.com/openthread/ot-br-posix/blob/main/src/rest/openapi.yaml
+
 EXIT_SUCCESS = 0
 EXIT_UNEXPECTED = 1
 EXIT_USAGE = 2
@@ -1205,6 +1207,7 @@ def _dispatch_topology(
     fallback_types = _resolve_fallback_types(args)
     primary_types = _resolve_types(args)
     progress_enabled = not getattr(args, "no_progress", False)
+    wall_start = time.monotonic()
 
     # ------------------------------------------------------------------
     # Step 1: Device refresh
@@ -1216,6 +1219,8 @@ def _dispatch_topology(
         path = data_dir / "td-otbr-restapi-devices-fetch.json"
         save_json_atomic(devices, path)
         logging.info("topology step 1 done: %d device(s) → %s", len(devices), path)
+        logging.debug("Saved device data into %s as JSON:\n%s",
+                path, json.dumps(devices, indent=4))
     else:
         logging.info("topology step 1 skipped (--skip-devices); fetching device list quietly")
         devices = client.list_devices(raw=False)
@@ -1227,6 +1232,7 @@ def _dispatch_topology(
     # ------------------------------------------------------------------
     if not getattr(args, "skip_diagnostics", False):
         logging.info("topology step 2: diagnostics fetch-all --preset %s ...", args.preset)
+        step_start = time.monotonic()
         if do_update and not getattr(args, "skip_devices", False):
             # Device list already refreshed in step 1; avoid a second refresh
             diag_device_ids = device_ids
@@ -1253,9 +1259,13 @@ def _dispatch_topology(
             _apply_mac_enrichment(diagnostics)
         path = data_dir / "td-otbr-restapi-diagnostics-fetch-all.json"
         save_json_atomic(diagnostics, path)
+        elapsed = time.monotonic() - step_start
         logging.info(
-            "topology step 2 done: %d diagnostic(s) → %s", len(diagnostics), path
+            "topology step 2 done: %d device(s), %d diagnostic(s) in %.1fs → %s",
+            len(diag_device_ids), len(diagnostics), elapsed, path,
         )
+        logging.debug("Saved diagnostics data into %s as JSON:\n%s",
+                path, json.dumps(diagnostics, indent=4))
     else:
         logging.info("topology step 2 skipped (--skip-diagnostics)")
 
@@ -1264,6 +1274,7 @@ def _dispatch_topology(
     # ------------------------------------------------------------------
     if not getattr(args, "skip_mesh_diagnostics", False):
         logging.info("topology step 3: mesh-diagnostics fetch-all --routers-only ...")
+        step_start = time.monotonic()
         router_ids = _filter_router_device_ids(devices, device_ids)
         logging.info(
             "topology step 3: %d router device(s) selected", len(router_ids)
@@ -1276,12 +1287,18 @@ def _dispatch_topology(
         )
         path = data_dir / "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
         save_json_atomic(mesh_results, path)
+        elapsed = time.monotonic() - step_start
         logging.info(
-            "topology step 3 done: %d mesh diagnostic(s) → %s", len(mesh_results), path
+            "topology step 3 done: %d mesh diagnostic(s) in %.1fs → %s",
+            len(mesh_results), elapsed, path,
         )
+        logging.debug("Saved mesh diagnostics data into %s as JSON:\n%s",
+                path, json.dumps(mesh_results, indent=4))
     else:
         logging.info("topology step 3 skipped (--skip-mesh-diagnostics)")
 
+    total_elapsed = time.monotonic() - wall_start
+    logging.info("Topology sweep complete in %.1fs", total_elapsed)
     return None  # emit_output handles None by writing nothing
 
 

@@ -2016,7 +2016,8 @@ options:
 
         logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
         logging.info(json.dumps(records, indent=2))
-
+        logging.debug("Saved mDNS scope data into %s as JSON:\n%s",
+                output_file, json.dumps(records, indent=2))
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -196,8 +196,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.info(
         f"Meshdiag routerneighbortables data saved to {output_path}")
 
-    logging.debug("Raw meshdiag routerneighbortables data as JSON:\n%s",
-                  json.dumps(router_neighbor_tables, indent=4))
+    logging.debug("Saved meshdiag routerneighbortables data into %s as JSON:\n%s",
+                  output_path, json.dumps(router_neighbor_tables, indent=4))
 
 
 if __name__ == "__main__":

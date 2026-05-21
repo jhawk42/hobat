@@ -140,7 +140,8 @@ def merge_extaddr_files(extaddr_json_path, topology_file_path, merge_name_overri
     
     # Write updated data back to static file
     save_json_atomic(static_data, extaddr_json_path)
-    
+    logging.debug("Saved extaddr data into %s as JSON:\n%s",
+            extaddr_json_path, json.dumps(static_data, indent=4))    
     return len(added_entries), added_entries, len(overridden_entries), overridden_entries
 
 

@@ -223,8 +223,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logging.info(
         f"Meshdiag router childtables data saved to {output_filename}")
-    logging.debug("Raw meshdiag router childtables data as JSON:\n%s",
-                  json.dumps(router_child_tables, indent=4))
+    logging.debug("Saved meshdiag router childtables data into %s as JSON:\n%s",
+                  output_filename, json.dumps(router_child_tables, indent=4))
 
 
 if __name__ == "__main__":

@@ -155,9 +155,6 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
     ),
 
     # Eve topology exports — externally managed static files.
-    "example-small-Eve Thread Network Layout.evethreadlayout": FileAction(
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action="STATIC", action_cost_s=1
-    ),
     "Eve Thread Network Layout.evethreadlayout": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action="STATIC", action_cost_s=1
     ),
@@ -284,7 +281,7 @@ def _get_source_lock(source: str) -> asyncio.Lock:
     return _source_locks[source]
 
 
-# async job tracking (DD-2 Option B)
+# async job tracking
 _LONG_COST_THRESHOLD_S = 300  # actions with cost > this get 202 + polling
 
 
@@ -364,18 +361,20 @@ async def run_td_cli(
     re-raised to the caller.  Pass ``None`` (the default) to disable the
     timeout.
     """
-    td_cli_path = Path(__file__).parent / "td_cli.py"  # DD-5
-    # logging.debug("Running td_cli with args: %s", " ".join(action_args))
-    logging.debug("Spawning subprocess: %s %s %s", sys.executable,
-                  td_cli_path, " ".join(action_args))
+    td_cli_path = Path(__file__).parent / "td_cli.py"
+    logging.debug("Spawning subprocess: %s %s %s", 
+                  sys.executable,
+                  td_cli_path, 
+                  " ".join(action_args))
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         str(td_cli_path),
-        "--datadir", str(data_dir),  # DD-6 — must precede action_args so td_cli.py's
+        "--datadir", str(data_dir),  # must precede action_args so td_cli.py's
         *action_args,                # top-level parser captures it before subcommand delegation
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    _t0 = time.monotonic()
     try:
         if timeout_s is not None:
             stdout, stderr = await asyncio.wait_for(
@@ -385,13 +384,24 @@ async def run_td_cli(
             stdout, stderr = await process.communicate()
     except asyncio.TimeoutError:
         logging.warning(
-            "td_cli timed out after %.1f s (args: %s); killing process",
+            "Subprocess timed out after %.1f s (args: %s); killing process",
             timeout_s,
-            action_args,
-        )
+            sys.executable,
+            td_cli_path,
+            " ".join(action_args),
+            )
         process.kill()
-        await process.communicate()  # reap the child to avoid zombie
+        # reap the child to avoid zombie
+        await process.communicate()  
         raise
+    finally:
+        logging.debug(
+            "Subprocess elapsed %.3f s  %s %s %s",
+            time.monotonic() - _t0,
+            sys.executable,
+            td_cli_path,
+            " ".join(action_args)
+        )
     if stdout:
         logging.info("td_cli stdout: %s", stdout.decode(errors="replace"))
     if stderr:
@@ -579,6 +589,10 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
 
     file_action, file_path = _resolve_and_validate(filename, data_dir)
 
+    logging.debug(">>>>>>>>>")
+    logging.debug("Request for %s (no_cache=%s); file action: %s; file path: %s",
+                  filename, no_cache, file_action, file_path)
+
     if file_action.action == "STATIC":
         if not file_path.is_file():
             raise aiohttp.web.HTTPNotFound(
@@ -588,6 +602,9 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
         if file_action.force_async or file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
             return await _dispatch_long_cost(filename, action_args, data_dir, file_action)
         await _dispatch_short_cost(filename, action_args, data_dir, file_action, no_cache)
+
+    logging.debug("Serving file %s for request (no_cache=%s)", file_path, no_cache)
+    logging.debug("<<<<<<<<<")
 
     return _build_file_response(file_path, file_action, request)
 
@@ -823,7 +840,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.host or "localhost",
         args.port,
     )
-    logging.info("Static assets root: %s", static_root)
+    logging.info("Static files root: %s", static_root)
     logging.info("Data root: %s", td_data_dir)
 
     aiohttp.web.run_app(

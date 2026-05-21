@@ -214,11 +214,11 @@ def is_border_router_from_ipv6_addrs(ipv6_addrs, meshlocal_prefix):
         is_meshlocal_addr = is_ipv6_address_in_meshlocal_prefix(addr, meshlocal_prefix)
         if is_meshlocal_addr:
             suffix = addr.split(":")[-1]  # Get the last segment of the IPv6 address
-            logging.warning(f"[DEBUG] Checking if address {addr} is a Border Router address with prefix {meshlocal_prefix} and suffix {suffix}\n")
+            ##logging.debug(f"[DEBUG] Checking if address {addr} is a Border Router address with prefix {meshlocal_prefix} and suffix {suffix}\n")
             
             # Check if suffix is in the range of fc10 to fc1f
             if aloc_service_anycast_suffix_range_start <= suffix <= aloc_service_anycast_suffix_range_end:
-                logging.warning(f"[DEBUG] Address {addr} has suffix {suffix} in the range of {aloc_service_anycast_suffix_range_start} to {aloc_service_anycast_suffix_range_end}.\n")
+                logging.debug(f"[DEBUG] Found Border Router Address {addr} with suffix {suffix} in the range of {aloc_service_anycast_suffix_range_start} to {aloc_service_anycast_suffix_range_end}.\n")
 
                 # This address is a Service Anycast address for Border Router, so we consider it as a Border Router address
                 return True  

@@ -776,7 +776,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     output_path = base_dir / args.output
     save_json_atomic(merged_records, output_path, indent=2, add_trailing_newline=True)
-
+    logging.debug("Saved merged records into %s as JSON:\n%s",
+            output_path, json.dumps(merged_records, indent=2))
     if args.report_file:
         report_path = base_dir / args.report_file
         save_json_atomic(report, report_path, indent=2, add_trailing_newline=True)

@@ -10,6 +10,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+# Reference: https://github.com/openthread/ot-br-posix/blob/main/src/rest/openapi.yaml
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8081
 DEFAULT_TIMEOUT = 10

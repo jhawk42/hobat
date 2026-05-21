@@ -27,6 +27,8 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
+import json
 import logging
 import sys
 import time
@@ -215,6 +217,8 @@ def run(args: argparse.Namespace) -> int:
             elapsed,
             mesh_path,
         )
+        logging.debug("Saved mesh diagnostics data into %s as JSON:\n%s",
+                mesh_path, json.dumps(mesh_results, indent=4))        
     else:
         logging.info("Step B skipped (--skip-mesh-diagnostics)")
 
