@@ -318,3 +318,89 @@ Targets:
 - Generic merge/conflict primitives from `dataset_merge.py`.
 - Generic normalization helpers not tied to Thread protocol specifics.
 - Shared JSON/file lifecycle utilities (if they reduce real duplication at call sites).
+
+---
+
+## Phase 10 — Proposed Function Extraction Catalog (Next-Level Detail)
+
+> Proposed names below are planning targets only.  
+> They are intentionally scoped to keep behavior parity while reducing duplication.
+
+### A) Proposed new helpers in `src/otbr_cli_util.py`
+- `run_diag_with_retry_and_tlv_fallback(exec_fn, tlv_levels, max_attempts, timeout_s)`
+  - Runs an OTBR CLI command with bounded retries and TLV detail fallback.
+- `collect_per_router(router_rows, collect_fn, router_meta_fn=None)`
+  - Standardizes “iterate routers + collect per-router payload” orchestration.
+- `is_response_timeout_error(exc_or_output)`
+  - Central timeout detector for CLI exceptions/text output.
+- `build_timeout_error_record(scope, rloc16=None, context=None)`
+  - Produces a consistent `_error` envelope for timeout/failure cases.
+- `load_extaddr_map_or_empty(path=None, logger=None)`
+  - Loads extaddr label map with uniform warning/default behavior.
+- `resolve_collector_runtime(datadir_arg=None, output_arg=None, default_filename=None)`
+  - Resolves datadir/output paths used by OTBR CLI collector entry points.
+- `parse_conn_time_seconds(raw_line)`
+  - Shared parser atom for `conn-time` fields in meshdiag outputs.
+- `parse_link_quality_metrics(raw_line)`
+  - Shared parser atom for RSS/error-rate style telemetry lines.
+
+### B) Proposed new helpers in `src/otbr_restapi_util.py`
+- `add_common_rest_client_args(parser)`
+  - Injects common host/port/timeout/base-url/header arguments into parsers.
+- `build_rest_client_from_args(args)`
+  - Centralized OTBR REST client bootstrap from parsed CLI args.
+- `emit_rest_payload_output(payload, output_path=None, logger=None)`
+  - Shared “save payload + optional structured log” output behavior.
+- `exit_code_for_rest_exception(exc)`
+  - Shared exception-to-exit-code mapping across REST entry points.
+- `normalize_rest_headers(accept, extra_headers)`
+  - Builds validated headers dict used by download/CLI commands.
+
+### C) Proposed local extraction in `src/otbr_cli_networkdiag_topology.py`
+- `_build_unknown_device_record(rloc16, role, error_message=None)`
+  - Creates consistent fallback records for unreachable/partial devices.
+- `_enrich_device_role_and_prefix_flags(record, meshlocal_prefix, omr_prefix)`
+  - Applies reusable device-type/BR/OMR enrichment to one record.
+- `_upsert_device_record(records_by_rloc, incoming_record)`
+  - Wraps merge-and-store call-site boilerplate around `merge_device_record`.
+
+### D) Proposed local extraction in `src/td_cli.py`
+- `_register_command_groups(subparsers)`
+  - Consolidates command-group registration sequence in one place.
+- `_dispatch_otbr_cli_command(args, extaddr_map)`
+  - Isolates OTBR CLI dispatch table from top-level `dispatch`.
+- `_dispatch_otbr_restapi_command(args)`
+  - Isolates OTBR REST API dispatch table from top-level `dispatch`.
+- `_dispatch_merge_command(args)`
+  - Encapsulates merge-related subcommand branching.
+
+### E) Proposed local extraction in `src/mdns_thread_scopes.py`
+- `_build_property_enricher_registry()`
+  - Returns table-driven mapping of property keys to enrichment handlers.
+- `_enrich_property_with_registry(key, raw_value, full_name, registry)`
+  - Executes one enrichment path via registry with safe fallback behavior.
+- `_normalize_service_properties(raw_properties)`
+  - Normalizes raw mDNS property input before field-level enrichment.
+
+### F) Proposed shared extraction for extaddr/dataset merge handling
+- `parse_extaddr_label_entries(raw_data)` in `src/extaddr_device_label_map.py`
+  - Parses and validates extaddr→label records independently of file I/O.
+- `load_extaddr_device_label_map_file(path)` in `src/extaddr_device_label_map.py`
+  - Loads file and delegates validation/parsing to shared parser helper.
+- `adapt_extaddr_labels_for_dataset_merge(path)` in `src/dataset_merge.py`
+  - Thin adapter that calls shared loader and preserves dataset_merge schema.
+
+### G) Proposed generic helpers for cross-source merge/runtime reuse (only if reused)
+- `merge_records_with_conflict_trace(left, right, conflict_path=())` in `src/util_data.py` (or `src/util_merge.py`)
+  - Performs deep merge while collecting conflict metadata for diagnostics.
+- `normalize_identifier_bundle(record, omr_prefix=None)` in `src/util_data.py` (or `src/util_merge.py`)
+  - Produces normalized identity fields (extaddr/omr/aliases) for matching.
+- `run_load_transform_save_pipeline(input_path, transform_fn, output_path)` in `src/util_data.py`
+  - Standardizes load-transform-save flow used by Eve/merge utility scripts.
+
+### H) Suggested execution sequence with the new function set
+1. Add OTBR CLI shared helpers (`otbr_cli_util.py`) and migrate meshdiag callers first.
+2. Add REST API shared helpers (`otbr_restapi_util.py`) and migrate restapi CLI/download/topology.
+3. Extract local networkdiag record helpers without moving TLV domain parsing out of module.
+4. Unify extaddr loader/parser contract across `extaddr_device_label_map.py` and `dataset_merge.py`.
+5. Promote merge/runtime generic helpers to `util_*` only when second non-OTBR reuse is confirmed.
