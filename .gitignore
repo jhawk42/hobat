@@ -103,5 +103,7 @@ docker-compose.*.local.yml
 script/
 downloads/
 plan/
+!plan/
+!plan/test-coverage-proposal.md
 data/
 diag/
