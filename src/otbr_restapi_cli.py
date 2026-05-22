@@ -107,6 +107,13 @@ def build_parser() -> argparse.ArgumentParser:
             "write results to <datadir>/td-otbr-restapi-<resource>-<command>.json (P5)"
         ),
     )
+    parser.add_argument(
+        "--debug",
+        "-d",
+        action="store_true",
+        default=False,
+        help="Enable debug logging",
+    )
 
     subparsers = parser.add_subparsers(dest="resource", required=True)
     _add_node_commands(subparsers)
@@ -364,6 +371,7 @@ def _add_actions_commands(
         "get", help="Get an action by action ID"
     )
     actions_get.add_argument("--action-id", required=True)
+    _add_fields_argument(actions_get)
 
     enqueue_parser = actions_subparsers.add_parser(
         "enqueue", help="Enqueue a new OTBR task"
@@ -422,10 +430,10 @@ def _add_actions_commands(
     energy_scan.add_argument("--destination", required=True)
     energy_scan.add_argument(
         "--channel-mask", nargs="+", required=True, type=int)
-    energy_scan.add_argument("--count", required=True, type=int)
-    energy_scan.add_argument("--period", required=True, type=int)
-    energy_scan.add_argument("--scan-duration", required=True, type=int)
-    energy_scan.add_argument("--timeout", required=True, type=int)
+    energy_scan.add_argument("--count", type=int, default=None)
+    energy_scan.add_argument("--period", type=int, default=None)
+    energy_scan.add_argument("--scan-duration", type=int, default=None)
+    energy_scan.add_argument("--timeout", type=int, default=None)
     energy_scan.add_argument("--destination-type")
 
     update_devices = enqueue_subparsers.add_parser(
@@ -1050,7 +1058,7 @@ def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:
                 fields=fields, raw=raw_arg, with_meta=args.with_meta
             )
         if args.actions_command == "get":
-            return client.get_action(args.action_id, raw=raw_arg)
+            return client.get_action(args.action_id, fields=fields, raw=raw_arg)
         if args.actions_command == "enqueue":
             if args.enqueue_type == "add-thread-device":
                 return client.enqueue_add_thread_device_task(
@@ -1418,11 +1426,16 @@ def run_cli(
     argv: Sequence[str] | None = None,
 ) -> int:
     """Standard CLI entry-point scaffold shared by both client CLIs."""
-    logging.basicConfig(
-        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
-    )
+    # Parse arguments first to check debug flag before setting up logging
     parser = build_parser_fn()
     args = parser.parse_args(argv)
+    
+    # Configure logging based on debug flag
+    log_level = logging.DEBUG if getattr(args, "debug", False) else logging.INFO
+    logging.basicConfig(
+        level=log_level, format="[%(asctime)s] %(levelname)s: %(message)s"
+    )
+    
     args.td_data_dir = resolve_data_dir(data_dir=args.datadir)
 
     # P5 — resolve output path: explicit --output > auto-naming > stdout

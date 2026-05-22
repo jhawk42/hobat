@@ -192,6 +192,12 @@ MESH_DIAGNOSTIC_TLVS: frozenset[str] = frozenset({
     DIAG_TLV_ROUTER_NEIGHBORS,
 })
 
+# Only these TLVs can be reset via resetNetworkDiagCounterTask (server enforces this)
+RESETTABLE_DIAGNOSTIC_TLVS: frozenset[str] = frozenset({
+    DIAG_TLV_MAC_COUNTERS,   # TLV 9
+    DIAG_TLV_MLE_COUNTERS,   # TLV 34
+})
+
 # 1.3 – Protocol string constants
 
 
@@ -209,8 +215,9 @@ class ActionStatus:
 
 
 class DestinationType:
-    EXTENDED = "extended"   # extAddress (16-char hex)
-    ML_EID_IID = "mlEidIid"   # Mesh-Local EID IID
+    EXTENDED   = "extended"  # extAddress, 16-char hex — wire value: "extended"
+    ML_EID_IID = "mleid"     # Mesh-Local EID IID, 16-char hex — wire value: "mleid"
+    RLOC       = "rloc"      # RLOC16, 6-char hex (e.g. "f000") — wire value: "rloc"
 
 
 class DeviceType:
@@ -221,6 +228,15 @@ class DeviceType:
 class DiagnosticType:
     NETWORK_DIAGNOSTICS = "networkDiagnostics"
     ENERGY_SCAN_REPORT = "energyScanReport"
+
+
+class ActionType:
+    ADD_THREAD_DEVICE        = "addThreadDeviceTask"
+    GET_NETWORK_DIAGNOSTIC   = "getNetworkDiagnosticTask"
+    RESET_DIAG_COUNTERS      = "resetNetworkDiagCounterTask"
+    GET_ENERGY_SCAN          = "getEnergyScanTask"
+    UPDATE_DEVICE_COLLECTION = "updateDeviceCollectionTask"
+    # discoverThreadNetworksTask — listed as TODO in openapi.yaml; not yet implemented on server
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +299,57 @@ class OTBRRestApiClient:
             content_type="application/json",
             raw=True,
         )
+
+    def get_node_ba_id(self) -> str:
+        return self._request("/node/ba-id", accept="application/json", raw=True)
+
+    def get_node_rloc(self) -> str:
+        return self._request("/node/rloc", accept="application/json", raw=True)
+
+    def get_node_rloc16(self) -> int:
+        return self._request("/node/rloc16", accept="application/json", raw=True)
+
+    def get_node_ext_address(self) -> str:
+        return self._request("/node/ext-address", accept="application/json", raw=True)
+
+    def get_node_network_name(self) -> str:
+        return self._request("/node/network-name", accept="application/json", raw=True)
+
+    def get_node_leader_data(self) -> dict:
+        return self._request("/node/leader-data", accept="application/json", raw=True)
+
+    def get_node_ext_panid(self) -> str:
+        return self._request("/node/ext-panid", accept="application/json", raw=True)
+
+    def get_node_num_of_router(self) -> int:
+        return self._request("/node/num-of-router", accept="application/json", raw=True)
+
+    def get_node_coprocessor_version(self) -> str:
+        return self._request("/node/coprocessor/version", accept="application/json", raw=True)
+
+    def get_pending_dataset(self, *, plain_text: bool = False, raw: object = _RAW_UNSET) -> Any:
+        raw = self._resolve_raw(raw)
+        accept = "text/plain" if plain_text else "application/json"
+        return self._request("/node/dataset/pending", accept=accept, raw=raw)
+
+    def set_pending_dataset(self, dataset: Mapping[str, Any] | str) -> Any:
+        if isinstance(dataset, str):
+            content_type = "text/plain"
+            body: Any = dataset
+        else:
+            content_type = "application/json"
+            body = dataset
+        return self._request(
+            "/node/dataset/pending",
+            method="PUT",
+            data=body,
+            accept="application/json",
+            content_type=content_type,
+            raw=True,
+        )
+
+    def get_commissioner_state(self) -> str:
+        return self._request("/node/commissioner/state", accept="application/json", raw=True)
 
     def get_active_dataset(self, *, plain_text: bool = False, raw: object = _RAW_UNSET) -> Any:
         raw = self._resolve_raw(raw)
@@ -369,9 +436,48 @@ class OTBRRestApiClient:
             with_meta=with_meta,
         )
 
-    def get_action(self, action_id: str, *, raw: object = _RAW_UNSET) -> Any:
+    def get_action(
+        self,
+        action_id: str,
+        fields: Mapping[str, str | Sequence[str] | None] | None = None,
+        *,
+        raw: object = _RAW_UNSET,
+    ) -> Any:
         raw = self._resolve_raw(raw)
-        return self._request(f"/api/actions/{action_id}", raw=raw)
+        return self._request(
+            f"/api/actions/{action_id}",
+            query=self._build_fields_query(fields),
+            raw=raw,
+        )
+
+    # -----------------------------------------------------------------------
+    # DELETE methods
+    # -----------------------------------------------------------------------
+
+    def delete_all_actions(self) -> None:
+        self._request("/api/actions", method="DELETE", raw=True)
+
+    def delete_all_devices(self) -> None:
+        self._request("/api/devices", method="DELETE", raw=True)
+
+    def delete_device(self, device_id: str) -> None:
+        self._validate_non_empty_string(device_id, "device_id")
+        self._request(f"/api/devices/{device_id}", method="DELETE", raw=True)
+
+    def delete_all_diagnostics(self) -> None:
+        self._request("/api/diagnostics", method="DELETE", raw=True)
+
+    def delete_diagnostic(self, diagnostics_id: str) -> None:
+        self._validate_non_empty_string(diagnostics_id, "diagnostics_id")
+        self._request(f"/api/diagnostics/{diagnostics_id}", method="DELETE", raw=True)
+
+    def factory_reset_node(self) -> None:
+        """DELETE /node — performs a factory reset of the Thread node.
+
+        WARNING: This is a destructive, irreversible operation. It wipes all
+        Thread network configuration and device state on the border router.
+        """
+        self._request("/node", method="DELETE", raw=True)
 
     def enqueue_actions(
         self, tasks: Sequence[Mapping[str, Any]], *, raw: object = _RAW_UNSET
@@ -456,9 +562,17 @@ class OTBRRestApiClient:
         raw: object = _RAW_UNSET,
     ) -> Any:
         raw = self._resolve_raw(raw)
-        attributes: dict[str, Any] = {
-            "types": self._validate_non_empty_sequence(types, "types")
-        }
+        validated = self._validate_non_empty_sequence(types, "types")
+        non_resettable = [
+            t for t in validated
+            if isinstance(t, str) and t not in RESETTABLE_DIAGNOSTIC_TLVS
+        ]
+        if non_resettable:
+            raise OTBRUsageError(
+                f"Non-resettable TLV(s): {non_resettable!r}. "
+                f"Only {sorted(RESETTABLE_DIAGNOSTIC_TLVS)!r} can be reset."
+            )
+        attributes: dict[str, Any] = {"types": validated}
         if destination is not None:
             attributes.update(
                 self._build_destination_attributes(
@@ -479,10 +593,10 @@ class OTBRRestApiClient:
         *,
         destination: str,
         channel_mask: Sequence[int],
-        count: int,
-        period: int,
-        scan_duration: int,
-        timeout: int,
+        count: int | None = None,
+        period: int | None = None,
+        scan_duration: int | None = None,
+        timeout: int | None = None,
         destination_type: str | None = None,
         raw: object = _RAW_UNSET,
     ) -> Any:
@@ -492,17 +606,17 @@ class OTBRRestApiClient:
             destination=destination,
             destination_type=destination_type,
         )
-        attributes.update(
-            {
-                "channelMask": self._validate_non_empty_sequence(
-                    channel_mask, "channel_mask"
-                ),
-                "count": count,
-                "period": period,
-                "scanDuration": scan_duration,
-                "timeout": timeout,
-            }
+        attributes["channelMask"] = self._validate_non_empty_sequence(
+            channel_mask, "channel_mask"
         )
+        if count is not None:
+            attributes["count"] = count
+        if period is not None:
+            attributes["period"] = period
+        if scan_duration is not None:
+            attributes["scanDuration"] = scan_duration
+        if timeout is not None:
+            attributes["timeout"] = timeout
 
         return self.enqueue_actions(
             [{"type": "getEnergyScanTask", "attributes": attributes}],
@@ -580,6 +694,12 @@ class OTBRRestApiClient:
             else:
                 status = action.get("status") if isinstance(
                     action, dict) else None
+
+            if status is None:
+                raise OTBRInvalidResponseError(
+                    f"Action {action_id} response has no 'status' field; "
+                    "server response may be malformed or missing attributes"
+                )
 
             if status in ActionStatus.TERMINAL:
                 if raise_on_stopped and status in (ActionStatus.STOPPED, ActionStatus.FAILED):
@@ -760,10 +880,16 @@ class OTBRRestApiClient:
         )
 
         result_id = extract_action_result_id(action)
-        if result_id is None:
-            raise OTBRInvalidResponseError(
-                f"Completed action {action_id} has no result relationship"
-            )
+        if not result_id:
+            msg = f"Completed action {action_id} has no result relationship"
+            if destination_type != DestinationType.EXTENDED:
+                msg += (
+                    f" (server bug: destinationType='{destination_type}' triggers"
+                    " uninitialized extAddr in FillDiagnosticCollection —"
+                    " diagnostic data was discarded; use destinationType='extended'"
+                    " with the device extAddress as device_id to work around this)"
+                )
+            raise OTBRInvalidResponseError(msg)
 
         return self.get_diagnostic(result_id, raw=raw)
 
@@ -995,6 +1121,89 @@ class OTBRRestApiClient:
                     on_progress(idx, total, device_id, time.monotonic() - t_start, status)
         return results
 
+    # -----------------------------------------------------------------------
+    # Energy Scan Workflow Method
+    # -----------------------------------------------------------------------
+
+    def fetch_energy_scan(
+        self,
+        *,
+        destination: str,
+        channel_mask: Sequence[int],
+        count: int | None = None,
+        period: int | None = None,
+        scan_duration: int | None = None,
+        destination_type: str | None = None,
+        task_timeout: int | None = None,
+        poll_interval: float = 2.0,
+        poll_timeout: float = 120.0,
+        raw: object = _RAW_UNSET,
+    ) -> Any:
+        """
+        Enqueue getEnergyScanTask, wait for completion, and return the
+        resulting energyScanReport diagnostic item.
+
+        Args:
+            destination: Target device address (hex string).
+            channel_mask: List of channel numbers to scan.
+            count: Number of scans per channel (server default: 1).
+            period: Time between scans in ms (server default: 32).
+            scan_duration: Duration per channel scan in ms (server default: 0).
+            destination_type: Addressing mode (default: server auto-detects).
+            task_timeout: Server-side task timeout in seconds.
+            poll_interval: Seconds between action status polls.
+            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError.
+            raw: If True, return raw JSON:API envelope for the diagnostic item.
+
+        Returns:
+            Flattened energyScanReport diagnostic item (or raw envelope).
+
+        Raises:
+            OTBRActionFailedError: Action stopped or failed.
+            OTBRActionTimeoutError: Polling timed out.
+            OTBRInvalidResponseError: Completed action has no result relationship.
+        """
+        raw = self._resolve_raw(raw)
+        enqueued = self.enqueue_get_energy_scan_task(
+            destination=destination,
+            channel_mask=channel_mask,
+            count=count,
+            period=period,
+            scan_duration=scan_duration,
+            timeout=task_timeout,
+            destination_type=destination_type,
+            raw=False,
+        )
+        action_id: str = enqueued[0]["id"]
+
+        action = self.wait_for_action(
+            action_id,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            raise_on_stopped=True,
+        )
+
+        result_id = extract_action_result_id(action)
+        if not result_id:
+            raise OTBRInvalidResponseError(
+                f"Completed energy-scan action {action_id} has no result relationship"
+            )
+        return self.get_diagnostic(result_id, raw=raw)
+
+    # -----------------------------------------------------------------------
+    # Node Convenience Method
+    # -----------------------------------------------------------------------
+
+    def get_node_info(self) -> dict[str, Any]:
+        """
+        Fetch commonly-needed node attributes from the /api/node endpoint.
+
+        Returns a flattened dict with rloc16, extAddress, mlEidIid, role, etc.
+        Equivalent to get_node() with default (flattened) output.
+        """
+        result = self.get_node(raw=False)
+        return result if isinstance(result, dict) else {}
+
     def _request(
         self,
         path: str,
@@ -1018,8 +1227,21 @@ class OTBRRestApiClient:
                 accept=accept, content_type=content_type),
             method=method,
         )
+        
+        # Log request details for debugging
+        logging.debug(
+            "HTTP Request: method=%s, url=%s, headers=%s, body_len=%s",
+            method,
+            url,
+            dict(request.headers),
+            len(body) if body else 0,
+        )
+        if body:
+            logging.debug("HTTP Request body: %s", body.decode("utf-8", errors="replace"))
+        
         effective_retries = retries if retries is not None else self.retries
         last_exc: Exception | None = None
+        last_exc_body: bytes = b""
 
         for attempt in range(max(1, effective_retries)):
             try:
@@ -1028,6 +1250,19 @@ class OTBRRestApiClient:
                     media_type = self._parse_media_type(
                         response.headers.get("Content-Type")
                     )
+                    
+                    # Log response details for debugging
+                    logging.debug(
+                        "HTTP Response: status=%s, headers=%s, body_len=%s",
+                        response.status,
+                        dict(response.headers),
+                        len(response_body),
+                    )
+                    if response_body:
+                        logging.debug(
+                            "HTTP Response body: %s",
+                            response_body.decode("utf-8", errors="replace"),
+                        )
 
                 if not response_body:
                     return None
@@ -1046,6 +1281,20 @@ class OTBRRestApiClient:
                     media_type = self._parse_media_type(
                         exc.headers.get("Content-Type")
                     )
+                    
+                    # Log error response details for debugging
+                    logging.debug(
+                        "HTTP Error Response: status=%s, headers=%s, body_len=%s",
+                        exc.code,
+                        dict(exc.headers),
+                        len(error_body),
+                    )
+                    if error_body:
+                        logging.debug(
+                            "HTTP Error Response body: %s",
+                            error_body.decode("utf-8", errors="replace"),
+                        )
+                    
                     payload = None
                     body_text = None
                     if error_body:
@@ -1064,6 +1313,18 @@ class OTBRRestApiClient:
                         body=body_text,
                     ) from exc
                 last_exc = exc
+                last_exc_body = exc.read()
+                logging.debug(
+                    "HTTP Error Response: status=%s, headers=%s, body_len=%s (will retry)",
+                    exc.code,
+                    dict(exc.headers),
+                    len(last_exc_body),
+                )
+                if last_exc_body:
+                    logging.debug(
+                        "HTTP Error Response body: %s",
+                        last_exc_body.decode("utf-8", errors="replace"),
+                    )
                 logging.warning(
                     "HTTP %d on attempt %d/%d for %s",
                     exc.code,
@@ -1086,7 +1347,7 @@ class OTBRRestApiClient:
 
         if isinstance(last_exc, HTTPError):
             exc = last_exc
-            error_body = exc.read() if hasattr(exc, "read") else b""
+            error_body = last_exc_body  # body was cached during retry loop
             media_type = self._parse_media_type(
                 exc.headers.get("Content-Type"))
             payload = None
@@ -1260,6 +1521,12 @@ class OTBRRestApiClient:
                 query[key] = ",".join(value)
         return query
 
+    _DEST_TYPE_LENGTHS: dict[str, int] = {
+        "extended": 16,
+        "mleid": 16,
+        "rloc": 6,
+    }
+
     def _build_destination_attributes(
         self,
         *,
@@ -1267,6 +1534,13 @@ class OTBRRestApiClient:
         destination_type: str | None = None,
     ) -> dict[str, Any]:
         self._validate_non_empty_string(destination, "destination")
+        if destination_type and destination_type in self._DEST_TYPE_LENGTHS:
+            expected = self._DEST_TYPE_LENGTHS[destination_type]
+            if len(destination) != expected:
+                raise OTBRUsageError(
+                    f"destination must be {expected} hex chars for type "
+                    f"'{destination_type}', got {len(destination)}"
+                )
         attributes: dict[str, Any] = {"destination": destination}
         if destination_type:
             attributes["destinationType"] = destination_type
@@ -1320,7 +1594,9 @@ def extract_action_result_id(action: Any) -> str | None:
             data = result.get("data")
             if isinstance(data, dict):
                 result_id = data.get("id")
-                if result_id is not None:
+                # Treat empty string as absent: server bug (non-ext destinationType)
+                # causes FillDiagnosticCollection() to discard the result and leave id="".
+                if result_id:
                     return result_id
 
     # Raw JSON:API form: action["data"]["relationships"]["result"]["data"]["id"]
@@ -1332,7 +1608,8 @@ def extract_action_result_id(action: Any) -> str | None:
             if isinstance(result, dict):
                 inner_data = result.get("data")
                 if isinstance(inner_data, dict):
-                    return inner_data.get("id")
+                    # Treat empty string as absent (same server bug guard as above).
+                    return inner_data.get("id") or None
 
     return None
 
