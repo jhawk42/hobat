@@ -65,7 +65,7 @@ export function isAnimationEnabled() {
 
 export function renderTopologyForDataset(dataset, physicsEnabled) {
   const container = document.getElementById("topology-view");
-  const statusEl = document.getElementById("status");
+  const statusEl = document.getElementById("view-status-line-content");
   const nodeFilterEl = document.getElementById("node-filter");
   const linkFilterEl = document.getElementById("link-filter");
   const diagnosticFilterEl = document.getElementById("diagnostic-filter");
@@ -257,8 +257,9 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     )
       ? ` Neighbor Match: targets ${matchedTargetNodeCount}, links ${forcedVisibleLinkCount}.`
       : "";
+    const fetchStatusEl = document.getElementById("fetch-status-line-content");
+    if (fetchStatusEl) fetchStatusEl.textContent = `Loaded ${sourceNames.join(", ")}.`;
     statusEl.textContent =
-      `Loaded ${sourceNames.join(", ")}. ` +
       `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links.${neighborSuffix}`;
   }
 

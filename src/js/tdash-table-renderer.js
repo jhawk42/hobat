@@ -314,8 +314,10 @@ function updateTableStatus(visibleRowCount, columnCount) {
   const diagFilterEl = document.getElementById("diagnostic-filter");
   const nodeLabel = nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
   const diagLabel = diagFilterEl.options[diagFilterEl.selectedIndex].text;
-  document.getElementById("status").textContent =
-    `Loaded ${_tableDatasetLabel}. Total: ${_tableRows.length} rows, ${_tableColumns.length} columns. ` +
+  const fetchStatusEl = document.getElementById("fetch-status-line-content");
+  if (fetchStatusEl) fetchStatusEl.textContent = `Loaded ${_tableDatasetLabel}.`;
+  document.getElementById("view-status-line-content").textContent =
+    `Total: ${_tableRows.length} rows, ${_tableColumns.length} columns. ` +
     `Showing: ${visibleRowCount} rows, ${columnCount} columns. Node Filter: ${nodeLabel}. Diagnostic Filter: ${diagLabel}. ` +
     `Click a header to sort.`;
 }

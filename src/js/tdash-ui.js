@@ -397,7 +397,7 @@ populateDiagnosticFilterBySource(initialDiagSource);
 applyLegendLineStylesFromConstants();
 await loadStaticLabelMap();
 // do not auto-load on startup; prompt the user instead.
-document.getElementById("status").textContent =
+document.getElementById("view-status-line-content").textContent =
   "Select a dataset and press Fetch.";
 
 initDetailPanelToggles(document.getElementById("details"));
@@ -584,25 +584,43 @@ document.getElementById("chk-only-cache").addEventListener("change", (e) => {
   }
 });
 
-// ── Collapsible cache-options fieldsets ─────────────────────────────────────
+// ── Collapsible cache-options fieldsets and containers ─────────────────────────────────────
 
-["btn-toggle-cache", "btn-toggle-status", "btn-toggle-devices"].forEach((id) => {
+["btn-toggle-cache", "btn-toggle-status", "btn-toggle-devices", "btn-toggle-panel-view", "btn-toggle-panel-dataset", "btn-toggle-filters"].forEach((id) => {
   document.getElementById(id)?.addEventListener("click", () => {
     const btn = document.getElementById(id);
-    const fieldset = btn.closest("fieldset");
+    const container = btn.closest("fieldset, [class*='cache-options'], #panel-view, #panel-dataset, #panel-node-link-filters");
     const isExpanded = btn.getAttribute("aria-expanded") === "true";
     btn.setAttribute("aria-expanded", String(!isExpanded));
-    fieldset.classList.toggle("collapsed");
+    if (container) container.classList.toggle("collapsed");
   });
 });
 
 // ── Collapsible Filters Panel ────────────────────────────────────────────────
+// (Handled by unified collapse logic above)
 
-document.getElementById("btn-toggle-filters").addEventListener("click", () => {
-  const btn = document.getElementById("btn-toggle-filters");
-  const content = document.getElementById("filters-content");
-  const isExpanded = btn.getAttribute("aria-expanded") === "true";
+// ── Collapse All / Expand All panels (home bar) ───────────────────────────────
+{
+  const MAIN_PANELS = [
+    { panelId: "panel-dataset",          btnId: "btn-toggle-panel-dataset" },
+    { panelId: "panel-node-link-filters", btnId: "btn-toggle-filters" },
+    { panelId: "panel-view",             btnId: "btn-toggle-panel-view" },
+  ];
 
-  btn.setAttribute("aria-expanded", !isExpanded);
-  content.classList.toggle("collapsed");
-});
+  const allBtn   = document.getElementById("btn-panels-toggle-all");
+  const allArrow = allBtn?.querySelector(".panels-toggle-arrow");
+  let isAllCollapsed = false;
+
+  allBtn?.addEventListener("click", () => {
+    isAllCollapsed = !isAllCollapsed;
+    allArrow.textContent = isAllCollapsed ? "▶" : "▼";
+    allBtn.title = isAllCollapsed ? "Expand all panels" : "Collapse all panels";
+
+    MAIN_PANELS.forEach(({ panelId, btnId }) => {
+      const panel = document.getElementById(panelId);
+      const btn   = document.getElementById(btnId);
+      if (panel) panel.classList.toggle("collapsed", isAllCollapsed);
+      if (btn)   btn.setAttribute("aria-expanded", String(!isAllCollapsed));
+    });
+  });
+}

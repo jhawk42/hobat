@@ -120,7 +120,7 @@ const _JOB_POLL_INTERVAL_MS = 5000;
 const _JOB_TIMEOUT_MS = 900_000; // 15 minutes
 
 async function pollJobUntilDone(jobId, filename, originalUrl, originalHeaders) {
-  const statusEl = document.getElementById("status");
+  const statusEl = document.getElementById("fetch-status-line-content");
   const startedAt = Date.now();
 
   while (true) {
@@ -201,20 +201,29 @@ export async function loadStaticLabelMap() {
 export async function loadDataset(entryValue) {
   const entry = DATASET_REGISTRY.find((e) => e.value === entryValue);
   if (!entry) {
-    document.getElementById("status").textContent =
+    document.getElementById("fetch-status-line-content").textContent =
       `Unknown dataset: ${entryValue}`;
     return;
   }
 
-  const statusEl = document.getElementById("status");
+  const statusEl = document.getElementById("fetch-status-line-content");
+  const timerEl = document.getElementById("fetch-timetaken-value");
+  const progressEl = document.getElementById("fetch-timetaken-progress");
   const initialLabel = entry.label;
   const loadStartTime = Date.now();
   statusEl.textContent = `Loading ${initialLabel}…`;
+  if (progressEl) progressEl.value = 0;
 
   // Set up an interval to update status bar with elapsed time while loading
   const elapsedUpdateInterval = setInterval(() => {
     const elapsed = Math.round((Date.now() - loadStartTime) / 1000);
-    statusEl.textContent = `Loading ${initialLabel}… (${elapsed}s)`;
+    statusEl.textContent = `Loading ${initialLabel}…`;
+    if (timerEl) timerEl.textContent = `${elapsed}s`;
+    // Update progress bar with animated progress (cycles 10-90)
+    if (progressEl) {
+      const progress = 10 + ((elapsed % 8) * 10);
+      progressEl.value = Math.min(progress, 90);
+    }
   }, 500); // Update every 500ms for smooth counter
 
   // Apply default link-filter for this dataset
@@ -266,6 +275,7 @@ export async function loadDataset(entryValue) {
 
   if (loadedFiles.length === 0) {
     statusEl.textContent = `Error: could not load any file for "${entry.label}". Failed: ${failedFiles.join(", ")}`;
+    if (progressEl) progressEl.value = 0;
     return;
   }
 
@@ -322,6 +332,11 @@ export async function loadDataset(entryValue) {
   }
 
   currentDataset = { entry, rawFiles, rows, loadedFiles, fetchDurationMs, fileLastModifiedAt: oldestLastModifiedAt };
+
+  // Set progress bar to 100% when fetch completes
+  if (progressEl) {
+    progressEl.value = progressEl.max;
+  }
 
   // Warn about any files that failed to load but don't hard-fail
   if (failedFiles.length > 0) {

@@ -98,27 +98,90 @@ h1 {
   outline-offset: 2px;
 }
 
+/* ── Panels Collapse All / Expand All button ─────────────── */
+
+.panels-toggle-all {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+@media (hover: hover) {
+  .panels-toggle-all:hover {
+    color: var(--accent);
+    border-color: var(--muted);
+  }
+}
+
+.panels-toggle-all:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.panels-toggle-arrow {
+  display: inline-block;
+  font-size: 11px;
+  transition: transform 0.2s ease;
+}
+
+/* Progress bar for fetch operations */
+#fetch-timetaken-progress {
+  width: 150px;
+  height: 8px;
+  border: 1px solid #666;
+  border-radius: 3px;
+  accent-color: #0066cc;
+  background-color: #f0f0f0;
+}
+
+#fetch-timetaken-progress::-webkit-progress-bar {
+  background-color: #f0f0f0;
+  border-radius: 3px;
+}
+
+#fetch-timetaken-progress::-webkit-progress-value {
+  background-color: #0066cc;
+  border-radius: 2px;
+}
+
+#fetch-timetaken-progress::-moz-progress-bar {
+  background-color: #0066cc;
+  border-radius: 2px;
+}
+
 /* ── Controls bar ─────────────────────────────────────────── */
 
 .controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 6px;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .dataset-controls {
   flex: 1 1 540px;
   min-width: 0;
   margin-bottom: 0;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .control-pair {
   display: grid;
   grid-template-columns: auto minmax(0, max-content);
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
 }
@@ -143,12 +206,41 @@ h1 {
   grid-template-columns: auto minmax(0, 1fr);
 }
 
-#panel-dataset,
+#panel-dataset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0;
+  background: var(--surface-raised);
+  margin-bottom: 8px !important;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+#panel-dataset > legend {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  margin: 0;
+}
+
+#panel-dataset-inner {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Reset flex-basis so 540px is not applied as height in the column-flex context */
+#panel-dataset-controls {
+  flex: 0 0 auto;
+}
+
 #panel-node-link-filters,
 #panel-view {
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 10px;
+  padding: 7px 10px;
   background: var(--surface-raised);
   margin-bottom: 8px !important;
 }
@@ -166,7 +258,8 @@ label {
   padding: 4px 10px;
   margin: 0;
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 4px;
   align-items: center;
   font-size: 0;
 }
@@ -203,6 +296,13 @@ label {
   outline-offset: 2px;
 }
 
+/* Panel-level toggle buttons (Dataset, Filters, View) */
+#btn-toggle-panel-dataset,
+#btn-toggle-filters,
+#btn-toggle-panel-view {
+  font-size: 14px;
+}
+
 .legend-toggle-arrow {
   display: inline-block;
   font-size: 9px;
@@ -222,9 +322,69 @@ label {
   display: none;
 }
 
+/* Fetch status collapsed state */
+#fetch-status.collapsed > #fetch-status-line-panel,
+#fetch-status.collapsed > .status-row,
+#fetch-status.collapsed > .progress-row {
+  display: none;
+}
+
+/* Fetch status line panel */
+#fetch-status-line-panel {
+  flex-basis: 100%;
+  font-size: 14px;
+  margin: 0;
+}
+
+#fetch-status-line-content {
+  font-size: 14px;
+  color: var(--text);
+}
+
 .cache-options label {
   font-size: 14px;
   margin: 0;
+}
+
+/* Status row styling */
+#fetch-status .status-row {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  flex-basis: 100%;
+  font-size: 14px;
+}
+
+#fetch-status .status-row label {
+  font-size: 14px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+#fetch-status .progress-row {
+  display: flex;
+  align-items: center;
+  flex-basis: 100%;
+  padding-top: 2px;
+  font-size: 14px;
+}
+
+/* Panel-view collapsed state */
+#panel-view.collapsed > .view-toggle-bar,
+#panel-view.collapsed > #view-status-line-panel,
+#panel-view.collapsed > #view-topology,
+#panel-view.collapsed > #view-table {
+  display: none;
+}
+
+/* Panel-dataset collapsed state */
+#panel-dataset.collapsed > #panel-dataset-inner {
+  display: none;
+}
+
+/* Panel-node-link-filters collapsed state */
+#panel-node-link-filters.collapsed > #filters-content {
+  display: none;
 }
 
 .view-options {
@@ -310,6 +470,11 @@ select.filter-disabled {
   padding: 0;
 }
 
+#panel-node-link-filters > legend {
+  padding: 7px 10px;
+  margin: 0;
+}
+
 .filters-header {
   padding: 10px;
   border-bottom: 1px solid var(--line);
@@ -351,15 +516,7 @@ select.filter-disabled {
 }
 
 .filters-content {
-  max-height: 1000px;
-  overflow: hidden;
-  transition: max-height 0.3s ease, opacity 0.3s ease;
-  opacity: 1;
-}
-
-.filters-content.collapsed {
-  max-height: 0;
-  opacity: 0;
+  padding: 10px;
 }
 
 .filters-content .controls {

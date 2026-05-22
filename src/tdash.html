@@ -22,112 +22,138 @@
 
 <body>
   <div class="page">
+
     <!-- Title bar -->
     <div id="panel-home" class="controls">
       <a href="" class="home-link" title="tdash home">🏠 tdash</a>
+      <button id="btn-panels-toggle-all" class="panels-toggle-all" title="Collapse all panels">
+        <span class="panels-toggle-arrow" aria-hidden="true">▼</span>
+      </button>
     </div>
 
-    <!-- Source and source selection bar -->
+    <!-- Source and dataset panel -->
     <div id="panel-dataset" class="controls">
-      <div class="controls dataset-controls">
-        <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch Dataset</button>
-        <div class="control-pair control-pair-source">
-          <label for="datasource-filter" title="Data source for the mesh network">Source</label>
-          <select id="datasource-filter" title="Data source for the mesh network">
-            <option value="otbr-cli">otbr-cli</option>
-            <option value="otbr-restapi">otbr-restapi</option>
-            <option value="mdns">mdns</option>
-            <option value="eve">eve</option>
-            <!-- -->
-            <option value="merged">multi-source</option>
-            <!--
+      <legend><button class="legend-toggle-btn" id="btn-toggle-panel-dataset" aria-expanded="true"><span
+            class="legend-toggle-arrow">▶</span>Dataset</button></legend>
+
+      <div id="panel-dataset-inner">
+        <div id="panel-dataset-controls" class="controls dataset-controls">
+          <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch Dataset</button>
+          <div id="panel-dataset-control-pair" class="control-pair control-pair-source">
+            <label for="datasource-filter" title="Data source for the mesh network">Source</label>
+            <select id="datasource-filter" title="Data source for the mesh network">
+              <option value="otbr-cli">otbr-cli</option>
+              <option value="otbr-restapi">otbr-restapi</option>
+              <option value="mdns">mdns</option>
+              <option value="eve">eve</option>
+              <!-- -->
+              <option value="merged">multi-source</option>
+              <!--
             <option value="lab">lab</option>
              -->
-            <option value="system">system</option>
-          </select>
+              <option value="system">system</option>
+            </select>
+          </div>
+          <div class="control-pair control-pair-dataset">
+            <label for="dataset-select" title="Select a dataset for the mesh network">Dataset</label>
+            <select id="dataset-select" title="Select a dataset for the mesh network">
+              <!-- populated by JS from DATASET_REGISTRY -->
+            </select>
+          </div>
         </div>
-        <div class="control-pair control-pair-dataset">
-          <label for="dataset-select" title="Select a dataset for the mesh network">Dataset</label>
-          <select id="dataset-select" title="Select a dataset for the mesh network">
-            <!-- populated by JS from DATASET_REGISTRY -->
-          </select>
-        </div>
-      </div>
 
-      <fieldset class="cache-options" id="fieldset-cache">
-        <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="true"><span class="legend-toggle-arrow">▶</span>Cache</button></legend>
-        <label title="Automatically re-fetch data when the dataset selection changes">
-          <input type="checkbox" id="chk-auto-fetch" checked /> Auto
-        </label>
-        <label title="Force the server to regenerate fresh data (bypass cache)">
-          <input type="checkbox" id="chk-force-fresh" /> Force Refresh
-        </label>
-        <label title="Only use server cached data (skip server regeneration even if cache is stale or missing)">
-          <input type="checkbox" id="chk-only-cache" /> Only Cache
-        </label>
-      </fieldset>
-      
-      <!-- Fetch status -->
-      <div id="fetch-status" role="status" aria-live="polite">
-        <!-- Last: 3 min ago | Took: 15 seconds | Cache file age: 6hr 45min -->
-        <fieldset class="cache-options" id="fieldset-status">
-          <legend><button class="legend-toggle-btn" id="btn-toggle-status" aria-expanded="true"><span class="legend-toggle-arrow">▶</span>Status</button></legend>
-          <label title="Last time browser called the server to fetch or generate data for this dataset">
-            <span id="fetch-last-label">Last:</span>
-            <span id="fetch-last-value">-</span>
+        <fieldset class="cache-options" id="fieldset-cache">
+          <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="true"><span
+                class="legend-toggle-arrow">▶</span>Cache</button></legend>
+          <label title="Automatically re-fetch data when the dataset selection changes">
+            <input type="checkbox" id="chk-auto-fetch" checked /> Auto
           </label>
-          <label title="Time taken to fetch or generate data for this dataset">
-            <span id="fetch-timetaken-label">Took:</span>
-            <span id="fetch-timetaken-value">-</span>
+          <label title="Force the server to regenerate fresh data (bypass cache)">
+            <input type="checkbox" id="chk-force-fresh" /> Force Refresh
           </label>
-          <label title="Age of the cached data for this dataset">
-            <span id="fetch-cache-age-label">Dataset Age:</span>
-            <span id="fetch-cache-age-value">-</span>
+          <label title="Only use server cached data (skip server regeneration even if cache is stale or missing)">
+            <input type="checkbox" id="chk-only-cache" /> Only Cache
           </label>
         </fieldset>
-      </div>
- 
-      <!-- Fetch device status and network health bar -->
-      <div id="device-status" role="status" aria-live="polite">
-        <!--
+
+
+        <!-- Fetch status -->
+        <div id="fetch-status" role="status" aria-live="polite" class="cache-options">
+          <button class="legend-toggle-btn" id="btn-toggle-status" aria-expanded="true">
+            <span class="legend-toggle-arrow">▶</span>Status
+          </button>
+
+          <!-- fetch status line  -->
+          <div id="fetch-status-line-panel">
+            <div id="fetch-status-line-content" role="status" aria-live="polite">
+              Select a dataset to load and press Fetch.
+            </div>
+          </div>
+
+          <!-- Status details -->
+          <div class="status-row">
+            <label title="Time taken to fetch or generate data for this dataset">
+              <span id="fetch-timetaken-label">Time:</span>
+              <span id="fetch-timetaken-value">-</span>
+            </label>
+            <label title="Last time browser called the server to fetch or generate data for this dataset">
+              <span id="fetch-last-label">When:</span>
+              <span id="fetch-last-value">-</span>
+            </label>
+            <label title="Age of the cached data for this dataset">
+              <span id="fetch-cache-age-label">Data Age:</span>
+              <span id="fetch-cache-age-value">-</span>
+            </label>
+          </div>
+          <div class="progress-row">
+            <progress id="fetch-timetaken-progress" max="100"></progress>
+          </div>
+        </div>
+
+        <!-- Fetch device status and network health bar -->
+        <div id="device-status" role="status" aria-live="polite">
+          <!--
             Fetched Devices: nn Border Routers: nn Routers: nn Child nodes: nn Links: LQ3: nn nn LQ2: nn LQ1: nn 
             Fetched: 🖥 12 Nodes | 🛤 3 Border Routers | NN Routers |NN Child nodes| ⚠ 2 Low-Quality Links | 
             -->
-        <fieldset class="cache-options" id="fieldset-devices">
-          <legend><button class="legend-toggle-btn" id="btn-toggle-devices" aria-expanded="true"><span class="legend-toggle-arrow">▶</span>Devices</button></legend>
-          <label title="Fetched number of devices in the dataset">
-            <span id="device-status-devices">Devices: <span id="device-count">0</span></span>
-          </label>
-          <label title="Fetched number of border routers in the dataset">
-            <span id="device-status-brs">🛜 Border Routers: <span id="br-count">0</span></span>
-          </label>
-          <label title="Fetched number of routers in the dataset">
-            <span id="device-status-routers">Routers: <span id="router-count">0</span></span>
-          </label>
-          <label title="Fetched number of child nodes in the dataset">
-            <span id="device-status-children">Child nodes: <span id="child-count">0</span></span>
-          </label>
-          <label title="Fetched number of links in the dataset">
-            <span id="device-status-links"> 📶 Links: <span id="link-count">0</span></span>
-          </label>
-          <label title="Fetched number of LQ3 links in the dataset">
-            <span id="device-status-lq3">LQ3: <span id="lq3-count">0</span></span>
-          </label>
-          <label title="Fetched number of LQ2 links in the dataset">
-            <span id="device-status-lq2">LQ2: <span id="lq2-count">0</span></span>
-          </label>
-          <label title="Fetched number of LQ1 links in the dataset">
-            <span id="device-status-lq1">LQ1: <span id="lq1-count">0</span></span>
-          </label>
-        </fieldset>
+          <fieldset class="cache-options" id="fieldset-devices">
+            <legend><button class="legend-toggle-btn" id="btn-toggle-devices" aria-expanded="true"><span
+                  class="legend-toggle-arrow">▶</span>Devices</button></legend>
+            <label title="Fetched number of devices in the dataset">
+              <span id="device-status-devices">Devices: <span id="device-count">0</span></span>
+            </label>
+            <label title="Fetched number of border routers in the dataset">
+              <span id="device-status-brs">🛜 Border Routers: <span id="br-count">0</span></span>
+            </label>
+            <label title="Fetched number of routers in the dataset">
+              <span id="device-status-routers">Routers: <span id="router-count">0</span></span>
+            </label>
+            <label title="Fetched number of child nodes in the dataset">
+              <span id="device-status-children">Child nodes: <span id="child-count">0</span></span>
+            </label>
+            <label title="Fetched number of links in the dataset">
+              <span id="device-status-links"> 📶 Links: <span id="link-count">0</span></span>
+            </label>
+            <label title="Fetched number of LQ3 links in the dataset">
+              <span id="device-status-lq3">LQ3: <span id="lq3-count">0</span></span>
+            </label>
+            <label title="Fetched number of LQ2 links in the dataset">
+              <span id="device-status-lq2">LQ2: <span id="lq2-count">0</span></span>
+            </label>
+            <label title="Fetched number of LQ1 links in the dataset">
+              <span id="device-status-lq1">LQ1: <span id="lq1-count">0</span></span>
+            </label>
+          </fieldset>
+        </div>
+
       </div>
 
     </div>
 
     <!-- Filters bar -->
-    <div id="panel-node-link-filters">
+    <div id="panel-node-link-filters" class="collapsed">
       <legend>
-        <button id="btn-toggle-filters" class="filters-toggle-btn" aria-expanded="false" title="Toggle filters panel">
+        <button id="btn-toggle-filters" class="legend-toggle-btn" aria-expanded="false" title="Toggle filters panel">
           <span class="legend-toggle-arrow">▶</span>Filters</button>
       </legend>
       <!--
@@ -138,7 +164,7 @@
         </button>
       </div>
       -->
-      <div id="filters-content" class="filters-content collapsed">
+      <div id="filters-content" class="filters-content">
         <div class="controls">
           <div class="control-pair control-pair-source">
             <label for="node-filter" title="Filter devices by type or role">Devices</label>
@@ -162,11 +188,14 @@
 ">MAC Counters</option>
               <option value="mle_counters" title="MLE (Mesh Link Establishment) counters track network-layer events (such as attachment attempts, parent changes, and routing state).
 ">MLE Counters</option>
-              <option value="time_statistics" title="Time statistics track various time-related metrics in the network.">Time Statistics</option>
-              <option value="link_quality" title="Link quality metrics track the quality of links between devices.">Link Quality</option>
-              <option value="other" title="Other diagnostics track miscellaneous metrics and events in the network.">Other Diagnostics</option>
+              <option value="time_statistics"
+                title="Time statistics track various time-related metrics in the network.">Time Statistics</option>
+              <option value="link_quality" title="Link quality metrics track the quality of links between devices.">Link
+                Quality</option>
+              <option value="other" title="Other diagnostics track miscellaneous metrics and events in the network.">
+                Other Diagnostics</option>
             </select>
-            
+
             <label for="diagnostic-filter" title="Filter diagnostics by type or severity">Diagnostics</label>
             <select id="diagnostic-filter" title="Filter diagnostics by type or severity">
               <!-- populated by JS from DIAGNOSTIC_FILTER_OPTIONS -->
@@ -178,6 +207,8 @@
 
     <!-- View panel -->
     <div id="panel-view">
+      <legend><button class="legend-toggle-btn" id="btn-toggle-panel-view" aria-expanded="true"><span
+            class="legend-toggle-arrow">▶</span>View</button></legend>
 
       <!-- View toggle -->
       <div class="view-toggle-bar">
@@ -203,8 +234,8 @@
       </div>
 
       <!-- Status line -->
-      <div class="status-bar">
-        <div id="status" role="status" aria-live="polite">Select a dataset to load.</div>
+      <div id="view-status-line-panel" class="status-bar">
+        <div id="view-status-line-content" role="status" aria-live="polite">Select a dataset to load.</div>
       </div>
 
       <!-- Topology view -->
@@ -216,8 +247,7 @@
               <button id="btn-legend-toggle" title="Toggle link quality legend">
                 Legend
               </button>
-              <button id="btn-physics" title="Toggle physics simulation"
-                aria-label="Pause physics simulation">
+              <button id="btn-physics" title="Toggle physics simulation" aria-label="Pause physics simulation">
                 ⏸
               </button>
             </div>
@@ -261,9 +291,8 @@
               data-fields="br,leader,type,mode.device,ver,thread_version,thread_stack_version,server">
             </ul>
             <h2>Network:</h2>
-            <ul id="network-list" class="node-details-list"
-              data-fields="ipv6_addrs">
-            </ul>  
+            <ul id="network-list" class="node-details-list" data-fields="ipv6_addrs">
+            </ul>
             <h2>Connections:</h2>
             <ul id="connections-list" class="node-details-list"
               data-fields="total_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count">
@@ -275,19 +304,16 @@
             </ul>
 
             <h2>Routes & Links:</h2>
-            <ul id="routes-links-list" class="node-details-list"
-              data-fields="routes, 3_links,2_links,1_links">
+            <ul id="routes-links-list" class="node-details-list" data-fields="routes, 3_links,2_links,1_links">
             </ul>
 
             <h2>Neighbors:</h2>
-            <ul id="neighbors-list" class="node-details-list"
-              data-fields="router_neighbor_table">
+            <ul id="neighbors-list" class="node-details-list" data-fields="router_neighbor_table">
             </ul>
 
             <h2>Children:</h2>
-            <ul id="children-list" class="node-details-list"
-              data-fields="children,router_child_table">
-            </ul>            
+            <ul id="children-list" class="node-details-list" data-fields="children,router_child_table">
+            </ul>
 
             <h2>Counters:</h2>
             <ul id="counters-list" class="node-details-list"
@@ -323,9 +349,8 @@
               data-fields="br,leader,type,mode.device,ver,thread_version,thread_stack_version">
             </ul>
             <h2>Network:</h2>
-            <ul id="table-network-list" class="node-details-list"
-              data-fields="ipv6_addrs">
-            </ul>            
+            <ul id="table-network-list" class="node-details-list" data-fields="ipv6_addrs">
+            </ul>
             <h2>Connections:</h2>
             <ul id="table-connections-list" class="node-details-list"
               data-fields="total_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count">
@@ -335,16 +360,13 @@
               data-fields="scope,service_info.type,service_info.server,service_info.port,service_info.properties.mdns_scopes_thread,service_info.properties.mdns_scopes_br,service_info.properties.mdns_scopes_hap,service_info.properties.mdns_scopes_matter,service_info.properties.pt.full_name,service_info.properties.pt.int_value,service_info.properties.mn.full_name,service_info.properties.mn.decoded,service_info.properties.pv.full_name,service_info.properties.pv.decoded,service_info.properties.md.full_name,service_info.properties.md.decoded,service_info.properties.ci.full_name,service_info.properties.ci.category_name,service_info.properties.ci.decoded,service_info.properties.ci.hex,service_info.properties.id.full_name,service_info.properties.id.decoded,service_info.properties.xa.full_name,service_info.properties.xa.hex,service_info.properties.vn.full_name,service_info.properties.vn.decoded,service_info.properties.tv.full_name,service_info.properties.tv.decoded,service_info.properties.rv.full_name,service_info.properties.rv.decoded,service_info.properties.nn.full_name,service_info.properties.nn.decoded,service_info.properties.xp.full_name,service_info.properties.xp.hex,service_info.properties.bb.full_name,service_info.properties.bb.hex,service_info.properties.sb.full_name,service_info.properties.sb.hex,service_info.properties.sf.full_name,service_info.properties.sf.hex,service_info.properties.sh.full_name,service_info.properties.sh.hex,service_info.properties.s#.full_name,service_info.properties.s#.decoded,service_info.properties.s#.hex,service_info.properties.c#.full_name,service_info.properties.c#.decoded,service_info.properties.c#.hex,service_info.properties.ff.full_name,service_info.properties.ff.decoded,service_info.properties.ff.hex,service_info.properties.FabricID.full_name,service_info.properties.FabricID.decoded,service_info.decoded_properties.SAI,service_info.decoded_properties.SAT,service_info.decoded_properties.SII,service_info.properties.NodeID.full_name,service_info.properties.NodeID.decoded,service_info.properties.SAI.full_name,service_info.properties.SAI.milliseconds,service_info.properties.SAT.full_name,service_info.properties.SAT.milliseconds,service_info.properties.SII.full_name,service_info.properties.SII.milliseconds">
             </ul>
             <h2>Routes & Links:</h2>
-            <ul id="table-routes-links-list" class="node-details-list"
-              data-fields="routes, 3_links,2_links,1_links">
+            <ul id="table-routes-links-list" class="node-details-list" data-fields="routes, 3_links,2_links,1_links">
             </ul>
             <h2>Neighbors:</h2>
-            <ul id="table-neighbors-list" class="node-details-list"
-              data-fields="router_neighbor_table">
+            <ul id="table-neighbors-list" class="node-details-list" data-fields="router_neighbor_table">
             </ul>
             <h2>Children:</h2>
-            <ul id="table-children-list" class="node-details-list"
-              data-fields="children,router_child_table">
+            <ul id="table-children-list" class="node-details-list" data-fields="children,router_child_table">
             </ul>
             <h2>Counters:</h2>
             <ul id="table-counters-list" class="node-details-list"
