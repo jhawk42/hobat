@@ -102,6 +102,7 @@ docker-compose.*.local.yml
 
 script/
 downloads/
-plan/
+plan/*
+!plan/otbr-cli-refactor-extraction-draft-plan.md
 data/
 diag/
