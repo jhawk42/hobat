@@ -7,23 +7,28 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 import otbr_restapi_util as client_module
-import otbr_restapi_client_cli as cli_module
+import otbr_restapi_cli as cli_module
 
 
-class FakeHeaders:
+class FakeHeaders(dict):
     def __init__(self, content_type: str) -> None:
-        self._content_type = content_type
+        super().__init__()
+        self["content-type"] = content_type
 
     def get(self, key: str, default: str | None = None) -> str | None:
-        if key.lower() == "content-type":
-            return self._content_type
-        return default
+        return super().get(key.lower(), default)
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return super().__getitem__(key.lower())
+        return super().__getitem__(key)
 
 
 class FakeResponse:
     def __init__(self, payload: bytes, content_type: str) -> None:
         self._payload = payload
         self.headers = FakeHeaders(content_type)
+        self.status = 200
 
     def read(self) -> bytes:
         return self._payload

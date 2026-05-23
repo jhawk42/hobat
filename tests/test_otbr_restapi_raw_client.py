@@ -6,23 +6,28 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import otbr_restapi_util as base_client_module
-import otbr_restapi__cli as cli_module
+import otbr_restapi_cli as cli_module
 
 
-class FakeHeaders:
+class FakeHeaders(dict):
     def __init__(self, content_type: str) -> None:
-        self._content_type = content_type
+        super().__init__()
+        self["content-type"] = content_type
 
     def get(self, key: str, default: str | None = None) -> str | None:
-        if key.lower() == "content-type":
-            return self._content_type
-        return default
+        return super().get(key.lower(), default)
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return super().__getitem__(key.lower())
+        return super().__getitem__(key)
 
 
 class FakeResponse:
     def __init__(self, payload: bytes, content_type: str) -> None:
         self._payload = payload
         self.headers = FakeHeaders(content_type)
+        self.status = 200
 
     def read(self) -> bytes:
         return self._payload
@@ -36,7 +41,7 @@ class FakeResponse:
 
 class OTBRRawClientTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.client = raw_client_module.OTBRRawRestApiClient(
+        self.client = base_client_module.OTBRRestApiClient(
             base_url="http://example.test"
         )
 
@@ -48,7 +53,7 @@ class OTBRRawClientTests(unittest.TestCase):
             "urlopen",
             return_value=FakeResponse(payload, "application/vnd.api+json"),
         ):
-            result = self.client.list_devices()
+            result = self.client.list_devices(raw=True)
 
         self.assertEqual(result["meta"]["collection"]["total"], 1)
         self.assertEqual(result["data"][0]["id"], "abc123")
@@ -62,10 +67,10 @@ class OTBRRawClientTests(unittest.TestCase):
             "urlopen",
             return_value=FakeResponse(payload, "application/vnd.api+json"),
         ):
-            result = self.client.get_node(raw=False)
+            result = self.client.get_node(raw=True)
 
-        self.assertEqual(result["id"], "abc123")
-        self.assertEqual(result["hostname"], "node-1")
+        self.assertEqual(result["data"]["id"], "abc123")
+        self.assertEqual(result["data"]["attributes"]["hostname"], "node-1")
 
 
 class OTBRRawCliTests(unittest.TestCase):
@@ -80,10 +85,10 @@ class OTBRRawCliTests(unittest.TestCase):
             ]
         }
 
-        with patch.object(raw_cli_module, "dispatch", return_value=raw_document):
+        with patch.object(cli_module, "dispatch", return_value=raw_document):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                exit_code = raw_cli_module.main(["devices", "list"])
+                exit_code = cli_module.main(["--no-auto-output", "devices", "list"])
 
         self.assertEqual(exit_code, 0)
         self.assertIn('"data"', stdout.getvalue())
