@@ -398,7 +398,7 @@ applyLegendLineStylesFromConstants();
 await loadStaticLabelMap();
 // do not auto-load on startup; prompt the user instead.
 document.getElementById("view-status-line-content").textContent =
-  "Select a dataset and press Fetch.";
+  "Showing: no dataset loaded. Select a dataset and click Fetch.";
 
 initDetailPanelToggles(document.getElementById("details"));
 initDetailPanelToggles(document.getElementById("table-details"));
