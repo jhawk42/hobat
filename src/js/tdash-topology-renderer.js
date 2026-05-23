@@ -22,6 +22,7 @@ import {
   routerNeighborRowMatchesDiagnosticFilter,
   normalizeLinkCategories,
 } from "./tdash-filters.js";
+import { rowMatchesSearch, parseSearchQuery } from "./tdash-search.js";
 import { runAdaptor } from "./tdash-adaptors.js";
 import { computeDatasetCounts } from "./tdash-topology-utils.js";
 
@@ -32,6 +33,7 @@ let _topologyFilterHandlers = null;
 let _autoZoomEnabled = true;
 let _animationEnabled = false;
 let _topologyNodeData = null;  // Store nodeData from last render for filter validation
+let _topologyRawRows = null;   // Map<nodeId, rawRow> from last render, used for search
 let _topologyDatasetCounts = null;  // Counts derived from last topology render
 
 // ── Exported accessors / setters ──────────────────────────────────────────────
@@ -76,6 +78,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     _visNetwork.destroy();
     _visNetwork = null;
     _topologyFilterHandlers = null;
+    _topologyRawRows = null;
   }
   container.innerHTML = "";
 
@@ -108,8 +111,9 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     sourceNames,
   } = adaptorResult;
 
-  // Store nodeData for filter validation
+  // Store nodeData and raw rows for filter validation and search
   _topologyNodeData = nodeData;
+  _topologyRawRows = rawByIdForDetails;
   // Compute and store dataset counts for the status bar
   _topologyDatasetCounts = computeDatasetCounts(nodeData, edgeData);
 
@@ -229,6 +233,70 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     };
   }
 
+  // ── Search highlight ─────────────────────────────────────────────────────
+
+  function applySearchHighlight(searchQuery, advancedMode) {
+    if (!_topologyNodeData || !_topologyRawRows) return;
+
+    if (!searchQuery) {
+      // Restore all nodes to their original appearance
+      nodesDataset.update(
+        _topologyNodeData.map((n) => ({
+          id: n.id,
+          color: n.color,
+          borderWidth: n.borderWidth,
+          font: n.font,
+        })),
+      );
+      return;
+    }
+
+    // Identify node IDs whose source row matches the query
+    const matchingNodeIds = new Set();
+    _topologyRawRows.forEach((row, nodeId) => {
+      if (rowMatchesSearch(row, searchQuery, advancedMode)) {
+        matchingNodeIds.add(nodeId);
+      }
+    });
+
+    // Update each node: highlight matches, dim non-matches
+    nodesDataset.update(
+      _topologyNodeData.map((n) => {
+        if (matchingNodeIds.has(n.id)) {
+          return {
+            id: n.id,
+            color: { background: n.color.background, border: "#d97706" },
+            borderWidth: Math.max(n.borderWidth ?? 2, 4),
+            font: n.font,
+          };
+        }
+        return {
+          id: n.id,
+          color: { background: "#e8e8e8", border: "#c0c0c0" },
+          borderWidth: 1,
+          font: { ...n.font, color: "#aaaaaa" },
+        };
+      }),
+    );
+
+    // When exactly one node matches: select it visually, populate the details
+    // panel, and zoom to it in the upper-center of the canvas.
+    if (matchingNodeIds.size === 1 && _visNetwork) {
+      const [singleId] = matchingNodeIds;
+      _visNetwork.selectNodes([singleId]);
+      showNodeDetails(singleId);
+      const viewEl = document.getElementById("view-topology");
+      const canvasHeight = viewEl ? viewEl.clientHeight : 400;
+      // Negative y shifts focal point upward; cap at 100px to avoid clipping on short canvases
+      const yOffset = -Math.min(Math.round(canvasHeight * 0.22), 100);
+      _visNetwork.focus(singleId, {
+        scale: 1.10,
+        animation: { duration: 600, easingFunction: "easeInOutQuad" },
+        offset: { x: 0, y: yOffset },
+      });
+    }
+  }
+
   // ── Status line ────────────────────────────────────────────────────────
 
   function formatTopologyScale() {
@@ -278,21 +346,32 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
         });
       return;
     }
-    const selectedId = params.nodes[0];
+    showNodeDetails(params.nodes[0]);
+  });
+
+  // Capture routerIdsWithChildren for detail panel
+  const routerIdsWithChildrenRef = new Set(
+    nodeData.filter((n) => n.hasChildren).map((n) => n.id),
+  );
+
+  // Shared helper: populate the device-details side panel for a given node ID.
+  // Called from the vis.js click handler and programmatically (e.g. single-match search).
+  function showNodeDetails(selectedId) {
+    const _QL =
+      "#identity-list, #highlights-list, #network-list, #connections-list, " +
+      "#mdns-list, #routes-links-list, #neighbors-list, #children-list, " +
+      "#counters-list, #details-list, #table-identity-list, #table-highlights-list, " +
+      "#table-network-list, #table-connections-list, #table-mdns-list, " +
+      "#table-routes-links-list, #table-neighbors-list, #table-children-list, " +
+      "#table-counters-list, #table-details-list";
+    const _hide = () => document.querySelectorAll(_QL).forEach((l) => l.classList.add("hidden"));
     const node = nodeMap.get(selectedId);
     if (!node) {
       document.getElementById("summary-list").innerHTML =
         "<li>No details available for selected node.</li>";
-      document
-        .querySelectorAll(
-          "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list, #table-identity-list, #table-highlights-list, #table-network-list, #table-connections-list, #table-mdns-list, #table-routes-links-list, #table-neighbors-list, #table-children-list, #table-counters-list, #table-details-list",
-        )
-        .forEach((list) => {
-          list.classList.add("hidden");
-        });
+      _hide();
       return;
     }
-
     const rawSource = rawByIdForDetails.get(selectedId) || {};
     const graphDetails = {
       graph: {
@@ -310,35 +389,20 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
           : undefined,
       },
     };
-
     const mergedDetails = mergeForDisplay(rawSource, graphDetails);
     const details = sortDetailsWithPriority(
       flattenObjectEntries(mergedDetails).filter(
         ([key]) => !shouldExcludeDetailPath(key),
       ),
     );
-
     if (details.length === 0) {
       document.getElementById("summary-list").innerHTML =
         "<li>No details available for selected node.</li>";
-      document
-        .querySelectorAll(
-          "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list, #table-identity-list, #table-highlights-list, #table-network-list, #table-connections-list, #table-mdns-list, #table-routes-links-list, #table-neighbors-list, #table-children-list, #table-counters-list, #table-details-list",
-        )
-        .forEach((list) => {
-          list.classList.add("hidden");
-        });
+      _hide();
       return;
     }
-
-    // Populate categorized lists
     populateNodeDetailsLists(details);
-  });
-
-  // Capture routerIdsWithChildren for detail panel
-  const routerIdsWithChildrenRef = new Set(
-    nodeData.filter((n) => n.hasChildren).map((n) => n.id),
-  );
+  }
 
   function refreshStatusScale() {
     if (lastStatusCounts) updateStatus(lastStatusCounts);
@@ -351,6 +415,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
   // ── Store filter handlers so the toggle/filter wiring can call them ──
   _topologyFilterHandlers = {
     applyFilters,
+    applySearchHighlight,
     updateStatus,
     fitIfEnabled: () => {
       if (_autoZoomEnabled && _visNetwork) {

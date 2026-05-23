@@ -32,6 +32,7 @@ import {
   populateDiagnosticFilterBySource,
   populateDiagnosticFilterBySourceWithCapabilities,
 } from "./tdash-filters.js";
+import { parseSearchQuery, filterRowsBySearch } from "./tdash-search.js";
 
 // ── Section 2: Build dataset <select> ────────────────────────────────────────
 
@@ -57,6 +58,11 @@ let currentView = "topology";
 let _physicsEnabled = true;
 let _enhanceEnabled = true;
 let _lastFetchStartedAt = null;
+let _currentSearchQuery = "";
+
+export function getSearchQuery() {
+  return _currentSearchQuery;
+}
 
 function applyLegendLineStylesFromConstants() {
   const root = document.documentElement;
@@ -551,6 +557,13 @@ async function doFetchDataset() {
     return;
   }
 
+  // Reset search state when a new dataset is loaded
+  _currentSearchQuery = "";
+  const _srchInput = document.getElementById("search-input");
+  if (_srchInput) _srchInput.value = "";
+  const _srchStatus = document.getElementById("search-status");
+  if (_srchStatus) _srchStatus.textContent = "";
+
   renderCurrentView();
   updateFetchStatusBar(_lastFetchStartedAt);
 }
@@ -563,6 +576,62 @@ document.getElementById("dataset-select").addEventListener("change", async () =>
   if (document.getElementById("chk-auto-fetch").checked) {
     await doFetchDataset();
   }
+});
+
+// ── Search wiring ────────────────────────────────────────────────────────────────────────
+
+function applySearch() {
+  if (!currentDataset) {
+    const el = document.getElementById("search-status");
+    if (el) el.textContent = "";
+    return;
+  }
+
+  if (currentView === "table") {
+    // applyTableFilters reads #search-input directly and updates #search-status
+    applyTableFilters();
+  } else {
+    // Topology: apply node highlight
+    const handlers = getTopologyFilterHandlers();
+    if (handlers) {
+      handlers.applySearchHighlight(_currentSearchQuery, isMoreInfoEnabled());
+    }
+    // Update #search-status with match count derived from dataset rows
+    const searchStatusEl = document.getElementById("search-status");
+    if (searchStatusEl) {
+      if (_currentSearchQuery && currentDataset.rows?.length) {
+        const { matchingRows } = filterRowsBySearch(
+          currentDataset.rows,
+          _currentSearchQuery,
+          isMoreInfoEnabled(),
+        );
+        searchStatusEl.textContent =
+          `${matchingRows.length} of ${currentDataset.rows.length} rows match`;
+      } else {
+        searchStatusEl.textContent = "";
+      }
+    }
+  }
+}
+
+document.getElementById("btn-search-find")?.addEventListener("click", () => {
+  _currentSearchQuery = parseSearchQuery(
+    document.getElementById("search-input").value,
+  );
+  applySearch();
+});
+
+document.getElementById("search-input")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    _currentSearchQuery = parseSearchQuery(e.target.value);
+    applySearch();
+  }
+});
+
+document.getElementById("btn-search-clear")?.addEventListener("click", () => {
+  document.getElementById("search-input").value = "";
+  _currentSearchQuery = "";
+  applySearch();
 });
 
 // Cache control checkboxes (mutually exclusive)
@@ -586,7 +655,7 @@ document.getElementById("chk-only-cache").addEventListener("change", (e) => {
 
 // ── Collapsible cache-options fieldsets and containers ─────────────────────────────────────
 
-["btn-toggle-cache", "btn-toggle-status", "btn-toggle-devices", "btn-toggle-panel-view", "btn-toggle-panel-dataset", "btn-toggle-filters"].forEach((id) => {
+["btn-toggle-cache", "btn-toggle-status", "btn-toggle-devices", "btn-toggle-panel-view", "btn-toggle-panel-dataset", "btn-toggle-filters", "btn-toggle-node-link-filters", "btn-toggle-diag-filters"].forEach((id) => {
   document.getElementById(id)?.addEventListener("click", () => {
     const btn = document.getElementById(id);
     const container = btn.closest("fieldset, [class*='cache-options'], #panel-view, #panel-dataset, #panel-node-link-filters");
