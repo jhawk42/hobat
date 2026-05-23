@@ -150,13 +150,13 @@ RECOMMENDED_DIAGNOSTIC_TLVS: list[str] = [
     DIAG_TLV_THREAD_STACK_VER,
     DIAG_TLV_EUI64,
     DIAG_TLV_VERSION,
-    DIAG_TLV_VENDOR_NAME,
-    DIAG_TLV_VENDOR_MODEL,
-    DIAG_TLV_VENDOR_SW_VERSION,
+#    DIAG_TLV_VENDOR_NAME,
+#    DIAG_TLV_VENDOR_MODEL,
+#    DIAG_TLV_VENDOR_SW_VERSION,
     DIAG_TLV_CONNECTIVITY,
     DIAG_TLV_ROUTE,
-    DIAG_TLV_LEADER_DATA,
-    DIAG_TLV_CHANNEL_PAGES,
+    DIAG_TLV_LEADER_DATA
+#    DIAG_TLV_CHANNEL_PAGES,
 ]
 
 # Includes mesh-diag query types for full topology detail (slower)
@@ -729,12 +729,12 @@ class OTBRRestApiClient:
     def trigger_and_wait_device_collection(
         self,
         *,
-        device_count: int = 200,
-        max_age: int = 30,
-        max_retries: int = 5,
-        task_timeout: int = 120, #60,
-        poll_interval: float = 3.0,
-        poll_timeout: float = 90.0,
+        device_count: int = 255,
+        max_age: int = 60,
+        max_retries: int = 2,
+        task_timeout: int = 6, 
+        poll_interval: float = 2.0,
+        poll_timeout: float = 6.0,
         raise_on_stopped: bool = False,
         raw: object = _RAW_UNSET,
     ) -> Any:
@@ -778,12 +778,12 @@ class OTBRRestApiClient:
     def fetch_device_collection(
         self,
         *,
-        device_count: int = 200,
-        max_age: int = 30,
-        max_retries: int = 5,
-        task_timeout: int = 60,
-        poll_interval: float = 3.0,
-        poll_timeout: float = 90.0,
+        device_count: int = 255,
+        max_age: int = 60,
+        max_retries: int = 2,
+        task_timeout: int = 6,
+        poll_interval: float = 2.0,
+        poll_timeout: float = 6.0,
         fields: Mapping[str, str | Sequence[str] | None] | None = None,
         with_meta: bool = False,
         raw: object = _RAW_UNSET,
@@ -834,9 +834,9 @@ class OTBRRestApiClient:
         *,
         types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
         destination_type: str = DestinationType.EXTENDED,
-        task_timeout: int = 93,
+        task_timeout: int = 6,
         poll_interval: float = 2.0,
-        poll_timeout: float = 120.0,
+        poll_timeout: float = 6.0,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -848,7 +848,7 @@ class OTBRRestApiClient:
             types: TLV name list. Defaults to RECOMMENDED_DIAGNOSTIC_TLVS.
             destination_type: Addressing mode. Use DestinationType.EXTENDED (default)
                               for device extAddress IDs.
-            task_timeout: Server-side task timeout in seconds (default 93s).
+            task_timeout: Server-side task timeout in seconds (default 5s).
             poll_interval: Seconds between action status polls.
             poll_timeout: Wall-clock seconds before OTBRActionTimeoutError is raised.
             raw: If True, return raw JSON:API envelope for the diagnostic item.
@@ -899,9 +899,9 @@ class OTBRRestApiClient:
         *,
         types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
         destination_type: str = DestinationType.EXTENDED,
-        task_timeout: int = 93,
+        task_timeout: int = 6,
         poll_interval: float = 2.0,
-        poll_timeout: float = 120.0,
+        poll_timeout: float = 6.0,
         skip_on_failure: bool = True,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
         raw: object = _RAW_UNSET,
@@ -931,6 +931,7 @@ class OTBRRestApiClient:
             t_start = time.monotonic()
             status = "completed"
             try:
+                logging.debug("Fetching diagnostics for device %s (%d/%d) types: %s", device_id, idx, total, " ".join(map(str, types)))
                 diag = self.fetch_device_diagnostics(
                     device_id,
                     types=types,
@@ -960,9 +961,9 @@ class OTBRRestApiClient:
         device_count: int = 200,
         types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
         destination_type: str = DestinationType.EXTENDED,
-        task_timeout: int = 93,
+        task_timeout: int = 6,
         poll_interval: float = 2.0,
-        poll_timeout: float = 120.0,
+        poll_timeout: float = 6.0,
         skip_on_failure: bool = True,
         raw: object = _RAW_UNSET,
     ) -> tuple[list[Any], list[Any]]:
@@ -1014,9 +1015,9 @@ class OTBRRestApiClient:
             DIAG_TLV_ROUTER_NEIGHBORS,
         ),
         destination_type: str = DestinationType.EXTENDED,
-        task_timeout: int = 300,
-        poll_interval: float = 3.0,
-        poll_timeout: float = 360.0,
+        task_timeout: int = 6,
+        poll_interval: float = 2.0,
+        poll_timeout: float = 6.0,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -1026,16 +1027,16 @@ class OTBRRestApiClient:
 
         These TLVs require an additional otMeshDiag round-trip on the server and
         have higher latency than standard diagnostic TLVs. The default task_timeout
-        (300s) and poll_timeout (360s) reflect this.
+        (5s) and poll_timeout (6s) reflect this.
 
         Args:
             device_id: Device extAddress (16-char hex), the item ID from /api/devices.
             types: Subset of {"children", "childIpv6Addresses", "routerNeighbors"}.
                    Defaults to all three. Passing any other TLV name raises OTBRUsageError.
             destination_type: Addressing mode. Defaults to DestinationType.EXTENDED.
-            task_timeout: Server-side task timeout in seconds (default 300).
+            task_timeout: Server-side task timeout in seconds (default 5s).
             poll_interval: Seconds between action status polls (default 3.0).
-            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError (default 360.0).
+            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError (default 6.0).
             raw: If True, return raw JSON:API envelope.
 
         Returns:
@@ -1079,9 +1080,9 @@ class OTBRRestApiClient:
             DIAG_TLV_ROUTER_NEIGHBORS,
         ),
         destination_type: str = DestinationType.EXTENDED,
-        task_timeout: int = 300,
-        poll_interval: float = 3.0,
-        poll_timeout: float = 360.0,
+        task_timeout: int = 6,
+        poll_interval: float = 2.0,
+        poll_timeout: float = 6.0,
         skip_on_failure: bool = True,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
         raw: object = _RAW_UNSET,
@@ -1136,7 +1137,7 @@ class OTBRRestApiClient:
         destination_type: str | None = None,
         task_timeout: int | None = None,
         poll_interval: float = 2.0,
-        poll_timeout: float = 120.0,
+        poll_timeout: float = 6.0,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -1150,9 +1151,9 @@ class OTBRRestApiClient:
             period: Time between scans in ms (server default: 32).
             scan_duration: Duration per channel scan in ms (server default: 0).
             destination_type: Addressing mode (default: server auto-detects).
-            task_timeout: Server-side task timeout in seconds.
+            task_timeout: Server-side task timeout in seconds (default 5s).
             poll_interval: Seconds between action status polls.
-            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError.
+            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError (default 6s).
             raw: If True, return raw JSON:API envelope for the diagnostic item.
 
         Returns:

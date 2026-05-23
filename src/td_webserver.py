@@ -139,7 +139,7 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "devices", "list"], action_cost_s=1
     ),
     "td-otbr-restapi-devices-fetch.json": FileAction(
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "devices", "fetch"], action_cost_s=180
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "devices", "fetch"], action_cost_s=5
     ),    
     "td-otbr-restapi-diagnostics-list.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "diagnostics", "list"], action_cost_s=1
@@ -148,10 +148,10 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "actions", "list"], action_cost_s=1
     ),
     "td-otbr-restapi-mesh-diagnostics-fetch-all.json": FileAction(
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "mesh-diagnostics", "fetch-all"], action_cost_s=480
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "mesh-diagnostics", "fetch-all"], action_cost_s=600
     ),
     "td-otbr-restapi-diagnostics-fetch-all.json": FileAction(
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "diagnostics", "fetch-all"], action_cost_s=480
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "diagnostics", "fetch-all"], action_cost_s=600
     ),
 
     # Eve topology exports — externally managed static files.
