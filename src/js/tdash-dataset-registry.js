@@ -277,12 +277,12 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links"
   },
 
- // ── Single-file simple datasets ───
+  // ── Single-file simple datasets ───
   {
     source: "otbr-restapi",
-    value: "restapi_devices_fetch",
-    label: "devices fetch⏰",
-    files: ["td-otbr-restapi-devices-fetch.json"],
+    value: "restapi_diagnostics_list",
+    label: "diagnostics list",
+    files: ["td-otbr-restapi-diagnostics-list.json"],
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
@@ -301,6 +301,18 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "otbr_rest_api",
   },
 
+  // ── Single-file simple datasets ───
+  {
+    source: "otbr-restapi",
+    value: "restapi_devices_fetch",
+    label: "devices fetch⏰",
+    files: ["td-otbr-restapi-devices-fetch.json"],
+    mergeStrategy: "none",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  },
+
   // ── Multi-file topology datasets (otbr-restapi) ────────────
   {
     source: "otbr-restapi",
@@ -311,20 +323,6 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "otbr_rest_api",
-  },
-
-
-
-  // ── Single-file simple datasets ───
-  {
-    source: "otbr-restapi",
-    value: "restapi_diagnostics_list",
-    label: "diagnostics list",
-    files: ["td-otbr-restapi-diagnostics-list.json"],
-    mergeStrategy: "none",
-    topologyMode: "otbr_restapi",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links"
   },
 
   // ── Single-file simple datasets ───
