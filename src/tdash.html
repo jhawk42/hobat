@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>tdash: Thread Mesh Network Dashboard</title>
+  <title>tdash: thread mesh network dashboard</title>
 
   <script src="js/depend/sortable.min.js"></script>
   <script src="js/depend/vis-network.min.js"></script>
@@ -25,7 +25,7 @@
 
     <!-- Title bar -->
     <div id="panel-home" class="controls">
-      <a href="" class="home-link" title="tdash home">🏠 tdash</a>
+      <a href="" class="home-link" title="tdash home">🏠 tdash: </a> thread mesh network dashboard
       <button id="btn-panels-toggle-all" class="panels-toggle-all" title="Collapse all panels">
         <span class="panels-toggle-arrow" aria-hidden="true">▼</span>
       </button>
@@ -38,7 +38,7 @@
 
       <div id="panel-dataset-inner">
         <div id="panel-dataset-controls" class="controls dataset-controls">
-          <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch Dataset</button>
+          <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch</button>
           <div id="panel-dataset-control-pair" class="control-pair control-pair-source">
             <label for="datasource-filter" title="Data source for the mesh network">Source</label>
             <select id="datasource-filter" title="Data source for the mesh network">
@@ -92,10 +92,15 @@
 
           <!-- Status details -->
           <div class="status-row">
-            <label title="Time taken to fetch or generate data for this dataset">
-              <span id="fetch-timetaken-label">Time:</span>
-              <span id="fetch-timetaken-value">-</span>
-            </label>
+            <div class="timetaken-group">
+              <label title="Time taken to fetch or generate data for this dataset">
+                <span id="fetch-timetaken-label">Time:</span>
+                <span id="fetch-timetaken-value">-</span>
+              </label>
+              <div class="progress-row">
+                <progress id="fetch-timetaken-progress" max="100"></progress>
+              </div>
+            </div>
             <label title="Last time browser called the server to fetch or generate data for this dataset">
               <span id="fetch-last-label">When:</span>
               <span id="fetch-last-value">-</span>
@@ -104,9 +109,6 @@
               <span id="fetch-cache-age-label">Data Age:</span>
               <span id="fetch-cache-age-value">-</span>
             </label>
-          </div>
-          <div class="progress-row">
-            <progress id="fetch-timetaken-progress" max="100"></progress>
           </div>
         </div>
 
@@ -221,9 +223,9 @@
         </button>
 
         <fieldset class="view-options">
-          <legend>View</legend>
+          <legend></legend>
           <label title="Automatically switch to the view specified by the dataset">
-            <input type="checkbox" id="chk-auto-view" checked /> Auto
+            <input type="checkbox" id="chk-auto-view" checked />Switch
           </label>
         </fieldset>
 

@@ -17,11 +17,46 @@
 
 export const DATASET_REGISTRY = [
 
+  // ── Single-file simple datasets (otbr-cli) ───  
+  {
+    source: "otbr-cli",
+    value: "meshdiag_only",
+    label: "meshdiag topo",
+    files: ["td-otbr-cli-meshdiag-topology.json"],
+    mergeStrategy: "none",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links"
+  },
+
+  // ── Single-file simple datasets (otbr-cli) ───
+  {
+    source: "otbr-cli",
+    value: "networkdiag_multicast_network_only",
+    label: "networkdiag-multicast",
+    files: ["td-otbr-cli-networkdiag-topology-multicast-network.json"],
+    mergeStrategy: "none",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links"
+  },
+
+  {
+    source: "otbr-cli",
+    value: "networkdiag_only",
+    label: "networkdiag-poll⏰",
+    files: ["td-otbr-cli-networkdiag-topology-poll.json"],
+    mergeStrategy: "none",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links"
+  },  
+
   // ── Multi-file merged (otbr-cli) ──
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast",
-    label: "meshdiag, networkdiag-multicast (rapid, secs)",
+    label: "meshdiag, networkdiag-multicast",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-topology-multicast-network.json"
@@ -36,7 +71,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast_mdns",
-    label: "meshdiag, networkdiag-multicast, mdns (rapid, secs)",
+    label: "meshdiag, networkdiag-multicast, mdns",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-topology-multicast-network.json",
@@ -48,26 +83,26 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links"
   },
 
+ // ── Multi-file merged (otbr-cli) ──
   {
     source: "otbr-cli",
-    value: "merged_otbr_cli_all_multicast",
-    label: "otbr-cli-*, networkdiag-multicast (medium, mins)",
+    value: "merged_otbr_cli_meshdiag_networkdiag_poll_mdns",
+    label: "meshdiag, networkdiag-poll⏰, mdns ",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-multicast-network.json",
-      "td-otbr-cli-meshdiag-router-neighbortables.json",
-      "td-otbr-cli-meshdiag-router-childtables.json",
+      "td-otbr-cli-networkdiag-topology-poll.json",
+      "td-mdns-scopes-thread.json"
     ],
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
     defaultLinkFilter: "all_links"
-  },  
+  },
 
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast_mdns",
-    label: "otbr-cli-*, networkdiag-multicast, mdns (medium, mins)",
+    label: "otbr-cli-*⏰, networkdiag-multicast, mdns",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-topology-multicast-network.json",
@@ -81,41 +116,10 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links"
   }, 
 
-  // ── Multi-file merged (otbr-cli) ──
-  {
-    source: "otbr-cli",
-    value: "merged_otbr_cli_meshdiag_networkdiag_poll",
-    label: "meshdiag, networkdiag-poll (detailed, mins)",
-    files: [
-      "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-poll.json"
-    ],
-    mergeStrategy: "by-identity",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links"
-  },
-
-  {
-    source: "otbr-cli",
-    value: "merged_otbr_cli_all",
-    label: "otbr-cli-*, network-poll (detailed, mins)",
-    files: [
-      "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-poll.json",
-      "td-otbr-cli-meshdiag-router-neighbortables.json",
-      "td-otbr-cli-meshdiag-router-childtables.json",
-    ],
-    mergeStrategy: "by-identity",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links"
-  },
-
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_poll_all_mdns",
-    label: "otbr-cli-*, network-poll, mdns (detailed, mins),",
+    label: "otbr-cli-*⏰, network-poll⏰, mdns",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-topology-poll.json",
@@ -129,45 +133,10 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links"
   },
 
-  // ── Single-file simple datasets (otbr-cli) ───  
-  {
-    source: "otbr-cli",
-    value: "meshdiag_only",
-    label: "meshdiag topo (rapid, secs)",
-    files: ["td-otbr-cli-meshdiag-topology.json"],
-    mergeStrategy: "none",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links"
-  },
-
-  // ── Single-file simple datasets (otbr-cli) ───
-  {
-    source: "otbr-cli",
-    value: "networkdiag_multicast_network_only",
-    label: "networkdiag-multicast (rapid, secs)",
-    files: ["td-otbr-cli-networkdiag-topology-multicast-network.json"],
-    mergeStrategy: "none",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links"
-  },
-
-  {
-    source: "otbr-cli",
-    value: "networkdiag_only",
-    label: "networkdiag-poll (detailed, mins)",
-    files: ["td-otbr-cli-networkdiag-topology-poll.json"],
-    mergeStrategy: "none",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links"
-  },
-
   {
     source: "otbr-cli",
     value: "router_neighbortables",
-    label: "meshdiag neighbors",
+    label: "meshdiag neighbors⏰",
     files: ["td-otbr-cli-meshdiag-router-neighbortables.json"],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
@@ -177,7 +146,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "router_childtables",
-    label: "meshdiag children",
+    label: "meshdiag children⏰",
     files: ["td-otbr-cli-meshdiag-router-childtables.json"],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
@@ -296,44 +265,6 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "default_links"
   },
 
-  // ── Multi-file merge (otbr-cli, eve) ──
-  {
-    source: "lab",
-    value: "merged_otbr_cli_meshdiag_networkdiag_neighbortables_eve",
-    label: "otbr-cli, eve",
-    files: [
-      "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-poll.json",
-      "td-otbr-cli-meshdiag-router-neighbortables.json",
-      "td-otbr-cli-meshdiag-router-childtables.json",
-      "td-eve-topology.json",
-    ],
-    mergeStrategy: "by-identity",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links"
-  },
-
-  // ── Multi-file merge [otbr-cli, otbr-restapi, eve] ──
-  {
-    source: "lab",
-    value: "merged_otbr_cli_meshdiag_networkdiag_neighbortables_restapi_eve",
-    label: "otbr-cli, otbr-restapi, eve",
-    files: [
-      "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-poll.json",
-      "td-otbr-cli-meshdiag-router-neighbortables.json",
-      "td-otbr-cli-meshdiag-router-childtables.json",
-      "td-otbr-restapi-devices.json",
-      "td-otbr-restapi-diagnostics.json",
-      "td-eve-topology.json",
-    ],
-    mergeStrategy: "by-identity",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links"
-  },
-
   // ── Single-file simple datasets ───
   {
     source: "otbr-restapi",
@@ -350,7 +281,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_fetch",
-    label: "devices fetch",
+    label: "devices fetch⏰",
     files: ["td-otbr-restapi-devices-fetch.json"],
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
