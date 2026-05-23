@@ -530,13 +530,13 @@ def dispatch(
                 fwd += ["--accept", args.accept]
             if getattr(args, "raw", False):
                 fwd += ["--raw"]
-            if getattr(args, "poll_interval", None) is not None:
+            if getattr(args, "poll-interval", None) is not None:
                 fwd += ["--poll-interval", str(args.poll_interval)]
-            if getattr(args, "poll_timeout", None) is not None:
+            if getattr(args, "poll-timeout", None) is not None:
                 fwd += ["--poll-timeout", str(args.poll_timeout)]
-            if getattr(args, "no_progress", False):
+            if getattr(args, "no-progress", False):
                 fwd += ["--no-progress"]
-            if getattr(args, "no_auto_output", False):
+            if getattr(args, "no-auto-output", False):
                 fwd += ["--no-auto-output"]
             return fwd
 
