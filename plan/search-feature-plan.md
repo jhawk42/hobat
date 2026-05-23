@@ -1,6 +1,6 @@
 # Plan: Browser-Side Search for Thread Device Dataset Rows
 
-**Status:** Draft — awaiting review before implementation
+**Status:** Decisions made — ready for implementation
 
 ---
 
@@ -39,9 +39,9 @@ Search will match against the `TABLE_PRIORITY_COLUMNS` subset: `rloc16`, `extadd
 
 1. Create `src/js/tdash-search.js`.
 2. Implement `parseSearchQuery(queryText)` — normalizes input (trim, lowercase). For now: single string matching. Future: support `field:value` syntax.
-3. Implement `rowMatchesSearch(row, query)` — iterates over search target fields (the `TABLE_PRIORITY_COLUMNS` priority subset), stringifies each value via the existing `toText()` / `getColumnValue()` helpers, and checks if any field value contains the query string (case-insensitive). Uses dot-path lookup for nested fields like `mode.device`.
-4. Implement `filterRowsBySearch(rows, query)` — returns `{ matchingRows, matchingIndices }`. When query is empty/blank, returns all rows (no filtering).
-5. Export a `SEARCH_TARGET_FIELDS` constant listing the exact fields to search (drawn from `TABLE_PRIORITY_COLUMNS`).
+3. Implement `rowMatchesSearch(row, query, advancedMode)` — when `advancedMode` is `false`, iterates over `SEARCH_TARGET_FIELDS` (the `TABLE_PRIORITY_COLUMNS` priority subset); when `advancedMode` is `true`, iterates over all keys present in the row object. Stringifies each value via the existing `toText()` / `getColumnValue()` helpers and checks if any field value contains the query string (case-insensitive). Uses dot-path lookup for nested fields like `mode.device`.
+4. Implement `filterRowsBySearch(rows, query, advancedMode)` — returns `{ matchingRows, matchingIndices }`. When query is empty/blank, returns all rows (no filtering). Passes `advancedMode` through to `rowMatchesSearch`.
+5. Export a `SEARCH_TARGET_FIELDS` constant listing the exact fields to search in normal mode (drawn from `TABLE_PRIORITY_COLUMNS`).
 
 **Dependencies:** `tdash-utils.js` (`toText`, `getColumnValue`, `isPlainObject`), `tdash-constants.js` (`TABLE_PRIORITY_COLUMNS`).
 
@@ -70,7 +70,7 @@ Search will match against the `TABLE_PRIORITY_COLUMNS` subset: `rloc16`, `extadd
 **Work items:**
 
 1. In `tdash-table-renderer.js`, import `filterRowsBySearch` from `tdash-search.js`.
-2. Extend `applyTableFilters()` to read the current search query (via a new exported accessor `getSearchQuery()` from `tdash-ui.js` or a module-level store in `tdash-search.js`) and pass it through `filterRowsBySearch()` after the existing node/diagnostic filters.
+2. Extend `applyTableFilters()` to read the current search query (via a new exported accessor `getSearchQuery()` from `tdash-ui.js` or a module-level store in `tdash-search.js`) and the current Advanced mode state (`isAdvancedMode()`), then pass both through `filterRowsBySearch(rows, query, advancedMode)` after the existing node/diagnostic filters.
 3. In `renderTableRows()`, add a CSS class `search-match` to `<tr>` elements whose row index is in `matchingIndices`. Update `tdash.css` to style `.search-match` with a subtle highlight (e.g., yellow/amber left border or background tint).
 4. Update `updateTableStatus()` to include search match count in the status line.
 
@@ -84,10 +84,7 @@ Search will match against the `TABLE_PRIORITY_COLUMNS` subset: `rloc16`, `extadd
 
 1. In `tdash-topology-renderer.js`, import `filterRowsBySearch`.
 2. After vis-network renders, compute matched node IDs by running `filterRowsBySearch` over the topology node data (using `_topologyNodeData` which stores the vis-node objects with their source row fields).
-3. Two display options (choose one after review):
-   - **Option A – Highlight-only:** For matching nodes, apply a distinct border color (e.g., amber/orange) and increased border width via `_visNetwork.body.data.nodes.update(...)`. Non-matching nodes are visually dimmed (reduced opacity via color alpha). Reset to normal when search is cleared.
-   - **Option B – Select + Focus:** Programmatically call `_visNetwork.selectNodes(matchingNodeIds)` and optionally `_visNetwork.fit({ nodes: matchingNodeIds })` to zoom to matches. Less invasive to the existing color scheme.
-   - **Recommended:** Option A for richer visual feedback; Option B as fallback.
+3. **Option A – Highlight-only (selected):** For matching nodes, apply a distinct border color (amber/orange) and increased border width via `_visNetwork.body.data.nodes.update(...)`. Non-matching nodes are visually dimmed (reduced opacity via color alpha). Reset all nodes to their original color/border/opacity when search is cleared or query is empty.
 4. Wire search result application to the existing `applyFilters()` pipeline in the topology filter handlers so search + existing node/link/diagnostic filters compose correctly.
 
 ---
@@ -100,7 +97,7 @@ Search will match against the `TABLE_PRIORITY_COLUMNS` subset: `rloc16`, `extadd
 
 1. Import `filterRowsBySearch`, `parseSearchQuery` from `tdash-search.js`.
 2. Add module-level `let _currentSearchQuery = ""` state.
-3. Wire `#btn-search-find` click → `_currentSearchQuery = parseSearchQuery(input.value); applySearch()`.
+3. Wire `#btn-search-find` click → `_currentSearchQuery = parseSearchQuery(input.value); applySearch()`. Search fires **only** on explicit button click or Enter key; no keystroke debounce.
 4. Wire `#search-input` keydown (Enter) → same as Find button.
 5. Wire `#btn-search-clear` click → clear input, reset `_currentSearchQuery = ""`, call `applySearch()`.
 6. Implement `applySearch()`:
@@ -157,9 +154,9 @@ The following are known extension points for when search needs to go beyond the 
 
 ---
 
-## Open Questions for Review
+## Resolved Decisions
 
-1. **Topology highlight strategy:** Option A (color highlight + dim non-matches) vs. Option B (vis-network `selectNodes` + fit)? Or a hybrid?
-2. **Search scope:** Should search only target `TABLE_PRIORITY_COLUMNS`, or should it also scan all other row fields when the "Advanced" (More Info) toggle is on?
-3. **Placement:** Should the search controls go inside the existing Filters panel (`#panel-node-link-filters`) or as a standalone panel between Dataset and Filters?
-4. **Auto-search on typing:** Should search fire on each keystroke (with debounce) rather than requiring a button click?
+1. **Topology highlight strategy:** **Option A** — highlight matching nodes (amber/orange border, increased border width) and dim non-matching nodes. Reset to normal on clear.
+2. **Search scope:** **TABLE_PRIORITY_COLUMNS** when Advanced (More Info) toggle is off. When Advanced is on, scan **all row fields**.
+3. **Placement:** Inside the existing Filters panel (`#panel-node-link-filters`).
+4. **Search trigger:** **Button click (and Enter key) only** — no auto-search on keystroke.
