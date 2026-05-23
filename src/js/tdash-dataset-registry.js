@@ -289,6 +289,55 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links"
   },
 
+  // ── Single-file simple datasets ───
+  {
+    source: "otbr-restapi",
+    value: "restapi_devices_fetch",
+    label: "devices fetch",
+    files: ["td-otbr-restapi-devices-fetch.json"],
+    mergeStrategy: "none",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  },
+
+  // ── Single-file simple datasets ───
+  {
+    source: "otbr-restapi",
+    value: "restapi_diagnostics_fetch_all",
+    label: "diagnostics fetch all⏰",
+    files: ["td-otbr-restapi-diagnostics-fetch-all.json"],
+    mergeStrategy: "by-identity",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "otbr_rest_api",
+  },
+
+  // ── Multi-file topology datasets (otbr-restapi) ────────────
+  {
+    source: "otbr-restapi",
+    value: "restapi_devices_fetch_diagnostics_fetch_all",
+    label: "devices fetch, diagnostics fetch all⏰",
+    files: ["td-otbr-restapi-devices-fetch.json", "td-otbr-restapi-diagnostics-fetch-all.json"],
+    mergeStrategy: "none",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  },
+
+
+  // ── Multi-file topology datasets (otbr-restapi) ────────────
+  {
+    source: "otbr-restapi",
+    value: "restapi_mesh_diagnostics_fetch_all",
+    label: "mesh diagnostics fetch all⏰",
+    files: ["td-otbr-restapi-mesh-diagnostics-fetch-all.json"],
+    mergeStrategy: "by-identity",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "otbr_rest_api",
+  },
+
   // ── Multi-file topology datasets (otbr-restapi) ────────────
   {
     source: "otbr-restapi",
@@ -299,18 +348,6 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "otbr_rest_api",
-  },
-
-  // ── Single-file simple datasets ───
-  {
-    source: "otbr-restapi",
-    value: "restapi_devices_fetch",
-    label: "devices fetch⏰",
-    files: ["td-otbr-restapi-devices-fetch.json"],
-    mergeStrategy: "none",
-    topologyMode: "otbr_restapi",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links"
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────
