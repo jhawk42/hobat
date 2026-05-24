@@ -742,7 +742,7 @@ python -m td_webserver --port 9165 --datadir /path/to/data
 
 ### Open the dashboard
 
-Open `http://localhost:9165/tdash.html` after starting the web server, or open `src/tdash.html` directly in a browser and select a dataset from the dropdown.
+Open `http://localhost:9165/tdash.html` after starting the web server, in a browser and select a dataset from the dropdown.
 
 ### Run tests
 
@@ -775,7 +775,7 @@ python src/td_cli.py otbr-restapi --host 127.0.0.1 --port 18081 node get
 |---|---|
 | `none` | Pass loaded JSON through without merging rows |
 | `by-rloc16` | Merge rows only when `rloc16` matches |
-| `by-identity` | Merge when any canonical identity matches (checked in order: `rloc16` → canonical `extaddr` → `omr_ipv6_addr`) |
+| `by-identity` | Merge when any canonical identity matches (checked in order: `extaddr` → `omr_ipv6_addr` → `rloc16`) |
 
 Identity matching is case-insensitive and ignores leading/trailing whitespace.  Empty identifiers are never used for matching.
 
