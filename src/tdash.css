@@ -532,8 +532,12 @@ select.filter-disabled {
 }
 
 #panel-node-link-filters > legend {
-  padding: 7px 10px;
+  padding: 1px 10px;
   margin: 0;
+}
+
+#fieldset-diag-filters .control-pair-source {
+  row-gap: 0;
 }
 
 .filters-header {
@@ -577,11 +581,11 @@ select.filter-disabled {
 }
 
 .filters-content {
-  padding: 2px 10px 2px;
+  padding: 0 10px;
 }
 
 .filters-content .controls {
-  padding: 10px;
+  padding: 1px 10px 10px;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;

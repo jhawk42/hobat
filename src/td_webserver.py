@@ -234,7 +234,7 @@ def build_cache_response_headers(max_age_s: int, file_mtime: float) -> dict[str,
     """
     last_modified = email.utils.formatdate(file_mtime, usegmt=True)
     return {
-        "Cache-Control": f"max-age={max_age_s}",
+        "Cache-Control": f"no-cache, max-age={max_age_s}",
         "Last-Modified": last_modified,
     }
 
