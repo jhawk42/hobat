@@ -143,7 +143,7 @@ python3 -m td_cli merge-dataset
 
 # Dashboard Webserver
 
-Note: The tdash docker container automatically runs td_webserver.py when the on container starts up.
+Note: The tdash docker container automatically runs td_webserver.py when the container starts up.
 
 tdash dashboard webserver commands
 ```bash
@@ -157,11 +157,11 @@ python3 -m td_webserver --host 0.0.0.0 --port 9165
 
 To do manual device labeling, add a file named td-static-extaddr-device-label.json with the format below into the data directory.
 
-The td_cli commands will use the file to lookip extaddr (Extended MAC Address) per device and enhance the collect thread device info. It is also used in the thread dashboard to lookup human readable device labels.
+The td_cli commands will use the file to lookup extaddr (Extended MAC Address) per device and enhance the collect thread device info with the device_label. It is also used in the thread dashboard to lookup human readable device labels.
+
+Example format of td-static-extaddr-device-label.json
 
 ```
-#td-static-extaddr-device-label.json
-
 [
     {
         "extaddr": "eeeaffeaffeaffe1",
