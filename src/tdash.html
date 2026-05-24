@@ -153,9 +153,9 @@
     </div>
 
     <!-- Filters bar -->
-    <div id="panel-node-link-filters" class="collapsed">
+    <div id="panel-node-link-filters">
       <legend>
-        <button id="btn-toggle-filters" class="legend-toggle-btn" aria-expanded="false" title="Toggle filters panel">
+        <button id="btn-toggle-filters" class="legend-toggle-btn" aria-expanded="true" title="Toggle filters panel">
           <span class="legend-toggle-arrow">▶</span>Filters</button>
       </legend>
       <!--
@@ -168,41 +168,51 @@
       -->
       <div id="filters-content" class="filters-content">
         <div class="controls">
-          <div class="control-pair control-pair-source">
-            <label for="node-filter" title="Filter devices by type or role">Devices</label>
-            <select id="node-filter" title="Filter devices by type or role">
-              <!-- populated by JS from NODE_FILTER_OPTIONS -->
-            </select>
+          <div class="control-pair control-pair-search">
+            <label for="search-input">Search</label>
+            <input type="text" id="search-input" placeholder="e.g. device_label, rloc16, extaddr…" />
+            <button id="btn-search-find" title="Find rows matching the search query">Find</button>
+            <button id="btn-search-clear" title="Clear search and reset results">✕</button>
+            <div id="search-status" role="status" aria-live="polite"></div>
           </div>
 
-          <div class="control-pair control-pair-source">
-            <label for="link-filter" title="Filter links by type or quality">Links</label>
-            <select id="link-filter" title="Filter links by type or quality">
-              <!-- populated by JS from LINK_FILTER_OPTIONS -->
-            </select>
-          </div>
+          <fieldset class="cache-options collapsed" id="fieldset-node-link-filters">
+            <legend><button class="legend-toggle-btn" id="btn-toggle-node-link-filters" aria-expanded="false"><span class="legend-toggle-arrow">▶</span>Nodes &amp; Links</button></legend>
+            <div class="control-pair control-pair-source">
+              <label for="node-filter" title="Filter devices by type or role">Devices</label>
+              <select id="node-filter" title="Filter devices by type or role">
+                <!-- populated by JS from NODE_FILTER_OPTIONS -->
+              </select>
+            </div>
+            <div class="control-pair control-pair-source">
+              <label for="link-filter" title="Filter links by type or quality">Links</label>
+              <select id="link-filter" title="Filter links by type or quality">
+                <!-- populated by JS from LINK_FILTER_OPTIONS -->
+              </select>
+            </div>
+          </fieldset>
 
-          <div class="control-pair control-pair-source">
-            <label for="diagnostic-source-filter" title="Filter diagnostics by source">Source</label>
-            <select id="diagnostic-source-filter" title="Filter diagnostics by source">
-              <!-- populated by JS from DIAGNOSTIC_SOURCE_FILTER_OPTIONS -->
-              <option value="mac_counters" title="MAC counters track physical/link-layer frame statistics (such as radio interference, retries, and dropped packets). 
+          <fieldset class="cache-options collapsed" id="fieldset-diag-filters">
+            <legend><button class="legend-toggle-btn" id="btn-toggle-diag-filters" aria-expanded="false"><span class="legend-toggle-arrow">▶</span>Diagnostics</button></legend>
+            <div class="control-pair control-pair-source">
+              <label for="diagnostic-source-filter" title="Filter diagnostics by source">Source</label>
+              <select id="diagnostic-source-filter" title="Filter diagnostics by source">
+                <!-- populated by JS from DIAGNOSTIC_SOURCE_FILTER_OPTIONS -->
+                <option value="mac_counters" title="MAC counters track physical/link-layer frame statistics (such as radio interference, retries, and dropped packets). 
 ">MAC Counters</option>
-              <option value="mle_counters" title="MLE (Mesh Link Establishment) counters track network-layer events (such as attachment attempts, parent changes, and routing state).
+                <option value="mle_counters" title="MLE (Mesh Link Establishment) counters track network-layer events (such as attachment attempts, parent changes, and routing state).
 ">MLE Counters</option>
-              <option value="time_statistics"
-                title="Time statistics track various time-related metrics in the network.">Time Statistics</option>
-              <option value="link_quality" title="Link quality metrics track the quality of links between devices.">Link
-                Quality</option>
-              <option value="other" title="Other diagnostics track miscellaneous metrics and events in the network.">
-                Other Diagnostics</option>
-            </select>
-
-            <label for="diagnostic-filter" title="Filter diagnostics by type or severity">Diagnostics</label>
-            <select id="diagnostic-filter" title="Filter diagnostics by type or severity">
-              <!-- populated by JS from DIAGNOSTIC_FILTER_OPTIONS -->
-            </select>
-          </div>
+                <option value="time_statistics"
+                  title="Time statistics track various time-related metrics in the network.">Time Statistics</option>
+                <option value="link_quality" title="Link quality metrics track the quality of links between devices.">Link
+                  Quality</option>
+              </select>
+              <label for="diagnostic-filter" title="Filter diagnostics by type or severity">Diagnostics</label>
+              <select id="diagnostic-filter" title="Filter diagnostics by type or severity">
+                <!-- populated by JS from DIAGNOSTIC_FILTER_OPTIONS -->
+              </select>
+            </div>
+          </fieldset>
         </div>
       </div>
     </div>
@@ -246,14 +256,14 @@
           <div class="topology-canvas-wrap">
             <div id="topology-view"></div>
             <div id="legend-toggle" class="legend-toggle">
-              <button id="btn-legend-toggle" title="Toggle link quality legend">
+              <button id="btn-legend-toggle" title="Toggle link quality legend" aria-expanded="false">
                 Legend
               </button>
               <button id="btn-physics" title="Toggle physics simulation" aria-label="Pause physics simulation">
                 ⏸
               </button>
             </div>
-            <div id="lq-legend" class="lq-legend">
+            <div id="lq-legend" class="lq-legend hidden">
               <span class="lq-legend-title">Link Quality</span>
               <span class="lq-legend-item lq-high">
                 <span class="lq-legend-line lq-legend-line-high" aria-hidden="true"></span>
