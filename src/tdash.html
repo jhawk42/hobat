@@ -46,11 +46,7 @@
               <option value="otbr-restapi">otbr-restapi</option>
               <option value="mdns">mdns</option>
               <option value="eve">eve</option>
-              <!-- -->
               <option value="merged">multi-source</option>
-              <!--
-            <option value="lab">lab</option>
-             -->
               <option value="system">system</option>
             </select>
           </div>
@@ -59,56 +55,6 @@
             <select id="dataset-select" title="Select a dataset for the mesh network">
               <!-- populated by JS from DATASET_REGISTRY -->
             </select>
-          </div>
-        </div>
-
-        <fieldset class="cache-options collapsed" id="fieldset-cache">
-          <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="false"><span
-                class="legend-toggle-arrow">▶</span>Cache</button></legend>
-          <label title="Automatically re-fetch data when the dataset selection changes">
-            <input type="checkbox" id="chk-auto-fetch" checked /> Auto
-          </label>
-          <label title="Force the server to regenerate fresh data (bypass cache)">
-            <input type="checkbox" id="chk-force-fresh" /> Force Refresh
-          </label>
-          <label title="Only use server cached data (skip server regeneration even if cache is stale or missing)">
-            <input type="checkbox" id="chk-only-cache" /> Only Cache
-          </label>
-        </fieldset>
-
-
-        <!-- Fetch status -->
-        <div id="fetch-status" role="status" aria-live="polite" class="cache-options">
-          <button class="legend-toggle-btn" id="btn-toggle-status" aria-expanded="true">
-            <span class="legend-toggle-arrow">▶</span>Status
-          </button>
-
-          <!-- fetch status line  -->
-          <div id="fetch-status-line-panel">
-            <div id="fetch-status-line-content" role="status" aria-live="polite">
-              Select a dataset to load and press Fetch.
-            </div>
-          </div>
-
-          <!-- Status details -->
-          <div class="status-row">
-            <div class="timetaken-group">
-              <label title="Time taken to fetch or generate data for this dataset">
-                <span id="fetch-timetaken-label">Time:</span>
-                <span id="fetch-timetaken-value">-</span>
-              </label>
-              <div class="progress-row">
-                <progress id="fetch-timetaken-progress" max="100"></progress>
-              </div>
-            </div>
-            <label title="Last time browser called the server to fetch or generate data for this dataset">
-              <span id="fetch-last-label">When:</span>
-              <span id="fetch-last-value">-</span>
-            </label>
-            <label title="Age of the cached data for this dataset">
-              <span id="fetch-cache-age-label">Data Age:</span>
-              <span id="fetch-cache-age-value">-</span>
-            </label>
           </div>
         </div>
 
@@ -148,6 +94,55 @@
           </fieldset>
         </div>
 
+        <!-- Fetch status -->
+        <fieldset id="fetch-status" role="status" aria-live="polite" class="cache-options">
+          <legend><button class="legend-toggle-btn" id="btn-toggle-status" aria-expanded="true">
+            <span class="legend-toggle-arrow">▶</span>Status
+          </button></legend>
+
+          <!-- Status details -->
+          <div class="status-row">
+            <div class="timetaken-group">
+              <label title="Time taken to fetch or generate data for this dataset">
+                <span id="fetch-timetaken-label">Time:</span>
+                <span id="fetch-timetaken-value">-</span>
+              </label>
+              <div class="progress-row">
+                <progress id="fetch-timetaken-progress" max="100"></progress>
+              </div>
+            </div>
+            <label title="Last time browser called the server to fetch or generate data for this dataset">
+              <span id="fetch-last-label">When:</span>
+              <span id="fetch-last-value">-</span>
+            </label>
+            <label title="Age of the cached data for this dataset">
+              <span id="fetch-cache-age-label">Data Age:</span>
+              <span id="fetch-cache-age-value">-</span>
+            </label>
+          </div>
+          <!-- fetch status line  -->
+          <div id="fetch-status-line-panel">
+            <div id="fetch-status-line-content" role="status" aria-live="polite">
+              Select a dataset to load and press Fetch.
+            </div>
+          </div>          
+        </fieldset>
+
+        <fieldset class="cache-options" id="fieldset-cache">
+          <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="true"><span
+                class="legend-toggle-arrow">▶</span>Cache</button></legend>
+          <label title="Automatically re-fetch data when the dataset selection changes">
+            <input type="checkbox" id="chk-auto-fetch" checked /> Auto
+          </label>
+          <label title="Force the server to regenerate fresh data (bypass cache)">
+            <input type="checkbox" id="chk-force-fresh" /> Force Refresh
+          </label>
+          <label title="Only use server cached data (skip server regeneration even if cache is stale or missing)">
+            <input type="checkbox" id="chk-only-cache" /> Only Cache
+          </label>
+        </fieldset>
+
+
       </div>
 
     </div>
@@ -158,14 +153,7 @@
         <button id="btn-toggle-filters" class="legend-toggle-btn" aria-expanded="true" title="Toggle filters panel">
           <span class="legend-toggle-arrow">▶</span>Filters</button>
       </legend>
-      <!--
-      <div class="filters-header">
-        <button id="btn-toggle-filters-xx" class="filters-toggle-btn" aria-expanded="false" title="Toggle filters panel">
-          <span class="filters-toggle-arrow">▶</span>
-          <span>Filters</span>
-        </button>
-      </div>
-      -->
+
       <div id="filters-content" class="filters-content">
         <div class="controls">
           <div id="search-control-bar" class="control-pair control-pair-search">
