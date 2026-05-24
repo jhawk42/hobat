@@ -285,13 +285,14 @@ h1 {
 #panel-dataset-inner {
   padding: 10px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
-/* Reset flex-basis so 540px is not applied as height in the column-flex context */
+/* Reset flex-basis and force controls to take full width in row-flex context */
 #panel-dataset-controls {
-  flex: 0 0 auto;
+  flex: 0 0 100%;
 }
 
 #panel-node-link-filters,
@@ -315,11 +316,17 @@ label {
   border-radius: 8px;
   padding: 4px 10px;
   margin: 0;
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
   font-size: 0;
+}
+
+/* Keep cache-options fieldsets sized to their content */
+#fieldset-cache,
+#fetch-status {
+  align-self: flex-start;
 }
 
 .cache-options legend {
@@ -390,7 +397,7 @@ label {
 
 /* Fetch status line panel */
 #fetch-status-line-panel {
-  flex-basis: 100%;
+  flex-basis: auto;
   font-size: 14px;
   margin: 0;
 }
@@ -411,7 +418,7 @@ label {
   display: flex;
   gap: 15px;
   align-items: center;
-  flex-basis: 100%;
+  flex-basis: auto;
   font-size: 14px;
 }
 
@@ -424,7 +431,7 @@ label {
 #fetch-status .progress-row {
   display: flex;
   align-items: center;
-  flex-basis: 100%;
+  flex-basis: auto;
   padding-top: 2px;
   font-size: 14px;
 }
