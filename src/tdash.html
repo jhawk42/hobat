@@ -62,8 +62,8 @@
           </div>
         </div>
 
-        <fieldset class="cache-options" id="fieldset-cache">
-          <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="true"><span
+        <fieldset class="cache-options collapsed" id="fieldset-cache">
+          <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="false"><span
                 class="legend-toggle-arrow">▶</span>Cache</button></legend>
           <label title="Automatically re-fetch data when the dataset selection changes">
             <input type="checkbox" id="chk-auto-fetch" checked /> Auto
@@ -168,12 +168,12 @@
       -->
       <div id="filters-content" class="filters-content">
         <div class="controls">
-          <div class="control-pair control-pair-search">
+          <div id="search-control-bar" class="control-pair control-pair-search">
             <label for="search-input">Search</label>
-            <input type="text" id="search-input" placeholder="e.g. device_label, rloc16, extaddr…" />
+            <input type="text" id="search-input" placeholder="extaddr, rloc16, device_label …" />
             <button id="btn-search-find" title="Find rows matching the search query">Find</button>
             <button id="btn-search-clear" title="Clear search and reset results">✕</button>
-            <div id="search-status" role="status" aria-live="polite"></div>
+            <div id="search-status" role="status" aria-live="polite">type your query and press Enter</div>
           </div>
 
           <fieldset class="cache-options collapsed" id="fieldset-node-link-filters">
