@@ -1,15 +1,21 @@
 # tdash - thread mesh network dashboard
 
-This tdash repo has a Python cli toolkit that fetches thread device info from a thread network and a browser dashboard for visualizing and monitoring Thread mesh networks.  [openthread](https://github.com/openthread/openthread) 
+A set of tools to help query and visualize a Thread mesh network. The dashboard can filter by thread node types like: border router, router, ftd, mtd child nodes etc and thread link quality like LQ3, LQ2, LQ1. It can filter nodes using diagnostics filters to find thread nodes that need attention: MAC counters (packets, frame errors, etc) and MLE counters (mesh partition, parent attempt changes, role time durations, etc) 
+[openthread](https://github.com/openthread/openthread) 
 
-
-It fetches thread device info from sources like: otbr-cli, otbr-restapi, mDNS (Multicast DNS) records and the eve thread json format layout file shared from the Eve app. The td_cli tool can also merge these various sources for consolidated thread info and visualization. It also provides a device labeling mechanism using a extaddr (Extended MAC Address) to device_label lookup file. See below for details.
+## Summary
+- Python cli toolkit that fetches thread device info from a thread network and then stores into a local cache in the tdash data directory for offline querying and processing. Fetch thread device info from these sources:
+    - Open Thread Border Router (OTBR: otbr-cli, otbr-restapi)
+    - mDNS (Multicast DNS) records
+    - Eve app thread json format layout file. 
+- Thread mesh network dashboard in a browser web page (html, javascript) for visualizing and querying thread mesh network info.  
+- Python webserver for the hosting the thread dashboard, rest endpoint for servicing requests from the dashboard for cached data, launching the tdash cli to refetch data from the thread network into the data cache.
+- Simple JSON file for device labeling mechanism using a extaddr (Extended MAC Address) to device_label lookup file. See below for details.
 
 ## Dataset Sources
 - otbr-cli: Fetches info from an OpenThread Border Router (OTBR) instance via ot-ctl commands for thread device info. By default use docker exec to call into the "otbr" docker container. Also support calling otbr on the host. Common ot-ctl commands used:
   - router table (quick, seconds, summary)
-  - meshdiag topology (quick, seconds, summary). 
-    - Optionally also calls these sub commands (long, more detailed info) routerneighbortable, childtable, childip6
+  - meshdiag topology (quick, seconds, summary). Optionally also calls these sub commands (long, more detailed info) routerneighbortable, childtable, childip6
   - networkdiag (takes time, minutes, detailed). The td_cli networkdiag supports multicast (quick, full thread devices) and poll (all devices including routes, full thread devices, minimal thread devices) 
 - otbr-restapi: Fetches info from an OpenThread Border Router REST API for thread device info.
 - mdns: Fetches thread-related mdns scope records: _meshcop, _trel, _hap, _matter for thread device info.
@@ -17,11 +23,11 @@ It fetches thread device info from sources like: otbr-cli, otbr-restapi, mDNS (M
 
 ## Getting Started
 
-The tdash can be run in a docker container or manually run on a host.
+The tdash can be run in a docker container or manually run via cli on a host.
 
 ### Setup - manual on a host
 
-To run manually on the host, git clone this repro onto the host. Details below to manually run td_cli.py and td_webserver.py commands.
+To run manually on the host, git clone this repro onto the host. See details below to manually run td_cli.py and td_webserver.py commands.
 
 ### Setup - docker container
 
@@ -32,8 +38,8 @@ docker pull ghcr.io/jhawk42/tdash:latest
 ```
 
 Notes: 
+- The tdash docker container automatically starts the td_webserver.py with the dashboard. Default port is 9165.
 - The tdash docker container needs access to the docker socket for docker exec calls between docker containers for the tdash container to call into otbr container to execute ot-ctl commands.
-- The tdash docker container automatically starts the td_webserver.py.
 
 ```
 docker run --name=tdash -d \
@@ -46,7 +52,7 @@ docker run --name=tdash -d \
 
 ### Open the tdash web dashboard in a browser
 
-Open the tdash web dashboard in a browser
+Open the tdash web dashboard in a browser. Default port is 9165.
 
 ```
 # localhost
@@ -62,11 +68,11 @@ Note: The tdash webserver will automatically use td_cli.py to refresh the thread
 
 ### tdash cli examples
 
-See below for additional manual run on host td_cli.py commands 
+See below for additional details for running td_cli.py commands 
 
 ```
 # direct on host
-python3 td_cli.py --help
+python3 -m td_cli --help
 ```
 
 The tdash docker container cli entry point is td_cli.py.
@@ -77,17 +83,17 @@ The tdash docker container cli entry point is td_cli.py.
 docker exec -it tdash /bin/bash $*
 
 # bash in tdash docker container: td_cli.py examples:
-python3 td_cli.py --help
+python3 -m td_cli --help
 
 usage: td_cli [-h] [--verbose] [--debug] [--output FILE] [--datadir DIR] {otbr-cli,mdns,otbr-restapi,process-eve,merge-dataset} ...
 
-python3 td_cli.py otbr-cli router-table
+python3 -m td_cli otbr-cli router-table
 ```
 
 docker exec into tdash: run td_cli.py commands
 ```
-docker exec -it tdash /usr/local/bin/python3 td_cli.py otbr-cli router-table
-docker exec -it tdash /usr/local/bin/python3 td_cli.py --debug otbr-cli router-table
+docker exec -it tdash /usr/local/bin/python3 -m td_cli otbr-cli router-table
+docker exec -it tdash /usr/local/bin/python3 -m td_cli --debug otbr-cli router-table
 ```
 
 ### tdash cli commands (docker or direct on host)
@@ -97,7 +103,7 @@ They can also be run directly on the host if you are running without docker.
 
 ```bash
 # Help
-python3 td_cli.py --help
+python3 -m td_cli --help
 
 usage: td_cli [-h] [--verbose] [--debug] [--output FILE] [--datadir DIR] {otbr-cli,mdns,otbr-restapi,process-eve,merge-dataset} ...
 
@@ -119,8 +125,9 @@ python3 -m td_cli otbr-cli all
 
 # OTBR REST API
 python3 -m td_cli otbr-restapi --help
-python3 -m td_cli otbr-restapi diagnostics list
 python3 -m td_cli otbr-restapi download
+python3 -m td_cli otbr-restapi devices list
+python3 -m td_cli otbr-restapi diagnostics list
 
 # mDNS
 python3 -m td_cli mdns --help
@@ -144,8 +151,9 @@ Note: The tdash docker container automatically runs td_webserver.py when the con
 
 tdash dashboard webserver commands
 ```bash
-# localhost
+# listen on localhost
 python3 -m td_webserver --host localhost --port 9165
+
 # listen on all available network interfaces
 python3 -m td_webserver --host 0.0.0.0 --port 9165
 ```

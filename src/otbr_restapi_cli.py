@@ -88,15 +88,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--poll-timeout",
         type=float,
-        default=120.0,
+        default=6.0,
         metavar="FLOAT",
-        help="Max wall-clock seconds to wait for an action to complete (default: 120.0)",
+        help="Max wall-clock seconds to wait for an action to complete (default: 6.0)",
     )
     parser.add_argument(
         "--no-progress",
         action="store_true",
         default=False,
-        help="Suppress per-device progress output to stderr on fetch-all commands (P6)",
+        help="Suppress per-device progress output to stderr on fetch-all commands",
     )
     parser.add_argument(
         "--no-auto-output",
@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help=(
             "Disable automatic output file naming. By default, fetch/fetch-all commands "
-            "write results to <datadir>/td-otbr-restapi-<resource>-<command>.json (P5)"
+            "write results to <datadir>/td-otbr-restapi-<resource>-<command>.json"
         ),
     )
     parser.add_argument(
@@ -208,19 +208,19 @@ def _add_devices_commands(
         ),
     )
     devices_fetch.add_argument(
-        "--device-count", type=int, default=200, help="Max devices to discover (default: 200)"
+        "--device-count", type=int, default=255, help="Max devices to discover (default: 255)"
     )
     devices_fetch.add_argument(
-        "--task-timeout", type=int, default=600,
-        help="Server-side task timeout in seconds (default: 600)",
+        "--task-timeout", type=int, default=6,
+        help="Server-side task timeout in seconds (default: 5)",
     )
     devices_fetch.add_argument(
         "--max-age", type=int, default=60,
         help="Max age of cached device entries in seconds (default: 60)",
     )
     devices_fetch.add_argument(
-        "--max-retries", type=int, default=5,
-        help="Max retries per device (default: 5)",
+        "--max-retries", type=int, default=2,
+        help="Max retries per device (default: 2)",
     )
 
 
@@ -267,8 +267,8 @@ def _add_diagnostics_commands(
         help="Use a predefined TLV preset; overrides --types",
     )
     diagnostics_fetch.add_argument(
-        "--task-timeout", type=int, default=600,
-        help="Server-side task timeout in seconds (default: 600)",
+        "--task-timeout", type=int, default=6,
+        help="Server-side task timeout in seconds (default: 5)",
     )
     diagnostics_fetch.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
@@ -278,19 +278,19 @@ def _add_diagnostics_commands(
         "--no-fallback",
         action="store_true",
         default=False,
-        help="Disable per-device TLV fallback retry on failure (P1)",
+        help="Disable per-device TLV fallback retry on failure",
     )
     diagnostics_fetch.add_argument(
         "--fallback-preset",
         choices=["medium", "minimal", "basic"],
         default="minimal",
-        help="TLV preset to retry with on device failure (default: minimal) (P1)",
+        help="TLV preset to retry with on device failure (default: minimal)",
     )
     diagnostics_fetch.add_argument(
         "--no-enrich-mac-counters",
         action="store_true",
         default=False,
-        help="Return raw macCounters values without computed totals and ratios (P3)",
+        help="Return raw macCounters values without computed totals and ratios",
     )
 
     diagnostics_fetch_all = diagnostics_subparsers.add_parser(
@@ -313,8 +313,8 @@ def _add_diagnostics_commands(
         help="Use a predefined TLV preset; overrides --types",
     )
     diagnostics_fetch_all.add_argument(
-        "--task-timeout", type=int, default=600,
-        help="Server-side task timeout per device in seconds (default: 600)",
+        "--task-timeout", type=int, default=6,
+        help="Server-side task timeout per device in seconds (default: 6)",
     )
     diagnostics_fetch_all.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
@@ -326,26 +326,26 @@ def _add_diagnostics_commands(
         default=False,
         help=(
             "Skip updateDeviceCollectionTask before fetching diagnostics. "
-            "By default the device list is refreshed first (P7)"
+            "By default the device list is refreshed first"
         ),
     )
     diagnostics_fetch_all.add_argument(
         "--no-fallback",
         action="store_true",
         default=False,
-        help="Disable per-device TLV fallback retry on failure (P1)",
+        help="Disable per-device TLV fallback retry on failure",
     )
     diagnostics_fetch_all.add_argument(
         "--fallback-preset",
         choices=["medium", "minimal", "basic"],
         default="minimal",
-        help="TLV preset to retry with on device failure (default: minimal) (P1)",
+        help="TLV preset to retry with on device failure (default: minimal)",
     )
     diagnostics_fetch_all.add_argument(
         "--no-enrich-mac-counters",
         action="store_true",
         default=False,
-        help="Return raw macCounters values without computed totals and ratios (P3)",
+        help="Return raw macCounters values without computed totals and ratios",
     )
 
 
@@ -440,20 +440,20 @@ def _add_actions_commands(
         "update-device-collection", help="Enqueue updateDeviceCollectionTask"
     )
     update_devices.add_argument(
-        "--max-age", type=int, default=30,
-        help="Maximum age (seconds) for cached device entries (default: 30)"
+        "--max-age", type=int, default=60,
+        help="Maximum age (seconds) for cached device entries (default: 60)"
     )
     update_devices.add_argument(
-        "--max-retries", type=int, default=5,
-        help="Maximum retries per device (default: 5)"
+        "--max-retries", type=int, default=2,
+        help="Maximum retries per device (default: 2)"
     )
     update_devices.add_argument(
-        "--device-count", type=int, default=200,
-        help="Maximum number of devices to discover (default: 200)"
+        "--device-count", type=int, default=255,
+        help="Maximum number of devices to discover (default: 255)"
     )
     update_devices.add_argument(
-        "--timeout", type=int, default=300,
-        help="Task timeout passed to the server in seconds (default: 300)"
+        "--timeout", type=int, default=5,
+        help="Task timeout passed to the server in seconds (default: 5)"
     )
 
 
@@ -480,7 +480,7 @@ def _add_mesh_diagnostics_commands(
         dest="mesh_diag_command", required=True
     )
 
-    def _mesh_device_args(p: argparse.ArgumentParser, task_timeout: int = 600) -> None:
+    def _mesh_device_args(p: argparse.ArgumentParser, task_timeout: int = 5) -> None:
         p.add_argument("--device-id", required=True,
                        help="Device extAddress (16-char hex)")
         p.add_argument(
@@ -488,9 +488,9 @@ def _add_mesh_diagnostics_commands(
             help=f"Server-side task timeout in seconds (default: {task_timeout})",
         )
         p.add_argument(
-            "--poll-timeout", type=float, default=360.0, metavar="FLOAT",
+            "--poll-timeout", type=float, default=6.0, metavar="FLOAT",
             help=(
-                "Max wall-clock seconds to wait for the action (default: 360.0). "
+                "Max wall-clock seconds to wait for the action (default: 6.0). "
                 "Mesh-diagnostic queries require an additional otMeshDiag round-trip."
             ),
         )
@@ -565,12 +565,12 @@ def _add_mesh_diagnostics_commands(
         ),
     )
     mesh_fetch_all_p.add_argument(
-        "--task-timeout", type=int, default=600,
-        help="Server-side task timeout per device in seconds (default: 600)",
+        "--task-timeout", type=int, default=6,
+        help="Server-side task timeout per device in seconds (default: 6)",
     )
     mesh_fetch_all_p.add_argument(
-        "--poll-timeout", type=float, default=360.0, metavar="FLOAT",
-        help="Max wall-clock seconds per device action (default: 360.0)",
+        "--poll-timeout", type=float, default=6.0, metavar="FLOAT",
+        help="Max wall-clock seconds per device action (default: 6.0)",
     )
     mesh_fetch_all_p.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
@@ -582,7 +582,7 @@ def _add_mesh_diagnostics_commands(
         default=False,
         help=(
             "Skip updateDeviceCollectionTask before fetching mesh diagnostics. "
-            "By default the device list is refreshed first (P7)"
+            "By default the device list is refreshed first"
         ),
     )
     mesh_fetch_all_p.add_argument(
@@ -591,7 +591,7 @@ def _add_mesh_diagnostics_commands(
         default=False,
         help=(
             "Restrict queries to router devices only (rloc16 lower-10-bits == 0). "
-            "Avoids wasting task slots on child devices for mesh-diagnostic TLVs (P2)"
+            "Avoids wasting task slots on child devices for mesh-diagnostic TLVs"
         ),
     )
 
@@ -633,30 +633,30 @@ def _add_topology_commands(
         "--no-update-devices",
         action="store_true",
         default=False,
-        help="Skip updateDeviceCollectionTask before diagnostics/mesh steps (P7)",
+        help="Skip updateDeviceCollectionTask before diagnostics/mesh steps",
     )
     topo_p.add_argument(
         "--no-enrich-mac-counters",
         action="store_true",
         default=False,
-        help="Disable MAC counter enrichment on the diagnostics result (P3)",
+        help="Disable MAC counter enrichment on the diagnostics result",
     )
     topo_p.add_argument(
         "--no-fallback",
         action="store_true",
         default=False,
-        help="Disable per-device TLV fallback retry on failure (P1)",
+        help="Disable per-device TLV fallback retry on failure",
     )
     topo_p.add_argument(
         "--fallback-preset",
         choices=["medium", "minimal", "basic"],
         default="minimal",
-        help="TLV preset to retry with on per-device failure (default: minimal) (P1)",
+        help="TLV preset to retry with on per-device failure (default: minimal)",
     )
 
 
 # ---------------------------------------------------------------------------
-# Medium TLV preset: RECOMMENDED minus threadStackVersion and mleCounters (P1)
+# Medium TLV preset: RECOMMENDED minus threadStackVersion and mleCounters
 # ---------------------------------------------------------------------------
 _MEDIUM_DIAGNOSTIC_TLVS: list[str] = [
     t for t in RECOMMENDED_DIAGNOSTIC_TLVS
@@ -664,7 +664,7 @@ _MEDIUM_DIAGNOSTIC_TLVS: list[str] = [
 ]
 
 # ---------------------------------------------------------------------------
-# MAC Counter Enrichment (P3)
+# MAC Counter Enrichment
 # REST API macCounters keys are camelCase (ifInErrors, ifInUcastPkts, …).
 # Derived fields use the same lowercase names as parse_mac_counters() in
 # otbr_cli_networkdiag_topology.py for cross-tool consistency.
@@ -752,7 +752,7 @@ def _apply_mac_enrichment(diagnostics: list[Any]) -> list[Any]:
 
 
 # ---------------------------------------------------------------------------
-# Progress Reporting (P6)
+# Progress Reporting
 # ---------------------------------------------------------------------------
 
 def _make_progress_fn(total: int, enabled: bool):
@@ -774,7 +774,7 @@ def _make_progress_fn(total: int, enabled: bool):
 
 
 # ---------------------------------------------------------------------------
-# Auto-output naming (P5)
+# Auto-output naming
 # ---------------------------------------------------------------------------
 
 _AUTO_OUTPUT_NAMES: dict[tuple[str, str], str] = {
@@ -819,7 +819,7 @@ def _auto_output_path(args: argparse.Namespace, data_dir: Path) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Router-only device filter (P2)
+# Router-only device filter
 # ---------------------------------------------------------------------------
 
 def _filter_router_device_ids(devices: list[Any], device_ids: list[str]) -> list[str]:
@@ -851,7 +851,7 @@ def _filter_router_device_ids(devices: list[Any], device_ids: list[str]) -> list
 
 
 # ---------------------------------------------------------------------------
-# TLV fallback helpers (P1)
+# TLV fallback helpers
 # ---------------------------------------------------------------------------
 
 def _resolve_fallback_types(args: argparse.Namespace) -> list[str | int] | None:
@@ -936,7 +936,7 @@ def _fetch_all_with_fallback(
                 raw=raw,
             )
             results.append(diag)
-        except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+        except (OTBRActionFailedError, OTBRActionTimeoutError, OTBRInvalidResponseError) as exc:
             status = "skipped"
             logging.warning("Skipping device %s: %s", device_id, exc)
         elapsed = time.monotonic() - t_start
@@ -1026,7 +1026,7 @@ def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:
 
             if do_update:
                 devices = client.fetch_device_collection(
-                    device_count=getattr(args, "device_count", 50),
+                    device_count=getattr(args, "device_count", 255),
                 )
             else:
                 devices = client.list_devices(raw=False)
@@ -1129,10 +1129,10 @@ def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:
 
     if args.resource == "mesh-diagnostics":
         cmd = args.mesh_diag_command
-        poll_timeout = getattr(args, "poll_timeout", args.poll_timeout)
-        poll_interval = args.poll_interval
-        dest_type = getattr(args, "destination_type", DestinationType.EXTENDED)
-        task_timeout = getattr(args, "task_timeout", 300)
+        poll_timeout = getattr(args, "poll-timeout", args.poll_timeout)
+        poll_interval = getattr(args, "poll-interval", args.poll_interval)
+        dest_type = getattr(args, "destination-type", DestinationType.EXTENDED)
+        task_timeout = getattr(args, "task-timeout", 6)
 
         if cmd == "children":
             return client.fetch_mesh_diagnostics(
@@ -1208,7 +1208,7 @@ def _dispatch_topology(
     args: argparse.Namespace,
     raw_arg: object,
 ) -> None:
-    """P4 — Execute the full topology sweep and write all three output files."""
+    """Execute the full topology sweep and write all three output files."""
     data_dir: Path = args.td_data_dir
     do_update = not getattr(args, "no_update_devices", False)
     do_enrich = not getattr(args, "no_enrich_mac_counters", False)
@@ -1255,11 +1255,11 @@ def _dispatch_topology(
         progress_fn = _make_progress_fn(len(diag_device_ids), progress_enabled)
         diagnostics = _fetch_all_with_fallback(
             client, diag_device_ids, primary_types, fallback_types,
-            destination_type=args.destination_type if hasattr(args, "destination_type")
+            destination_type=args.destination_type if hasattr(args, "destination-type")
             else DestinationType.EXTENDED,
-            task_timeout=args.task_timeout if hasattr(args, "task_timeout") else 93,
-            poll_interval=args.poll_interval,
-            poll_timeout=args.poll_timeout,
+            task_timeout=args.task_timeout if hasattr(args, "task-timeout") else 6.0,
+            poll_interval=args.poll_interval if hasattr(args, "poll-interval") else 2.0,
+            poll_timeout=args.poll_timeout if hasattr(args, "poll-timeout") else 6.0,
             raw=raw_arg,
             on_progress=progress_fn,
         )
@@ -1438,7 +1438,7 @@ def run_cli(
     
     args.td_data_dir = resolve_data_dir(data_dir=args.datadir)
 
-    # P5 — resolve output path: explicit --output > auto-naming > stdout
+    # Resolve output path: explicit --output > auto-naming > stdout
     output_path = getattr(args, "output", None)
     if output_path:
         output_path = str(resolve_data_file_path(output_path, args.td_data_dir))

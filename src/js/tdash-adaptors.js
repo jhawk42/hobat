@@ -30,8 +30,12 @@ const FILE_RESTAPI_DEVICES       = 'td-otbr-restapi-devices.json';
 const FILE_RESTAPI_DIAGNOSTICS   = 'td-otbr-restapi-diagnostics.json';
 const FILE_RESTAPI_DEVICES_LIST      = 'td-otbr-restapi-devices-list.json';
 const FILE_RESTAPI_DEVICES_FETCH     = 'td-otbr-restapi-devices-fetch.json';
-const FILE_RESTAPI_DIAGNOSTICS_LIST  = 'td-otbr-restapi-diagnostics-list.json';
-const FILE_RESTAPI_DIAGNOSTICS_FETCH = 'td-otbr-restapi-diagnostics-fetch.json';
+const FILE_RESTAPI_DIAGNOSTICS_LIST      = 'td-otbr-restapi-diagnostics-list.json';
+const FILE_RESTAPI_DIAGNOSTICS_FETCH     = 'td-otbr-restapi-diagnostics-fetch.json';
+const FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL = 'td-otbr-restapi-diagnostics-fetch-all.json';
+const FILE_ROUTER_CHILDIP6               = 'td-otbr-cli-meshdiag-router-childip6.json';
+const FILE_NETWORKDIAG_MULTICAST_NEIGHBORS = 'td-otbr-cli-networkdiag-topology-multicast-neighbors.json';
+const FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL = 'td-otbr-restapi-mesh-diagnostics-fetch-all.json';
 
 // Files consumed as named primary slots in adaptMeshdiagNetworkdiag;
 // anything not in this set is treated as supplementary (e.g. mdns, eve).
@@ -898,7 +902,7 @@ export function adaptRawArray(fileMap) {
 
 export function adaptOtbrRestApi(fileMap) {
   const devicesRaw = fileMap.get(FILE_RESTAPI_DEVICES) ?? fileMap.get(FILE_RESTAPI_DEVICES_LIST) ?? fileMap.get(FILE_RESTAPI_DEVICES_FETCH);
-  const diagRaw = fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH);
+  const diagRaw = fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL);
   // Accept JSON:API envelope ({data:[...]}), pre-flattened array, or a single diagnostic object
   function extractItems(raw) {
     if (!raw) return [];

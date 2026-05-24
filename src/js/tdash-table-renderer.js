@@ -1,4 +1,5 @@
 import { TABLE_PRIORITY_COLUMNS } from "./tdash-constants.js";
+import { parseSearchQuery, filterRowsBySearch } from "./tdash-search.js";
 import {
   isPlainObject,
   hasNestedPath,
@@ -244,7 +245,7 @@ function getColumnWidthStyle(maxLen) {
 
 // ── DOM table builder ─────────────────────────────────────────────────────────
 
-function renderTableRows(rows, columns) {
+function renderTableRows(rows, columns, isSearchActive = false) {
   const theadEl = document.querySelector("#data-table thead");
   const tbodyEl = document.querySelector("#data-table tbody");
   theadEl.innerHTML = "";
@@ -271,6 +272,7 @@ function renderTableRows(rows, columns) {
   rows.forEach((row, idx) => {
     const tr = document.createElement("tr");
     tr.dataset.rowIndex = idx;
+    if (isSearchActive) tr.classList.add("search-match");
     columns.forEach((col) => {
       const td = document.createElement("td");
       renderTdContent(td, getColumnValue(row, col), col);
@@ -309,28 +311,42 @@ function renderTableRows(rows, columns) {
 
 // ── Filter + render pipeline ──────────────────────────────────────────────────
 
-function updateTableStatus(visibleRowCount, columnCount) {
+function updateTableStatus(visibleRowCount, columnCount, totalFilteredCount, searchQuery) {
   const nodeFilterEl = document.getElementById("node-filter");
   const diagFilterEl = document.getElementById("diagnostic-filter");
   const nodeLabel = nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
   const diagLabel = diagFilterEl.options[diagFilterEl.selectedIndex].text;
   const fetchStatusEl = document.getElementById("fetch-status-line-content");
   if (fetchStatusEl) fetchStatusEl.textContent = `Loaded ${_tableDatasetLabel}.`;
-  document.getElementById("view-status-line-content").textContent =
+  let statusText =
     `Total: ${_tableRows.length} rows, ${_tableColumns.length} columns. ` +
-    `Showing: ${visibleRowCount} rows, ${columnCount} columns. Node Filter: ${nodeLabel}. Diagnostic Filter: ${diagLabel}. ` +
-    `Click a header to sort.`;
+    `Showing: ${visibleRowCount} rows, ${columnCount} columns. Node Filter: ${nodeLabel}. Diagnostic Filter: ${diagLabel}.`;
+  if (searchQuery) {
+    statusText += ` Search: "${searchQuery}" — ${visibleRowCount} of ${totalFilteredCount} rows match.`;
+  }
+  statusText += " Click a header to sort.";
+  document.getElementById("view-status-line-content").textContent = statusText;
+  const searchStatusEl = document.getElementById("search-status");
+  if (searchStatusEl) {
+    searchStatusEl.textContent = searchQuery
+      ? `${visibleRowCount} of ${totalFilteredCount} rows match`
+      : "";
+  }
 }
 
 export function applyTableFilters() {
   const nodeMode = document.getElementById("node-filter").value;
   const diagMode = document.getElementById("diagnostic-filter").value;
+  const searchQuery = parseSearchQuery(
+    document.getElementById("search-input")?.value ?? "",
+  );
   const filtered = _tableRows.filter(
     (row) =>
       isRowVisibleByNodeFilter(row, nodeMode) &&
       isRowVisibleByDiagnosticFilter(row, diagMode),
   );
-  _lastFilteredRows = filtered;
+  const { matchingRows } = filterRowsBySearch(filtered, searchQuery, _moreInfoEnabled);
+  _lastFilteredRows = matchingRows;
   const activeColumns = _moreInfoEnabled
     ? _tableColumns
     : TABLE_PRIORITY_COLUMNS.filter((col) => _tableColumns.includes(col));
@@ -339,8 +355,27 @@ export function applyTableFilters() {
   const summaryListEl = document.getElementById("table-summary-list");
   if (summaryListEl)
     summaryListEl.innerHTML = "<li>Click a row to view its properties.</li>";
-  renderTableRows(filtered, activeColumns);
-  updateTableStatus(filtered.length, activeColumns.length);
+  renderTableRows(matchingRows, activeColumns, searchQuery !== "");
+  updateTableStatus(matchingRows.length, activeColumns.length, filtered.length, searchQuery);
+
+  // Auto-select and populate device details when exactly one row matches the search
+  if (searchQuery && matchingRows.length === 1) {
+    const tbodyEl = document.querySelector("#data-table tbody");
+    const firstRow = tbodyEl?.querySelector("tr");
+    if (firstRow) {
+      firstRow.classList.add("selected-row");
+      const rawRow = _lastFilteredRows[0];
+      const details = sortDetailsWithPriority(
+        flattenObjectEntries(rawRow).filter(
+          ([key]) => !shouldExcludeDetailPath(key, "table"),
+        ),
+      );
+      if (details.length > 0) {
+        if (summaryListEl) summaryListEl.innerHTML = "";
+        populateNodeDetailsLists(details, "table-");
+      }
+    }
+  }
 }
 
 export function renderTableForDataset(dataset) {
