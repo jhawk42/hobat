@@ -1,17 +1,4 @@
-# Codebase Overview
-
-## What Is tdash?
-
-Thread Mesh Network Dashboard (tdash) is a Python toolkit and browser-based dashboard for visualizing and monitoring [Thread](https://github.com/openthread/openthread) mesh networks.  It collects network data from several sources (OTBR, mDNS, Eve), normalizes and merges that data, and renders it as an interactive topology graph and table in HTML dashboard page.
-
-The tool collects data from various dataset sources including:
-
-- otbr-cli: Open Thread OTBR cli. Executes ot-ctl command line tool against an OTBR instance to scan for information on thread devices.
-- otbr-restapi: Open Thread OTBR restapi. Web calls to OTBR instance restapi to collect information on thread devices.
-- mDNS: Multicast DNS allows devices on a local network to discover each other and services
-- Eve app: The native Eve JSON file has useful information for Apple Home thread mesh networks. This tool enhances the native Eve app JSON file with RLOC16 in hex format, etc
-
----
+# TDash Codebase Overview
 
 ## Key Technologies
 
@@ -67,10 +54,7 @@ tdash/
 │   ├── util_data.py            # Data-directory resolution utilities
 │   ├── util_*.py               # Other shared utility modules
 │   ├── profile_wrapper_td_cli.py      # cProfile wrapper for td_cli.py
-│   ├── profile_wrapper_td_webserver.py # cProfile wrapper for td_webserver.py
-│   ├── td-fetch.sh             # Shell helper for fetching data
-│   ├── td-monitor-data.sh      # Shell helper for monitoring data files
-│   └── td-scratch.sh           # Scratch/dev shell script
+│   └── profile_wrapper_td_webserver.py # cProfile wrapper for td_webserver.py
 ├── tests/                      # Test suite and local mock server
 │   ├── test_*.py               # Unit tests
 │   └── td_mock_otbr_restapi_server.py
@@ -758,7 +742,7 @@ python -m td_webserver --port 9165 --datadir /path/to/data
 
 ### Open the dashboard
 
-Open `http://localhost:9165/tdash.html` after starting the web server, or open `src/tdash.html` directly in a browser and select a dataset from the dropdown.
+Open `http://localhost:9165/tdash.html` after starting the web server, in a browser and select a dataset from the dropdown.
 
 ### Run tests
 
@@ -791,7 +775,7 @@ python src/td_cli.py otbr-restapi --host 127.0.0.1 --port 18081 node get
 |---|---|
 | `none` | Pass loaded JSON through without merging rows |
 | `by-rloc16` | Merge rows only when `rloc16` matches |
-| `by-identity` | Merge when any canonical identity matches (checked in order: `rloc16` → canonical `extaddr` → `omr_ipv6_addr`) |
+| `by-identity` | Merge when any canonical identity matches (checked in order: `extaddr` → `omr_ipv6_addr` → `rloc16`) |
 
 Identity matching is case-insensitive and ignores leading/trailing whitespace.  Empty identifiers are never used for matching.
 
