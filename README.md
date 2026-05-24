@@ -1,9 +1,12 @@
 # tdash - thread mesh network dashboard
 
-This tdash repo has a Python cli toolkit that fetches thread device info from a thread network and a browser dashboard for visualizing and monitoring Thread mesh networks.  [openthread](https://github.com/openthread/openthread) 
-
-
-It fetches thread device info from sources like: otbr-cli, otbr-restapi, mDNS (Multicast DNS) records and the eve thread json format layout file shared from the Eve app. The td_cli tool can also merge these various sources for consolidated thread info and visualization. It also provides a device labeling mechanism using a extaddr (Extended MAC Address) to device_label lookup file. See below for details.
+Summary:
+- Python cli toolkit that fetches thread device info from a thread network which it then stores in a local cache in the data directory for offfline queries and processing. 
+-- Fetches thread device info from sources like: otbr-cli, otbr-restapi, mDNS (Multicast DNS) records and the Eve alp thread json format layout file. 
+-- Merge these various sources into a consolidated thread info dataset for querying and visualizing.
+- Browser (html, javascript) based thread dashboard for visualizing and monitoring Thread mesh networks.  [openthread](https://github.com/openthread/openthread) 
+- Python webserver for the hosting the thread dashboard, rest endpoint for servicing requests from the dashboard for cached data, launching the tdash cli to refetch data from the thread network into the data cache.
+- Simple device labeling mechanism using a extaddr (Extended MAC Address) to device_label JSON lookup file. See below for details.
 
 ## Dataset Sources
 - otbr-cli: Fetches info from an OpenThread Border Router (OTBR) instance via ot-ctl commands for thread device info. By default use docker exec to call into the "otbr" docker container. Also support calling otbr on the host. Common ot-ctl commands used:
