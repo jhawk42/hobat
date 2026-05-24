@@ -206,8 +206,6 @@
                   title="Time statistics track various time-related metrics in the network.">Time Statistics</option>
                 <option value="link_quality" title="Link quality metrics track the quality of links between devices.">Link
                   Quality</option>
-                <option value="other" title="Other diagnostics track miscellaneous metrics and events in the network.">
-                  Other Diagnostics</option>
               </select>
               <label for="diagnostic-filter" title="Filter diagnostics by type or severity">Diagnostics</label>
               <select id="diagnostic-filter" title="Filter diagnostics by type or severity">
@@ -258,14 +256,14 @@
           <div class="topology-canvas-wrap">
             <div id="topology-view"></div>
             <div id="legend-toggle" class="legend-toggle">
-              <button id="btn-legend-toggle" title="Toggle link quality legend">
+              <button id="btn-legend-toggle" title="Toggle link quality legend" aria-expanded="false">
                 Legend
               </button>
               <button id="btn-physics" title="Toggle physics simulation" aria-label="Pause physics simulation">
                 ⏸
               </button>
             </div>
-            <div id="lq-legend" class="lq-legend">
+            <div id="lq-legend" class="lq-legend hidden">
               <span class="lq-legend-title">Link Quality</span>
               <span class="lq-legend-item lq-high">
                 <span class="lq-legend-line lq-legend-line-high" aria-hidden="true"></span>
