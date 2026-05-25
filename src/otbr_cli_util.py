@@ -282,3 +282,97 @@ def collect_per_router(
         results.append(result)
     
     return results
+
+
+def parse_rss_metrics(line: str) -> dict[str, int] | None:
+    """Parse RSS (Received Signal Strength) metrics from meshdiag telemetry line.
+    
+    Extracts average, last, and margin RSS values from lines like:
+    "rss - ave:-20 last:-18 margin:80"
+    
+    Args:
+        line: Telemetry line from meshdiag childtable or routerneighbortable output.
+    
+    Returns:
+        Dictionary with keys: rss_ave, rss_last, rss_margin (all int values).
+        Returns None if line doesn't match RSS pattern.
+    
+    Examples:
+        >>> parse_rss_metrics("rss - ave:-20 last:-18 margin:80")
+        {"rss_ave": -20, "rss_last": -18, "rss_margin": 80}
+        
+        >>> parse_rss_metrics("some other line")
+        None
+    """
+    match = re.match(
+        r"rss\s+-\s+ave:(-?\d+)\s+last:(-?\d+)\s+margin:(-?\d+)",
+        line.strip(),
+    )
+    if match:
+        return {
+            "rss_ave": int(match.group(1)),
+            "rss_last": int(match.group(2)),
+            "rss_margin": int(match.group(3)),
+        }
+    return None
+
+
+def parse_err_rate_metrics(line: str) -> dict[str, float] | None:
+    """Parse error rate metrics from meshdiag telemetry line.
+    
+    Extracts frame and message error rate percentages from lines like:
+    "err-rate - frame:0.00% msg:0.00%"
+    
+    Args:
+        line: Telemetry line from meshdiag childtable or routerneighbortable output.
+    
+    Returns:
+        Dictionary with keys: err_rate_frame_pct, err_rate_msg_pct (both float values).
+        Returns None if line doesn't match error rate pattern.
+    
+    Examples:
+        >>> parse_err_rate_metrics("err-rate - frame:0.50% msg:1.25%")
+        {"err_rate_frame_pct": 0.5, "err_rate_msg_pct": 1.25}
+        
+        >>> parse_err_rate_metrics("some other line")
+        None
+    """
+    match = re.match(
+        r"err-rate\s+-\s+frame:([0-9]+(?:\.[0-9]+)?)%\s+msg:([0-9]+(?:\.[0-9]+)?)%",
+        line.strip(),
+    )
+    if match:
+        return {
+            "err_rate_frame_pct": float(match.group(1)),
+            "err_rate_msg_pct": float(match.group(2)),
+        }
+    return None
+
+
+def parse_conn_time(line: str) -> str | None:
+    """Parse connection time from meshdiag telemetry line.
+    
+    Extracts connection time value from lines like:
+    "conn-time:00:12:34"
+    
+    Args:
+        line: Telemetry line from meshdiag childtable or routerneighbortable output.
+    
+    Returns:
+        Connection time string value (format varies, e.g., "00:12:34" or other formats).
+        Returns None if line doesn't match conn-time pattern.
+    
+    Examples:
+        >>> parse_conn_time("conn-time:00:12:34")
+        "00:12:34"
+        
+        >>> parse_conn_time("conn-time:1d2h3m")
+        "1d2h3m"
+        
+        >>> parse_conn_time("some other line")
+        None
+    """
+    match = re.match(r"conn-time:(\S+)", line.strip())
+    if match:
+        return match.group(1)
+    return None
