@@ -31,6 +31,7 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
         )
 
     def test_main_passes_parsed_network_options_to_restapi_downloads(self) -> None:
+        """Test that main() constructs a client and passes it to download_all_restapi_endpoints()."""
         with patch.object(
             script_module, "download_all_restapi_endpoints", return_value=0
         ) as download_all_restapi_endpoints:
@@ -50,14 +51,22 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
             )
 
         self.assertEqual(exit_code, 0)
-        download_all_restapi_endpoints.assert_called_once_with(
-            base_url="http://192.168.4.77:18081",
-            headers={
-                "Accept": "application/json",
-                "Authorization": "Bearer token",
-            },
-            timeout=15,
-        )
+        
+        # After Phase IV-2 migration, main() passes a client instead of base_url/headers/timeout
+        download_all_restapi_endpoints.assert_called_once()
+        call_kwargs = download_all_restapi_endpoints.call_args[1]
+        
+        # Verify client was passed with correct configuration
+        self.assertIn("client", call_kwargs)
+        client = call_kwargs["client"]
+        self.assertEqual(client.base_url, "http://192.168.4.77:18081")
+        self.assertEqual(client.timeout, 15)
+        self.assertEqual(client.accept, "application/json")
+        
+        # Verify data_dir and update_devices were passed
+        self.assertIn("data_dir", call_kwargs)
+        self.assertIn("update_devices", call_kwargs)
+        self.assertEqual(call_kwargs["update_devices"], False)
 
 
 if __name__ == "__main__":
