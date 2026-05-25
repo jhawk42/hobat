@@ -12,6 +12,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Sequence
 
+from extaddr_device_label_map import (
+    EXTADDR_FIELD_ALIASES,
+    load_extaddr_device_label_map_flexible,
+)
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
 from util_data import resolve_data_dir, save_json_atomic
 
@@ -178,34 +182,6 @@ def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, 
             mode["device"] = mode_device
 
     return record
-
-
-def load_extaddr_device_label_map(path: Path) -> dict[str, str]:
-    data = load_json(path)
-    mapping: dict[str, str] = {}
-
-    if isinstance(data, list):
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            normalized_item = normalize_record_aliases(item)
-            extaddr = get_canonical_extaddr(normalized_item)
-            label = item.get("device_label")
-            if extaddr and isinstance(label, str) and label:
-                mapping[extaddr] = label
-        return mapping
-
-    if isinstance(data, dict):
-        for _, item in data.items():
-            if not isinstance(item, dict):
-                continue
-            normalized_item = normalize_record_aliases(item)
-            extaddr = get_canonical_extaddr(normalized_item)
-            label = item.get("device_label")
-            if extaddr and isinstance(label, str) and label:
-                mapping[extaddr] = label
-
-    return mapping
 
 
 def extract_records(filename: str, data: Any) -> list[dict[str, Any]]:
@@ -756,7 +732,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not extaddr_map_path.is_file():
         raise FileNotFoundError(
             f"Reference file not found: {extaddr_map_path}")
-    device_label_map = load_extaddr_device_label_map(extaddr_map_path)
+    device_label_map = load_extaddr_device_label_map_flexible(
+        str(extaddr_map_path),
+        extaddr_aliases=EXTADDR_FIELD_ALIASES,
+    )
 
     dataset = load_json(base_dir / args.dataset_file)
     omr_prefix = dataset.get("prefix_omr_ipv6addr_prefix", "")
