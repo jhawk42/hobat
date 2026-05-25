@@ -14,6 +14,9 @@ from otbr_cli_util import (
     collect_per_router,
     is_response_timeout_error,
     load_extaddr_map_or_empty,
+    parse_conn_time,
+    parse_err_rate_metrics,
+    parse_rss_metrics,
     resolve_collector_runtime,
 )
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
@@ -642,3 +645,164 @@ class TestCollectPerRouter:
         assert results[0]["extaddr"] == "third"
         assert results[1]["extaddr"] == "first"
         assert results[2]["extaddr"] == "second"
+
+
+class TestParseRssMetrics:
+    """Tests for parse_rss_metrics telemetry parser."""
+    
+    def test_parses_valid_rss_line(self):
+        """Should parse RSS metrics with all three values."""
+        line = "rss - ave:-20 last:-18 margin:80"
+        result = parse_rss_metrics(line)
+        
+        assert result == {
+            "rss_ave": -20,
+            "rss_last": -18,
+            "rss_margin": 80,
+        }
+    
+    def test_parses_positive_rss_values(self):
+        """Should handle positive RSS values."""
+        line = "rss - ave:15 last:20 margin:100"
+        result = parse_rss_metrics(line)
+        
+        assert result["rss_ave"] == 15
+        assert result["rss_last"] == 20
+        assert result["rss_margin"] == 100
+    
+    def test_parses_with_extra_whitespace(self):
+        """Should handle variations in whitespace."""
+        line = "  rss  -  ave:-25  last:-22  margin:85  "
+        result = parse_rss_metrics(line)
+        
+        assert result is not None
+        assert result["rss_ave"] == -25
+    
+    def test_returns_none_for_non_matching_line(self):
+        """Should return None for lines that don't match pattern."""
+        assert parse_rss_metrics("some other line") is None
+        assert parse_rss_metrics("") is None
+        assert parse_rss_metrics("rss: invalid format") is None
+    
+    def test_returns_none_for_incomplete_rss_line(self):
+        """Should return None if RSS line is missing fields."""
+        assert parse_rss_metrics("rss - ave:-20 last:-18") is None
+        assert parse_rss_metrics("rss - ave:-20") is None
+    
+    def test_parses_zero_values(self):
+        """Should handle zero RSS values."""
+        line = "rss - ave:0 last:0 margin:0"
+        result = parse_rss_metrics(line)
+        
+        assert result["rss_ave"] == 0
+        assert result["rss_last"] == 0
+        assert result["rss_margin"] == 0
+
+
+class TestParseErrRateMetrics:
+    """Tests for parse_err_rate_metrics telemetry parser."""
+    
+    def test_parses_valid_err_rate_line(self):
+        """Should parse error rate percentages."""
+        line = "err-rate - frame:0.50% msg:1.25%"
+        result = parse_err_rate_metrics(line)
+        
+        assert result == {
+            "err_rate_frame_pct": 0.5,
+            "err_rate_msg_pct": 1.25,
+        }
+    
+    def test_parses_integer_percentages(self):
+        """Should handle integer error rates without decimal."""
+        line = "err-rate - frame:2% msg:3%"
+        result = parse_err_rate_metrics(line)
+        
+        assert result["err_rate_frame_pct"] == 2.0
+        assert result["err_rate_msg_pct"] == 3.0
+    
+    def test_parses_zero_error_rates(self):
+        """Should handle zero error rates."""
+        line = "err-rate - frame:0.00% msg:0.00%"
+        result = parse_err_rate_metrics(line)
+        
+        assert result["err_rate_frame_pct"] == 0.0
+        assert result["err_rate_msg_pct"] == 0.0
+    
+    def test_parses_high_error_rates(self):
+        """Should handle high error rate values."""
+        line = "err-rate - frame:99.99% msg:100.00%"
+        result = parse_err_rate_metrics(line)
+        
+        assert result["err_rate_frame_pct"] == 99.99
+        assert result["err_rate_msg_pct"] == 100.0
+    
+    def test_parses_with_extra_whitespace(self):
+        """Should handle variations in whitespace."""
+        line = "  err-rate  -  frame:1.5%  msg:2.5%  "
+        result = parse_err_rate_metrics(line)
+        
+        assert result is not None
+        assert result["err_rate_frame_pct"] == 1.5
+    
+    def test_returns_none_for_non_matching_line(self):
+        """Should return None for lines that don't match pattern."""
+        assert parse_err_rate_metrics("some other line") is None
+        assert parse_err_rate_metrics("") is None
+        assert parse_err_rate_metrics("err-rate: invalid") is None
+    
+    def test_returns_none_for_incomplete_err_rate_line(self):
+        """Should return None if error rate line is missing fields."""
+        assert parse_err_rate_metrics("err-rate - frame:0.5%") is None
+        assert parse_err_rate_metrics("err-rate - msg:1.0%") is None
+
+
+class TestParseConnTime:
+    """Tests for parse_conn_time telemetry parser."""
+    
+    def test_parses_time_format(self):
+        """Should parse connection time in HH:MM:SS format."""
+        line = "conn-time:00:12:34"
+        result = parse_conn_time(line)
+        
+        assert result == "00:12:34"
+    
+    def test_parses_duration_format(self):
+        """Should parse connection time in duration format."""
+        line = "conn-time:1d2h3m"
+        result = parse_conn_time(line)
+        
+        assert result == "1d2h3m"
+    
+    def test_parses_numeric_format(self):
+        """Should parse numeric connection time values."""
+        line = "conn-time:123456"
+        result = parse_conn_time(line)
+        
+        assert result == "123456"
+    
+    def test_parses_with_extra_whitespace(self):
+        """Should handle leading/trailing whitespace."""
+        line = "  conn-time:00:05:30  "
+        result = parse_conn_time(line)
+        
+        assert result == "00:05:30"
+    
+    def test_returns_none_for_non_matching_line(self):
+        """Should return None for lines that don't match pattern."""
+        assert parse_conn_time("some other line") is None
+        assert parse_conn_time("") is None
+        assert parse_conn_time("connection-time:invalid") is None
+    
+    def test_parses_short_time_values(self):
+        """Should parse short connection time values."""
+        line = "conn-time:1m"
+        result = parse_conn_time(line)
+        
+        assert result == "1m"
+    
+    def test_parses_complex_time_format(self):
+        """Should parse complex time formats."""
+        line = "conn-time:2d15h42m36s"
+        result = parse_conn_time(line)
+        
+        assert result == "2d15h42m36s"
