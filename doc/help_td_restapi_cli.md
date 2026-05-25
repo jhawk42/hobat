@@ -29,9 +29,10 @@ These options apply to every command and must be placed **before** the subcomman
 | `--output FILE` | — | Write JSON result to a file instead of stdout |
 | `--datadir DIR` | auto | Data directory for file reads/writes (falls back to `$TD_DATA_DIR`, then `/data`, then `./data`) |
 | `--poll-interval FLOAT` | `2.0` | Seconds between action status polls |
-| `--poll-timeout FLOAT` | `120.0` | Max wall-clock seconds to wait for an action to complete |
+| `--poll-timeout FLOAT` | `6.0` | Max wall-clock seconds to wait for an action to complete |
 | `--no-progress` | off | Suppress per-device `[N/T] id → status (Xs)` progress lines printed to stderr on `fetch-all` commands |
 | `--no-auto-output` | off | Disable automatic output file naming; send JSON to stdout instead of `<datadir>/td-otbr-restapi-<resource>-<command>.json` |
+| `--debug`, `-d` | off | Enable debug logging |
 
 ---
 
@@ -258,10 +259,10 @@ devices fetch [--device-count N] [--task-timeout SECS] [--max-age SECS] [--max-r
 
 | Option | Default | Description |
 |---|---|---|
-| `--device-count` | `200` | Max devices to discover |
-| `--task-timeout` | `600` | Server-side task timeout in seconds |
+| `--device-count` | `255` | Max devices to discover |
+| `--task-timeout` | `6` | Server-side task timeout in seconds |
 | `--max-age` | `60` | Max age of cached device entries in seconds |
-| `--max-retries` | `5` | Max retries per device |
+| `--max-retries` | `2` | Max retries per device |
 
 **Examples:**
 
@@ -343,7 +344,7 @@ diagnostics fetch --device-id DEVICE_ID
 | `--device-id` | required | Device extAddress (16-char hex) |
 | `--types` | recommended set | Space-separated diagnostic TLV names |
 | `--preset` | — | `recommended`, `full`, `minimal`, or `basic`; overrides `--types` |
-| `--task-timeout` | `600` | Server-side task timeout in seconds |
+| `--task-timeout` | `6` | Server-side task timeout in seconds |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 | `--no-fallback` | off | Disable TLV fallback retry; skip the device immediately on failure |
 | `--fallback-preset` | `minimal` | TLV preset to retry with when the primary request fails: `medium`, `minimal`, or `basic` |
@@ -389,7 +390,7 @@ diagnostics fetch-all [--device-ids ID ...]
 | `--device-ids` | all devices | Space-separated extAddress IDs to query |
 | `--types` | recommended set | Diagnostic TLV names |
 | `--preset` | — | `recommended`, `full`, `minimal`, or `basic`; overrides `--types` |
-| `--task-timeout` | `600` | Server-side task timeout per device in seconds |
+| `--task-timeout` | `6` | Server-side task timeout per device in seconds |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 | `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list |
 | `--no-fallback` | off | Disable per-device TLV fallback retry on failure |
@@ -533,8 +534,8 @@ actions enqueue get-network-diagnostic --destination DEST
 | Option | Default | Description |
 |---|---|---|
 | `--destination` | required | Destination address |
-| `--types` | — | TLV names or integers (required unless `--preset` given) |
-| `--preset` | — | `recommended`, `full`, `minimal`, or `basic` |
+| `--types` | recommended set | TLV names or integers |
+| `--preset` | — | `recommended`, `full`, `minimal`, or `basic`; overrides `--types` |
 | `--timeout` | — | Server-side task timeout in seconds |
 | `--destination-type` | — | `extended`, `mleid`, or `rloc` |
 | `--wait` | off | Poll until completion and return the diagnostic result; exit code 4 on stopped/failed |
@@ -659,10 +660,10 @@ actions enqueue update-device-collection
 
 | Option | Default | Description |
 |---|---|---|
-| `--device-count` | `200` | Max devices to discover |
-| `--max-age` | `30` | Max age of cached device entries in seconds |
-| `--max-retries` | `5` | Max retries per device |
-| `--timeout` | `300` | Server-side task timeout in seconds |
+| `--device-count` | `255` | Max devices to discover |
+| `--max-age` | `60` | Max age of cached device entries in seconds |
+| `--max-retries` | `2` | Max retries per device |
+| `--timeout` | `5` | Server-side task timeout in seconds |
 
 **Examples:**
 
@@ -709,8 +710,8 @@ Common per-device options for `children`, `child-ipv6`, `router-neighbors`, and 
 | Option | Default | Description |
 |---|---|---|
 | `--device-id` | required | Device extAddress (16-char hex) |
-| `--task-timeout` | `600` | Server-side task timeout in seconds |
-| `--poll-timeout` | `360.0` | Max wall-clock seconds to wait |
+| `--task-timeout` | `5` | Server-side task timeout in seconds |
+| `--poll-timeout` | `6.0` | Max wall-clock seconds to wait |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 
 ---
@@ -826,8 +827,8 @@ mesh-diagnostics fetch-all [--device-ids ID ...]
 |---|---|---|
 | `--device-ids` | all devices | Space-separated extAddress IDs to query |
 | `--types` | all three | `children`, `childIpv6Addresses`, `routerNeighbors` |
-| `--task-timeout` | `600` | Server-side task timeout per device in seconds |
-| `--poll-timeout` | `360.0` | Max wall-clock seconds per device action |
+| `--task-timeout` | `6` | Server-side task timeout per device in seconds |
+| `--poll-timeout` | `6.0` | Max wall-clock seconds per device action |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 | `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list |
 | `--routers-only` | off | Filter to router devices only (RLOC16 lower 10 bits == 0); skips child devices that return empty mesh-diag records |
