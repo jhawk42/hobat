@@ -8,7 +8,7 @@ import logging
 
 from copy import deepcopy
 from typing import Sequence
-from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP, TD_THREAD_MULTICAST_ADDRESSES_LINK_LOCAL_ALL_FTDS_AND_MEDS, TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS_AND_MEDS
 import util_ot_ctl
 import util_network
 from otbr_cli_router_table import fetch_and_parse_router_table
@@ -1087,7 +1087,7 @@ def fetch_network_diag_topology_multicast_network(
         Dict keyed by rloc16 with device records from all mesh devices
     """
     return fetch_network_diag_multicast(
-        multicast_addr="ff03::1",
+        multicast_addr=TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS_AND_MEDS, # "ff03::1"
         extaddr_map=extaddr_map,
         thread_network_info=thread_network_info,
     )
@@ -1112,7 +1112,7 @@ def fetch_network_diag_topology_multicast_neighbors(
         Dict keyed by rloc16 with device records from immediate one-hop neighbors
     """
     return fetch_network_diag_multicast(
-        multicast_addr="ff02::1",
+        multicast_addr=TD_THREAD_MULTICAST_ADDRESSES_LINK_LOCAL_ALL_FTDS_AND_MEDS, # "ff02::1"
         extaddr_map=extaddr_map,
         thread_network_info=thread_network_info,
     )
