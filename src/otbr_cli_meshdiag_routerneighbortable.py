@@ -8,6 +8,7 @@ from extaddr_device_label_map import load_extaddr_device_label_map
 from otbr_cli_router_table import fetch_and_parse_router_table
 from otbr_cli_util import (
     build_timeout_error_record,
+    collect_per_router,
     is_response_timeout_error,
     load_extaddr_map_or_empty,
     resolve_collector_runtime,
@@ -140,32 +141,13 @@ def fetch_all_meshdiag_router_neighbor_tables(extaddr_map=None):
 
     # 1. Get all active routers (potential parents)
     router_table_data = fetch_and_parse_router_table(extaddr_map)
-    router_rlocs = [
-        router.get("rloc16") for router in router_table_data if router.get("rloc16")
-    ]
-
-    router_neighbor_tables = []
-
-    for rloc16 in router_rlocs:
-        router = next(
-            (r for r in router_table_data if r.get("rloc16") == rloc16), None)
-        if router:
-            extaddr = router.get("extaddr")
-            device_label = extaddr_map.get(extaddr, "Unknown")
-            logging.info(
-                f"Getting meshdiag routerneighbortable for router rloc16 {rloc16} (Node: {device_label}, ExtAddr: {extaddr})..."
-            )
-        else:
-            logging.info(
-                f"Getting meshdiag routerneighbortable for router rloc16 {rloc16} (Node: Unknown, ExtAddr: Unknown)..."
-            )
-
-        router_neighbor_table = fetch_meshdiag_router_neighbor_table_for_device(
-            rloc16, router, extaddr_map
-        )
-        router_neighbor_tables.append(router_neighbor_table)
-
-    return router_neighbor_tables
+    
+    return collect_per_router(
+        router_table_data=router_table_data,
+        collect_fn=fetch_meshdiag_router_neighbor_table_for_device,
+        extaddr_map=extaddr_map,
+        collection_name="meshdiag routerneighbortable",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
