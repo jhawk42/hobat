@@ -11,6 +11,7 @@ import pytest
 
 from otbr_cli_util import (
     build_timeout_error_record,
+    collect_per_router,
     is_response_timeout_error,
     load_extaddr_map_or_empty,
     resolve_collector_runtime,
@@ -436,3 +437,208 @@ class TestBuildTimeoutErrorRecord:
         for key in result:
             if key.endswith("_count"):
                 assert result[key] == 0
+
+
+class TestCollectPerRouter:
+    """Tests for collect_per_router orchestration helper."""
+    
+    def test_collects_data_for_all_routers(self):
+        """Should call collect_fn for each router and return list of results."""
+        router_table = [
+            {"rloc16": "0x5000", "extaddr": "aabbccddeeff0011"},
+            {"rloc16": "0x6400", "extaddr": "1122334455667788"},
+            {"rloc16": "0x2800", "extaddr": "8877665544332211"},
+        ]
+        
+        def mock_collect(rloc16, router, extaddr_map):
+            return {"rloc16": rloc16, "data": f"collected for {rloc16}"}
+        
+        results = collect_per_router(
+            router_table_data=router_table,
+            collect_fn=mock_collect,
+            extaddr_map=None,
+            collection_name="test data"
+        )
+        
+        assert len(results) == 3
+        assert results[0] == {"rloc16": "0x5000", "data": "collected for 0x5000"}
+        assert results[1] == {"rloc16": "0x6400", "data": "collected for 0x6400"}
+        assert results[2] == {"rloc16": "0x2800", "data": "collected for 0x2800"}
+    
+    def test_returns_empty_list_for_empty_router_table(self):
+        """Should return empty list when router table is empty."""
+        def mock_collect(rloc16, router, extaddr_map):
+            return {"rloc16": rloc16}
+        
+        results = collect_per_router(
+            router_table_data=[],
+            collect_fn=mock_collect,
+            collection_name="test data"
+        )
+        
+        assert results == []
+    
+    def test_passes_router_object_and_extaddr_map_to_callback(self):
+        """Should pass full router object and extaddr_map to collect_fn."""
+        router_table = [
+            {"rloc16": "0x5000", "extaddr": "aabbccddeeff0011", "version": 5},
+        ]
+        extaddr_map = {"aabbccddeeff0011": "Router 1"}
+        
+        collected_args = []
+        
+        def mock_collect(rloc16, router, extaddr_map):
+            collected_args.append((rloc16, router, extaddr_map))
+            return {"rloc16": rloc16}
+        
+        collect_per_router(
+            router_table_data=router_table,
+            collect_fn=mock_collect,
+            extaddr_map=extaddr_map,
+            collection_name="test"
+        )
+        
+        assert len(collected_args) == 1
+        assert collected_args[0][0] == "0x5000"
+        assert collected_args[0][1] == {"rloc16": "0x5000", "extaddr": "aabbccddeeff0011", "version": 5}
+        assert collected_args[0][2] == {"aabbccddeeff0011": "Router 1"}
+    
+    def test_filters_out_routers_without_rloc16(self):
+        """Should skip routers that don't have rloc16 field."""
+        router_table = [
+            {"rloc16": "0x5000", "extaddr": "aabbccddeeff0011"},
+            {"extaddr": "1122334455667788"},  # Missing rloc16
+            {"rloc16": None, "extaddr": "8877665544332211"},  # None rloc16
+            {"rloc16": "0x6400", "extaddr": "ffeeddccbbaa9988"},
+        ]
+        
+        call_count = 0
+        
+        def mock_collect(rloc16, router, extaddr_map):
+            nonlocal call_count
+            call_count += 1
+            return {"rloc16": rloc16}
+        
+        results = collect_per_router(
+            router_table_data=router_table,
+            collect_fn=mock_collect,
+            collection_name="test"
+        )
+        
+        # Should only collect for routers with valid rloc16
+        assert call_count == 2
+        assert len(results) == 2
+        assert results[0]["rloc16"] == "0x5000"
+        assert results[1]["rloc16"] == "0x6400"
+    
+    def test_logs_collection_start_with_device_context(self, caplog):
+        """Should log collection start with device label and extaddr."""
+        router_table = [
+            {"rloc16": "0x5000", "extaddr": "aabbccddeeff0011"},
+        ]
+        extaddr_map = {"aabbccddeeff0011": "Living Room Bulb"}
+        
+        def mock_collect(rloc16, router, extaddr_map):
+            return {"rloc16": rloc16}
+        
+        with caplog.at_level(logging.INFO):
+            collect_per_router(
+                router_table_data=router_table,
+                collect_fn=mock_collect,
+                extaddr_map=extaddr_map,
+                collection_name="meshdiag childtable"
+            )
+        
+        assert len(caplog.records) == 1
+        log_message = caplog.records[0].message
+        assert "Getting meshdiag childtable" in log_message
+        assert "0x5000" in log_message
+        assert "Living Room Bulb" in log_message
+        assert "aabbccddeeff0011" in log_message
+    
+    def test_logs_unknown_when_no_extaddr_map(self, caplog):
+        """Should log 'Unknown' device label when extaddr_map is None."""
+        router_table = [
+            {"rloc16": "0x5000", "extaddr": "aabbccddeeff0011"},
+        ]
+        
+        def mock_collect(rloc16, router, extaddr_map):
+            return {"rloc16": rloc16}
+        
+        with caplog.at_level(logging.INFO):
+            collect_per_router(
+                router_table_data=router_table,
+                collect_fn=mock_collect,
+                extaddr_map=None,
+                collection_name="meshdiag childip6"
+            )
+        
+        log_message = caplog.records[0].message
+        assert "Unknown" in log_message
+        assert "0x5000" in log_message
+    
+    def test_logs_unknown_when_extaddr_not_in_map(self, caplog):
+        """Should log 'Unknown' when extaddr not found in map."""
+        router_table = [
+            {"rloc16": "0x5000", "extaddr": "aabbccddeeff0011"},
+        ]
+        extaddr_map = {"different_extaddr": "Some Device"}
+        
+        def mock_collect(rloc16, router, extaddr_map):
+            return {"rloc16": rloc16}
+        
+        with caplog.at_level(logging.INFO):
+            collect_per_router(
+                router_table_data=router_table,
+                collect_fn=mock_collect,
+                extaddr_map=extaddr_map,
+                collection_name="test"
+            )
+        
+        log_message = caplog.records[0].message
+        assert "Unknown" in log_message
+    
+    def test_collect_fn_can_return_any_dict_structure(self):
+        """Should work with any dict structure returned by collect_fn."""
+        router_table = [
+            {"rloc16": "0x5000", "extaddr": "aabbccddeeff0011"},
+        ]
+        
+        def mock_collect(rloc16, router, extaddr_map):
+            return {
+                "parent_rloc16": rloc16,
+                "device_label": "Test",
+                "router_child_table": [{"child": 1}, {"child": 2}],
+                "router_child_table_count": 2,
+            }
+        
+        results = collect_per_router(
+            router_table_data=router_table,
+            collect_fn=mock_collect,
+            collection_name="test"
+        )
+        
+        assert len(results) == 1
+        assert results[0]["parent_rloc16"] == "0x5000"
+        assert results[0]["router_child_table_count"] == 2
+    
+    def test_maintains_order_of_router_table(self):
+        """Should maintain the order of routers from router_table_data."""
+        router_table = [
+            {"rloc16": "0x2800", "extaddr": "third"},
+            {"rloc16": "0x5000", "extaddr": "first"},
+            {"rloc16": "0x6400", "extaddr": "second"},
+        ]
+        
+        def mock_collect(rloc16, router, extaddr_map):
+            return {"rloc16": rloc16, "extaddr": router.get("extaddr")}
+        
+        results = collect_per_router(
+            router_table_data=router_table,
+            collect_fn=mock_collect,
+            collection_name="test"
+        )
+        
+        assert results[0]["extaddr"] == "third"
+        assert results[1]["extaddr"] == "first"
+        assert results[2]["extaddr"] == "second"
