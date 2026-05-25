@@ -12,7 +12,8 @@ from util_data import resolve_data_file_path, resolve_data_dir, save_json_atomic
 from td_const import TD_DATA_DIR_ARG_HELP
 
 from otbr_restapi_util import (
-    
+    add_common_rest_client_args,
+    build_rest_client_from_args,
     DEFAULT_ACCEPT,
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -55,23 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="CLI wrapper for the OpenThread Border Router REST API.",
     )
-    parser.add_argument("--host", default=DEFAULT_HOST,
-                        help="OTBR REST API host")
-    parser.add_argument(
-        "--port", type=int, default=DEFAULT_PORT, help="OTBR REST API port"
-    )
-    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
-    parser.add_argument(
-        "--base-url", help="Override host/port with a full base URL")
-    parser.add_argument(
-        "--timeout", type=int, default=DEFAULT_TIMEOUT, help="HTTP timeout in seconds"
-    )
-    parser.add_argument(
-        "--accept",
-        default=DEFAULT_ACCEPT,
-        choices=["application/vnd.api+json", "application/json", "text/plain"],
-        help="Default Accept header",
-    )
+    # Add standard REST API client arguments
+    add_common_rest_client_args(parser)
     parser.add_argument(
         "--raw",
         action="store_true",
@@ -946,13 +932,8 @@ def _fetch_all_with_fallback(
 
 
 def build_client(args: argparse.Namespace) -> OTBRRestApiClient:
-    return OTBRRestApiClient(
-        host=args.host,
-        port=args.port,
-        base_url=args.base_url,
-        timeout=args.timeout,
-        accept=args.accept,
-    )
+    """Construct OTBRRestApiClient from parsed CLI arguments."""
+    return build_rest_client_from_args(args)
 
 
 def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:

@@ -9,6 +9,12 @@ from typing import Any, Sequence, Tuple
 
 from td_const import TD_DATA_DIR_ARG_HELP
 from otbr_restapi_util import (
+    add_common_rest_client_args,
+    build_rest_client_from_args,
+    DEFAULT_ACCEPT,
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    DEFAULT_TIMEOUT,
     RECOMMENDED_DIAGNOSTIC_TLVS,
     OTBRActionFailedError,
     OTBRActionTimeoutError,
@@ -17,10 +23,10 @@ from otbr_restapi_util import (
 )
 from util_data import resolve_data_dir, resolve_data_file_path, save_json_atomic
 
-HOST = "127.0.0.1"
-PORT = 8081
-TIMEOUT = 10
-DEFAULT_ACCEPT = "application/vnd.api+json"
+# Retain local constants for backward compatibility with direct-entry tests
+HOST = DEFAULT_HOST
+PORT = DEFAULT_PORT
+TIMEOUT = DEFAULT_TIMEOUT
 
 # (client method name, output filename) – static endpoints downloaded unconditionally
 _STATIC_ENDPOINTS: Sequence[Tuple[str, str]] = [
@@ -45,16 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
             "per-device network diagnostics."
         ),
     )
-    parser.add_argument("--host", default=HOST, help="OTBR REST API host")
-    parser.add_argument("--port", type=int, default=PORT,
-                        help="OTBR REST API port")
-    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
-    parser.add_argument("--base-url",
-                        help="Override host/port with a full base URL")
-    parser.add_argument("--timeout", type=int, default=TIMEOUT,
-                        help="HTTP timeout in seconds")
-    parser.add_argument("--accept", default=DEFAULT_ACCEPT,
-                        help="Accept header sent with each request")
+    # Add standard REST API client arguments
+    add_common_rest_client_args(parser)
     parser.add_argument(
         "--header",
         action="append",
@@ -284,38 +282,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    try:
-        headers = build_headers(args.accept, args.header)
-    except ValueError as exc:
-        parser.error(str(exc))
+    # Validate extra headers if provided
+    if hasattr(args, 'header') and args.header:
+        try:
+            headers = build_headers(args.accept, args.header)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     data_dir = resolve_data_dir(data_dir=args.datadir)
-    base_url = build_base_url(args.host, args.port, args.base_url)
+    
+    # Build client using new helper
+    client = build_rest_client_from_args(args)
 
     global _ACTIVE_TD_DATA_DIR
     _ACTIVE_TD_DATA_DIR = data_dir
     try:
-        if args.update_devices:
-            exit_code = download_all_restapi_endpoints(
-                base_url=base_url,
-                headers=headers,
-                timeout=args.timeout,
-                update_devices=True,
-            )
-        else:
-            exit_code = download_all_restapi_endpoints(
-                base_url=base_url,
-                headers=headers,
-                timeout=args.timeout,
-            )
+        # Download static endpoints (with optional device update)
+        exit_code = download_all_restapi_endpoints(
+            client=client,
+            data_dir=data_dir,
+            update_devices=args.update_devices,
+        )
 
+        # Optionally fetch per-device diagnostics
         if args.fetch_diagnostics:
             diag_types = args.diag_types or list(RECOMMENDED_DIAGNOSTIC_TLVS)
-            client = _build_client_from_options(
-                base_url=base_url,
-                timeout=args.timeout,
-                headers=headers,
-            )
             diag_exit = fetch_and_save_diagnostics(client, data_dir, diag_types)
             if diag_exit != 0:
                 exit_code = diag_exit
