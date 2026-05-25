@@ -420,7 +420,7 @@ A **Dataset** dropdown (populated from `DATASET_REGISTRY`) lets you choose which
 - `files[]` — one or more local JSON filenames to fetch (via `fetch()`)
 - `mergeStrategy` — how to combine multiple files (`none` / `by-rloc16` / `by-identity`)
 - `topologyMode` — which topology adaptor to use when drawing the graph
-- `defaultLinkFilter` — the link filter pre-selected when this dataset loads
+- `defaultLinkFilter` — the link filter preselected when this dataset loads
 
 The full set of pre-configured datasets is listed below, grouped by category:
 
