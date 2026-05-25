@@ -1118,6 +1118,159 @@ def fetch_network_diag_topology_multicast_neighbors(
     )
 
 
+# ---------------------------------------------------------------------------
+# Internal Helper Functions
+# ---------------------------------------------------------------------------
+
+def _build_unknown_device_record(
+    rloc16: str,
+    role: str,
+    ipv6_addresses: dict,
+    omr_ipv6addr_prefix: str | None,
+    meshlocal_prefix: str | None,
+) -> dict:
+    """
+    Constructs a fallback device record for unresponsive nodes.
+    
+    Used when a device fails to respond to network diagnostic queries after retry
+    attempts. Provides a minimal record with placeholder values and available IPv6
+    information to maintain topology completeness.
+    
+    Args:
+        rloc16: RLOC16 of the unresponsive device (e.g., "0x5000")
+        role: Device role ("Router" or "Child") to determine record structure
+        ipv6_addresses: Dict mapping rloc16 to list of IPv6 addresses
+        omr_ipv6addr_prefix: OMR prefix for finding off-mesh-routable addresses (optional)
+        meshlocal_prefix: Mesh-local prefix for detecting border routers (optional)
+    
+    Returns:
+        Dictionary with fallback device record structure. For routers, includes
+        border router detection. For children, includes empty counters.
+    """
+    ipv6_addrs = ipv6_addresses.get(rloc16, [])
+    
+    # Find OMR address if prefix available
+    omr_ipv6_addr = (
+        util_network.find_omr_address_in_list(ipv6_addrs, omr_ipv6addr_prefix)
+        if omr_ipv6addr_prefix
+        else None
+    )
+    
+    # Base record structure (common to both routers and children)
+    record = {
+        "extaddr": f"Unknown-{rloc16}",
+        "rloc16": rloc16,
+        "device_label": f"Unknown-{rloc16}",
+        "thread_stack_version": "Unknown",
+        "mode": {},
+        "ipv6_addrs": ipv6_addrs,
+        "omr_ipv6_addr": omr_ipv6_addr,
+        "children": [],
+    }
+    
+    if role == "Router":
+        # Router-specific fields: type/br based on IPv6 addresses
+        if meshlocal_prefix:
+            is_br = util_network.is_border_router_from_ipv6_addrs(
+                ipv6_addrs, meshlocal_prefix
+            )
+            record["br"] = is_br
+            record["type"] = "Border Router" if is_br else "Router"
+        else:
+            record["br"] = None
+            record["type"] = "Router"
+        
+        record["mac_counters"] = {}
+        record["mle_counters"] = {}
+        record["time_statistics"] = {}
+    
+    elif role == "Child":
+        # Child-specific fields: type fixed, no br detection, empty counters
+        record["type"] = "Unknown-Child"
+        record["mac_counters"] = {}
+        record["mle_counters"] = {}
+        record["time_statistics"] = {}
+    
+    return record
+
+
+def _enrich_device_role_and_prefix_flags(
+    record: dict,
+    meshlocal_prefix: str | None,
+    omr_ipv6addr_prefix: str | None,
+) -> None:
+    """
+    Enriches a device record with role classification and prefix-based flags.
+    
+    Analyzes IPv6 addresses to determine device type (Router or Border Router)
+    and adds OMR IPv6 address field if available. Mutates the record in place.
+    
+    Args:
+        record: Device record dict to enrich (mutated in place)
+        meshlocal_prefix: Mesh-local prefix for detecting border routers (optional)
+        omr_ipv6addr_prefix: OMR prefix for finding off-mesh-routable addresses (optional)
+    
+    Side Effects:
+        Adds/updates the following fields in record:
+        - "type": "Border Router" or "Router"
+        - "br": True/False/None (border router flag)
+        - "omr_ipv6_addr": OMR address string or None
+    """
+    # Set default type to Router
+    record["type"] = "Router"
+    
+    # Add OMR IPv6 address if prefix available
+    if omr_ipv6addr_prefix:
+        record["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
+            record.get("ipv6_addrs", []), omr_ipv6addr_prefix
+        )
+    else:
+        record["omr_ipv6_addr"] = None
+    
+    # Check if device is a border router based on mesh-local prefix
+    if meshlocal_prefix:
+        is_border_router = util_network.is_border_router_from_ipv6_addrs(
+            record.get("ipv6_addrs", []), meshlocal_prefix
+        )
+        record["br"] = is_border_router
+        if is_border_router:
+            record["type"] = "Border Router"
+    else:
+        record["br"] = None
+
+
+def _upsert_device_record(
+    records_by_rloc: dict,
+    incoming_record: dict,
+) -> None:
+    """
+    Adds or merges a device record into the topology map.
+    
+    Implements the "upsert" pattern: if a record already exists for this rloc16,
+    merge the new data into it; otherwise, add the new record. This is commonly
+    used when combining multicast and direct query results.
+    
+    Args:
+        records_by_rloc: Dict keyed by rloc16 containing existing device records (mutated)
+        incoming_record: New device record to add or merge
+    
+    Side Effects:
+        Mutates records_by_rloc by either:
+        - Adding incoming_record as a new entry, or
+        - Merging incoming_record into an existing entry via merge_device_record()
+    """
+    rloc16 = incoming_record.get("rloc16")
+    if not rloc16:
+        return
+    
+    if rloc16 in records_by_rloc:
+        # Merge new data into existing record
+        merge_device_record(records_by_rloc[rloc16], incoming_record)
+    else:
+        # Add new record
+        records_by_rloc[rloc16] = incoming_record
+
+
 def fetch_network_diag_topology(
     extaddr_map=None, thread_network_info=None, expand_children=True
 ):
@@ -1169,11 +1322,7 @@ def fetch_network_diag_topology(
         )
         # Merge multicast topology data into main topology map, keyed by rloc16
         for rloc16, device_record in network_topology_map_multicast.items():
-            if rloc16 in network_topology_map:
-                merge_device_record(
-                    network_topology_map[rloc16], device_record)
-            else:
-                network_topology_map[rloc16] = device_record
+            _upsert_device_record(network_topology_map, device_record)
         logging.info(
             f"After merging multicast data, topology map has {len(network_topology_map)} devices (keyed by rloc16)"
         )
@@ -1243,69 +1392,20 @@ def fetch_network_diag_topology(
 
         if network_topology_node is None:
             # extaddr not found, use default values
-            network_topology_map[rloc16] = {
-                "extaddr": f"Unknown-{rloc16}",
-                "rloc16": rloc16,
-                "device_label": f"Unknown-{rloc16}",
-                "thread_stack_version": "Unknown",
-                "mode": {},
-                "ipv6_addrs": ipv6_addresses.get(rloc16, []),
-                "omr_ipv6_addr": util_network.find_omr_address_in_list(
-                    ipv6_addresses.get(rloc16, []), omr_ipv6addr_prefix
-                )
-                if omr_ipv6addr_prefix
-                else None,
-
-                "br": util_network.is_border_router_from_ipv6_addrs(
-                    ipv6_addresses.get(rloc16, []), meshlocal_prefix
-                )
-                if meshlocal_prefix
-                else None,
-
-                "type": "Border Router" if util_network.is_border_router_from_ipv6_addrs(
-                    ipv6_addresses.get(rloc16, []), meshlocal_prefix
-                )
-                else "Router",
-
-                "children": [],
-               
-                "mac_counters": {},
-                "mle_counters": {},
-                "time_statistics": {},
-            }
+            network_topology_map[rloc16] = _build_unknown_device_record(
+                rloc16, "Router", ipv6_addresses, omr_ipv6addr_prefix, meshlocal_prefix
+            )
         else:
-            network_topology_node["type"] = "Router"
-            if omr_ipv6addr_prefix:
-                network_topology_node["omr_ipv6_addr"] = (
-                    util_network.find_omr_address_in_list(
-                        network_topology_node.get(
-                            "ipv6_addrs", []), omr_ipv6addr_prefix
-                    )
-                )
-            else:
-                network_topology_node["omr_ipv6_addr"] = None
-
-            if meshlocal_prefix:
-                border_router = util_network.is_border_router_from_ipv6_addrs(
-                    network_topology_node.get(
-                        "ipv6_addrs", []), meshlocal_prefix
-                )
-                network_topology_node["br"] = border_router
-                if border_router:
-                    network_topology_node["type"] = "Border Router"
-            else:
-                network_topology_node["br"] = None
+            # Enrich device record with role classification and prefix-based flags
+            _enrich_device_role_and_prefix_flags(
+                network_topology_node, meshlocal_prefix, omr_ipv6addr_prefix
+            )
 
             # Merge with existing data in topology map if present (e.g. from multicast query) to enrich the node data with any missing fields that we couldn't get from the direct query due to unresponsive node or TLV issues, this way we can have the most complete data possible for each node by combining the results from both the multicast and direct queries, and we can also handle cases where some nodes might only respond to one of the query types but not the other.
-            if rloc16 in network_topology_map:
-                merge_device_record(
-                    network_topology_map[rloc16], network_topology_node)
-            else:
-                # If we don't already have data for this RLOC16 in the topology map, add it now. If we do have
-                # existing data (e.g. from multicast), we will have already merged the new data into the existing
-                # record, so we don't need to add it again.
-                network_topology_map[rloc16] = network_topology_node
+            is_new_record = rloc16 not in network_topology_map
+            _upsert_device_record(network_topology_map, network_topology_node)
 
+            if is_new_record:
                 logging.info(
                     f"Added router node {rloc16} {network_topology_node.get('extaddr', 'Unknown')} {network_topology_node.get('device_label', 'Unknown')} to topology map. {r+1}/{retries} attempts.  TLV detail level: {tlv_detail_level} {get_tlv_values_for_detail_level(tlv_detail_level)}"
                 )
@@ -1395,35 +1495,18 @@ def fetch_network_diag_topology(
                                 time.sleep(c_delay)
 
                         if child_node is None:
-                            network_topology_map[child_rloc] = {
-                                "extaddr": f"Unknown-{child_rloc}",
-                                "rloc16": child_rloc,
-                                "device_label": f"Unknown-{child_rloc}",
-                                "thread_stack_version": "Unknown",
-                                "mode": {},
-                                "ipv6_addrs": ipv6_addresses.get(child_rloc, []),
-                                "children": [],
-                                "omr_ipv6_addr": util_network.find_omr_address_in_list(
-                                    ipv6_addresses.get(child_rloc, []),
-                                    omr_ipv6addr_prefix,
-                                )
-                                if omr_ipv6addr_prefix
-                                else None,
-                                "type": "Unknown-Child",
-                                "mac_counters": {},
-                                "mle_counters": {},
-                                "time_statistics": {},
-                            }
+                            network_topology_map[child_rloc] = _build_unknown_device_record(
+                                child_rloc, "Child", ipv6_addresses, omr_ipv6addr_prefix, meshlocal_prefix
+                            )
 
                         else:
-                            child_node["omr_ipv6_addr"] = (
-                                util_network.find_omr_address_in_list(
-                                    child_node.get("ipv6_addrs", []),
-                                    omr_ipv6addr_prefix,
+                            # Add OMR IPv6 address to child record
+                            if omr_ipv6addr_prefix:
+                                child_node["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
+                                    child_node.get("ipv6_addrs", []), omr_ipv6addr_prefix
                                 )
-                                if omr_ipv6addr_prefix
-                                else None
-                            )
+                            else:
+                                child_node["omr_ipv6_addr"] = None
                             network_topology_map[child_rloc] = child_node
                             # logging.info(
                             #    f"Added child node {child_rloc} {child_node.get('extaddr', 'Unknown')} {child_node.get('device_label', 'Unknown')} to topology map. {r}/{retries} attempts.  TLV detail level: {tlv_detail_level}"
