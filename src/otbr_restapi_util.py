@@ -1677,3 +1677,119 @@ def error_to_dict(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, OTBRClientError):
         return {"error": {"type": "client", "message": str(exc)}}
     return {"error": {"type": "unexpected", "message": str(exc)}}
+
+
+# ---------------------------------------------------------------------------
+# CLI Helper Functions
+# ---------------------------------------------------------------------------
+
+def add_common_rest_client_args(parser) -> None:
+    """Add common OTBR REST API client arguments to an ArgumentParser.
+    
+    Adds the following standard arguments:
+    - --host: OTBR REST API host (default: 127.0.0.1)
+    - --port: OTBR REST API port (default: 8081)
+    - --base-url: Override host/port with full base URL
+    - --timeout: HTTP timeout in seconds (default: 10)
+    - --accept: Accept header (default: application/vnd.api+json)
+    - --datadir: Data directory for output files (optional)
+    
+    Args:
+        parser: argparse.ArgumentParser or subparser to augment
+    
+    Usage Example:
+        >>> import argparse
+        >>> from otbr_restapi_util import add_common_rest_client_args
+        >>> parser = argparse.ArgumentParser()
+        >>> add_common_rest_client_args(parser)
+        >>> args = parser.parse_args(['--host', '192.168.1.1', '--port', '8080'])
+        >>> args.host
+        '192.168.1.1'
+        >>> args.port
+        8080
+    
+    Notes:
+        - The --base-url argument takes precedence over --host and --port when constructing the client
+        - --accept defaults to JSON:API format but can be overridden
+        - --datadir is optional and typically used for output file resolution
+    """
+    from td_const import TD_DATA_DIR_ARG_HELP
+    
+    parser.add_argument(
+        "--host",
+        default=DEFAULT_HOST,
+        help=f"OTBR REST API host (default: {DEFAULT_HOST})",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"OTBR REST API port (default: {DEFAULT_PORT})",
+    )
+    parser.add_argument(
+        "--base-url",
+        help="Override host/port with a full base URL (e.g., http://10.0.0.1:8081)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT,
+        help=f"HTTP timeout in seconds (default: {DEFAULT_TIMEOUT})",
+    )
+    parser.add_argument(
+        "--accept",
+        default=DEFAULT_ACCEPT,
+        help=f"Accept header for HTTP requests (default: {DEFAULT_ACCEPT})",
+    )
+    parser.add_argument(
+        "--datadir",
+        default=None,
+        help=TD_DATA_DIR_ARG_HELP,
+    )
+
+
+def build_rest_client_from_args(args, **kwargs) -> OTBRRestApiClient:
+    """Construct OTBRRestApiClient from parsed CLI arguments.
+    
+    Builds a client instance using standard arguments added by add_common_rest_client_args().
+    Handles precedence: --base-url overrides --host and --port if provided.
+    
+    Args:
+        args: argparse.Namespace with host, port, base_url, timeout, accept attributes
+        **kwargs: Additional keyword arguments to pass to OTBRRestApiClient constructor
+                  (e.g., retries, user_agent, default_raw)
+    
+    Returns:
+        Configured OTBRRestApiClient instance ready for API calls
+    
+    Usage Example:
+        >>> import argparse
+        >>> from otbr_restapi_util import add_common_rest_client_args, build_rest_client_from_args
+        >>> parser = argparse.ArgumentParser()
+        >>> add_common_rest_client_args(parser)
+        >>> args = parser.parse_args(['--host', '192.168.1.1'])
+        >>> client = build_rest_client_from_args(args)
+        >>> client.base_url
+        'http://192.168.1.1:8081'
+    
+    Notes:
+        - If args.base_url is provided, it takes precedence over host/port
+        - Additional kwargs are forwarded to the OTBRRestApiClient constructor
+        - Default values come from the DEFAULT_* constants in otbr_restapi_util
+    
+    Raises:
+        AttributeError: If required arguments (host, port, timeout, accept) are missing from args
+    """
+    # Extract standard client parameters from args
+    client_params = {
+        "host": args.host,
+        "port": args.port,
+        "base_url": args.base_url,
+        "timeout": args.timeout,
+        "accept": args.accept,
+    }
+    
+    # Merge with any additional kwargs
+    client_params.update(kwargs)
+    
+    return OTBRRestApiClient(**client_params)
