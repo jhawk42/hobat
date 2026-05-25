@@ -8,12 +8,14 @@ import time
 
 from pathlib import Path
 from typing import Any, Sequence
-from util_data import resolve_data_file_path, resolve_data_dir, save_json_atomic
+from util_data import resolve_data_file_path, resolve_data_dir
 from td_const import TD_DATA_DIR_ARG_HELP
 
 from otbr_restapi_util import (
     add_common_rest_client_args,
     build_rest_client_from_args,
+    emit_rest_payload_output,
+    exit_code_for_rest_exception,
     DEFAULT_ACCEPT,
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -1206,10 +1208,8 @@ def _dispatch_topology(
         logging.info("topology step 1: devices fetch ...")
         devices = client.fetch_device_collection()
         path = data_dir / "td-otbr-restapi-devices-fetch.json"
-        save_json_atomic(devices, path)
+        emit_rest_payload_output(devices, path, logging.getLogger(__name__))
         logging.info("topology step 1 done: %d device(s) → %s", len(devices), path)
-        logging.debug("Saved device data into %s as JSON:\n%s",
-                path, json.dumps(devices, indent=4))
     else:
         logging.info("topology step 1 skipped (--skip-devices); fetching device list quietly")
         devices = client.list_devices(raw=False)
@@ -1247,14 +1247,12 @@ def _dispatch_topology(
         if do_enrich:
             _apply_mac_enrichment(diagnostics)
         path = data_dir / "td-otbr-restapi-diagnostics-fetch-all.json"
-        save_json_atomic(diagnostics, path)
+        emit_rest_payload_output(diagnostics, path, logging.getLogger(__name__))
         elapsed = time.monotonic() - step_start
         logging.info(
             "topology step 2 done: %d device(s), %d diagnostic(s) in %.1fs → %s",
             len(diag_device_ids), len(diagnostics), elapsed, path,
         )
-        logging.debug("Saved diagnostics data into %s as JSON:\n%s",
-                path, json.dumps(diagnostics, indent=4))
     else:
         logging.info("topology step 2 skipped (--skip-diagnostics)")
 
@@ -1275,14 +1273,12 @@ def _dispatch_topology(
             on_progress=mesh_progress_fn,
         )
         path = data_dir / "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
-        save_json_atomic(mesh_results, path)
+        emit_rest_payload_output(mesh_results, path, logging.getLogger(__name__))
         elapsed = time.monotonic() - step_start
         logging.info(
             "topology step 3 done: %d mesh diagnostic(s) in %.1fs → %s",
             len(mesh_results), elapsed, path,
         )
-        logging.debug("Saved mesh diagnostics data into %s as JSON:\n%s",
-                path, json.dumps(mesh_results, indent=4))
     else:
         logging.info("topology step 3 skipped (--skip-mesh-diagnostics)")
 
@@ -1385,19 +1381,11 @@ def emit_error(exc: Exception) -> None:
 
 
 def exit_code_for_exception(exc: Exception) -> int:
+    """Map exceptions to exit codes, with CLI-specific handling for OTBRUsageError."""
     if isinstance(exc, OTBRUsageError):
         return EXIT_USAGE
-    if isinstance(exc, OTBRConnectionError):
-        return EXIT_CONNECTION
-    if isinstance(exc, OTBRHTTPError):
-        return EXIT_HTTP
-    if isinstance(exc, OTBRActionError):
-        return EXIT_HTTP
-    if isinstance(exc, OTBRInvalidResponseError):
-        return EXIT_INVALID_RESPONSE
-    if isinstance(exc, OTBRClientError):
-        return EXIT_UNEXPECTED
-    return EXIT_UNEXPECTED
+    # Delegate all REST API exceptions to shared helper
+    return exit_code_for_rest_exception(exc)
 
 
 def run_cli(
