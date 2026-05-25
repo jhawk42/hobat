@@ -8,6 +8,7 @@ from extaddr_device_label_map import load_extaddr_device_label_map
 from otbr_cli_router_table import fetch_and_parse_router_table
 from otbr_cli_util import (
     build_timeout_error_record,
+    collect_per_router,
     is_response_timeout_error,
     load_extaddr_map_or_empty,
     resolve_collector_runtime,
@@ -163,39 +164,13 @@ def fetch_all_meshdiag_child_tables(extaddr_map):
     """Collect child tables for all active routers in the router table."""
 
     router_table_data = fetch_and_parse_router_table(extaddr_map)
-    router_rlocs = [
-        router.get("rloc16") for router in router_table_data if router.get("rloc16")
-    ]
-
-    router_child_tables = []
-
-    for parent_rloc16 in router_rlocs:
-        router = next(
-            (r for r in router_table_data if r.get(
-                "rloc16") == parent_rloc16), None
-        )
-        if router:
-            extaddr = router.get("extaddr")
-            device_label = (
-                extaddr_map.get(
-                    extaddr, "Unknown") if extaddr_map else "Unknown"
-            )
-            logging.info(
-                f"Getting meshdiag childtable for router rloc16 {parent_rloc16} "
-                f"(Node: {device_label}, ExtAddr: {extaddr})..."
-            )
-        else:
-            logging.info(
-                f"Getting meshdiag childtable for router rloc16 {parent_rloc16} "
-                "(Node: Unknown, ExtAddr: Unknown)..."
-            )
-
-        router_child_table = fetch_meshdiag_child_table_for_device(
-            parent_rloc16, router, extaddr_map
-        )
-        router_child_tables.append(router_child_table)
-
-    return router_child_tables
+    
+    return collect_per_router(
+        router_table_data=router_table_data,
+        collect_fn=fetch_meshdiag_child_table_for_device,
+        extaddr_map=extaddr_map,
+        collection_name="meshdiag childtable",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
