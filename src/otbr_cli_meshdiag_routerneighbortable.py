@@ -6,7 +6,12 @@ from typing import Sequence
 
 from extaddr_device_label_map import load_extaddr_device_label_map
 from otbr_cli_router_table import fetch_and_parse_router_table
-from otbr_cli_util import load_extaddr_map_or_empty, resolve_collector_runtime
+from otbr_cli_util import (
+    build_timeout_error_record,
+    is_response_timeout_error,
+    load_extaddr_map_or_empty,
+    resolve_collector_runtime,
+)
 import util_network
 from util_ot_ctl import exec_ot_ctl
 from util_data import parse_datadir_from_argv, save_json_atomic
@@ -24,21 +29,18 @@ def fetch_meshdiag_router_neighbor_table_for_device(rloc16, router=None, extaddr
         f"[DEBUG] Output of 'meshdiag routerneighbortable {rloc16}':\n{output}\n"
     )
 
-    timeout_match = re.search(r"Error\s+(\d+):\s+ResponseTimeout", output)
-    if timeout_match:
-        return {
-            "rloc16": rloc16,
-            "device_label": extaddr_map.get(router.get("extaddr"), "Unknown")
+    if is_response_timeout_error(output):
+        device_label = (
+            extaddr_map.get(router.get("extaddr"), "Unknown")
             if router and extaddr_map
-            else "Unknown",
-            "router_neighbor_table": [],
-            "_error": {
-                "type": "ResponseTimeout"
-                # "code": int(timeout_match.group(1)),
-                # "rloc16": rloc16,
-                # "message": "Diagnostic response timed out"
-            },
-        }
+            else "Unknown"
+        )
+        return build_timeout_error_record(
+            rloc16=rloc16,
+            device_label=device_label,
+            result_table_key="router_neighbor_table",
+            rloc_key="rloc16",
+        )
 
     # store router rloc16
     # lookup rloc16 in router_table_data to get extaddr and device label if available
