@@ -11,6 +11,9 @@ from otbr_cli_util import (
     collect_per_router,
     is_response_timeout_error,
     load_extaddr_map_or_empty,
+    parse_conn_time,
+    parse_err_rate_metrics,
+    parse_rss_metrics,
     resolve_collector_runtime,
 )
 import util_network
@@ -114,29 +117,22 @@ def fetch_meshdiag_child_table_for_device(parent_rloc16, router=None, extaddr_ma
                 rx_type_match.group(3))
             continue
 
-        rss_match = re.match(
-            r"rss\s+-\s+ave:(-?\d+)\s+last:(-?\d+)\s+margin:(-?\d+)",
-            stripped,
-        )
-        if rss_match:
-            current_child["rss_ave"] = int(rss_match.group(1))
-            current_child["rss_last"] = int(rss_match.group(2))
-            current_child["rss_margin"] = int(rss_match.group(3))
+        # Parse RSS metrics
+        rss_metrics = parse_rss_metrics(stripped)
+        if rss_metrics:
+            current_child.update(rss_metrics)
             continue
 
-        err_rate_match = re.match(
-            r"err-rate\s+-\s+frame:([0-9]+(?:\.[0-9]+)?)%\s+msg:([0-9]+(?:\.[0-9]+)?)%",
-            stripped,
-        )
-        if err_rate_match:
-            current_child["err_rate_frame_pct"] = float(
-                err_rate_match.group(1))
-            current_child["err_rate_msg_pct"] = float(err_rate_match.group(2))
+        # Parse error rate metrics
+        err_rate_metrics = parse_err_rate_metrics(stripped)
+        if err_rate_metrics:
+            current_child.update(err_rate_metrics)
             continue
 
-        conn_time_match = re.match(r"conn-time:(\S+)", stripped)
-        if conn_time_match:
-            current_child["conn_time"] = conn_time_match.group(1)
+        # Parse connection time
+        conn_time = parse_conn_time(stripped)
+        if conn_time:
+            current_child["conn_time"] = conn_time
             continue
 
         csl_match = re.match(
