@@ -1,6 +1,10 @@
 """Tests for otbr_restapi_util module."""
 
 import argparse
+import json
+import logging
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,9 +13,18 @@ from otbr_restapi_util import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     DEFAULT_TIMEOUT,
+    OTBRActionError,
+    OTBRActionFailedError,
+    OTBRActionTimeoutError,
+    OTBRClientError,
+    OTBRConnectionError,
+    OTBRHTTPError,
+    OTBRInvalidResponseError,
     OTBRRestApiClient,
     add_common_rest_client_args,
     build_rest_client_from_args,
+    emit_rest_payload_output,
+    exit_code_for_rest_exception,
 )
 
 
@@ -361,3 +374,171 @@ class TestIntegrationWorkflow:
         
         assert client.base_url == "https://otbr.example.com/api"
         assert client.timeout == 15
+
+
+class TestEmitRestPayloadOutput:
+    """Tests for emit_rest_payload_output helper."""
+    
+    def test_saves_json_to_file(self, tmp_path):
+        """Should save payload as JSON to specified file."""
+        payload = {"devices": [{"id": "abc123", "rloc16": "0x8001"}]}
+        output_file = tmp_path / "test_output.json"
+        
+        emit_rest_payload_output(payload, output_file, logger=None)
+        
+        assert output_file.exists()
+        saved_data = json.loads(output_file.read_text())
+        assert saved_data == payload
+    
+    def test_handles_none_output_path(self):
+        """Should do nothing when output_path is None."""
+        payload = {"test": "data"}
+        
+        # Should not raise exception
+        emit_rest_payload_output(payload, None, logger=None)
+    
+    def test_logs_success_message(self, tmp_path, caplog):
+        """Should log info message on successful save."""
+        payload = {"test": "data"}
+        output_file = tmp_path / "output.json"
+        logger = logging.getLogger("test_logger")
+        
+        with caplog.at_level(logging.INFO, logger="test_logger"):
+            emit_rest_payload_output(payload, output_file, logger)
+        
+        assert any("Saved:" in record.message for record in caplog.records)
+        assert str(output_file) in caplog.text
+    
+    def test_logs_debug_with_json_content(self, tmp_path, caplog):
+        """Should log debug message with JSON content."""
+        payload = {"test": "data", "value": 123}
+        output_file = tmp_path / "output.json"
+        logger = logging.getLogger("test_logger")
+        
+        with caplog.at_level(logging.DEBUG, logger="test_logger"):
+            emit_rest_payload_output(payload, output_file, logger)
+        
+        assert any("Saved data into" in record.message for record in caplog.records)
+    
+    def test_raises_on_file_write_error(self, tmp_path):
+        """Should raise OSError if file write fails."""
+        payload = {"test": "data"}
+        # Use a read-only directory to trigger write error
+        output_file = tmp_path / "readonly_dir" / "output.json"
+        output_file.parent.mkdir()
+        output_file.parent.chmod(0o444)  # Read-only
+        
+        with pytest.raises(OSError):
+            emit_rest_payload_output(payload, output_file, logger=None)
+        
+        # Cleanup
+        output_file.parent.chmod(0o755)
+    
+    def test_accepts_string_path(self, tmp_path):
+        """Should accept string path in addition to Path object."""
+        payload = {"test": "data"}
+        output_file = str(tmp_path / "output.json")
+        
+        emit_rest_payload_output(payload, output_file, logger=None)
+        
+        assert Path(output_file).exists()
+    
+    def test_uses_root_logger_when_none(self, tmp_path, caplog):
+        """Should use root logger when logger is None."""
+        payload = {"test": "data"}
+        output_file = tmp_path / "output.json"
+        
+        with caplog.at_level(logging.INFO):
+            emit_rest_payload_output(payload, output_file, logger=None)
+        
+        assert len(caplog.records) > 0
+    
+    def test_saves_list_payload(self, tmp_path):
+        """Should handle list payloads."""
+        payload = [{"id": "1"}, {"id": "2"}]
+        output_file = tmp_path / "list.json"
+        
+        emit_rest_payload_output(payload, output_file, logger=None)
+        
+        saved_data = json.loads(output_file.read_text())
+        assert saved_data == payload
+    
+    def test_saves_nested_structure(self, tmp_path):
+        """Should handle deeply nested JSON structures."""
+        payload = {
+            "data": {
+                "type": "devices",
+                "attributes": {
+                    "nested": {
+                        "deeply": [1, 2, 3]
+                    }
+                }
+            }
+        }
+        output_file = tmp_path / "nested.json"
+        
+        emit_rest_payload_output(payload, output_file, logger=None)
+        
+        saved_data = json.loads(output_file.read_text())
+        assert saved_data == payload
+
+
+class TestExitCodeForRestException:
+    """Tests for exit_code_for_rest_exception helper."""
+    
+    def test_connection_error_returns_3(self):
+        """Should return exit code 3 for connection errors."""
+        exc = OTBRConnectionError("Connection failed")
+        assert exit_code_for_rest_exception(exc) == 3
+    
+    def test_http_error_returns_4(self):
+        """Should return exit code 4 for HTTP errors."""
+        exc = OTBRHTTPError(500, "Internal Server Error", {})
+        assert exit_code_for_rest_exception(exc) == 4
+    
+    def test_action_error_returns_4(self):
+        """Should return exit code 4 for action errors."""
+        exc = OTBRActionError("action-id-123", "running", "Action failed")
+        assert exit_code_for_rest_exception(exc) == 4
+    
+    def test_action_failed_error_returns_4(self):
+        """Should return exit code 4 for action failed errors (subclass of OTBRActionError)."""
+        exc = OTBRActionFailedError("action-id-456", "failed", "Task failed")
+        assert exit_code_for_rest_exception(exc) == 4
+    
+    def test_action_timeout_error_returns_4(self):
+        """Should return exit code 4 for action timeout errors (subclass of OTBRActionError)."""
+        exc = OTBRActionTimeoutError("action-id-789", "timeout", "Task timed out")
+        assert exit_code_for_rest_exception(exc) == 4
+    
+    def test_invalid_response_error_returns_5(self):
+        """Should return exit code 5 for invalid response errors."""
+        exc = OTBRInvalidResponseError("Malformed JSON response")
+        assert exit_code_for_rest_exception(exc) == 5
+    
+    def test_generic_client_error_returns_1(self):
+        """Should return exit code 1 for generic client errors."""
+        exc = OTBRClientError("Generic error")
+        assert exit_code_for_rest_exception(exc) == 1
+    
+    def test_unexpected_exception_returns_1(self):
+        """Should return exit code 1 for non-OTBR exceptions."""
+        exc = ValueError("Unexpected error")
+        assert exit_code_for_rest_exception(exc) == 1
+    
+    def test_runtime_error_returns_1(self):
+        """Should return exit code 1 for RuntimeError."""
+        exc = RuntimeError("Something went wrong")
+        assert exit_code_for_rest_exception(exc) == 1
+    
+    def test_exception_type_precedence(self):
+        """Should respect exception type hierarchy (more specific first)."""
+        # OTBRActionFailedError is subclass of OTBRActionError which is subclass of OTBRClientError
+        # Should map to 4 (action/HTTP), not 1 (generic client)
+        exc = OTBRActionFailedError("action-999", "failed", "Specific failure")
+        assert exit_code_for_rest_exception(exc) == 4
+        
+        # OTBRHTTPError is subclass of OTBRClientError
+        # Should map to 4 (HTTP), not 1 (generic client)
+        exc = OTBRHTTPError(404, "Not Found", {})
+        assert exit_code_for_rest_exception(exc) == 4

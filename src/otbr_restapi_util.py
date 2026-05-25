@@ -5,6 +5,7 @@ import logging
 import time
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -1793,3 +1794,123 @@ def build_rest_client_from_args(args, **kwargs) -> OTBRRestApiClient:
     client_params.update(kwargs)
     
     return OTBRRestApiClient(**client_params)
+
+
+# ---------------------------------------------------------------------------
+# Output and Exit Code Helpers
+# ---------------------------------------------------------------------------
+
+def emit_rest_payload_output(
+    payload: Any,
+    output_path: str | Path | None,
+    logger = None,
+) -> None:
+    """Save REST API payload to JSON file and log the operation.
+    
+    Centralizes the common pattern of saving JSON data and logging success/failure.
+    Used by REST API CLI and download modules to standardize output handling.
+    
+    Args:
+        payload: Data to serialize as JSON (dict, list, or JSON-serializable object)
+        output_path: Path to output file, or None to skip file write
+        logger: Optional logger instance for info/debug logging (uses root logger if None)
+    
+    Usage Example:
+        >>> import logging
+        >>> from pathlib import Path
+        >>> from otbr_restapi_util import emit_rest_payload_output
+        >>> 
+        >>> data = {"devices": [{"id": "abc123", "rloc16": "0x8001"}]}
+        >>> output_file = Path("/tmp/devices.json")
+        >>> logger = logging.getLogger(__name__)
+        >>> 
+        >>> emit_rest_payload_output(data, output_file, logger)
+        # Saves JSON to /tmp/devices.json and logs success
+    
+    Raises:
+        OSError: If file write fails (logged as error before raising)
+        TypeError: If payload is not JSON-serializable
+    
+    Notes:
+        - Uses save_json_atomic() for safe atomic writes
+        - Logs info message with file path on success
+        - Logs debug message with JSON content for troubleshooting
+        - Does nothing if output_path is None
+    """
+    from util_data import save_json_atomic
+    
+    if output_path is None:
+        return
+    
+    if logger is None:
+        import logging
+        logger = logging.getLogger(__name__)
+    
+    output_file = Path(output_path)
+    
+    try:
+        save_json_atomic(payload, output_file)
+        logger.info("Saved: %s", output_file)
+        logger.debug(
+            "Saved data into %s as JSON:\n%s",
+            output_file,
+            json.dumps(payload, indent=4),
+        )
+    except OSError as exc:
+        logger.error("File write error for %s: %s", output_file, exc)
+        raise
+
+
+def exit_code_for_rest_exception(exc: Exception) -> int:
+    """Map REST API exceptions to CLI exit codes.
+    
+    Provides standardized exit code mapping for OTBR REST API exceptions.
+    Used by CLI modules to ensure consistent exit behavior across tools.
+    
+    Args:
+        exc: Exception to map to exit code
+    
+    Returns:
+        Integer exit code:
+        - 0: Not an error (should not be called with success)
+        - 1: Unexpected error or generic OTBRClientError
+        - 3: Connection error (network/connectivity issues)
+        - 4: HTTP error or Action error (server returned error response)
+        - 5: Invalid response (malformed JSON or unexpected structure)
+    
+    Usage Example:
+        >>> from otbr_restapi_util import OTBRConnectionError, exit_code_for_rest_exception
+        >>> 
+        >>> try:
+        ...     # ... REST API operation ...
+        ...     pass
+        ... except OTBRConnectionError as exc:
+        ...     exit_code = exit_code_for_rest_exception(exc)
+        ...     print(f"Exiting with code {exit_code}")
+        ...     sys.exit(exit_code)
+        # Output: Exiting with code 3
+    
+    Notes:
+        - Matches exit code constants from otbr_restapi_cli (EXIT_*)
+        - More specific exception types take precedence
+        - Falls back to exit code 1 for unexpected exceptions
+        - Action errors (OTBRActionError) map to HTTP error code 4
+    """
+    # Connection issues
+    if isinstance(exc, OTBRConnectionError):
+        return 3  # EXIT_CONNECTION
+    
+    # HTTP and Action errors
+    if isinstance(exc, (OTBRHTTPError, OTBRActionError)):
+        return 4  # EXIT_HTTP
+    
+    # Invalid response structure
+    if isinstance(exc, OTBRInvalidResponseError):
+        return 5  # EXIT_INVALID_RESPONSE
+    
+    # Generic client error or unexpected exception
+    if isinstance(exc, OTBRClientError):
+        return 1  # EXIT_UNEXPECTED
+    
+    # Fallback for non-OTBR exceptions
+    return 1  # EXIT_UNEXPECTED
