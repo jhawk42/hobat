@@ -4,12 +4,12 @@ import re
 import logging
 from typing import Sequence
 
-from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
-from otbr_cli_router_table import fetch_and_parse_router_table
 from extaddr_device_label_map import load_extaddr_device_label_map
+from otbr_cli_router_table import fetch_and_parse_router_table
+from otbr_cli_util import load_extaddr_map_or_empty, resolve_collector_runtime
 import util_network
 from util_ot_ctl import exec_ot_ctl
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
+from util_data import parse_datadir_from_argv, save_json_atomic
 
 
 def _parse_yes_no_to_bool(value):
@@ -196,35 +196,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
-    td_data_dir = resolve_data_dir(
-        data_dir=parse_datadir_from_argv(argv))
-
-    extaddr_json_filename = data_file_path(
-        EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir
+    
+    # Resolve runtime paths using shared utility
+    runtime = resolve_collector_runtime(
+        datadir_arg=parse_datadir_from_argv(argv),
+        default_output_filename="td-otbr-cli-meshdiag-router-childtables.json",
     )
-
-    if os.path.exists(extaddr_json_filename):
-        logging.info(
-            f"Loading extended address to device label mapping from {extaddr_json_filename}..."
-        )
-        extaddr_map = load_extaddr_device_label_map(extaddr_json_filename)
-    else:
-        logging.warning(
-            f"extended address mapping file not found: {extaddr_json_filename}. Continuing with Unknown labels."
-        )
-        extaddr_map = {}
+    
+    # Load extaddr map with unified helper
+    extaddr_map = load_extaddr_map_or_empty(runtime.extaddr_map_path)
 
     router_child_tables = fetch_all_meshdiag_child_tables(extaddr_map)
 
-    output_filename = data_file_path(
-        "td-otbr-cli-meshdiag-router-childtables.json", td_data_dir
-    )
-    save_json_atomic(router_child_tables, output_filename)
+    save_json_atomic(router_child_tables, runtime.output_path)
 
     logging.info(
-        f"Meshdiag router childtables data saved to {output_filename}")
+        f"Meshdiag router childtables data saved to {runtime.output_path}")
     logging.debug("Saved meshdiag router childtables data into %s as JSON:\n%s",
-                  output_filename, json.dumps(router_child_tables, indent=4))
+                  runtime.output_path, json.dumps(router_child_tables, indent=4))
 
 
 if __name__ == "__main__":
