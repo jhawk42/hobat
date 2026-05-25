@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -121,3 +122,83 @@ def resolve_collector_runtime(
         extaddr_map_path=extaddr_map_path,
         output_path=output_path,
     )
+
+
+def is_response_timeout_error(output: str) -> bool:
+    """Detect ResponseTimeout error in OTBR CLI command output.
+    
+    Checks for the standard "Error <code>: ResponseTimeout" pattern that
+    appears in meshdiag command output when a device fails to respond within
+    the timeout window.
+    
+    Args:
+        output: Raw text output from an OTBR CLI command (e.g., meshdiag childtable).
+    
+    Returns:
+        True if output contains ResponseTimeout error, False otherwise.
+    
+    Examples:
+        >>> output = "Error 6: ResponseTimeout\\nDone"
+        >>> is_response_timeout_error(output)
+        True
+        
+        >>> output = "rloc16:0x5000 ext-addr:1a7fbf0434e4f043\\nDone"
+        >>> is_response_timeout_error(output)
+        False
+    """
+    return re.search(r"Error\s+(\d+):\s+ResponseTimeout", output) is not None
+
+
+def build_timeout_error_record(
+    rloc16: str,
+    device_label: str = "Unknown",
+    result_table_key: str = "result_table",
+    rloc_key: str = "rloc16",
+) -> dict[str, Any]:
+    """Build standardized error record for ResponseTimeout failures.
+    
+    Creates a consistent error envelope structure used across meshdiag collectors
+    when a device fails to respond to diagnostic queries.
+    
+    Args:
+        rloc16: The RLOC16 address of the device that timed out (e.g., "0x5000").
+        device_label: Human-readable device label from extaddr map (default: "Unknown").
+        result_table_key: Name of the empty result array field (e.g., "router_child_table").
+        rloc_key: Name of the rloc field (e.g., "parent_rloc16" or "rloc16").
+    
+    Returns:
+        Dictionary with error envelope containing:
+        - rloc field with the provided rloc16 value
+        - device_label field
+        - empty result table array
+        - count field set to 0 (if result_table_key doesn't contain "neighbor")
+        - _error field with type "ResponseTimeout"
+    
+    Examples:
+        >>> build_timeout_error_record(
+        ...     rloc16="0x5000",
+        ...     device_label="Kitchen Sensor",
+        ...     result_table_key="router_child_table",
+        ...     rloc_key="parent_rloc16"
+        ... )
+        {
+            "parent_rloc16": "0x5000",
+            "device_label": "Kitchen Sensor",
+            "router_child_table": [],
+            "router_child_table_count": 0,
+            "_error": {"type": "ResponseTimeout"}
+        }
+    """
+    error_record = {
+        rloc_key: rloc16,
+        "device_label": device_label,
+        result_table_key: [],
+        "_error": {"type": "ResponseTimeout"},
+    }
+    
+    # Add count field for non-neighbor tables (childtable and childip6 have counts)
+    # routerneighbortable has count too, so we include it for all
+    count_key = f"{result_table_key}_count"
+    error_record[count_key] = 0
+    
+    return error_record

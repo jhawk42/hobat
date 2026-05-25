@@ -9,7 +9,12 @@ from unittest.mock import Mock
 
 import pytest
 
-from otbr_cli_util import load_extaddr_map_or_empty, resolve_collector_runtime
+from otbr_cli_util import (
+    build_timeout_error_record,
+    is_response_timeout_error,
+    load_extaddr_map_or_empty,
+    resolve_collector_runtime,
+)
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
 
@@ -260,3 +265,174 @@ class TestIntegrationScenario:
         # Verify output file written
         assert runtime.output_path.exists()
         assert json.loads(runtime.output_path.read_text()) == output_data
+
+
+class TestIsResponseTimeoutError:
+    """Tests for is_response_timeout_error helper function."""
+    
+    def test_detects_timeout_with_error_code(self):
+        """Should detect ResponseTimeout with error code pattern."""
+        output = "Error 6: ResponseTimeout\nDone"
+        assert is_response_timeout_error(output) is True
+    
+    def test_detects_timeout_with_different_error_codes(self):
+        """Should detect ResponseTimeout regardless of error code."""
+        assert is_response_timeout_error("Error 1: ResponseTimeout") is True
+        assert is_response_timeout_error("Error 23: ResponseTimeout") is True
+        assert is_response_timeout_error("Error 999: ResponseTimeout") is True
+    
+    def test_detects_timeout_with_extra_whitespace(self):
+        """Should handle variations in whitespace."""
+        assert is_response_timeout_error("Error  6:  ResponseTimeout") is True
+        assert is_response_timeout_error("Error\t6:\tResponseTimeout") is True
+    
+    def test_returns_false_for_normal_output(self):
+        """Should return False for successful command output."""
+        output = """rloc16:0x5000 ext-addr:1a7fbf0434e4f043 ver:5
+ip6-addrs:
+    - fd00::1
+Done"""
+        assert is_response_timeout_error(output) is False
+    
+    def test_returns_false_for_different_errors(self):
+        """Should not match other error types."""
+        assert is_response_timeout_error("Error 1: InvalidArgument") is False
+        assert is_response_timeout_error("Error 2: NotFound") is False
+        assert is_response_timeout_error("Timeout occurred") is False
+    
+    def test_returns_false_for_empty_string(self):
+        """Should return False for empty output."""
+        assert is_response_timeout_error("") is False
+    
+    def test_detects_timeout_within_multiline_output(self):
+        """Should detect timeout anywhere in output."""
+        output = """
+Processing request...
+Waiting for response...
+Error 6: ResponseTimeout
+Failed to get diagnostic data
+Done
+"""
+        assert is_response_timeout_error(output) is True
+
+
+class TestBuildTimeoutErrorRecord:
+    """Tests for build_timeout_error_record helper function."""
+    
+    def test_builds_basic_error_record(self):
+        """Should build error record with minimal arguments."""
+        result = build_timeout_error_record(rloc16="0x5000")
+        
+        assert result["rloc16"] == "0x5000"
+        assert result["device_label"] == "Unknown"
+        assert result["result_table"] == []
+        assert result["result_table_count"] == 0
+        assert result["_error"] == {"type": "ResponseTimeout"}
+    
+    def test_builds_error_record_with_device_label(self):
+        """Should include provided device label."""
+        result = build_timeout_error_record(
+            rloc16="0x5000",
+            device_label="Kitchen Sensor"
+        )
+        
+        assert result["device_label"] == "Kitchen Sensor"
+    
+    def test_builds_error_record_with_custom_result_key(self):
+        """Should use custom result table key name."""
+        result = build_timeout_error_record(
+            rloc16="0x5000",
+            result_table_key="router_child_table"
+        )
+        
+        assert "router_child_table" in result
+        assert result["router_child_table"] == []
+        assert result["router_child_table_count"] == 0
+    
+    def test_builds_error_record_with_custom_rloc_key(self):
+        """Should use custom rloc field name."""
+        result = build_timeout_error_record(
+            rloc16="0x5000",
+            rloc_key="parent_rloc16"
+        )
+        
+        assert "parent_rloc16" in result
+        assert result["parent_rloc16"] == "0x5000"
+        assert "rloc16" not in result
+    
+    def test_builds_childip6_style_error_record(self):
+        """Should match childip6 error record structure."""
+        result = build_timeout_error_record(
+            rloc16="0x5000",
+            device_label="Living Room Bulb",
+            result_table_key="router_child_ip6_table",
+            rloc_key="parent_rloc16"
+        )
+        
+        expected = {
+            "parent_rloc16": "0x5000",
+            "device_label": "Living Room Bulb",
+            "router_child_ip6_table": [],
+            "router_child_ip6_table_count": 0,
+            "_error": {"type": "ResponseTimeout"},
+        }
+        assert result == expected
+    
+    def test_builds_childtable_style_error_record(self):
+        """Should match childtable error record structure."""
+        result = build_timeout_error_record(
+            rloc16="0x6400",
+            device_label="Bedroom Switch",
+            result_table_key="router_child_table",
+            rloc_key="parent_rloc16"
+        )
+        
+        expected = {
+            "parent_rloc16": "0x6400",
+            "device_label": "Bedroom Switch",
+            "router_child_table": [],
+            "router_child_table_count": 0,
+            "_error": {"type": "ResponseTimeout"},
+        }
+        assert result == expected
+    
+    def test_builds_routerneighbortable_style_error_record(self):
+        """Should match routerneighbortable error record structure."""
+        result = build_timeout_error_record(
+            rloc16="0x2800",
+            device_label="Gateway",
+            result_table_key="router_neighbor_table",
+            rloc_key="rloc16"
+        )
+        
+        expected = {
+            "rloc16": "0x2800",
+            "device_label": "Gateway",
+            "router_neighbor_table": [],
+            "router_neighbor_table_count": 0,
+            "_error": {"type": "ResponseTimeout"},
+        }
+        assert result == expected
+    
+    def test_error_type_is_always_response_timeout(self):
+        """Should always set error type to ResponseTimeout."""
+        result = build_timeout_error_record(rloc16="0x1234")
+        assert result["_error"]["type"] == "ResponseTimeout"
+    
+    def test_result_table_is_always_empty_list(self):
+        """Should always initialize result table as empty list."""
+        result = build_timeout_error_record(
+            rloc16="0x1234",
+            result_table_key="test_table"
+        )
+        assert "test_table" in result
+        assert result["test_table"] == []
+        assert isinstance(result["test_table"], list)
+    
+    def test_count_is_always_zero(self):
+        """Should always set count to 0."""
+        result = build_timeout_error_record(rloc16="0x1234")
+        # Find the count key
+        for key in result:
+            if key.endswith("_count"):
+                assert result[key] == 0
