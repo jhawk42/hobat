@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -202,3 +203,82 @@ def build_timeout_error_record(
     error_record[count_key] = 0
     
     return error_record
+
+
+def collect_per_router(
+    router_table_data: list[dict],
+    collect_fn: Callable[[str, dict | None, dict | None], dict],
+    extaddr_map: dict | None = None,
+    collection_name: str = "data",
+) -> list[dict]:
+    """Orchestrate per-router data collection with standardized logging.
+    
+    This function encapsulates the common pattern used by meshdiag collectors:
+    - Extract RLOCs from router table
+    - For each router, log collection start with device context
+    - Call collector function with (rloc16, router, extaddr_map)
+    - Collect results into a list
+    
+    Args:
+        router_table_data: Router table from fetch_and_parse_router_table().
+                          Should be list of dicts with "rloc16" and "extaddr" fields.
+        collect_fn: Callback function that collects data for one router.
+                   Signature: fn(rloc16: str, router: dict | None, extaddr_map: dict | None) -> dict
+        extaddr_map: Optional mapping of extaddr -> device_label for logging and collection.
+        collection_name: Name of data being collected (for logging), e.g. "meshdiag childip6".
+    
+    Returns:
+        List of collection results (one dict per router in router_table_data).
+    
+    Examples:
+        >>> def collect_child_table(rloc16, router, extaddr_map):
+        ...     # Fetch and parse childtable for this router
+        ...     return {"parent_rloc16": rloc16, "children": [...]}
+        
+        >>> router_table = fetch_and_parse_router_table(extaddr_map)
+        >>> results = collect_per_router(
+        ...     router_table_data=router_table,
+        ...     collect_fn=collect_child_table,
+        ...     extaddr_map=extaddr_map,
+        ...     collection_name="meshdiag childtable"
+        ... )
+    """
+    # Extract RLOCs from router table (filter out entries without rloc16)
+    router_rlocs = [
+        router.get("rloc16") 
+        for router in router_table_data 
+        if router.get("rloc16")
+    ]
+    
+    results = []
+    
+    for rloc16 in router_rlocs:
+        # Find the full router record for this rloc16
+        router = next(
+            (r for r in router_table_data if r.get("rloc16") == rloc16),
+            None
+        )
+        
+        # Log collection start with device context
+        if router:
+            extaddr = router.get("extaddr")
+            device_label = (
+                extaddr_map.get(extaddr, "Unknown") 
+                if extaddr_map and extaddr 
+                else "Unknown"
+            )
+            logging.info(
+                f"Getting {collection_name} for router rloc16 {rloc16} "
+                f"(Node: {device_label}, ExtAddr: {extaddr})..."
+            )
+        else:
+            logging.info(
+                f"Getting {collection_name} for router rloc16 {rloc16} "
+                "(Node: Unknown, ExtAddr: Unknown)..."
+            )
+        
+        # Call collector function
+        result = collect_fn(rloc16, router, extaddr_map)
+        results.append(result)
+    
+    return results
