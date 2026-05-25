@@ -6,7 +6,12 @@ from typing import Sequence
 
 from extaddr_device_label_map import load_extaddr_device_label_map
 from otbr_cli_router_table import fetch_and_parse_router_table
-from otbr_cli_util import load_extaddr_map_or_empty, resolve_collector_runtime
+from otbr_cli_util import (
+    build_timeout_error_record,
+    is_response_timeout_error,
+    load_extaddr_map_or_empty,
+    resolve_collector_runtime,
+)
 from util_ot_ctl import exec_ot_ctl
 from util_data import parse_datadir_from_argv, save_json_atomic
 
@@ -18,19 +23,18 @@ def fetch_meshdiag_child_ip6_for_device(parent_rloc16, router=None, extaddr_map=
     logging.debug(
         f"[DEBUG] Output of 'meshdiag childip6 {parent_rloc16}':\n{output}\n")
 
-    timeout_match = re.search(r"Error\s+(\d+):\s+ResponseTimeout", output)
-    if timeout_match:
-        return {
-            "parent_rloc16": parent_rloc16,
-            "device_label": extaddr_map.get(router.get("extaddr"), "Unknown")
+    if is_response_timeout_error(output):
+        device_label = (
+            extaddr_map.get(router.get("extaddr"), "Unknown")
             if router and extaddr_map
-            else "Unknown",
-            "router_child_ip6_table": [],
-            "router_child_ip6_table_count": 0,
-            "_error": {
-                "type": "ResponseTimeout",
-            },
-        }
+            else "Unknown"
+        )
+        return build_timeout_error_record(
+            rloc16=parent_rloc16,
+            device_label=device_label,
+            result_table_key="router_child_ip6_table",
+            rloc_key="parent_rloc16",
+        )
 
     router_child_ip6 = {
         "parent_rloc16": parent_rloc16,
