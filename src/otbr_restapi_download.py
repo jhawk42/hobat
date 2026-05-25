@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
@@ -11,6 +10,7 @@ from td_const import TD_DATA_DIR_ARG_HELP
 from otbr_restapi_util import (
     add_common_rest_client_args,
     build_rest_client_from_args,
+    emit_rest_payload_output,
     DEFAULT_ACCEPT,
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -21,7 +21,7 @@ from otbr_restapi_util import (
     OTBRClientError,
     OTBRRestApiClient,
 )
-from util_data import resolve_data_dir, resolve_data_file_path, save_json_atomic
+from util_data import resolve_data_dir, resolve_data_file_path
 
 # Retain local constants for backward compatibility with direct-entry tests
 HOST = DEFAULT_HOST
@@ -198,10 +198,8 @@ def download_all_restapi_endpoints(
         method = getattr(client, method_name)
         try:
             data = method(raw=True)
-            save_json_atomic(data, output_file)
+            emit_rest_payload_output(data, output_file, logging.getLogger(__name__))
             logging.info("OK: %s -> %s", method_name, output_file)
-            logging.debug("Saved %s data into %s as JSON:\n%s",
-                method_name, output_file, json.dumps(data, indent=4))
         except OTBRClientError as exc:
             logging.error("Failed to download %s: %s", method_name, exc)
             failures += 1
@@ -250,10 +248,8 @@ def fetch_and_save_diagnostics(
             diag = client.fetch_device_diagnostics(
                 device_id, types=diag_types, raw=True
             )
-            save_json_atomic(diag, output_file)
+            emit_rest_payload_output(diag, output_file, logging.getLogger(__name__))
             logging.info("Diagnostic saved: %s -> %s", device_id, output_file)
-            logging.debug("Saved diagnostic data for %s into %s as JSON:\n%s",
-                device_id, output_file, json.dumps(diag, indent=4))
         except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
             logging.warning("Diagnostic skipped for %s: %s", device_id, exc)
             failures += 1
