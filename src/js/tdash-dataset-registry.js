@@ -170,7 +170,7 @@ export const DATASET_REGISTRY = [
   {
     source: "merged",
     value: "merged_all_deep_wide_otbr_cli_restapi_eve",
-    label: "premerged: otbr-cli, otbr-restapi, eve",
+    label: "premerged: topology (otbr-cli, otbr-restapi, mdns...)",
     files: ["td-merged-topology-all.json"],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",

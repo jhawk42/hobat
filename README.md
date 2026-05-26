@@ -200,4 +200,144 @@ Example format of td-static-extaddr-device-label.json
     }
 ]
 ```
+
+# Dataset Merge
+
+The dataset merge capability combines multiple Thread topology JSON files from different sources (CLI, REST API, mDNS) into a single consolidated topology file. This enables comprehensive device information by merging complementary data from multiple sources.
+
+## Merge Features
+
+The merge system provides:
+
+- **Identity-Based Merging:** Nodes are matched by `extaddr` (Extended MAC Address), ensuring correct device correlation across sources
+- **Field Normalization:** Automatically handles both snake_case (CLI) and camelCase (REST API) field naming conventions
+- **Composite Identity Matching:** 
+  - Routes merged by `(owner_rloc16, destination_route_id)` composite identity
+  - Children merged by `(parent_rloc16, child_extaddr)` composite identity
+- **Sequence Number Precedence:** Uses RFC 1982 serial arithmetic for 8-bit sequence numbers with wraparound (0-255)
+- **Partition Awareness:** Respects Thread partition boundaries for routing data
+- **mDNS Integration:** Merges service discovery data (vendor, model, version) with Thread topology
+- **Source Precedence:** REST API (highest) > CLI > mDNS > Eve (lowest) for conflict resolution
+- **Conflict Tracking:** Logs all merge conflicts in `_merge_conflicts` field
+- **Source Tracking:** Records all contributing files in `_source_files` field
+
+## Running the Merge
+
+```bash
+# Basic merge with defaults
+python3 -m td_cli merge-dataset
+
+# With custom options
+python3 -m td_cli merge-dataset --datadir /path/to/data --output my-merged.json
+
+# Docker container
+docker exec tdash python3 -m td_cli merge-dataset
+```
+
+Or directly using the merge script:
+
+```bash
+# From src directory
+python3 src/dataset_merge.py --base-dir data/ --output td-merged-topology-all.json
+
+# With merge report
+python3 src/dataset_merge.py --base-dir data/ --report-file td-merge-report.json
+```
+
+## Input Files
+
+The merge processes these files by default:
+
+**Thread CLI Sources:**
+- `td-otbr-cli-router-table.json` - Router table summary
+- `td-otbr-cli-meshdiag-topology.json` - Mesh diagnostic topology
+- `td-otbr-cli-networkdiag-topology-poll.json` - Network diagnostic data (poll mode)
+- `td-otbr-cli-networkdiag-topology-multicast-network.json` - Multicast network data
+- `td-otbr-cli-meshdiag-router-neighbortables.json` - Router neighbor tables
+
+**Thread REST API Sources:**
+- `td-otbr-restapi-devices.json` - Device list with detailed information
+- `td-otbr-restapi-diagnostics.json` - Device diagnostics data
+
+**mDNS Sources:**
+- `td-mdns-scopes-br.json` - Border Router mDNS records (_meshcop._udp)
+- `td-mdns-scopes-thread.json` - Thread device mDNS records
+- `td-mdns-scopes-hap.json` - HomeKit Accessory Protocol records
+- `td-mdns-scopes-matter.json` - Matter device records
+
+**Legacy Sources:**
+- `td-eve-topology.json` - Eve app topology export
+
+## Output Format
+
+The merged output (`td-merged-topology-all.json`) is a JSON array of device records with:
+
+```json
+[
+  {
+    "extaddr": "0011223344556677",
+    "rloc16": "0x1400",
+    "device_label": "Living Room HomePod",
+    "route_data": {
+      "id_sequence": 15,
+      "route_data": [...]
+    },
+    "children": [...],
+    "service_info": {
+      "decoded_properties": {
+        "vn": "Apple",
+        "mn": "BorderRouter",
+        "tv": "1.3.0"
+      }
+    },
+    "_source_files": [
+      "td-otbr-cli-networkdiag-topology-poll.json",
+      "td-otbr-restapi-diagnostics.json",
+      "td-mdns-scopes-br.json"
+    ],
+    "_merge_conflicts": [...]
+  }
+]
+```
+
+## Merge Behavior
+
+**Identity Matching:**
+- Primary identity: `extaddr` (immutable 64-bit EUI-64 address)
+- Secondary: `omr_ipv6_addr` (stable OMR IPv6 address)
+- Tertiary: `rloc16` (partition-scoped, may change)
+
+**Route Data Merging:**
+- Routes matched by `(owner_rloc16, route_id)` - no duplicates
+- Highest `id_sequence` wins (with 8-bit wraparound: 5 > 250)
+- Partition-aware: routes only valid within same `partition_id`
+
+**Children Array Merging:**
+- Children matched by `(parent_rloc16, child_extaddr)`
+- `childId` is parent-local only (not globally unique)
+- Prevents duplicate children with same extaddr
+
+**mDNS Data Merging:**
+- Timestamp precedence: newer `captured_at_epoch` wins
+- Event priority: add > update > remove
+- Service info deeply merged with nested structure preservation
+
+**Field Conflicts:**
+- Non-empty incoming values overwrite empty base values
+- For conflicts between non-empty values: base wins, conflict logged
+- Special handling for routes, children, and mDNS data
+
+## Troubleshooting
+
+See [doc/merge_troubleshooting.md](doc/merge_troubleshooting.md) for detailed troubleshooting guidance.
+
+**Common Issues:**
+
+1. **Missing input files:** Ensure all required JSON files exist in the data directory
+2. **Partition conflicts:** Review `_merge_conflicts` field for partition-related issues
+3. **Route duplicates:** Check that `id_sequence` is being set correctly in source data
+4. **Performance:** Large networks (100+ nodes) may take 1-2 seconds; this is normal
+
+For more details on merge implementation, see the [plan/](plan/) directory for phase documentation.
+
 end

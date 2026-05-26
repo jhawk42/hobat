@@ -66,6 +66,8 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   "mode.device",
   "scope",
   "status",
+  "vendor_name",
+  "vendorName"  
 ]);
 
 // ── Query normalisation ────────────────────────────────────────────────────────
