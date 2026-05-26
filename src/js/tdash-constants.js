@@ -685,36 +685,106 @@ export const VIS_OPTIONS = {
 
 // ── Table column priority order ───────────────────────────────────────────────
 
+/**
+ * Ordered list of device record field names for table column priority.
+ * 
+ * Fields appear in the table view in this order (left to right).
+ * The priority system organizes fields into 5 tiers:
+ * 
+ * - **TIER 1: Primary Identity** - Core device identifiers (rloc16, extaddr, device_label, routerId)
+ * - **TIER 2: Secondary Identity** - Additional identifiers (omr_ipv6_addr, mlEidIid, room)
+ * - **TIER 3: Device Role & Status** - Device type, role, and mode information
+ * - **TIER 4: Topology & Connectivity** - Network topology, link quality, connectivity metrics
+ * - **TIER 5: Advanced/Diagnostic** - Detailed diagnostics, vendor info, MLE/MAC counters
+ * 
+ * **Field Naming Conventions:**
+ * - Supports both snake_case (CLI datasets) and camelCase (REST API datasets)
+ * - Both variants can appear (e.g., extaddr and extAddress, omr_ipv6_addr and omrIpv6Address)
+ * - Missing fields are gracefully hidden (no errors)
+ * 
+ * **Dataset Compatibility:**
+ * - CLI datasets (meshdiag, networkdiag) provide snake_case fields
+ * - REST API datasets (devices-list, diagnostics-fetch) provide camelCase fields
+ * - Eve topology and MDNS datasets have mixed conventions
+ * - Merged datasets may contain both naming conventions
+ * 
+ * @type {string[]}
+ * @constant
+ */
 export const TABLE_PRIORITY_COLUMNS = [
+  // === TIER 1: Primary Identity ===
   "rloc16",
   "extaddr",
+  "extAddress",
   "device_label",
   "name",
-  "room",
+  "routerId",
+  "router_id",
+  "eui64",
+  "id",
   "ID",
+  
+  // === TIER 2: Secondary Identity ===
+  "omr_ipv6_addr",
+  "omrIpv6Address",
+  "mlEidIid",
+  "room",
   "Extended MAC",
   "Next Hop",
   "Path Cost",
   "LQ In",
   "LQ Out",
   "Age",
+  
+  // === TIER 3: Device Role & Status ===
   "type",
+  "Role",
   "br",
+  "isBorderRouter",
+  "leader",
+  "isLeader",
+  "is_router",
+  "isPrimaryBBR",
   "status",
-  "icon",
+  "mode.device",
+  "mode.deviceTypeFTD",
   "ver",
+  "version",
   "thread_version",
   "thread_stack_version",
+  "threadStackVersion",
+  
+  // === TIER 4: Topology & Connectivity ===
   "total_children",
+  "has_children",
   "total_links",
   "total_link_3",
   "total_link_2",
   "total_link_1",
   "router_neighbor_table_count",
   "router_child_table_count",
-  "mode.device",
-  "omr_ipv6_addr",
+  "connectivity.activeRouters",
+  "connectivity.active_routers",
+  "connectivity.linkQuality3",
+  "connectivity.link_quality_3",
+  "connectivity.linkQuality2",
+  "connectivity.link_quality_2",
+  "connectivity.linkQuality1",
+  "connectivity.link_quality_1",
+  "leaderData.partitionId",
+  "leader_data.partition_id",
+  "leaderData.leaderRouterId",
+  "leader_data.leader_router_id",
+  
+  // === TIER 5: Advanced/Diagnostic ===
+  "icon",
   "scope",
+  "vendor_name",
+  "vendorName",
+  "vendor_model",
+  "vendorModel",
+  "vendor_sw_version",
+  "vendorSwVersion",
   "tlv_values",
   "mac_counters.ifinerrors_pct",
   "mac_counters.ifouterrors_pct",

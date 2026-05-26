@@ -2,25 +2,68 @@ import { TABLE_PRIORITY_COLUMNS } from "./tdash-constants.js";
 import { toText, getColumnValue, isPlainObject } from "./tdash-utils.js";
 
 // ── Search target fields (normal mode) ────────────────────────────────────────
-//
-// Subset of TABLE_PRIORITY_COLUMNS covering human-meaningful identity and role
-// fields. Used when advancedMode is false.
-//
+
+/**
+ * Device record fields that are searchable in normal (non-advanced) search mode.
+ * 
+ * This is a curated subset of TABLE_PRIORITY_COLUMNS containing fields that are
+ * most meaningful for user-initiated searches: identity fields, addresses, device
+ * roles, and version information.
+ * 
+ * **Field Categories:**
+ * - **Identity & Addresses** - Core identifiers like rloc16, extaddr, device_label, routerId
+ * - **Device Type & Role** - Role, type, br, leader, isBorderRouter
+ * - **Versions** - Thread stack version, software version
+ * - **Other** - mode.device, scope, status
+ * 
+ * **Usage:**
+ * - Normal mode search (`advancedMode === false`) checks only these fields
+ * - Advanced mode search (`advancedMode === true`) checks all fields in the record
+ * - Search is case-insensitive and supports partial matches
+ * 
+ * **Field Naming:**
+ * - Includes both snake_case (CLI) and camelCase (REST API) variants
+ * - Examples: extaddr/extAddress, omr_ipv6_addr/omrIpv6Address, thread_stack_version/threadStackVersion
+ * - Both variants are searchable to support all dataset types
+ * 
+ * @type {Readonly<string[]>}
+ * @constant
+ * @see {@link TABLE_PRIORITY_COLUMNS} for complete field list
+ */
 export const SEARCH_TARGET_FIELDS = Object.freeze([
+  // === Identity & Addresses ===
   "rloc16",
   "extaddr",
+  "extAddress",
+  "eui64",
   "device_label",
   "name",
   "room",
   "ID",
   "Extended MAC",
+  "routerId",
+  "router_id",
+  "omr_ipv6_addr",
+  "omrIpv6Address",
+  "mlEidIid",
+  
+  // === Device Type & Role ===
   "type",
+  "Role",
   "br",
+  "isBorderRouter",
+  "leader",
+  "isLeader",
+  
+  // === Versions ===
   "ver",
+  "version",
   "thread_version",
   "thread_stack_version",
+  "threadStackVersion",
+  
+  // === Other ===
   "mode.device",
-  "omr_ipv6_addr",
   "scope",
   "status",
 ]);
