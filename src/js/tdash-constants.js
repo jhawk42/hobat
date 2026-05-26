@@ -238,6 +238,7 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
       EDGE_CATEGORY_DEFAULT_3,
       EDGE_CATEGORY_EVE_ROUTE,
       EDGE_CATEGORY_EVE_NATIVE_ROUTE,
+      EDGE_CATEGORY_OTBR_ROUTE,
     ],
   },
   {
@@ -248,6 +249,7 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
       EDGE_CATEGORY_DEFAULT_2,
       EDGE_CATEGORY_EVE_ROUTE,
       EDGE_CATEGORY_EVE_NATIVE_ROUTE,
+      EDGE_CATEGORY_OTBR_ROUTE,
     ],
   },
   {
@@ -258,6 +260,7 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
       EDGE_CATEGORY_DEFAULT_1,
       EDGE_CATEGORY_EVE_ROUTE,
       EDGE_CATEGORY_EVE_NATIVE_ROUTE,
+      EDGE_CATEGORY_OTBR_ROUTE,
     ],
   },
   { value: LINK_FILTER_LQ_NONE,             label: "No LQ Data / Unknown",   alwaysShow: true, group: "Link Quality" },

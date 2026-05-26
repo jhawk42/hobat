@@ -200,7 +200,7 @@ When two rows share any key, they are merged: the first non-empty value wins; co
 
 | topologyMode | Adaptor | Input |
 |---|---|---|
-| `meshdiag-networkdiag` | `adaptMeshdiagNetworkdiag` | meshdiag + networkdiag + neighbor/child tables |
+| `meshdiag-networkdiag` | `adaptMeshdiagNetworkdiag` | meshdiag + networkdiag (with route_data links) + neighbor/child tables |
 | `merged-detailed` | `adaptMergedDetailed` | pre-merged topology-all file |
 | `otbr_restapi` | `adaptOtbrRestApi` | REST API devices + diagnostics |
 | `eve_enhanced` | `adaptEve` | td-eve-topology.json |
@@ -253,6 +253,64 @@ Each edge carries:
 | `isParentChild: bool` | True for parent→child edges; used by `lq_parent_child` filter |
 | `baseHidden: bool` | When `true` the edge is never shown regardless of filter |
 | `color`, `width`, `dashes` | Visual style from `EDGE_LQ_STYLES` constants |
+
+### Link Quality Processing by Dataset Type
+
+Different datasets encode link quality information in different formats. The adaptors normalize these into the common `lqLevel` (0–3) and `linkCategories[]` properties:
+
+#### meshdiag datasets (OTBR CLI `meshdiag topology`)
+
+**Source data:** `3_links[]`, `2_links[]`, `1_links[]` arrays on each router node
+
+**Processing:** Each link array is iterated, creating edges with:
+- `linkCategories: [EDGE_CATEGORY_DEFAULT_3]` (for `3_links`), `[EDGE_CATEGORY_DEFAULT_2]` (for `2_links`), or `[EDGE_CATEGORY_DEFAULT_1]` (for `1_links`)
+- `lqLevel: 3` (high), `2` (medium), or `1` (low) via `lqStyleFromField(field)`
+- Visual style (width, color, dashes) from `EDGE_LQ_STYLES.high`/`.medium`/`.low`
+
+**Example:** A router with `"3_links": [{"id": "52", "rloc16": "0xd000", ...}]` creates an edge with `EDGE_CATEGORY_DEFAULT_3` and `lqLevel: 3`.
+
+#### networkdiag datasets (OTBR CLI `networkdiag topology`)
+
+**Source data:** `route_data.route_data[]` arrays with `link_quality_in` and `link_quality_out` numeric values (0–3 scale)
+
+**Processing:** Each route entry creates an edge with:
+- `linkCategories: [EDGE_CATEGORY_OTBR_ROUTE]`
+- `lqLevel: 0–3` computed by `lqStyleFromAvgLqi(max(lqi_in, lqi_out), 3)` — takes the conservative (max) value
+  - `avgLqi >= 3` → `lqLevel: 3` (high)
+  - `avgLqi >= 2` → `lqLevel: 2` (medium)
+  - `avgLqi < 2` → `lqLevel: 1` (low)
+- Visual style from `EDGE_LQ_STYLES` based on computed level
+
+**Example:** A route with `"link_quality_in": 3, "link_quality_out": 2` computes `max(3, 2) = 3` → `lqLevel: 3`, edge category `EDGE_CATEGORY_OTBR_ROUTE`.
+
+#### Eve datasets (Eve Thread Network Layout)
+
+**Source data (enhanced):** `routes[]` with `avgLqi` values (0–255 scale)
+
+**Processing:**
+- `linkCategories: [EDGE_CATEGORY_EVE_ROUTE]`
+- `lqLevel` computed via `lqStyleFromAvgLqi(avgLqi, 255)`:
+  - `avgLqi >= 200` → `lqLevel: 3`
+  - `avgLqi >= 128` → `lqLevel: 2`
+  - `avgLqi < 128` → `lqLevel: 1`
+
+**Source data (native):** `routes[]` with `quality` values (0–3 scale)
+
+**Processing:**
+- `linkCategories: [EDGE_CATEGORY_EVE_NATIVE_ROUTE]`
+- `lqLevel` computed via `lqStyleFromAvgLqi(quality, 3)` (same thresholds as networkdiag)
+
+### Edge Category and Filter Mapping
+
+Link filter dropdown options declare `requiredEdgeCategories[]` — the option is shown only when the dataset contains edges with at least one matching category. This ensures link quality filters (High/Medium/Low) appear for any dataset type that provides link quality data:
+
+| Filter Option | Required Edge Categories | Actual Filter Predicate |
+|---|---|---|
+| `lq_high` (High LQ3) | `DEFAULT_3`, `EVE_ROUTE`, `EVE_NATIVE_ROUTE`, `OTBR_ROUTE` | `edge.lqLevel === 3` |
+| `lq_medium` (Medium LQ2) | `DEFAULT_2`, `EVE_ROUTE`, `EVE_NATIVE_ROUTE`, `OTBR_ROUTE` | `edge.lqLevel === 2` |
+| `lq_low` (Low LQ1) | `DEFAULT_1`, `EVE_ROUTE`, `EVE_NATIVE_ROUTE`, `OTBR_ROUTE` | `edge.lqLevel === 1` |
+
+The filter predicate tests `lqLevel` (not category), so it works uniformly across all dataset types. The category list only controls dropdown visibility.
 
 ---
 

@@ -284,6 +284,33 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN] });
       routerIdsWithChildren.add(fromId);
     });
+
+    // Process route_data routes from networkdiag (multicast variant).
+    // route_data.route_data[] contains routing table entries with LQI metrics.
+    // Each route has a direct rloc16 target (no ID conversion needed).
+    (Array.isArray(node.route_data?.route_data) ? node.route_data.route_data : []).forEach((route) => {
+      const toRloc16 = toText(route.rloc16);
+      if (!toRloc16) return;
+
+      // Ensure target node exists
+      const toId = ensureNode(
+        toRloc16,
+        { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
+        { source: 'networkdiagnostic', shape: 'box', color: NODE_COLORS.router }
+      );
+
+      // Compute LQI-based edge style
+      const lqIn = toFiniteNumber(route.link_quality_in) || 0;
+      const lqOut = toFiniteNumber(route.link_quality_out) || 0;
+      const avgLqi = Math.max(lqIn, lqOut); // Take max for conservative estimate
+      const lqStyle = lqStyleFromAvgLqi(avgLqi, 3);
+
+      // Add edge with LQI styling
+      addEdge(edgeMap, edgeData, fromId, toId, {
+        ...lqStyle,
+        linkCategories: [EDGE_CATEGORY_OTBR_ROUTE]
+      });
+    });
   }
 
   restApiDiagnostics.forEach((node) => {
