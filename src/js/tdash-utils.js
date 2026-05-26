@@ -417,29 +417,104 @@ export function shouldExcludeDetailPath(_path, _context) {
   return false;
 }
 
+/**
+ * Sorts device detail entries by priority order for display in detail panels.
+ * 
+ * This function orders fields according to a 5-tier priority system that matches
+ * TABLE_PRIORITY_COLUMNS. Fields appear in the detail panel sections (Keys,
+ * Highlights, Connections, Routes & Links) in this priority order.
+ * 
+ * **Priority Tiers:**
+ * - **TIER 1: Primary Identity** - Core identifiers (rloc16, extaddr, routerId, device_label)
+ * - **TIER 2: Secondary Identity** - Additional identifiers (omr_ipv6_addr, mlEidIid, room)
+ * - **TIER 3: Device Role & Status** - Role, type, mode information
+ * - **TIER 4: Topology & Connectivity** - Link quality, connectivity metrics
+ * - **TIER 5: Advanced/Diagnostic** - Counters, vendor info, diagnostics
+ * 
+ * **Behavior:**
+ * - Fields in priorityKeys appear first, in the specified order
+ * - Fields not in priorityKeys appear after, in alphabetical order
+ * - Supports both snake_case and camelCase field naming conventions
+ * - Missing fields are gracefully skipped (no errors)
+ * 
+ * @param {Array<[string, any]>} details - Array of [fieldName, fieldValue] tuples
+ * @returns {Array<[string, any]>} Sorted array of [fieldName, fieldValue] tuples
+ * 
+ * @example
+ * const details = [['type', 'router'], ['rloc16', '0x4400'], ['extaddr', 'abc123']];
+ * const sorted = sortDetailsWithPriority(details);
+ * // Returns: [['rloc16', '0x4400'], ['extaddr', 'abc123'], ['type', 'router']]
+ */
 export function sortDetailsWithPriority(details) {
   const priorityKeys = [
+    // === TIER 1: Primary Identity ===
     "rloc16",
     "extaddr",
+    "extAddress",
     "device_label",
     "name",
+    "routerId",
+    "router_id",
+    "eui64",
+    "id",
+    "ID",
+    
+    // === TIER 2: Secondary Identity ===
+    "omr_ipv6_addr",
+    "omrIpv6Address",
+    "mlEidIid",
+    "room",
+    "Extended MAC",
+    
+    // === TIER 3: Device Role & Status ===
     "type",
+    "Role",
     "br",
+    "isBorderRouter",
+    "leader",
+    "isLeader",
+    "is_router",
+    "isPrimaryBBR",
     "status",
     "icon",
+    "mode",
+    "mode.device",
+    "mode.deviceTypeFTD",
     "ver",
+    "version",
     "thread_version",
     "thread_stack_version",
-    "total_links",
+    "threadStackVersion",
+    
+    // === TIER 4: Topology & Connectivity ===
     "total_children",
+    "has_children",
+    "total_links",
     "total_link_3",
     "total_link_2",
     "total_link_1",
     "router_neighbor_table_count",
     "router_child_table_count",
-    "mode",
-    "mode.device",
-    "omr_ipv6_addr",
+    "connectivity.activeRouters",
+    "connectivity.active_routers",
+    "connectivity.linkQuality3",
+    "connectivity.link_quality_3",
+    "connectivity.linkQuality2",
+    "connectivity.link_quality_2",
+    "connectivity.linkQuality1",
+    "connectivity.link_quality_1",
+    "leaderData.partitionId",
+    "leader_data.partition_id",
+    "leaderData.leaderRouterId",
+    "leader_data.leader_router_id",
+    
+    // === TIER 5: Advanced/Diagnostic ===
+    "vendor_name",
+    "vendorName",
+    "vendor_model",
+    "vendorModel",
+    "vendor_sw_version",
+    "vendorSwVersion",
     "tlv_values",
     "mac_counters.ifinerrors_pct",
     "mac_counters.ifouterrors_pct",
@@ -448,6 +523,10 @@ export function sortDetailsWithPriority(details) {
     "mle_counters.partitionidchanges",
     "mle_counters.betterpartitionattachattempts",
     "mle_counters.parentchanges",
+    "mle_counters.totalparentpartitionchanges",
+    "mle_counters.attachattempts",
+    "mle_counters.detachedrole",
+    "mle_counters.disabledrole",
   ];
   const priorityIndex = new Map(priorityKeys.map((k, i) => [k, i]));
   return [...details].sort((a, b) => {

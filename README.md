@@ -66,6 +66,24 @@ Note: The tdash webserver will automatically use td_cli.py to refresh the thread
 - When cached info files don't exist.
 - When cached info files are stale beyond a certain threshold.
 
+## Dashboard Features
+
+The tdash web dashboard provides comprehensive visualization and querying capabilities:
+
+- **Multiple Views:** Topology view (graph) and Table view for different analysis needs
+- **Search:** Search devices by rloc16, extaddr, device_label, routerId, and 20+ other identity fields
+- **Filtering:** Filter by device type (border router, router, FTD, MTD), link quality (LQ3/LQ2/LQ1), and diagnostic criteria
+- **Detail Panels:** Click any device to view comprehensive details organized into sections (Keys, Highlights, Connections, Routes & Links)
+- **77+ Device Fields:** Supports extensive device information including:
+  - Identity: rloc16, extaddr, device_label, routerId, omrIpv6Address
+  - Role & Status: type, mode flags, leaderData, border router/leader indicators
+  - Connectivity: link quality, connectivity metrics, neighbor/child counts
+  - Diagnostics: MLE counters, MAC counters, vendor information
+- **Multiple Data Sources:** Supports CLI (meshdiag, networkdiag), REST API, mDNS, and Eve topology datasets
+- **Flexible Field Naming:** Automatically handles both snake_case (CLI) and camelCase (REST API) field conventions
+
+For complete field reference and dashboard usage, see [doc/dashboard_ui_fields.md](doc/dashboard_ui_fields.md).
+
 ### tdash cli examples
 
 See below for additional details for running td_cli.py commands 
