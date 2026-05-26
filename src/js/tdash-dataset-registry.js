@@ -38,7 +38,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "default_links"
+    defaultLinkFilter: "all_links"
   },
 
   {
@@ -49,7 +49,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "default_links"
+    defaultLinkFilter: "all_links"
   },  
 
   // ── Multi-file merged (otbr-cli) ──

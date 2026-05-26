@@ -20,25 +20,35 @@ from util_data import data_file_path, resolve_data_dir, save_json_atomic
 # TLV value sets used for different detail levels by networkdiag functions to request Thread diagnostic information from devices.
 # Some devices fail to return any TLV data when the list contains certain TLVs e.g. 28 Thread Stack Version TLV.
 # So multiple detail levels allow retries with progressively simpler TLV sets.
+# Note: Some Thread device implementations may not respond with all requested TLVs.
 
-# TLV 0 = Ext Address
-# TLV 1 = RLOC16
-# TLV 2 = Mode
+# TLV 0 = Ext Address (MAC Extended Address)
+# TLV 1 = RLOC16 (Address16)
+# TLV 2 = Mode (Capabilities)
+# TLV 4 = Connectivity (Physical state, link quality, parent metrics, routing costs)
+# TLV 5 = Route64 (ID sequence tracking paths and routing costs to all Router IDs)
+# TLV 6 = Leader Data (Partition ID, Weighting, Leader node address)
 # TLV 8 = IPv6 Address List
 # TLV 9 = MAC Counters
 # TLV 16 = Child Table
-# TLV 28 = Thread Stack Version
+# TLV 23 = EUI64 (Factory-assigned 8-byte global identifier)
+# TLV 24 = Thread Version (Protocol runtime version)
+# TLV 25 = Vendor Name (Hardware creator name)
+# TLV 26 = Vendor Model (Product SKU hardware identification)
+# TLV 27 = Vendor SW Version (Running firmware version)
+# TLV 28 = Vendor App URL (Developer/device-specific support URL, labeled as Thread Stack Version)
 # TLV 34 = MLE Counters
 
 # ROUTER TLVs - includes childtable
-TLV_VALUES_DETAILED = "0 1 2 28 8 16 9 34"
+TLV_VALUES_DETAILED = "0 1 2 23 8 4 6 24 25 26 27 28 5 16 9 34"
 TLV_VALUES_MEDIUM = "0 1 2 8 16 9"
-TLV_VALUES_SIMPLE = "0 1 2 8"
-# CHILD TLVs
-TLV_VALUES_CHILD_DETAILED = "0 1 2 8 28 9 34"
-TLV_VALUES_CHILD_MEDIUM = "0 1 2 8 9"
-TLV_VALUES_CHILD_SIMPLE = "0 1 2 8"
+TLV_VALUES_BASIC = "0 1 2 8"
 
+# CHILD TLVs (excludes TLV 16 Child Table and TLV 6 Leader Data)
+TLV_VALUES_CHILD_DETAILED = "0 1 2 23 8 4 24 25 26 27 28 5 9 34"
+TLV_VALUES_CHILD_MEDIUM_TV_MAC  = "0 1 2 8 24 9"
+TLV_VALUES_CHILD_MEDIUM_MAC = "0 1 2 8 9"
+TLV_VALUES_CHILD_BASIC = "0 1 2 8"
 
 def fetch_ipv6_addresses():
     """
@@ -99,6 +109,14 @@ def parse_ipv6_address_list(output):
                 or line.strip().startswith("Child Table:")
                 or line.strip().startswith("MAC Counters:")
                 or line.strip().startswith("MLE Counters:")
+                or line.strip().startswith("Connectivity:")
+                or line.strip().startswith("Leader Data:")
+                or line.strip().startswith("Vendor Name:")
+                or line.strip().startswith("Vendor Model:")
+                or line.strip().startswith("Vendor SW Version:")
+                or line.strip().startswith("Route:")
+                or line.strip().startswith("Thread Stack Version:")
+                or line.strip().startswith("EUI64:")
                 or ("Ext Address:" in line and "Rloc16:" not in line)
             ):
                 # End of IP6 list section
@@ -618,6 +636,320 @@ def parse_time_statistics(output):
     return time_stats
 
 
+def parse_eui64(output):
+    """Extracts EUI64 hardware address from diagnostic output (TLV 23).
+    
+    Args:
+        output: Raw diagnostic output string
+    
+    Returns:
+        String with 16-char hex EUI64 (e.g., "f434f0fffe1e1774") or None if not found
+    """
+    match = re.search(r"EUI64:\s*([0-9a-fA-F]{16})", output)
+    return match.group(1).lower() if match else None
+
+
+def parse_connectivity(output):
+    """Extracts Connectivity metrics from diagnostic output (TLV 4).
+    
+    Thread connectivity metrics provide physical state, link quality, parent metrics,
+    and routing costs for a device. These values help assess the device's position
+    and connectivity quality within the mesh network.
+    
+    Args:
+        output: Raw diagnostic output string
+    
+    Returns:
+        Dictionary with connectivity fields, or empty dict {} if not found:
+        {
+            "parent_priority": int,
+            "link_quality_3": int,
+            "link_quality_2": int,
+            "link_quality_1": int,
+            "leader_cost": int,
+            "id_sequence": int,
+            "active_routers": int,
+            "sed_buffer_size": int,
+            "sed_datagram_count": int
+        }
+    """
+    connectivity = {}
+    lines = output.split("\n")
+    in_connectivity_section = False
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Start of Connectivity section
+        if stripped == "Connectivity:":
+            in_connectivity_section = True
+            continue
+        
+        if not in_connectivity_section:
+            continue
+        
+        # End connectivity section at next top-level field
+        if stripped and not line.startswith(" "):
+            break
+        
+        # Parse connectivity fields
+        if "ParentPriority:" in line:
+            match = re.search(r"ParentPriority:\s*(\d+)", line)
+            if match:
+                connectivity["parent_priority"] = int(match.group(1))
+        elif "LinkQuality3:" in line:
+            match = re.search(r"LinkQuality3:\s*(\d+)", line)
+            if match:
+                connectivity["link_quality_3"] = int(match.group(1))
+        elif "LinkQuality2:" in line:
+            match = re.search(r"LinkQuality2:\s*(\d+)", line)
+            if match:
+                connectivity["link_quality_2"] = int(match.group(1))
+        elif "LinkQuality1:" in line:
+            match = re.search(r"LinkQuality1:\s*(\d+)", line)
+            if match:
+                connectivity["link_quality_1"] = int(match.group(1))
+        elif "LeaderCost:" in line:
+            match = re.search(r"LeaderCost:\s*(\d+)", line)
+            if match:
+                connectivity["leader_cost"] = int(match.group(1))
+        elif "IdSequence:" in line:
+            match = re.search(r"IdSequence:\s*(\d+)", line)
+            if match:
+                connectivity["id_sequence"] = int(match.group(1))
+        elif "ActiveRouters:" in line:
+            match = re.search(r"ActiveRouters:\s*(\d+)", line)
+            if match:
+                connectivity["active_routers"] = int(match.group(1))
+        elif "SedBufferSize:" in line:
+            match = re.search(r"SedBufferSize:\s*(\d+)", line)
+            if match:
+                connectivity["sed_buffer_size"] = int(match.group(1))
+        elif "SedDatagramCount:" in line:
+            match = re.search(r"SedDatagramCount:\s*(\d+)", line)
+            if match:
+                connectivity["sed_datagram_count"] = int(match.group(1))
+    
+    return connectivity
+
+
+def parse_leader_data(output):
+    """Extracts Leader Data from diagnostic output (TLV 6).
+    
+    Leader data contains partition and network version information that helps
+    identify the network partition and track network data changes.
+    
+    Args:
+        output: Raw diagnostic output string
+    
+    Returns:
+        Dictionary with leader data fields, or empty dict {} if not found:
+        {
+            "partition_id": str,          # hex string with 0x prefix
+            "weighting": int,
+            "data_version": int,
+            "stable_data_version": int,
+            "leader_router_id": str       # hex string with 0x prefix
+        }
+    """
+    leader_data = {}
+    lines = output.split("\n")
+    in_leader_section = False
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Start of Leader Data section
+        if stripped == "Leader Data:":
+            in_leader_section = True
+            continue
+        
+        if not in_leader_section:
+            continue
+        
+        # End leader data section at next top-level field
+        if stripped and not line.startswith(" "):
+            break
+        
+        # Parse leader data fields
+        if "PartitionId:" in line:
+            match = re.search(r"PartitionId:\s*(0x[0-9a-fA-F]+)", line)
+            if match:
+                leader_data["partition_id"] = match.group(1)
+        elif "Weighting:" in line:
+            match = re.search(r"Weighting:\s*(\d+)", line)
+            if match:
+                leader_data["weighting"] = int(match.group(1))
+        elif "StableDataVersion:" in line:
+            match = re.search(r"StableDataVersion:\s*(\d+)", line)
+            if match:
+                leader_data["stable_data_version"] = int(match.group(1))
+        elif "DataVersion:" in line:
+            match = re.search(r"DataVersion:\s*(\d+)", line)
+            if match:
+                leader_data["data_version"] = int(match.group(1))
+        elif "LeaderRouterId:" in line:
+            match = re.search(r"LeaderRouterId:\s*(0x[0-9a-fA-F]+)", line)
+            if match:
+                leader_data["leader_router_id"] = match.group(1)
+    
+    return leader_data
+
+
+def parse_vendor_name(output):
+    """Extracts Vendor Name from diagnostic output (TLV 25).
+    
+    Args:
+        output: Raw diagnostic output string
+    
+    Returns:
+        String with vendor name (e.g., "Apple") or None if empty/missing
+    """
+    match = re.search(r"Vendor Name:[ \t]*([^\r\n]*)$", output, re.MULTILINE)
+    if match:
+        vendor_name = match.group(1).strip()
+        return vendor_name if vendor_name else None
+    return None
+
+
+def parse_vendor_model(output):
+    """Extracts Vendor Model from diagnostic output (TLV 26).
+    
+    Args:
+        output: Raw diagnostic output string
+    
+    Returns:
+        String with vendor model (e.g., "Default") or None if empty/missing
+    """
+    match = re.search(r"Vendor Model:[ \t]*([^\r\n]*)$", output, re.MULTILINE)
+    if match:
+        vendor_model = match.group(1).strip()
+        return vendor_model if vendor_model else None
+    return None
+
+
+def parse_vendor_sw_version(output):
+    """Extracts Vendor SW Version from diagnostic output (TLV 27).
+    
+    Args:
+        output: Raw diagnostic output string
+    
+    Returns:
+        String with vendor software version (e.g., "Default") or None if empty/missing
+    """
+    match = re.search(r"Vendor SW Version:[ \t]*([^\r\n]*)$", output, re.MULTILINE)
+    if match:
+        vendor_sw_version = match.group(1).strip()
+        return vendor_sw_version if vendor_sw_version else None
+    return None
+
+
+def parse_route_data(output):
+    """Extracts Route data from diagnostic output (TLV 5).
+    
+    Route data contains the routing table with ID sequence tracking and routing costs
+    to all Router IDs in the network. This helps understand the routing topology and
+    path costs between routers.
+    
+    Args:
+        output: Raw diagnostic output string
+    
+    Returns:
+        Dictionary with route data, or empty dict {} if not found:
+        {
+            "id_sequence": int,
+            "route_data": [
+                {
+                    "route_id": str,          # hex string with 0x prefix
+                    "link_quality_out": int,
+                    "link_quality_in": int,
+                    "route_cost": int
+                },
+                ...
+            ]
+        }
+    """
+    route = {}
+    lines = output.split("\n")
+    in_route_section = False
+    in_route_data_array = False
+    current_route_entry = None
+    route_data_list = []
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Start of Route section
+        if stripped == "Route:":
+            in_route_section = True
+            continue
+        
+        if not in_route_section:
+            continue
+        
+        # End route section at next top-level field (not indented)
+        if stripped and not line.startswith(" "):
+            # Save any pending route entry
+            if current_route_entry:
+                route_data_list.append(current_route_entry)
+                current_route_entry = None
+            break
+        
+        # Parse IdSequence (top-level field under Route:)
+        if "IdSequence:" in line and not in_route_data_array:
+            match = re.search(r"IdSequence:\s*(\d+)", line)
+            if match:
+                route["id_sequence"] = int(match.group(1))
+        
+        # Start of RouteData array
+        elif stripped == "RouteData:":
+            in_route_data_array = True
+            continue
+        
+        # Parse RouteData entries
+        elif in_route_data_array:
+            # New route entry starts with "- RouteId:"
+            if "- RouteId:" in line or "RouteId:" in line:
+                # Save previous entry if exists
+                if current_route_entry:
+                    route_data_list.append(current_route_entry)
+                
+                # Start new entry
+                match = re.search(r"RouteId:\s*(0x[0-9a-fA-F]+)", line)
+                if match:
+                    current_route_entry = {
+                        "route_id": match.group(1),
+                        "link_quality_out": None,
+                        "link_quality_in": None,
+                        "route_cost": None
+                    }
+            
+            # Parse fields of current route entry
+            elif current_route_entry:
+                if "LinkQualityOut:" in line:
+                    match = re.search(r"LinkQualityOut:\s*(\d+)", line)
+                    if match:
+                        current_route_entry["link_quality_out"] = int(match.group(1))
+                elif "LinkQualityIn:" in line:
+                    match = re.search(r"LinkQualityIn:\s*(\d+)", line)
+                    if match:
+                        current_route_entry["link_quality_in"] = int(match.group(1))
+                elif "RouteCost:" in line:
+                    match = re.search(r"RouteCost:\s*(\d+)", line)
+                    if match:
+                        current_route_entry["route_cost"] = int(match.group(1))
+    
+    # Save any pending route entry at end of output
+    if current_route_entry:
+        route_data_list.append(current_route_entry)
+    
+    # Add route_data array to result if we collected any entries
+    if route_data_list:
+        route["route_data"] = route_data_list
+    
+    return route
+
+
 def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) -> dict:
     """
     Parses multicast network diagnostic output containing responses from multiple devices.
@@ -640,16 +972,23 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
         {
             "extaddr": str,               # from TLV 0, used as dict key
             "rloc16": str,                # from TLV 1, e.g. "0x2000"
-            # from extaddr_map or f"Unknown-{rloc16}"
-            "device_label": str,
+            "device_label": str,          # from extaddr_map or f"Unknown-{rloc16}"
+            "eui64": str,                 # from TLV 23, factory-assigned global ID
             "thread_stack_version": str,  # from TLV 28 or "Unknown"
-            "mode": dict,                 # from parse_mode_flags()
-            "ipv6_addrs": list,           # from parse_ipv6_address_list()
+            "mode": dict,                 # from TLV 2, parse_mode_flags()
+            "ipv6_addrs": list,           # from TLV 8, parse_ipv6_address_list()
+            "connectivity": dict,         # from TLV 4, link quality and routing metrics
+            "leader_data": dict,          # from TLV 6, partition and leader info
+            "vendor_name": str,           # from TLV 25, hardware creator name
+            "vendor_model": str,          # from TLV 26, product SKU identification
+            "vendor_sw_version": str,     # from TLV 27, firmware version
+            "route_data": dict,           # from TLV 5, routing table with costs
             "responder_ipv6": str,        # IPv6 from DIAG_GET.rsp header
-            "children": list,             # from parse_child_table() if present
-            "mac_counters": dict,         # from parse_mac_counters() if present
-            "mle_counters": dict,         # from parse_mle_counters() if present
-            "time_statistics": dict,      # from parse_time_statistics() if present
+            "children": list,             # from TLV 16, parse_child_table()
+            "total_children": int,        # count of children
+            "mac_counters": dict,         # from TLV 9, parse_mac_counters()
+            "mle_counters": dict,         # from TLV 34, parse_mle_counters()
+            "time_statistics": dict,      # from parse_time_statistics()
         }
     """
     if extaddr_map is None:
@@ -703,6 +1042,13 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
         ipv6_addrs = parse_ipv6_address_list(block)
 
         # Parse optional TLV data (may be present depending on response)
+        eui64 = parse_eui64(block)
+        connectivity = parse_connectivity(block)
+        leader_data = parse_leader_data(block)
+        vendor_name = parse_vendor_name(block)
+        vendor_model = parse_vendor_model(block)
+        vendor_sw_version = parse_vendor_sw_version(block)
+        route_data = parse_route_data(block)
         children = parse_child_table(block, rloc16)
         mac_counters = parse_mac_counters(block)
         mle_counters = parse_mle_counters(block)
@@ -713,9 +1059,16 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
             "extaddr": extaddr,
             "rloc16": rloc16,
             "device_label": device_label,
+            "eui64": eui64,
             "thread_stack_version": thread_stack_version,
             "mode": mode,
             "ipv6_addrs": ipv6_addrs,
+            "connectivity": connectivity,
+            "leader_data": leader_data,
+            "vendor_name": vendor_name,
+            "vendor_model": vendor_model,
+            "vendor_sw_version": vendor_sw_version,
+            "route_data": route_data,
             "responder_ipv6": responder_ipv6,
             "children": children,
             "total_children": len(children),
@@ -758,6 +1111,13 @@ def merge_device_record(existing: dict, new: dict) -> dict:
         - mac_counters: Take new if new is non-empty dict and existing is empty, else keep existing
         - mle_counters: Take new if new is non-empty dict and existing is empty, else keep existing
         - time_statistics: Take new if new is non-empty dict and existing is empty, else keep existing
+        - eui64: Keep existing if present, else take new
+        - connectivity: Take new if new is non-empty dict and existing is empty, else keep existing
+        - leader_data: Take new if new is non-empty dict and existing is empty, else keep existing
+        - vendor_name: Keep existing if present, else take new
+        - vendor_model: Keep existing if present, else take new
+        - vendor_sw_version: Keep existing if present, else take new
+        - route_data: Take new if new is non-empty dict and existing is empty, else keep existing
     """
     # extaddr: keep existing (it's the key, should be identical)
     # (no update needed)
@@ -821,6 +1181,34 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     if not existing.get("time_statistics") and new.get("time_statistics"):
         existing["time_statistics"] = new["time_statistics"]
 
+    # eui64: keep existing if present, else take new
+    if not existing.get("eui64") and new.get("eui64"):
+        existing["eui64"] = new["eui64"]
+
+    # connectivity: take new if new is non-empty dict and existing is empty
+    if not existing.get("connectivity") and new.get("connectivity"):
+        existing["connectivity"] = new["connectivity"]
+
+    # leader_data: take new if new is non-empty dict and existing is empty
+    if not existing.get("leader_data") and new.get("leader_data"):
+        existing["leader_data"] = new["leader_data"]
+
+    # vendor_name: keep existing if present, else take new
+    if not existing.get("vendor_name") and new.get("vendor_name"):
+        existing["vendor_name"] = new["vendor_name"]
+
+    # vendor_model: keep existing if present, else take new
+    if not existing.get("vendor_model") and new.get("vendor_model"):
+        existing["vendor_model"] = new["vendor_model"]
+
+    # vendor_sw_version: keep existing if present, else take new
+    if not existing.get("vendor_sw_version") and new.get("vendor_sw_version"):
+        existing["vendor_sw_version"] = new["vendor_sw_version"]
+
+    # route_data: take new if new is non-empty dict and existing is empty
+    if not existing.get("route_data") and new.get("route_data"):
+        existing["route_data"] = new["route_data"]
+
     return existing
 
 
@@ -837,25 +1225,28 @@ def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
     """
     match tlv_detail_level:
         # ROUTER TLV sets
-        case 6:
+        case 10:
             return TLV_VALUES_DETAILED
-        case 5:
+        case 9:
             return TLV_VALUES_MEDIUM
-        case 4:
-            return TLV_VALUES_SIMPLE
+        case 8:
+            return TLV_VALUES_BASIC
+        
         # CHILD TLV sets
-        case 3:
+        case 4:
             return TLV_VALUES_CHILD_DETAILED
+        case 3:
+            return TLV_VALUES_CHILD_MEDIUM_TV_MAC        
         case 2:
-            return TLV_VALUES_CHILD_MEDIUM
+            return TLV_VALUES_CHILD_MEDIUM_MAC
         case 1:
-            return TLV_VALUES_CHILD_SIMPLE
+            return TLV_VALUES_CHILD_BASIC
         case _:
-            return TLV_VALUES_SIMPLE
+            return TLV_VALUES_BASIC
 
 
 def fetch_network_diag_for_device(
-    rloc16, rloc_prefix, extaddr_map=None, ipv6_addresses=None, tlv_detail_level=6
+    rloc16, rloc_prefix, extaddr_map=None, router_table_by_router_id=None, ipv6_addresses=None, tlv_detail_level=6
 ):
     """
     Queries and parses network diagnostic data for a single router.
@@ -882,8 +1273,13 @@ def fetch_network_diag_for_device(
     # Get TLV values for the requested detail level
     tlv_values = get_tlv_values_for_detail_level(tlv_detail_level)
 
-    # Query each router for its TLV fields: Ext Addr, RLOC16, Thread Stack Version,
-    # IPv6 Address List, Child Table, MAC Counters, MLE Counters, Time Statistics
+    # Query router for diagnostic TLVs:
+    # TLV 0: Ext Address, TLV 1: RLOC16, TLV 2: Mode, TLV 23: EUI64
+    # TLV 8: IPv6 Address List, TLV 4: Connectivity, TLV 6: Leader Data
+    # TLV 24: Thread Version, TLV 25: Vendor Name, TLV 26: Vendor Model
+    # TLV 27: Vendor SW Version, TLV 28: Vendor App URL (Thread Stack Version)
+    # TLV 5: Route64, TLV 16: Child Table, TLV 9: MAC Counters
+    # TLV 34: MLE Counters, Time Statistics
     output = util_ot_ctl.exec_ot_ctl(
         f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}"
     )
@@ -911,6 +1307,13 @@ def fetch_network_diag_for_device(
     # Parse detailed structures
     mode_flags = parse_mode_flags(output)
     ipv6_list = parse_ipv6_address_list(output)
+    eui64 = parse_eui64(output)
+    connectivity = parse_connectivity(output)
+    leader_data = parse_leader_data(output)
+    vendor_name = parse_vendor_name(output)
+    vendor_model = parse_vendor_model(output)
+    vendor_sw_version = parse_vendor_sw_version(output)
+    route_data = parse_route_data(output)
     children = parse_child_table(output, rloc16)
     mac_counters = parse_mac_counters(output)
     mle_counters = parse_mle_counters(output)
@@ -920,17 +1323,29 @@ def fetch_network_diag_for_device(
         "extaddr": extaddr_match.group(1) if extaddr_match else "Unknown",
         "rloc16": rloc16_match.group(1) if rloc16_match else rloc16,
         "device_label": device_label,
+        "eui64": eui64,
         "tlv_values": tlv_values,
         "thread_stack_version": thread_version.group(1).strip()
         if thread_version
         else "Unknown",
         "mode": mode_flags,
         "ipv6_addrs": ipv6_list if ipv6_list else ipv6_addresses.get(rloc16, []),
+        "connectivity": connectivity,
+        "leader_data": leader_data,
+        "vendor_name": vendor_name,
+        "vendor_model": vendor_model,
+        "vendor_sw_version": vendor_sw_version,
+        "route_data": route_data,
         "children": children,
         "mac_counters": mac_counters,
         "mle_counters": mle_counters,
         "time_statistics": time_stats,
     }
+
+   # Enrich device_record routes with router rloc
+    _enrich_device_route_data_with_router_info(
+        network_topology_node, router_table_by_router_id
+    )      
 
     return network_topology_node
 
@@ -939,6 +1354,7 @@ def fetch_network_diag_multicast(
     multicast_addr: str,
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
+    router_table_by_router_id: dict | None = None,
 ) -> dict:
     """
     Queries network diagnostic data via multicast with retry and merge strategy.
@@ -978,7 +1394,7 @@ def fetch_network_diag_multicast(
     # 3 attempts gives {DETAILED, MEDIUM, SIMPLE}, 2 attempts gives {DETAILED, MEDIUM}, 1 attempt gives {DETAILED}
     retries = 2
     delay_start = 0.1  # between retries 0.10 0.20 0.50 1.0 1.5 1.75 2.0 seconds
-    tlv_detail_level = 6
+    tlv_detail_level = 10
     consolidated = {}  # Keyed by extaddr during collection
 
     # Retry loop with progressively simpler TLV sets
@@ -1004,6 +1420,10 @@ def fetch_network_diag_multicast(
         # Merge results into consolidated dict (keyed by extaddr)
         for device_record in parsed.values():
             extaddr = device_record["extaddr"]
+            # Enrich device_record routes with router rloc
+            _enrich_device_route_data_with_router_info(
+                device_record, router_table_by_router_id
+            )
             # Add TLV set info to record
             device_record["tlv_values"] = tlv_values
             if extaddr in consolidated:
@@ -1072,6 +1492,7 @@ def fetch_network_diag_multicast(
 def fetch_network_diag_topology_multicast_network(
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
+    router_table_by_router_id: dict | None = None,
 ) -> dict:
     """
     Queries network diagnostic data via multicast to all Thread devices in the mesh (ff03::1).
@@ -1090,6 +1511,7 @@ def fetch_network_diag_topology_multicast_network(
         multicast_addr=TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS_AND_MEDS, # "ff03::1"
         extaddr_map=extaddr_map,
         thread_network_info=thread_network_info,
+        router_table_by_router_id=router_table_by_router_id
     )
 
 
@@ -1238,10 +1660,57 @@ def _enrich_device_role_and_prefix_flags(
     else:
         record["br"] = None
 
+# Enrich device record route_data [] of routes, enriching the items in the array by looking up their router_id in the router_table_data and adding the corresponding rloc16 to each route entry. 
+# This way we can have more complete information about the routes in the topology map, including the rloc16 of the next hops for each route, which can be useful for understanding the network topology and routing paths. 
+
+def _enrich_device_route_data_with_router_info(
+    record: dict,
+    router_table_by_router_id: dict | None,
+) -> None:
+    """
+    Enriches the route data in a device record with router information from the router table.
+    
+    For each route entry in the device's route_data, looks up the corresponding router_id
+    in the router_table_data to find the rloc16 and adds it to the route entry. Mutates
+    the record in place.
+    
+    Args:
+        record: Device record dict containing "route_data" field to enrich (mutated in place)
+        router_table_by_router_id: Optional dict of router entries keyed by "router_id", 
+                                    each containing "rloc16". If None, no enrichment is performed.
+    
+    Side Effects:
+        Updates each route entry in record["route_data"]["route_data"] by adding an "rloc16" field 
+        based on matching "router_id" from router_table_by_router_id
+    """
+    # Early return if no router table provided
+    if not router_table_by_router_id:
+        return
+    
+    # route_data has structure: {"id_sequence": int, "route_data": [...]}
+    route_data_dict = record.get("route_data")
+    if not route_data_dict or not isinstance(route_data_dict, dict):
+        return
+    
+    # Get the nested array of routes
+    routes_array = route_data_dict.get("route_data")
+    if not routes_array or not isinstance(routes_array, list):
+        return
+    
+    for route in routes_array:
+        route_id = route.get("route_id")
+        if route_id is not None:
+            # Look up rloc16 for this router_id in the router_table_by_router_id
+            matching_router = router_table_by_router_id.get(route_id)
+            if matching_router and matching_router.get("rloc16"):
+                route["rloc16"] = matching_router["rloc16"]
+            else:
+                route["rloc16"] = "Unknown"
 
 def _upsert_device_record(
     records_by_rloc: dict,
     incoming_record: dict,
+    extaddr_to_rloc: dict,
 ) -> None:
     """
     Adds or merges a device record into the topology map.
@@ -1250,18 +1719,52 @@ def _upsert_device_record(
     merge the new data into it; otherwise, add the new record. This is commonly
     used when combining multicast and direct query results.
     
+    Handles RLOC16 changes: if the same EXTADDR appears with a different RLOC16,
+    removes the old entry and adds with the new RLOC16 key. This prevents
+    duplicates when devices change roles during topology polling.
+    
     Args:
         records_by_rloc: Dict keyed by rloc16 containing existing device records (mutated)
         incoming_record: New device record to add or merge
+        extaddr_to_rloc: Dict mapping extaddr to current rloc16 for duplicate detection (mutated)
     
     Side Effects:
         Mutates records_by_rloc by either:
         - Adding incoming_record as a new entry, or
         - Merging incoming_record into an existing entry via merge_device_record()
+        - Removing old rloc16 key and adding new one if extaddr matches but rloc16 changed
+        Mutates extaddr_to_rloc to track current rloc16 for each extaddr
     """
     rloc16 = incoming_record.get("rloc16")
+    extaddr = incoming_record.get("extaddr")
+    
     if not rloc16:
         return
+    
+    # Skip unknown or placeholder extaddrs (they start with "Unknown-")
+    if extaddr and not extaddr.startswith("Unknown-"):
+        # Check if this extaddr already exists with a different rloc16
+        existing_rloc16 = extaddr_to_rloc.get(extaddr)
+        
+        if existing_rloc16 and existing_rloc16 != rloc16:
+            # Same device, different RLOC16 (role change during polling)
+            # Remove old entry and merge data into new entry
+            logging.info(
+                f"Device {extaddr} changed RLOC16 from {existing_rloc16} to {rloc16} "
+                f"(role change detected). Removing old entry and updating with new RLOC16."
+            )
+            old_record = records_by_rloc.pop(existing_rloc16, None)
+            if old_record:
+                # Merge old data into incoming record to preserve any data collected earlier
+                merge_device_record(incoming_record, old_record)
+            
+            # Update extaddr mapping
+            extaddr_to_rloc[extaddr] = rloc16
+            records_by_rloc[rloc16] = incoming_record
+            return
+        
+        # Track this extaddr -> rloc16 mapping
+        extaddr_to_rloc[extaddr] = rloc16
     
     if rloc16 in records_by_rloc:
         # Merge new data into existing record
@@ -1280,8 +1783,10 @@ def fetch_network_diag_topology(
     # Set to True to also query and include child nodes in the topology map (will increase runtime significantly)
     # Set to False to only get parent nodes without expanding children
 
-    # 1. Initialize topology map
+    # 1. Initialize topology map and extaddr tracking
     network_topology_map = {}
+    # Track extaddr -> rloc16 mapping to detect duplicate devices with changed RLOC16
+    extaddr_to_rloc = {}
 
     # 2. Get OMR prefix
     omr_ipv6addr_prefix = (
@@ -1295,13 +1800,17 @@ def fetch_network_diag_topology(
         thread_network_info["prefix_meshlocal_ipv6addr_prefix"]
         if thread_network_info and "prefix_meshlocal_ipv6addr_prefix" in thread_network_info
         else None
-    )     
+    )
 
     # 4. Get all active routers (potential parents)
     router_table_data = fetch_and_parse_router_table(extaddr_map)
     router_rlocs = [
         router.get("rloc16") for router in router_table_data if router.get("rloc16")
     ]
+
+    # build a dict of router_table_data indexed by router_id
+    router_table_by_router_id = {router.get(
+        "router_id"): router for router in router_table_data if router.get("router_id") is not None}
 
     # 5. Get IPv6 addresses for all routers
     # need this if nodes don't reponse to networkdiagnostic get with TLV 8 for IPv6 address list, then we can at least populate the topology map with known IPv6 addresses for each RLOC16 from this separate query. This way we can still have some reference to IPv6 addresses in the topology even if some nodes don't respond to the full diagnostic query.
@@ -1313,7 +1822,7 @@ def fetch_network_diag_topology(
     # 6. Get the multicast topology data
     # This will give us a starting point with data from all devices that responded to the multicast query, which we can then enrich with additional direct queries for any missing data or child information as needed. The multicast query can help reduce the number of direct queries needed by providing data for many devices in one go, especially for those that respond with more detailed TLV sets in the initial retries.
     network_topology_map_multicast = fetch_network_diag_topology_multicast_network(
-        extaddr_map, thread_network_info
+        extaddr_map, thread_network_info, router_table_by_router_id
     )
 
     if network_topology_map_multicast:
@@ -1322,7 +1831,7 @@ def fetch_network_diag_topology(
         )
         # Merge multicast topology data into main topology map, keyed by rloc16
         for rloc16, device_record in network_topology_map_multicast.items():
-            _upsert_device_record(network_topology_map, device_record)
+            _upsert_device_record(network_topology_map, device_record, extaddr_to_rloc)
         logging.info(
             f"After merging multicast data, topology map has {len(network_topology_map)} devices (keyed by rloc16)"
         )
@@ -1363,32 +1872,32 @@ def fetch_network_diag_topology(
             for r in range(retries):
                 # On last retries, try with simpler TLV set in case detailed one is causing issues
                 if r == retries - 2:
-                    tlv_detail_level = 5
-                logging.info(
-                    f"Router Node {rloc16} not found after {r} attempts, trying with tlv_detail_level {tlv_detail_level} {get_tlv_values_for_detail_level(tlv_detail_level)} TLV set."
-                )
+                    tlv_detail_level = 9
+                    logging.info(
+                        f"Router Node {rloc16} not found after {r} attempts, trying with tlv_detail_level {tlv_detail_level} {get_tlv_values_for_detail_level(tlv_detail_level)} TLV set."
+                    )
 
-            if r == retries - 1:
-                tlv_detail_level = 4
-                logging.info(
-                    f"Router Node {rloc16} not found after {r} attempts, trying with tlv_detail_level {tlv_detail_level} {get_tlv_values_for_detail_level(tlv_detail_level)} TLV set."
-                )
+                if r == retries - 1:
+                    tlv_detail_level = 8
+                    logging.info(
+                        f"Router Node {rloc16} not found after {r} attempts, trying with tlv_detail_level {tlv_detail_level} {get_tlv_values_for_detail_level(tlv_detail_level)} TLV set."
+                    )
 
-            network_topology_node = fetch_network_diag_for_device(
-                rloc16, meshlocal_prefix, extaddr_map, ipv6_addresses, tlv_detail_level
-            )
-            if network_topology_node is not None:
-                break
-            logging.info(
-                f"Router Node {rloc16} not found, retrying in {delay_start} seconds..."
-            )
-            # if last iteration skip sleep to avoid unnecessary delay before giving up and adding with default values
-            if r < retries - 1:
-                # Increase delay with each retry
-                l_delay = delay_start * (r + 1)
+                network_topology_node = fetch_network_diag_for_device(
+                    rloc16, meshlocal_prefix, extaddr_map, router_table_by_router_id, ipv6_addresses, tlv_detail_level
+                )
+                if network_topology_node is not None:
+                    break
                 logging.info(
-                    f"Waiting for {l_delay} seconds before next retry...{r + 1} of {retries}")
-                time.sleep(l_delay)
+                    f"Router Node {rloc16} not found, retrying in {delay_start} seconds..."
+                )
+                # if last iteration skip sleep to avoid unnecessary delay before giving up and adding with default values
+                if r < retries - 1:
+                    # Increase delay with each retry
+                    l_delay = delay_start * (r + 1)
+                    logging.info(
+                        f"Waiting for {l_delay} seconds before next retry...{r + 1} of {retries}")
+                    time.sleep(l_delay)
 
         if network_topology_node is None:
             # extaddr not found, use default values
@@ -1403,7 +1912,7 @@ def fetch_network_diag_topology(
 
             # Merge with existing data in topology map if present (e.g. from multicast query) to enrich the node data with any missing fields that we couldn't get from the direct query due to unresponsive node or TLV issues, this way we can have the most complete data possible for each node by combining the results from both the multicast and direct queries, and we can also handle cases where some nodes might only respond to one of the query types but not the other.
             is_new_record = rloc16 not in network_topology_map
-            _upsert_device_record(network_topology_map, network_topology_node)
+            _upsert_device_record(network_topology_map, network_topology_node, extaddr_to_rloc)
 
             if is_new_record:
                 logging.info(
@@ -1428,11 +1937,11 @@ def fetch_network_diag_topology(
                     if child.get("rloc16")
                 ]
                 for child_rloc in children_rlocs:
-                    # Check if child RLOC16 is already in topology map (e.g. from multicast query), 
-                    # if so skip the direct query and use the existing data to populate the topology map 
-                    # for this child node. This way we can avoid unnecessary queries for child nodes that 
-                    # already responded to the multicast request, which can help reduce overall runtime and 
-                    # network load. If we don't have data for this child RLOC16 from the multicast query, then 
+                    # Check if child RLOC16 is already in topology map (e.g. from multicast query),
+                    # if so skip the direct query and use the existing data to populate the topology map
+                    # for this child node. This way we can avoid unnecessary queries for child nodes that
+                    # already responded to the multicast request, which can help reduce overall runtime and
+                    # network load. If we don't have data for this child RLOC16 from the multicast query, then
                     # we proceed with the direct query with retries to try to get the data for this child node.
 
                     if child_rloc not in network_topology_map:
@@ -1449,10 +1958,17 @@ def fetch_network_diag_topology(
                         # - Start with detailed TLV (includes child table, IPv6 list); may not respond to simpler sets
                         # - Fall back to simpler TLV if detailed responses fail; still get basic node info
                         # - Maximize response chances while attempting to maximize detail level
-                        child_tlv_detail_level = 3
+                        child_tlv_detail_level = 4
 
                         for cr in range(child_retries):
                             # On last retries, try with simpler TLV set in case detailed one is causing issues
+
+                            if cr == child_retries - 4:
+                                # MEDIUM
+                                child_tlv_detail_level = 3
+                                logging.info(
+                                    f"Child node {child_rloc} not found after {cr} attempts, trying with tlv_detail_level {child_tlv_detail_level} {get_tlv_values_for_detail_level(child_tlv_detail_level)} medium detail TLV set."
+                                )
 
                             if cr == child_retries - 3:
                                 # MEDIUM
@@ -1469,7 +1985,7 @@ def fetch_network_diag_topology(
                                 )
 
                             if cr == child_retries - 1:
-                                # SIMPLE
+                                # BASIC
                                 child_tlv_detail_level = 1
                                 logging.info(
                                     f"Child node {child_rloc} not found after {cr} attempts, trying with tlv_detail_level {child_tlv_detail_level} {get_tlv_values_for_detail_level(child_tlv_detail_level)} simple detail TLV set."
@@ -1479,8 +1995,9 @@ def fetch_network_diag_topology(
                                 child_rloc,
                                 meshlocal_prefix,
                                 extaddr_map,
+                                router_table_by_router_id,
                                 ipv6_addresses,
-                                child_tlv_detail_level,
+                                child_tlv_detail_level
                             )
                             if child_node is not None:
                                 child_node["type"] = "Child"
@@ -1495,19 +2012,24 @@ def fetch_network_diag_topology(
                                 time.sleep(c_delay)
 
                         if child_node is None:
-                            network_topology_map[child_rloc] = _build_unknown_device_record(
+                            unknown_child = _build_unknown_device_record(
                                 child_rloc, "Child", ipv6_addresses, omr_ipv6addr_prefix, meshlocal_prefix
                             )
+                            _upsert_device_record(network_topology_map, unknown_child, extaddr_to_rloc)
 
                         else:
                             # Add OMR IPv6 address to child record
                             if omr_ipv6addr_prefix:
                                 child_node["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
-                                    child_node.get("ipv6_addrs", []), omr_ipv6addr_prefix
+                                    child_node.get(
+                                        "ipv6_addrs", []), omr_ipv6addr_prefix
                                 )
                             else:
                                 child_node["omr_ipv6_addr"] = None
-                            network_topology_map[child_rloc] = child_node
+                            
+                            # Use _upsert_device_record to handle potential RLOC16 changes
+                            _upsert_device_record(network_topology_map, child_node, extaddr_to_rloc)
+                            
                             # logging.info(
                             #    f"Added child node {child_rloc} {child_node.get('extaddr', 'Unknown')} {child_node.get('device_label', 'Unknown')} to topology map. {r}/{retries} attempts.  TLV detail level: {tlv_detail_level}"
                             # )
@@ -1613,9 +2135,16 @@ def save_topology_to_json_list(
             "extaddr": data["extaddr"],
             "device_label": data.get("device_label", f"Unknown-{rloc}"),
             "tlv_values": data.get("tlv_values", []),
+            "eui64": data.get("eui64"),
             "thread_stack_version": data.get("thread_stack_version", "Unknown"),
             "mode": data.get("mode", {}),
             "ipv6_addrs": data.get("ipv6_addrs", []),
+            "connectivity": data.get("connectivity", {}),
+            "leader_data": data.get("leader_data", {}),
+            "vendor_name": data.get("vendor_name"),
+            "vendor_model": data.get("vendor_model"),
+            "vendor_sw_version": data.get("vendor_sw_version"),
+            "route_data": data.get("route_data", {}),
             "omr_ipv6_addr": data.get("omr_ipv6_addr"),
             "type": data.get("type", "Unknown"),
             "br": data.get("br", None),
@@ -1660,9 +2189,16 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
 
     thread_network_info = util_network.fetch_thread_network_info()
 
+    # Get all active routers (potential parents)
+    router_table_data = fetch_and_parse_router_table(extaddr_map)
+ 
+    # Build a dict of router_table_data indexed by router_id
+    router_table_by_router_id = {router.get(
+        "router_id"): router for router in router_table_data if router.get("router_id") is not None}
+
     # Get the multicast topology data
     data = fetch_network_diag_topology_multicast_network(
-        extaddr_map, thread_network_info
+        extaddr_map, thread_network_info, router_table_by_router_id
     )
 
     # Print the topology in tree format to console
@@ -1708,9 +2244,16 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
 
     thread_network_info = util_network.fetch_thread_network_info()
 
+    # Get all active routers (potential parents)
+    router_table_data = fetch_and_parse_router_table(extaddr_map)
+
+    # Build a dict of router_table_data indexed by router_id
+    router_table_by_router_id = {router.get(
+        "router_id"): router for router in router_table_data if router.get("router_id") is not None}
+
     # Get the multicast topology data
     data = fetch_network_diag_topology_multicast_neighbors(
-        extaddr_map, thread_network_info
+        extaddr_map, thread_network_info, router_table_by_router_id
     )
 
     # Print the topology in tree format to console

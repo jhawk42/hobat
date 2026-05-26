@@ -117,7 +117,9 @@ def parse_router_table(output, extaddr_map=None):
             # Add device_label from extaddr_map if available
             if ext_mac and ext_mac in extaddr_map:
                 router["device_label"] = extaddr_map[ext_mac]
-
+            # Add ID as hex string for easier mapping with other data sources
+            if "ID" in router:
+                router["router_id"] = f"0x{router['ID']:02x}"
             routers.append(router)
         else:
             if values:  # Skip blank separator rows silently
@@ -176,6 +178,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         save_json_atomic(router_table_data, save_path)
         logging.debug("Saved router-table data into %s as JSON:\n%s",
                 save_path, json.dumps(router_table_data, indent=4))
+        # log a summary of the data
+        logging.info(f"Fetched and parsed router table with {len(router_table_data)} entries.")
+        
     except FileNotFoundError as e:
         logging.error(f"Error: File not found - {e}")
     except json.JSONDecodeError as e:
