@@ -13,6 +13,12 @@ from urllib.request import Request, urlopen
 
 # Reference: https://github.com/openthread/ot-br-posix/blob/main/src/rest/openapi.yaml
 
+OT_REST_LISTEN_ADDR_ENV =  "OT_REST_LISTEN_ADDR" # Environment variable name for OTBR REST API listen address
+OT_REST_LISTEN_ADDR_DEFAULT =  "0.0.0.0" # Default listen address for OTBR REST API (all interfaces)
+
+OT_REST_LISTEN_PORT_ENV =  "OT_REST_LISTEN_PORT" # Environment variable name for OTBR REST API listen port
+OT_REST_LISTEN_PORT_DEFAULT =  8081 # Default listen port for OTBR REST API
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8081
 DEFAULT_TIMEOUT = 10
