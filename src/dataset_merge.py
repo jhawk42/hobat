@@ -177,8 +177,8 @@ MERGE_IDENTITY_FIELDS = {
 SOURCE_PRECEDENCE = {
     "td-otbr-restapi-diagnostics.json": 100,      # Highest priority (most detailed)
     "td-otbr-restapi-devices.json": 95,
-    "td-otbr-cli-networkdiag-topology-poll.json": 90,
-    "td-otbr-cli-networkdiag-topology-multicast-network.json": 85,
+    "td-otbr-cli-networkdiag-fetch-all.json": 90,
+    "td-otbr-cli-networkdiag-multicast-network.json": 85,
     "td-otbr-cli-meshdiag-topology.json": 80,
     "td-otbr-cli-meshdiag-router-neighbortables.json": 75,
     "td-otbr-cli-router-table.json": 70,
@@ -192,8 +192,8 @@ SOURCE_PRECEDENCE = {
 DEFAULT_INPUT_FILES = [
     "td-otbr-cli-router-table.json",
     "td-otbr-cli-meshdiag-topology.json",
-    "td-otbr-cli-networkdiag-topology-poll.json",
-    "td-otbr-cli-networkdiag-topology-multicast-network.json",
+    "td-otbr-cli-networkdiag-fetch-all.json",
+    "td-otbr-cli-networkdiag-multicast-network.json",
     "td-otbr-cli-meshdiag-router-neighbortables.json",
     "td-otbr-restapi-devices.json",
     "td-otbr-restapi-diagnostics.json",

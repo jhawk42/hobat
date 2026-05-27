@@ -54,7 +54,7 @@ def test_cross_source_integration_cli_rest_mdns():
             "partition_id": 12345,
             "leader_router_id": 5,
         },
-        "_source_files": ["td-otbr-cli-networkdiag-topology-poll.json"]
+        "_source_files": ["td-otbr-cli-networkdiag-fetch-all.json"]
     }
     
     # REST API data (camelCase)
@@ -134,7 +134,7 @@ def test_cross_source_integration_cli_rest_mdns():
     
     # Verify all sources tracked
     assert len(result["_source_files"]) == 3
-    assert "td-otbr-cli-networkdiag-topology-poll.json" in result["_source_files"]
+    assert "td-otbr-cli-networkdiag-fetch-all.json" in result["_source_files"]
     assert "td-otbr-restapi-diagnostics.json" in result["_source_files"]
     assert "td-mdns-scopes-br.json" in result["_source_files"]
     
@@ -582,7 +582,7 @@ def test_conflict_tracking_source_files():
     node1 = {
         "extaddr": "0011223344556677",
         "device_label": "Device A",
-        "_source_files": ["td-otbr-cli-networkdiag-topology-poll.json"]
+        "_source_files": ["td-otbr-cli-networkdiag-fetch-all.json"]
     }
     
     node2 = {
@@ -603,7 +603,7 @@ def test_conflict_tracking_source_files():
     # All source files should be tracked
     assert "_source_files" in result
     assert len(result["_source_files"]) == 3
-    assert "td-otbr-cli-networkdiag-topology-poll.json" in result["_source_files"]
+    assert "td-otbr-cli-networkdiag-fetch-all.json" in result["_source_files"]
     assert "td-otbr-restapi-diagnostics.json" in result["_source_files"]
     assert "td-mdns-scopes-br.json" in result["_source_files"]
     
@@ -676,7 +676,7 @@ def test_complex_integration_all_features():
             ]
         },
         "leader_data": {"partition_id": 12345, "leader_router_id": 5},
-        "_source_files": ["td-otbr-cli-networkdiag-topology-poll.json"]
+        "_source_files": ["td-otbr-cli-networkdiag-fetch-all.json"]
     }
     
     # REST API data with children (camelCase)

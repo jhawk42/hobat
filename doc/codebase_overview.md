@@ -261,7 +261,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | `otbr_cli_meshdiag_childtable.py` | `meshdiag childtable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childtables.json` | For every router in the router table, collects per-child details: RLOC16, extaddr, Thread version, timeout, age, supervision interval, queued messages, rx-on flag, device type, full-net flag, RSS (avg/last/margin), frame/message error rates, connection time, and CSL parameters.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_meshdiag_childip6.py` | `meshdiag childip6 <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childip6.json` | For every router in the router table, collects child IPv6 address lists grouped by child RLOC16 and records per-child IP address counts.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_meshdiag_routerneighbortable.py` | `meshdiag routerneighbortable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-neighbortables.json` | For every router in the router table, collects per-neighbour details: RLOC16, extaddr, Thread version, RSS (avg/last/margin), frame/message error rates, and connection time.  Handles `ResponseTimeout` gracefully. |
-| `otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (unicast per router) or `networkdiag get ff03::1/ff02::1 <tlvs>` (multicast) | `td-otbr-cli-networkdiag-topology-poll.json` (unicast poll), `td-otbr-cli-networkdiag-topology-multicast-network.json` (multicast all), `td-otbr-cli-networkdiag-topology-multicast-neighbors.json` (multicast neighbors) | Collects network diagnostic data from Thread devices via three modes: (1) Unicast topology-poll: polls each router individually via rloc IPv6. (2) Multicast network: broadcasts to all mesh devices (ff03::1) with retry strategy and TLV merging. (3) Multicast neighbors: broadcasts to one-hop neighbors (ff02::1) with retry strategy and TLV merging. For every device, parses 16 TLVs including: Ext Address (0), RLOC16 (1), Mode (2), EUI64 (23), IPv6 addresses (8), Connectivity (4), Leader Data (6), Thread Version (24), Vendor Name (25), Vendor Model (26), Vendor SW Version (27), Vendor App URL (28), Route64 (5), Child Table (16), MAC Counters (9), MLE Counters (34), and time-in-role statistics. Mode TLV provides RxOnWhenIdle/DeviceType/NetworkData for FTD/MTD classification. MAC counters include error/discard totals and percentages. MLE counters track role changes, partition ID changes, parent changes, and attach attempts. |
+| `otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (unicast per router) or `networkdiag get ff03::1/ff02::1 <tlvs>` (multicast) | `td-otbr-cli-networkdiag-fetch-all.json` (unicast poll), `td-otbr-cli-networkdiag-multicast-network.json` (multicast all), `td-otbr-cli-networkdiag-multicast-neighbors.json` (multicast neighbors) | Collects network diagnostic data from Thread devices via three modes: (1) Unicast fetch-all: polls each router individually via rloc IPv6. (2) Multicast network: broadcasts to all mesh devices (ff03::1) with retry strategy and TLV merging. (3) Multicast neighbors: broadcasts to one-hop neighbors (ff02::1) with retry strategy and TLV merging. For every device, parses 16 TLVs including: Ext Address (0), RLOC16 (1), Mode (2), EUI64 (23), IPv6 addresses (8), Connectivity (4), Leader Data (6), Thread Version (24), Vendor Name (25), Vendor Model (26), Vendor SW Version (27), Vendor App URL (28), Route64 (5), Child Table (16), MAC Counters (9), MLE Counters (34), and time-in-role statistics. Mode TLV provides RxOnWhenIdle/DeviceType/NetworkData for FTD/MTD classification. MAC counters include error/discard totals and percentages. MLE counters track role changes, partition ID changes, parent changes, and attach attempts. |
 | `otbr_cli_thread_network_info.py` | `dataset active`, `prefix meshlocal`, `br omrprefix favored` | `td-otbr-cli-thread-network-info.json` | Collects the active Thread dataset (channel, PAN ID, extended PAN ID, mesh-local prefix, network name, etc.) and derives the mesh-local IPv6 RLOC prefix and the OMR prefix for use by other collectors. |
 
 ### Data Collection — Other Sources
@@ -429,7 +429,7 @@ The full set of pre-configured datasets is listed below, grouped by category:
 | Dataset key | Label | Files | Topology mode |
 |---|---|---|---|
 | `meshdiag_only` | otbr-cli: meshdiag topology | `td-otbr-cli-meshdiag-topology.json` | `meshdiag-networkdiag` |
-| `networkdiag_only` | otbr-cli: networkdiag topology | `td-otbr-cli-networkdiag-topology-poll.json` | `meshdiag-networkdiag` |
+| `networkdiag_only` | otbr-cli: networkdiag topology | `td-otbr-cli-networkdiag-fetch-all.json` | `meshdiag-networkdiag` |
 | `router_table` | otbr-cli: router table | `td-otbr-cli-router-table.json` | `router-table` |
 | `router_neighbortables` | otbr-cli: meshdiag router neighbortables | `td-otbr-cli-meshdiag-router-neighbortables.json` | `merged-detailed` |
 | `router_childtables` | otbr-cli: meshdiag router childtables | `td-otbr-cli-meshdiag-router-childtables.json` | `merged-detailed` |
@@ -537,7 +537,7 @@ The `topologyMode` field in each dataset registry entry selects the JavaScript a
 
 | Mode | Typical Input Files | What it draws |
 |---|---|---|
-| `meshdiag-networkdiag` | `td-otbr-cli-meshdiag-topology.json`, `td-otbr-cli-networkdiag-topology-poll.json` | Nodes for every router; edges derived from the link-quality buckets (1/2/3-links), children arrays, child tables, and router-neighbour tables depending on the active link filter. |
+| `meshdiag-networkdiag` | `td-otbr-cli-meshdiag-topology.json`, `td-otbr-cli-networkdiag-fetch-all.json` | Nodes for every router; edges derived from the link-quality buckets (1/2/3-links), children arrays, child tables, and router-neighbour tables depending on the active link filter. |
 | `merged-detailed` | `td-merged-topology-all.json` | Full merged dataset; all link types available. |
 | `otbr_restapi` | `td-otbr-restapi-devices.json`, `td-otbr-restapi-diagnostics.json` | Nodes from OTBR REST API device list; edges from route data and child tables embedded in the REST API payloads. |
 | `eve_enhanced` | `td-eve-topology.json` | Nodes from the pre-processed Eve topology; edges from enriched `routes` and `children` arrays. |
@@ -669,7 +669,7 @@ python td_cli.py otbr-cli meshdiag topology
 python td_cli.py otbr-cli meshdiag childtable
 python td_cli.py otbr-cli meshdiag childip6
 python td_cli.py otbr-cli meshdiag routerneighbortable
-python td_cli.py otbr-cli networkdiag topology-poll
+python td_cli.py otbr-cli networkdiag fetch-all
 
 # Scan mDNS (optional)
 python td_cli.py mdns thread
@@ -702,8 +702,8 @@ python src/otbr_cli_meshdiag_routerneighbortable.py
 python src/otbr_cli_networkdiag_topology.py
 
 # Alternatively, collect CLI topology data via multicast (faster, discovers entire network at once)
-python src/td_cli.py otbr-cli networkdiag topology-multicast-network
-python src/td_cli.py otbr-cli networkdiag topology-multicast-neighbors
+python src/td_cli.py otbr-cli networkdiag multicast-network
+python src/td_cli.py otbr-cli networkdiag multicast-neighbors
 
 # Merge everything
 python src/dataset_merge.py

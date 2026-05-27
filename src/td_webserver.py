@@ -106,21 +106,21 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
         force_async=True,
     ),
     # networkdiag — TLV request per router with retries; up to ~8 min on large networks.
-    "td-otbr-cli-networkdiag-topology-poll.json": FileAction(
+    "td-otbr-cli-networkdiag-fetch-all.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
-        action=["otbr-cli", "networkdiag", "topology-poll"],
+        action=["otbr-cli", "networkdiag", "fetch-all"],
         action_cost_s=480,  # ~8 min for ~60 routers with timeout retries
     ),
-    # networkdiag topology-multicast-network — TLV request per router with retries; up to ~16 seconds on large networks.
-    "td-otbr-cli-networkdiag-topology-multicast-network.json": FileAction(
+    # networkdiag multicast-network — TLV request per router with retries; up to ~16 seconds on large networks.
+    "td-otbr-cli-networkdiag-multicast-network.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
-        action=["otbr-cli", "networkdiag", "topology-multicast-network"],
+        action=["otbr-cli", "networkdiag", "multicast-network"],
         action_cost_s=16,  # ~11 seconds with timeout retries
     ),
-    # networkdiag topology-multicast-neighbors — TLV request per router with retries; up to ~16 seconds on large networks.
-    "td-otbr-cli-networkdiag-topology-multicast-neighbors.json": FileAction(
+    # networkdiag multicast-neighbors — TLV request per router with retries; up to ~16 seconds on large networks.
+    "td-otbr-cli-networkdiag-multicast-neighbors.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
-        action=["otbr-cli", "networkdiag", "topology-multicast-neighbors"],
+        action=["otbr-cli", "networkdiag", "multicast-neighbors"],
         action_cost_s=16,  # ~11 seconds with timeout retries
     ),
 

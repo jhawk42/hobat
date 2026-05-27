@@ -22,8 +22,8 @@ import {
 // ── File name constants ───────────────────────────────────────────────────────
 
 const FILE_MESHDIAG              = 'td-otbr-cli-meshdiag-topology.json';
-const FILE_NETWORKDIAG_POLL      = 'td-otbr-cli-networkdiag-topology-poll.json';
-const FILE_NETWORKDIAG_MULTICAST = 'td-otbr-cli-networkdiag-topology-multicast-network.json';
+const FILE_NETWORKDIAG_FETCH_ALL      = 'td-otbr-cli-networkdiag-fetch-all.json';
+const FILE_NETWORKDIAG_MULTICAST = 'td-otbr-cli-networkdiag-multicast-network.json';
 const FILE_ROUTER_NEIGHBORTABLES = 'td-otbr-cli-meshdiag-router-neighbortables.json';
 const FILE_ROUTER_CHILDTABLES    = 'td-otbr-cli-meshdiag-router-childtables.json';
 const FILE_RESTAPI_DEVICES       = 'td-otbr-restapi-devices.json';
@@ -34,13 +34,13 @@ const FILE_RESTAPI_DIAGNOSTICS_LIST      = 'td-otbr-restapi-diagnostics-list.jso
 const FILE_RESTAPI_DIAGNOSTICS_FETCH     = 'td-otbr-restapi-diagnostics-fetch.json';
 const FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL = 'td-otbr-restapi-diagnostics-fetch-all.json';
 const FILE_ROUTER_CHILDIP6               = 'td-otbr-cli-meshdiag-router-childip6.json';
-const FILE_NETWORKDIAG_MULTICAST_NEIGHBORS = 'td-otbr-cli-networkdiag-topology-multicast-neighbors.json';
+const FILE_NETWORKDIAG_MULTICAST_NEIGHBORS = 'td-otbr-cli-networkdiag-multicast-neighbors.json';
 const FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL = 'td-otbr-restapi-mesh-diagnostics-fetch-all.json';
 
 // Files consumed as named primary slots in adaptMeshdiagNetworkdiag;
 // anything not in this set is treated as supplementary (e.g. mdns, eve).
 const MESHDIAG_PRIMARY_FILES = new Set([
-  FILE_MESHDIAG, FILE_NETWORKDIAG_POLL, FILE_NETWORKDIAG_MULTICAST,
+  FILE_MESHDIAG, FILE_NETWORKDIAG_FETCH_ALL, FILE_NETWORKDIAG_MULTICAST,
   FILE_ROUTER_NEIGHBORTABLES, FILE_ROUTER_CHILDTABLES,
   FILE_RESTAPI_DIAGNOSTICS,
 ]);
@@ -65,7 +65,7 @@ function buildFileMap(fileNames, rawFiles) {
 export function adaptMeshdiagNetworkdiag(fileMap) {
   const meshdiag = asArray(fileMap.get(FILE_MESHDIAG));
   const networkDiag = asArray(
-    fileMap.get(FILE_NETWORKDIAG_POLL) ?? fileMap.get(FILE_NETWORKDIAG_MULTICAST)
+    fileMap.get(FILE_NETWORKDIAG_FETCH_ALL) ?? fileMap.get(FILE_NETWORKDIAG_MULTICAST)
   );
   const routerNeighborTables = asArray(fileMap.get(FILE_ROUTER_NEIGHBORTABLES));
   const routerChildTables = asArray(fileMap.get(FILE_ROUTER_CHILDTABLES));
@@ -632,7 +632,7 @@ export function adaptMergedDetailed(fileMap) {
     if (!sources.includes('td-eve-topology.json')) return false;
     return !sources.some((s) => s === 'td-otbr-cli-router-table.json'
       || s === 'td-otbr-cli-meshdiag-topology.json'
-      || s === 'td-otbr-cli-networkdiag-topology-poll.json'
+      || s === 'td-otbr-cli-networkdiag-fetch-all.json'
       || s === 'td-otbr-cli-meshdiag-router-neighbortables.json'
       || s === 'td-otbr-restapi-devices.json'
       || s === 'td-otbr-restapi-diagnostics.json');

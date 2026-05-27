@@ -72,14 +72,14 @@ Subcommand help snapshots:
         all                 Run all meshdiag scans
 
   otbr-cli networkdiag
-    usage: td_cli otbr-cli networkdiag [-h] {topology-poll,topology-multicast-network,topology-multicast-neighbors} ...
+    usage: td_cli otbr-cli networkdiag [-h] {fetch-all,multicast-network,multicast-neighbors} ...
 
     positional arguments:
-      {topology-poll,topology-multicast-network,topology-multicast-neighbors}
-        topology-poll       Scan and poll networkdiag topology (unicast, router-by-router)
-        topology-multicast-network
+      {fetch-all,multicast-network,multicast-neighbors}
+        fetch-all       Scan and poll networkdiag topology (unicast, router-by-router)
+        multicast-network
                             Scan networkdiag topology via multicast to all Thread devices (ff03::1)
-        topology-multicast-neighbors
+        multicast-neighbors
                             Scan networkdiag topology via multicast to one-hop neighbors (ff02::1)
 
   mdns

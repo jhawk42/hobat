@@ -262,12 +262,12 @@ class TestSameSourceSerializationLongCost(ConcurrencyTestBase):
     """Two long-cost jobs for different files of the same source must not overlap."""
 
     async def test_long_cost_same_source_runs_sequentially(self) -> None:
-        # networkdiag-topology (cost=480) and networkdiag-topology-multicast-network
+        # networkdiag-fetch-all (cost=480) and networkdiag-multicast-network
         # (cost=16) are both otbr-cli but multicast is short-cost.
-        # Use two long-cost files: networkdiag-topology and mdns files.
+        # Use two long-cost files: networkdiag-fetch-all and mdns files.
         # Actually let's use a short-cost threshold patch so we can use real files.
-        file_a = "td-otbr-cli-networkdiag-topology-poll.json"             # cost=480, long
-        file_b = "td-otbr-cli-networkdiag-topology-multicast-network.json"  # cost=16, short
+        file_a = "td-otbr-cli-networkdiag-fetch-all.json"             # cost=480, long
+        file_b = "td-otbr-cli-networkdiag-multicast-network.json"  # cost=16, short
 
         # Temporarily lower the threshold so file_b also goes through the job path.
         original_threshold = td_webserver._LONG_COST_THRESHOLD_S
@@ -325,7 +325,7 @@ class TestLongCostBlocksShortCostSameSource(ConcurrencyTestBase):
     """A running long-cost job must block a short-cost request for the same source."""
 
     async def test_short_cost_waits_for_long_cost_lock(self) -> None:
-        file_long = "td-otbr-cli-networkdiag-topology-poll.json"    # cost=480, long
+        file_long = "td-otbr-cli-networkdiag-fetch-all.json"    # cost=480, long
         file_short = "td-otbr-cli-router-table.json"           # cost=1, short
 
         running_at_same_time = False

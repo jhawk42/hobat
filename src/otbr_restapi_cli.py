@@ -76,9 +76,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--poll-timeout",
         type=float,
-        default=6.0,
+        default=8.0,
         metavar="FLOAT",
-        help="Max wall-clock seconds to wait for an action to complete (default: 6.0)",
+        help="Max wall-clock seconds to wait for an action to complete (default: 8.0)",
     )
     parser.add_argument(
         "--no-progress",
@@ -199,8 +199,8 @@ def _add_devices_commands(
         "--device-count", type=int, default=255, help="Max devices to discover (default: 255)"
     )
     devices_fetch.add_argument(
-        "--task-timeout", type=int, default=6,
-        help="Server-side task timeout in seconds (default: 5)",
+        "--task-timeout", type=int, default=8,
+        help="Server-side task timeout in seconds (default: 8)",
     )
     devices_fetch.add_argument(
         "--max-age", type=int, default=60,
@@ -255,8 +255,8 @@ def _add_diagnostics_commands(
         help="Use a predefined TLV preset; overrides --types",
     )
     diagnostics_fetch.add_argument(
-        "--task-timeout", type=int, default=6,
-        help="Server-side task timeout in seconds (default: 5)",
+        "--task-timeout", type=int, default=8,
+        help="Server-side task timeout in seconds (default: 8)",
     )
     diagnostics_fetch.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
@@ -301,8 +301,8 @@ def _add_diagnostics_commands(
         help="Use a predefined TLV preset; overrides --types",
     )
     diagnostics_fetch_all.add_argument(
-        "--task-timeout", type=int, default=6,
-        help="Server-side task timeout per device in seconds (default: 6)",
+        "--task-timeout", type=int, default=8,
+        help="Server-side task timeout per device in seconds (default: 8)",
     )
     diagnostics_fetch_all.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
@@ -468,7 +468,7 @@ def _add_mesh_diagnostics_commands(
         dest="mesh_diag_command", required=True
     )
 
-    def _mesh_device_args(p: argparse.ArgumentParser, task_timeout: int = 5) -> None:
+    def _mesh_device_args(p: argparse.ArgumentParser, task_timeout: int = 8) -> None:
         p.add_argument("--device-id", required=True,
                        help="Device extAddress (16-char hex)")
         p.add_argument(
@@ -476,9 +476,9 @@ def _add_mesh_diagnostics_commands(
             help=f"Server-side task timeout in seconds (default: {task_timeout})",
         )
         p.add_argument(
-            "--poll-timeout", type=float, default=6.0, metavar="FLOAT",
+            "--poll-timeout", type=float, default=8.0, metavar="FLOAT",
             help=(
-                "Max wall-clock seconds to wait for the action (default: 6.0). "
+                "Max wall-clock seconds to wait for the action (default: 8.0). "
                 "Mesh-diagnostic queries require an additional otMeshDiag round-trip."
             ),
         )
@@ -553,12 +553,12 @@ def _add_mesh_diagnostics_commands(
         ),
     )
     mesh_fetch_all_p.add_argument(
-        "--task-timeout", type=int, default=6,
-        help="Server-side task timeout per device in seconds (default: 6)",
+        "--task-timeout", type=int, default=8,
+        help="Server-side task timeout per device in seconds (default: 8)",
     )
     mesh_fetch_all_p.add_argument(
-        "--poll-timeout", type=float, default=6.0, metavar="FLOAT",
-        help="Max wall-clock seconds per device action (default: 6.0)",
+        "--poll-timeout", type=float, default=8.0, metavar="FLOAT",
+        help="Max wall-clock seconds per device action (default: 8.0)",
     )
     mesh_fetch_all_p.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
@@ -1115,7 +1115,7 @@ def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:
         poll_timeout = getattr(args, "poll-timeout", args.poll_timeout)
         poll_interval = getattr(args, "poll-interval", args.poll_interval)
         dest_type = getattr(args, "destination-type", DestinationType.EXTENDED)
-        task_timeout = getattr(args, "task-timeout", 6)
+        task_timeout = getattr(args, "task-timeout", 8)
 
         if cmd == "children":
             return client.fetch_mesh_diagnostics(
@@ -1238,9 +1238,9 @@ def _dispatch_topology(
             client, diag_device_ids, primary_types, fallback_types,
             destination_type=args.destination_type if hasattr(args, "destination-type")
             else DestinationType.EXTENDED,
-            task_timeout=args.task_timeout if hasattr(args, "task-timeout") else 6.0,
+            task_timeout=args.task_timeout if hasattr(args, "task-timeout") else 8.0,
             poll_interval=args.poll_interval if hasattr(args, "poll-interval") else 2.0,
-            poll_timeout=args.poll_timeout if hasattr(args, "poll-timeout") else 6.0,
+            poll_timeout=args.poll_timeout if hasattr(args, "poll-timeout") else 8.0,
             raw=raw_arg,
             on_progress=progress_fn,
         )

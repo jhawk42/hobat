@@ -142,7 +142,7 @@ jq '.[] | select(.route_data != null) | {extaddr, seq: .route_data.id_sequence}'
    ```bash
    # Check CLI source
    jq '.[] | select(.route_data != null) | .route_data.id_sequence' \
-     data/td-otbr-cli-networkdiag-topology-poll.json | head -5
+     data/td-otbr-cli-networkdiag-fetch-all.json | head -5
    
    # Check REST API source
    jq '.[] | select(.route != null) | .route.idSequence' \
@@ -297,8 +297,8 @@ done
    ```bash
    # Remove unnecessary fields from large files
    jq 'map(del(.verbose_diagnostic_data))' \
-     data/td-otbr-cli-networkdiag-topology-poll.json > temp.json
-   mv temp.json data/td-otbr-cli-networkdiag-topology-poll.json
+     data/td-otbr-cli-networkdiag-fetch-all.json > temp.json
+   mv temp.json data/td-otbr-cli-networkdiag-fetch-all.json
    ```
 
 2. **Exclude non-essential sources:**
@@ -366,7 +366,7 @@ jq '[.[] | select(._merge_conflicts != null) |
    ```python
    SOURCE_PRECEDENCE = {
        "td-otbr-restapi-diagnostics.json": 100,  # Highest priority
-       "td-otbr-cli-networkdiag-topology-poll.json": 90,
+       "td-otbr-cli-networkdiag-fetch-all.json": 90,
        # ... adjust as needed ...
    }
    ```

@@ -39,8 +39,8 @@ def test_source_precedence_configuration():
     assert len(missing_precedence) == 0, f"Missing precedence for: {missing_precedence}"
     
     # Check precedence order
-    assert SOURCE_PRECEDENCE["td-otbr-restapi-diagnostics.json"] > SOURCE_PRECEDENCE["td-otbr-cli-networkdiag-topology-poll.json"]
-    assert SOURCE_PRECEDENCE["td-otbr-cli-networkdiag-topology-poll.json"] > SOURCE_PRECEDENCE["td-mdns-scopes-br.json"]
+    assert SOURCE_PRECEDENCE["td-otbr-restapi-diagnostics.json"] > SOURCE_PRECEDENCE["td-otbr-cli-networkdiag-fetch-all.json"]
+    assert SOURCE_PRECEDENCE["td-otbr-cli-networkdiag-fetch-all.json"] > SOURCE_PRECEDENCE["td-mdns-scopes-br.json"]
     assert SOURCE_PRECEDENCE["td-mdns-scopes-br.json"] > SOURCE_PRECEDENCE["td-eve-topology.json"]
     
     # Check mDNS files added to defaults

@@ -114,29 +114,29 @@ class TestOtbrCliParser(unittest.TestCase):
         self.assertEqual(args.meshdiag_command, "childip6")
 
     def test_networkdiag_topology_default_children(self):
-        args = _parse(["otbr-cli", "networkdiag", "topology-poll"])
+        args = _parse(["otbr-cli", "networkdiag", "fetch-all"])
         self.assertEqual(args.cli_command, "networkdiag")
-        self.assertEqual(args.networkdiag_command, "topology-poll")
+        self.assertEqual(args.networkdiag_command, "fetch-all")
         self.assertTrue(args.expand_children)
 
     def test_networkdiag_topology_children_no(self):
         args = _parse(["otbr-cli", "networkdiag",
-                      "topology-poll", "--children-no"])
+                      "fetch-all", "--children-no"])
         self.assertFalse(args.expand_children)
 
     def test_networkdiag_topology_multicast_network(self):
         args = _parse(["otbr-cli", "networkdiag",
-                      "topology-multicast-network"])
+                      "multicast-network"])
         self.assertEqual(args.cli_command, "networkdiag")
         self.assertEqual(args.networkdiag_command,
-                         "topology-multicast-network")
+                         "multicast-network")
 
     def test_networkdiag_topology_multicast_neighbors(self):
         args = _parse(["otbr-cli", "networkdiag",
-                      "topology-multicast-neighbors"])
+                      "multicast-neighbors"])
         self.assertEqual(args.cli_command, "networkdiag")
         self.assertEqual(args.networkdiag_command,
-                         "topology-multicast-neighbors")
+                         "multicast-neighbors")
 
     def test_networkdiag_old_topology_command_no_longer_valid(self):
         with self.assertRaises(SystemExit):
@@ -224,7 +224,7 @@ class TestDispatchOtbrCli(unittest.TestCase):
             td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
         ) as m:
             rc = self._dispatch(
-                ["otbr-cli", "networkdiag", "topology-poll", "--children-no"]
+                ["otbr-cli", "networkdiag", "fetch-all", "--children-no"]
             )
         m.assert_called_once_with(["-cno"])
         self.assertEqual(rc, 0)

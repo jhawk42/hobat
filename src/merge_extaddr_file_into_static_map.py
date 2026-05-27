@@ -159,8 +159,8 @@ def main():
     )
     parser.add_argument(
         '--topology-file',
-        default='td-otbr-cli-networkdiag-topology-poll.json',
-        help='Topology file name (default: td-otbr-cli-networkdiag-topology-poll.json)'
+        default='td-otbr-cli-networkdiag-fetch-all.json',
+        help='Topology file name (default: td-otbr-cli-networkdiag-fetch-all.json)'
     )
     parser.add_argument(
         '--merge_name_override',

@@ -29,7 +29,7 @@ These options apply to every command and must be placed **before** the subcomman
 | `--output FILE` | — | Write JSON result to a file instead of stdout |
 | `--datadir DIR` | auto | Data directory for file reads/writes (falls back to `$TD_DATA_DIR`, then `/data`, then `./data`) |
 | `--poll-interval FLOAT` | `2.0` | Seconds between action status polls |
-| `--poll-timeout FLOAT` | `6.0` | Max wall-clock seconds to wait for an action to complete |
+| `--poll-timeout FLOAT` | `8.0` | Max wall-clock seconds to wait for an action to complete |
 | `--no-progress` | off | Suppress per-device `[N/T] id → status (Xs)` progress lines printed to stderr on `fetch-all` commands |
 | `--no-auto-output` | off | Disable automatic output file naming; send JSON to stdout instead of `<datadir>/td-otbr-restapi-<resource>-<command>.json` |
 | `--debug`, `-d` | off | Enable debug logging |
@@ -710,8 +710,8 @@ Common per-device options for `children`, `child-ipv6`, `router-neighbors`, and 
 | Option | Default | Description |
 |---|---|---|
 | `--device-id` | required | Device extAddress (16-char hex) |
-| `--task-timeout` | `5` | Server-side task timeout in seconds |
-| `--poll-timeout` | `6.0` | Max wall-clock seconds to wait |
+| `--task-timeout` | `8` | Server-side task timeout in seconds |
+| `--poll-timeout` | `8.0` | Max wall-clock seconds to wait |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 
 ---
@@ -827,8 +827,8 @@ mesh-diagnostics fetch-all [--device-ids ID ...]
 |---|---|---|
 | `--device-ids` | all devices | Space-separated extAddress IDs to query |
 | `--types` | all three | `children`, `childIpv6Addresses`, `routerNeighbors` |
-| `--task-timeout` | `6` | Server-side task timeout per device in seconds |
-| `--poll-timeout` | `6.0` | Max wall-clock seconds per device action |
+| `--task-timeout` | `8` | Server-side task timeout per device in seconds |
+| `--poll-timeout` | `8.0` | Max wall-clock seconds per device action |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 | `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list |
 | `--routers-only` | off | Filter to router devices only (RLOC16 lower 10 bits == 0); skips child devices that return empty mesh-diag records |

@@ -1117,7 +1117,7 @@ class OTBRRestApiClient:
                     raw=raw,
                 )
                 results.append(diag)
-            except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+            except (OTBRActionFailedError, OTBRActionTimeoutError, OTBRInvalidResponseError) as exc:
                 status = "skipped"
                 if not skip_on_failure:
                     raise

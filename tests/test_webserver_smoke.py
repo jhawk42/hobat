@@ -251,8 +251,8 @@ class TestSmokePath_C_LongCost202(SmokeTestBase):
 
     async def test_long_cost_threshold_file_returns_202(self) -> None:
         """A file whose action_cost_s exceeds _LONG_COST_THRESHOLD_S returns 202."""
-        # "td-otbr-cli-networkdiag-topology-poll.json" has action_cost_s=480 > 300.
-        filename = "td-otbr-cli-networkdiag-topology-poll.json"
+        # "td-otbr-cli-networkdiag-fetch-all.json" has action_cost_s=480 > 300.
+        filename = "td-otbr-cli-networkdiag-fetch-all.json"
 
         proceed = asyncio.Event()
 
@@ -277,7 +277,7 @@ class TestSmokePath_C_LongCost202(SmokeTestBase):
 
     async def test_duplicate_long_cost_request_reuses_job_id(self) -> None:
         """A second request for the same long-cost file while running gets the same job_id."""
-        filename = "td-otbr-cli-networkdiag-topology-poll.json"
+        filename = "td-otbr-cli-networkdiag-fetch-all.json"
 
         proceed = asyncio.Event()
 

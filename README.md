@@ -136,9 +136,9 @@ python3 -m td_cli otbr-cli meshdiag routerneighbortable
 python3 -m td_cli otbr-cli meshdiag childtable
 python3 -m td_cli otbr-cli meshdiag childip6
 python3 -m td_cli otbr-cli meshdiag all
-python3 -m td_cli otbr-cli networkdiag topology-poll
-python3 -m td_cli otbr-cli networkdiag topology-multicast-network
-python3 -m td_cli otbr-cli networkdiag topology-multicast-neighbors
+python3 -m td_cli otbr-cli networkdiag fetch-all
+python3 -m td_cli otbr-cli networkdiag multicast-network
+python3 -m td_cli otbr-cli networkdiag multicast-neighbors
 python3 -m td_cli otbr-cli all
 
 # OTBR REST API
@@ -251,8 +251,8 @@ The merge processes these files by default:
 **Thread CLI Sources:**
 - `td-otbr-cli-router-table.json` - Router table summary
 - `td-otbr-cli-meshdiag-topology.json` - Mesh diagnostic topology
-- `td-otbr-cli-networkdiag-topology-poll.json` - Network diagnostic data (poll mode)
-- `td-otbr-cli-networkdiag-topology-multicast-network.json` - Multicast network data
+- `td-otbr-cli-networkdiag-fetch-all.json` - Network diagnostic data (poll mode)
+- `td-otbr-cli-networkdiag-multicast-network.json` - Multicast network data
 - `td-otbr-cli-meshdiag-router-neighbortables.json` - Router neighbor tables
 
 **Thread REST API Sources:**
@@ -291,7 +291,7 @@ The merged output (`td-merged-topology-all.json`) is a JSON array of device reco
       }
     },
     "_source_files": [
-      "td-otbr-cli-networkdiag-topology-poll.json",
+      "td-otbr-cli-networkdiag-fetch-all.json",
       "td-otbr-restapi-diagnostics.json",
       "td-mdns-scopes-br.json"
     ],

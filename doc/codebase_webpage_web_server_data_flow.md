@@ -529,7 +529,7 @@ Each entry is a plain object:
 {
   source:            "otbr-cli",           // drives the #datasource-filter grouping
   value:             "merged_otbr_cli_all", // <option value>
-  label:             "otbr-cli-*, network-poll",
+  label:             "otbr-cli-*, networkdiag-fetch-all",
   files:             ["td-otbr-cli-meshdiag-topology.json", ...],
   mergeStrategy:     "by-identity",
   topologyMode:      "meshdiag-networkdiag",

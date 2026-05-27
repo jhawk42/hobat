@@ -62,9 +62,9 @@ class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
 #   td_cli.py otbr-cli meshdiag childtable
 #   td_cli.py otbr-cli meshdiag childip6
 #   td_cli.py otbr-cli meshdiag all
-#   td_cli.py otbr-cli networkdiag topology-poll
-#   td_cli.py otbr-cli networkdiag topology-multicast-network
-#   td_cli.py otbr-cli networkdiag topology-multicast-neighbors
+#   td_cli.py otbr-cli networkdiag fetch-all
+#   td_cli.py otbr-cli networkdiag multicast-network
+#   td_cli.py otbr-cli networkdiag multicast-neighbors
 #   td_cli.py otbr-cli all
 #
 # mdns examples:
@@ -151,7 +151,7 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         dest="networkdiag_command", required=True
     )
     networkdiag_topology_p = networkdiag_sub.add_parser(
-        "topology-poll", help="Scan and poll networkdiag topology (unicast, router-by-router)"
+        "fetch-all", help="Scan and poll networkdiag topology (unicast, router-by-router)"
     )
     networkdiag_children_group = networkdiag_topology_p.add_mutually_exclusive_group()
     networkdiag_children_group.add_argument(
@@ -170,11 +170,11 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Do not expand child nodes in the topology map",
     )
     networkdiag_sub.add_parser(
-        "topology-multicast-network",
+        "multicast-network",
         help="Scan networkdiag topology via multicast to all Thread devices (ff03::1)",
     )
     networkdiag_sub.add_parser(
-        "topology-multicast-neighbors",
+        "multicast-neighbors",
         help="Scan networkdiag topology via multicast to one-hop neighbors (ff02::1)",
     )
 
@@ -446,7 +446,7 @@ def dispatch(
                 return rc
 
         if cli_cmd == "networkdiag":
-            if args.networkdiag_command == "topology-poll":
+            if args.networkdiag_command == "fetch-all":
                 expand_children_argv = (
                     [] if getattr(args, "expand_children", True) else ["-cno"]
                 )
@@ -456,14 +456,14 @@ def dispatch(
                     )
                     or 0
                 )
-            if args.networkdiag_command == "topology-multicast-network":
+            if args.networkdiag_command == "multicast-network":
                 return (
                     otbr_cli_networkdiag_topology.main_multicast_network(
                         _forward_with_datadir([])
                     )
                     or 0
                 )
-            if args.networkdiag_command == "topology-multicast-neighbors":
+            if args.networkdiag_command == "multicast-neighbors":
                 return (
                     otbr_cli_networkdiag_topology.main_multicast_neighbors(
                         _forward_with_datadir([])

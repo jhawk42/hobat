@@ -221,7 +221,7 @@ def test_source_files_tracking():
     
     base = {
         "extaddr": "aabbccddeeff1122",
-        "_source_files": ["td-otbr-cli-networkdiag-topology-poll.json"]
+        "_source_files": ["td-otbr-cli-networkdiag-fetch-all.json"]
     }
     
     incoming = {

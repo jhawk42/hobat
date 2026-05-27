@@ -34,7 +34,7 @@ export const DATASET_REGISTRY = [
     source: "otbr-cli",
     value: "networkdiag_multicast_network_only",
     label: "networkdiag-multicast",
-    files: ["td-otbr-cli-networkdiag-topology-multicast-network.json"],
+    files: ["td-otbr-cli-networkdiag-multicast-network.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
@@ -44,8 +44,8 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "networkdiag_only",
-    label: "networkdiag-poll⏰",
-    files: ["td-otbr-cli-networkdiag-topology-poll.json"],
+    label: "networkdiag-fetch-all⏰",
+    files: ["td-otbr-cli-networkdiag-fetch-all.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
@@ -59,7 +59,7 @@ export const DATASET_REGISTRY = [
     label: "meshdiag, networkdiag-multicast",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-multicast-network.json"
+      "td-otbr-cli-networkdiag-multicast-network.json"
     ],
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
@@ -74,7 +74,7 @@ export const DATASET_REGISTRY = [
     label: "meshdiag, networkdiag-multicast, mdns",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-multicast-network.json",
+      "td-otbr-cli-networkdiag-multicast-network.json",
       "td-mdns-scopes-thread.json",
     ],
     mergeStrategy: "by-identity",
@@ -86,11 +86,11 @@ export const DATASET_REGISTRY = [
  // ── Multi-file merged (otbr-cli) ──
   {
     source: "otbr-cli",
-    value: "merged_otbr_cli_meshdiag_networkdiag_poll_mdns",
-    label: "meshdiag, networkdiag-poll⏰, mdns ",
+    value: "merged_otbr_cli_meshdiag_networkdiag_fetch_all_mdns",
+    label: "meshdiag, networkdiag-fetch-all⏰, mdns ",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-poll.json",
+      "td-otbr-cli-networkdiag-fetch-all.json",
       "td-mdns-scopes-thread.json"
     ],
     mergeStrategy: "by-identity",
@@ -105,7 +105,7 @@ export const DATASET_REGISTRY = [
     label: "otbr-cli-*⏰, networkdiag-multicast, mdns",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-multicast-network.json",
+      "td-otbr-cli-networkdiag-multicast-network.json",
       "td-otbr-cli-meshdiag-router-neighbortables.json",
       "td-otbr-cli-meshdiag-router-childtables.json",
       "td-mdns-scopes-thread.json"
@@ -119,10 +119,10 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_poll_all_mdns",
-    label: "otbr-cli-*⏰, network-poll⏰, mdns",
+    label: "otbr-cli-*⏰, network-fetch-all⏰, mdns",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-poll.json",
+      "td-otbr-cli-networkdiag-fetch-all.json",
       "td-otbr-cli-meshdiag-router-neighbortables.json",
       "td-otbr-cli-meshdiag-router-childtables.json",
       "td-mdns-scopes-thread.json"
@@ -253,7 +253,7 @@ export const DATASET_REGISTRY = [
     label: "otbr-cli, otbr-restapi",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-topology-poll.json",
+      "td-otbr-cli-networkdiag-fetch-all.json",
       "td-otbr-cli-meshdiag-router-neighbortables.json",
       "td-otbr-cli-meshdiag-router-childtables.json",
       "td-otbr-restapi-devices.json",

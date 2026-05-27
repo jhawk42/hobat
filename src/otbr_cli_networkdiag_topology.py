@@ -1492,7 +1492,7 @@ def fetch_network_diag_multicast(
 def fetch_network_diag_topology_multicast_network(
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
-    router_table_by_router_id: dict | None = None,
+    router_table_by_router_id: dict | None = None
 ) -> dict:
     """
     Queries network diagnostic data via multicast to all Thread devices in the mesh (ff03::1).
@@ -1518,6 +1518,7 @@ def fetch_network_diag_topology_multicast_network(
 def fetch_network_diag_topology_multicast_neighbors(
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
+    router_table_by_router_id: dict | None = None
 ) -> dict:
     """
     Queries network diagnostic data via multicast to immediate one-hop neighbors (ff02::1).
@@ -1529,7 +1530,7 @@ def fetch_network_diag_topology_multicast_neighbors(
     Args:
         extaddr_map: Optional dict mapping extended addresses to device labels
         thread_network_info: Optional dict with network info (contains OMR prefix)
-
+        router_table_by_router_id: Optional dict mapping router IDs to router table entries
     Returns:
         Dict keyed by rloc16 with device records from immediate one-hop neighbors
     """
@@ -1537,6 +1538,7 @@ def fetch_network_diag_topology_multicast_neighbors(
         multicast_addr=TD_THREAD_MULTICAST_ADDRESSES_LINK_LOCAL_ALL_FTDS_AND_MEDS, # "ff02::1"
         extaddr_map=extaddr_map,
         thread_network_info=thread_network_info,
+        router_table_by_router_id=router_table_by_router_id
     )
 
 
@@ -2114,7 +2116,7 @@ def print_network_diag_topology(topology):
 
 
 def save_topology_to_json_dict(
-    data, filename="td-otbr-cli-networkdiag-topology-poll.json"
+    data, filename="td-otbr-cli-networkdiag-fetch-all.json"
 ):
     """Serializes the dictionary to a pretty-printed JSON file."""
     save_json_atomic(data, filename)
@@ -2162,7 +2164,7 @@ def save_topology_to_json_list(
             filename, json.dumps(network_map, indent=4))
 
 def main_multicast_network(argv: Sequence[str] | None = None) -> int:
-    """Entry point for topology-multicast-network subcommand (ff03::1)."""
+    """Entry point for multicast-network subcommand (ff03::1)."""
 
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
@@ -2206,7 +2208,7 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
 
     # Save the topology as JSON to file
     save_json_filename = data_file_path(
-        "td-otbr-cli-networkdiag-topology-multicast-network.json", td_data_dir
+        "td-otbr-cli-networkdiag-multicast-network.json", td_data_dir
     )
     save_topology_to_json_list(data, save_json_filename)
 
@@ -2217,7 +2219,7 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
 
 
 def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
-    """Entry point for topology-multicast-neighbors subcommand (ff02::1)."""
+    """Entry point for multicast-neighbors subcommand (ff02::1)."""
 
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
@@ -2263,7 +2265,7 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
 
     # Save the topology as JSON to file
     save_json_filename = data_file_path(
-        "td-otbr-cli-networkdiag-topology-multicast-neighbors.json", td_data_dir
+        "td-otbr-cli-networkdiag-multicast-neighbors.json", td_data_dir
     )
     save_topology_to_json_list(data, save_json_filename)
 
@@ -2326,7 +2328,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # save the topology as JSON to file
     save_json_filename = data_file_path(
-        "td-otbr-cli-networkdiag-topology-poll.json", td_data_dir
+        "td-otbr-cli-networkdiag-fetch-all.json", td_data_dir
     )
     save_topology_to_json_list(
         networkdiagnostic_topology_data, save_json_filename

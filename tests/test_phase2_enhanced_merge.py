@@ -443,7 +443,7 @@ def test_integration_cli_and_rest_api():
         "children": [
             {"extaddr": "aabbccddeeff0011", "age": 100}
         ],
-        "_source_files": ["td-otbr-cli-networkdiag-topology-poll.json"]
+        "_source_files": ["td-otbr-cli-networkdiag-fetch-all.json"]
     }
     
     # REST API data (camelCase, different parent names)

@@ -54,7 +54,7 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
                 "/tmp/td-data",
                 "otbr-cli",
                 "networkdiag",
-                "topology-poll",
+                "fetch-all",
                 "--children-no",
             ]
         )

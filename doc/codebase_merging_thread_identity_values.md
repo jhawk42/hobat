@@ -150,7 +150,7 @@ All merged records include metadata:
 ```json
 {
   "_source_files": [
-    "td-otbr-cli-networkdiag-topology-poll.json",
+    "td-otbr-cli-networkdiag-fetch-all.json",
     "td-otbr-restapi-diagnostics.json",
     "td-mdns-scopes-br.json"
   ]
@@ -217,8 +217,8 @@ Performance scales linearly with dataset size. Networks with 100+ nodes complete
 CLI sources (5):
 - `td-otbr-cli-router-table.json`
 - `td-otbr-cli-meshdiag-topology.json`
-- `td-otbr-cli-networkdiag-topology-poll.json`
-- `td-otbr-cli-networkdiag-topology-multicast-network.json`
+- `td-otbr-cli-networkdiag-fetch-all.json`
+- `td-otbr-cli-networkdiag-multicast-network.json`
 - `td-otbr-cli-meshdiag-router-neighbortables.json`
 
 REST API sources (2):
