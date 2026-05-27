@@ -58,6 +58,17 @@ export function lqStyleFromAvgLqi(avgLqi, scale) {
   return EDGE_LQ_STYLES.low;
 }
 
+// linkMargin in dB: higher = better link quality
+// Typical values: 0–80 dB; >20 dB is good, >40 dB is excellent
+export function lqStyleFromLinkMargin(linkMargin) {
+  const margin = toFiniteNumber(linkMargin);
+  if (!Number.isFinite(margin)) return EDGE_LQ_STYLES.noLqPurple;
+  if (margin >= 40) return EDGE_LQ_STYLES.high;
+  if (margin >= 20) return EDGE_LQ_STYLES.medium;
+  if (margin >= 10) return EDGE_LQ_STYLES.low;
+  return EDGE_LQ_STYLES.noLqPurple;
+}
+
 // ── Edge builder ──────────────────────────────────────────────────────────────
 //
 // Inserts or merges a directed edge into edgeMap/edgeData.

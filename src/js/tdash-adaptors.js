@@ -16,7 +16,7 @@ import {
   chooseNodeId, buildLabel,
   buildMainRouterRloc16, buildChildRloc16,
   addEdge, groupIsolatedUnknownNodes, buildVisNodeData,
-  lqStyleFromField, lqStyleFromAvgLqi
+  lqStyleFromField, lqStyleFromAvgLqi, lqStyleFromLinkMargin
 } from './tdash-topology-utils.js';
 
 // ── File name constants ───────────────────────────────────────────────────────
@@ -950,7 +950,7 @@ export function adaptRawArray(fileMap) {
 
 export function adaptOtbrRestApi(fileMap) {
   const devicesRaw = fileMap.get(FILE_RESTAPI_DEVICES) ?? fileMap.get(FILE_RESTAPI_DEVICES_LIST) ?? fileMap.get(FILE_RESTAPI_DEVICES_FETCH);
-  const diagRaw = fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL);
+  const diagRaw = fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL) ?? fileMap.get(FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL);
   // Accept JSON:API envelope ({data:[...]}), pre-flattened array, or a single diagnostic object
   function extractItems(raw) {
     if (!raw) return [];
@@ -1064,8 +1064,51 @@ export function adaptOtbrRestApi(fileMap) {
       addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_OTBR_CHILD] });
       routerIdsWithChildren.add(fromId);
     });
+
+    // Pass 3b: edges from routerNeighbors (mesh-diagnostics-fetch-all)
+    (Array.isArray(node.routerNeighbors) ? node.routerNeighbors : []).forEach((neighbor) => {
+      const neighborExtaddr = toText(neighbor.extAddress).toLowerCase();
+      const neighborRloc16 = toText(neighbor.rloc16).toLowerCase();
+      let toId = neighborExtaddr || neighborRloc16;
+      if (!toId) return;
+
+      // Prefer extAddress-based lookup, fallback to rloc16
+      if (neighborExtaddr && nodeMap.has(neighborExtaddr)) {
+        toId = neighborExtaddr;
+      } else if (neighborRloc16 && rloc16ToNodeId.has(neighborRloc16)) {
+        toId = rloc16ToNodeId.get(neighborRloc16);
+      } else if (!nodeMap.has(toId)) {
+        // Create placeholder node for neighbor
+        upsertOtbrRestApiNode(toId, {
+          extAddress: neighborExtaddr,
+          rloc16: neighborRloc16,
+          id: toId
+        }, { shape: 'box', color: NODE_COLORS.router });
+        if (neighborRloc16) rloc16ToNodeId.set(neighborRloc16, toId);
+      }
+
+      // Style link based on linkMargin (dB)
+      const lqStyle = lqStyleFromLinkMargin(neighbor.linkMargin);
+      addEdge(edgeMap, edgeData, fromId, toId, {
+        ...lqStyle,
+        linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR]
+      });
+
+      // Store neighbor data for potential detail display
+      const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
+      if (fromRloc16) {
+        if (!routerNeighborByRloc16.has(fromRloc16)) {
+          routerNeighborByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_neighbor_table: [] });
+        }
+        const neighborRow = routerNeighborByRloc16.get(fromRloc16);
+        if (Array.isArray(neighborRow.router_neighbor_table)) {
+          neighborRow.router_neighbor_table.push(neighbor);
+        }
+      }
+    });
   });
 
+  // Pass 4: group isolated unknown nodes
   const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 

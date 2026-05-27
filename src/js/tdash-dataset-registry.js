@@ -329,6 +329,18 @@ export const DATASET_REGISTRY = [
   // ── Multi-file topology datasets (otbr-restapi) ────────────
   {
     source: "otbr-restapi",
+    value: "restapi_devices_fetch_diagnostics_fetch_mesh-diagnostics-fetch_all",
+    label: "devices fetch, diagnostics fetch all⏰, mesh-diagnostics fetch all⏰",
+    files: ["td-otbr-restapi-devices-fetch.json", "td-otbr-restapi-diagnostics-fetch-all.json","td-otbr-restapi-mesh-diagnostics-fetch-all.json"],
+    mergeStrategy: "none",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links"
+  },
+
+  // ── Multi-file topology datasets (otbr-restapi) ────────────
+  {
+    source: "otbr-restapi",
     value: "restapi_mesh_diagnostics_fetch_all",
     label: "mesh diagnostics fetch all⏰",
     files: ["td-otbr-restapi-mesh-diagnostics-fetch-all.json"],
