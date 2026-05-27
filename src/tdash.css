@@ -22,8 +22,8 @@
   /* Topology node colors */
   --node-router-bg: #d9ecff;
   --node-router-border: #1565c0;
-  --node-border-router-bg: #ffd9d9;
-  --node-border-router-border: #c62828;
+  --node-border-router-bg: #c8e6c9;
+  --node-border-router-border: #4caf50;
   --node-child-bg: #fff4cc;
   --node-child-border: #d9a400;
   --node-eve-bg: #e8f5e9;

@@ -59,8 +59,8 @@ export const PALETTE = Object.freeze({
   // Topology node colors
   routerBg: "#d9ecff",
   routerBorder: "#1565c0",
-  borderRouterBg: "#ffd9d9",
-  borderRouterBorder: "#c62828",
+  borderRouterBg: "#c8e6c9",
+  borderRouterBorder: "#4caf50",
   childBg: "#fff4cc",
   childBorder: "#d9a400",
   eveBg: "#e8f5e9",

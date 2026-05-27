@@ -141,7 +141,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
   
   // Store original styling for each node so we can restore it when search is cleared
   _originalNodeStyling = new Map();
-  nodesDataset.forEach((node) => {
+  nodeData.forEach((node) => {
     _originalNodeStyling.set(node.id, {
       color: node.color,
       borderWidth: node.borderWidth,
@@ -285,21 +285,22 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     });
 
     // Update each node: highlight matches, dim non-matches
+    // Use stored original styling to preserve current node state
     nodesDataset.update(
-      _topologyNodeData.map((n) => {
-        if (matchingNodeIds.has(n.id)) {
+      Array.from(_originalNodeStyling.entries()).map(([nodeId, originalStyle]) => {
+        if (matchingNodeIds.has(nodeId)) {
           return {
-            id: n.id,
-            color: { background: n.color.background, border: "#d97706" },
-            borderWidth: Math.max(n.borderWidth ?? 2, 4),
-            font: n.font,
+            id: nodeId,
+            color: { background: originalStyle.color.background, border: "#d97706" },
+            borderWidth: Math.max(originalStyle.borderWidth ?? 2, 4),
+            font: originalStyle.font,
           };
         }
         return {
-          id: n.id,
+          id: nodeId,
           color: { background: "#e8e8e8", border: "#c0c0c0" },
           borderWidth: 1,
-          font: { ...n.font, color: "#aaaaaa" },
+          font: { ...originalStyle.font, color: "#aaaaaa" },
         };
       }),
     );
@@ -460,5 +461,16 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     diagnosticFilterEl.value,
   );
   updateStatus(initial);
+  
+  // Apply visual styling after filters to ensure correct colors are displayed
+  nodesDataset.update(
+    Array.from(_originalNodeStyling.entries()).map(([nodeId, originalStyle]) => ({
+      id: nodeId,
+      color: originalStyle.color,
+      borderWidth: originalStyle.borderWidth,
+      font: originalStyle.font,
+    })),
+  );
+  
   _topologyFilterHandlers.fitIfEnabled();
 }
