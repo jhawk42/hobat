@@ -485,6 +485,14 @@ export function sortDetailsWithPriority(details) {
     "thread_version",
     "thread_stack_version",
     "threadStackVersion",
+    "vendor_name",
+    "vendorName",
+    "vendor_model",
+    "vendorModel",
+    "vendor_sw_version",
+    "vendorSwVersion",    
+    "room",
+    "icon",
     
     // === TIER 4: Topology & Connectivity ===
     "total_children",
@@ -509,12 +517,6 @@ export function sortDetailsWithPriority(details) {
     "leader_data.leader_router_id",
     
     // === TIER 5: Advanced/Diagnostic ===
-    "vendor_name",
-    "vendorName",
-    "vendor_model",
-    "vendorModel",
-    "vendor_sw_version",
-    "vendorSwVersion",
     "tlv_values",
     "mac_counters.ifinerrors_pct",
     "mac_counters.ifouterrors_pct",

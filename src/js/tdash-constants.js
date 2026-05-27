@@ -753,6 +753,8 @@ export const TABLE_PRIORITY_COLUMNS = [
   "thread_version",
   "thread_stack_version",
   "threadStackVersion",
+  "room",
+  "icon",
   
   // === TIER 4: Topology & Connectivity ===
   "total_children",
