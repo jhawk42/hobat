@@ -35,6 +35,7 @@ let _animationEnabled = false;
 let _topologyNodeData = null;  // Store nodeData from last render for filter validation
 let _topologyRawRows = null;   // Map<nodeId, rawRow> from last render, used for search
 let _topologyDatasetCounts = null;  // Counts derived from last topology render
+let _originalNodeStyling = null;  // Map<nodeId, {color, borderWidth, font}> — original styling for search restore
 
 // ── Exported accessors / setters ──────────────────────────────────────────────
 
@@ -61,6 +62,19 @@ export function isAutoZoomEnabled() {
 }
 export function isAnimationEnabled() {
   return _animationEnabled;
+}
+
+// ── Debug accessors (for development/troubleshooting) ────────────────────────
+
+/**
+ * DEBUG: Expose the vis Network instance for browser console inspection.
+ * Usage in browser console: window.tdashDebug.getVisNetwork()
+ */
+if (typeof window !== 'undefined') {
+  window.tdashDebug = window.tdashDebug || {};
+  window.tdashDebug.getVisNetwork = function() { return _visNetwork; };
+  window.tdashDebug.getTopologyNodeData = function() { return _topologyNodeData; };
+  window.tdashDebug.getOriginalNodeStyling = function() { return _originalNodeStyling; };
 }
 
 // ── Main renderer ─────────────────────────────────────────────────────────────
@@ -124,6 +138,17 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
 
   const nodesDataset = new vis.DataSet(nodeData);
   const edgesDataset = new vis.DataSet(edgeData);
+  
+  // Store original styling for each node so we can restore it when search is cleared
+  _originalNodeStyling = new Map();
+  nodesDataset.forEach((node) => {
+    _originalNodeStyling.set(node.id, {
+      color: node.color,
+      borderWidth: node.borderWidth,
+      font: node.font,
+    });
+  });
+  
   const effectiveOptions = physicsEnabled
     ? VIS_OPTIONS
     : Object.assign({}, VIS_OPTIONS, {
@@ -239,13 +264,13 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     if (!_topologyNodeData || !_topologyRawRows) return;
 
     if (!searchQuery) {
-      // Restore all nodes to their original appearance
+      // Restore all nodes to their original appearance using stored original styling
       nodesDataset.update(
-        _topologyNodeData.map((n) => ({
-          id: n.id,
-          color: n.color,
-          borderWidth: n.borderWidth,
-          font: n.font,
+        Array.from(_originalNodeStyling.entries()).map(([nodeId, originalStyle]) => ({
+          id: nodeId,
+          color: originalStyle.color,
+          borderWidth: originalStyle.borderWidth,
+          font: originalStyle.font,
         })),
       );
       return;

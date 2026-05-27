@@ -187,11 +187,17 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_meshdiag: (style.source === 'meshdiag') || (existing ? existing.from_meshdiag === true : false),
       from_networkdiagnostic: (style.source === 'networkdiagnostic') || (existing ? existing.from_networkdiagnostic === true : false),
-      shape: style.shape || (existing ? existing.shape : 'box'),
+      shape: (existing && existing.shape === 'ellipse') ? 'ellipse' : (style.shape || (existing ? existing.shape : 'box')),
       color: style.color || (existing ? existing.color : NODE_COLORS.router)
     };
     merged.is_ftd_router = merged.mode_device === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
-    if (merged.br) merged.color = NODE_COLORS.borderRouter;
+    // Apply role-based color overrides
+    if (merged.br) {
+      merged.color = NODE_COLORS.borderRouter;
+    } else if (merged.shape === 'ellipse') {
+      // Child nodes (ellipse shape) should always use child color, not router default
+      merged.color = NODE_COLORS.child;
+    }
     nodeMap.set(nodeId, merged);
   }
 
@@ -436,7 +442,16 @@ export function adaptEve(fileMap) {
       shape: style.shape || (existing ? existing.shape : 'box'),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
-    if (merged.br) merged.color = NODE_COLORS.borderRouter;
+    // Apply role-based color overrides
+    if (merged.br) {
+      merged.color = NODE_COLORS.borderRouter;
+    } else if (merged.shape === 'ellipse') {
+      // Child nodes (ellipse shape) should always use child color
+      if (['0x4c00', '0xa800'].includes(nodeId)) {
+        console.log(`[upsertEveNativeNode] Setting ellipse color for ${nodeId}: from`, existing?.color, 'to', NODE_COLORS.child);
+      }
+      merged.color = NODE_COLORS.child;
+    }
     nodeMap.set(nodeId, merged);
   }
 
@@ -537,7 +552,13 @@ export function adaptEveNative(fileMap) {
       shape: style.shape || (existing ? existing.shape : 'box'),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
-    if (merged.br) merged.color = NODE_COLORS.borderRouter;
+    // Apply role-based color overrides
+    if (merged.br) {
+      merged.color = NODE_COLORS.borderRouter;
+    } else if (merged.shape === 'ellipse') {
+      // Child nodes (ellipse shape) should always use child color
+      merged.color = NODE_COLORS.child;
+    }
     nodeMap.set(nodeId, merged);
   }
 

@@ -5,7 +5,7 @@ import {
   getCanonicalOmrIpv6Address,
 } from "./tdash-utils.js";
 import { normalizeLinkCategories } from "./tdash-filters.js";
-import { EDGE_LQ_STYLES } from "./tdash-constants.js";
+import { EDGE_LQ_STYLES, NODE_COLORS } from "./tdash-constants.js";
 
 // ── Node-id selection ─────────────────────────────────────────────────────────
 
@@ -298,11 +298,15 @@ export function buildVisNodeData(
       widthConstraint = { minimum: 187, maximum: 187 };
       heightConstraint = { minimum: 77, maximum: 77 };
     }
+    // Ensure ellipse nodes always have child color, especially for unknown nodes
+    const effectiveColor = (effectiveShape === "ellipse" && !node.br) 
+      ? NODE_COLORS.child 
+      : node.color;
     return {
       id: node.id,
       label: labelFn(node),
       shape: effectiveShape,
-      color: node.color,
+      color: effectiveColor,
       font: { size: fontSize, face: "monospace", multi: "md" },
       heightConstraint,
       widthConstraint,

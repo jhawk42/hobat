@@ -1,3 +1,8 @@
+// Prevent browser from restoring scroll position on reload
+if ('scrollRestoration' in history) {
+  history.scrollRestoration = 'manual';
+}
+
 import { DATASET_REGISTRY } from "./tdash-dataset-registry.js";
 import {
   currentDataset,
