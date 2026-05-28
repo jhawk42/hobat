@@ -209,6 +209,7 @@ export async function loadDataset(entryValue) {
   const statusEl = document.getElementById("fetch-status-line-content");
   const timerEl = document.getElementById("fetch-timetaken-value");
   const progressEl = document.getElementById("fetch-timetaken-progress");
+  const estimateActionCostSecs = entry.estimateActionCostSecs ?? "?";
   const initialLabel = entry.label;
   const loadStartTime = Date.now();
   statusEl.textContent = `Loading ${initialLabel}…`;
@@ -218,7 +219,7 @@ export async function loadDataset(entryValue) {
   const elapsedUpdateInterval = setInterval(() => {
     const elapsed = Math.round((Date.now() - loadStartTime) / 1000);
     statusEl.textContent = `Loading ${initialLabel}…`;
-    if (timerEl) timerEl.textContent = `${elapsed}s`;
+    if (timerEl) timerEl.textContent = `${elapsed} / ${estimateActionCostSecs}s`;
     // Update progress bar with animated progress (cycles 10-90)
     if (progressEl) {
       const progress = 10 + ((elapsed % 8) * 10);
@@ -258,6 +259,8 @@ export async function loadDataset(entryValue) {
 
   // Clear the elapsed time update interval
   clearInterval(elapsedUpdateInterval);
+  const finalElapsed = Math.round((Date.now() - loadStartTime) / 1000);
+  if (timerEl) timerEl.textContent = `${finalElapsed}s`;
 
   const rawFiles = [];
   const loadedFiles = [];

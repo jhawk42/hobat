@@ -27,7 +27,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "default_links"
+    defaultLinkFilter: "default_links",
+    estimateActionCostSecs: 6
   },
 
   // ── Single-file simple datasets (otbr-cli) ───
@@ -39,7 +40,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 16
   },
 
   // ── Multi-file merged (otbr-cli, mdns) ──
@@ -55,7 +57,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 80
   },
 
  // ── Multi-file merged (otbr-cli) ──
@@ -71,7 +74,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 720
   },
 
 
@@ -89,7 +93,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 270
   }, 
 
   {
@@ -106,7 +111,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 900
   },
 
   /*
@@ -135,7 +141,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 600
   },  
 
 
@@ -147,7 +154,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 90
   },
   {
     source: "otbr-cli",
@@ -157,7 +165,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 90
   },
 
   // ── Single-file simple datasets (otbr-cli) ───
@@ -169,7 +178,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "router-table",
     defaultView: "table",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1
   },
 
   // otbr-restapi
@@ -182,7 +192,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────
@@ -198,6 +209,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "otbr_rest_api",
+    estimateActionCostSecs: 2
   },   
 
   // ── Single-file simple datasets ───
@@ -209,7 +221,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1
   },
   
   // ── Single-file simple datasets ───
@@ -221,7 +234,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 6
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────
@@ -236,7 +250,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 606
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────
@@ -252,7 +267,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1206
   },
 
   // ── Single-file simple datasets ───
@@ -265,6 +281,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "otbr_rest_api",
+    estimateActionCostSecs: 600
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────
@@ -277,6 +294,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "otbr_rest_api",
+    estimateActionCostSecs: 600
   },
 
   /*
@@ -329,7 +347,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultView: "table",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1
   },
 
   // ── Single-file simple datasets ───
@@ -341,7 +360,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultView: "table",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1
   },
 
   // mDNS
@@ -354,7 +374,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultLinkFilter: "all_links",
-    defaultView: "table"
+    defaultView: "table",
+    estimateActionCostSecs: 60
   },
 
   {
@@ -365,7 +386,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultLinkFilter: "all_links",
-    defaultView: "table"
+    defaultView: "table",
+    estimateActionCostSecs: 60
   },
 
   {
@@ -376,7 +398,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultLinkFilter: "all_links",
-    defaultView: "table"
+    defaultView: "table",
+    estimateActionCostSecs: 60
   },
 
   {
@@ -387,7 +410,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultLinkFilter: "all_links",
-    defaultView: "table"
+    defaultView: "table",
+    estimateActionCostSecs: 60
   },
 
   // ── Single-file simple dataset ───
@@ -399,7 +423,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "eve_native",
     defaultView: "topology",
-    defaultLinkFilter: "eve_native_routes_children"
+    defaultLinkFilter: "eve_native_routes_children",
+    estimateActionCostSecs: 1
   },
   // ── Single-file simple dataset ───
   {
@@ -410,7 +435,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "eve_enhanced",
     defaultView: "topology",
-    defaultLinkFilter: "eve_enhanced_routes_children"
+    defaultLinkFilter: "eve_enhanced_routes_children",
+    estimateActionCostSecs: 1
   },
 
   // ── Merged (all nodes) ─
@@ -422,7 +448,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
     defaultView: "topology",
-    defaultLinkFilter: "all_links"
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1
   },
 
   // ── Multi-file topology datasets (otbr-cli, otbr-restapi) ────────────
@@ -440,7 +467,8 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "default_links"
+    defaultLinkFilter: "default_links",
+    estimateActionCostSecs: 720
   },
 
   // ── Single-file simple datasets (system) ───
@@ -452,6 +480,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultLinkFilter: "all_links",
-    defaultView: "table"
+    defaultView: "table",
+    estimateActionCostSecs: 1
   }
 ];

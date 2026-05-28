@@ -55,22 +55,22 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
     ),
 
     # mdns
-    # Fetches mDNS using zeroconf. Browse window is ~5–10 min per service type.
+    # Fetches mDNS using zeroconf. Browse window is ~60 sec per service type.
     "td-mdns-scopes-thread.json": FileAction(
-        # ~10 min browse
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["mdns", "thread"], action_cost_s=600
+        # ~60 sec browse
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["mdns", "thread"], action_cost_s=60
     ),
     "td-mdns-scopes-br.json": FileAction(
-        # ~6 min browse
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["mdns", "br"], action_cost_s=360
+        # ~60 sec browse
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["mdns", "br"], action_cost_s=60
     ),
     "td-mdns-scopes-hap.json": FileAction(
-        # ~6 min browse
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["mdns", "hap"], action_cost_s=360
+        # ~60 sec browse
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["mdns", "hap"], action_cost_s=60
     ),
     "td-mdns-scopes-matter.json": FileAction(
-        # ~10 min browse
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["mdns", "matter"], action_cost_s=600
+        # ~60 sec browse
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["mdns", "matter"], action_cost_s=60
     ),
 
     # otbr-cli
@@ -83,7 +83,7 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
     ),
     # meshdiag topology — single command, a few seconds.
     "td-otbr-cli-meshdiag-topology.json": FileAction(
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-cli", "meshdiag", "topology"], action_cost_s=5
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-cli", "meshdiag", "topology"], action_cost_s=6
     ),
     # Per-router meshdiag commands — ~1–2 s each router; 90 s for ~50-router network.
     # force_async=True: 90 s exceeds the browser-safe synchronous limit (~30 s).
@@ -105,23 +105,23 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
         action_cost_s=90,  # ~1–2 s per router
         force_async=True,
     ),
-    # networkdiag — TLV request per router with retries; up to ~8 min on large networks.
+    # networkdiag — TLV request per router with retries; up to ~10 min on large networks.
     "td-otbr-cli-networkdiag-fetch-all.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
         action=["otbr-cli", "networkdiag", "fetch-all"],
-        action_cost_s=480,  # ~8 min for ~60 routers with timeout retries
+        action_cost_s=600,  # ~10 min for ~60 routers with timeout retries
     ),
     # networkdiag multicast-network — TLV request per router with retries; up to ~16 seconds on large networks.
     "td-otbr-cli-networkdiag-multicast-network.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
         action=["otbr-cli", "networkdiag", "multicast-network"],
-        action_cost_s=16,  # ~11 seconds with timeout retries
+        action_cost_s=16,  # ~16 seconds with timeout retries
     ),
     # networkdiag multicast-neighbors — TLV request per router with retries; up to ~16 seconds on large networks.
     "td-otbr-cli-networkdiag-multicast-neighbors.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT,
         action=["otbr-cli", "networkdiag", "multicast-neighbors"],
-        action_cost_s=16,  # ~11 seconds with timeout retries
+        action_cost_s=16,  # ~16 seconds with timeout retries
     ),
 
     # otbr-restapi
@@ -139,7 +139,7 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "devices", "list"], action_cost_s=1
     ),
     "td-otbr-restapi-devices-fetch.json": FileAction(
-        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "devices", "fetch"], action_cost_s=5
+        max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "devices", "fetch"], action_cost_s=6
     ),    
     "td-otbr-restapi-diagnostics-list.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["otbr-restapi", "diagnostics", "list"], action_cost_s=1
