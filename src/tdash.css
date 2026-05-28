@@ -252,13 +252,6 @@ h1 {
   white-space: nowrap;
 }
 
-#search-status {
-  flex-basis: 100%;
-  font-size: 12px;
-  color: var(--text-muted, #888);
-  min-height: 1em;
-}
-
 .search-match {
   border-left: 3px solid #d97706 !important;
   background-color: rgba(217, 119, 6, 0.07) !important;

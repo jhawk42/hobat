@@ -326,12 +326,6 @@ function updateTableStatus(visibleRowCount, columnCount, totalFilteredCount, sea
   }
   statusText += " Click a header to sort.";
   document.getElementById("view-status-line-content").textContent = statusText;
-  const searchStatusEl = document.getElementById("search-status");
-  if (searchStatusEl) {
-    searchStatusEl.textContent = searchQuery
-      ? `${visibleRowCount} of ${totalFilteredCount} rows match`
-      : "";
-  }
 }
 
 export function applyTableFilters() {

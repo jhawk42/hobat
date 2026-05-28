@@ -566,8 +566,6 @@ async function doFetchDataset() {
   _currentSearchQuery = "";
   const _srchInput = document.getElementById("search-input");
   if (_srchInput) _srchInput.value = "";
-  const _srchStatus = document.getElementById("search-status");
-  if (_srchStatus) _srchStatus.textContent = "";
 
   renderCurrentView();
   updateFetchStatusBar(_lastFetchStartedAt);
@@ -587,34 +585,19 @@ document.getElementById("dataset-select").addEventListener("change", async () =>
 
 function applySearch() {
   if (!currentDataset) {
-    const el = document.getElementById("search-status");
-    if (el) el.textContent = "";
+    document.getElementById("view-status-line-content").textContent =
+      "No dataset loaded. Select a dataset and click Fetch.";
     return;
   }
 
   if (currentView === "table") {
-    // applyTableFilters reads #search-input directly and updates #search-status
+    // applyTableFilters reads #search-input directly and updates #view-status-line-content
     applyTableFilters();
   } else {
     // Topology: apply node highlight
     const handlers = getTopologyFilterHandlers();
     if (handlers) {
       handlers.applySearchHighlight(_currentSearchQuery, isMoreInfoEnabled());
-    }
-    // Update #search-status with match count derived from dataset rows
-    const searchStatusEl = document.getElementById("search-status");
-    if (searchStatusEl) {
-      if (_currentSearchQuery && currentDataset.rows?.length) {
-        const { matchingRows } = filterRowsBySearch(
-          currentDataset.rows,
-          _currentSearchQuery,
-          isMoreInfoEnabled(),
-        );
-        searchStatusEl.textContent =
-          `${matchingRows.length} of ${currentDataset.rows.length} rows match`;
-      } else {
-        searchStatusEl.textContent = "";
-      }
     }
   }
 }

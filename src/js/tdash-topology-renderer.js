@@ -273,6 +273,8 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
           font: originalStyle.font,
         })),
       );
+      // Clear search from status line
+      updateStatus(lastStatusCounts);
       return;
     }
 
@@ -283,6 +285,9 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
         matchingNodeIds.add(nodeId);
       }
     });
+
+    // Update status line with search counts
+    updateStatus(lastStatusCounts, searchQuery, matchingNodeIds.size, _topologyRawRows.size);
 
     // Update each node: highlight matches, dim non-matches
     // Use stored original styling to preserve current node state
@@ -332,7 +337,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     return ` Scale: ${scale.toFixed(2)}x.`;
   }
 
-  function updateStatus(counts) {
+  function updateStatus(counts, searchQuery = null, matchCount = 0, totalCount = 0) {
     lastStatusCounts = counts;
     const {
       visibleNodeCount,
@@ -351,10 +356,13 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     )
       ? ` Neighbor Match: targets ${matchedTargetNodeCount}, links ${forcedVisibleLinkCount}.`
       : "";
+    const searchSuffix = searchQuery
+      ? ` Search: "${searchQuery}" — ${matchCount} of ${totalCount} rows match.`
+      : "";
     const fetchStatusEl = document.getElementById("fetch-status-line-content");
     if (fetchStatusEl) fetchStatusEl.textContent = `Loaded ${sourceNames.join(", ")}.`;
     statusEl.textContent =
-      `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links.${neighborSuffix}`;
+      `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links.${neighborSuffix}${searchSuffix}`;
   }
 
   // ── Node detail click handler ──────────────────────────────────────────
