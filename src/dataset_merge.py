@@ -1356,6 +1356,18 @@ def build_merged_records(
             # Compatibility alias for older consumers expecting `_sources`.
             node["_sources"] = list(source_files)
 
+        # Build _merge_identity_keys (mirrors JS mergeRowsByStrategy output).
+        identity_key_parts: list[str] = []
+        iv = collect_merge_identity_values(node)
+        if iv.get("extaddr"):
+            identity_key_parts.append(f"extaddr:{iv['extaddr']}")
+        if iv.get("rloc16"):
+            identity_key_parts.append(f"rloc16:{iv['rloc16']}")
+        if iv.get("omr_ipv6_addr"):
+            identity_key_parts.append(f"omr_ipv6_addr:{iv['omr_ipv6_addr']}")
+        if identity_key_parts:
+            node["_merge_identity_keys"] = identity_key_parts
+
         ordered: dict[str, Any] = {}
 
         for key in PRIORITY_FIELDS:
@@ -1492,6 +1504,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=EXTADDR_DEVICE_LABEL_MAP_FILENAME,
         help="Reference file used only for extaddr to device_label lookup.",
     )
+    parser.add_argument(
+        "--merge-strategy",
+        default="merge",
+        choices=["merge", "none"],
+        help=(
+            "merge (default): identify-and-merge records from all sources. "
+            "none: pass-through mode — all records from all sources are "
+            "collected as-is without identity matching or deduplication."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1538,6 +1560,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     report["reference_extaddr_map_file"] = args.extaddr_map_file
     report["reference_extaddr_map_entries"] = len(device_label_map)
+
+    if args.merge_strategy == "none":
+        # Pass-through: collect all records without identity matching.
+        passthrough_records: list[dict[str, Any]] = []
+        for filename in input_files:
+            data = load_json(base_dir / filename)
+            records = extract_records(filename, data)
+            for raw_record in records:
+                record = normalize_identifiers(raw_record, omr_prefix)
+                record.setdefault("_source_files", [filename])
+                passthrough_records.append(record)
+        merged_records = passthrough_records
+        report["merge_strategy"] = "none"
+        report["passthrough_record_count"] = len(passthrough_records)
+        logging.info(
+            f"merge-strategy=none: collected {len(passthrough_records)} "
+            "records without merging."
+        )
+    else:
+        report["merge_strategy"] = "merge"
 
     output_path = base_dir / args.output
     save_json_atomic(merged_records, output_path, indent=2, add_trailing_newline=True)
