@@ -158,6 +158,8 @@ export function mergeRowFields(target, source) {
   mergeRowMetadata(target, source);
   Object.keys(source).forEach((key) => {
     if (key.startsWith("_")) return;
+    // Guard against prototype-pollution keys
+    if (key === "__proto__" || key === "constructor" || key === "prototype") return;
     const sv = source[key];
     const tv = target[key];
     if (isEmptyMergeValue(tv) && !isEmptyMergeValue(sv)) {
@@ -228,6 +230,8 @@ export function getPartitionId(row) {
 export function deepMergeObjects(target, source, pathPrefix, conflictTarget, ctx = {}) {
   Object.keys(source).forEach((key) => {
     if (key.startsWith("_")) return;
+    // Guard against prototype-pollution keys
+    if (key === "__proto__" || key === "constructor" || key === "prototype") return;
     const sv = source[key];
     const tv = target[key];
     const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
