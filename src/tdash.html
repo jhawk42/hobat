@@ -104,17 +104,13 @@
           <div class="status-row">
             <div class="timetaken-group">
               <label title="Time taken to fetch or generate data for this dataset">
-                <span id="fetch-timetaken-label">Time:</span>
+                <span id="fetch-timetaken-label">Time to fetch:</span>
                 <span id="fetch-timetaken-value">-</span>
               </label>
               <div class="progress-row">
                 <progress id="fetch-timetaken-progress" max="100"></progress>
               </div>
             </div>
-            <label title="Last time browser called the server to fetch or generate data for this dataset">
-              <span id="fetch-last-label">When:</span>
-              <span id="fetch-last-value">-</span>
-            </label>
             <label title="Age of the cached data for this dataset">
               <span id="fetch-cache-age-label">Data Age:</span>
               <span id="fetch-cache-age-value">-</span>
@@ -158,8 +154,7 @@
         <div class="controls">
           <div id="search-control-bar" class="control-pair control-pair-search">
             <label for="search-input">Search</label>
-            <input type="text" id="search-input" placeholder="extaddr, rloc16, device_label …" title="Search device records by extaddr, rloc16, device_label, name, room, role, version, or other identity fields. Press Enter or click Find to search." />
-            <button id="btn-search-find" title="Find rows matching the search query">Find</button>
+            <input type="text" id="search-input" placeholder="extaddr, rloc16, device_label …" title="Search device records by extaddr, rloc16, device_label, name, room, role, version, or other identity fields. Press Enter to search." />
             <button id="btn-search-clear" title="Clear search and reset results">✕</button>
           </div>
 

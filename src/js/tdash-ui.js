@@ -503,8 +503,6 @@ function updateDeviceStatusBar(counts) {
 }
 
 function updateFetchStatusBar(fetchStartedAt) {
-  document.getElementById("fetch-last-value").textContent =
-    formatAgo(fetchStartedAt);
   document.getElementById("fetch-timetaken-value").textContent =
     currentDataset?.fetchDurationMs != null
       ? formatDuration(currentDataset.fetchDurationMs)
@@ -516,7 +514,7 @@ function updateFetchStatusBar(fetchStartedAt) {
 }
 
 // Reusable list of all status-bar span IDs for bulk updates.
-const _FETCH_STATUS_IDS = ["fetch-last-value", "fetch-timetaken-value", "fetch-cache-age-value"];
+const _FETCH_STATUS_IDS = ["fetch-timetaken-value", "fetch-cache-age-value"];
 const _DEVICE_STATUS_IDS = ["device-count", "br-count", "router-count", "child-count",
                              "link-count", "lq3-count", "lq2-count", "lq1-count"];
 
@@ -601,13 +599,6 @@ function applySearch() {
     }
   }
 }
-
-document.getElementById("btn-search-find")?.addEventListener("click", () => {
-  _currentSearchQuery = parseSearchQuery(
-    document.getElementById("search-input").value,
-  );
-  applySearch();
-});
 
 document.getElementById("search-input")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
