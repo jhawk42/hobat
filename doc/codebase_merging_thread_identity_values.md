@@ -34,7 +34,7 @@ The dashboard and Python merge pipeline support canonical identity matching acro
 
 ---
 
-# Python Backend Merge System (dataset_merge.py)
+# Python Backend Merge System (merge_dataset.py)
 
 The Python backend provides comprehensive topology merging that processes multiple JSON files from different sources (CLI, REST API, mDNS, Eve) into a single consolidated topology file.
 
@@ -241,13 +241,13 @@ Legacy sources (1):
 python3 -m td_cli merge-dataset
 
 # Direct invocation with options
-python3 src/dataset_merge.py \
+python3 src/merge_dataset.py \
   --base-dir data/ \
   --output td-merged-topology-all.json \
   --report-file td-merge-report.json
 
 # Custom file selection
-python3 src/dataset_merge.py \
+python3 src/merge_dataset.py \
   --base-dir data/ \
   --include-files custom-source.json \
   --exclude-files td-eve-topology.json

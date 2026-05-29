@@ -18,7 +18,7 @@ from copy import deepcopy
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from dataset_merge import (
+from merge_dataset import (
     deep_merge,
     normalize_field_names_in_record,
     get_partition_id,

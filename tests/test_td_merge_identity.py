@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dataset_merge import build_merged_records
+from merge_dataset import build_merged_records
 
 
 class BuildMergedRecordsIdentityTests(unittest.TestCase):

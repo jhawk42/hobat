@@ -162,7 +162,7 @@ FILE_ACTION_MAP: dict[str, FileAction] = {
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["process-eve"], action_cost_s=1
     ),
 
-    # Pre-merged output — produced by dataset_merge; treated as static here.
+    # Pre-merged output — produced by merge_dataset; treated as static here.
     "td-merged-topology-all.json": FileAction(
         max_age_s=TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT, action=["merge-dataset"], action_cost_s=1
     ),

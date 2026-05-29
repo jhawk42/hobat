@@ -20,7 +20,7 @@ from typing import Any
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from dataset_merge import main as dataset_merge_main
+from merge_dataset import main as merge_dataset_main
 
 
 # Test data directory
@@ -59,7 +59,7 @@ def test_e2e_merge_with_real_data():
         
         # Run merge
         start_time = time.time()
-        exit_code = dataset_merge_main(args)
+        exit_code = merge_dataset_main(args)
         end_time = time.time()
         
         assert exit_code == 0, f"Merge failed with exit code {exit_code}"
@@ -192,7 +192,7 @@ def test_performance_benchmarking():
     
     # Run merge and measure time
     start_time = time.time()
-    exit_code = dataset_merge_main(args)
+    exit_code = merge_dataset_main(args)
     end_time = time.time()
     
     # Get memory usage

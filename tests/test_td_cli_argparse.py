@@ -310,7 +310,7 @@ class TestDispatchOtherCommands(unittest.TestCase):
 
     def test_merge_dataset_forwards_extras(self):
         argv = ["merge-dataset", "--input1", "a.json"]
-        with patch.object(td_cli.dataset_merge, "main", return_value=0) as m:
+        with patch.object(td_cli.merge_dataset, "main", return_value=0) as m:
             rc = self._dispatch(argv)
         m.assert_called_once_with(["--input1", "a.json"])
         self.assertEqual(rc, 0)

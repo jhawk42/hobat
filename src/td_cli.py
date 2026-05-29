@@ -28,7 +28,7 @@ import otbr_cli_networkdiag_topology
 import otbr_restapi_download
 import otbr_restapi_cli
 
-import dataset_merge
+import merge_dataset
 
 
 class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
@@ -288,7 +288,7 @@ def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
 def _add_merge_commands(subparsers: argparse._SubParsersAction) -> None:
     """Build the flattened merge-dataset command."""
 
-    # Remaining args are captured as extras via parse_known_args and forwarded to dataset_merge.main().
+    # Remaining args are captured as extras via parse_known_args and forwarded to merge_dataset.main().
     subparsers.add_parser(
         "merge-dataset",
         help="Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file",
@@ -561,7 +561,7 @@ def dispatch(
 
     # --- merge-dataset ---
     if args.command in ("merge-dataset", "merge-data"):
-        return dataset_merge.main(_forward_with_datadir(extra_args)) or 0
+        return merge_dataset.main(_forward_with_datadir(extra_args)) or 0
 
     # --- unhandled command ---
     raise ValueError(f"Unhandled command: {args.command}")
