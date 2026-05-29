@@ -271,21 +271,18 @@ The merge system provides:
 # Basic merge with defaults
 python3 -m td_cli merge-dataset
 
+# Specify output file
+python3 -m td_cli merge_dataset --output td-merged-topology-all.json
+
+# With merge report
+python3 -m td_cli merge_dataset --report-file td-merge-report.json
+
 # With custom options
 python3 -m td_cli merge-dataset --datadir /path/to/data --output my-merged.json
 
+
 # Docker container
 docker exec tdash python3 -m td_cli merge-dataset
-```
-
-Or directly using the merge script:
-
-```bash
-# From src directory
-python3 src/merge_dataset.py --base-dir data/ --output td-merged-topology-all.json
-
-# With merge report
-python3 src/merge_dataset.py --base-dir data/ --report-file td-merge-report.json
 ```
 
 ## Input Files
