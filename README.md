@@ -13,9 +13,9 @@ The tdash tools provide the following:
     - Multicast DNS (mDNS) records
     - Eve app thread json format layout file. 
 - Dashboard for Thread mesh network in a browser web page (html, javascript) for visualizing and querying thread mesh network info.
-  - Search: Search devices by rloc16, extaddr, device_label, routerId, and a number of other identity fields
+  - Search devices by: rloc16, extaddr, device_label, routerId, and a number of other fields
   - Filter by:
-    - Thread node types: border router, router, ftd, mtd child nodes etc.
+    - Thread node types: border router, router, ftd, mtd child nodes etc;
     - Thread link quality: LQ3, LQ2, LQ1. Ratio of LQ3 to total links, etc.
     - Diagnostics filters to find thread nodes that need attention:
       - MAC counters (packets, frame errors, etc)
@@ -59,7 +59,7 @@ docker pull ghcr.io/jhawk42/tdash:latest
 
 Notes: 
 - The tdash docker container automatically starts the td_webserver.py with the dashboard. Default port is 9165.
-- The tdash docker container needs access to the docker socket for docker exec calls between docker containers for the tdash container to call into otbr container to execute ot-ctl commands.
+- The tdash docker container needs access to the docker socket for otbr-cli to call between docker containers so td_cli in the tdash container to call into the otbr container to execute ot-ctl commands via: docker exec -it otbr /usr/sbin/ot-ctl to fetch thread device info.
 - See [Environment Variables](./doc/help_env_vars.md) for changing the:
   - td_webserver.py http access to Dashboard : HOST, PORT 
   - otbr-restapi access: OT_REST_LISTEN_ADDR, OT_REST_LISTEN_PORT
