@@ -309,7 +309,7 @@ The merge processes these files by default:
 - `td-mdns-scopes-hap.json` - HomeKit Accessory Protocol records
 - `td-mdns-scopes-matter.json` - Matter device records
 
-**Legacy Sources:**
+**Native Sources:**
 - `td-eve-topology.json` - Eve app topology export
 
 ## Output Format
@@ -373,7 +373,7 @@ The merged output (`td-merged-topology-all.json`) is a JSON array of device reco
 
 ## Troubleshooting
 
-See [doc/merge_troubleshooting.md](doc/merge_troubleshooting.md) for detailed troubleshooting guidance.
+See [doc/merge_thread_device_info.md](doc/merge_thread_device_info.md) for detailed troubleshooting guidance.
 
 **Common Issues:**
 
