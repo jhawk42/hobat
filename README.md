@@ -155,7 +155,7 @@ python3 -m td_cli mdns hap    # Apple HomeKit Accessory Protocol (HAP) thread de
 python3 -m td_cli mdns matter # Matter thread devices
 
 # Eve processing 
-# Reads thread-eve-layout.json from data dir, enhances data and outputs td-eve-topology.json
+# Reads 'Eve Thread Network Layout.evethreadlayout' from data dir, enhances data and outputs td-eve-topology.json
 python3 -m td_cli process-eve 
 
 # Dataset merge
