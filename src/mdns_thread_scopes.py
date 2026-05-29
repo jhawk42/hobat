@@ -357,7 +357,6 @@ def decode_thread_partition_id(pt_value):
     """Decode Thread Partition Identifier (pt) - 32-bit value"""
     try:
         pt_hex = pt_value.hex().upper()
-        # pt_str = pt_value.decode('utf-8') if isinstance(pt_value, bytes) else str(pt_value)
         pt_int = int(pt_hex, 16)
         pt_hex = format(pt_int, "08x").upper()  # 32-bit value in hex
         return pt_int, pt_hex
@@ -370,8 +369,6 @@ def decode_thread_beacon_bitmap(bb_value):
     try:
         bb_hex = bb_value.hex().upper()
         bb_int = int(bb_hex, 16)
-        # bb_str = bb_value.decode('utf-8') if isinstance(bb_value, bytes) else str(bb_value)
-        # bb_int = int(bb_value, 16) if isinstance(bb_value, str) else int(bb_value)
         bb_hex = format(bb_int, "04x").upper()  # 32-bit value in hex
 
         # Decode specific bits if any are set
@@ -1367,8 +1364,6 @@ class MDNSDumpListener(ServiceListener):
                     # Partition Identifier (pt) - 32-bit value
                     if "pt" in props and isinstance(props["pt"], bytes):
                         pt_val = props["pt"]
-                        # pt_hex = pt_val.hex().upper()
-                        # pt_str = pt_val.decode('utf-8')
                         pt_int, pt_hex = decode_thread_partition_id(pt_val)
                         if pt_int is not None:
                             print(
