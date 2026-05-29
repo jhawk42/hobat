@@ -1,3 +1,4 @@
+import argparse
 import copy
 import json
 import logging
@@ -170,11 +171,23 @@ def enhance_eve_routes(eve_data):
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Parse and enhance an Eve Thread layout file."
+    )
+    parser.add_argument(
+        "--datadir",
+        metavar="DIR",
+        default=None,
+        help="Data directory for JSON reads/writes",
+    )
+    args = parser.parse_args(argv)
+
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
     td_data_dir = resolve_data_dir(
-        data_dir=parse_datadir_from_argv(argv))
+        data_dir=args.datadir or parse_datadir_from_argv(argv)
+    )
 
     # Main execution:
 

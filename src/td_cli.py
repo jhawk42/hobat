@@ -14,7 +14,7 @@ import util_network
 import extaddr_device_label_map
 
 import mdns_thread_scopes
-import eve_parse
+import eve_process
 
 import otbr_cli_thread_network_info
 import otbr_cli_router_table
@@ -29,7 +29,7 @@ import otbr_restapi_download
 import otbr_restapi_cli
 
 import merge_dataset
-
+import merge_extaddr_device_label_map
 
 class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
     """Formatter with a wider help column for long command names."""
@@ -181,36 +181,10 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
     otbr_cli_sub.add_parser("all", help="Run all otbr-cli scans")
 
     # mdns
-    mdns_p = subparsers.add_parser(
-        "mdns", help="Scan Thread-related mDNS scopes")
-    mdns_p.add_argument(
-        "mdns_scope",
-        nargs="?",
-        choices=["thread", "br", "hap", "matter"],
-        default="thread",
-        metavar="SCOPE",
-        help="Scope filter: thread | br | hap | matter  (default: thread)",
-    )
-    mdns_p.add_argument(
-        "--browse-timeout",
-        type=float,
-        default=None,
-        metavar="SECONDS",
-        help="Seconds of idle time before auto-exit (default: 10, or TD_MDNS_BROWSE_TIMEOUT env var)",
-    )
-    mdns_p.add_argument(
-        "--haptcp",
-        action="store_true",
-        default=False,
-        help="Also browse _hap._tcp.local. (Wi-Fi HomeKit accessories). "
-        "Applies when scope is 'thread' or 'hap'. Off by default.",
-    )
-    mdns_p.add_argument(
-        "--mattertcpsupported",
-        action="store_true",
-        default=False,
-        help="Include _matter._tcp records where T=1 (TCP supported). "
-        "By default those records are excluded.",
+    subparsers.add_parser(
+        "mdns",
+        help="Scan Thread-related mDNS scopes",
+        add_help=False,
     )
 
 
@@ -278,20 +252,28 @@ def _add_otbr_restapi_commands(subparsers: argparse._SubParsersAction) -> None:
 def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
     """Build the flattened process-eve command."""
 
-    # Remaining args are captured as extras via parse_known_args and forwarded to eve_parse.main().
+    # Remaining args are captured as extras via parse_known_args and forwarded to eve_process.main().
     subparsers.add_parser(
-        "process-eve", help="Parse and enhance an Eve Thread layout file"
+        "process-eve",
+        help="Parse and enhance an Eve Thread layout file",
+        add_help=False,
     )
 
 
 # type: ignore[type-arg]
 def _add_merge_commands(subparsers: argparse._SubParsersAction) -> None:
-    """Build the flattened merge-dataset command."""
+    """Build the flattened merge commands."""
 
-    # Remaining args are captured as extras via parse_known_args and forwarded to merge_dataset.main().
+    # Remaining args are captured as extras via parse_known_args and forwarded to subordinate module main().
     subparsers.add_parser(
         "merge-dataset",
         help="Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file",
+        add_help=False,
+    )
+    subparsers.add_parser(
+        "merge-extaddr",
+        help="Merge missing extaddr entries from a topology or mdns input file into the static extaddr map",
+        add_help=False,
     )
 
 
@@ -351,6 +333,9 @@ def build_parser() -> argparse.ArgumentParser:
     merge-dataset
         usage: td_cli merge-dataset [-h] ...
 
+    merge-extaddr
+        usage: td_cli merge-extaddr [-h] ...
+
 """
 
     # Expose subparsers so dispatch() can print targeted help
@@ -358,7 +343,8 @@ def build_parser() -> argparse.ArgumentParser:
         "otbr-cli": subparsers._name_parser_map["otbr-cli"],
         "otbr-restapi": subparsers._name_parser_map["otbr-restapi"],
         "process-eve": subparsers._name_parser_map["process-eve"],
-        "merge-dataset": subparsers._name_parser_map["merge-dataset"]
+        "merge-dataset": subparsers._name_parser_map["merge-dataset"],
+        "merge-extaddr": subparsers._name_parser_map["merge-extaddr"]
     }
 
     return parser
@@ -487,18 +473,7 @@ def dispatch(
 
     # --- mdns ---
     if args.command == "mdns":
-        mdns_argv = (
-            [args.mdns_scope]
-            + (
-                ["--browse-timeout", str(args.browse_timeout)]
-                if args.browse_timeout is not None
-                else []
-            )
-            + (["--haptcp"] if args.haptcp else [])
-            + (["--mattertcpsupported"] if args.mattertcpsupported else [])
-            + extra_args
-        )
-        return mdns_thread_scopes.main(_forward_with_datadir(mdns_argv)) or 0
+        return mdns_thread_scopes.main(_forward_with_datadir(extra_args)) or 0
 
     # --- otbr-restapi ---
     if args.command == "otbr-restapi":
@@ -557,11 +532,15 @@ def dispatch(
 
     # --- process-eve ---
     if args.command == "process-eve":
-        return eve_parse.main(_forward_with_datadir(extra_args)) or 0
+        return eve_process.main(_forward_with_datadir(extra_args)) or 0
 
     # --- merge-dataset ---
     if args.command in ("merge-dataset", "merge-data"):
         return merge_dataset.main(_forward_with_datadir(extra_args)) or 0
+
+    # --- merge-extaddr ---
+    if args.command == "merge-extaddr":
+        return merge_extaddr_device_label_map.main(_forward_with_datadir(extra_args)) or 0
 
     # --- unhandled command ---
     raise ValueError(f"Unhandled command: {args.command}")
@@ -592,15 +571,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         logging.getLogger().setLevel(logging.DEBUG)
 
     # banner
-    logging.info("Thread Network Topology Scanner")
-    logging.info("Initiating Thread Network Topology Scan...\n")
+    print("Thread Network Topology CLI")
+    print("")
     # log args at debug level
     logging.debug("Parsed arguments: %s", args)
     # log command='otbr-cli', cli_command='router-table')
-    logging.info(
-        "Command: %s, sub-command: %s",
-        getattr(args, "command", None),
-        getattr(args, "cli_command", None),
+    print(
+        f"Command: {getattr(args, 'command', None)}, sub-command: {getattr(args, 'cli_command', None)}"
     )
     # dispatch command
     rc = dispatch(args, extras, parser)
