@@ -18,7 +18,7 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 | `--verbose`, `-v` | Enable verbose (INFO) logging |
 | `--debug`, `-d` | Enable debug logging |
 | `--output FILE`, `-o FILE` | Write command output to file |
-| `--datadir DIR` | Data directory for JSON reads/writes (`TD_DATA_DIR` → `--datadir` → `/data` or `./data`) |
+| `--datadir DIR` | Data directory for JSON reads/writes when `TD_DATA_DIR` is not set. If omitted and `TD_DATA_DIR` is unset: use `/data` when present; otherwise create/use `./data` under the current run directory. |
 
 ---
 
@@ -30,7 +30,8 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 | `mdns` | Scan Thread-related mDNS scopes |
 | `otbr-restapi` | Query OTBR REST API commands |
 | `process-eve` | Parse and enhance an Eve Thread layout file |
-| `merge-dataset` | Merge Thread sources into one cache file |
+| `merge-dataset` | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file |
+| `merge-extaddr` | Merge missing extaddr entries from a topology or mdns input file into the static extaddr map |
 
 ---
 
@@ -64,6 +65,12 @@ td_cli process-eve ...
 
 ```text
 td_cli merge-dataset ...
+```
+
+### `merge-extaddr`
+
+```text
+td_cli merge-extaddr ...
 ```
 
 ---
@@ -179,7 +186,7 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --browse-timeout SECONDS
-                        Seconds of idle time before auto-exit (default: 10, or
+                        Seconds of idle time before auto-exit (default: 5, or
                         TD_MDNS_BROWSE_TIMEOUT env var)
   --haptcp              Also browse _hap._tcp.local. (Wi-Fi HomeKit
                         accessories). Applies when scope is 'thread' or 'hap'.
@@ -227,6 +234,128 @@ options:
   --no-auto-output      Disable automatic output file naming (forwarded)
 ```
 
+### `otbr-restapi node`
+
+```
+usage: python3 -m td_cli node [-h] {get,state,dataset} ...
+
+positional arguments:
+  {get,state,dataset}
+    get                Get the OTBR node record from /api/node
+    state              Get or set Thread state
+    dataset            Operate on node datasets
+
+options:
+  -h, --help           show this help message and exit
+```
+
+### `otbr-restapi devices`
+
+```
+usage: python3 -m td_cli devices [-h] {list,get,fetch} ...
+
+positional arguments:
+  {list,get,fetch}
+    list            List devices
+    get             Get a device by device ID
+    fetch           Trigger updateDeviceCollectionTask, wait for it, and
+                    return the populated device list
+
+options:
+  -h, --help        show this help message and exit
+```
+
+### `otbr-restapi diagnostics`
+
+```
+usage: python3 -m td_cli diagnostics [-h] {list,get,fetch,fetch-all} ...
+
+positional arguments:
+  {list,get,fetch,fetch-all}
+    list                List diagnostics
+    get                 Get a diagnostic by diagnostics ID
+    fetch               Enqueue getNetworkDiagnosticTask for a device, wait
+                        for completion, and return the diagnostic result
+    fetch-all           Fetch diagnostics for all known devices (or a given
+                        list), one device at a time
+
+options:
+  -h, --help            show this help message and exit
+```
+
+### `otbr-restapi actions`
+
+```
+usage: python3 -m td_cli actions [-h] {list,get,enqueue} ...
+
+positional arguments:
+  {list,get,enqueue}
+    list              List actions
+    get               Get an action by action ID
+    enqueue           Enqueue a new OTBR task
+
+options:
+  -h, --help          show this help message and exit
+```
+
+### `otbr-restapi mesh-diagnostics`
+
+```
+usage: python3 -m td_cli mesh-diagnostics [-h]
+                                          {children,child-ipv6,router-neighbors,fetch,fetch-all} ...
+
+positional arguments:
+  {children,child-ipv6,router-neighbors,fetch,fetch-all}
+    children            Fetch the child table for a device via otMeshDiag (TLV
+                        29). Higher latency than standard diagnostic TLVs.
+    child-ipv6          Fetch child IPv6 addresses for a device via otMeshDiag
+                        (TLV 30). Higher latency than standard diagnostic
+                        TLVs.
+    router-neighbors    Fetch router neighbor table for a device via
+                        otMeshDiag (TLV 31). Higher latency than standard
+                        diagnostic TLVs.
+    fetch               Fetch a caller-specified subset of mesh-diagnostic
+                        TLVs for a single device. Allowed types: children,
+                        childIpv6Addresses, routerNeighbors.
+    fetch-all           Fetch mesh diagnostics for all known devices (or a
+                        given list), one device at a time.
+
+options:
+  -h, --help            show this help message and exit
+```
+
+### `otbr-restapi topology`
+
+```
+usage: python3 -m td_cli topology [-h]
+                                  [--preset {recommended,full,minimal,basic}]
+                                  [--skip-devices] [--skip-diagnostics]
+                                  [--skip-mesh-diagnostics]
+                                  [--no-update-devices]
+                                  [--no-enrich-mac-counters] [--no-fallback]
+                                  [--fallback-preset {medium,minimal,basic}]
+
+options:
+  -h, --help            show this help message and exit
+  --preset {recommended,full,minimal,basic}
+                        TLV preset for the diagnostics step (default:
+                        recommended)
+  --skip-devices        Skip Step 1 (device refresh via
+                        updateDeviceCollectionTask)
+  --skip-diagnostics    Skip Step 2 (network diagnostics fetch-all)
+  --skip-mesh-diagnostics
+                        Skip Step 3 (mesh diagnostics fetch-all)
+  --no-update-devices   Skip updateDeviceCollectionTask before
+                        diagnostics/mesh steps
+  --no-enrich-mac-counters
+                        Disable MAC counter enrichment on the diagnostics
+                        result
+  --no-fallback         Disable per-device TLV fallback retry on failure
+  --fallback-preset {medium,minimal,basic}
+                        TLV preset to retry with on per-device failure
+                        (default: minimal)
+```
+
 ### `process-eve`
 
 ```
@@ -237,4 +366,25 @@ usage: td_cli process-eve [-h]
 
 ```
 usage: td_cli merge-dataset [-h]
+```
+
+### `merge-extaddr`
+
+```
+usage: td_cli merge-extaddr [-h] [--merge-mdns-br | --merge-topology-all]
+                             [--merge-input-file MERGE_INPUT_FILE]
+                             [--merge_name_override]
+
+options:
+  -h, --help            show this help message and exit
+  --merge-mdns-br       Use td-mdns-scopes-br.json instead of the default
+                        merge input file
+  --merge-topology-all  Use td-merged-topology-all.json instead of the
+                        default merge input file
+  --merge-input-file MERGE_INPUT_FILE
+                        Merge input file name (default:
+                        td-otbr-cli-networkdiag-fetch-all.json)
+  --merge_name_override
+                        If set, replace static Unknown device_label values
+                        with merge input name for matching extaddr entries
 ```
