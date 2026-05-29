@@ -9,12 +9,6 @@ CLI wrapper for the OpenThread Border Router REST API.
 Run from the project root with:
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py [global-options] <command> ...
-```
-
-This CLI is also available through the `td_cli` wrapper:
-
-```bash
 PYTHONPATH=src python3 -m td_cli otbr-restapi [global-options] <command> ...
 ```
 
@@ -98,14 +92,14 @@ node get [--fields FIELDS]
 
 ```bash
 # Print full node record
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node get
+PYTHONPATH=src python3 -m td_cli otbr-restapi node get
 
 # Select specific fields only
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node get \
+PYTHONPATH=src python3 -m td_cli otbr-restapi node get \
     --fields 'threadBorderRouter=extAddress,rloc16,role'
 
 # Save to file
-PYTHONPATH=src python3 src/otbr_restapi_cli.py --output data/node.json node get
+PYTHONPATH=src python3 -m td_cli otbr-restapi --output data/node.json node get
 ```
 
 ---
@@ -121,9 +115,9 @@ node state get
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node state get
+PYTHONPATH=src python3 -m td_cli otbr-restapi node state get
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py --host 192.168.1.10 node state get
+PYTHONPATH=src python3 -m td_cli otbr-restapi --host 192.168.1.10 node state get
 ```
 
 ---
@@ -143,9 +137,9 @@ node state set --value {enable,disable}
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node state set --value enable
+PYTHONPATH=src python3 -m td_cli otbr-restapi node state set --value enable
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node state set --value disable
+PYTHONPATH=src python3 -m td_cli otbr-restapi node state set --value disable
 ```
 
 ---
@@ -166,10 +160,10 @@ node dataset active get [--text]
 
 ```bash
 # JSON
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node dataset active get
+PYTHONPATH=src python3 -m td_cli otbr-restapi node dataset active get
 
 # Raw TLV hex string
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node dataset active get --text
+PYTHONPATH=src python3 -m td_cli otbr-restapi node dataset active get --text
 ```
 
 ---
@@ -192,10 +186,10 @@ node dataset active set (--json JSON | --json-file FILE | --text TEXT | --text-f
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     node dataset active set --json-file data/dataset.json
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     node dataset active set --text 0e080000000000010000000300000f...
 ```
 
@@ -221,12 +215,12 @@ devices list [--fields FIELDS] [--with-meta]
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py devices list
+PYTHONPATH=src python3 -m td_cli otbr-restapi devices list
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     devices list --fields 'threadDevice=hostName,role'
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py devices list --with-meta
+PYTHONPATH=src python3 -m td_cli otbr-restapi devices list --with-meta
 ```
 
 ---
@@ -247,10 +241,10 @@ devices get --device-id DEVICE_ID [--fields FIELDS]
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     devices get --device-id aabbccddeeff0011
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     devices get --device-id aabbccddeeff0011 \
     --fields 'threadDevice=extAddress,role'
 ```
@@ -275,9 +269,9 @@ devices fetch [--device-count N] [--task-timeout SECS] [--max-age SECS] [--max-r
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py devices fetch
+PYTHONPATH=src python3 -m td_cli otbr-restapi devices fetch
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --output data/devices.json \
     devices fetch --device-count 20 --task-timeout 60
 ```
@@ -299,9 +293,9 @@ diagnostics list [--fields FIELDS] [--with-meta]
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py diagnostics list
+PYTHONPATH=src python3 -m td_cli otbr-restapi diagnostics list
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     diagnostics list --fields 'networkDiagnostics=extAddress,rloc16,macCounters'
 ```
 
@@ -322,10 +316,10 @@ diagnostics get --diagnostics-id ID
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     diagnostics get --diagnostics-id a6a0b433-437e-45bf-9994-58e0d7b32399
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --output data/diag-a6a0.json \
     diagnostics get --diagnostics-id a6a0b433-437e-45bf-9994-58e0d7b32399
 ```
@@ -363,15 +357,15 @@ By default, if a device fails to respond to the primary TLV set the command auto
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     diagnostics fetch --device-id aabbccddeeff0011 --preset recommended
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     diagnostics fetch --device-id aabbccddeeff0011 \
     --types extAddress rloc16 macCounters mleCounters \
     --no-enrich-mac-counters
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py --no-auto-output \
+PYTHONPATH=src python3 -m td_cli otbr-restapi --no-auto-output \
     diagnostics fetch --device-id aabbccddeeff0011 --preset recommended --no-fallback
 ```
 
@@ -412,18 +406,18 @@ Results are automatically written to `<datadir>/td-otbr-restapi-diagnostics-fetc
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     diagnostics fetch-all --preset recommended
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     diagnostics fetch-all --preset recommended --no-update-devices
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py --no-progress \
+PYTHONPATH=src python3 -m td_cli otbr-restapi --no-progress \
     diagnostics fetch-all \
     --device-ids aabbccddeeff0011 aabbccddeeff0022 \
     --no-enrich-mac-counters
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py --no-auto-output \
+PYTHONPATH=src python3 -m td_cli otbr-restapi --no-auto-output \
     diagnostics fetch-all --preset recommended
 ```
 
@@ -449,9 +443,9 @@ actions list [--fields FIELDS] [--with-meta]
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py actions list
+PYTHONPATH=src python3 -m td_cli otbr-restapi actions list
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions list --fields 'action=id,type,status'
 ```
 
@@ -476,15 +470,15 @@ Action `status` values: `pending` → `active` → `completed` / `stopped` / `fa
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions get --action-id 9ecae480-07a0-4b72-869d-15858196144e
 
 # Lightweight status-only poll
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions get --action-id 9ecae480-07a0-4b72-869d-15858196144e \
     --fields 'action=id,status'
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --output data/action-status.json \
     actions get --action-id 9ecae480-07a0-4b72-869d-15858196144e
 ```
@@ -512,13 +506,13 @@ actions enqueue add-thread-device --pskd PSKD
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue add-thread-device \
     --eui aabbccddeeff0022 \
     --pskd J01NME \
     --timeout 120
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue add-thread-device \
     --discerner 0xabc \
     --pskd S3CRET
@@ -551,13 +545,13 @@ actions enqueue get-network-diagnostic --destination DEST
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue get-network-diagnostic \
     --destination aabbccddeeff0011 \
     --preset recommended
 
 # Block until complete, return diagnostic result
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue get-network-diagnostic \
     --destination aabbccddeeff0011 \
     --types extAddress rloc16 macCounters mleCounters \
@@ -588,12 +582,12 @@ actions enqueue reset-network-diag-counter --types TYPE ...
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue reset-network-diag-counter \
     --destination aabbccddeeff0011 \
     --types macCounters mleCounters
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue reset-network-diag-counter \
     --destination aabbccddeeff0011 \
     --types mleCounters \
@@ -630,13 +624,13 @@ actions enqueue get-energy-scan --destination DEST
 
 ```bash
 # Minimal — server uses defaults for count, period, scan-duration
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue get-energy-scan \
     --destination aabbccddeeff0011 \
     --channel-mask 11 15
 
 # Explicit parameters
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue get-energy-scan \
     --destination aabbccddeeff0011 \
     --channel-mask 11 15 \
@@ -644,7 +638,7 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
     --timeout 60
 
 # Full channel scan 11-26
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue get-energy-scan \
     --destination aabbccddeeff0011 \
     --channel-mask 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 \
@@ -676,20 +670,20 @@ actions enqueue update-device-collection
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue update-device-collection
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue update-device-collection \
     --device-count 20 --max-age 60 --max-retries 3 --timeout 90
 
 # Capture action ID and poll manually
-ACTION_ID=$(PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+ACTION_ID=$(PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue update-device-collection | jq -r '.[0].id')
 echo "Enqueued action: $ACTION_ID"
 
 while true; do
-    STATUS=$(PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    STATUS=$(PYTHONPATH=src python3 -m td_cli otbr-restapi \
         actions get --action-id "$ACTION_ID" | jq -r '.status')
     echo "status: $STATUS"
     [[ "$STATUS" == "completed" || "$STATUS" == "stopped" || "$STATUS" == "failed" ]] && break
@@ -697,7 +691,7 @@ while true; do
 done
 
 # Preferred: enqueue + wait + list in one shot
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     devices fetch --device-count 20 --task-timeout 90
 ```
 
@@ -709,7 +703,7 @@ Fetch mesh-diagnostic TLVs via `otMeshDiag`. These require an additional round-t
 
 > **Router / leader devices only.** The server omits `children`, `childIpv6Addresses`, and `routerNeighbors` for child devices (RLOC16 lower 10 bits non-zero). Use `--routers-only` on `fetch-all` or check roles first:
 > ```bash
-> PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+> PYTHONPATH=src python3 -m td_cli otbr-restapi \
 >     devices list --fields 'threadDevice=extAddress,role,hostName'
 > ```
 
@@ -736,10 +730,10 @@ mesh-diagnostics children --device-id DEVICE_ID
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics children --device-id aabbccddeeff0011
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --output data/children-aabb.json \
     mesh-diagnostics children --device-id aabbccddeeff0011
 ```
@@ -758,10 +752,10 @@ mesh-diagnostics child-ipv6 --device-id DEVICE_ID
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics child-ipv6 --device-id aabbccddeeff0011
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics child-ipv6 --device-id aabbccddeeff0011 --task-timeout 600
 ```
 
@@ -779,10 +773,10 @@ mesh-diagnostics router-neighbors --device-id DEVICE_ID
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics router-neighbors --device-id aabbccddeeff0011
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --output data/router-nbrs-aabb.json \
     mesh-diagnostics router-neighbors --device-id aabbccddeeff0011
 ```
@@ -803,15 +797,15 @@ mesh-diagnostics fetch --device-id DEVICE_ID
 
 ```bash
 # All three TLVs
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics fetch --device-id aabbccddeeff0011
 
 # Selected subset
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics fetch --device-id aabbccddeeff0011 \
     --types children childIpv6Addresses
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics fetch --device-id aabbccddeeff0011 --types children
 ```
 
@@ -849,15 +843,15 @@ Results are automatically written to `<datadir>/td-otbr-restapi-mesh-diagnostics
 
 ```bash
 # Router devices only (recommended)
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics fetch-all --routers-only
 
 # All devices, skip device refresh
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics fetch-all --no-update-devices
 
 # Two specific devices, router-neighbors only
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics fetch-all \
     --device-ids aabbccddeeff0011 aabbccddeeff0022 \
     --types routerNeighbors
@@ -903,21 +897,21 @@ Progress for each step and each device is printed to stderr. Pass `--no-progress
 
 ```bash
 # Full sweep with defaults
-PYTHONPATH=src python3 src/otbr_restapi_cli.py topology
+PYTHONPATH=src python3 -m td_cli otbr-restapi topology
 
 # Remote OTBR, custom data directory
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --host 192.168.1.10 --datadir /tmp/topology \
     topology
 
 # Skip device refresh (already done)
-PYTHONPATH=src python3 src/otbr_restapi_cli.py topology --skip-devices
+PYTHONPATH=src python3 -m td_cli otbr-restapi topology --skip-devices
 
 # Diagnostics step only
-PYTHONPATH=src python3 src/otbr_restapi_cli.py topology --skip-mesh-diagnostics
+PYTHONPATH=src python3 -m td_cli otbr-restapi topology --skip-mesh-diagnostics
 
 # Silent (no progress output)
-PYTHONPATH=src python3 src/otbr_restapi_cli.py --no-progress topology
+PYTHONPATH=src python3 -m td_cli otbr-restapi --no-progress topology
 ```
 
 ---
@@ -1101,9 +1095,9 @@ actions get --action-id <UUID> --fields 'action=id,status,destination'
 ### 1. Discover devices — one-shot fetch
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py devices fetch
+PYTHONPATH=src python3 -m td_cli otbr-restapi devices fetch
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --output data/devices.json \
     devices fetch
 ```
@@ -1114,13 +1108,13 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 
 ```bash
 # Enqueue and capture the action ID
-ACTION_ID=$(PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+ACTION_ID=$(PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue update-device-collection | jq -r '.[0].id')
 echo "Enqueued: $ACTION_ID"
 
 # Poll until terminal status
 while true; do
-    STATUS=$(PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+    STATUS=$(PYTHONPATH=src python3 -m td_cli otbr-restapi \
         actions get --action-id "$ACTION_ID" | jq -r '.status')
     echo "status: $STATUS"
     [[ "$STATUS" == "completed" || "$STATUS" == "stopped" || "$STATUS" == "failed" ]] && break
@@ -1128,7 +1122,7 @@ while true; do
 done
 
 # List the refreshed devices
-PYTHONPATH=src python3 src/otbr_restapi_cli.py devices list
+PYTHONPATH=src python3 -m td_cli otbr-restapi devices list
 ```
 
 ---
@@ -1136,7 +1130,7 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py devices list
 ### 3. Fetch diagnostics for a single device
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     diagnostics fetch --device-id aabbccddeeff0011 --preset recommended
 ```
 
@@ -1146,15 +1140,15 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 
 ```bash
 # Refresh device list and fetch (auto-saved to file)
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     diagnostics fetch-all --preset recommended
 
 # Skip device refresh when the list was just updated
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     diagnostics fetch-all --preset recommended --no-update-devices
 
 # Explicit output path
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --output data/all-diagnostics.json \
     diagnostics fetch-all --preset recommended
 ```
@@ -1164,7 +1158,7 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 ### 5. Enqueue a diagnostic task and wait inline
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue get-network-diagnostic \
     --destination aabbccddeeff0011 \
     --preset recommended \
@@ -1176,10 +1170,10 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 ### 6. Get node status and dataset
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node get
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node state get
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node dataset active get
-PYTHONPATH=src python3 src/otbr_restapi_cli.py node dataset active get --text
+PYTHONPATH=src python3 -m td_cli otbr-restapi node get
+PYTHONPATH=src python3 -m td_cli otbr-restapi node state get
+PYTHONPATH=src python3 -m td_cli otbr-restapi node dataset active get
+PYTHONPATH=src python3 -m td_cli otbr-restapi node dataset active get --text
 ```
 
 ---
@@ -1188,15 +1182,15 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py node dataset active get --text
 
 ```bash
 # All three TLVs for one device
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics fetch --device-id aabbccddeeff0011
 
 # Child table only
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics children --device-id aabbccddeeff0011
 
 # All mesh diagnostics for all router devices (recommended)
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     mesh-diagnostics fetch-all --routers-only
 ```
 
@@ -1205,7 +1199,7 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 ### 8. Commission a new joiner device
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue add-thread-device \
     --pskd J01NME \
     --eui aabbccddeeff0022 \
@@ -1217,7 +1211,7 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 ### 9. Reset diagnostic counters
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions enqueue reset-network-diag-counter \
     --destination aabbccddeeff0011 \
     --types macCounters mleCounters
@@ -1229,15 +1223,15 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 
 ```bash
 # Device hostname and role
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     devices list --fields 'threadDevice=hostName,role'
 
 # Action id and status only (lightweight polling view)
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions list --fields 'action=id,status,type'
 
 # Single action with sparse fields
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     actions get --action-id 9ecae480-07a0-4b72-869d-15858196144e \
     --fields 'action=id,status'
 ```
@@ -1247,11 +1241,11 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 ### 11. Target a non-default OTBR host
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --host 192.168.1.100 --port 8081 \
     devices list
 
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --base-url http://192.168.1.100:8081 \
     devices list
 ```
@@ -1261,7 +1255,7 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py \
 ### 12. Raw envelope output
 
 ```bash
-PYTHONPATH=src python3 src/otbr_restapi_cli.py --raw devices list
+PYTHONPATH=src python3 -m td_cli otbr-restapi --raw devices list
 ```
 
 ---
@@ -1270,13 +1264,13 @@ PYTHONPATH=src python3 src/otbr_restapi_cli.py --raw devices list
 
 ```bash
 # Default sweep — all three steps, auto-save all files
-PYTHONPATH=src python3 src/otbr_restapi_cli.py topology
+PYTHONPATH=src python3 -m td_cli otbr-restapi topology
 
 # Skip mesh diagnostics (faster)
-PYTHONPATH=src python3 src/otbr_restapi_cli.py topology --skip-mesh-diagnostics
+PYTHONPATH=src python3 -m td_cli otbr-restapi topology --skip-mesh-diagnostics
 
 # Remote OTBR, custom data directory
-PYTHONPATH=src python3 src/otbr_restapi_cli.py \
+PYTHONPATH=src python3 -m td_cli otbr-restapi \
     --host 192.168.1.10 --datadir /tmp/scan \
     topology
 ```
