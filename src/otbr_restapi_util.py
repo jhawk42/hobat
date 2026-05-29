@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 
 from dataclasses import dataclass
@@ -28,6 +29,31 @@ JSON_CONTENT_TYPES = {
     "application/json",
     "application/vnd.api+json",
 }
+
+
+def resolve_default_rest_host(env: Mapping[str, str] | None = None) -> str:
+    """Resolve the OTBR REST API host from environment or fallback default."""
+    env_map = os.environ if env is None else env
+    value = env_map.get(OT_REST_LISTEN_ADDR_ENV)
+    if value is None:
+        return DEFAULT_HOST
+    normalized = value.strip()
+    return normalized or DEFAULT_HOST
+
+
+def resolve_default_rest_port(env: Mapping[str, str] | None = None) -> int:
+    """Resolve the OTBR REST API port from environment or fallback default."""
+    env_map = os.environ if env is None else env
+    value = env_map.get(OT_REST_LISTEN_PORT_ENV)
+    if value is None:
+        return DEFAULT_PORT
+    normalized = value.strip()
+    if not normalized:
+        return DEFAULT_PORT
+    try:
+        return int(normalized)
+    except ValueError:
+        return DEFAULT_PORT
 
 
 @dataclass(frozen=True)
@@ -256,8 +282,8 @@ class OTBRRestApiClient:
 
     def __init__(
         self,
-        host: str = DEFAULT_HOST,
-        port: int = DEFAULT_PORT,
+        host: str | None = None,
+        port: int | None = None,
         base_url: str | None = None,
         timeout: int = DEFAULT_TIMEOUT,
         retries: int = DEFAULT_RETRIES,
@@ -265,7 +291,9 @@ class OTBRRestApiClient:
         user_agent: str = "td-otbr-restapi-client/1.0",
         default_raw: bool = False,
     ) -> None:
-        self.base_url = (base_url or f"http://{host}:{port}").rstrip("/")
+        resolved_host = resolve_default_rest_host() if host is None else host
+        resolved_port = resolve_default_rest_port() if port is None else port
+        self.base_url = (base_url or f"http://{resolved_host}:{resolved_port}").rstrip("/")
         self.timeout = timeout
         self.retries = retries
         self.accept = accept
@@ -1694,8 +1722,8 @@ def add_common_rest_client_args(parser) -> None:
     """Add common OTBR REST API client arguments to an ArgumentParser.
     
     Adds the following standard arguments:
-    - --host: OTBR REST API host (default: 127.0.0.1)
-    - --port: OTBR REST API port (default: 8081)
+    - --host: OTBR REST API host (default: OT_REST_LISTEN_ADDR env or 127.0.0.1)
+    - --port: OTBR REST API port (default: OT_REST_LISTEN_PORT env or 8081)
     - --base-url: Override host/port with full base URL
     - --timeout: HTTP timeout in seconds (default: 10)
     - --accept: Accept header (default: application/vnd.api+json)
@@ -1717,21 +1745,31 @@ def add_common_rest_client_args(parser) -> None:
     
     Notes:
         - The --base-url argument takes precedence over --host and --port when constructing the client
+        - When --host/--port are omitted, OT_REST_LISTEN_ADDR and OT_REST_LISTEN_PORT
+          are used if present in the environment
         - --accept defaults to JSON:API format but can be overridden
         - --datadir is optional and typically used for output file resolution
     """
     from td_const import TD_DATA_DIR_ARG_HELP
+    default_host = resolve_default_rest_host()
+    default_port = resolve_default_rest_port()
     
     parser.add_argument(
         "--host",
-        default=DEFAULT_HOST,
-        help=f"OTBR REST API host (default: {DEFAULT_HOST})",
+        default=default_host,
+        help=(
+            f"OTBR REST API host (default: {default_host}; "
+            f"falls back to {DEFAULT_HOST} when {OT_REST_LISTEN_ADDR_ENV} is unset)"
+        ),
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=DEFAULT_PORT,
-        help=f"OTBR REST API port (default: {DEFAULT_PORT})",
+        default=default_port,
+        help=(
+            f"OTBR REST API port (default: {default_port}; "
+            f"falls back to {DEFAULT_PORT} when {OT_REST_LISTEN_PORT_ENV} is unset/invalid)"
+        ),
     )
     parser.add_argument(
         "--base-url",
@@ -1782,7 +1820,8 @@ def build_rest_client_from_args(args, **kwargs) -> OTBRRestApiClient:
     Notes:
         - If args.base_url is provided, it takes precedence over host/port
         - Additional kwargs are forwarded to the OTBRRestApiClient constructor
-        - Default values come from the DEFAULT_* constants in otbr_restapi_util
+        - Default values come from OT_REST_LISTEN_ADDR / OT_REST_LISTEN_PORT when set,
+          otherwise from the DEFAULT_* constants in otbr_restapi_util
     
     Raises:
         AttributeError: If required arguments (host, port, timeout, accept) are missing from args

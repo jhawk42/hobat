@@ -20,6 +20,8 @@ from otbr_restapi_util import (
     OTBRActionTimeoutError,
     OTBRClientError,
     OTBRRestApiClient,
+    resolve_default_rest_host,
+    resolve_default_rest_port,
 )
 from util_data import resolve_data_dir, resolve_data_file_path
 
@@ -168,7 +170,9 @@ def download_all_restapi_endpoints(
         Exit code: 0 on full success, 1 if any download failed.
     """
     if client is None:
-        effective_base_url = (base_url or f"http://{HOST}:{PORT}").rstrip("/")
+        effective_host = resolve_default_rest_host()
+        effective_port = resolve_default_rest_port()
+        effective_base_url = (base_url or f"http://{effective_host}:{effective_port}").rstrip("/")
         effective_headers = headers or {"Accept": DEFAULT_ACCEPT}
         client = _build_client_from_options(
             base_url=effective_base_url,

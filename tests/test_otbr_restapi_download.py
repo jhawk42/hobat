@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import otbr_restapi_download as script_module
@@ -67,6 +69,53 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
         self.assertIn("data_dir", call_kwargs)
         self.assertIn("update_devices", call_kwargs)
         self.assertEqual(call_kwargs["update_devices"], False)
+
+    def test_main_uses_otbr_env_defaults_when_args_omitted(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "OT_REST_LISTEN_ADDR": "0.0.0.0",
+                "OT_REST_LISTEN_PORT": "18081",
+            },
+            clear=False,
+        ), patch.object(
+            script_module, "download_all_restapi_endpoints", return_value=0
+        ) as download_all_restapi_endpoints:
+            exit_code = script_module.main([])
+
+        self.assertEqual(exit_code, 0)
+        client = download_all_restapi_endpoints.call_args.kwargs["client"]
+        self.assertEqual(client.base_url, "http://0.0.0.0:18081")
+
+    def test_download_all_falls_back_for_invalid_env_port(self) -> None:
+        mock_client = MagicMock()
+        mock_client.get_active_dataset.return_value = {}
+        mock_client.list_devices.return_value = []
+        mock_client.list_diagnostics.return_value = []
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            "os.environ",
+            {
+                "OT_REST_LISTEN_ADDR": "0.0.0.0",
+                "OT_REST_LISTEN_PORT": "invalid",
+            },
+            clear=False,
+        ), patch.object(
+            script_module, "_build_client_from_options", return_value=mock_client
+        ) as build_client, patch.object(
+            script_module, "emit_rest_payload_output", return_value=None
+        ):
+            script_module.download_all_restapi_endpoints(
+                client=None,
+                data_dir=script_module.Path(temp_dir),
+                base_url=None,
+                headers=None,
+            )
+
+        self.assertEqual(
+            build_client.call_args.kwargs["base_url"],
+            "http://0.0.0.0:8081",
+        )
 
 
 if __name__ == "__main__":
