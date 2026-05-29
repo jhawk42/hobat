@@ -1,3 +1,7 @@
+# Environment Variables
+
+List of environment variables fot tdash.
+
 | module name | environment variable name | default value | description of what the env var does |
 | --- | --- | --- | --- |
 | `mdns_thread_scopes.py` | `TD_MDNS_BROWSE_TIMEOUT` | `5` | Sets the default idle browse timeout (seconds) used by the mDNS scope browser when `--browse-timeout` is not provided. |

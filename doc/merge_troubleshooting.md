@@ -25,7 +25,7 @@ This guide helps diagnose and resolve common issues with the Thread topology dat
 ls -lh data/td-*.json
 
 # Run merge with verbose output
-python3 src/merge_dataset.py --base-dir data/ 2>&1 | grep -i "processing\|file"
+python3 -m td_cli merge-dataset --base-dir data/ 2>&1 | grep -i "processing\|file"
 ```
 
 **Common Causes:**
