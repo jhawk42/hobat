@@ -2,7 +2,9 @@
 
 A set of tools to help query and visualize a Thread mesh network. The dashboard can filter by thread node types like: border router, router, ftd, mtd child nodes etc and thread link quality like LQ3, LQ2, LQ1. It can filter nodes using diagnostics filters to find thread nodes that need attention: MAC counters (packets, frame errors, etc) and MLE counters (mesh partition, parent attempt changes, role time durations, etc) 
 [openthread](https://github.com/openthread/openthread) 
-[Jump to Getting Starter](## Getting Started)
+
+Jump to: Help [Getting Started](#getting-started)  [docs](./doc/) [td_cli](./doc/help_td_cli.md) [td cli rest-api](./doc/help_td_restapi_cli.md) [td_webserver](./doc/help_td_webserver.md) [env vars](./doc/help_env_vars.md)
+
 
 ## Summary
 - Python cli toolkit that fetches thread device info from a thread network and then stores into a local cache in the tdash data directory for offline querying and processing. Fetch thread device info from these sources:
