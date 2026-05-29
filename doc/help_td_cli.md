@@ -27,8 +27,8 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 | Command | Description |
 |---|---|
 | `otbr-cli` | Scan OTBR CLI commands |
-| `mdns` | Scan Thread-related mDNS scopes |
 | `otbr-restapi` | Query OTBR REST API commands |
+| `mdns` | Scan Thread-related mDNS scopes |
 | `process-eve` | Parse and enhance an Eve Thread layout file |
 | `merge-dataset` | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file |
 | `merge-extaddr` | Merge missing extaddr entries from a topology or mdns input file into the static extaddr map |
@@ -43,16 +43,16 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 td_cli otbr-cli {thread-network-info,router-table,meshdiag,networkdiag,all} ...
 ```
 
-### `mdns`
-
-```text
-td_cli mdns [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
-```
-
 ### `otbr-restapi`
 
 ```text
 td_cli otbr-restapi [global-forwarded-options] {download,node,devices,diagnostics,actions,mesh-diagnostics,topology} ...
+```
+
+### `mdns`
+
+```text
+td_cli mdns [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
 ```
 
 ### `process-eve`
