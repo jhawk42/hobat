@@ -19,6 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set the working directory inside the container
 WORKDIR /app
 
+# Copy init script to the container
+COPY rootfs /
+
 # Copy the requirements file and install dependencies
 # Doing this before copying the rest of the code improves build caching
 COPY requirements.txt .
@@ -31,7 +34,9 @@ COPY . .
 WORKDIR /app/src
 
 # Set environment variables
+ENV APP_DIR=/app/src
+ENV SCRIPT_NAME=td_webserver.py
+ENV HOST=0.0.0.0
 
-
-# Command to run the script
-CMD ["python3", "td_webserver.py", "--host", "0.0.0.0"]
+# Command to run the script via init
+CMD ["/init"]

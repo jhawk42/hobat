@@ -12,6 +12,76 @@ export const MERGE_IDENTITY_FIELDS = Object.freeze({
   rloc16: "rloc16",
 });
 
+// ── Source precedence (higher number = higher authority) ─────────────────────
+//
+// When multiple sources provide a value for the same field, the source with the
+// higher priority number wins.  Mirrors the Python SOURCE_PRECEDENCE dict in
+// dataset_merge.py.  Filenames not listed default to priority 0.
+//
+export const SOURCE_PRECEDENCE = Object.freeze({
+  "td-otbr-restapi-diagnostics-fetch-all.json": 100, // Highest priority (most detailed)
+  "td-otbr-restapi-mesh-diagnostics-fetch-all.json": 99,
+  "td-otbr-restapi-diagnostics-list.json": 98,
+  "td-otbr-restapi-diagnostics.json": 97,      
+  "td-otbr-restapi-devices-fetch.json": 96,
+  "td-otbr-restapi-devices-list.json": 95,
+  "td-otbr-restapi-devices.json": 94,
+  "td-otbr-cli-networkdiag-fetch-all.json": 90,
+  "td-otbr-cli-networkdiag-multicast-network.json": 85,
+  "td-otbr-cli-meshdiag-topology.json": 80,
+  "td-otbr-cli-meshdiag-router-neighbortables.json": 75,
+  "td-otbr-cli-meshdiag-router-childtables.json": 74,
+  "td-otbr-cli-router-table.json": 70,
+  "td-mdns-scopes-thread.json": 55,
+  "td-mdns-scopes-br.json": 60,                // mDNS scopes (service discovery)
+  "td-mdns-scopes-hap.json": 50,
+  "td-mdns-scopes-matter.json": 45,
+  "td-eve-topology.json": 10,                  // Lowest priority 
+});
+
+// ── Field-name alias mapping (canonical snake_case → [camelCase aliases]) ────
+//
+// Mirrors FIELD_ALIASES_BIDIRECTIONAL in dataset_merge.py.
+// Used by normalizeFieldNames() in tdash-utils.js to ensure rows from different
+// sources (CLI snake_case, REST API camelCase) use consistent field names.
+//
+export const FIELD_ALIASES = Object.freeze({
+  extaddr:              ["extAddress", "Extended MAC"],
+  omr_ipv6_addr:        ["omrIpv6Address"],
+  router_id:            ["routerId"],
+  device_label:         ["name", "hostName"],
+  eui64:                ["EUI64"],
+  route_data:           ["route"],
+  leader_data:          ["leaderData"],
+  route_id:             ["routeId"],
+  route_cost:           ["routeCost"],
+  link_quality_in:      ["linkQualityIn"],
+  link_quality_out:     ["linkQualityOut"],
+  id_sequence:          ["idSequence"],
+  partition_id:         ["partitionId"],
+  leader_router_id:     ["leaderRouterId"],
+  data_version:         ["dataVersion"],
+  stable_data_version:  ["stableDataVersion"],
+  active_routers:       ["activeRouters"],
+  leader_cost:          ["leaderCost"],
+  parent_priority:      ["parentPriority"],
+  link_quality_3:       ["linkQuality3"],
+  link_quality_2:       ["linkQuality2"],
+  link_quality_1:       ["linkQuality1"],
+  sed_buffer_size:      ["sedBufferSize"],
+  sed_datagram_count:   ["sedDatagramCount"],
+  br:                   ["isBorderRouter"],
+  leader:               ["isLeader"],
+  is_router:            ["isRouter"],
+  vendor_name:          ["vendorName"],
+  vendor_model:         ["vendorModel"],
+  vendor_sw_version:    ["vendorSwVersion"],
+  thread_stack_version: ["threadStackVersion"],
+  rx_on_when_idle:      ["rxOnWhenIdle"],
+  device_type:          ["deviceTypeFTD"],
+  network_data:         ["fullNetworkData"],
+});
+
 // ── Link filter constants ─────────────────────────────────────────────────────
 
 export const LINK_FILTER_DEFAULT = "default_links";

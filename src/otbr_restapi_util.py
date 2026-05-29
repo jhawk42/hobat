@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 
 from dataclasses import dataclass
@@ -24,10 +25,65 @@ DEFAULT_PORT = 8081
 DEFAULT_TIMEOUT = 10
 DEFAULT_RETRIES = 3
 DEFAULT_ACCEPT = "application/vnd.api+json"
+
+# Action polling defaults
+ACTION_POLL_INTERVAL_DEFAULT = 2.0
+ACTION_POLL_TIMEOUT_DEFAULT = 120.0
+
+# Device-collection workflow defaults
+DEVICE_COLLECTION_DEFAULT_DEVICE_COUNT = 255
+DEVICE_COLLECTION_DEFAULT_MAX_AGE = 60
+DEVICE_COLLECTION_DEFAULT_MAX_RETRIES = 2
+DEVICE_COLLECTION_DEFAULT_TASK_TIMEOUT = 6
+DEVICE_COLLECTION_DEFAULT_POLL_INTERVAL = 2.0
+DEVICE_COLLECTION_DEFAULT_POLL_TIMEOUT = 6.0
+
+# Diagnostics workflow defaults
+DIAGNOSTICS_DEFAULT_DEVICE_COUNT = 200
+DIAGNOSTICS_DEFAULT_TASK_TIMEOUT = 6
+DIAGNOSTICS_DEFAULT_POLL_INTERVAL = 2.0
+DIAGNOSTICS_DEFAULT_POLL_TIMEOUT = 6.0
+
+# Mesh diagnostics workflow defaults
+MESH_DIAGNOSTICS_DEFAULT_TASK_TIMEOUT = 6
+MESH_DIAGNOSTICS_DEFAULT_POLL_INTERVAL = 2.0
+MESH_DIAGNOSTICS_DEFAULT_POLL_TIMEOUT = 6.0
+
+# Energy-scan workflow defaults
+ENERGY_SCAN_DEFAULT_POLL_INTERVAL = 2.0
+ENERGY_SCAN_DEFAULT_POLL_TIMEOUT = 6.0
+
+# HTTP retry backoff defaults
+RETRY_BACKOFF_BASE = 2
 JSON_CONTENT_TYPES = {
     "application/json",
     "application/vnd.api+json",
 }
+
+
+def resolve_default_rest_host(env: Mapping[str, str] | None = None) -> str:
+    """Resolve the OTBR REST API host from environment or fallback default."""
+    env_map = os.environ if env is None else env
+    value = env_map.get(OT_REST_LISTEN_ADDR_ENV)
+    if value is None:
+        return DEFAULT_HOST
+    normalized = value.strip()
+    return normalized or DEFAULT_HOST
+
+
+def resolve_default_rest_port(env: Mapping[str, str] | None = None) -> int:
+    """Resolve the OTBR REST API port from environment or fallback default."""
+    env_map = os.environ if env is None else env
+    value = env_map.get(OT_REST_LISTEN_PORT_ENV)
+    if value is None:
+        return DEFAULT_PORT
+    normalized = value.strip()
+    if not normalized:
+        return DEFAULT_PORT
+    try:
+        return int(normalized)
+    except ValueError:
+        return DEFAULT_PORT
 
 
 @dataclass(frozen=True)
@@ -256,8 +312,8 @@ class OTBRRestApiClient:
 
     def __init__(
         self,
-        host: str = DEFAULT_HOST,
-        port: int = DEFAULT_PORT,
+        host: str | None = None,
+        port: int | None = None,
         base_url: str | None = None,
         timeout: int = DEFAULT_TIMEOUT,
         retries: int = DEFAULT_RETRIES,
@@ -265,7 +321,9 @@ class OTBRRestApiClient:
         user_agent: str = "td-otbr-restapi-client/1.0",
         default_raw: bool = False,
     ) -> None:
-        self.base_url = (base_url or f"http://{host}:{port}").rstrip("/")
+        resolved_host = resolve_default_rest_host() if host is None else host
+        resolved_port = resolve_default_rest_port() if port is None else port
+        self.base_url = (base_url or f"http://{resolved_host}:{resolved_port}").rstrip("/")
         self.timeout = timeout
         self.retries = retries
         self.accept = accept
@@ -660,8 +718,8 @@ class OTBRRestApiClient:
         self,
         action_id: str,
         *,
-        poll_interval: float = 2.0,
-        poll_timeout: float = 120.0,
+        poll_interval: float = ACTION_POLL_INTERVAL_DEFAULT,
+        poll_timeout: float = ACTION_POLL_TIMEOUT_DEFAULT,
         raise_on_stopped: bool = True,
         raw: object = _RAW_UNSET,
     ) -> Any:
@@ -671,9 +729,9 @@ class OTBRRestApiClient:
 
         Args:
             action_id: UUID returned when the action was enqueued.
-            poll_interval: Seconds between polls (default 2.0).
+            poll_interval: Seconds between polls (default ACTION_POLL_INTERVAL_DEFAULT).
             poll_timeout: Wall-clock seconds before raising OTBRActionTimeoutError
-                          (default 120.0).
+                          (default ACTION_POLL_TIMEOUT_DEFAULT).
             raise_on_stopped: If True (default), raise OTBRActionFailedError when
                               status is 'stopped' or 'failed'.
             raw: If True, return raw JSON:API envelope; else return flattened item.
@@ -736,12 +794,12 @@ class OTBRRestApiClient:
     def trigger_and_wait_device_collection(
         self,
         *,
-        device_count: int = 255,
-        max_age: int = 60,
-        max_retries: int = 2,
-        task_timeout: int = 6, 
-        poll_interval: float = 2.0,
-        poll_timeout: float = 6.0,
+        device_count: int = DEVICE_COLLECTION_DEFAULT_DEVICE_COUNT,
+        max_age: int = DEVICE_COLLECTION_DEFAULT_MAX_AGE,
+        max_retries: int = DEVICE_COLLECTION_DEFAULT_MAX_RETRIES,
+        task_timeout: int = DEVICE_COLLECTION_DEFAULT_TASK_TIMEOUT,
+        poll_interval: float = DEVICE_COLLECTION_DEFAULT_POLL_INTERVAL,
+        poll_timeout: float = DEVICE_COLLECTION_DEFAULT_POLL_TIMEOUT,
         raise_on_stopped: bool = False,
         raw: object = _RAW_UNSET,
     ) -> Any:
@@ -785,12 +843,12 @@ class OTBRRestApiClient:
     def fetch_device_collection(
         self,
         *,
-        device_count: int = 255,
-        max_age: int = 60,
-        max_retries: int = 2,
-        task_timeout: int = 6,
-        poll_interval: float = 2.0,
-        poll_timeout: float = 6.0,
+        device_count: int = DEVICE_COLLECTION_DEFAULT_DEVICE_COUNT,
+        max_age: int = DEVICE_COLLECTION_DEFAULT_MAX_AGE,
+        max_retries: int = DEVICE_COLLECTION_DEFAULT_MAX_RETRIES,
+        task_timeout: int = DEVICE_COLLECTION_DEFAULT_TASK_TIMEOUT,
+        poll_interval: float = DEVICE_COLLECTION_DEFAULT_POLL_INTERVAL,
+        poll_timeout: float = DEVICE_COLLECTION_DEFAULT_POLL_TIMEOUT,
         fields: Mapping[str, str | Sequence[str] | None] | None = None,
         with_meta: bool = False,
         raw: object = _RAW_UNSET,
@@ -841,9 +899,9 @@ class OTBRRestApiClient:
         *,
         types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
         destination_type: str = DestinationType.EXTENDED,
-        task_timeout: int = 6,
-        poll_interval: float = 2.0,
-        poll_timeout: float = 6.0,
+        task_timeout: int = DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
+        poll_interval: float = DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
+        poll_timeout: float = DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -855,7 +913,8 @@ class OTBRRestApiClient:
             types: TLV name list. Defaults to RECOMMENDED_DIAGNOSTIC_TLVS.
             destination_type: Addressing mode. Use DestinationType.EXTENDED (default)
                               for device extAddress IDs.
-            task_timeout: Server-side task timeout in seconds (default 5s).
+            task_timeout: Server-side task timeout in seconds
+                          (default DIAGNOSTICS_DEFAULT_TASK_TIMEOUT).
             poll_interval: Seconds between action status polls.
             poll_timeout: Wall-clock seconds before OTBRActionTimeoutError is raised.
             raw: If True, return raw JSON:API envelope for the diagnostic item.
@@ -906,9 +965,9 @@ class OTBRRestApiClient:
         *,
         types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
         destination_type: str = DestinationType.EXTENDED,
-        task_timeout: int = 6,
-        poll_interval: float = 2.0,
-        poll_timeout: float = 6.0,
+        task_timeout: int = DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
+        poll_interval: float = DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
+        poll_timeout: float = DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
         skip_on_failure: bool = True,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
         raw: object = _RAW_UNSET,
@@ -965,12 +1024,12 @@ class OTBRRestApiClient:
         self,
         *,
         update_devices: bool = True,
-        device_count: int = 200,
+        device_count: int = DIAGNOSTICS_DEFAULT_DEVICE_COUNT,
         types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
         destination_type: str = DestinationType.EXTENDED,
-        task_timeout: int = 6,
-        poll_interval: float = 2.0,
-        poll_timeout: float = 6.0,
+        task_timeout: int = DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
+        poll_interval: float = DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
+        poll_timeout: float = DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
         skip_on_failure: bool = True,
         raw: object = _RAW_UNSET,
     ) -> tuple[list[Any], list[Any]]:
@@ -1022,9 +1081,9 @@ class OTBRRestApiClient:
             DIAG_TLV_ROUTER_NEIGHBORS,
         ),
         destination_type: str = DestinationType.EXTENDED,
-        task_timeout: int = 6,
-        poll_interval: float = 2.0,
-        poll_timeout: float = 6.0,
+        task_timeout: int = MESH_DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
+        poll_interval: float = MESH_DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
+        poll_timeout: float = MESH_DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -1033,17 +1092,19 @@ class OTBRRestApiClient:
         then fetch and return the resulting diagnostic item.
 
         These TLVs require an additional otMeshDiag round-trip on the server and
-        have higher latency than standard diagnostic TLVs. The default task_timeout
-        (5s) and poll_timeout (6s) reflect this.
+        have higher latency than standard diagnostic TLVs.
 
         Args:
             device_id: Device extAddress (16-char hex), the item ID from /api/devices.
             types: Subset of {"children", "childIpv6Addresses", "routerNeighbors"}.
                    Defaults to all three. Passing any other TLV name raises OTBRUsageError.
             destination_type: Addressing mode. Defaults to DestinationType.EXTENDED.
-            task_timeout: Server-side task timeout in seconds (default 5s).
-            poll_interval: Seconds between action status polls (default 3.0).
-            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError (default 6.0).
+            task_timeout: Server-side task timeout in seconds
+                          (default MESH_DIAGNOSTICS_DEFAULT_TASK_TIMEOUT).
+            poll_interval: Seconds between action status polls
+                           (default MESH_DIAGNOSTICS_DEFAULT_POLL_INTERVAL).
+            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError
+                          (default MESH_DIAGNOSTICS_DEFAULT_POLL_TIMEOUT).
             raw: If True, return raw JSON:API envelope.
 
         Returns:
@@ -1087,9 +1148,9 @@ class OTBRRestApiClient:
             DIAG_TLV_ROUTER_NEIGHBORS,
         ),
         destination_type: str = DestinationType.EXTENDED,
-        task_timeout: int = 6,
-        poll_interval: float = 2.0,
-        poll_timeout: float = 6.0,
+        task_timeout: int = MESH_DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
+        poll_interval: float = MESH_DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
+        poll_timeout: float = MESH_DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
         skip_on_failure: bool = True,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
         raw: object = _RAW_UNSET,
@@ -1143,8 +1204,8 @@ class OTBRRestApiClient:
         scan_duration: int | None = None,
         destination_type: str | None = None,
         task_timeout: int | None = None,
-        poll_interval: float = 2.0,
-        poll_timeout: float = 6.0,
+        poll_interval: float = ENERGY_SCAN_DEFAULT_POLL_INTERVAL,
+        poll_timeout: float = ENERGY_SCAN_DEFAULT_POLL_TIMEOUT,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -1158,9 +1219,10 @@ class OTBRRestApiClient:
             period: Time between scans in ms (server default: 32).
             scan_duration: Duration per channel scan in ms (server default: 0).
             destination_type: Addressing mode (default: server auto-detects).
-            task_timeout: Server-side task timeout in seconds (default 5s).
+            task_timeout: Server-side task timeout in seconds (default: server-defined).
             poll_interval: Seconds between action status polls.
-            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError (default 6s).
+            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError
+                          (default ENERGY_SCAN_DEFAULT_POLL_TIMEOUT).
             raw: If True, return raw JSON:API envelope for the diagnostic item.
 
         Returns:
@@ -1351,7 +1413,7 @@ class OTBRRestApiClient:
                 )
 
             if attempt < effective_retries - 1:
-                time.sleep(2**attempt)
+                time.sleep(RETRY_BACKOFF_BASE ** attempt)
 
         if isinstance(last_exc, HTTPError):
             exc = last_exc
@@ -1694,8 +1756,8 @@ def add_common_rest_client_args(parser) -> None:
     """Add common OTBR REST API client arguments to an ArgumentParser.
     
     Adds the following standard arguments:
-    - --host: OTBR REST API host (default: 127.0.0.1)
-    - --port: OTBR REST API port (default: 8081)
+    - --host: OTBR REST API host (default: OT_REST_LISTEN_ADDR env or 127.0.0.1)
+    - --port: OTBR REST API port (default: OT_REST_LISTEN_PORT env or 8081)
     - --base-url: Override host/port with full base URL
     - --timeout: HTTP timeout in seconds (default: 10)
     - --accept: Accept header (default: application/vnd.api+json)
@@ -1717,21 +1779,31 @@ def add_common_rest_client_args(parser) -> None:
     
     Notes:
         - The --base-url argument takes precedence over --host and --port when constructing the client
+        - When --host/--port are omitted, OT_REST_LISTEN_ADDR and OT_REST_LISTEN_PORT
+          are used if present in the environment
         - --accept defaults to JSON:API format but can be overridden
         - --datadir is optional and typically used for output file resolution
     """
     from td_const import TD_DATA_DIR_ARG_HELP
+    default_host = resolve_default_rest_host()
+    default_port = resolve_default_rest_port()
     
     parser.add_argument(
         "--host",
-        default=DEFAULT_HOST,
-        help=f"OTBR REST API host (default: {DEFAULT_HOST})",
+        default=default_host,
+        help=(
+            f"OTBR REST API host (default: {default_host}; "
+            f"falls back to {DEFAULT_HOST} when {OT_REST_LISTEN_ADDR_ENV} is unset)"
+        ),
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=DEFAULT_PORT,
-        help=f"OTBR REST API port (default: {DEFAULT_PORT})",
+        default=default_port,
+        help=(
+            f"OTBR REST API port (default: {default_port}; "
+            f"falls back to {DEFAULT_PORT} when {OT_REST_LISTEN_PORT_ENV} is unset/invalid)"
+        ),
     )
     parser.add_argument(
         "--base-url",
@@ -1782,7 +1854,8 @@ def build_rest_client_from_args(args, **kwargs) -> OTBRRestApiClient:
     Notes:
         - If args.base_url is provided, it takes precedence over host/port
         - Additional kwargs are forwarded to the OTBRRestApiClient constructor
-        - Default values come from the DEFAULT_* constants in otbr_restapi_util
+        - Default values come from OT_REST_LISTEN_ADDR / OT_REST_LISTEN_PORT when set,
+          otherwise from the DEFAULT_* constants in otbr_restapi_util
     
     Raises:
         AttributeError: If required arguments (host, port, timeout, accept) are missing from args

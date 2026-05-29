@@ -357,12 +357,12 @@ class TestBuildTimeoutErrorRecord:
         """Should use custom rloc field name."""
         result = build_timeout_error_record(
             rloc16="0x5000",
-            rloc_key="parent_rloc16"
+            rloc_key="rloc16"
         )
         
-        assert "parent_rloc16" in result
-        assert result["parent_rloc16"] == "0x5000"
-        assert "rloc16" not in result
+        assert "rloc16" in result
+        assert result["rloc16"] == "0x5000"
+        assert "parent_rloc16" not in result
     
     def test_builds_childip6_style_error_record(self):
         """Should match childip6 error record structure."""
@@ -370,11 +370,11 @@ class TestBuildTimeoutErrorRecord:
             rloc16="0x5000",
             device_label="Living Room Bulb",
             result_table_key="router_child_ip6_table",
-            rloc_key="parent_rloc16"
+            rloc_key="rloc16"
         )
         
         expected = {
-            "parent_rloc16": "0x5000",
+            "rloc16": "0x5000",
             "device_label": "Living Room Bulb",
             "router_child_ip6_table": [],
             "router_child_ip6_table_count": 0,
@@ -388,11 +388,11 @@ class TestBuildTimeoutErrorRecord:
             rloc16="0x6400",
             device_label="Bedroom Switch",
             result_table_key="router_child_table",
-            rloc_key="parent_rloc16"
+            rloc_key="rloc16"
         )
         
         expected = {
-            "parent_rloc16": "0x6400",
+            "rloc16": "0x6400",
             "device_label": "Bedroom Switch",
             "router_child_table": [],
             "router_child_table_count": 0,
@@ -609,7 +609,7 @@ class TestCollectPerRouter:
         
         def mock_collect(rloc16, router, extaddr_map):
             return {
-                "parent_rloc16": rloc16,
+                "rloc16": rloc16,
                 "device_label": "Test",
                 "router_child_table": [{"child": 1}, {"child": 2}],
                 "router_child_table_count": 2,
@@ -622,7 +622,7 @@ class TestCollectPerRouter:
         )
         
         assert len(results) == 1
-        assert results[0]["parent_rloc16"] == "0x5000"
+        assert results[0]["rloc16"] == "0x5000"
         assert results[0]["router_child_table_count"] == 2
     
     def test_maintains_order_of_router_table(self):

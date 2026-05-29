@@ -13,6 +13,8 @@ from otbr_restapi_util import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     DEFAULT_TIMEOUT,
+    OT_REST_LISTEN_ADDR_ENV,
+    OT_REST_LISTEN_PORT_ENV,
     OTBRActionError,
     OTBRActionFailedError,
     OTBRActionTimeoutError,
@@ -25,7 +27,33 @@ from otbr_restapi_util import (
     build_rest_client_from_args,
     emit_rest_payload_output,
     exit_code_for_rest_exception,
+    resolve_default_rest_host,
+    resolve_default_rest_port,
 )
+
+
+class TestResolveDefaultRestEndpoint:
+    """Tests for OTBR REST API env-based default resolution."""
+
+    def test_resolve_default_rest_host_prefers_env(self, monkeypatch):
+        monkeypatch.setenv(OT_REST_LISTEN_ADDR_ENV, "0.0.0.0")
+
+        assert resolve_default_rest_host() == "0.0.0.0"
+
+    def test_resolve_default_rest_host_falls_back_for_empty_env(self, monkeypatch):
+        monkeypatch.setenv(OT_REST_LISTEN_ADDR_ENV, "   ")
+
+        assert resolve_default_rest_host() == DEFAULT_HOST
+
+    def test_resolve_default_rest_port_prefers_env(self, monkeypatch):
+        monkeypatch.setenv(OT_REST_LISTEN_PORT_ENV, "18081")
+
+        assert resolve_default_rest_port() == 18081
+
+    def test_resolve_default_rest_port_falls_back_for_invalid_env(self, monkeypatch):
+        monkeypatch.setenv(OT_REST_LISTEN_PORT_ENV, "invalid")
+
+        assert resolve_default_rest_port() == DEFAULT_PORT
 
 
 class TestAddCommonRestClientArgs:
@@ -61,6 +89,15 @@ class TestAddCommonRestClientArgs:
         args = parser.parse_args(["--host", "192.168.1.100"])
         
         assert args.host == "192.168.1.100"
+
+    def test_host_argument_uses_env_default(self, monkeypatch):
+        """Should use OT_REST_LISTEN_ADDR when present."""
+        monkeypatch.setenv(OT_REST_LISTEN_ADDR_ENV, "0.0.0.0")
+        parser = argparse.ArgumentParser()
+        add_common_rest_client_args(parser)
+        args = parser.parse_args([])
+
+        assert args.host == "0.0.0.0"
     
     def test_port_argument_default(self):
         """Should set default port to DEFAULT_PORT."""
@@ -78,6 +115,24 @@ class TestAddCommonRestClientArgs:
         
         assert args.port == 9000
         assert isinstance(args.port, int)
+
+    def test_port_argument_uses_env_default(self, monkeypatch):
+        """Should use OT_REST_LISTEN_PORT when present."""
+        monkeypatch.setenv(OT_REST_LISTEN_PORT_ENV, "18081")
+        parser = argparse.ArgumentParser()
+        add_common_rest_client_args(parser)
+        args = parser.parse_args([])
+
+        assert args.port == 18081
+
+    def test_port_argument_falls_back_for_invalid_env(self, monkeypatch):
+        """Should fall back to DEFAULT_PORT for invalid env values."""
+        monkeypatch.setenv(OT_REST_LISTEN_PORT_ENV, "not-a-port")
+        parser = argparse.ArgumentParser()
+        add_common_rest_client_args(parser)
+        args = parser.parse_args([])
+
+        assert args.port == DEFAULT_PORT
     
     def test_base_url_argument_default(self):
         """Should set base_url to None by default."""
@@ -188,6 +243,18 @@ class TestBuildRestClientFromArgs:
         assert client.base_url == f"http://{DEFAULT_HOST}:{DEFAULT_PORT}"
         assert client.timeout == DEFAULT_TIMEOUT
         assert client.accept == DEFAULT_ACCEPT
+
+    def test_builds_client_with_env_default_values(self, monkeypatch):
+        """Should build client with env-derived defaults from args."""
+        monkeypatch.setenv(OT_REST_LISTEN_ADDR_ENV, "0.0.0.0")
+        monkeypatch.setenv(OT_REST_LISTEN_PORT_ENV, "18081")
+        parser = argparse.ArgumentParser()
+        add_common_rest_client_args(parser)
+        args = parser.parse_args([])
+
+        client = build_rest_client_from_args(args)
+
+        assert client.base_url == "http://0.0.0.0:18081"
     
     def test_builds_client_with_custom_host_and_port(self):
         """Should build client with custom host and port."""
@@ -374,6 +441,18 @@ class TestIntegrationWorkflow:
         
         assert client.base_url == "https://otbr.example.com/api"
         assert client.timeout == 15
+
+
+class TestOTBRRestApiClientDefaults:
+    """Tests for OTBRRestApiClient default host/port resolution."""
+
+    def test_constructor_uses_env_defaults(self, monkeypatch):
+        monkeypatch.setenv(OT_REST_LISTEN_ADDR_ENV, "0.0.0.0")
+        monkeypatch.setenv(OT_REST_LISTEN_PORT_ENV, "18081")
+
+        client = OTBRRestApiClient()
+
+        assert client.base_url == "http://0.0.0.0:18081"
 
 
 class TestEmitRestPayloadOutput:
