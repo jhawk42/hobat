@@ -183,7 +183,7 @@ def build_timeout_error_record(
         ...     rloc_key="rloc16"
         ... )
         {
-            "parent_rloc16": "0x5000",
+            "rloc16": "0x5000",
             "device_label": "Kitchen Sensor",
             "router_child_table": [],
             "router_child_table_count": 0,
@@ -233,7 +233,7 @@ def collect_per_router(
     Examples:
         >>> def collect_child_table(rloc16, router, extaddr_map):
         ...     # Fetch and parse childtable for this router
-        ...     return {"parent_rloc16": rloc16, "children": [...]}
+        ...     return {"rloc16": rloc16, "children": [...]}
         
         >>> router_table = fetch_and_parse_router_table(extaddr_map)
         >>> results = collect_per_router(
