@@ -791,10 +791,35 @@ export function adaptMergedDetailed(fileMap) {
     });
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
       const childNode = typeof child === 'string' ? { id: child } : (child || {});
-      if (typeof child === 'string' || toText(childNode.id)) return; // skip eve-only string children
+      if (typeof child === 'string') return; // skip eve-only string children
+      if (!toText(childNode.rloc16) && !toText(childNode.extaddr)) return; // skip object refs without Thread identity
       const childId = ensureNodeForLink(childNode, `${fromId}-child-${ci + 1}`);
       if (!childId) return;
       addEdge(edgeMap, edgeData, fromId, childId, { dashes: false, isParentChild: true, linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN], edgeKeySuffix: 'merged-default-child' });
+      routerIdsWithChildren.add(fromId);
+    });
+    (Array.isArray(node.router_child_table) ? node.router_child_table : []).forEach((child, ci) => {
+      const childId = toText(child.rloc16) || `${fromId}-rct-child-${ci + 1}`;
+      const childType = toText(child.type).toLowerCase();
+      const isChildLikeNode = childType === 'mtd' || child.rx_on === false;
+      const isRouterLikeNode = childType === 'ftd' && childId.toLowerCase().endsWith('00');
+      upsertMergedNode(childId, {
+        rloc16: toText(child.rloc16),
+        extaddr: toText(child.extaddr),
+        device_label: toText(child.device_label),
+        type: childType,
+        thread_version: toText(child.thread_version)
+      }, {
+        source: 'merged-detailed',
+        shape: isChildLikeNode && !isRouterLikeNode ? 'ellipse' : 'box',
+        color: isChildLikeNode && !isRouterLikeNode ? NODE_COLORS.child : NODE_COLORS.eve
+      });
+      if (!rawNodeById.has(childId)) rawNodeById.set(childId, child);
+      addEdge(edgeMap, edgeData, fromId, childId, {
+        dashes: false, isParentChild: true,
+        linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN],
+        edgeKeySuffix: 'merged-rct-child'
+      });
       routerIdsWithChildren.add(fromId);
     });
   });
