@@ -45,6 +45,8 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   "router_id",
   "omr_ipv6_addr",
   "omrIpv6Address",
+  "rloc_ipv6_addr",
+  "rlocIpv6Address",
   "mlEidIid",
   
   // === Device Type & Role ===
@@ -62,6 +64,10 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   "thread_stack_version",
   "threadStackVersion",
   
+  // === Addresses & Network Info ===
+  "ipv6_addrs",
+  "ipv6Addresses",
+
   // === Other ===
   "mode.device",
   "scope",
