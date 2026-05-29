@@ -12,6 +12,14 @@ Run from the project root with:
 PYTHONPATH=src python3 src/otbr_restapi_cli.py [global-options] <command> ...
 ```
 
+This CLI is also available through the `td_cli` wrapper:
+
+```bash
+PYTHONPATH=src python3 -m td_cli otbr-restapi [global-options] <command> ...
+```
+
+The wrapper forwards the same OTBR REST API global options to `otbr_restapi_cli.py`.
+
 ---
 
 ## Global Options
