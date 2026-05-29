@@ -16,7 +16,7 @@ export const MERGE_IDENTITY_FIELDS = Object.freeze({
 //
 // When multiple sources provide a value for the same field, the source with the
 // higher priority number wins.  Mirrors the Python SOURCE_PRECEDENCE dict in
-// dataset_merge.py.  Filenames not listed default to priority 0.
+// merge_dataset.py.  Filenames not listed default to priority 0.
 //
 export const SOURCE_PRECEDENCE = Object.freeze({
   "td-otbr-restapi-diagnostics-fetch-all.json": 100, // Highest priority (most detailed)
@@ -41,7 +41,7 @@ export const SOURCE_PRECEDENCE = Object.freeze({
 
 // ── Field-name alias mapping (canonical snake_case → [camelCase aliases]) ────
 //
-// Mirrors FIELD_ALIASES_BIDIRECTIONAL in dataset_merge.py.
+// Mirrors FIELD_ALIASES_BIDIRECTIONAL in merge_dataset.py.
 // Used by normalizeFieldNames() in tdash-utils.js to ensure rows from different
 // sources (CLI snake_case, REST API camelCase) use consistent field names.
 //

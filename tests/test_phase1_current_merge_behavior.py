@@ -2,7 +2,7 @@
 """
 Phase 1: Test Current deep_merge() Behavior
 
-This script tests the current merge behavior of dataset_merge.py
+This script tests the current merge behavior of merge_dataset.py
 to understand its capabilities and limitations before Phase 2 enhancements.
 """
 
@@ -14,7 +14,7 @@ from copy import deepcopy
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from dataset_merge import (
+from merge_dataset import (
     deep_merge,
     merge_lists,
     value_is_empty,

@@ -238,10 +238,10 @@ Or directly using the merge script:
 
 ```bash
 # From src directory
-python3 src/dataset_merge.py --base-dir data/ --output td-merged-topology-all.json
+python3 src/merge_dataset.py --base-dir data/ --output td-merged-topology-all.json
 
 # With merge report
-python3 src/dataset_merge.py --base-dir data/ --report-file td-merge-report.json
+python3 src/merge_dataset.py --base-dir data/ --report-file td-merge-report.json
 ```
 
 ## Input Files

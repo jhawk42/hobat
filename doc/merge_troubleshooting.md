@@ -25,7 +25,7 @@ This guide helps diagnose and resolve common issues with the Thread topology dat
 ls -lh data/td-*.json
 
 # Run merge with verbose output
-python3 src/dataset_merge.py --base-dir data/ 2>&1 | grep -i "processing\|file"
+python3 src/merge_dataset.py --base-dir data/ 2>&1 | grep -i "processing\|file"
 ```
 
 **Common Causes:**
@@ -52,18 +52,18 @@ python3 src/dataset_merge.py --base-dir data/ 2>&1 | grep -i "processing\|file"
 2. **Verify file paths:**
    ```bash
    # Check data directory
-   python3 -c "from dataset_merge import DEFAULT_INPUT_FILES; print('\n'.join(DEFAULT_INPUT_FILES))"
+   python3 -c "from merge_dataset import DEFAULT_INPUT_FILES; print('\n'.join(DEFAULT_INPUT_FILES))"
    ```
 
 3. **Use custom file selection:**
    ```bash
    # Exclude missing files
-   python3 src/dataset_merge.py \
+   python3 src/merge_dataset.py \
      --base-dir data/ \
      --exclude-files td-eve-topology.json
    
    # Include additional files
-   python3 src/dataset_merge.py \
+   python3 src/merge_dataset.py \
      --base-dir data/ \
      --include-files custom-snapshot.json
    ```
@@ -243,7 +243,7 @@ jq '[.[] | keys[]] | unique | sort' data/td-merged-topology-all.json
    ```bash
    # Check canonical names used
    python3 -c "
-   from dataset_merge import FIELD_ALIASES_BIDIRECTIONAL, get_canonical_field_name
+   from merge_dataset import FIELD_ALIASES_BIDIRECTIONAL, get_canonical_field_name
    print(get_canonical_field_name('extAddress'))  # Should return 'extaddr'
    print(get_canonical_field_name('idSequence'))  # Should return 'id_sequence'
    "
@@ -251,7 +251,7 @@ jq '[.[] | keys[]] | unique | sort' data/td-merged-topology-all.json
 
 2. **Add missing aliases:**
    
-   Edit `src/dataset_merge.py` and add to `FIELD_ALIASES_BIDIRECTIONAL`:
+   Edit `src/merge_dataset.py` and add to `FIELD_ALIASES_BIDIRECTIONAL`:
    ```python
    FIELD_ALIASES_BIDIRECTIONAL = {
        # ... existing aliases ...
@@ -274,7 +274,7 @@ jq '[.[] | keys[]] | unique | sort' data/td-merged-topology-all.json
 **Diagnosis:**
 ```bash
 # Measure performance with timing
-time python3 src/dataset_merge.py --base-dir data/ --output test-merge.json
+time python3 src/merge_dataset.py --base-dir data/ --output test-merge.json
 
 # Check input file sizes
 du -sh data/td-*.json | sort -h
@@ -304,7 +304,7 @@ done
 2. **Exclude non-essential sources:**
    ```bash
    # Skip Eve topology if not needed
-   python3 src/dataset_merge.py \
+   python3 src/merge_dataset.py \
      --base-dir data/ \
      --exclude-files td-eve-topology.json
    ```
@@ -362,7 +362,7 @@ jq '[.[] | select(._merge_conflicts != null) |
 
 3. **Adjust source precedence if needed:**
    
-   Edit `src/dataset_merge.py` to adjust `SOURCE_PRECEDENCE`:
+   Edit `src/merge_dataset.py` to adjust `SOURCE_PRECEDENCE`:
    ```python
    SOURCE_PRECEDENCE = {
        "td-otbr-restapi-diagnostics.json": 100,  # Highest priority
@@ -390,13 +390,13 @@ jq '.[] | {extaddr, sources: ._source_files}' \
 
 # Check source precedence configuration
 python3 -c "
-from dataset_merge import SOURCE_PRECEDENCE
+from merge_dataset import SOURCE_PRECEDENCE
 import json
 print(json.dumps(SOURCE_PRECEDENCE, indent=2))
 "
 
 # Verify file processing order
-python3 src/dataset_merge.py --base-dir data/ 2>&1 | grep "Processing file"
+python3 src/merge_dataset.py --base-dir data/ 2>&1 | grep "Processing file"
 ```
 
 **Common Causes:**
@@ -409,7 +409,7 @@ python3 src/dataset_merge.py --base-dir data/ 2>&1 | grep "Processing file"
 1. **Verify precedence rules:**
    ```python
    # Check current precedence
-   from dataset_merge import SOURCE_PRECEDENCE
+   from merge_dataset import SOURCE_PRECEDENCE
    sorted_sources = sorted(SOURCE_PRECEDENCE.items(), 
                           key=lambda x: x[1], 
                           reverse=True)
@@ -419,7 +419,7 @@ python3 src/dataset_merge.py --base-dir data/ 2>&1 | grep "Processing file"
 
 2. **Add custom source to precedence:**
    
-   Edit `src/dataset_merge.py`:
+   Edit `src/merge_dataset.py`:
    ```python
    SOURCE_PRECEDENCE = {
        # ... existing entries ...
@@ -456,7 +456,7 @@ If issues persist after following this guide:
 
 3. **Generate detailed merge report:**
    ```bash
-   python3 src/dataset_merge.py \
+   python3 src/merge_dataset.py \
      --base-dir data/ \
      --report-file detailed-report.json
    
@@ -466,7 +466,7 @@ If issues persist after following this guide:
 
 4. **Enable debug logging:**
    
-   Edit `src/dataset_merge.py` and add at top of main():
+   Edit `src/merge_dataset.py` and add at top of main():
    ```python
    import logging
    logging.basicConfig(level=logging.DEBUG)

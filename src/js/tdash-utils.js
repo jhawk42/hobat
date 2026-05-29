@@ -78,7 +78,7 @@ export function normalizeFieldNames(row) {
  * Derives the canonical mode.device value ("FTD" or "MTD") from whichever
  * representation is present in `row`, trying five sources in priority order.
  * Returns "" when the device type cannot be determined.
- * Mirrors derive_mode_device() in dataset_merge.py.
+ * Mirrors derive_mode_device() in merge_dataset.py.
  */
 export function deriveModeDevice(row) {
   // 1. Explicit "mode.device" flat key
@@ -131,7 +131,7 @@ export function deriveModeDevice(row) {
  * Attempts to derive `omr_ipv6_addr` by prefix-matching entries in
  * `row.ipv6_addrs` against `omrPrefix`.  Returns the matching address
  * (lowercased) or "" when not found or `omrPrefix` is empty.
- * Mirrors the ipv6_addrs loop in normalize_identifiers() in dataset_merge.py.
+ * Mirrors the ipv6_addrs loop in normalize_identifiers() in merge_dataset.py.
  */
 export function getOmrIpv6FromIpv6Addrs(row, omrPrefix) {
   if (!omrPrefix || typeof omrPrefix !== "string") return "";
