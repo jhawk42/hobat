@@ -46,7 +46,7 @@ tdash/
 │   ├── otbr_restapi_*.py       # OTBR REST API collectors and CLI clients
 │   ├── otbr_cli_*.py           # ot-ctl CLI collectors
 │   ├── mdns_thread_scopes.py   # mDNS discovery collector
-│   ├── eve_parse.py            # Eve topology parser
+│   ├── eve_process.py          # Eve topology parser
 │   ├── merge_dataset.py        # Dataset merge engine
 │   ├── merge_extaddr_file_into_static_map.py  # Admin utility: merge extaddr entries into static label map
 │   ├── extaddr_device_label_map.py  # Static extaddr→label loader
@@ -77,7 +77,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 | `otbr_cli_` | OTBR `ot-ctl` CLI wrappers (via Docker exec) | `otbr_cli_router_table.py` |
 | `otbr_restapi_` | OTBR HTTP REST API clients and downloaders | `otbr_restapi_client.py` |
 | `mdns_` | Zeroconf/mDNS discovery collectors | `mdns_thread_scopes.py` |
-| `eve_` | Eve topology parsing helpers | `eve_parse.py` |
+| `eve_` | Eve topology parsing helpers | `eve_process.py` |
 | `util_` | Shared helpers used across collectors/parsers | `util_network.py` |
 
 ---
@@ -274,7 +274,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 
 | File | Purpose |
 |---|---|
-| `eve_parse.py` | Parses an Eve App `Eve Thread Network Layout.evethreadlayout` exported file.  Normalises decimal RLOC16 to hex, converts base64-encoded extended addresses to hex, enriches nodes with OMR IPv6 address and route-destination names, and keys the output by `rloc16_hex`. |
+| `eve_process.py` | Parses an Eve App `Eve Thread Network Layout.evethreadlayout` exported file.  Normalises decimal RLOC16 to hex, converts base64-encoded extended addresses to hex, enriches nodes with OMR IPv6 address and route-destination names, and keys the output by `rloc16_hex`. |
 | `extaddr_device_label_map.py` | Loads a static `td-static-extaddr-device-label.json` file that maps extended addresses to human-readable device labels. |
 
 ### Data Merging
@@ -596,7 +596,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 │                        Data Collection                         │
 │                                                                │
 │  OTBR REST API          ot-ctl (Docker)        Eve App / mDNS  │
-│  otbr_restapi_*         otbr_cli_*             eve_parse.py    │
+│  otbr_restapi_*         otbr_cli_*             eve_process.py  │
 │  *.py                   *.py                   mdns_            │
 │                                                thread_scopes.py│
 └────────────────┬───────────────────┬───────────────────────────┘

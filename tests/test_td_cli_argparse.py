@@ -303,7 +303,7 @@ class TestDispatchOtherCommands(unittest.TestCase):
 
     def test_process_eve_forwards_extras(self):
         argv = ["process-eve", "--input", "layout.evethreadlayout"]
-        with patch.object(td_cli.eve_parse, "main", return_value=0) as m:
+        with patch.object(td_cli.eve_process, "main", return_value=0) as m:
             rc = self._dispatch(argv)
         m.assert_called_once_with(["--input", "layout.evethreadlayout"])
         self.assertEqual(rc, 0)
