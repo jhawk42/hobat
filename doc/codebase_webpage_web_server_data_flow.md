@@ -42,7 +42,7 @@ _Covers `td_webserver.py`, `tdash.html`, and all `js/*.js` modules._
 │                        └─────────────────────────────────────────┘ │
 └──────────────────────────────────┬──────────────────────────────────┘
                                    │ subprocess
-                            td_cli.py + data collectors
+                            python3 -m td_cli {command} + data collectors
                                    │ writes JSON
                             data/ directory  (JSON files on disk)
 ```
@@ -79,7 +79,7 @@ Every data file the browser can request is listed in `FILE_ACTION_MAP` as a `Fil
 @dataclasses.dataclass
 class FileAction:
     max_age_s: int          # seconds until the cached file is considered stale
-    action: str | list[str] # "STATIC" or td_cli.py CLI args
+    action: str | list[str] # "STATIC" or td_cli command args
     action_cost_s: int      # estimated wall-clock seconds for the action
     force_async: bool       # True → always return 202 regardless of cost
 ```
@@ -562,7 +562,7 @@ doFetchDataset() [tdash-ui.js]
         ▼
 loadDataset(value) [tdash-dataset.js]
   ├── fetch /api/data/<file> per entry.files[]
-  │     └── server: check freshness → run td_cli.py if stale → return JSON
+  │     └── server: check freshness → run python3 -m td_cli {command} if stale → return JSON
   │     └── HTTP 202: poll /api/job/{id} until "done"
   │
   ├── normalizeRows() per loaded file group [tdash-merge.js]
