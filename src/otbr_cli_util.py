@@ -165,7 +165,7 @@ def build_timeout_error_record(
         rloc16: The RLOC16 address of the device that timed out (e.g., "0x5000").
         device_label: Human-readable device label from extaddr map (default: "Unknown").
         result_table_key: Name of the empty result array field (e.g., "router_child_table").
-        rloc_key: Name of the rloc field (e.g., "parent_rloc16" or "rloc16").
+        rloc_key: Name of the rloc field (e.g., "rloc16").
     
     Returns:
         Dictionary with error envelope containing:
@@ -180,7 +180,7 @@ def build_timeout_error_record(
         ...     rloc16="0x5000",
         ...     device_label="Kitchen Sensor",
         ...     result_table_key="router_child_table",
-        ...     rloc_key="parent_rloc16"
+        ...     rloc_key="rloc16"
         ... )
         {
             "parent_rloc16": "0x5000",

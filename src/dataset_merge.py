@@ -175,18 +175,24 @@ MERGE_IDENTITY_FIELDS = {
 # Phase 3: Source Precedence Rules (Priority: Higher = Wins)
 # Used to resolve conflicts when multiple sources provide same field
 SOURCE_PRECEDENCE = {
-    "td-otbr-restapi-diagnostics.json": 100,      # Highest priority (most detailed)
-    "td-otbr-restapi-devices.json": 95,
+    "td-otbr-restapi-diagnostics-fetch-all.json": 100, # Highest priority (most detailed)
+    "td-otbr-restapi-mesh-diagnostics-fetch-all.json": 99,
+    "td-otbr-restapi-diagnostics-list.json": 98,
+    "td-otbr-restapi-diagnostics.json": 97,      
+    "td-otbr-restapi-devices-fetch.json": 96,
+    "td-otbr-restapi-devices-list.json": 95,
+    "td-otbr-restapi-devices.json": 94,
     "td-otbr-cli-networkdiag-fetch-all.json": 90,
     "td-otbr-cli-networkdiag-multicast-network.json": 85,
     "td-otbr-cli-meshdiag-topology.json": 80,
     "td-otbr-cli-meshdiag-router-neighbortables.json": 75,
+    "td-otbr-cli-meshdiag-router-childtables.json": 74,
     "td-otbr-cli-router-table.json": 70,
-    "td-mdns-scopes-br.json": 60,                # mDNS scopes (service discovery)
     "td-mdns-scopes-thread.json": 55,
+    "td-mdns-scopes-br.json": 60,                # mDNS scopes (service discovery)
     "td-mdns-scopes-hap.json": 50,
     "td-mdns-scopes-matter.json": 45,
-    "td-eve-topology.json": 10,                  # Lowest priority (legacy)
+    "td-eve-topology.json": 10,                  # Lowest priority 
 }
 
 DEFAULT_INPUT_FILES = [
@@ -195,10 +201,16 @@ DEFAULT_INPUT_FILES = [
     "td-otbr-cli-networkdiag-fetch-all.json",
     "td-otbr-cli-networkdiag-multicast-network.json",
     "td-otbr-cli-meshdiag-router-neighbortables.json",
-    "td-otbr-restapi-devices.json",
+    "td-otbr-cli-meshdiag-router-childtables.json",
+    "td-otbr-restapi-diagnostics-fetch-all.json",
+    "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+    "td-otbr-restapi-diagnostics-list.json",
     "td-otbr-restapi-diagnostics.json",
-    "td-mdns-scopes-br.json",                    # Phase 3: mDNS Border Router discovery
+    "td-otbr-restapi-devices-fetch.json",
+    "td-otbr-restapi-devices-list.json",
+    "td-otbr-restapi-devices.json",   
     "td-mdns-scopes-thread.json",                # Phase 3: mDNS Thread devices
+    "td-mdns-scopes-br.json",                    # Phase 3: mDNS Border Router discovery
     "td-mdns-scopes-hap.json",                   # Phase 3: mDNS HomeKit devices
     "td-mdns-scopes-matter.json",                # Phase 3: mDNS Matter devices
     "td-eve-topology.json",
@@ -1356,6 +1368,18 @@ def build_merged_records(
             # Compatibility alias for older consumers expecting `_sources`.
             node["_sources"] = list(source_files)
 
+        # Build _merge_identity_keys (mirrors JS mergeRowsByStrategy output).
+        identity_key_parts: list[str] = []
+        iv = collect_merge_identity_values(node)
+        if iv.get("extaddr"):
+            identity_key_parts.append(f"extaddr:{iv['extaddr']}")
+        if iv.get("rloc16"):
+            identity_key_parts.append(f"rloc16:{iv['rloc16']}")
+        if iv.get("omr_ipv6_addr"):
+            identity_key_parts.append(f"omr_ipv6_addr:{iv['omr_ipv6_addr']}")
+        if identity_key_parts:
+            node["_merge_identity_keys"] = identity_key_parts
+
         ordered: dict[str, Any] = {}
 
         for key in PRIORITY_FIELDS:
@@ -1492,6 +1516,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=EXTADDR_DEVICE_LABEL_MAP_FILENAME,
         help="Reference file used only for extaddr to device_label lookup.",
     )
+    parser.add_argument(
+        "--merge-strategy",
+        default="merge",
+        choices=["merge", "none"],
+        help=(
+            "merge (default): identify-and-merge records from all sources. "
+            "none: pass-through mode — all records from all sources are "
+            "collected as-is without identity matching or deduplication."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1538,6 +1572,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     report["reference_extaddr_map_file"] = args.extaddr_map_file
     report["reference_extaddr_map_entries"] = len(device_label_map)
+
+    if args.merge_strategy == "none":
+        # Pass-through: collect all records without identity matching.
+        passthrough_records: list[dict[str, Any]] = []
+        for filename in input_files:
+            data = load_json(base_dir / filename)
+            records = extract_records(filename, data)
+            for raw_record in records:
+                record = normalize_identifiers(raw_record, omr_prefix)
+                record.setdefault("_source_files", [filename])
+                passthrough_records.append(record)
+        merged_records = passthrough_records
+        report["merge_strategy"] = "none"
+        report["passthrough_record_count"] = len(passthrough_records)
+        logging.info(
+            f"merge-strategy=none: collected {len(passthrough_records)} "
+            "records without merging."
+        )
+    else:
+        report["merge_strategy"] = "merge"
 
     output_path = base_dir / args.output
     save_json_atomic(merged_records, output_path, indent=2, add_trailing_newline=True)

@@ -34,11 +34,11 @@ def fetch_meshdiag_child_ip6_for_device(parent_rloc16, router=None, extaddr_map=
             rloc16=parent_rloc16,
             device_label=device_label,
             result_table_key="router_child_ip6_table",
-            rloc_key="parent_rloc16",
+            rloc_key="rloc16",
         )
 
     router_child_ip6 = {
-        "parent_rloc16": parent_rloc16,
+        "rloc16": parent_rloc16,
         "device_label": extaddr_map.get(router.get("extaddr"), "Unknown")
         if router and extaddr_map
         else "Unknown",

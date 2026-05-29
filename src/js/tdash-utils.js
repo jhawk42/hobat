@@ -1,4 +1,4 @@
-import { MERGE_IDENTITY_FIELDS } from "./tdash-constants.js";
+import { MERGE_IDENTITY_FIELDS, FIELD_ALIASES } from "./tdash-constants.js";
 
 // ── Primitive type helpers ────────────────────────────────────────────────────
 
@@ -39,17 +39,139 @@ export function getCanonicalOmrIpv6Address(row) {
   return canonicalIdText(row?.[MERGE_IDENTITY_FIELDS.omr_ipv6_addr]);
 }
 
+// ── Field-name normalisation helpers ─────────────────────────────────────────
+
+// Build reverse lookup once at module load: alias → canonical name.
+const _ALIAS_TO_CANONICAL = (() => {
+  const map = new Map();
+  Object.entries(FIELD_ALIASES).forEach(([canonical, aliases]) => {
+    aliases.forEach((alias) => map.set(alias, canonical));
+  });
+  return map;
+})();
+
+/** Returns the canonical (snake_case) form of a field name, or the name itself if unknown. */
+export function getCanonicalFieldName(fieldName) {
+  return _ALIAS_TO_CANONICAL.get(fieldName) ?? fieldName;
+}
+
+/**
+ * Returns a shallow copy of `row` with canonical field names added alongside
+ * any aliases.  Original alias keys are preserved for backward compatibility.
+ * If the canonical name already exists in the row, it is not overwritten.
+ */
+export function normalizeFieldNames(row) {
+  if (!isPlainObject(row)) return row;
+  const result = { ...row };
+  Object.entries(row).forEach(([key, value]) => {
+    const canonical = getCanonicalFieldName(key);
+    if (canonical !== key && !(canonical in result)) {
+      result[canonical] = value;
+    }
+  });
+  return result;
+}
+
+// ── Mode/device-type derivation ───────────────────────────────────────────────
+
+/**
+ * Derives the canonical mode.device value ("FTD" or "MTD") from whichever
+ * representation is present in `row`, trying five sources in priority order.
+ * Returns "" when the device type cannot be determined.
+ * Mirrors derive_mode_device() in dataset_merge.py.
+ */
+export function deriveModeDevice(row) {
+  // 1. Explicit "mode.device" flat key
+  const modeDeviceFlat = row?.["mode.device"];
+  if (typeof modeDeviceFlat === "string" && modeDeviceFlat.trim()) {
+    const v = modeDeviceFlat.trim().toUpperCase();
+    if (v === "FTD" || v === "MTD") return v;
+  }
+
+  const mode = row?.mode;
+  if (isPlainObject(mode)) {
+    // 2. mode.device string
+    const modeDevice = mode.device;
+    if (typeof modeDevice === "string" && modeDevice.trim()) {
+      const v = modeDevice.trim().toUpperCase();
+      if (v === "FTD" || v === "MTD") return v;
+    }
+    // 3. mode.deviceTypeFTD boolean (REST API)
+    if (typeof mode.deviceTypeFTD === "boolean") {
+      return mode.deviceTypeFTD ? "FTD" : "MTD";
+    }
+    // 4. mode.device_type numeric
+    if (typeof mode.device_type === "number") {
+      return mode.device_type !== 0 ? "FTD" : "MTD";
+    }
+  }
+
+  // 5. Role string
+  const role = row?.role ?? row?.Role;
+  if (typeof role === "string") {
+    const r = role.trim().toLowerCase();
+    if (r === "router" || r === "border router") return "FTD";
+    if (r === "child") return "MTD";
+  }
+
+  // 6. Type string
+  const nodeType = row?.type;
+  if (typeof nodeType === "string") {
+    const t = nodeType.trim().toLowerCase();
+    if (t === "router" || t === "border router") return "FTD";
+    if (t.includes("child")) return "MTD";
+  }
+
+  return "";
+}
+
+// ── OMR IPv6 auto-discovery ───────────────────────────────────────────────────
+
+/**
+ * Attempts to derive `omr_ipv6_addr` by prefix-matching entries in
+ * `row.ipv6_addrs` against `omrPrefix`.  Returns the matching address
+ * (lowercased) or "" when not found or `omrPrefix` is empty.
+ * Mirrors the ipv6_addrs loop in normalize_identifiers() in dataset_merge.py.
+ */
+export function getOmrIpv6FromIpv6Addrs(row, omrPrefix) {
+  if (!omrPrefix || typeof omrPrefix !== "string") return "";
+  const prefix = omrPrefix.toLowerCase();
+  const addrs = row?.ipv6_addrs;
+  if (!Array.isArray(addrs)) return "";
+  for (const addr of addrs) {
+    if (typeof addr === "string" && addr.toLowerCase().startsWith(prefix)) {
+      return addr.toLowerCase();
+    }
+  }
+  return "";
+}
+
 // ── Row normalisation helpers ─────────────────────────────────────────────────
 
-export function normalizeRowMergeAliases(row) {
+export function normalizeRowMergeAliases(row, options = {}) {
   if (!isPlainObject(row)) return row;
-  const normalized = { ...row };
-  const extaddr = getCanonicalExtaddr(row);
-  const omr_ipv6_addr = getCanonicalOmrIpv6Address(row);
-
+  // Step 1: normalise field names (camelCase → snake_case)
+  let normalized = normalizeFieldNames(row);
+  // Step 2: canonical identity fields
+  const extaddr = getCanonicalExtaddr(normalized);
+  let omr_ipv6_addr = getCanonicalOmrIpv6Address(normalized);
   if (extaddr) normalized.extaddr = extaddr;
+  if (!omr_ipv6_addr && options.omrPrefix) {
+    omr_ipv6_addr = getOmrIpv6FromIpv6Addrs(normalized, options.omrPrefix);
+  }
   if (omr_ipv6_addr) normalized.omr_ipv6_addr = omr_ipv6_addr;
-
+  // Step 3: derive mode.device (FTD/MTD) when not already set
+  const existingModeDevice = normalized?.mode?.device ?? normalized?.["mode.device"];
+  if (!existingModeDevice) {
+    const derived = deriveModeDevice(normalized);
+    if (derived) {
+      if (isPlainObject(normalized.mode)) {
+        normalized = { ...normalized, mode: { ...normalized.mode, device: derived } };
+      } else {
+        normalized["mode.device"] = derived;
+      }
+    }
+  }
   return normalized;
 }
 
