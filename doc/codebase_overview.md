@@ -48,7 +48,7 @@ tdash/
 │   ├── mdns_thread_scopes.py   # mDNS discovery collector
 │   ├── eve_process.py          # Eve topology parser
 │   ├── merge_dataset.py        # Dataset merge engine
-│   ├── merge_extaddr_file_into_static_map.py  # Admin utility: merge extaddr entries into static label map
+│   ├── merge_extaddr_device_label_map.py  # Admin utility: merge extaddr entries into static label map
 │   ├── extaddr_device_label_map.py  # Static extaddr→label loader
 │   ├── td_const.py             # Shared constants (data-dir defaults, env var names, filenames)
 │   ├── util_data.py            # Data-directory resolution utilities
@@ -75,7 +75,7 @@ This codebase uses a strict naming split so the data source is visible from the 
 | Prefix | Data source | Example |
 |---|---|---|
 | `otbr_cli_` | OTBR `ot-ctl` CLI wrappers (via Docker exec) | `otbr_cli_router_table.py` |
-| `otbr_restapi_` | OTBR HTTP REST API clients and downloaders | `otbr_restapi_client.py` |
+| `otbr_restapi_` | OTBR HTTP REST API clients and downloaders | `otbr_restapi_util.py` |
 | `mdns_` | Zeroconf/mDNS discovery collectors | `mdns_thread_scopes.py` |
 | `eve_` | Eve topology parsing helpers | `eve_process.py` |
 | `util_` | Shared helpers used across collectors/parsers | `util_network.py` |
@@ -110,7 +110,7 @@ The Python codebase has six distinct layers, each with a single responsibility. 
 ┌──────────────────────────────────▼──────────────────────────────────────┐
 │  Layer 4 — CLI Dispatcher  (td_cli.py)                                  │
 │  argparse tree: otbr-cli / mdns / otbr-restapi / process-eve /          │
-│  merge-dataset → forwards --datadir to every subcommand module          │
+│  merge-dataset / merge-extaddr → forwards --datadir to every subcommand │
 └──┬───────────────┬───────────────┬───────────────┬──────────────────────┘
    │               │               │               │
 ┌──▼──────────┐ ┌──▼──────────┐ ┌──▼──────────┐ ┌──▼──────────────────────┐
@@ -150,8 +150,8 @@ The Python codebase has six distinct layers, each with a single responsibility. 
 | **2 — Shared Utilities** | `td_const.py`, `util_data.py`, `util_ot_ctl.py`, `util_network.py`, `util_convert.py` | Constants, data-dir resolution, subprocess wrapper, network math |
 | **3a — ot-ctl Collectors** | `otbr_cli_*.py` | Run `ot-ctl` inside the OTBR Docker container; parse output; write JSON |
 | **3b — REST API Collectors** | `otbr_restapi_*.py` | HTTP calls to OTBR REST API; flatten JSON:API envelopes; write JSON |
-| **3c — mDNS / Eve Collectors** | `mdns_thread_scopes.py`, `eve_parse.py` | Zeroconf browse and Eve App export parsing; write JSON |
-| **3d — Data Processing** | `merge_dataset.py`, `merge_extaddr_file_into_static_map.py`, `extaddr_device_label_map.py` | Normalise identifiers, merge multi-source records, manage label map |
+| **3c — mDNS / Eve Collectors** | `mdns_thread_scopes.py`, `eve_process.py` | Zeroconf browse and Eve App export parsing; write JSON |
+| **3d — Data Processing** | `merge_dataset.py`, `merge_extaddr_device_label_map.py`, `extaddr_device_label_map.py` | Normalise identifiers, merge multi-source records, manage label map |
 | **4 — CLI Dispatcher** | `td_cli.py` | `argparse` tree; forward `--datadir`; call Layer 3 `main()` functions |
 | **5 — HTTP Server** | `td_webserver.py` | aiohttp server; cache gating; subprocess dispatch of Layer 4 |
 | **6 — Browser Dashboard** | `tdash.html`, `js/*.js`, `tdash.css` | Fetch JSON via Layer 5; merge, adapt, and render in-browser |
@@ -162,7 +162,7 @@ The Python codebase has six distinct layers, each with a single responsibility. 
 
 ```
 User / shell script
-    │  python td_cli.py otbr-cli meshdiag topology --datadir ./data
+    │  python3 -m td_cli otbr-cli meshdiag topology --datadir ./data
     ▼
 Layer 4 — td_cli.py (argparse dispatch)
     │  calls otbr_cli_meshdiag_topology.main(["--datadir", "./data"])
@@ -220,7 +220,7 @@ python merge_dataset.py --datadir ./data
     ▼
 Layer 1 — data/td-merged-topology-all.json
 
-python merge_extaddr_file_into_static_map.py --topology td-mdns-scopes-thread.json
+python3 -m td_cli merge-extaddr --merge-input-file td-mdns-scopes-thread.json
     │  reads topology file + td-static-extaddr-device-label.json
     │  adds missing extaddr entries (prefers device_label, falls back to name)
     ▼
@@ -248,7 +248,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | File | Purpose |
 |---|---|
 | `otbr_restapi_download.py` | Fixed-target downloader: fetches `/node/dataset/active`, `/api/devices`, and `/api/diagnostics` and writes them to local JSON files.  Accepts CLI overrides for host, port, base URL, timeout, and headers. |
-| `otbr_restapi_client.py` | Full-featured REST API client (`OTBRRestApiClient`).  Returns **flattened** Python objects by default (JSON:API `id`/`type`/`attributes` merged into a single dict). Also contains the shared exception hierarchy (`OTBRHTTPError`, `OTBRConnectionError`, etc.). |
+| `otbr_restapi_util.py` | Full-featured REST API client (`OTBRRestApiClient`).  Returns **flattened** Python objects by default (JSON:API `id`/`type`/`attributes` merged into a single dict). Also contains the shared exception hierarchy (`OTBRHTTPError`, `OTBRConnectionError`, etc.). |
 | `otbr_restapi_cli.py` | CLI front-end for the flattened client.  Supports sub-commands: `node get/state get/state set/dataset get`, `devices list/get`, `diagnostics list/get`, `actions list/get/enqueue`. |
 
 
@@ -282,7 +282,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | File | Purpose |
 |---|---|
 | `merge_dataset.py` | Reads multiple JSON data files (OTBR CLI, REST API, Eve) and merges all records into a single output file.  Supports three merge strategies: `none` (pass-through), `by-rloc16`, and `by-identity` (matches on RLOC16, canonical `extaddr`, or `omr_ipv6_addr`).  Tracks source provenance in `_source_files` and records conflicts without overwriting existing values.  Also provides `normalize_identifiers()` (canonicalises RLOC16, extaddr aliases, and OMR address) and `derive_mode_device()` (infers FTD/MTD from multiple field shapes). |
-| `merge_extaddr_file_into_static_map.py` | Admin utility that reads a topology JSON file (e.g. an mDNS or networkdiag output) and adds any previously unseen `extaddr` entries to `td-static-extaddr-device-label.json`.  Falls back from `device_label` to `name` for the label text.  Accepts `--merge-name-override` to overwrite existing `Unknown` labels with the topology name. |
+| `merge_extaddr_device_label_map.py` | Admin utility that reads a topology JSON file (e.g. an mDNS or networkdiag output) and adds any previously unseen `extaddr` entries to `td-static-extaddr-device-label.json`.  Falls back from `device_label` to `name` for the label text.  Accepts `--merge_name_override` to overwrite existing `Unknown` labels with the topology name. |
 
 ### Utilities
 
@@ -307,7 +307,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 |---|---|
 | `tdash.html` | Combined single-page dashboard — replaces the former separate topology and tables HTML files.  See [Dashboard Functions](#dashboard-functions) below. |
 | `tdash.css` | Stylesheet for the browser dashboard.  Defines CSS variables for colours, typography, and layout of all dashboard components. |
-| `td_webserver.py` | Async HTTP server built on `aiohttp`.  Binds to `$HOST`/`$PORT` (default `9165`).  Serves `src/` as a static file tree with explicit MIME-type overrides.  Exposes a REST API (`/api/data/{filename}`, `/api/job/{job_id}`) that checks file freshness, invokes `td_cli.py` subprocesses on demand, and streams results back with `Cache-Control` and CORS headers.  Actions with `action_cost_s > 300 s` or `force_async=True` return HTTP 202 immediately and complete as background asyncio tasks that clients poll via `/api/job/{job_id}`.  Accepts `--datadir`; run standalone as `python -m td_webserver`. |
+| `td_webserver.py` | Async HTTP server built on `aiohttp`.  Binds to `$HOST`/`$PORT` (default `9165`).  Serves `src/` as a static file tree with explicit MIME-type overrides.  Exposes a REST API (`/api/data/{filename}`, `/api/job/{job_id}`) that checks file freshness, invokes `td_cli.py` subprocesses on demand, and streams results back with `Cache-Control` and CORS headers.  Actions with `action_cost_s > 300 s` or `force_async=True` return HTTP 202 immediately and complete as background asyncio tasks that clients poll via `/api/job/{job_id}`.  Accepts `--datadir`; run standalone as `python3 -m td_webserver`. |
 
 ### Dashboard JavaScript Modules (`js/`)
 
@@ -329,7 +329,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 
 | File | Purpose |
 |---|---|
-| `td_cli.py` | Top-level CLI entry point.  Builds the flattened `argparse` tree and dispatches to the appropriate module `main()`.  Supported top-level commands: `otbr-cli`, `mdns`, `otbr-restapi`, `process-eve`, `merge-dataset`.  The web server is a separate module (`td_webserver.py`) and is **not** a `td_cli.py` subcommand.  Accepts a global `--datadir` option (overridden by `TD_DATA_DIR` env var) that is forwarded to every subcommand.  Unknown trailing arguments are forwarded via `parse_known_args` to subordinate modules. |
+| `td_cli.py` | Top-level CLI entry point.  Builds the flattened `argparse` tree and dispatches to the appropriate module `main()`.  Supported top-level commands: `otbr-cli`, `mdns`, `otbr-restapi`, `process-eve`, `merge-dataset`, `merge-extaddr`.  The web server is a separate module (`td_webserver.py`) and is **not** a `td_cli.py` subcommand.  Accepts a global `--datadir` option (overridden by `TD_DATA_DIR` env var) that is forwarded to every subcommand.  Unknown trailing arguments are forwarded via `parse_known_args` to subordinate modules. |
 
 ---
 
@@ -618,10 +618,10 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 
 ### Step-by-step
 
-1. **Collect**: Run individual `otbr_restapi_*`, `otbr_cli_*`, and `mdns_*` scripts directly, or via `td_cli.py`.  Each saves data as a local JSON file (e.g. `td-otbr-restapi-devices.json`, `td-otbr-cli-router-table.json`, `td-eve-topology.json`).
+1. **Collect**: Run individual `otbr_restapi_*`, `otbr_cli_*`, and `mdns_*` scripts directly, or via `python3 -m td_cli`.  Each saves data as a local JSON file (e.g. `td-otbr-restapi-devices.json`, `td-otbr-cli-router-table.json`, `td-eve-topology.json`).
 2. **Normalize**: Each collector normalises its data — RLOC16 values are hex strings (`0x5000`), extended addresses are lowercase hex (`1a7fbf0434e4f043`), field aliases are canonicalised (`extAddress` → `extaddr`).
-3. **Merge**: `merge_dataset.py` (or `td_cli.py merge-dataset`) reads the JSON files and merges records using the configured strategy.  Non-empty values are never silently overwritten; conflicts are recorded.  The output JSON (`td-merged-topology-all.json`) retains a `_source_files` list per row.
-4. **Visualise**: Open `src/tdash.html` in a browser, select a dataset from the dropdown, and explore the interactive topology graph or table.  Alternatively, serve the `src/` directory with `python src/td_webserver.py` and open `http://localhost:9165/tdash.html`.
+3. **Merge**: `merge_dataset.py` (or `python3 -m td_cli merge-dataset`) reads the JSON files and merges records using the configured strategy.  Non-empty values are never silently overwritten; conflicts are recorded.  The output JSON (`td-merged-topology-all.json`) retains a `_source_files` list per row.
+4. **Visualise**: Open `src/tdash.html` in a browser, select a dataset from the dropdown, and explore the interactive topology graph or table.  Alternatively, serve the `src/` directory with `python3 -m td_webserver` and open `http://localhost:9165/tdash.html`.
 
 ---
 
@@ -647,7 +647,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 - A running OTBR Docker container named `otbr` (or set `TD_OTBR_CONTAINER_NAME`)
 - For mDNS discovery: `pip install zeroconf`
 
-### Collect and merge data — via unified CLI (`td_cli.py`)
+### Collect and merge data — via unified CLI (`python3 -m td_cli {command}`)
 
 Run all commands from the `src/` directory (or add `src/` to `PYTHONPATH`).
 
@@ -655,34 +655,34 @@ Run all commands from the `src/` directory (or add `src/` to `PYTHONPATH`).
 cd src
 
 # Download REST API snapshots
-python td_cli.py otbr-restapi download
+python3 -m td_cli otbr-restapi download
 
 # Collect thread network info (provides OMR / mesh-local prefixes used by other collectors)
-python td_cli.py otbr-cli thread-network-info
+python3 -m td_cli otbr-cli thread-network-info
 
 # Collect all CLI topology data in one shot
-python td_cli.py otbr-cli all
+python3 -m td_cli otbr-cli all
 
 # Or collect individual CLI sources
-python td_cli.py otbr-cli router-table
-python td_cli.py otbr-cli meshdiag topology
-python td_cli.py otbr-cli meshdiag childtable
-python td_cli.py otbr-cli meshdiag childip6
-python td_cli.py otbr-cli meshdiag routerneighbortable
-python td_cli.py otbr-cli networkdiag fetch-all
+python3 -m td_cli otbr-cli router-table
+python3 -m td_cli otbr-cli meshdiag topology
+python3 -m td_cli otbr-cli meshdiag childtable
+python3 -m td_cli otbr-cli meshdiag childip6
+python3 -m td_cli otbr-cli meshdiag routerneighbortable
+python3 -m td_cli otbr-cli networkdiag fetch-all
 
 # Scan mDNS (optional)
-python td_cli.py mdns thread
+python3 -m td_cli mdns thread
 
 # Process an Eve layout file (optional)
-python td_cli.py process-eve
+python3 -m td_cli process-eve
 
 # Merge everything
-python td_cli.py merge-dataset
+python3 -m td_cli merge-dataset
 
 # Use a custom data directory (overrides TD_DATA_DIR env var)
-python td_cli.py --datadir /path/to/data otbr-cli all
-python td_cli.py --datadir /path/to/data merge-dataset
+python3 -m td_cli --datadir /path/to/data otbr-cli all
+python3 -m td_cli --datadir /path/to/data merge-dataset
 ```
 
 ### Collect and merge data — via individual modules
@@ -702,8 +702,8 @@ python src/otbr_cli_meshdiag_routerneighbortable.py
 python src/otbr_cli_networkdiag_topology.py
 
 # Alternatively, collect CLI topology data via multicast (faster, discovers entire network at once)
-python src/td_cli.py otbr-cli networkdiag multicast-network
-python src/td_cli.py otbr-cli networkdiag multicast-neighbors
+python3 -m td_cli otbr-cli networkdiag multicast-network
+python3 -m td_cli otbr-cli networkdiag multicast-neighbors
 
 # Merge everything
 python src/merge_dataset.py
@@ -713,11 +713,11 @@ python src/merge_dataset.py
 
 ```bash
 # Flattened client CLI (via td_cli.py)
-python src/td_cli.py otbr-restapi node get
-python src/td_cli.py otbr-restapi devices list --with-meta
+python3 -m td_cli otbr-restapi node get
+python3 -m td_cli otbr-restapi devices list --with-meta
 
 # Raw client CLI (via td_cli.py)
-python src/td_cli.py otbr-restapi --raw node get
+python3 -m td_cli otbr-restapi --raw node get
 
 # Or invoke the modules directly
 python src/otbr_restapi_cli.py node get
@@ -727,17 +727,17 @@ python src/otbr_restapi_cli.py node get
 
 ```bash
 # Run the web server module directly (serves src/ on http://localhost:9165, data from ./data)
-python src/td_webserver.py
+python3 -m td_webserver
 
 # Custom host/port
-python src/td_webserver.py --host 0.0.0.0 --port 8090
+python3 -m td_webserver --host 0.0.0.0 --port 8090
 
 # Custom data directory (JSON files served from /path/to/data)
-python src/td_webserver.py --datadir /path/to/data
+python3 -m td_webserver --datadir /path/to/data
 
 # Or as a module (from the repository root)
-python -m td_webserver --port 9165
-python -m td_webserver --port 9165 --datadir /path/to/data
+python3 -m td_webserver --port 9165
+python3 -m td_webserver --port 9165 --datadir /path/to/data
 ```
 
 ### Open the dashboard
@@ -764,7 +764,7 @@ python tests/td_mock_otbr_restapi_server.py --host 127.0.0.1 --port 18081
 # then override client defaults:
 python src/otbr_restapi_cli.py --host 127.0.0.1 --port 18081 node get
 # or via td_cli.py:
-python src/td_cli.py otbr-restapi --host 127.0.0.1 --port 18081 node get
+python3 -m td_cli otbr-restapi --host 127.0.0.1 --port 18081 node get
 ```
 
 ---
