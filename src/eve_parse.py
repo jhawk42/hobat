@@ -8,6 +8,7 @@ import util_network
 from util_convert import b64_to_extended_address
 from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
+EVE_NATIVE_LAYOUT_FILENAME = "Eve Thread Network Layout.evethreadlayout"
 
 def load_and_parse_eve_file(path, thread_network_info=None):
     """
@@ -181,7 +182,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     thread_network_info = util_network.fetch_thread_network_info()
 
     # Parse the Eve JSON file to build an enhanced data structure keyed by rloc16_hex with all node fields preserved and extAddress in hex format for easier mapping and reference.
-    eve_json_file_path = data_file_path("thread-eve-layout.json", td_data_dir)
+    eve_json_file_path = data_file_path(EVE_NATIVE_LAYOUT_FILENAME, td_data_dir)
     eve_data_raw = load_and_parse_eve_file(
         eve_json_file_path, thread_network_info
     )

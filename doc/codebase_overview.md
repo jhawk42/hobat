@@ -274,7 +274,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 
 | File | Purpose |
 |---|---|
-| `eve_parse.py` | Parses an Eve App `thread-eve-layout.json` export.  Normalises decimal RLOC16 to hex, converts base64-encoded extended addresses to hex, enriches nodes with OMR IPv6 address and route-destination names, and keys the output by `rloc16_hex`. |
+| `eve_parse.py` | Parses an Eve App `Eve Thread Network Layout.evethreadlayout` exported file.  Normalises decimal RLOC16 to hex, converts base64-encoded extended addresses to hex, enriches nodes with OMR IPv6 address and route-destination names, and keys the output by `rloc16_hex`. |
 | `extaddr_device_label_map.py` | Loads a static `td-static-extaddr-device-label.json` file that maps extended addresses to human-readable device labels. |
 
 ### Data Merging
