@@ -12,12 +12,14 @@ The tdash tools provide the following:
       - otbr-restapi via OTBR REST endpoint
     - Multicast DNS (mDNS) records
     - Eve app thread json format layout file. 
-- Dashboard for Thread mesh network in a browser web page (html, javascript) for visualizing and querying thread mesh network info. The dashboard can filter by:
-  - Thread node types: border router, router, ftd, mtd child nodes etc.
-  - Thread link quality: LQ3, LQ2, LQ1. Ratio of LQ3 to total links, etc.
-  - Diagnostics filters to find thread nodes that need attention:
-    - MAC counters (packets, frame errors, etc)
-    - MLE counters (partition changes, parent attempt changes, role time durations, etc)
+- Dashboard for Thread mesh network in a browser web page (html, javascript) for visualizing and querying thread mesh network info.
+  - Search: Search devices by rloc16, extaddr, device_label, routerId, and a number of other identity fields
+  - Filter by:
+    - Thread node types: border router, router, ftd, mtd child nodes etc.
+    - Thread link quality: LQ3, LQ2, LQ1. Ratio of LQ3 to total links, etc.
+    - Diagnostics filters to find thread nodes that need attention:
+      - MAC counters (packets, frame errors, etc)
+      - MLE counters (partition changes, parent attempt changes, role time durations, etc)
 - Python webserver for the hosting the thread dashboard, tdash restapi endpoint for servicing requests from the tdash dashboard for cached data, launching the tdash cli to refetch data from the thread network into the data cache.
 - Simple JSON file for a device labeling mechanism using a Extended MAC Address extadd to device_label lookup file. See [Device Labeling](#device-labeling) below for details.
 
@@ -27,13 +29,12 @@ The tdash tools provide the following:
   - meshdiag topology (quick, seconds, summary). Optionally also calls these sub commands (long, more detailed info) routerneighbortable, childtable, childip6
   - networkdiag (takes time, minutes, detailed). The td_cli networkdiag supports multicast (quick, full thread devices) and poll (all devices including routes, full thread devices, minimal thread devices) 
 - otbr-restapi: Fetches info from an OpenThread Border Router REST API for thread device info.
-  - node: 	    get, state get, state set, dataset active get, dataset active set	Read/mutate local OTBR node and active dataset
-  - devices:	    list, get, fetch	List, read, or refresh device collection
-  - diagnostics:	list, get, fetch, fetch-all	Read or fetch network diagnostics
+  - node: 	     get, state get, state set, dataset active get, dataset active set	Read/mutate local OTBR node and active dataset
+  - devices:	 list, get, fetch	List, read, or refresh device collection
+  - diagnostics: list, get, fetch, fetch-all	Read or fetch network diagnostics
   - mesh-diagnostics:	children, child-ipv6, router-neighbors, fetch, fetch-all
-  - actions:	    list, get, enqueue add-thread-device, enqueue get-network-diagnostic, enqueue reset-network-diag-counter, enqueue get-energy-scan, 
-    - enqueue update-device-collection	Inspect and enqueue OTBR action tasks
-  - download:	Download OTBR REST API endpoint snapshots to JSON files
+  - actions:	 list, get, enqueue (update-device-collection,get-network-diagnostic). Inspect and enqueue OTBR action tasks
+  - download:	 download OTBR REST API endpoint snapshots to JSON files
 - mdns: Fetches thread-related mdns scope records: _meshcop, _hap, _matter for thread device info.
   - thread:      All thread scopes _meshcop, _hap, _matter      
   - br:          Thread Border Routers in _meshcop scope
