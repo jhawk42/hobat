@@ -175,18 +175,24 @@ MERGE_IDENTITY_FIELDS = {
 # Phase 3: Source Precedence Rules (Priority: Higher = Wins)
 # Used to resolve conflicts when multiple sources provide same field
 SOURCE_PRECEDENCE = {
-    "td-otbr-restapi-diagnostics.json": 100,      # Highest priority (most detailed)
-    "td-otbr-restapi-devices.json": 95,
+    "td-otbr-restapi-diagnostics-fetch-all.json": 100, # Highest priority (most detailed)
+    "td-otbr-restapi-mesh-diagnostics-fetch-all.json": 99,
+    "td-otbr-restapi-diagnostics-list.json": 98,
+    "td-otbr-restapi-diagnostics.json": 97,      
+    "td-otbr-restapi-devices-fetch.json": 96,
+    "td-otbr-restapi-devices-list.json": 95,
+    "td-otbr-restapi-devices.json": 94,
     "td-otbr-cli-networkdiag-fetch-all.json": 90,
     "td-otbr-cli-networkdiag-multicast-network.json": 85,
     "td-otbr-cli-meshdiag-topology.json": 80,
     "td-otbr-cli-meshdiag-router-neighbortables.json": 75,
+    "td-otbr-cli-meshdiag-router-childtables.json": 74,
     "td-otbr-cli-router-table.json": 70,
-    "td-mdns-scopes-br.json": 60,                # mDNS scopes (service discovery)
     "td-mdns-scopes-thread.json": 55,
+    "td-mdns-scopes-br.json": 60,                # mDNS scopes (service discovery)
     "td-mdns-scopes-hap.json": 50,
     "td-mdns-scopes-matter.json": 45,
-    "td-eve-topology.json": 10,                  # Lowest priority (legacy)
+    "td-eve-topology.json": 10,                  # Lowest priority 
 }
 
 DEFAULT_INPUT_FILES = [
@@ -195,10 +201,16 @@ DEFAULT_INPUT_FILES = [
     "td-otbr-cli-networkdiag-fetch-all.json",
     "td-otbr-cli-networkdiag-multicast-network.json",
     "td-otbr-cli-meshdiag-router-neighbortables.json",
-    "td-otbr-restapi-devices.json",
+    "td-otbr-cli-meshdiag-router-childtables.json",
+    "td-otbr-restapi-diagnostics-fetch-all.json",
+    "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+    "td-otbr-restapi-diagnostics-list.json",
     "td-otbr-restapi-diagnostics.json",
-    "td-mdns-scopes-br.json",                    # Phase 3: mDNS Border Router discovery
+    "td-otbr-restapi-devices-fetch.json",
+    "td-otbr-restapi-devices-list.json",
+    "td-otbr-restapi-devices.json",   
     "td-mdns-scopes-thread.json",                # Phase 3: mDNS Thread devices
+    "td-mdns-scopes-br.json",                    # Phase 3: mDNS Border Router discovery
     "td-mdns-scopes-hap.json",                   # Phase 3: mDNS HomeKit devices
     "td-mdns-scopes-matter.json",                # Phase 3: mDNS Matter devices
     "td-eve-topology.json",

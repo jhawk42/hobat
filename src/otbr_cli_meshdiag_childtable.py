@@ -43,11 +43,11 @@ def fetch_meshdiag_child_table_for_device(parent_rloc16, router=None, extaddr_ma
             rloc16=parent_rloc16,
             device_label=device_label,
             result_table_key="router_child_table",
-            rloc_key="parent_rloc16",
+            rloc_key="rloc16",
         )
 
     router_child_table = {
-        "parent_rloc16": parent_rloc16,
+        "rloc16": parent_rloc16,
         "device_label": extaddr_map.get(router.get("extaddr"), "Unknown")
         if router and extaddr_map
         else "Unknown",
