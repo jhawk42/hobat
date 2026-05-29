@@ -1,6 +1,6 @@
 # tdash - thread mesh network dashboard
 
-A set of tools to fetch info from thread network and store in a local offf network local cache, Visualize the Thread mesh network and query over the thread info including: Node type, Link Quality, MAC (radio), MLE (thread mesh) and Time counters. 
+A set of tools to fetch info from thread network and store in a local cache off the thread nerwork, Visualize the Thread mesh network and query over the thread info including: Node type, Link Quality, MAC (radio), MLE (thread mesh) and Time counters. 
 
 Jump to: Help [Getting Started](#getting-started)  [docs](./doc/) [td_cli](./doc/help_td_cli.md) [td cli rest-api](./doc/help_td_restapi_cli.md) [td_webserver](./doc/help_td_webserver.md) [env vars](./doc/help_env_vars.md) [openthread](https://github.com/openthread/openthread) 
 
@@ -21,7 +21,7 @@ The tdash tools provide the following:
       - MAC counters (packets, frame errors, etc)
       - MLE counters (partition changes, parent attempt changes, role time durations, etc)
 - Python webserver for the hosting the thread dashboard, tdash restapi endpoint for servicing requests from the tdash dashboard for cached data, launching the tdash cli to refetch data from the thread network into the data cache.
-- Simple JSON file for a device labeling mechanism using a Extended MAC Address extadd to device_label lookup file. See [Device Labeling](#device-labeling) below for details.
+- Simple JSON file for a device labeling mechanism using a Extended MAC Address extadd to device_label lookup file. See [Device Labeling](#setup-device-labeling) below for details.
 
 ## Dataset Sources
 - otbr-cli: Fetches info from an OpenThread Border Router (OTBR) instance via ot-ctl commands for thread device info. By default use docker exec to call into the "otbr" docker container. Also support calling otbr on the host. Common ot-ctl commands used:
@@ -49,7 +49,7 @@ The tdash tools provide the following:
 
 The tdash can be run in a docker container or manually run via cli on a host.
 
-### Setup - tdash docker container
+### Setup Pull tdash docker container
 
 The tdash docker container hosts the td_cli and web server.
 
@@ -65,6 +65,46 @@ Notes:
   - otbr-restapi access: OT_REST_LISTEN_ADDR, OT_REST_LISTEN_PORT
   - otbr-cli access: OTBR docker container name: TD_OTBR_CONTAINER_NAME
 
+### Setup Device Labeling
+To do device labeling via a side json file, create a data directory and add a file named td-static-extaddr-device-label.json with the format below into the data directory. Map this directory into the docker container via docker run. See below for example.
+
+```bash
+mkdir $PWD/data
+```
+
+The td_cli commands and dash dasboard will use the file if it exists to lookup extaddr (Extended MAC Address) to device_label mapping. The td_cli commands enhance the collect thread device info with the device_label. The thread dashboard will use the extaddr device_label to lookup extaddr to device label mapping.
+
+```
+nano $PWD/data/td-static-extaddr-device-label.json
+```
+Edit the td-static-extaddr-device-label.json as you discover thread devices in the thread network. 
+The extaddr is the thread device Extended MAC Address.
+The device_label is the name you assign to the thread device.
+
+Sources for names: Matching thread device identities like ipv6 addresses in  mDNS records (_meshcop._udp, _hap._udp) and Eve layout file is a good place to find thread device names.
+Note _matter._tcp does not have device names. Try using the 
+[Home Assistant Open Home Foundation Matter Server](https://github.com/matter-js/python-matter-server) as it has great Matter over Thread support.
+
+Example format of the td-static-extaddr-device-label.json file.
+```JSON
+[
+    {
+        "extaddr": "eeeaffeaffeaffe1",
+        "device_label": "Device 1"
+    },
+    {
+        "extaddr": "eeeaffeaffeaffe2",
+        "device_label": "Device 2"
+    },
+    {
+        "extaddr": "eeeaffeaffeaffe3",
+        "device_label": "Device 3"
+    }
+]
+```
+
+### Setup Start the tdash docker container
+
 ```bash
 docker run --name=tdash -d \
   --network=host \
@@ -75,7 +115,7 @@ docker run --name=tdash -d \
 ```
 
 
-### Open the tdash web dashboard in a browser
+### Setup: Open the tdash web dashboard in a browser
 
 Open the tdash web dashboard in a browser. Default port is 9165.
 
@@ -95,34 +135,34 @@ Note: The tdash webserver will automatically use td_cli.py to refresh the thread
 
 The tdash web dashboard provides comprehensive visualization and querying capabilities:
 
+- **Fetch from Multiple Data Sources:** Supports otbr-cli (meshdiag, networkdiag), otbr-restapi, mDNS, and Eve topology datasets
 - **Multiple Views:** Topology view (graph) and Table view for different analysis needs
 - **Search:** Search devices by rloc16, extaddr, device_label, routerId, and a number other identity fields
 - **Filtering:** Filter by device type (border router, router, FTD, MTD), link quality (LQ3/LQ2/LQ1), and diagnostic criteria
 - **Detail Panels:** Click any device to view comprehensive details organized into sections (Keys, Highlights, Connections, Routes & Links)
-- **Device Fields:** Supports extensive device information including:
+- **Device Fields:** Supports detailed device information including:
   - Identity: rloc16, extaddr, device_label, routerId, omrIpv6Address
   - Role & Status: type, mode flags, leaderData, border router/leader indicators
   - Connectivity: link quality, connectivity metrics, neighbor/child counts
   - Diagnostics: MLE counters, MAC counters, vendor information
-- **Multiple Data Sources:** Supports CLI (meshdiag, networkdiag), REST API, mDNS, and Eve topology datasets
 - **Flexible Field Naming:** Automatically handles both snake_case (CLI) and camelCase (REST API) field conventions
 
 For complete field reference and dashboard usage, see [doc/dashboard_ui_fields.md](doc/dashboard_ui_fields.md).
 
-### Setup - manual on a host
+### Setup: Manual on a host
 
-To run manually on the host, git clone this repro onto the host. See details below to manually run td_cli.py and td_webserver.py commands.
+To manually run on a host, git clone this repro onto the host. See details below to manually run td_cli.py and td_webserver.py commands.
 
 ### tdash cli examples
 
 See below for additional details for running td_cli.py commands 
 
+Direct on host
 ```
-# direct on host
 python3 -m td_cli --help
 ```
 
-The tdash docker container cli entry point is td_cli.py.
+Docker exec into dash docker container cli entry point and run td_cli.py.
 
 ```
 # docker exec into tdash container: run bash and then td_cli.py commands.
@@ -203,31 +243,6 @@ python3 -m td_webserver --host localhost --port 9165
 
 # listen on all available network interfaces
 python3 -m td_webserver --host 0.0.0.0 --port 9165
-```
-
-# Device Labeling
-
-To do manual device labeling, add a file named td-static-extaddr-device-label.json with the format below into the data directory.
-
-The td_cli commands will use the file to lookup extaddr (Extended MAC Address) per device and enhance the collect thread device info with the device_label. It is also used in the thread dashboard to lookup human readable device labels.
-
-Example format of td-static-extaddr-device-label.json
-
-```
-[
-    {
-        "extaddr": "eeeaffeaffeaffe1",
-        "device_label": "Device 1"
-    },
-    {
-        "extaddr": "eeeaffeaffeaffe2",
-        "device_label": "Device 2"
-    },
-    {
-        "extaddr": "eeeaffeaffeaffe3",
-        "device_label": "Device 3"
-    }
-]
 ```
 
 # Dataset Merge
