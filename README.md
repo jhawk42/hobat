@@ -1,25 +1,27 @@
 # tdash - thread mesh network dashboard
 
-A set of tools to fetch info from thread network and store in a local cache off the thread nerwork, Visualize the Thread mesh network and query over the thread info including: Node type, Link Quality, MAC (radio), MLE (thread mesh) and Time counters. 
+The tdash set of tools enable fetching info from a thread network and store the info in a local cache off the thread network, Visualize the Thread mesh network and run queries over the thread info including: Node type, Link Quality, MAC (radio), MLE (thread mesh) and Time counters. I have tdash running both inside a Docker container and also direct on the on Debian host.
+
+Related Thread Network tools:
+- [Home Assistant Matter Server](https://github.com/matter-js/matterjs-server) has a great dashboard with Matter over Thread support growing with each release for thread devices.
+- [Eve App](https://www.evehome.com/en-us/eve-app) can query a thread network for the list of thread devices. Needs a powered Eve device (smartplug) in the thread network to enable gathering thread device information. 
+- [Thread Group - Android: Thread Network Diagnostics app](https://play.google.com/store/apps/details?id=com.threadgroup.otloom&hl=en_US)
+- [Nordic Semiconductor - nRF Thread Topology Monitor](https://www.nordicsemi.com/Products/Development-tools/nRF-Thread-topology-monitor)
 
 Jump to: Help [Getting Started](#getting-started)  [docs](./doc/) [td_cli](./doc/help_td_cli.md) [td cli rest-api](./doc/help_td_restapi_cli.md) [td_webserver](./doc/help_td_webserver.md) [env vars](./doc/help_env_vars.md) [openthread](https://github.com/openthread/openthread) 
 
 ## Summary
-The tdash tools provide the following:
+The tdash tools provide:
 - CLI toolkit (Python) that fetches thread device info from a thread network and then stores into a local cache in the tdash data directory for offline querying and processing. Fetch thread device info from these sources:
-    - Open Thread Border Router (OTBR) via:
-      - otbr-cli via OTBR ot-ctl tool
-      - otbr-restapi via OTBR REST endpoint
+    - Open Thread Border Router (OTBR): otbr-cli via OTBR ot-ctl tool and otbr-restapi via OTBR REST endpoint.
     - Multicast DNS (mDNS) records
     - Eve app thread json format layout file. 
 - Dashboard for Thread mesh network in a browser web page (html, javascript) for visualizing and querying thread mesh network info.
   - Search devices by: rloc16, extaddr, device_label, routerId, and a number of other fields
-  - Filter by:
+  - Filter by: Thread node types, link quality, Diagnostics filters
     - Thread node types: border router, router, ftd, mtd child nodes etc;
     - Thread link quality: LQ3, LQ2, LQ1. Ratio of LQ3 to total links, etc.
-    - Diagnostics filters to find thread nodes that need attention:
-      - MAC counters (packets, frame errors, etc)
-      - MLE counters (partition changes, parent attempt changes, role time durations, etc)
+    - Diagnostics filters to find thread nodes that need attention: MAC counters (packets, frame errors, etc) and MLE counters (partition changes, parent attempt changes, role time durations, etc)
 - Python webserver for the hosting the thread dashboard, tdash restapi endpoint for servicing requests from the tdash dashboard for cached data, launching the tdash cli to refetch data from the thread network into the data cache.
 - Simple JSON file for a device labeling mechanism using a Extended MAC Address extadd to device_label lookup file. See [Device Labeling](#setup-device-labeling) below for details.
 
