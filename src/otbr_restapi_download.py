@@ -14,6 +14,7 @@ from otbr_restapi_download_helpers import (
 from otbr_restapi_util import (
     add_common_rest_client_args,
     build_rest_client_from_args,
+    emit_rest_payload_output,
     DEFAULT_ACCEPT,
     DEFAULT_HOST,
     DEFAULT_PORT,
