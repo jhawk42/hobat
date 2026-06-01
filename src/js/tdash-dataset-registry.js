@@ -458,6 +458,7 @@ export const DATASET_REGISTRY = [
     value: "merged_otbr_cli_otbr_restapi",
     label: "dynamic merge:otbr-cli, otbr-restapi, mdns ⏰",
     files: [
+      "td-static-extaddr-device-label.json",
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-fetch-all.json",
       "td-otbr-restapi-devices-list.json",

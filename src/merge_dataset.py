@@ -175,6 +175,7 @@ MERGE_IDENTITY_FIELDS = {
 # Phase 3: Source Precedence Rules (Priority: Higher = Wins)
 # Used to resolve conflicts when multiple sources provide same field
 SOURCE_PRECEDENCE = {
+    "td-static-extaddr-device-label.json": 101, # Highest priority (most detailed)
     "td-otbr-restapi-diagnostics-fetch-all.json": 100, # Highest priority (most detailed)
     "td-otbr-restapi-mesh-diagnostics-fetch-all.json": 99,
     "td-otbr-restapi-diagnostics-list.json": 98,
@@ -196,6 +197,7 @@ SOURCE_PRECEDENCE = {
 }
 
 DEFAULT_INPUT_FILES = [
+    "td-static-extaddr-device-label.json",
     "td-otbr-cli-router-table.json",
     "td-otbr-cli-meshdiag-topology.json",
     "td-otbr-cli-networkdiag-fetch-all.json",

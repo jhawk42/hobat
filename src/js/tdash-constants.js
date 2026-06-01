@@ -19,6 +19,7 @@ export const MERGE_IDENTITY_FIELDS = Object.freeze({
 // merge_dataset.py.  Filenames not listed default to priority 0.
 //
 export const SOURCE_PRECEDENCE = Object.freeze({
+  "td-static-extaddr-device-label.json": 101, // Highest priority (most detailed)
   "td-otbr-restapi-diagnostics-fetch-all.json": 100, // Highest priority (most detailed)
   "td-otbr-restapi-mesh-diagnostics-fetch-all.json": 99,
   "td-otbr-restapi-diagnostics-list.json": 98,
@@ -32,11 +33,11 @@ export const SOURCE_PRECEDENCE = Object.freeze({
   "td-otbr-cli-meshdiag-router-neighbortables.json": 75,
   "td-otbr-cli-meshdiag-router-childtables.json": 74,
   "td-otbr-cli-router-table.json": 70,
+  "td-eve-topology.json": 60,                   
   "td-mdns-scopes-thread.json": 55,
   "td-mdns-scopes-br.json": 60,                // mDNS scopes (service discovery)
   "td-mdns-scopes-hap.json": 50,
   "td-mdns-scopes-matter.json": 45,
-  "td-eve-topology.json": 10,                  // Lowest priority 
 });
 
 // ── Field-name alias mapping (canonical snake_case → [camelCase aliases]) ────
