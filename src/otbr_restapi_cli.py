@@ -43,6 +43,12 @@ from otbr_restapi_util import (
     error_to_dict,
     extract_action_result_id,
 )
+from otbr_restapi_node import dispatch_node
+from otbr_restapi_devices import dispatch_devices
+from otbr_restapi_actions import dispatch_actions
+from otbr_restapi_diagnostics import dispatch_diagnostics
+from otbr_restapi_mesh_diagnostics import dispatch_mesh_diagnostics
+from otbr_restapi_topology import dispatch_topology
 
 # Reference: https://github.com/openthread/ot-br-posix/blob/main/src/rest/openapi.yaml
 
@@ -964,248 +970,26 @@ def build_client(args: argparse.Namespace) -> OTBRRestApiClient:
 
 def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:
     raw_arg = True if args.raw else _RAW_UNSET
-    _eff_raw = client._resolve_raw(raw_arg)
+    effective_raw = client._resolve_raw(raw_arg)
     fields = build_fields_mapping(getattr(args, "fields", None))
 
     if args.resource == "node":
-        if args.node_command == "get":
-            return client.get_node(fields=fields, raw=raw_arg)
-        if args.node_command == "state":
-            if args.state_command == "get":
-                return client.get_node_state()
-            if args.state_command == "set":
-                return client.set_node_state(args.value)
-        if args.node_command == "dataset" and args.dataset_kind == "active":
-            if args.dataset_command == "get":
-                return client.get_active_dataset(plain_text=args.text, raw=raw_arg)
-            if args.dataset_command == "set":
-                dataset = _parse_dataset_input(args)
-                return client.set_active_dataset(dataset)
+        return dispatch_node(client, args, raw_arg, fields)
 
     if args.resource == "devices":
-        if args.devices_command == "list":
-            return client.list_devices(
-                fields=fields, raw=raw_arg, with_meta=args.with_meta
-            )
-        if args.devices_command == "get":
-            return client.get_device(args.device_id, fields=fields, raw=raw_arg)
-        if args.devices_command == "fetch":
-            return client.fetch_device_collection(
-                device_count=args.device_count,
-                max_age=args.max_age,
-                max_retries=args.max_retries,
-                task_timeout=args.task_timeout,
-                poll_interval=args.poll_interval,
-                poll_timeout=args.poll_timeout,
-                raw=raw_arg,
-            )
+        return dispatch_devices(client, args, raw_arg, fields)
 
     if args.resource == "diagnostics":
-        if args.diagnostics_command == "list":
-            return client.list_diagnostics(
-                fields=fields, raw=raw_arg, with_meta=args.with_meta
-            )
-        if args.diagnostics_command == "get":
-            return client.get_diagnostic(args.diagnostics_id, raw=raw_arg)
-        if args.diagnostics_command == "fetch":
-            primary_types = _resolve_types(args)
-            fallback_types = _resolve_fallback_types(args)
-            result = _fetch_device_with_fallback(
-                client, args.device_id, primary_types, fallback_types,
-                destination_type=args.destination_type,
-                task_timeout=args.task_timeout,
-                poll_interval=args.poll_interval,
-                poll_timeout=args.poll_timeout,
-                raw=raw_arg,
-            )
-            if not getattr(args, "no_enrich_mac_counters", False):
-                _apply_mac_enrichment([result])
-            return result
-        if args.diagnostics_command == "fetch-all":
-            resolved_types = _resolve_types(args)
-            fallback_types = _resolve_fallback_types(args)
-            do_enrich = not getattr(args, "no_enrich_mac_counters", False)
-            do_update = not getattr(args, "no_update_devices", False)
-            progress_fn = _make_progress_fn(
-                0,  # total unknown until device list retrieved
-                not getattr(args, "no_progress", False),
-            )
-
-            if do_update:
-                devices = client.fetch_device_collection(
-                    device_count=getattr(args, "device_count", 255),
-                )
-            else:
-                devices = client.list_devices(raw=False)
-
-            device_ids = (
-                getattr(args, "device_ids", None)
-                or [d["id"] for d in devices if isinstance(d, dict) and d.get("id")]
-            )
-            progress_fn = _make_progress_fn(
-                len(device_ids),
-                not getattr(args, "no_progress", False),
-            )
-            diagnostics = _fetch_all_with_fallback(
-                client, device_ids, resolved_types, fallback_types,
-                destination_type=args.destination_type,
-                task_timeout=args.task_timeout,
-                poll_interval=args.poll_interval,
-                poll_timeout=args.poll_timeout,
-                raw=raw_arg,
-                on_progress=progress_fn,
-            )
-            if do_enrich:
-                _apply_mac_enrichment(diagnostics)
-            return diagnostics
+        return dispatch_diagnostics(client, args, raw_arg, fields)
 
     if args.resource == "actions":
-        if args.actions_command == "list":
-            return client.list_actions(
-                fields=fields, raw=raw_arg, with_meta=args.with_meta
-            )
-        if args.actions_command == "get":
-            return client.get_action(args.action_id, fields=fields, raw=raw_arg)
-        if args.actions_command == "enqueue":
-            if args.enqueue_type == "add-thread-device":
-                return client.enqueue_add_thread_device_task(
-                    pskd=args.pskd,
-                    eui=args.eui,
-                    discerner=args.discerner,
-                    joiner_id=args.joiner_id,
-                    timeout=args.timeout,
-                    raw=raw_arg,
-                )
-            if args.enqueue_type == "get-network-diagnostic":
-                resolved_types = _resolve_types(args)
-                if not resolved_types:
-                    raise OTBRUsageError(
-                        "Provide --types or --preset for get-network-diagnostic"
-                    )
-                enqueued = client.enqueue_get_network_diagnostic_task(
-                    destination=args.destination,
-                    types=resolved_types,
-                    timeout=args.timeout,
-                    destination_type=args.destination_type,
-                    raw=raw_arg,
-                )
-                if not getattr(args, "wait", False):
-                    return enqueued
-                # --wait: poll until terminal state, then return diagnostic result
-                action_id = (
-                    enqueued["data"][0]["id"] if _eff_raw else enqueued[0]["id"]
-                )
-                action = client.wait_for_action(
-                    action_id,
-                    poll_interval=args.poll_interval,
-                    poll_timeout=args.poll_timeout,
-                    raise_on_stopped=True,
-                    raw=raw_arg,
-                )
-                result_id = extract_action_result_id(action)
-                if result_id:
-                    return client.get_diagnostic(result_id, raw=raw_arg)
-                return action
-            if args.enqueue_type == "reset-network-diag-counter":
-                return client.enqueue_reset_network_diag_counter_task(
-                    destination=args.destination,
-                    types=_parse_typed_values(args.types),
-                    timeout=args.timeout,
-                    destination_type=args.destination_type,
-                    raw=raw_arg,
-                )
-            if args.enqueue_type == "get-energy-scan":
-                return client.enqueue_get_energy_scan_task(
-                    destination=args.destination,
-                    channel_mask=args.channel_mask,
-                    count=args.count,
-                    period=args.period,
-                    scan_duration=args.scan_duration,
-                    timeout=args.timeout,
-                    destination_type=args.destination_type,
-                    raw=raw_arg,
-                )
-            if args.enqueue_type == "update-device-collection":
-                return client.enqueue_update_device_collection_task(
-                    max_age=args.max_age,
-                    max_retries=args.max_retries,
-                    device_count=args.device_count,
-                    timeout=args.timeout,
-                    raw=raw_arg,
-                )
+        return dispatch_actions(client, args, raw_arg, fields, effective_raw)
 
     if args.resource == "mesh-diagnostics":
-        cmd = args.mesh_diag_command
-        poll_timeout = getattr(args, "poll-timeout", args.poll_timeout)
-        poll_interval = getattr(args, "poll-interval", args.poll_interval)
-        dest_type = getattr(args, "destination-type", DestinationType.EXTENDED)
-        task_timeout = getattr(args, "task-timeout", CLI_MESH_TASK_TIMEOUT_DEFAULT)
-
-        if cmd == "children":
-            return client.fetch_mesh_diagnostics(
-                args.device_id, types=[DIAG_TLV_CHILDREN],
-                destination_type=dest_type, task_timeout=task_timeout,
-                poll_interval=poll_interval, poll_timeout=poll_timeout,
-                raw=raw_arg,
-            )
-        if cmd == "child-ipv6":
-            return client.fetch_mesh_diagnostics(
-                args.device_id, types=[DIAG_TLV_CHILD_IPV6_ADDRS],
-                destination_type=dest_type, task_timeout=task_timeout,
-                poll_interval=poll_interval, poll_timeout=poll_timeout,
-                raw=raw_arg,
-            )
-        if cmd == "router-neighbors":
-            return client.fetch_mesh_diagnostics(
-                args.device_id, types=[DIAG_TLV_ROUTER_NEIGHBORS],
-                destination_type=dest_type, task_timeout=task_timeout,
-                poll_interval=poll_interval, poll_timeout=poll_timeout,
-                raw=raw_arg,
-            )
-        if cmd == "fetch":
-            types = _parse_mesh_diag_types(
-                args.types or list(MESH_DIAGNOSTIC_TLVS))
-            return client.fetch_mesh_diagnostics(
-                args.device_id, types=types,
-                destination_type=dest_type, task_timeout=task_timeout,
-                poll_interval=poll_interval, poll_timeout=poll_timeout,
-                raw=raw_arg,
-            )
-        if cmd == "fetch-all":
-            types = _parse_mesh_diag_types(
-                args.types or list(MESH_DIAGNOSTIC_TLVS))
-            do_update = not getattr(args, "no_update_devices", False)
-            routers_only = getattr(args, "routers_only", False)
-
-            if do_update:
-                devices = client.fetch_device_collection()
-            else:
-                devices = client.list_devices(raw=False)
-
-            device_ids = getattr(args, "device_ids", None) or [
-                d["id"] for d in devices if isinstance(d, dict) and d.get("id")
-            ]
-            if routers_only:
-                device_ids = _filter_router_device_ids(devices, device_ids)
-                logging.info(
-                    "--routers-only: %d router device(s) selected from device list",
-                    len(device_ids),
-                )
-
-            progress_fn = _make_progress_fn(
-                len(device_ids),
-                not getattr(args, "no_progress", False),
-            )
-            return client.fetch_mesh_diagnostics_all_devices(
-                device_ids, types=types,
-                destination_type=dest_type, task_timeout=task_timeout,
-                poll_interval=poll_interval, poll_timeout=poll_timeout,
-                on_progress=progress_fn,
-                raw=raw_arg,
-            )
+        return dispatch_mesh_diagnostics(client, args, raw_arg)
 
     if args.resource == "topology":
-        return _dispatch_topology(client, args, raw_arg)
+        return dispatch_topology(client, args, raw_arg)
 
     raise ValueError("Unsupported CLI command")
 
