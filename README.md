@@ -1,6 +1,6 @@
 # tdash - thread mesh network dashboard
 
-The tdash set of tools enable fetching info from a thread network and store the info in a local cache off the thread network, Visualize the Thread mesh network and run queries over the thread info including: Node type, Link Quality, MAC (radio), MLE (thread mesh) and Time counters. I have tdash running both inside a Docker container and also direct on the on Debian host.
+The tdash tools enable fetching info from a thread network and storing that info into a local cache to visualize the Thread mesh network in topology and table view. The tdash tools can run queries over the thread info for: Node type, Link Quality, MAC (radio) counters and MLE (thread mesh & role time counters). I have tdash running on a Debian host, mostly inside a Docker container and also directly on the Debian host. I have OTBR running in a Docker container connected to a Home Assistant Connect ZBT-1 via usb.
 
 Related Thread Network tools:
 - [Home Assistant Matter Server](https://github.com/matter-js/matterjs-server) has a great dashboard with Matter over Thread support growing with each release for thread devices.
@@ -12,7 +12,7 @@ Jump to: Help [Getting Started](#getting-started)  [docs](./doc/) [td_cli](./doc
 
 ## Summary
 The tdash tools provide:
-- CLI toolkit (Python) that fetches thread device info from a thread network and then stores into a local cache in the tdash data directory for offline querying and processing. Fetch thread device info from these sources:
+- CLI toolkit (Python) fetches thread device info from a thread network and then stores into a local cache in the tdash data directory for offline querying and processing. Fetch thread device info from these sources:
     - Open Thread Border Router (OTBR): otbr-cli via OTBR ot-ctl tool and otbr-restapi via OTBR REST endpoint.
     - Multicast DNS (mDNS) records
     - Eve app thread json format layout file. 
