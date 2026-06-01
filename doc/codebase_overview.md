@@ -43,9 +43,9 @@ tdash/
 │   │   ├── tdash-topology-utils.js # Node/edge helper utilities
 │   │   ├── tdash-ui.js             # UI event wiring and render dispatch
 │   │   └── tdash-utils.js          # Canonical identity and type helpers
-│   ├── otbr_restapi_*.py       # OTBR REST API collectors and CLI clients
-│   ├── otbr_cli_*.py           # ot-ctl CLI collectors
-│   ├── mdns_thread_scopes.py   # mDNS discovery collector
+│   ├── otbr_restapi_*.py       # OTBR REST API collectors and CLI handlers
+│   ├── otbr_cli_*.py           # ot-ctl CLI collectors and parsers
+│   ├── mdns_*.py               # mDNS discovery collectors and scope helpers
 │   ├── eve_process.py          # Eve topology parser
 │   ├── merge_dataset.py        # Dataset merge engine
 │   ├── merge_extaddr_device_label_map.py  # Admin utility: merge extaddr entries into static label map
@@ -63,7 +63,7 @@ tdash/
 └── LICENSE
 ```
 
-Collector and utility files use source-first prefixes (`otbr_restapi_`, `otbr_cli_`, `mdns_`, `eve_`, `util_`).
+Collector and utility files use source-first prefixes (`otbr_restapi_`, `otbr_cli_`, `mdns_`, `eve_`, `util_`). The REST API, ot-ctl, and mDNS families are split across handler and helper modules rather than a single large file.
 Test files use `test_*.py` names that follow the module under test.
 
 ---
@@ -74,9 +74,9 @@ This codebase uses a strict naming split so the data source is visible from the 
 
 | Prefix | Data source | Example |
 |---|---|---|
-| `otbr_cli_` | OTBR `ot-ctl` CLI wrappers (via Docker exec) | `otbr_cli_router_table.py` |
-| `otbr_restapi_` | OTBR HTTP REST API clients and downloaders | `otbr_restapi_util.py` |
-| `mdns_` | Zeroconf/mDNS discovery collectors | `mdns_thread_scopes.py` |
+| `otbr_cli_` | OTBR `ot-ctl` CLI wrappers and parsers (via Docker exec) | `otbr_cli_router_table.py` |
+| `otbr_restapi_` | OTBR HTTP REST API clients, handlers, and download helpers | `otbr_restapi_util.py` |
+| `mdns_` | Zeroconf/mDNS discovery collectors and scope helpers | `mdns_thread_scopes.py` |
 | `eve_` | Eve topology parsing helpers | `eve_process.py` |
 | `util_` | Shared helpers used across collectors/parsers | `util_network.py` |
 
@@ -118,15 +118,11 @@ The Python codebase has six distinct layers, each with a single responsibility. 
 │ ot-ctl CLI  │ │ REST API    │ │ mDNS / Eve  │ │ Data Processing         │
 │ Collectors  │ │ Collectors  │ │ Collectors  │ │ (Merge / Parse)         │
 │             │ │             │ │             │ │                         │
-│ otbr_cli_   │ │ otbr_       │ │ mdns_       │ │ merge_dataset.py        │
-│ router_     │ │ restapi_    │ │ thread_     │ │ merge_extaddr_file_     │
-│ table.py    │ │ download.py │ │ scopes.py   │ │ into_static_map.py      │
-│ otbr_cli_   │ │ otbr_       │ │ eve_        │ │ extaddr_device_         │
-│ meshdiag_   │ │ restapi_    │ │ parse.py    │ │ label_map.py            │
-│ *.py        │ │ client.py   │ │             │ │                         │
-│ otbr_cli_   │ │ otbr_       │ │             │ │                         │
-│ networkdiag │ │ restapi_    │ │             │ │                         │
-│ _topology   │ │ cli.py      │ │             │ │                         │
+│ otbr_cli_*.py│ │ otbr_restapi_*.py │ │ mdns_*.py │ │ merge_dataset.py     │
+│ router_table │ │ cli + download   │ │ scopes +  │ │ merge_extaddr_device_│
+│ meshdiag_*   │ │ + handlers        │ │ helpers   │ │ label_map.py         │
+│ networkdiag_* │ │                   │ │ eve_process.py│ │ extaddr_device_   │
+│ parsers/util │ │                   │ │           │ │ label_map.py         │
 └──┬──────────┘ └──┬──────────┘ └─────────────┘ └─────────────────────────┘
    │               │
 ┌──▼───────────────▼──────────────────────────────────────────────────────┐
@@ -149,8 +145,8 @@ The Python codebase has six distinct layers, each with a single responsibility. 
 | **1 — Data Directory** | `data/` (files on disk) | JSON snapshots: written by collectors, read by server and browser |
 | **2 — Shared Utilities** | `td_const.py`, `util_data.py`, `util_ot_ctl.py`, `util_network.py`, `util_convert.py` | Constants, data-dir resolution, subprocess wrapper, network math |
 | **3a — ot-ctl Collectors** | `otbr_cli_*.py` | Run `ot-ctl` inside the OTBR Docker container; parse output; write JSON |
-| **3b — REST API Collectors** | `otbr_restapi_*.py` | HTTP calls to OTBR REST API; flatten JSON:API envelopes; write JSON |
-| **3c — mDNS / Eve Collectors** | `mdns_thread_scopes.py`, `eve_process.py` | Zeroconf browse and Eve App export parsing; write JSON |
+| **3b — REST API Collectors** | `otbr_restapi_*.py` | HTTP calls to OTBR REST API; dispatch into `node`, `devices`, `diagnostics`, `actions`, `mesh-diagnostics`, and `topology` handlers; write JSON |
+| **3c — mDNS / Eve Collectors** | `mdns_*.py`, `eve_process.py` | Zeroconf browse and Eve App export parsing; write JSON |
 | **3d — Data Processing** | `merge_dataset.py`, `merge_extaddr_device_label_map.py`, `extaddr_device_label_map.py` | Normalise identifiers, merge multi-source records, manage label map |
 | **4 — CLI Dispatcher** | `td_cli.py` | `argparse` tree; forward `--datadir`; call Layer 3 `main()` functions |
 | **5 — HTTP Server** | `td_webserver.py` | aiohttp server; cache gating; subprocess dispatch of Layer 4 |
@@ -247,9 +243,16 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 
 | File | Purpose |
 |---|---|
-| `otbr_restapi_download.py` | Fixed-target downloader: fetches `/node/dataset/active`, `/api/devices`, and `/api/diagnostics` and writes them to local JSON files.  Accepts CLI overrides for host, port, base URL, timeout, and headers. |
+| `otbr_restapi_download.py` | Fixed-target downloader: fetches the active dataset, devices, and diagnostics snapshots and writes them to local JSON files.  Uses shared download helpers for static endpoint writes and per-device diagnostics updates. |
+| `otbr_restapi_download_helpers.py` | Shared helper functions for downloading static endpoints and saving device diagnostics. |
 | `otbr_restapi_util.py` | Full-featured REST API client (`OTBRRestApiClient`).  Returns **flattened** Python objects by default (JSON:API `id`/`type`/`attributes` merged into a single dict). Also contains the shared exception hierarchy (`OTBRHTTPError`, `OTBRConnectionError`, etc.). |
-| `otbr_restapi_cli.py` | CLI front-end for the flattened client.  Supports sub-commands: `node get/state get/state set/dataset get`, `devices list/get`, `diagnostics list/get`, `actions list/get/enqueue`. |
+| `otbr_restapi_cli.py` | CLI front-end for the flattened client.  Dispatches to handler modules for `node`, `devices`, `diagnostics`, `actions`, `mesh-diagnostics`, and `topology` commands. |
+| `otbr_restapi_node.py` | REST CLI handlers for node, state, and dataset commands. |
+| `otbr_restapi_devices.py` | REST CLI handlers for device list/get/fetch commands. |
+| `otbr_restapi_diagnostics.py` | REST CLI handlers for diagnostics list/get/fetch commands and TLV presets. |
+| `otbr_restapi_actions.py` | REST CLI handlers for action list/get/enqueue commands. |
+| `otbr_restapi_mesh_diagnostics.py` | REST CLI helpers and handlers for child tables, child IPv6 addresses, router neighbours, and mesh-diagnostic batch fetches. |
+| `otbr_restapi_topology.py` | Combined topology sweep for devices, diagnostics, and mesh diagnostics. |
 
 
 ### Data Collection — ot-ctl CLI (via Docker)
@@ -261,6 +264,8 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | `otbr_cli_meshdiag_childtable.py` | `meshdiag childtable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childtables.json` | For every router in the router table, collects per-child details: RLOC16, extaddr, Thread version, timeout, age, supervision interval, queued messages, rx-on flag, device type, full-net flag, RSS (avg/last/margin), frame/message error rates, connection time, and CSL parameters.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_meshdiag_childip6.py` | `meshdiag childip6 <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childip6.json` | For every router in the router table, collects child IPv6 address lists grouped by child RLOC16 and records per-child IP address counts.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_meshdiag_routerneighbortable.py` | `meshdiag routerneighbortable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-neighbortables.json` | For every router in the router table, collects per-neighbour details: RLOC16, extaddr, Thread version, RSS (avg/last/margin), frame/message error rates, and connection time.  Handles `ResponseTimeout` gracefully. |
+| `otbr_cli_networkdiag_parsers.py` | `networkdiag get` parser helpers | n/a | Parser helpers for networkdiag output sections, TLV decoding, and record normalization. |
+| `otbr_cli_networkdiag_util.py` | `networkdiag get` utilities | n/a | Shared utilities for networkdiag collection, device classification, and record merging. |
 | `otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (unicast per router) or `networkdiag get ff03::1/ff02::1 <tlvs>` (multicast) | `td-otbr-cli-networkdiag-fetch-all.json` (unicast poll), `td-otbr-cli-networkdiag-multicast-network.json` (multicast all), `td-otbr-cli-networkdiag-multicast-neighbors.json` (multicast neighbors) | Collects network diagnostic data from Thread devices via three modes: (1) Unicast fetch-all: polls each router individually via rloc IPv6. (2) Multicast network: broadcasts to all mesh devices (ff03::1) with retry strategy and TLV merging. (3) Multicast neighbors: broadcasts to one-hop neighbors (ff02::1) with retry strategy and TLV merging. For every device, parses 16 TLVs including: Ext Address (0), RLOC16 (1), Mode (2), EUI64 (23), IPv6 addresses (8), Connectivity (4), Leader Data (6), Thread Version (24), Vendor Name (25), Vendor Model (26), Vendor SW Version (27), Vendor App URL (28), Route64 (5), Child Table (16), MAC Counters (9), MLE Counters (34), and time-in-role statistics. Mode TLV provides RxOnWhenIdle/DeviceType/NetworkData for FTD/MTD classification. MAC counters include error/discard totals and percentages. MLE counters track role changes, partition ID changes, parent changes, and attach attempts. |
 | `otbr_cli_thread_network_info.py` | `dataset active`, `prefix meshlocal`, `br omrprefix favored` | `td-otbr-cli-thread-network-info.json` | Collects the active Thread dataset (channel, PAN ID, extended PAN ID, mesh-local prefix, network name, etc.) and derives the mesh-local IPv6 RLOC prefix and the OMR prefix for use by other collectors. |
 
@@ -268,7 +273,11 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 
 | File | Purpose |
 |---|---|
-| `mdns_thread_scopes.py` | Uses `zeroconf` to browse for Thread-related mDNS service types (e.g. `_meshcop._udp`).  Decodes HAP categories, State Bitmaps, and OUI vendor lookups. |
+| `mdns_thread_scopes.py` | Uses `zeroconf` to browse for Thread-related mDNS service types (e.g. `_meshcop._udp`).  Delegates scope-specific parsing and enrichment to `mdns_hap.py`, `mdns_matter.py`, `mdns_meshcop.py`, and `mdns_thread_util.py`. |
+| `mdns_hap.py` | HAP-specific mDNS parsing and enrichment helpers. |
+| `mdns_matter.py` | Matter-specific mDNS parsing and enrichment helpers. |
+| `mdns_meshcop.py` | Thread meshcop mDNS parsing and enrichment helpers. |
+| `mdns_thread_util.py` | Shared mDNS and Thread helper utilities. |
 
 ### Data Parsing
 
