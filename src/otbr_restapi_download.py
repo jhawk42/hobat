@@ -7,10 +7,13 @@ from pathlib import Path
 from typing import Any, Sequence, Tuple
 
 from td_const import TD_DATA_DIR_ARG_HELP
+from otbr_restapi_download_helpers import (
+    download_static_endpoints,
+    save_device_diagnostics,
+)
 from otbr_restapi_util import (
     add_common_rest_client_args,
     build_rest_client_from_args,
-    emit_rest_payload_output,
     DEFAULT_ACCEPT,
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -183,8 +186,6 @@ def download_all_restapi_endpoints(
     if data_dir is None:
         data_dir = _ACTIVE_TD_DATA_DIR or resolve_data_dir(data_dir=None)
 
-    failures = 0
-
     # Optionally refresh device collection first
     if update_devices:
         logging.info("Triggering updateDeviceCollectionTask …")
@@ -197,20 +198,7 @@ def download_all_restapi_endpoints(
         except OTBRClientError as exc:
             logging.warning("Device collection update failed: %s", exc)
 
-    for method_name, filename in _STATIC_ENDPOINTS:
-        output_file = resolve_data_file_path(filename, data_dir)
-        method = getattr(client, method_name)
-        try:
-            data = method(raw=True)
-            emit_rest_payload_output(data, output_file, logging.getLogger(__name__))
-            logging.info("OK: %s -> %s", method_name, output_file)
-        except OTBRClientError as exc:
-            logging.error("Failed to download %s: %s", method_name, exc)
-            failures += 1
-        except OSError as exc:
-            logging.error("File write error for %s: %s", output_file, exc)
-            failures += 1
-
+    failures = download_static_endpoints(client, data_dir, _STATIC_ENDPOINTS)
     if failures:
         logging.error("Completed with %d failure(s).", failures)
         return 1
@@ -231,43 +219,7 @@ def fetch_and_save_diagnostics(
     Returns:
         Exit code: 0 on full success, 1 if any device diagnostic failed.
     """
-    try:
-        devices = client.list_devices(raw=False)
-    except OTBRClientError as exc:
-        logging.error("Failed to list devices for diagnostics: %s", exc)
-        return 1
-
-    if not devices:
-        logging.info("No devices found; skipping diagnostics.")
-        return 0
-
-    failures = 0
-    for device in devices:
-        device_id = device.get("id") if isinstance(device, dict) else None
-        if not device_id:
-            continue
-        filename = f"td-otbr-restapi-diagnostic-{device_id}.json"
-        output_file = resolve_data_file_path(filename, data_dir)
-        try:
-            diag = client.fetch_device_diagnostics(
-                device_id, types=diag_types, raw=True
-            )
-            emit_rest_payload_output(diag, output_file, logging.getLogger(__name__))
-            logging.info("Diagnostic saved: %s -> %s", device_id, output_file)
-        except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
-            logging.warning("Diagnostic skipped for %s: %s", device_id, exc)
-            failures += 1
-        except OTBRClientError as exc:
-            logging.error("Diagnostic error for %s: %s", device_id, exc)
-            failures += 1
-        except OSError as exc:
-            logging.error("File write error for %s: %s", output_file, exc)
-            failures += 1
-
-    if failures:
-        logging.warning("Diagnostics completed with %d failure(s).", failures)
-        return 1
-    return 0
+    return save_device_diagnostics(client, data_dir, diag_types)
 
 
 # ---------------------------------------------------------------------------
