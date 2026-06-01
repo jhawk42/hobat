@@ -98,10 +98,10 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
 
   // Reset all details lists
   document.getElementById("summary-list").innerHTML =
-    "<li>Click a node to view its properties.</li>";
+    "<li>Click a node or row to view its properties.</li>";
   document
     .querySelectorAll(
-      "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list, #table-identity-list, #table-highlights-list, #table-network-list, #table-connections-list, #table-mdns-list, #table-routes-links-list, #table-neighbors-list, #table-children-list, #table-counters-list, #table-details-list",
+      "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
     )
     .forEach((list) => {
       list.innerHTML = "";
@@ -370,10 +370,10 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
   _visNetwork.on("click", (params) => {
     if (params.nodes.length === 0) {
       document.getElementById("summary-list").innerHTML =
-        "<li>Click a node to view its properties.</li>";
+        "<li>Click a node or row to view its properties.</li>";
       document
         .querySelectorAll(
-          "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list, #table-identity-list, #table-highlights-list, #table-network-list, #table-connections-list, #table-mdns-list, #table-routes-links-list, #table-neighbors-list, #table-children-list, #table-counters-list, #table-details-list",
+          "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
         )
         .forEach((list) => {
           list.classList.add("hidden");
@@ -394,10 +394,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     const _QL =
       "#identity-list, #highlights-list, #network-list, #connections-list, " +
       "#mdns-list, #routes-links-list, #neighbors-list, #children-list, " +
-      "#counters-list, #details-list, #table-identity-list, #table-highlights-list, " +
-      "#table-network-list, #table-connections-list, #table-mdns-list, " +
-      "#table-routes-links-list, #table-neighbors-list, #table-children-list, " +
-      "#table-counters-list, #table-details-list";
+      "#counters-list, #details-list";
     const _hide = () => document.querySelectorAll(_QL).forEach((l) => l.classList.add("hidden"));
     const node = nodeMap.get(selectedId);
     if (!node) {

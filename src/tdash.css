@@ -705,9 +705,45 @@ button.active {
 
 .topology-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+}
+
+/* Position device details panel on wider screens */
+#panel-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-rows: auto auto 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+/* Place view controls and containers in column 1 */
+.view-toggle-bar {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#view-status-line-panel {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+#view-topology {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+#view-table {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+/* Device details spans column 2, all rows */
+#device-details {
+  grid-column: 2;
+  grid-row: 1 / 4;
 }
 
 .topology-canvas-wrap {
@@ -1077,7 +1113,7 @@ td .td-array-idx {
 
 .table-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
@@ -1142,8 +1178,20 @@ td:last-child {
     grid-template-columns: 1fr;
   }
 
-  #details,
-  #table-details {
+  #panel-view {
+    grid-template-columns: 1fr;
+  }
+
+  .view-toggle-bar,
+  #view-status-line-panel,
+  #view-topology,
+  #view-table,
+  #device-details {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  #device-details {
     max-height: none;
   }
 }

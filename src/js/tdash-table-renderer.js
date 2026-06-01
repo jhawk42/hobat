@@ -283,7 +283,7 @@ function renderTableRows(rows, columns, isSearchActive = false) {
       const prev = tbodyEl.querySelector("tr.selected-row");
       if (prev) prev.classList.remove("selected-row");
       tr.classList.add("selected-row");
-      const summaryListEl = document.getElementById("table-summary-list");
+      const summaryListEl = document.getElementById("summary-list");
       const rawRow = _lastFilteredRows[idx] ?? row;
       const details = sortDetailsWithPriority(
         flattenObjectEntries(rawRow).filter(
@@ -297,7 +297,7 @@ function renderTableRows(rows, columns, isSearchActive = false) {
         return;
       }
       if (summaryListEl) summaryListEl.innerHTML = "";
-      populateNodeDetailsLists(details, "table-");
+      populateNodeDetailsLists(details);
     });
     fragment.appendChild(tr);
   });
@@ -344,11 +344,11 @@ export function applyTableFilters() {
   const activeColumns = _moreInfoEnabled
     ? _tableColumns
     : TABLE_PRIORITY_COLUMNS.filter((col) => _tableColumns.includes(col));
-  const detailsListEl = document.getElementById("table-details-list");
+  const detailsListEl = document.getElementById("details-list");
   if (detailsListEl) detailsListEl.innerHTML = "";
-  const summaryListEl = document.getElementById("table-summary-list");
+  const summaryListEl = document.getElementById("summary-list");
   if (summaryListEl)
-    summaryListEl.innerHTML = "<li>Click a row to view its properties.</li>";
+    summaryListEl.innerHTML = "<li>Click a node or row to view its properties.</li>";
   renderTableRows(matchingRows, activeColumns, searchQuery !== "");
   updateTableStatus(matchingRows.length, activeColumns.length, filtered.length, searchQuery);
 

@@ -186,8 +186,10 @@ function switchView(newView) {
     btnPhysics.style.display = "none";
     if (btnAutoZoom) btnAutoZoom.style.display = "none";
     linkFilterEl.classList.add("filter-disabled");
-    document.getElementById("table-details-list").innerHTML =
-      "<li>Click a row to view its properties.</li>";
+    document.getElementById("details-list").innerHTML = "";
+    const summaryListEl = document.getElementById("summary-list");
+    if (summaryListEl)
+      summaryListEl.innerHTML = "<li>Click a node or row to view its properties.</li>";
   }
 
   if (currentDataset) {
@@ -411,8 +413,7 @@ await loadStaticLabelMap();
 document.getElementById("view-status-line-content").textContent =
   "Showing: no dataset loaded. Select a dataset and click Fetch.";
 
-initDetailPanelToggles(document.getElementById("details"));
-initDetailPanelToggles(document.getElementById("table-details"));
+initDetailPanelToggles(document.getElementById("device-details"));
 
 // Cache checkbox helper: make checkboxes mutually exclusive
 function updateCacheCheckboxes(changedCheckbox) {

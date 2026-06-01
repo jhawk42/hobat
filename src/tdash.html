@@ -123,8 +123,8 @@
           </div>          
         </fieldset>
 
-        <fieldset class="cache-options" id="fieldset-cache">
-          <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="true"><span
+        <fieldset class="cache-options collapsed" id="fieldset-cache">
+          <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="false"><span
                 class="legend-toggle-arrow">▶</span>Cache</button></legend>
           <label title="Automatically re-fetch data when the dataset selection changes">
             <input type="checkbox" id="chk-auto-fetch" checked /> Auto
@@ -269,53 +269,6 @@
               </span>
             </div>
           </div>
-
-          <div id="details" class="node-details-panel">
-            <h2>Device details:</h2>
-            <ul id="summary-list" class="node-details-list">
-              <li>Click a node to view its properties.</li>
-            </ul>
-            <h2>Keys:</h2>
-            <ul id="identity-list" class="node-details-list"
-              data-fields="rloc16,extaddr,extAddress,device_label,name,routerId,router_id,eui64,mlEidIid,omr_ipv6_addr,omrIpv6Address,id,ID">
-            </ul>
-            <h2>Highlights:</h2>
-            <ul id="highlights-list" class="node-details-list"
-              data-fields="type,Role,br,isBorderRouter,leader,isLeader,is_router,isPrimaryBBR,status,mode.device,mode.deviceTypeFTD,ver,version,thread_version,thread_stack_version,threadStackVersion,leader_data.partition_id,leaderData.partitionId,leader_data.leader_router_id,leaderData.leaderRouterId,vendor_name,vendorName,vendor_model,vendorModel,vendor_sw_version,vendorSwVersion,server,room,icon">
-            </ul>
-            <h2>Network:</h2>
-            <ul id="network-list" class="node-details-list" data-fields="ipv6_addrs, ipv6Addresses">
-            </ul>
-            <h2>Connections:</h2>
-            <ul id="connections-list" class="node-details-list"
-              data-fields="total_children,has_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count,router_child_table_count,connectivity.active_routers,connectivity.activeRouters,connectivity.link_quality_3,connectivity.linkQuality3,connectivity.link_quality_2,connectivity.linkQuality2,connectivity.link_quality_1,connectivity.linkQuality1">
-            </ul>
-
-            <h2>MDNS:</h2>
-            <ul id="mdns-list" class="node-details-list"
-              data-fields="scope,service_info.type,service_info.server,service_info.port,service_info.properties.mdns_scopes_thread,service_info.properties.mdns_scopes_br,service_info.properties.mdns_scopes_hap,service_info.properties.mdns_scopes_matter,service_info.properties.pt.full_name,service_info.properties.pt.int_value,service_info.properties.mn.full_name,service_info.properties.mn.decoded,service_info.properties.pv.full_name,service_info.properties.pv.decoded,service_info.properties.md.full_name,service_info.properties.md.decoded,service_info.properties.ci.full_name,service_info.properties.ci.category_name,service_info.properties.ci.decoded,service_info.properties.ci.hex,service_info.properties.id.full_name,service_info.properties.id.decoded,service_info.properties.xa.full_name,service_info.properties.xa.hex,service_info.properties.vn.full_name,service_info.properties.vn.decoded,service_info.properties.tv.full_name,service_info.properties.tv.decoded,service_info.properties.rv.full_name,service_info.properties.rv.decoded,service_info.properties.nn.full_name,service_info.properties.nn.decoded,service_info.properties.xp.full_name,service_info.properties.xp.hex,service_info.properties.bb.full_name,service_info.properties.bb.hex,service_info.properties.sb.full_name,service_info.properties.sb.hex,service_info.properties.sf.full_name,service_info.properties.sf.hex,service_info.properties.sh.full_name,service_info.properties.sh.hex,service_info.properties.s#.full_name,service_info.properties.s#.decoded,service_info.properties.s#.hex,service_info.properties.c#.full_name,service_info.properties.c#.decoded,service_info.properties.c#.hex,service_info.properties.ff.full_name,service_info.properties.ff.decoded,service_info.properties.ff.hex,service_info.properties.FabricID.full_name,service_info.properties.FabricID.decoded,service_info.decoded_properties.SAI,service_info.decoded_properties.SAT,service_info.decoded_properties.SII,service_info.properties.NodeID.full_name,service_info.properties.NodeID.decoded,service_info.properties.SAI.full_name,service_info.properties.SAI.milliseconds,service_info.properties.SAT.full_name,service_info.properties.SAT.milliseconds,service_info.properties.SII.full_name,service_info.properties.SII.milliseconds">
-            </ul>
-
-            <h2>Routes & Links:</h2>
-            <ul id="routes-links-list" class="node-details-list" data-fields="routes,route,route.routeData,route_data,route_data.route_data,route_data.routeData,3_links,2_links,1_links">
-            </ul>
-
-            <h2>Neighbors:</h2>
-            <ul id="neighbors-list" class="node-details-list" data-fields="router_neighbor_table,routerNeighbors">
-            </ul>
-
-            <h2>Children:</h2>
-            <ul id="children-list" class="node-details-list" data-fields="children,router_child_table,childTable,childIpv6Addresses">
-            </ul>
-
-            <h2>Counters:</h2>
-            <ul id="counters-list" class="node-details-list"
-              data-fields="mac_counters.iftotalpkts,mac_counters.iftotaldiscards,mac_counters.iftotalerrors,mac_counters.iftotalerrors_totalpkts_ratio,mac_counters.iftotaldiscards_totalpkts_ratio,mle_counters.leaderrole,mle_counters.routerrole,mle_counters.childrole,mle_counters.partitionidchanges,mle_counters.betterpartitionattachattempts,mle_counters.parentchanges,mle_counters.totalparentpartitionchanges,mle_counters.attachattempts,mle_counters.detachedrole,mle_counters.disabledrole,time_statistics.leader_pct,time_statistics.router_pct,time_statistics.child_pct,time_statistics.detached_disabled_pct,time_statistics.detached_pct,time_statistics.disabled_pct">
-            </ul>
-            <h2>Details:</h2>
-            <ul id="details-list" class="node-details-list" data-fields="*">
-            </ul>
-          </div>
         </div>
       </div>
 
@@ -328,48 +281,55 @@
               <tbody></tbody>
             </table>
           </div>
-          <div id="table-details" class="node-details-panel">
-            <h2>Device details:</h2>
-            <ul id="table-summary-list" class="node-details-list">
-              <li>Click a row to view its properties.</li>
-            </ul>
-            <h2>Keys:</h2>
-            <ul id="table-identity-list" class="node-details-list"
-              data-fields="rloc16,extaddr,extAddress,device_label,name,routerId,router_id,eui64,mlEidIid,omr_ipv6_addr,omrIpv6Address,id,ID">
-            </ul>
-            <h2>Highlights:</h2>
-            <ul id="table-highlights-list" class="node-details-list"
-              data-fields="type,Role,br,isBorderRouter,leader,isLeader,is_router,isPrimaryBBR,status,mode.device,mode.deviceTypeFTD,ver,version,thread_version,thread_stack_version,threadStackVersion,leader_data.partition_id,leaderData.partitionId,leader_data.leader_router_id,leaderData.leaderRouterId,vendor_name,vendorName,vendor_model,vendorModel,vendor_sw_version,vendorSwVersion,room,icon">
-            </ul>
-            <h2>Network:</h2>
-            <ul id="table-network-list" class="node-details-list" data-fields="ipv6_addrs,ipv6Addresses">
-            </ul>
-            <h2>Connections:</h2>
-            <ul id="table-connections-list" class="node-details-list"
-              data-fields="total_children,has_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count,router_child_table_count,connectivity.active_routers,connectivity.activeRouters,connectivity.link_quality_3,connectivity.linkQuality3,connectivity.link_quality_2,connectivity.linkQuality2,connectivity.link_quality_1,connectivity.linkQuality1">
-            </ul>
-            <h2>MDNS:</h2>
-            <ul id="table-mdns-list" class="node-details-list"
-              data-fields="scope,service_info.type,service_info.server,service_info.port,service_info.properties.mdns_scopes_thread,service_info.properties.mdns_scopes_br,service_info.properties.mdns_scopes_hap,service_info.properties.mdns_scopes_matter,service_info.properties.pt.full_name,service_info.properties.pt.int_value,service_info.properties.mn.full_name,service_info.properties.mn.decoded,service_info.properties.pv.full_name,service_info.properties.pv.decoded,service_info.properties.md.full_name,service_info.properties.md.decoded,service_info.properties.ci.full_name,service_info.properties.ci.category_name,service_info.properties.ci.decoded,service_info.properties.ci.hex,service_info.properties.id.full_name,service_info.properties.id.decoded,service_info.properties.xa.full_name,service_info.properties.xa.hex,service_info.properties.vn.full_name,service_info.properties.vn.decoded,service_info.properties.tv.full_name,service_info.properties.tv.decoded,service_info.properties.rv.full_name,service_info.properties.rv.decoded,service_info.properties.nn.full_name,service_info.properties.nn.decoded,service_info.properties.xp.full_name,service_info.properties.xp.hex,service_info.properties.bb.full_name,service_info.properties.bb.hex,service_info.properties.sb.full_name,service_info.properties.sb.hex,service_info.properties.sf.full_name,service_info.properties.sf.hex,service_info.properties.sh.full_name,service_info.properties.sh.hex,service_info.properties.s#.full_name,service_info.properties.s#.decoded,service_info.properties.s#.hex,service_info.properties.c#.full_name,service_info.properties.c#.decoded,service_info.properties.c#.hex,service_info.properties.ff.full_name,service_info.properties.ff.decoded,service_info.properties.ff.hex,service_info.properties.FabricID.full_name,service_info.properties.FabricID.decoded,service_info.decoded_properties.SAI,service_info.decoded_properties.SAT,service_info.decoded_properties.SII,service_info.properties.NodeID.full_name,service_info.properties.NodeID.decoded,service_info.properties.SAI.full_name,service_info.properties.SAI.milliseconds,service_info.properties.SAT.full_name,service_info.properties.SAT.milliseconds,service_info.properties.SII.full_name,service_info.properties.SII.milliseconds">
-            </ul>
-            <h2>Routes & Links:</h2>
-            <ul id="table-routes-links-list" class="node-details-list" data-fields="routes,route,route.routeData,route_data,route_data.route_data,route_data.routeData,3_links,2_links,1_links">
-            </ul>
-            <h2>Neighbors:</h2>
-            <ul id="table-neighbors-list" class="node-details-list" data-fields="router_neighbor_table,routerNeighbors">
-            </ul>
-            <h2>Children:</h2>
-            <ul id="table-children-list" class="node-details-list" data-fields="children,router_child_table,,childTable,childIpv6Addresses">
-            </ul>
-            <h2>Counters:</h2>
-            <ul id="table-counters-list" class="node-details-list"
-              data-fields="mac_counters.iftotalpkts,mac_counters.iftotaldiscards,mac_counters.iftotalerrors,mac_counters.iftotalerrors_totalpkts_ratio,mac_counters.iftotaldiscards_totalpkts_ratio,mle_counters.leaderrole,mle_counters.routerrole,mle_counters.childrole,mle_counters.partitionidchanges,mle_counters.betterpartitionattachattempts,mle_counters.parentchanges,mle_counters.totalparentpartitionchanges,mle_counters.attachattempts,mle_counters.detachedrole,mle_counters.disabledrole,time_statistics.leader_pct,time_statistics.router_pct,time_statistics.child_pct,time_statistics.detached_disabled_pct,time_statistics.detached_pct,time_statistics.disabled_pct">
-            </ul>
-            <h2>Details:</h2>
-            <ul id="table-details-list" class="node-details-list" data-fields="*">
-            </ul>
-          </div>
         </div>
+      </div>
+
+      <!-- Unified Device Details Panel (shared by topology and table views) -->
+      <div id="device-details" class="node-details-panel">
+        <h2>Device details:</h2>
+        <ul id="summary-list" class="node-details-list">
+          <li>Click a node or row to view its properties.</li>
+        </ul>
+        <h2>Keys:</h2>
+        <ul id="identity-list" class="node-details-list"
+          data-fields="rloc16,extaddr,extAddress,device_label,name,routerId,router_id,eui64,mlEidIid,omr_ipv6_addr,omrIpv6Address,id,ID">
+        </ul>
+        <h2>Highlights:</h2>
+        <ul id="highlights-list" class="node-details-list"
+          data-fields="type,Role,br,isBorderRouter,leader,isLeader,is_router,isPrimaryBBR,status,mode.device,mode.deviceTypeFTD,ver,version,thread_version,thread_stack_version,threadStackVersion,leader_data.partition_id,leaderData.partitionId,leader_data.leader_router_id,leaderData.leaderRouterId,vendor_name,vendorName,vendor_model,vendorModel,vendor_sw_version,vendorSwVersion,server,room,icon">
+        </ul>
+        <h2>Network:</h2>
+        <ul id="network-list" class="node-details-list" data-fields="ipv6_addrs, ipv6Addresses">
+        </ul>
+        <h2>Connections:</h2>
+        <ul id="connections-list" class="node-details-list"
+          data-fields="total_children,has_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count,router_child_table_count,connectivity.active_routers,connectivity.activeRouters,connectivity.link_quality_3,connectivity.linkQuality3,connectivity.link_quality_2,connectivity.linkQuality2,connectivity.link_quality_1,connectivity.linkQuality1">
+        </ul>
+
+        <h2>MDNS:</h2>
+        <ul id="mdns-list" class="node-details-list"
+          data-fields="scope,service_info.type,service_info.server,service_info.port,service_info.properties.mdns_scopes_thread,service_info.properties.mdns_scopes_br,service_info.properties.mdns_scopes_hap,service_info.properties.mdns_scopes_matter,service_info.properties.pt.full_name,service_info.properties.pt.int_value,service_info.properties.mn.full_name,service_info.properties.mn.decoded,service_info.properties.pv.full_name,service_info.properties.pv.decoded,service_info.properties.md.full_name,service_info.properties.md.decoded,service_info.properties.ci.full_name,service_info.properties.ci.category_name,service_info.properties.ci.decoded,service_info.properties.ci.hex,service_info.properties.id.full_name,service_info.properties.id.decoded,service_info.properties.xa.full_name,service_info.properties.xa.hex,service_info.properties.vn.full_name,service_info.properties.vn.decoded,service_info.properties.tv.full_name,service_info.properties.tv.decoded,service_info.properties.rv.full_name,service_info.properties.rv.decoded,service_info.properties.nn.full_name,service_info.properties.nn.decoded,service_info.properties.xp.full_name,service_info.properties.xp.hex,service_info.properties.bb.full_name,service_info.properties.bb.hex,service_info.properties.sb.full_name,service_info.properties.sb.hex,service_info.properties.sf.full_name,service_info.properties.sf.hex,service_info.properties.sh.full_name,service_info.properties.sh.hex,service_info.properties.s#.full_name,service_info.properties.s#.decoded,service_info.properties.s#.hex,service_info.properties.c#.full_name,service_info.properties.c#.decoded,service_info.properties.c#.hex,service_info.properties.ff.full_name,service_info.properties.ff.decoded,service_info.properties.ff.hex,service_info.properties.FabricID.full_name,service_info.properties.FabricID.decoded,service_info.decoded_properties.SAI,service_info.decoded_properties.SAT,service_info.decoded_properties.SII,service_info.properties.NodeID.full_name,service_info.properties.NodeID.decoded,service_info.properties.SAI.full_name,service_info.properties.SAI.milliseconds,service_info.properties.SAT.full_name,service_info.properties.SAT.milliseconds,service_info.properties.SII.full_name,service_info.properties.SII.milliseconds">
+        </ul>
+
+        <h2>Routes & Links:</h2>
+        <ul id="routes-links-list" class="node-details-list" data-fields="routes,route,route.routeData,route_data,route_data.route_data,route_data.routeData,3_links,2_links,1_links">
+        </ul>
+
+        <h2>Neighbors:</h2>
+        <ul id="neighbors-list" class="node-details-list" data-fields="router_neighbor_table,routerNeighbors">
+        </ul>
+
+        <h2>Children:</h2>
+        <ul id="children-list" class="node-details-list" data-fields="children,router_child_table,childTable,childIpv6Addresses">
+        </ul>
+
+        <h2>Counters:</h2>
+        <ul id="counters-list" class="node-details-list"
+          data-fields="mac_counters.iftotalpkts,mac_counters.iftotaldiscards,mac_counters.iftotalerrors,mac_counters.iftotalerrors_totalpkts_ratio,mac_counters.iftotaldiscards_totalpkts_ratio,mle_counters.leaderrole,mle_counters.routerrole,mle_counters.childrole,mle_counters.partitionidchanges,mle_counters.betterpartitionattachattempts,mle_counters.parentchanges,mle_counters.totalparentpartitionchanges,mle_counters.attachattempts,mle_counters.detachedrole,mle_counters.disabledrole,time_statistics.leader_pct,time_statistics.router_pct,time_statistics.child_pct,time_statistics.detached_disabled_pct,time_statistics.detached_pct,time_statistics.disabled_pct">
+        </ul>
+        <h2>Details:</h2>
+        <ul id="details-list" class="node-details-list" data-fields="*">
+        </ul>
       </div>
     </div>
   </div>
