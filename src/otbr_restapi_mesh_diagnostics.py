@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+import argparse
+import logging
+from typing import Any
+
+from otbr_restapi_diagnostics import make_progress_fn
+from otbr_restapi_util import (
+    DIAG_TLV_CHILDREN,
+    DIAG_TLV_CHILD_IPV6_ADDRS,
+    DIAG_TLV_ROUTER_NEIGHBORS,
+    DestinationType,
+    MESH_DIAGNOSTIC_TLVS,
+    OTBRRestApiClient,
+    OTBRUsageError,
+)
+
+CLI_MESH_TASK_TIMEOUT_DEFAULT = 8
+ROUTER_RLOC16_MASK = 0x03FF
+ROUTER_RLOC16_VALUE = 0
+
+
+def filter_router_device_ids(devices: list[Any], device_ids: list[str]) -> list[str]:
+    rloc16_by_id: dict[str, int] = {}
+    for device in devices:
+        if not isinstance(device, dict):
+            continue
+        dev_id = device.get("id")
+        rloc16_raw = device.get("rloc16")
+        if dev_id is None or rloc16_raw is None:
+            continue
+        try:
+            rloc16_by_id[dev_id] = int(rloc16_raw, 16) if isinstance(rloc16_raw, str) else int(rloc16_raw)
+        except (ValueError, TypeError):
+            pass
+
+    result: list[str] = []
+    for dev_id in device_ids:
+        rloc16 = rloc16_by_id.get(dev_id)
+        if rloc16 is None or (rloc16 & ROUTER_RLOC16_MASK) == ROUTER_RLOC16_VALUE:
+            result.append(dev_id)
+    return result
+
+
+def parse_mesh_diag_types(types: list[str]) -> list[str]:
+    invalid = [value for value in types if value not in MESH_DIAGNOSTIC_TLVS]
+    if invalid:
+        raise OTBRUsageError(
+            f"Invalid mesh-diagnostic TLV(s): {invalid!r}. Allowed: {sorted(MESH_DIAGNOSTIC_TLVS)!r}"
+        )
+    if not types:
+        raise OTBRUsageError("At least one mesh-diagnostic TLV must be specified")
+    return types
+
+
+def dispatch_mesh_diagnostics(
+    client: OTBRRestApiClient,
+    args: argparse.Namespace,
+    raw_arg: object,
+) -> Any:
+    cmd = args.mesh_diag_command
+    poll_timeout = getattr(args, "poll-timeout", args.poll_timeout)
+    poll_interval = getattr(args, "poll-interval", args.poll_interval)
+    dest_type = getattr(args, "destination-type", DestinationType.EXTENDED)
+    task_timeout = getattr(args, "task-timeout", CLI_MESH_TASK_TIMEOUT_DEFAULT)
+
+    if cmd == "children":
+        return client.fetch_mesh_diagnostics(
+            args.device_id,
+            types=[DIAG_TLV_CHILDREN],
+            destination_type=dest_type,
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            raw=raw_arg,
+        )
+    if cmd == "child-ipv6":
+        return client.fetch_mesh_diagnostics(
+            args.device_id,
+            types=[DIAG_TLV_CHILD_IPV6_ADDRS],
+            destination_type=dest_type,
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            raw=raw_arg,
+        )
+    if cmd == "router-neighbors":
+        return client.fetch_mesh_diagnostics(
+            args.device_id,
+            types=[DIAG_TLV_ROUTER_NEIGHBORS],
+            destination_type=dest_type,
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            raw=raw_arg,
+        )
+    if cmd == "fetch":
+        types = parse_mesh_diag_types(args.types or list(MESH_DIAGNOSTIC_TLVS))
+        return client.fetch_mesh_diagnostics(
+            args.device_id,
+            types=types,
+            destination_type=dest_type,
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            raw=raw_arg,
+        )
+    if cmd == "fetch-all":
+        types = parse_mesh_diag_types(args.types or list(MESH_DIAGNOSTIC_TLVS))
+        do_update = not getattr(args, "no_update_devices", False)
+        routers_only = getattr(args, "routers_only", False)
+
+        if do_update:
+            devices = client.fetch_device_collection()
+        else:
+            devices = client.list_devices(raw=False)
+
+        device_ids = getattr(args, "device_ids", None) or [
+            d["id"] for d in devices if isinstance(d, dict) and d.get("id")
+        ]
+        if routers_only:
+            device_ids = filter_router_device_ids(devices, device_ids)
+            logging.info(
+                "--routers-only: %d router device(s) selected from device list",
+                len(device_ids),
+            )
+
+        progress_fn = make_progress_fn(len(device_ids), not getattr(args, "no_progress", False))
+        return client.fetch_mesh_diagnostics_all_devices(
+            device_ids,
+            types=types,
+            destination_type=dest_type,
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            on_progress=progress_fn,
+            raw=raw_arg,
+        )
+
+    raise ValueError("Unsupported mesh-diagnostics command")
