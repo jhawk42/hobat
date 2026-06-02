@@ -10,21 +10,21 @@ _Covers `td_webserver.py`, `tdash.html`, and all `js/*.js` modules._
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Browser                                                            │
 │                                                                     │
-│  ┌──────────────────────┐   ┌─────────────────────────────────────┐│
-│  │  tdash.html (DOM)    │   │  JavaScript ES Modules              ││
-│  │  - control bars      │   │                                     ││
-│  │  - filter dropdowns  │   │  tdash-ui.js         (event wiring) ││
-│  │  - topology canvas   │   │  tdash-dataset.js    (fetch+merge)  ││
-│  │  - sortable table    │   │  tdash-merge.js      (row merge)    ││
-│  │  - details panels    │   │  tdash-adaptors.js   (→vis format)  ││
-│  └──────────────────────┘   │  tdash-filters.js    (predicates)   ││
-│                             │  tdash-topology-renderer.js         ││
-│                             │  tdash-table-renderer.js            ││
-│                             │  tdash-topology-utils.js            ││
-│                             │  tdash-utils.js                     ││
-│                             │  tdash-constants.js  (string consts)││
-│                             │  tdash-dataset-registry.js          ││
-│                             └─────────────────────────────────────┘│
+│  ┌──────────────────────┐   ┌─────────────────────────────────────┐ │
+│  │  tdash.html (DOM)    │   │  JavaScript ES Modules              │ │
+│  │  - control bars      │   │                                     │ │
+│  │  - filter dropdowns  │   │  tdash-ui.js         (event wiring) │ │
+│  │  - topology canvas   │   │  tdash-dataset.js    (fetch+merge)  │ │
+│  │  - sortable table    │   │  tdash-merge.js      (row merge)    │ │
+│  │  - details panels    │   │  tdash-adaptors.js   (→vis format)  │ │
+│  └──────────────────────┘   │  tdash-filters.js    (predicates)   │ │
+│                             │  tdash-topology-renderer.js         │ │
+│                             │  tdash-table-renderer.js            │ │
+│                             │  tdash-topology-utils.js            │ │
+│                             │  tdash-utils.js                     │ │
+│                             │  tdash-constants.js  (string consts)│ │
+│                             │  tdash-dataset-registry.js          │ │
+│                             └─────────────────────────────────────┘ │
 └──────────────────────────────────┬──────────────────────────────────┘
                                    │ HTTP (fetch API)
                         /api/data/{filename}

@@ -22,7 +22,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "meshdiag_only",
-    label: "topology [meshdiag md]",
+    label: "Mesh topology [meshdiag md]",
     files: ["td-otbr-cli-meshdiag-topology.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
@@ -35,7 +35,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "networkdiag_multicast_network_only",
-    label: "topology [networkdiag-multicast ndmc]",
+    label: "Device (ftd) details topology [networkdiag-multicast ndmc]",
     files: ["td-otbr-cli-networkdiag-multicast-network.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
@@ -48,7 +48,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast_mdns",
-    label: "topology [md, ndmc, mdns] brief",
+    label: "Device (ftd) & Mesh topology w/mdns [md, ndmc, mdns] ",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json",
@@ -61,11 +61,24 @@ export const DATASET_REGISTRY = [
     estimateActionCostSecs: 80
   },
 
- // ── Multi-file merged (otbr-cli) ──
+  // ── Single-file simple datasets (otbr-cli) ───
+  {
+    source: "otbr-cli",
+    value: "networkdiag_only",
+    label: "Device (ftd,sed) detailed topology Networkdiag fetch all (ndfa)⏰",
+    files: ["td-otbr-cli-networkdiag-fetch-all.json"],
+    mergeStrategy: "none",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 600
+  }, 
+
+  // ── Multi-file merged (otbr-cli) ──
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_fetch_all_mdns",
-    label: "topo: [md, ndfa, mdns] detailed⏰",
+    label: "Detailed topology [md, ndfa, mdns] ⏰",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-fetch-all.json",
@@ -82,7 +95,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast_mdns",
-    label: "topo: [md, ndmc, mdn, mdc,  mdns] detailed⏰",
+    label: "Detailed topology [md, ndmc, mdn, mdc, mdns] ⏰",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json",
@@ -100,7 +113,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_poll_all_mdns",
-    label: "topo: [md, ndfa, mdn, mdc, mdns] detailed⏰",
+    label: "Detailed topology [md, ndfa, mdn, mdc, mdns] ⏰",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-fetch-all.json",
@@ -120,7 +133,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast",
-    label: "topology (md,ndmc) rapid fetch",
+    label: "Rapid fetch topology [md, ndmc]",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json"
@@ -132,24 +145,10 @@ export const DATASET_REGISTRY = [
   },
 */
 
-  // ── Single-file simple datasets (otbr-cli) ───
-  {
-    source: "otbr-cli",
-    value: "networkdiag_only",
-    label: "topo: networkdiag-fetch-all (ndfa)⏰",
-    files: ["td-otbr-cli-networkdiag-fetch-all.json"],
-    mergeStrategy: "none",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 600
-  },  
-
-
   {
     source: "otbr-cli",
     value: "router_neighbortables",
-    label: "meshdiag neighbors (mdn)⏰",
+    label: "Meshdiag neighbors (mdn)⏰",
     files: ["td-otbr-cli-meshdiag-router-neighbortables.json"],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
@@ -160,7 +159,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "router_childtables",
-    label: "meshdiag children (mdc)⏰",
+    label: "Meshdiag children (mdc)⏰",
     files: ["td-otbr-cli-meshdiag-router-childtables.json"],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
@@ -173,7 +172,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "router_table",
-    label: "router table (rt)",
+    label: "Router table (rt)",
     files: ["td-otbr-cli-router-table.json"],
     mergeStrategy: "none",
     topologyMode: "router-table",
@@ -444,7 +443,10 @@ export const DATASET_REGISTRY = [
     source: "merged",
     value: "merged_all_deep_wide_otbr_cli_restapi_eve",
     label: "premerged: topology [otbr-cli, otbr-restapi, mdns ...] deep & wide",
-    files: ["td-merged-topology-all.json"],
+    files: [
+      "td-merged-topology-all.json",
+      "td-static-extaddr-device-label.json"
+    ],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
     defaultView: "topology",

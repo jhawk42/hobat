@@ -53,6 +53,7 @@ function populateDatasetSelect(sourceFilter = null) {
     const opt = document.createElement("option");
     opt.value = entry.value;
     opt.textContent = entry.label;
+    opt.title = entry.label; // Use the label as the tooltip content
     sel.appendChild(opt);
   });
 }
@@ -299,6 +300,15 @@ document
         switchView(selectedDataset.defaultView);
       }
     }
+
+    // Update estimated fetch time immediately on dataset selection
+    const selectedValue = event.target.value;
+    const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
+    if (selectedDataset && selectedDataset.estimateActionCostSecs != null) {
+      updateEstimatedFetchTime(selectedDataset.estimateActionCostSecs);
+    } else {
+      updateEstimatedFetchTime(null);
+    }
   });
 
 document.getElementById("node-filter").addEventListener("change", () => {
@@ -409,6 +419,16 @@ const initialDiagSource = document.getElementById("diagnostic-source-filter").va
 populateDiagnosticFilterBySource(initialDiagSource);
 applyLegendLineStylesFromConstants();
 await loadStaticLabelMap();
+
+// Initialize estimated fetch time from the initially selected dataset
+const initialDatasetValue = document.getElementById("dataset-select").value;
+if (initialDatasetValue) {
+  const initialDataset = DATASET_REGISTRY.find((entry) => entry.value === initialDatasetValue);
+  if (initialDataset && initialDataset.estimateActionCostSecs != null) {
+    updateEstimatedFetchTime(initialDataset.estimateActionCostSecs);
+  }
+}
+
 // do not auto-load on startup; prompt the user instead.
 document.getElementById("view-status-line-content").textContent =
   "Showing: no dataset loaded. Select a dataset and click Fetch.";
@@ -524,6 +544,17 @@ function _setStatusSpans(ids, text) {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
   });
+}
+
+// Update estimated fetch time from dataset registry
+function updateEstimatedFetchTime(estimateSeconds) {
+  const el = document.getElementById("fetch-timetaken-value");
+  if (!el) return;
+  if (estimateSeconds == null || !Number.isFinite(estimateSeconds)) {
+    el.textContent = "—";
+  } else {
+    el.textContent = `~${Math.ceil(estimateSeconds)}s`;
+  }
 }
 
 // Fetch dataset function

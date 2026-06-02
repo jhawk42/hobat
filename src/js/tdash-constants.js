@@ -235,7 +235,7 @@ export const NODE_FILTER_OPTIONS = Object.freeze([
   },
   {
     value: "mtd-devices",
-    label: "Minimal Thread Devices",
+    label: "Sleepy End Devices",
     group: null,
     topoNodeField: "mode_device",
     topoNodeValue: "MTD",

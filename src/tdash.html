@@ -11,8 +11,8 @@
 
   <!--
   Sourced from local copies in js/depend/ for offline use and to ensure stability.
-  Can be switched to CDN if needed:
-  
+ 
+  Can be switched to CDN: 
   vis:      https://unpkg.com/vis-network/standalone/umd/vis-network.min.js
   sortable: https://cdn.jsdelivr.net/gh/tofsjonas/sortable@latest/sortable.min.js
   -->
@@ -34,23 +34,23 @@
     <!-- Fetch device status and network health bar -->
     <div id="device-status" role="status" aria-live="polite">
       <!--
-        Fetched Devices: nn Border Routers: nn Routers: nn Child nodes: nn Links: LQ3: nn nn LQ2: nn LQ1: nn 
-        Fetched: 🖥 12 Nodes | 🛤 3 Border Routers | NN Routers |NN Child nodes| ⚠ 2 Low-Quality Links | 
+        Devices: nn Border Routers: nn Routers: nn Child nodes: nn Links: LQ3: nn nn LQ2: nn LQ1: nn 
+        Devices: 🖥 12 Nodes | 🛤 3 Border Routers | NN Routers |NN Child nodes| ⚠ 2 Low-Quality Links | 
         -->
       <fieldset class="cache-options" id="fieldset-devices">
         <legend><button class="legend-toggle-btn" id="btn-toggle-devices" aria-expanded="true"><span
               class="legend-toggle-arrow">▶</span>Devices</button></legend>
         <label title="Fetched number of devices in the dataset">
-          <span id="device-status-devices">Total: <span id="device-count">0</span></span>
+          <span id="device-status-devices">⛬ Total: <span id="device-count">0</span></span>
         </label>
         <label title="Fetched number of border routers in the dataset">
           <span id="device-status-brs">🛜 Border Routers: <span id="br-count">0</span></span>
         </label>
         <label title="Fetched number of routers in the dataset">
-          <span id="device-status-routers">Routers: <span id="router-count">0</span></span>
+          <span id="device-status-routers">⛖ Routers: <span id="router-count">0</span></span>
         </label>
         <label title="Fetched number of child nodes in the dataset">
-          <span id="device-status-children">Child nodes: <span id="child-count">0</span></span>
+          <span id="device-status-children">⏺ Child nodes: <span id="child-count">0</span></span>
         </label>
         <label title="Fetched number of links in the dataset">
           <span id="device-status-links"> 📶 Links: <span id="link-count">0</span></span>
@@ -87,7 +87,7 @@
           </div>
           <div class="control-pair control-pair-dataset">
             <label for="dataset-select" title="Select a dataset for the mesh network">Dataset</label>
-            <select id="dataset-select" title="Select a dataset for the mesh network">
+            <select id="dataset-select" title="Select a dataset for the mesh network. Datasets with ⏰ may take time (mins) to fetch if not cached.">
               <!-- populated by JS from DATASET_REGISTRY -->
             </select>
           </div>
@@ -96,8 +96,8 @@
         <!-- Fetch status -->
         <fieldset id="fetch-status" role="status" aria-live="polite" class="cache-options">
           <legend><button class="legend-toggle-btn" id="btn-toggle-status" aria-expanded="true">
-            <span class="legend-toggle-arrow">▶</span>Status
-          </button></legend>
+              <span class="legend-toggle-arrow">▶</span>Status
+            </button></legend>
 
           <!-- Status details -->
           <div class="status-row">
@@ -120,7 +120,7 @@
             <div id="fetch-status-line-content" role="status" aria-live="polite">
               Select a dataset to load and press Fetch.
             </div>
-          </div>          
+          </div>
         </fieldset>
 
         <fieldset class="cache-options collapsed" id="fieldset-cache">
@@ -136,10 +136,7 @@
             <input type="checkbox" id="chk-only-cache" /> Only Cache
           </label>
         </fieldset>
-
-
       </div>
-
     </div>
 
     <!-- Filters bar -->
@@ -153,12 +150,14 @@
         <div class="controls">
           <div id="search-control-bar" class="control-pair control-pair-search">
             <label for="search-input">Search</label>
-            <input type="text" id="search-input" placeholder="extaddr, rloc16, device_label …" title="Search device records by extaddr, rloc16, device_label, name, room, role, version, or other identity fields. Press Enter to search." />
+            <input type="text" id="search-input" placeholder="extaddr, rloc16, device_label …"
+              title="Search device records by extaddr, rloc16, device_label, name, room, role, version, or other identity fields. Press Enter to search." />
             <button id="btn-search-clear" title="Clear search and reset results">✕</button>
           </div>
 
           <fieldset class="cache-options collapsed" id="fieldset-node-link-filters">
-            <legend><button class="legend-toggle-btn" id="btn-toggle-node-link-filters" aria-expanded="false"><span class="legend-toggle-arrow">▶</span>Nodes &amp; Links</button></legend>
+            <legend><button class="legend-toggle-btn" id="btn-toggle-node-link-filters" aria-expanded="false"><span
+                  class="legend-toggle-arrow">▶</span>Nodes &amp; Links</button></legend>
             <div class="control-pair control-pair-source">
               <label for="node-filter" title="Filter devices by type or role">Devices</label>
               <select id="node-filter" title="Filter devices by type or role">
@@ -174,7 +173,8 @@
           </fieldset>
 
           <fieldset class="cache-options collapsed" id="fieldset-diag-filters">
-            <legend><button class="legend-toggle-btn" id="btn-toggle-diag-filters" aria-expanded="false"><span class="legend-toggle-arrow">▶</span>Diagnostics</button></legend>
+            <legend><button class="legend-toggle-btn" id="btn-toggle-diag-filters" aria-expanded="false"><span
+                  class="legend-toggle-arrow">▶</span>Diagnostics</button></legend>
             <div class="control-pair control-pair-source">
               <label for="diagnostic-source-filter" title="Filter diagnostics by source">Source</label>
               <select id="diagnostic-source-filter" title="Filter diagnostics by source">
@@ -185,7 +185,8 @@
 ">MLE Counters</option>
                 <option value="time_statistics"
                   title="Time statistics track various time-related metrics in the network.">Time Statistics</option>
-                <option value="link_quality" title="Link quality metrics track the quality of links between devices.">Link
+                <option value="link_quality" title="Link quality metrics track the quality of links between devices.">
+                  Link
                   Quality</option>
               </select>
               <label for="diagnostic-filter" title="Filter diagnostics by type or severity">Diagnostics</label>
@@ -292,7 +293,7 @@
         </ul>
         <h2>Keys:</h2>
         <ul id="identity-list" class="node-details-list"
-          data-fields="rloc16,extaddr,extAddress,device_label,name,routerId,router_id,eui64,mlEidIid,omr_ipv6_addr,omrIpv6Address,id,ID">
+          data-fields="rloc16,extaddr,extAddress,device_label,name,routerId,router_id,eui64,mlEidIid,omr_ipv6_addr,omrIpv6Address,id,ID,graph.unified_id">
         </ul>
         <h2>Highlights:</h2>
         <ul id="highlights-list" class="node-details-list"
@@ -312,7 +313,8 @@
         </ul>
 
         <h2>Routes & Links:</h2>
-        <ul id="routes-links-list" class="node-details-list" data-fields="routes,route,route.routeData,route_data,route_data.route_data,route_data.routeData,3_links,2_links,1_links">
+        <ul id="routes-links-list" class="node-details-list"
+          data-fields="routes,route,route.routeData,route_data,route_data.route_data,route_data.routeData,3_links,2_links,1_links">
         </ul>
 
         <h2>Neighbors:</h2>
@@ -320,7 +322,8 @@
         </ul>
 
         <h2>Children:</h2>
-        <ul id="children-list" class="node-details-list" data-fields="children,router_child_table,childTable,childIpv6Addresses">
+        <ul id="children-list" class="node-details-list"
+          data-fields="children,router_child_table,childTable,childIpv6Addresses">
         </ul>
 
         <h2>Counters:</h2>
@@ -336,5 +339,4 @@
 
   <script type="module" src="js/tdash-ui.js"></script>
 </body>
-
 </html>
