@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from merge_extaddr_file_into_static_map import merge_extaddr_files
+from merge_extaddr_device_label_map import merge_extaddr_files
 
 
 class MergeExtaddrFilesTests(unittest.TestCase):

@@ -119,6 +119,7 @@ class TestResolveCollectorRuntime:
     
     def test_resolves_with_explicit_datadir_arg(self, tmp_path, monkeypatch):
         """Should use explicit datadir_arg when provided."""
+        monkeypatch.delenv("TD_DATA_DIR", raising=False)
         custom_datadir = tmp_path / "custom_data"
         custom_datadir.mkdir()
         
@@ -147,8 +148,9 @@ class TestResolveCollectorRuntime:
         assert runtime.extaddr_map_path.name == EXTADDR_DEVICE_LABEL_MAP_FILENAME
         assert runtime.output_path.name == "test-output.json"
     
-    def test_output_path_is_none_when_filename_not_provided(self, tmp_path):
+    def test_output_path_is_none_when_filename_not_provided(self, tmp_path, monkeypatch):
         """Should set output_path to None when default_output_filename is None."""
+        monkeypatch.delenv("TD_DATA_DIR", raising=False)
         custom_datadir = tmp_path / "data"
         custom_datadir.mkdir()
         
@@ -161,8 +163,9 @@ class TestResolveCollectorRuntime:
         assert runtime.extaddr_map_path == custom_datadir / EXTADDR_DEVICE_LABEL_MAP_FILENAME
         assert runtime.output_path is None
     
-    def test_extaddr_map_path_always_resolved(self, tmp_path):
+    def test_extaddr_map_path_always_resolved(self, tmp_path, monkeypatch):
         """Should always resolve extaddr_map_path even if file doesn't exist."""
+        monkeypatch.delenv("TD_DATA_DIR", raising=False)
         custom_datadir = tmp_path / "data"
         custom_datadir.mkdir()
         
@@ -230,8 +233,9 @@ class TestResolveCollectorRuntime:
 class TestIntegrationScenario:
     """Integration tests combining multiple helper functions."""
     
-    def test_typical_collector_workflow(self, tmp_path):
+    def test_typical_collector_workflow(self, tmp_path, monkeypatch):
         """Test typical OTBR CLI collector initialization pattern."""
+        monkeypatch.delenv("TD_DATA_DIR", raising=False)
         # Setup test data
         datadir = tmp_path / "data"
         datadir.mkdir()

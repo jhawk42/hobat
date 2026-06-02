@@ -248,6 +248,14 @@ def get_canonical_omr(record: dict[str, Any]) -> str:
     )
 
 
+def is_placeholder_extaddr(value: Any) -> bool:
+    """Return True for known non-identity extaddr placeholder values."""
+    if not isinstance(value, str):
+        return False
+    normalized = normalize_identifier_text(value)
+    return normalized in {"", "0000000000000000"}
+
+
 def normalize_record_aliases(record: dict[str, Any]) -> dict[str, Any]:
     extaddr = get_canonical_extaddr(record)
     omr_addr = get_canonical_omr(record)
@@ -1151,6 +1159,9 @@ def deep_merge(
             base[key] = merge_lists(cur, value)
         elif value_is_empty(cur) and not value_is_empty(value):
             base[key] = deepcopy(value)
+        elif key in ("extaddr", "extAddress", "Extended MAC") and is_placeholder_extaddr(cur) and not is_placeholder_extaddr(value):
+            # Prefer a concrete extaddr over known placeholder values.
+            base[key] = deepcopy(value)
         elif (
             not value_is_empty(cur)
             and not value_is_empty(value)
@@ -1246,6 +1257,36 @@ def add_identifier(
         index[key] = node_id
 
 
+def filter_candidate_ids_for_extaddr_consistency(
+    candidate_ids: set[int],
+    incoming_extaddr: str,
+    nodes: dict[int, dict[str, Any]],
+) -> set[int]:
+    """Keep only candidate nodes that do not conflict with incoming concrete extaddr."""
+    if not incoming_extaddr:
+        return candidate_ids
+
+    filtered: set[int] = set()
+    for node_id in candidate_ids:
+        node = nodes.get(node_id)
+        if not isinstance(node, dict):
+            continue
+
+        node_extaddr = get_canonical_extaddr(node)
+        if not node_extaddr:
+            filtered.add(node_id)
+            continue
+
+        if is_placeholder_extaddr(node_extaddr):
+            filtered.add(node_id)
+            continue
+
+        if node_extaddr == incoming_extaddr:
+            filtered.add(node_id)
+
+    return filtered
+
+
 def merge_nodes(
     target_id: int,
     source_id: int,
@@ -1314,6 +1355,15 @@ def build_merged_records(
             candidate_ids = find_candidate_node_ids(
                 identity_values, by_rloc16, by_extaddr, by_omr
             )
+
+            # Guard against collapsing distinct devices that only share weak identities
+            # (e.g. reused rloc16/OMR) but have conflicting concrete extaddr values.
+            if isinstance(extaddr, str) and not is_placeholder_extaddr(extaddr):
+                candidate_ids = filter_candidate_ids_for_extaddr_consistency(
+                    candidate_ids,
+                    extaddr,
+                    nodes,
+                )
 
             if not candidate_ids:
                 node_id = next_id

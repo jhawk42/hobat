@@ -82,7 +82,7 @@ def resolve_data_dir_with_source(
 ) -> TDDataDirResolution:
     """Resolve td_data_dir and include resolution metadata.
 
-    Precedence is environment, then CLI argument, then defaults.
+    Precedence: environment variable, then explicit CLI argument, then defaults.
     """
     env_map = os.environ if env is None else env
     base_cwd = _normalize_path(cwd or Path.cwd())

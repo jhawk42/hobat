@@ -14,8 +14,10 @@ import sys
 import json
 import time
 import tracemalloc
+import traceback
 from pathlib import Path
 from typing import Any
+import pytest
 
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -26,14 +28,15 @@ from merge_dataset import main as merge_dataset_main
 # Test data directory
 DATA_DIR = Path(__file__).parent.parent / "data"
 TEST_OUTPUT_DIR = Path(__file__).parent.parent / "data"
+PLACEHOLDER_EXTADDRS = {"0000000000000000"}
 
 
 # =============================================================================
 # Test 1: End-to-End Merge with Real Data
 # =============================================================================
 
-def test_e2e_merge_with_real_data():
-    """Test full merge pipeline with real captured JSON files."""
+def _run_e2e_merge_with_real_data() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Run the full merge pipeline and return merged/report data."""
     print("\n=== Test: End-to-End Merge with Real Data ===")
     
     # Backup existing merged file if it exists
@@ -98,6 +101,30 @@ def test_e2e_merge_with_real_data():
             print(f"  Restoring backup from {backup_file}")
             output_file.unlink()
             backup_file.rename(output_file)
+
+
+@pytest.fixture(scope="module")
+def merged_bundle() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Run merge once for module-level tests that validate merged output."""
+    return _run_e2e_merge_with_real_data()
+
+
+@pytest.fixture(scope="module")
+def merged_data(merged_bundle: tuple[list[dict[str, Any]], dict[str, Any]]) -> list[dict[str, Any]]:
+    return merged_bundle[0]
+
+
+@pytest.fixture(scope="module")
+def report_data(merged_bundle: tuple[list[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+    return merged_bundle[1]
+
+
+def test_e2e_merge_with_real_data(merged_data: list[dict[str, Any]], report_data: dict[str, Any]):
+    """Test full merge pipeline with real captured JSON files."""
+    assert isinstance(merged_data, list)
+    assert len(merged_data) > 0
+    assert isinstance(report_data, dict)
+    assert report_data.get("total_merged_nodes") == len(merged_data)
 
 
 # =============================================================================
@@ -217,17 +244,15 @@ def test_performance_benchmarking():
     
     print("  ✅ PASS: Performance is acceptable")
     
-    return {
-        "execution_time_seconds": execution_time,
-        "peak_memory_mb": peak_memory_mb,
-    }
+    assert execution_time >= 0.0
+    assert peak_memory_mb >= 0.0
 
 
 # =============================================================================
 # Test 4: Data Loss Detection
 # =============================================================================
 
-def test_data_loss_detection():
+def test_data_loss_detection(merged_data: list[dict[str, Any]]):
     """Detect potential data loss during merge."""
     print("\n=== Test: Data Loss Detection ===")
     
@@ -266,29 +291,30 @@ def test_data_loss_detection():
                         if isinstance(record, dict):
                             extaddr = record.get("extaddr") or record.get("extAddress")
                             if extaddr:
-                                input_extaddrs.add(extaddr)
+                                normalized = str(extaddr).strip().lower()
+                                if normalized and normalized not in PLACEHOLDER_EXTADDRS:
+                                    input_extaddrs.add(normalized)
                 elif isinstance(data, dict):
                     total_input_records += 1
                     extaddr = data.get("extaddr") or data.get("extAddress")
                     if extaddr:
-                        input_extaddrs.add(extaddr)
+                        normalized = str(extaddr).strip().lower()
+                        if normalized and normalized not in PLACEHOLDER_EXTADDRS:
+                            input_extaddrs.add(normalized)
             except json.JSONDecodeError:
                 print(f"  ⚠️  Could not parse: {filename}")
     
     print(f"  Total input records: {total_input_records}")
     print(f"  Unique extaddrs in inputs: {len(input_extaddrs)}")
     
-    # Load merged output
-    merged_file = TEST_OUTPUT_DIR / "td-merged-topology-all.json"
-    with merged_file.open("r") as f:
-        merged_data = json.load(f)
-    
     merged_extaddrs = set()
     for node in merged_data:
         if isinstance(node, dict):
             extaddr = node.get("extaddr") or node.get("extAddress")
             if extaddr:
-                merged_extaddrs.add(extaddr)
+                normalized = str(extaddr).strip().lower()
+                if normalized and normalized not in PLACEHOLDER_EXTADDRS:
+                    merged_extaddrs.add(normalized)
     
     print(f"  Merged output nodes: {len(merged_data)}")
     print(f"  Unique extaddrs in output: {len(merged_extaddrs)}")
@@ -318,19 +344,9 @@ def test_data_loss_detection():
 # Test 5: Backward Compatibility Verification
 # =============================================================================
 
-def test_backward_compatibility():
+def test_backward_compatibility(merged_data: list[dict[str, Any]]):
     """Verify backward compatibility with existing merged files."""
     print("\n=== Test: Backward Compatibility ===")
-    
-    # Load the merged file
-    merged_file = TEST_OUTPUT_DIR / "td-merged-topology-all.json"
-    
-    if not merged_file.exists():
-        print("  ⚠️  No merged file to test backward compatibility")
-        return
-    
-    with merged_file.open("r") as f:
-        merged_data = json.load(f)
     
     # Verify expected structure
     assert isinstance(merged_data, list), "Merged data should be a list (backward compatible)"
@@ -410,13 +426,13 @@ def run_all_tests():
     print("=" * 70)
     
     # Test 1: Run full merge with real data
-    merged_data, report_data = test_e2e_merge_with_real_data()
+    merged_data, report_data = _run_e2e_merge_with_real_data()
     
     # Test 2: Validate merged output correctness
     test_validate_merged_output_correctness(merged_data)
     
     # Test 3: Performance benchmarking
-    perf_metrics = test_performance_benchmarking()
+    test_performance_benchmarking()
     
     # Test 4: Data loss detection
     test_data_loss_detection()

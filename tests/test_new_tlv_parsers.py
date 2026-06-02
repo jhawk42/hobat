@@ -7,6 +7,7 @@ Tests the 8 new parsing functions added for TLVs: 23, 4, 6, 24, 25, 26, 27, 5
 
 import sys
 import os
+import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -23,7 +24,7 @@ from otbr_cli_networkdiag_topology import (
 )
 
 
-class TestResults:
+class ResultsTracker:
     """Simple test results tracker."""
     def __init__(self):
         self.passed = 0
@@ -40,6 +41,7 @@ class TestResults:
             print(f"✗ {test_name}")
             print(f"  Expected: {expected}")
             print(f"  Got: {actual}")
+            raise AssertionError(f"{test_name}: expected {expected!r}, got {actual!r}")
     
     def assert_none(self, actual, test_name):
         self.assert_equal(actual, None, test_name)
@@ -56,6 +58,7 @@ class TestResults:
             self.failures.append(test_name)
             print(f"✗ {test_name}")
             print(f"  Key '{key}' not found in dict")
+            raise AssertionError(f"{test_name}: key {key!r} not found")
     
     def summary(self):
         total = self.passed + self.failed
@@ -69,6 +72,11 @@ class TestResults:
         else:
             print("All tests passed! ✓")
             return 0
+
+
+@pytest.fixture
+def results():
+    return ResultsTracker()
 
 
 def test_parse_eui64(results):
@@ -227,7 +235,7 @@ def test_example_file_7c00(results):
     """Test parsing against test_tlvs_7c00.txt example file."""
     print("\n--- Testing test_tlvs_7c00.txt ---")
     
-    file_path = os.path.join(os.path.dirname(__file__), '..', 'test', 'test_tlvs_7c00.txt')
+    file_path = os.path.join(os.path.dirname(__file__), '..', 'tests', 'test_tlvs_7c00.txt')
     if not os.path.exists(file_path):
         print(f"Warning: {file_path} not found, skipping")
         return
@@ -265,7 +273,7 @@ def test_example_file_6000(results):
     """Test parsing against test_tlvs_6000.txt example file (empty vendor fields)."""
     print("\n--- Testing test_tlvs_6000.txt ---")
     
-    file_path = os.path.join(os.path.dirname(__file__), '..', 'test', 'test_tlvs_6000.txt')
+    file_path = os.path.join(os.path.dirname(__file__), '..', 'tests', 'test_tlvs_6000.txt')
     if not os.path.exists(file_path):
         print(f"Warning: {file_path} not found, skipping")
         return
@@ -295,7 +303,7 @@ def test_multicast_integration(results):
     """Test parse_multicast_diag_output integration with new TLV fields."""
     print("\n--- Testing multicast integration ---")
     
-    file_path = os.path.join(os.path.dirname(__file__), '..', 'test', 'test_tlvs_7c00.txt')
+    file_path = os.path.join(os.path.dirname(__file__), '..', 'tests', 'test_tlvs_7c00.txt')
     if not os.path.exists(file_path):
         print(f"Warning: {file_path} not found, skipping")
         return
@@ -333,7 +341,7 @@ def main():
     print("Phase 3: TLV Parsing Tests")
     print("="*60)
     
-    results = TestResults()
+    results = ResultsTracker()
     
     # Unit tests for each parser
     test_parse_eui64(results)

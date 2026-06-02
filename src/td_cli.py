@@ -181,10 +181,35 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
     otbr_cli_sub.add_parser("all", help="Run all otbr-cli scans")
 
     # mdns
-    subparsers.add_parser(
+    mdns_p = subparsers.add_parser(
         "mdns",
         help="Scan Thread-related mDNS scopes",
-        add_help=False,
+    )
+    mdns_p.add_argument(
+        "mdns_scope",
+        nargs="?",
+        default="thread",
+        choices=["thread", "br", "hap", "matter"],
+        help="mDNS scope to query (default: thread)",
+    )
+    mdns_p.add_argument(
+        "--browse-timeout",
+        type=float,
+        default=None,
+        dest="browse_timeout",
+        help="Browse timeout in seconds forwarded to mdns_thread_scopes",
+    )
+    mdns_p.add_argument(
+        "--haptcp",
+        action="store_true",
+        default=False,
+        help="Include _hap._tcp service scope",
+    )
+    mdns_p.add_argument(
+        "--mattertcpsupported",
+        action="store_true",
+        default=False,
+        help="Include _matterc._udp scope",
     )
 
 
@@ -473,7 +498,15 @@ def dispatch(
 
     # --- mdns ---
     if args.command == "mdns":
-        return mdns_thread_scopes.main(_forward_with_datadir(extra_args)) or 0
+        mdns_argv: list[str] = [getattr(args, "mdns_scope", "thread")]
+        if getattr(args, "browse_timeout", None) is not None:
+            mdns_argv += ["--browse-timeout", str(args.browse_timeout)]
+        if getattr(args, "haptcp", False):
+            mdns_argv.append("--haptcp")
+        if getattr(args, "mattertcpsupported", False):
+            mdns_argv.append("--mattertcpsupported")
+        mdns_argv += list(extra_args)
+        return mdns_thread_scopes.main(_forward_with_datadir(mdns_argv)) or 0
 
     # --- otbr-restapi ---
     if args.command == "otbr-restapi":

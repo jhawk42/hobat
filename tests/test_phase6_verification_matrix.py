@@ -115,7 +115,9 @@ class DirectModuleInvocationTests(unittest.TestCase):
     """Verification coverage for direct module entry points bypassing td_cli."""
 
     def test_case_6b_restapi_download_main_uses_datadir_arg_directly(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.dict("os.environ", {}, clear=False) as env_patch:
+            env_patch.pop("TD_DATA_DIR", None)
             datadir = Path(tmpdir) / "direct-entry-dir"
             expected = datadir.resolve()
 

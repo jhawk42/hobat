@@ -19,7 +19,7 @@ def test_multicast_to_json_output_has_all_fields():
     """Verify that multicast parsing → JSON output includes all new TLV fields."""
     
     # Load real multicast output from example file
-    example_file = os.path.join(os.path.dirname(__file__), '..', 'test', 'test_tlvs_7c00.txt')
+    example_file = os.path.join(os.path.dirname(__file__), '..', 'tests', 'test_tlvs_7c00.txt')
     with open(example_file, 'r') as f:
         multicast_output = f.read()
     
@@ -132,7 +132,7 @@ def test_multicast_to_json_output_has_all_fields():
 def test_device_with_empty_vendor_fields():
     """Test device with empty vendor fields (test_tlvs_6000.txt)."""
     
-    example_file = os.path.join(os.path.dirname(__file__), '..', 'test', 'test_tlvs_6000.txt')
+    example_file = os.path.join(os.path.dirname(__file__), '..', 'tests', 'test_tlvs_6000.txt')
     with open(example_file, 'r') as f:
         multicast_output = f.read()
     
