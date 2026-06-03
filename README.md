@@ -29,7 +29,7 @@ The tdash tools provide:
     - Thread link quality: LQ3, LQ2, LQ1. Ratio of LQ3 to total links, etc.
     - Diagnostics filters to find thread nodes that need attention: MAC counters (packets, frame errors, etc) and MLE counters (partition changes, parent attempt changes, role time durations, etc)
 - Python webserver for the hosting the thread dashboard, tdash restapi endpoint for servicing requests from the tdash dashboard for cached data, launching the tdash cli to refetch data from the thread network into the data cache.
-- Simple JSON file for a device labeling mechanism using a Extended MAC Address extadd to device_label lookup file. See [Device Labeling](#setup-device-labeling) below for details.
+- Labeling for thread devices using a simple JSON file mechanism using a Extended MAC Address (extaddr) to device_label lookup file. See [Device Labeling](#setup-device-labeling) below for details.
 
 ## Dataset Sources
 - otbr-cli: Fetches info from an OpenThread Border Router (OTBR) instance via ot-ctl commands for thread device info. By default use docker exec to call into the "otbr" docker container. Also support calling otbr on the host. Common ot-ctl commands used:
