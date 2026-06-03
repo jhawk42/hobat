@@ -50,6 +50,30 @@ const _ALIAS_TO_CANONICAL = (() => {
   return map;
 })();
 
+function _getFieldNameCandidates(fieldName) {
+  const canonical = getCanonicalFieldName(fieldName);
+  const canonicalAliases = FIELD_ALIASES[canonical] ?? [];
+  const aliasCanonical = _ALIAS_TO_CANONICAL.get(fieldName);
+  const aliasCanonicalAliases = aliasCanonical
+    ? FIELD_ALIASES[aliasCanonical] ?? []
+    : [];
+  return [...new Set([
+    fieldName,
+    canonical,
+    ...canonicalAliases,
+    ...aliasCanonicalAliases,
+  ])];
+}
+
+function _getOwnPropertyValueByAlias(obj, fieldName) {
+  for (const candidate of _getFieldNameCandidates(fieldName)) {
+    if (Object.prototype.hasOwnProperty.call(obj, candidate)) {
+      return obj[candidate];
+    }
+  }
+  return undefined;
+}
+
 /** Returns the canonical (snake_case) form of a field name, or the name itself if unknown. */
 export function getCanonicalFieldName(fieldName) {
   return _ALIAS_TO_CANONICAL.get(fieldName) ?? fieldName;
@@ -672,15 +696,13 @@ export function areNodeIdsEquivalent(a, b) {
 // Returns true if `row` contains a value at the given dot-separated `path`.
 export function hasNestedPath(row, path) {
   if (!path.includes("."))
-    return Object.prototype.hasOwnProperty.call(row, path);
+    return _getOwnPropertyValueByAlias(row, path) !== undefined;
   let current = row;
   for (const part of path.split(".")) {
-    if (
-      !isPlainObject(current) ||
-      !Object.prototype.hasOwnProperty.call(current, part)
-    )
-      return false;
-    current = current[part];
+    if (!isPlainObject(current)) return false;
+    const next = _getOwnPropertyValueByAlias(current, part);
+    if (next === undefined) return false;
+    current = next;
   }
   return true;
 }
@@ -688,17 +710,15 @@ export function hasNestedPath(row, path) {
 // Returns the value at a dot-separated `columnName` path within `row`, or
 // `undefined` if any segment is missing.
 export function getColumnValue(row, columnName) {
-  if (Object.prototype.hasOwnProperty.call(row, columnName))
-    return row[columnName];
+  const direct = _getOwnPropertyValueByAlias(row, columnName);
+  if (direct !== undefined) return direct;
   if (!columnName.includes(".")) return undefined;
   let current = row;
   for (const part of columnName.split(".")) {
-    if (
-      !isPlainObject(current) ||
-      !Object.prototype.hasOwnProperty.call(current, part)
-    )
-      return undefined;
-    current = current[part];
+    if (!isPlainObject(current)) return undefined;
+    const next = _getOwnPropertyValueByAlias(current, part);
+    if (next === undefined) return undefined;
+    current = next;
   }
   return current;
 }

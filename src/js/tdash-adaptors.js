@@ -10,7 +10,8 @@ import {
   toText, toFiniteNumber, isPlainObject,
   getCanonicalRloc16, getCanonicalExtaddr,
   getCanonicalOmrIpv6Address,
-  mergeForDisplay
+  mergeForDisplay,
+  getColumnValue
 } from './tdash-utils.js';
 import {
   chooseNodeId, buildLabel,
@@ -93,19 +94,15 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     const existingIpv6 = existing && Array.isArray(existing.ipv6_addrs) ? existing.ipv6_addrs : [];
     const mergedIpv6 = rawIpv6.length > 0 ? rawIpv6 : existingIpv6;
     const rawChildren = Array.isArray(rawNode.children) ? rawNode.children : [];
-    const rawPacketErrorDiscardPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.ifindiscards_pct)
-      ? rawNode.mac_counters.ifindiscards_pct : undefined;
-    const rawInerrorsPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.ifinerrors_pct)
-      ? rawNode.mac_counters.ifinerrors_pct : undefined;
-    const rawOuterrorsPct = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.ifouterrors_pct)
-      ? rawNode.mac_counters.ifouterrors_pct : undefined;
+    const getRawMetric = (path) => toFiniteNumber(getColumnValue(rawNode, path));
+    const rawPacketErrorDiscardPct = getRawMetric('mac_counters.ifindiscards_pct');
+    const rawInerrorsPct = getRawMetric('mac_counters.ifinerrors_pct');
+    const rawOuterrorsPct = getRawMetric('mac_counters.ifouterrors_pct');
     const rawModeDevice = rawNode.mode && toText(rawNode.mode.device)
       ? toText(rawNode.mode.device)
       : (rawNode.mode?.deviceTypeFTD === true ? 'FTD' : (rawNode.mode?.deviceTypeFTD === false ? 'MTD' : ''));
-    const rawPartitionIdChanges = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.partitionidchanges)
-      ? rawNode.mle_counters.partitionidchanges : undefined;
-    const rawParentChanges = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.parentchanges)
-      ? rawNode.mle_counters.parentchanges : undefined;
+    const rawPartitionIdChanges = getRawMetric('mle_counters.partitionidchanges');
+    const rawParentChanges = getRawMetric('mle_counters.parentchanges');
     // Phase 1a: new fields
     const mergedTotalLink3 = Number.isFinite(rawNode.total_link_3) ? rawNode.total_link_3
       : (existing && Number.isFinite(existing.total_link_3) ? existing.total_link_3 : undefined);
@@ -129,18 +126,12 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
         if (lqNum === 1) hasChildLqPoor = true;
       }
     });
-    const rawTotalErrorsRatio = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotalerrors_totalpkts_ratio)
-      ? rawNode.mac_counters.iftotalerrors_totalpkts_ratio : undefined;
-    const rawTotalDiscardsRatio = rawNode.mac_counters && Number.isFinite(rawNode.mac_counters.iftotaldiscards_totalpkts_ratio)
-      ? rawNode.mac_counters.iftotaldiscards_totalpkts_ratio : undefined;
-    const rawBetterPartition = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.betterpartitionattachattempts)
-      ? rawNode.mle_counters.betterpartitionattachattempts : undefined;
-    const rawTotalParentPartition = rawNode.mle_counters && Number.isFinite(rawNode.mle_counters.totalparentpartitionchanges)
-      ? rawNode.mle_counters.totalparentpartitionchanges : undefined;
-    const rawRouterPct = rawNode.time_statistics && Number.isFinite(rawNode.time_statistics.router_pct)
-      ? rawNode.time_statistics.router_pct : undefined;
-    const rawDetachedDisabledPct = rawNode.time_statistics && Number.isFinite(rawNode.time_statistics.detached_disabled_pct)
-      ? rawNode.time_statistics.detached_disabled_pct : undefined;
+    const rawTotalErrorsRatio = getRawMetric('mac_counters.iftotalerrors_totalpkts_ratio');
+    const rawTotalDiscardsRatio = getRawMetric('mac_counters.iftotaldiscards_totalpkts_ratio');
+    const rawBetterPartition = getRawMetric('mle_counters.betterpartitionattachattempts');
+    const rawTotalParentPartition = getRawMetric('mle_counters.totalparentpartitionchanges');
+    const rawRouterPct = getRawMetric('time_statistics.router_pct');
+    const rawDetachedDisabledPct = getRawMetric('time_statistics.detached_disabled_pct');
     const merged = {
       id: nodeId,
       device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
@@ -1009,6 +1000,7 @@ export function adaptOtbrRestApi(fileMap) {
 
   function upsertOtbrRestApiNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
+    const getRawMetric = (path) => toFiniteNumber(getColumnValue(rawNode, path));
     const roleText = toText(rawNode.role).toLowerCase();
     const isChildLike = roleText === 'child' || roleText.includes('sleepy');
     const modeDevice = rawNode.mode?.deviceTypeFTD === true ? 'FTD'
@@ -1024,11 +1016,28 @@ export function adaptOtbrRestApi(fileMap) {
       type: roleText || toText(rawNode.type) || (existing ? existing.type : ''),
       mode_device: modeDevice || (existing ? existing.mode_device : ''),
       omr_ipv6_addr: toText(rawNode.omr_ipv6_addr) || (existing ? existing.omr_ipv6_addr : ''),
+      iftotalerrors_totalpkts_ratio: getRawMetric('mac_counters.iftotalerrors_totalpkts_ratio')
+        ?? (existing ? existing.iftotalerrors_totalpkts_ratio : undefined),
+      iftotaldiscards_totalpkts_ratio: getRawMetric('mac_counters.iftotaldiscards_totalpkts_ratio')
+        ?? (existing ? existing.iftotaldiscards_totalpkts_ratio : undefined),
+      partitionidchanges: getRawMetric('mle_counters.partitionidchanges')
+        ?? (existing ? existing.partitionidchanges : undefined),
+      parentchanges: getRawMetric('mle_counters.parentchanges')
+        ?? (existing ? existing.parentchanges : undefined),
+      betterpartitionattachattempts: getRawMetric('mle_counters.betterpartitionattachattempts')
+        ?? (existing ? existing.betterpartitionattachattempts : undefined),
+      totalparentpartitionchanges: getRawMetric('mle_counters.totalparentpartitionchanges')
+        ?? (existing ? existing.totalparentpartitionchanges : undefined),
+      router_pct: getRawMetric('time_statistics.router_pct')
+        ?? (existing ? existing.router_pct : undefined),
+      detached_disabled_pct: getRawMetric('time_statistics.detached_disabled_pct')
+        ?? (existing ? existing.detached_disabled_pct : undefined),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_otbr_restapi: true,
       shape: style.shape || (existing ? existing.shape : (isChildLike ? 'ellipse' : 'box')),
       color: style.color || (existing ? existing.color : NODE_COLORS.router)
     };
+    merged.is_ftd_router = merged.mode_device === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
     if (merged.br) merged.color = NODE_COLORS.borderRouter;
     nodeMap.set(nodeId, merged);
   }

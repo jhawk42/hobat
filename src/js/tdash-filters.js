@@ -468,6 +468,11 @@ function anyNodesMatchDiagnosticFilter(nodeData, filterMode) {
   return nodeData.some(node => isNodeVisibleByDiagnosticFilter(node, filterMode));
 }
 
+function anyRowsMatchDiagnosticFilter(rows, filterMode) {
+  if (!rows || rows.length === 0) return false;
+  return rows.some((row) => isRowVisibleByDiagnosticFilter(row, filterMode));
+}
+
 // ── Populate diagnostic filter by source with capability checking ──────────────
 //
 // Populates the diagnostic-filter select based on the selected source and the
@@ -476,7 +481,7 @@ function anyNodesMatchDiagnosticFilter(nodeData, filterMode) {
 // 2. Have the required fields in the dataset (capability check)
 // 3. Actually have matching rows in the dataset (data validation check)
 
-export function populateDiagnosticFilterBySourceWithCapabilities(sourceValue, capabilities, nodeData) {
+export function populateDiagnosticFilterBySourceWithCapabilities(sourceValue, capabilities, nodeData, view = "topology") {
   const el = document.getElementById("diagnostic-filter");
   el.innerHTML = "";
 
@@ -539,8 +544,12 @@ export function populateDiagnosticFilterBySourceWithCapabilities(sourceValue, ca
       if (entry.source !== sourceValue) return false;
       if (entry.alwaysShow === true) return true;
       if (diagCapabilityByValue[entry.value] !== true) return false;
-      // Only show if there are actual nodes matching this filter
-      return nodeData ? anyNodesMatchDiagnosticFilter(nodeData, entry.value) : true;
+      // Only show if there are actual matches for this filter in the active view.
+      if (!nodeData) return true;
+      if (view === "table") {
+        return anyRowsMatchDiagnosticFilter(nodeData, entry.value);
+      }
+      return anyNodesMatchDiagnosticFilter(nodeData, entry.value);
     }
   );
 
@@ -720,19 +729,35 @@ export function isNodeVisibleByFilter(node, filterMode) {
   return true;
 }
 
+function getDiagnosticOptionByValue(filterMode) {
+  return DIAGNOSTIC_FILTER_OPTIONS.find((entry) => entry.value === filterMode);
+}
+
+function getNodeDiagnosticMetric(node, filterMode) {
+  const option = getDiagnosticOptionByValue(filterMode);
+  if (!option?.topoNodeField) return undefined;
+  return toFiniteNumber(node?.[option.topoNodeField]);
+}
+
+function getRowDiagnosticMetric(row, filterMode) {
+  const option = getDiagnosticOptionByValue(filterMode);
+  if (!option?.tableRowField) return undefined;
+  return toFiniteNumber(getColumnValue(row, option.tableRowField));
+}
+
 export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
   if (filterMode === "medium-partition-changes")
-    return (
-      Number.isFinite(node.partitionidchanges) && node.partitionidchanges >= 2
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 2;
   if (filterMode === "high-partition-changes")
-    return (
-      Number.isFinite(node.partitionidchanges) && node.partitionidchanges >= 5
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 5;
   if (filterMode === "medium-parent-changes")
-    return Number.isFinite(node.parentchanges) && node.parentchanges >= 2;
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 2;
   if (filterMode === "high-parent-changes")
-    return Number.isFinite(node.parentchanges) && node.parentchanges >= 5;
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 5;
   if (filterMode === "router-neighbor-err-rate-frame-low")
     return (
       Number.isFinite(node.router_neighbor_max_err_rate_frame_pct) &&
@@ -826,47 +851,31 @@ export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
     return node.router_child_has_queued_msgs === true;
   // Mac total errors ratio
   if (filterMode === "mac-total-errors-ratio-medium")
-    return (
-      Number.isFinite(node.iftotalerrors_totalpkts_ratio) &&
-      node.iftotalerrors_totalpkts_ratio >= 1.0
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 1.0;
   if (filterMode === "mac-total-errors-ratio-high")
-    return (
-      Number.isFinite(node.iftotalerrors_totalpkts_ratio) &&
-      node.iftotalerrors_totalpkts_ratio >= 5.0
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 5.0;
   // Mac total discards ratio
   if (filterMode === "mac-total-discards-ratio-medium")
-    return (
-      Number.isFinite(node.iftotaldiscards_totalpkts_ratio) &&
-      node.iftotaldiscards_totalpkts_ratio >= 2.0
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 2.0;
   if (filterMode === "mac-total-discards-ratio-high")
-    return (
-      Number.isFinite(node.iftotaldiscards_totalpkts_ratio) &&
-      node.iftotaldiscards_totalpkts_ratio >= 8.0
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 8.0;
   // MLE extended counters
   if (filterMode === "mle-better-partition-medium")
-    return (
-      Number.isFinite(node.betterpartitionattachattempts) &&
-      node.betterpartitionattachattempts >= 2
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 2;
   if (filterMode === "mle-better-partition-high")
-    return (
-      Number.isFinite(node.betterpartitionattachattempts) &&
-      node.betterpartitionattachattempts >= 5
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 5;
   if (filterMode === "mle-total-parent-partition-medium")
-    return (
-      Number.isFinite(node.totalparentpartitionchanges) &&
-      node.totalparentpartitionchanges >= 3
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 3;
   if (filterMode === "mle-total-parent-partition-high")
-    return (
-      Number.isFinite(node.totalparentpartitionchanges) &&
-      node.totalparentpartitionchanges >= 8
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 8;
   // Time statistics
   if (filterMode === "ftd-router-pct-low")
     return (
@@ -879,15 +888,11 @@ export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
       Number.isFinite(node.router_pct) && node.router_pct < 50
     );
   if (filterMode === "detached-disabled-pct-medium")
-    return (
-      Number.isFinite(node.detached_disabled_pct) &&
-      node.detached_disabled_pct >= 1.0
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 1.0;
   if (filterMode === "detached-disabled-pct-high")
-    return (
-      Number.isFinite(node.detached_disabled_pct) &&
-      node.detached_disabled_pct >= 5.0
-    );
+    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
+      getNodeDiagnosticMetric(node, filterMode) >= 5.0;
   return true;
 }
 
@@ -1016,24 +1021,21 @@ export function isRowVisibleByNodeFilter(row, filterMode) {
 
 export function isRowVisibleByDiagnosticFilter(row, filterMode) {
   if (filterMode === "all") return true;
-  const getMetric = (path) => {
-    const v = getColumnValue(row, path);
-    return Number.isFinite(v) ? v : undefined;
-  };
+  const getMetric = () => getRowDiagnosticMetric(row, filterMode);
   if (filterMode === "medium-partition-changes") {
-    const v = getMetric("mle_counters.partitionidchanges");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 2;
   }
   if (filterMode === "high-partition-changes") {
-    const v = getMetric("mle_counters.partitionidchanges");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 5;
   }
   if (filterMode === "medium-parent-changes") {
-    const v = getMetric("mle_counters.parentchanges");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 2;
   }
   if (filterMode === "high-parent-changes") {
-    const v = getMetric("mle_counters.parentchanges");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 5;
   }
 
@@ -1184,37 +1186,37 @@ export function isRowVisibleByDiagnosticFilter(row, filterMode) {
 
   // Mac total errors / discards ratio
   if (filterMode === "mac-total-errors-ratio-medium") {
-    const v = getMetric("mac_counters.iftotalerrors_totalpkts_ratio");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 1.0;
   }
   if (filterMode === "mac-total-errors-ratio-high") {
-    const v = getMetric("mac_counters.iftotalerrors_totalpkts_ratio");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 5.0;
   }
   if (filterMode === "mac-total-discards-ratio-medium") {
-    const v = getMetric("mac_counters.iftotaldiscards_totalpkts_ratio");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 2.0;
   }
   if (filterMode === "mac-total-discards-ratio-high") {
-    const v = getMetric("mac_counters.iftotaldiscards_totalpkts_ratio");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 8.0;
   }
 
   // MLE extended counters
   if (filterMode === "mle-better-partition-medium") {
-    const v = getMetric("mle_counters.betterpartitionattachattempts");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 2;
   }
   if (filterMode === "mle-better-partition-high") {
-    const v = getMetric("mle_counters.betterpartitionattachattempts");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 5;
   }
   if (filterMode === "mle-total-parent-partition-medium") {
-    const v = getMetric("mle_counters.totalparentpartitionchanges");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 3;
   }
   if (filterMode === "mle-total-parent-partition-high") {
-    const v = getMetric("mle_counters.totalparentpartitionchanges");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 8;
   }
 
@@ -1224,17 +1226,17 @@ export function isRowVisibleByDiagnosticFilter(row, filterMode) {
     const rloc16Text = toText(getColumnValue(row, "rloc16")).toLowerCase();
     const isFtdRouter = modeDevice === "FTD" && rloc16Text.length > 0 && rloc16Text.endsWith("00");
     if (!isFtdRouter) return false;
-    const v = getMetric("time_statistics.router_pct");
+    const v = getMetric();
     if (!Number.isFinite(v)) return false;
     if (filterMode === "ftd-router-pct-low")      return v < 80;
     if (filterMode === "ftd-router-pct-very-low") return v < 50;
   }
   if (filterMode === "detached-disabled-pct-medium") {
-    const v = getMetric("time_statistics.detached_disabled_pct");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 1.0;
   }
   if (filterMode === "detached-disabled-pct-high") {
-    const v = getMetric("time_statistics.detached_disabled_pct");
+    const v = getMetric();
     return Number.isFinite(v) && v >= 5.0;
   }
 

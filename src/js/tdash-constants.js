@@ -81,6 +81,23 @@ export const FIELD_ALIASES = Object.freeze({
   rx_on_when_idle:      ["rxOnWhenIdle"],
   device_type:          ["deviceTypeFTD"],
   network_data:         ["fullNetworkData"],
+  mac_counters:         ["macCounters"],
+  mle_counters:         ["mleCounters"],
+  time_statistics:      ["timeStatistics"],
+  partitionidchanges:   ["partIdChangesCount"],
+  parentchanges:        ["newParentCount"],
+  attachattempts:       ["attachAttemptsCount"],
+  childrole:            ["childRoleCount"],
+  detachedrole:         ["detachedRoleCount"],
+  leaderrole:           ["leaderRoleCount"],
+  routerrole:           ["routerRoleCount"],
+  disabledrole:         ["radioDisabledCount"],
+  betterpartitionattachattempts: ["betterPartIdAttachAttemptsCount"],
+  totalparentpartitionchanges: ["totalParentPartitionChangesCount"],
+  iftotalerrors_totalpkts_ratio: ["ifTotalErrorsTotalPktsRatio"],
+  iftotaldiscards_totalpkts_ratio: ["ifTotalDiscardsTotalPktsRatio"],
+  router_pct:           ["routerPct"],
+  detached_disabled_pct: ["detachedDisabledPct"],
 });
 
 // ── Link filter constants ─────────────────────────────────────────────────────

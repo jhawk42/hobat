@@ -112,7 +112,7 @@ function refreshDiagnosticFilterForCurrentSource() {
   }
   
   // Repopulate with capability-aware filtering and data validation
-  populateDiagnosticFilterBySourceWithCapabilities(selectedSource, currentDataset.capabilities, nodeDataForValidation);
+  populateDiagnosticFilterBySourceWithCapabilities(selectedSource, currentDataset.capabilities, nodeDataForValidation, currentView);
   
   // Restore the previously selected value if it's still available
   const diagFilterEl = document.getElementById("diagnostic-filter");
@@ -381,7 +381,7 @@ document.getElementById("diagnostic-source-filter").addEventListener("change", (
     const nodeDataForValidation = currentView === "topology"
       ? getTopologyNodeData()
       : currentDataset.rows;
-    populateDiagnosticFilterBySourceWithCapabilities(selectedSource, currentDataset.capabilities, nodeDataForValidation);
+    populateDiagnosticFilterBySourceWithCapabilities(selectedSource, currentDataset.capabilities, nodeDataForValidation, currentView);
   } else {
     populateDiagnosticFilterBySource(selectedSource);
   }
