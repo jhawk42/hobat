@@ -1,9 +1,15 @@
 # tdash - thread mesh network dashboard
 
-The tdash tools enable fetching info from a thread network and storing that info into a local cache to visualize the Thread mesh network in topology and table view. The tdash tools can run queries over the thread info for: Node type, Link Quality, MAC (radio) counters and MLE (thread mesh & role time counters). I have tdash running on a Debian host, mostly inside a Docker container and also directly on the Debian host. I have OTBR running in a Docker container connected to a Home Assistant Connect ZBT-1 via usb.
+The tdash tools enable fetching info from a thread network and storing that info into a local cache to visualize the Thread mesh network in topology and table view. 
+
+The tdash tools can run diagnostics queries over the thread info for: Node type, Link Quality, MAC (radio) counters and MLE (thread mesh & role time counters). 
+
+Environments: 
+- Inside a Docker container on Debian, and also directly on the Debian host. 
+- Openthread OTBR running in a Docker container connected to a Home Assistant Connect ZBT-1 via usb. I have a ZBT-2 on backorder. 
 
 Related Thread Network tools:
-- [Home Assistant Matter Server](https://github.com/matter-js/matterjs-server) has a great dashboard with Matter over Thread support growing with each release for thread devices.
+- [Home Assistant Matter Server](https://github.com/matter-js/matterjs-server) has a great dashboard with Matter over Thread support growing with each release for thread devices. 
 - [Eve App](https://www.evehome.com/en-us/eve-app) can query a thread network for the list of thread devices. Needs a powered Eve device (smartplug) in the thread network to enable gathering thread device information. 
 - [Thread Group - Android: Thread Network Diagnostics app](https://play.google.com/store/apps/details?id=com.threadgroup.otloom&hl=en_US)
 - [Nordic Semiconductor - nRF Thread Topology Monitor](https://www.nordicsemi.com/Products/Development-tools/nRF-Thread-topology-monitor)
