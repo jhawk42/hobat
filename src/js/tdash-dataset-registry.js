@@ -444,8 +444,7 @@ export const DATASET_REGISTRY = [
     value: "merged_all_deep_wide_otbr_cli_restapi_eve",
     label: "premerged: topology [otbr-cli, otbr-restapi, mdns ...] deep & wide",
     files: [
-      "td-merged-topology-all.json",
-      "td-static-extaddr-device-label.json"
+      "td-merged-topology-all.json"
     ],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
