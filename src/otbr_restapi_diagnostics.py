@@ -88,6 +88,73 @@ def _apply_mac_enrichment(diagnostics: list[Any]) -> list[Any]:
     return diagnostics
 
 
+def enrich_time_statistics(record: dict[str, Any]) -> None:
+    """Enrich a diagnostic record with normalized time_statistics metrics.
+
+    OTBR REST diagnostics expose role-time counters under mleCounters. This
+    function derives the same time_statistics fields used by
+    parse_time_statistics() for cross-tool consistency.
+    """
+    stats = record.get("time_statistics")
+    if isinstance(stats, dict):
+        tracked_time = stats.get("tracked_time", 0)
+        disabled_time = stats.get("disabled_time", 0)
+        detached_time = stats.get("detached_time", 0)
+        child_time = stats.get("child_time", 0)
+        router_time = stats.get("router_time", 0)
+        leader_time = stats.get("leader_time", 0)
+    else:
+        time_stats = record.get("timeStatistics")
+        if isinstance(time_stats, dict):
+            tracked_time = time_stats.get("trackedTime", 0)
+            disabled_time = time_stats.get("disabledTime", 0)
+            detached_time = time_stats.get("detachedTime", 0)
+            child_time = time_stats.get("childTime", 0)
+            router_time = time_stats.get("routerTime", 0)
+            leader_time = time_stats.get("leaderTime", 0)
+        else:
+            mle = record.get("mleCounters")
+            if not isinstance(mle, dict):
+                return
+            tracked_time = mle.get("totalTrackingTime", 0)
+            disabled_time = mle.get("radioDisabledTime", 0)
+            detached_time = mle.get("detachedRoleTime", 0)
+            child_time = mle.get("childRoleTime", 0)
+            router_time = mle.get("routerRoleTime", 0)
+            leader_time = mle.get("leaderRoleTime", 0)
+
+        stats = {
+            "tracked_time": tracked_time,
+            "disabled_time": disabled_time,
+            "detached_time": detached_time,
+            "child_time": child_time,
+            "router_time": router_time,
+            "leader_time": leader_time,
+        }
+        record["time_statistics"] = stats
+
+    if not isinstance(tracked_time, (int, float)) or tracked_time <= 0:
+        return
+
+    detached_disabled_time = detached_time + disabled_time
+    stats["detached_disabled_time"] = detached_disabled_time
+    stats["detached_disabled_pct"] = round((detached_disabled_time / tracked_time) * 100, 1)
+    stats["router_pct"] = round((router_time / tracked_time) * 100, 1)
+    stats["child_pct"] = round((child_time / tracked_time) * 100, 1)
+    stats["leader_pct"] = round((leader_time / tracked_time) * 100, 1)
+    stats["disabled_pct"] = round((disabled_time / tracked_time) * 100, 1)
+    stats["detached_pct"] = round((detached_time / tracked_time) * 100, 1)
+
+
+def _apply_time_stats_enrichment(diagnostics: list[Any]) -> list[Any]:
+    """Apply enrich_time_statistics in-place to each diagnostic record."""
+    for record in diagnostics:
+        if not isinstance(record, dict):
+            continue
+        enrich_time_statistics(record)
+    return diagnostics
+
+
 def make_progress_fn(total: int, enabled: bool):
     if not enabled or total == 0:
         return None
@@ -222,7 +289,25 @@ def dispatch_diagnostics(
     fields: dict[str, str] | None,
 ) -> Any:
     if args.diagnostics_command == "list":
-        return client.list_diagnostics(fields=fields, raw=raw_arg, with_meta=args.with_meta)
+        diagnostics = client.list_diagnostics(
+            fields=fields,
+            raw=raw_arg,
+            with_meta=args.with_meta,
+        )
+        if raw_arg is True or getattr(args, "no_enrich_mac_counters", False):
+            return diagnostics
+
+        if args.with_meta and isinstance(diagnostics, dict):
+            items = diagnostics.get("items")
+            if isinstance(items, list):
+                _apply_mac_enrichment(items)
+                _apply_time_stats_enrichment(items)
+            return diagnostics
+
+        if isinstance(diagnostics, list):
+            _apply_mac_enrichment(diagnostics)
+            _apply_time_stats_enrichment(diagnostics)
+        return diagnostics
     if args.diagnostics_command == "get":
         return client.get_diagnostic(args.diagnostics_id, raw=raw_arg)
     if args.diagnostics_command == "fetch":
@@ -271,6 +356,7 @@ def dispatch_diagnostics(
         )
         if do_enrich:
             _apply_mac_enrichment(diagnostics)
+            _apply_time_stats_enrichment(diagnostics)
         return diagnostics
 
     raise ValueError("Unsupported diagnostics command")

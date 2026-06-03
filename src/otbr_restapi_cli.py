@@ -258,6 +258,12 @@ def _add_diagnostics_commands(
         action="store_true",
         help="Include collection meta with flattened items",
     )
+    diagnostics_list.add_argument(
+        "--no-enrich-mac-counters",
+        action="store_true",
+        default=False,
+        help="Return raw macCounters values without computed totals and ratios",
+    )
 
     diagnostics_get = diagnostics_subparsers.add_parser(
         "get", help="Get a diagnostic by diagnostics ID"
