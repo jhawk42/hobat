@@ -276,7 +276,7 @@ h1 {
 }
 
 #panel-dataset-inner {
-  padding: 10px;
+  padding: 4px;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
@@ -438,7 +438,7 @@ label {
 }
 
 /* Panel-dataset collapsed state */
-#panel-dataset.collapsed > #panel-dataset-inner {
+#panel-dataset.collapsed #panel-dataset-inner {
   display: none;
 }
 
@@ -714,36 +714,42 @@ button.active {
 #panel-view {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   gap: 12px;
   align-items: start;
+}
+
+/* Keep the View legend button at the top of column 1 */
+#panel-view > legend {
+  grid-column: 1;
+  grid-row: 1;
 }
 
 /* Place view controls and containers in column 1 */
 .view-toggle-bar {
   grid-column: 1;
-  grid-row: 1;
+  grid-row: 2;
 }
 
 #view-status-line-panel {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 3;
 }
 
 #view-topology {
   grid-column: 1;
-  grid-row: 3;
+  grid-row: 4;
 }
 
 #view-table {
   grid-column: 1;
-  grid-row: 3;
+  grid-row: 4;
 }
 
 /* Device details spans column 2, all rows */
 #device-details {
   grid-column: 2;
-  grid-row: 1 / 4;
+  grid-row: 1 / 5;
 }
 
 .topology-canvas-wrap {

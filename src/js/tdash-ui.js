@@ -666,10 +666,19 @@ document.getElementById("chk-only-cache").addEventListener("change", (e) => {
 
 // ── Collapsible cache-options fieldsets and containers ─────────────────────────────────────
 
+const COLLAPSE_CONTAINER_BY_BUTTON_ID = {
+  "btn-toggle-panel-view": "panel-view",
+  "btn-toggle-panel-dataset": "panel-dataset",
+  "btn-toggle-filters": "panel-node-link-filters",
+};
+
 ["btn-toggle-cache", "btn-toggle-status", "btn-toggle-devices", "btn-toggle-panel-view", "btn-toggle-panel-dataset", "btn-toggle-filters", "btn-toggle-node-link-filters", "btn-toggle-diag-filters"].forEach((id) => {
   document.getElementById(id)?.addEventListener("click", () => {
     const btn = document.getElementById(id);
-    const container = btn.closest("fieldset, [class*='cache-options'], #panel-view, #panel-dataset, #panel-node-link-filters");
+    const explicitContainerId = COLLAPSE_CONTAINER_BY_BUTTON_ID[id];
+    const container = explicitContainerId
+      ? document.getElementById(explicitContainerId)
+      : btn.closest("fieldset, [class*='cache-options'], #panel-view, #panel-dataset, #panel-node-link-filters");
     const isExpanded = btn.getAttribute("aria-expanded") === "true";
     btn.setAttribute("aria-expanded", String(!isExpanded));
     if (container) container.classList.toggle("collapsed");

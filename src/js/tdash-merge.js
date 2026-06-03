@@ -416,7 +416,7 @@ export function sortRowGroupsByPriority(rowGroups, priorityMap) {
     const srcB = groupB[0]?._source_files?.[0] ?? "";
     const prioA = map[srcA] ?? 0;
     const prioB = map[srcB] ?? 0;
-    return prioA - prioB; // ascending: lowest priority first
+    return prioB - prioA; // descending: highest priority first
   });
 }
 
@@ -425,10 +425,9 @@ export function mergeRowsByStrategy(rowGroups, strategy, options = {}) {
   const identifierToNodeId = new Map();
   let nextNodeId = 1;
 
-  // Sort rowGroups so that higher-priority sources are processed last (they
-  // win on conflicts because mergeRowFields keeps the existing value unless
-  // it is empty — so we flip order: lowest priority first as base, highest
-  // priority merges on top and wins).
+  // Sort rowGroups so higher-priority sources are processed first. Since
+  // mergeRowFields preserves existing non-empty values, this ensures the
+  // highest-authority source keeps conflicting scalar fields.
   const sortedGroups = sortRowGroupsByPriority(rowGroups, options.sourcePriorities);
 
   sortedGroups.forEach((rows) => {

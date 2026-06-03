@@ -10,9 +10,8 @@
   <script src="js/depend/vis-network.min.js"></script>
 
   <!--
-  Sourced from local copies in js/depend/ for offline use and to ensure stability.
- 
-  Can be switched to CDN: 
+  Served from local js/depend/ for offline use and to ensure stability.
+  Can be switched to serve from CDN: 
   vis:      https://unpkg.com/vis-network/standalone/umd/vis-network.min.js
   sortable: https://cdn.jsdelivr.net/gh/tofsjonas/sortable@latest/sortable.min.js
   -->
@@ -25,21 +24,30 @@
 
     <!-- Title bar -->
     <div id="panel-home" class="controls">
-      <a href="" class="home-link" title="tdash home">🏠 tdash: </a> thread mesh network dashboard
+      <a href="" class="home-link" title="tdash home">🏠 tdash: </a>
+      <!-- fetch status line  -->
+      <div id="fetch-status-line-panel">
+        <div id="fetch-status-line-content" role="status" aria-live="polite">
+          <div class="fetch-status-placeholder">
+          Select a dataset to load and press Fetch.
+          </div>
+        </div>
+      </div>
       <button id="btn-panels-toggle-all" class="panels-toggle-all" title="Collapse all panels">
         <span class="panels-toggle-arrow" aria-hidden="true">▼</span>
       </button>
     </div>
-
+ 
     <!-- Fetch device status and network health bar -->
-    <div id="device-status" role="status" aria-live="polite">
+    <div id="device-status" class="controls" role="status" aria-live="polite">
       <!--
         Devices: nn Border Routers: nn Routers: nn Child nodes: nn Links: LQ3: nn nn LQ2: nn LQ1: nn 
         Devices: 🖥 12 Nodes | 🛤 3 Border Routers | NN Routers |NN Child nodes| ⚠ 2 Low-Quality Links | 
         -->
       <fieldset class="cache-options" id="fieldset-devices">
         <legend><button class="legend-toggle-btn" id="btn-toggle-devices" aria-expanded="true"><span
-              class="legend-toggle-arrow">▶</span>Devices</button></legend>
+              class="legend-toggle-arrow">▶</span>Devices</button>
+        </legend>
         <label title="Fetched number of devices in the dataset">
           <span id="device-status-devices">⛬ Total: <span id="device-count">0</span></span>
         </label>
@@ -47,7 +55,7 @@
           <span id="device-status-brs">🛜 Border Routers: <span id="br-count">0</span></span>
         </label>
         <label title="Fetched number of routers in the dataset">
-          <span id="device-status-routers">⛖ Routers: <span id="router-count">0</span></span>
+          <span id="device-status-routers">↕️ Routers: <span id="router-count">0</span></span>
         </label>
         <label title="Fetched number of child nodes in the dataset">
           <span id="device-status-children">⏺ Child nodes: <span id="child-count">0</span></span>
@@ -69,11 +77,15 @@
 
     <!-- Source and dataset panel -->
     <div id="panel-dataset" class="controls">
-      <legend><button class="legend-toggle-btn" id="btn-toggle-panel-dataset" aria-expanded="true"><span
-            class="legend-toggle-arrow">▶</span>Dataset</button></legend>
+    <fieldset class="cache-options" id="fieldset-dataset">
+      <legend>
+        <button class="legend-toggle-btn" id="btn-toggle-panel-dataset" aria-expanded="true">
+          <span class="legend-toggle-arrow">▶</span>Dataset
+        </button>
+      </legend>
+      
       <div id="panel-dataset-inner">
         <div id="panel-dataset-controls" class="controls dataset-controls">
-          <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch</button>
           <div id="panel-dataset-control-pair" class="control-pair control-pair-source">
             <label for="datasource-filter" title="Data source for the mesh network">Source</label>
             <select id="datasource-filter" title="Data source for the mesh network">
@@ -87,17 +99,24 @@
           </div>
           <div class="control-pair control-pair-dataset">
             <label for="dataset-select" title="Select a dataset for the mesh network">Dataset</label>
-            <select id="dataset-select" title="Select a dataset for the mesh network. Datasets with ⏰ may take time (mins) to fetch if not cached.">
+            <select id="dataset-select"
+              title="Select a dataset for the mesh network. Datasets with ⏰ may take time (mins) to fetch if not cached.">
               <!-- populated by JS from DATASET_REGISTRY -->
             </select>
           </div>
+        </div>
+
+        <!-- Fetch button -->
+        <div>
+          <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch</button>
         </div>
 
         <!-- Fetch status -->
         <fieldset id="fetch-status" role="status" aria-live="polite" class="cache-options">
           <legend><button class="legend-toggle-btn" id="btn-toggle-status" aria-expanded="true">
               <span class="legend-toggle-arrow">▶</span>Status
-            </button></legend>
+            </button>
+          </legend>
 
           <!-- Status details -->
           <div class="status-row">
@@ -110,16 +129,10 @@
                 <progress id="fetch-timetaken-progress" max="100"></progress>
               </div>
             </div>
-            <label title="Age of the cached data for this dataset">
+            <label title="Time this dataset was last updated in the server data cache">
               <span id="fetch-cache-age-label">Last updated:</span>
-              <span id="fetch-cache-age-value">-</span>
+              <span id="fetch-cache-age-value">- minutes ago</span>
             </label>
-          </div>
-          <!-- fetch status line  -->
-          <div id="fetch-status-line-panel">
-            <div id="fetch-status-line-content" role="status" aria-live="polite">
-              Select a dataset to load and press Fetch.
-            </div>
           </div>
         </fieldset>
 
@@ -137,6 +150,7 @@
           </label>
         </fieldset>
       </div>
+      </fieldset>
     </div>
 
     <!-- Filters bar -->
@@ -339,4 +353,5 @@
 
   <script type="module" src="js/tdash-ui.js"></script>
 </body>
+
 </html>

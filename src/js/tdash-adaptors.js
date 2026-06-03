@@ -378,7 +378,9 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       const nodeId = (omr && omrToNodeId.get(omr)) || (ea && extaddrToNodeId.get(ea));
       if (!nodeId) return;
       const existing = rawByIdForDetails.get(nodeId) || {};
-      rawByIdForDetails.set(nodeId, mergeForDisplay(existing, record));
+        // Supplementary files (e.g. mdns) should enrich missing fields but not
+        // clobber canonical values already derived from primary topology files.
+        rawByIdForDetails.set(nodeId, mergeForDisplay(record, existing));
     });
   }
 
