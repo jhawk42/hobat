@@ -749,6 +749,28 @@ const COLLAPSE_CONTAINER_BY_BUTTON_ID = {
   });
 });
 
+document.getElementById("btn-toggle-node-diag-filters")?.addEventListener("click", () => {
+  const nodeLinkFieldset = document.getElementById("fieldset-node-link-filters");
+  const diagFieldset = document.getElementById("fieldset-diag-filters");
+  const nodeLinkToggleBtn = document.getElementById("btn-toggle-node-link-filters");
+  const diagToggleBtn = document.getElementById("btn-toggle-diag-filters");
+
+  if (!nodeLinkFieldset || !diagFieldset) return;
+
+  const shouldShow = nodeLinkFieldset.hidden || diagFieldset.hidden;
+
+  nodeLinkFieldset.hidden = !shouldShow;
+  diagFieldset.hidden = !shouldShow;
+
+  if (shouldShow) {
+    nodeLinkFieldset.classList.remove("collapsed");
+    diagFieldset.classList.remove("collapsed");
+  }
+
+  nodeLinkToggleBtn?.setAttribute("aria-expanded", String(shouldShow));
+  diagToggleBtn?.setAttribute("aria-expanded", String(shouldShow));
+});
+
 // ── Collapsible Filters Panel ────────────────────────────────────────────────
 // (Handled by unified collapse logic above)
 

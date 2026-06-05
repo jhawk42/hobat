@@ -316,6 +316,11 @@ label {
   font-size: 0;
 }
 
+#fieldset-node-link-filters[hidden],
+#fieldset-diag-filters[hidden] {
+  display: none !important;
+}
+
 /* Keep cache-options fieldsets sized to their content */
 #fieldset-cache,
 #fetch-status {

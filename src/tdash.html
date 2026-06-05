@@ -168,8 +168,9 @@
             <input type="text" id="search-input" placeholder="extaddr, rloc16, device_label …"
               title="Search device records by extaddr, rloc16, device_label, name, room, role, version, or other identity fields. Press Enter to search." />
             <button id="btn-search-clear" title="Clear search and reset results">✕</button>
+            <button id="btn-toggle-node-diag-filters" title="Toggle Nodes, Links, Diagnostics filters panel">⧨</button>
           </div>
-          <fieldset class="cache-options collapsed" id="fieldset-node-link-filters">
+          <fieldset class="cache-options" id="fieldset-node-link-filters" hidden>
             <legend><button class="legend-toggle-btn" id="btn-toggle-node-link-filters" aria-expanded="false"><span
                   class="legend-toggle-arrow">▶</span>Nodes &amp; Links</button></legend>
             
@@ -187,7 +188,7 @@
             </div>
           </fieldset>
 
-          <fieldset class="cache-options collapsed" id="fieldset-diag-filters">
+          <fieldset class="cache-options" id="fieldset-diag-filters" hidden>
             <legend><button class="legend-toggle-btn" id="btn-toggle-diag-filters" aria-expanded="false"><span
                   class="legend-toggle-arrow">▶</span>Diagnostics</button></legend>
             <div class="control-pair control-pair-source">
@@ -210,7 +211,7 @@
               </select>
             </div>
           </fieldset>
-          <div id="diag-filters-toggle">⧨</div>
+          
         </div>
       </div>
     </div>
