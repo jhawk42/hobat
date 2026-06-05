@@ -497,10 +497,12 @@ async def run_td_cli(
             if process.returncode is None:
                 process.terminate()
                 try:
+                    logging.debug("Waiting up to %.1f s for subprocess to terminate gracefully", _PROCESS_TERMINATE_GRACE_S)
                     await asyncio.wait_for(
                         process.communicate(), timeout=_PROCESS_TERMINATE_GRACE_S
                     )
                 except asyncio.TimeoutError:
+                    logging.warning("Subprocess did not terminate gracefully; killing process")
                     process.kill()
                     await process.communicate()
         finally:
@@ -916,6 +918,8 @@ async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Res
             "detail": job.detail,
             "error": "Job is not cancellable in its current state.",
         }
+        logging.warning("Cancellation requested for non-cancellable job %s: %s",
+                        job_id, body["error"])
         return aiohttp.web.Response(
             status=409,
             content_type="application/json",
@@ -931,9 +935,11 @@ async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Res
         process = runtime.process
         if process is not None and process.returncode is None and not runtime.task.done():
             # Cancel task; run_td_cli handles graceful terminate/kill cleanup.
+            logging.info("Cancelling job %s: terminating subprocess", job_id)
             runtime.task.cancel()
         elif process is None and not runtime.task.done():
             # If still queued before subprocess start, cancel the task directly.
+            logging.info("Cancelling job %s: task not started yet", job_id)
             runtime.task.cancel()
 
     body = {
