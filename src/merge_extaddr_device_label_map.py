@@ -15,8 +15,8 @@ import logging
 import sys
 from pathlib import Path
 
-from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
+from util_data import data_file_path, resolve_data_dir, save_json_atomic
 
 OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME = 'td-otbr-cli-networkdiag-fetch-all.json'
 MDNS_SCOPES_BR_FILENAME = "td-mdns-scopes-br.json"
@@ -184,11 +184,11 @@ def main(argv=None):
             'for matching extaddr entries'
         ),
     )
+    parser.add_argument('--datadir', default=None, help=TD_DATA_DIR_ARG_HELP)
     args = parser.parse_args(argv)
     
     # Use datadir
-    td_data_dir = resolve_data_dir(
-        data_dir=parse_datadir_from_argv(argv if argv is not None else sys.argv))
+    td_data_dir = resolve_data_dir(data_dir=args.datadir)
 
     extaddr_json_filename = data_file_path(
         EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir
