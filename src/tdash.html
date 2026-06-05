@@ -168,11 +168,11 @@
               title="Search device records by extaddr, rloc16, device_label, name, room, role, version, or other identity fields. Press Enter to search." />
             <button id="btn-search-clear" title="Clear search and reset results">✕</button>
           </div>
-
           <fieldset class="cache-options collapsed" id="fieldset-node-link-filters">
             <legend><button class="legend-toggle-btn" id="btn-toggle-node-link-filters" aria-expanded="false"><span
                   class="legend-toggle-arrow">▶</span>Nodes &amp; Links</button></legend>
-            <div class="control-pair control-pair-source">
+            
+                  <div class="control-pair control-pair-source">
               <label for="node-filter" title="Filter devices by type or role">Devices</label>
               <select id="node-filter" title="Filter devices by type or role">
                 <!-- populated by JS from NODE_FILTER_OPTIONS -->
@@ -209,6 +209,7 @@
               </select>
             </div>
           </fieldset>
+          <div id="diag-filters-toggle">⧨</div>
         </div>
       </div>
     </div>

@@ -33,13 +33,13 @@ _Covers `td_webserver.py`, `tdash.html`, and all `js/*.js` modules._
 ┌──────────────────────────────────┴──────────────────────────────────┐
 │  td_webserver.py  (aiohttp)                                         │
 │                                                                     │
-│  ┌──────────────────┐  ┌─────────────────────────────────────────┐ │
-│  │ Static serving   │  │  /api/data/{filename}                   │ │
-│  │ src/ tree        │  │  - FILE_ACTION_MAP lookup               │ │
-│  │ (no-cache revalidation)│  - freshness check (mtime, max_age) │ │
-│  └──────────────────┘  │  - short-cost: sync subprocess 200      │ │
-│                        │  - long-cost / force_async: 202 + job   │ │
-│                        └─────────────────────────────────────────┘ │
+│  ┌──────────────────┐  ┌─────────────────────────────────────────┐  │
+│  │ Static serving   │  │  /api/data/{filename}                   │  │
+│  │ src/ tree        │  │  - FILE_ACTION_MAP lookup               │  │
+│  │ (no-cache        │  │  - freshness check (mtime, max_age)     │  │
+│  │ revalidation)    │  │  - short-cost: sync subprocess 200      │  │
+│  └──────────────────┘  │  - long-cost / force_async: 202 + job   │  │
+│                        └─────────────────────────────────────────┘  │
 └──────────────────────────────────┬──────────────────────────────────┘
                                    │ subprocess
                             python3 -m td_cli {command} + data collectors

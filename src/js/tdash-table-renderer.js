@@ -237,9 +237,11 @@ function calculateColumnMaxLength(rows, column) {
 
 function getColumnWidthStyle(maxLen) {
   const charPx = 8.8;
+  const paddingH = 20; // 10px left + 10px right padding (box-sizing: border-box)
   const minWidth = 70;
-  const maxWidth = 25 * charPx;
-  const width = maxLen >= 25 ? maxWidth : Math.max(maxLen * charPx, minWidth);
+  const maxChars = 28;
+  const maxWidth = maxChars * charPx + paddingH;
+  const width = maxLen >= maxChars ? maxWidth : Math.max(maxLen * charPx + paddingH, minWidth);
   return { width: `${width}px` };
 }
 
