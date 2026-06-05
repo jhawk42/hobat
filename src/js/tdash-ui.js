@@ -771,6 +771,34 @@ document.getElementById("btn-toggle-node-diag-filters")?.addEventListener("click
   diagToggleBtn?.setAttribute("aria-expanded", String(shouldShow));
 });
 
+{
+  const cacheFieldset = document.getElementById("fieldset-cache");
+  const cacheLegendBtn = document.getElementById("btn-toggle-cache");
+  if (cacheFieldset) {
+    cacheFieldset.hidden = true;
+    cacheFieldset.classList.add("collapsed");
+    cacheLegendBtn?.setAttribute("aria-expanded", "false");
+  }
+}
+
+document.getElementById("btn-fetch-toggle-status-chk-cache")?.addEventListener("click", () => {
+  const cacheFieldset = document.getElementById("fieldset-cache");
+  const cacheLegendBtn = document.getElementById("btn-toggle-cache");
+  if (!cacheFieldset) return;
+
+  const shouldShow = cacheFieldset.hidden;
+  cacheFieldset.hidden = !shouldShow;
+
+  // When revealed via the fetch/status toggle, show cache controls immediately.
+  if (shouldShow) {
+    cacheFieldset.classList.remove("collapsed");
+    cacheLegendBtn?.setAttribute("aria-expanded", "true");
+  } else {
+    cacheFieldset.classList.add("collapsed");
+    cacheLegendBtn?.setAttribute("aria-expanded", "false");
+  }
+});
+
 // ── Collapsible Filters Panel ────────────────────────────────────────────────
 // (Handled by unified collapse logic above)
 

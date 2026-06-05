@@ -29,7 +29,7 @@
       <div id="fetch-status-line-panel">
         <div id="fetch-status-line-content" role="status" aria-live="polite">
           <div class="fetch-status-placeholder">
-          Select a dataset to load and press Fetch.
+            Select a dataset to load and press Fetch.
           </div>
         </div>
       </div>
@@ -37,7 +37,7 @@
         <span class="panels-toggle-arrow" aria-hidden="true">▼</span>
       </button>
     </div>
- 
+
     <!-- Fetch device status and network health bar -->
     <div id="device-status" class="controls" role="status" aria-live="polite">
       <!--
@@ -77,80 +77,87 @@
 
     <!-- Source and dataset panel -->
     <div id="panel-dataset" class="controls">
-    <fieldset class="cache-options" id="fieldset-dataset">
-      <legend>
-        <button class="legend-toggle-btn" id="btn-toggle-panel-dataset" aria-expanded="true">
-          <span class="legend-toggle-arrow">▶</span>Dataset
-        </button>
-      </legend>
-      
-      <div id="panel-dataset-inner">
-        <div id="panel-dataset-controls" class="controls dataset-controls">
-          <div id="panel-dataset-control-pair" class="control-pair control-pair-source">
-            <label for="datasource-filter" title="Data source for the mesh network">Source</label>
-            <select id="datasource-filter" title="Data source for the mesh network">
-              <option value="otbr-cli">otbr-cli</option>
-              <option value="otbr-restapi">otbr-restapi</option>
-              <option value="mdns">mdns</option>
-              <option value="eve">eve</option>
-              <option value="merged">multi-source</option>
-              <option value="system">system</option>
-            </select>
-          </div>
-          <div class="control-pair control-pair-dataset">
-            <label for="dataset-select" title="Select a dataset for the mesh network">Dataset</label>
-            <select id="dataset-select"
-              title="Select a dataset for the mesh network. Datasets with ⏰ may take time (mins) to fetch if not cached.">
-              <!-- populated by JS from DATASET_REGISTRY -->
-            </select>
-          </div>
-        </div>
+      <fieldset class="cache-options" id="fieldset-dataset">
+        <legend>
+          <button class="legend-toggle-btn" id="btn-toggle-panel-dataset" aria-expanded="true">
+            <span class="legend-toggle-arrow">▶</span>Dataset
+          </button>
+        </legend>
 
-        <!-- Fetch button -->
-        <div>
-          <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch</button>
-        </div>
-
-        <!-- Fetch status -->
-        <fieldset id="fetch-status" role="status" aria-live="polite" class="cache-options">
-          <legend><button class="legend-toggle-btn" id="btn-toggle-status" aria-expanded="true">
-              <span class="legend-toggle-arrow">▶</span>Status
-            </button>
-          </legend>
-
-          <!-- Status details -->
-          <div class="status-row">
-            <div class="timetaken-group">
-              <label title="Time taken to fetch or generate data for this dataset">
-                <span id="fetch-timetaken-label">Time to fetch:</span>
-                <span id="fetch-timetaken-value">-</span>
-              </label>
-              <div class="progress-row">
-                <progress id="fetch-timetaken-progress" max="100"></progress>
-                <button id="btn-fetch-cancel" title="Cancel pending fetch">✕</button>
-              </div>
+        <div id="panel-dataset-inner">
+          <div id="panel-dataset-controls" class="controls dataset-controls">
+            <div id="panel-dataset-control-pair" class="control-pair control-pair-source">
+              <label for="datasource-filter" title="Data source for the mesh network">Source</label>
+              <select id="datasource-filter" title="Data source for the mesh network">
+                <option value="otbr-cli">otbr-cli</option>
+                <option value="otbr-restapi">otbr-restapi</option>
+                <option value="mdns">mdns</option>
+                <option value="eve">eve</option>
+                <option value="merged">multi-source</option>
+                <option value="system">system</option>
+              </select>
             </div>
-            <label title="Time this dataset was last updated in the server data cache">
-              <span id="fetch-cache-age-label">Last updated:</span>
-              <span id="fetch-cache-age-value">- minutes ago</span>
-            </label>
+            <div class="control-pair control-pair-dataset">
+              <label for="dataset-select" title="Select a dataset for the mesh network">Dataset</label>
+              <select id="dataset-select"
+                title="Select a dataset for the mesh network. Datasets with ⏰ may take time (mins) to fetch if not cached.">
+                <!-- populated by JS from DATASET_REGISTRY -->
+              </select>
+            </div>
           </div>
-        </fieldset>
 
-        <fieldset class="cache-options collapsed" id="fieldset-cache">
-          <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="false"><span
-                class="legend-toggle-arrow">▶</span>Cache</button></legend>
-          <label title="Automatically re-fetch data when the dataset selection changes">
-            <input type="checkbox" id="chk-auto-fetch" checked /> Auto
-          </label>
-          <label title="Force the server to regenerate fresh data (bypass cache)">
-            <input type="checkbox" id="chk-force-fresh" /> Force Refresh
-          </label>
-          <label title="Only use server cached data (skip server regeneration even if cache is stale or missing)">
-            <input type="checkbox" id="chk-only-cache" /> Only Cache
-          </label>
-        </fieldset>
-      </div>
+          <!-- Fetch button -->
+          <div>
+            <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch</button>
+            <button id="btn-fetch-toggle-status-chk-cache" title="Toggle Fetch Status and Cache Options">⧨</button>
+          </div>
+
+          <!-- Fetch status -->
+          <fieldset id="fetch-status" role="status" aria-live="polite" class="cache-options">
+            <legend><button class="legend-toggle-btn" id="btn-toggle-status" aria-expanded="true">
+                <span class="legend-toggle-arrow">▶</span>Status
+              </button>
+            </legend>
+
+            <!-- Status details -->
+            <div class="status-row">
+              <div class="timetaken-group">
+                <label title="Time taken to fetch or generate data for this dataset">
+                  <span id="fetch-timetaken-label">Time to fetch:</span>
+                  <span id="fetch-timetaken-value">-</span>
+                </label>
+                <div class="progress-row">
+                  <progress id="fetch-timetaken-progress" max="100"></progress>
+                  <button id="btn-fetch-cancel" title="Cancel pending fetch">✕</button>
+                </div>
+              </div>
+
+            </div>
+          </fieldset>
+
+          <fieldset class="cache-options collapsed" id="fieldset-cache" hidden>
+            <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="false"><span
+                  class="legend-toggle-arrow">▶</span>Cache</button></legend>
+            <div id="chk-cache-group">
+              <label title="Automatically re-fetch data when the dataset selection changes">
+                <input type="checkbox" id="chk-auto-fetch" checked /> Auto
+              </label>
+              <label title="Force the server to regenerate fresh data (bypass cache)">
+                <input type="checkbox" id="chk-force-fresh" /> Force Refresh
+              </label>
+              <label title="Only use server cached data (skip server regeneration even if cache is stale or missing)">
+                <input type="checkbox" id="chk-only-cache" /> Only Cache
+              </label>
+            </div>
+
+            <div id="fetch-cache-age-group">
+              <label title="Time this dataset was last updated in the server data cache">
+                <span id="fetch-cache-age-label"> ⏲ Last updated:</span>
+                <span id="fetch-cache-age-value">- minutes ago</span>
+              </label>
+            </div>
+          </fieldset>
+        </div>
       </fieldset>
     </div>
 
@@ -173,8 +180,8 @@
           <fieldset class="cache-options" id="fieldset-node-link-filters" hidden>
             <legend><button class="legend-toggle-btn" id="btn-toggle-node-link-filters" aria-expanded="false"><span
                   class="legend-toggle-arrow">▶</span>Nodes &amp; Links</button></legend>
-            
-                  <div class="control-pair control-pair-source">
+
+            <div class="control-pair control-pair-source">
               <label for="node-filter" title="Filter devices by type or role">Devices</label>
               <select id="node-filter" title="Filter devices by type or role">
                 <!-- populated by JS from NODE_FILTER_OPTIONS -->
@@ -211,7 +218,7 @@
               </select>
             </div>
           </fieldset>
-          
+
         </div>
       </div>
     </div>

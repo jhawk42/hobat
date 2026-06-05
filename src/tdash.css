@@ -321,6 +321,10 @@ label {
   display: none !important;
 }
 
+#fieldset-cache[hidden] {
+  display: none !important;
+}
+
 /* Keep cache-options fieldsets sized to their content */
 #fieldset-cache,
 #fetch-status {
@@ -382,7 +386,9 @@ label {
 }
 
 .cache-options.collapsed > label,
-.cache-options.collapsed > .control-pair {
+.cache-options.collapsed > .control-pair,
+.cache-options.collapsed > #chk-cache-group,
+.cache-options.collapsed > #fetch-cache-age-group {
   display: none;
 }
 
