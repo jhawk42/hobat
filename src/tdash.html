@@ -131,6 +131,10 @@
                   <button id="btn-fetch-cancel" title="Cancel pending fetch">✕</button>
                 </div>
               </div>
+              <div id="fetch-cache-age-group">
+                <span id="fetch-cache-age-label">⏲ Last updated:</span>
+                <span id="fetch-cache-age-value">- minutes ago</span>
+              </div>
 
             </div>
           </fieldset>
@@ -147,13 +151,6 @@
               </label>
               <label title="Only use server cached data (skip server regeneration even if cache is stale or missing)">
                 <input type="checkbox" id="chk-only-cache" /> Only Cache
-              </label>
-            </div>
-
-            <div id="fetch-cache-age-group">
-              <label title="Time this dataset was last updated in the server data cache">
-                <span id="fetch-cache-age-label"> ⏲ Last updated:</span>
-                <span id="fetch-cache-age-value">- minutes ago</span>
               </label>
             </div>
           </fieldset>

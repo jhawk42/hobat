@@ -35,7 +35,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "networkdiag_multicast_network_only",
-    label: "Device (ftd) topology [network multicast ndmc]",
+    label: "Device topology [ftd,network multicast ndmc]",
     files: ["td-otbr-cli-networkdiag-multicast-network.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
@@ -48,7 +48,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast",
-    label: "Device (ftd) & Mesh topology [md, ndmc]",
+    label: "Device & Mesh topology [ftd,md,ndmc]",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json"
@@ -64,7 +64,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast_mdns",
-    label: "Device (ftd) & Mesh topology w/mdns [md, ndmc, mdns] ",
+    label: "Device & Mesh topology w/mdns [ttd,md,ndmc,mdns] ",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json",
@@ -77,12 +77,10 @@ export const DATASET_REGISTRY = [
     estimateActionCostSecs: 80
   },
 
- 
-
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast_mdns",
-    label: "Device (all) detailed topology [md, ndmc, mdn, mdc, mdns] ⏰",
+    label: "Device (all) detailed topology [md,ndmc,mdn,mdc,mdns] ⏰",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json",
@@ -186,7 +184,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_diagnostics_list",
-    label: "topology [diagnostics list dial]",
+    label: "Diag topology [diagnostics list dial]",
     files: ["td-otbr-restapi-diagnostics-list.json"],
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
@@ -199,7 +197,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_diagnostics_list",
-    label: "topology [dial,devl]",
+    label: "Diag & Device topology list [dial,devl]",
     files: [
       "td-otbr-restapi-devices-list.json", 
       "td-otbr-restapi-diagnostics-list.json"
@@ -215,7 +213,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_list",
-    label: "devices list (devl)",
+    label: "Devices list (devl)",
     files: ["td-otbr-restapi-devices-list.json"],
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
@@ -228,7 +226,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_fetch",
-    label: "devices fetch (devf)",
+    label: "Devices fetch (devf)",
     files: ["td-otbr-restapi-devices-fetch.json"],
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
@@ -241,7 +239,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_fetch_diagnostics_fetch_all",
-    label: "topo: [devf, diagfa]⏰",
+    label: "Devices & Diag Topology fetch: [devf,diagfa]⏰",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
       "td-otbr-restapi-diagnostics-fetch-all.json"
@@ -257,7 +255,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_fetch_diagnostics_fetch_mesh-diagnostics-fetch_all",
-    label: "topo: [devf, diagfa, mdfa]⏰",
+    label: "Devices, Diag & Mesh Topology: [devf,diagfa,mdfa]⏰",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
       "td-otbr-restapi-diagnostics-fetch-all.json",
@@ -274,7 +272,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_diagnostics_fetch_all",
-    label: "topo: diagnostics fetch all (diagfa)⏰",
+    label: "Diag Topology: diagnostics fetch all [diagfa]⏰",
     files: ["td-otbr-restapi-diagnostics-fetch-all.json"],
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
@@ -287,7 +285,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_mesh_diagnostics_fetch_all",
-    label: "mesh diagnostics fetch all (mdfa)⏰",
+    label: "Mesh Topology: mesh diagnostics fetch all (mdfa)⏰",
     files: ["td-otbr-restapi-mesh-diagnostics-fetch-all.json"],
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",

@@ -277,15 +277,38 @@ h1 {
 
 #panel-dataset-inner {
   padding: 4px;
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "controls controls"
+    "actions status"
+    "cache cache";
+  gap: 6px;
+  align-items: start;
 }
 
 /* Reset flex-basis and force controls to take full width in row-flex context */
 #panel-dataset-controls {
+  grid-area: controls;
+  width: 100%;
   flex: 0 0 100%;
+}
+
+#panel-dataset-inner > div:nth-of-type(2) {
+  grid-area: actions;
+}
+
+#fetch-status {
+  grid-area: status;
+  justify-self: stretch;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#fieldset-cache {
+  grid-area: cache;
+  width: 100%;
 }
 
 #panel-node-link-filters,
@@ -421,9 +444,11 @@ label {
 #fetch-status .status-row {
   display: flex;
   gap: 15px;
-  align-items: center;
+  align-items: flex-start;
   flex-basis: auto;
   font-size: 14px;
+  width: 100%;
+  flex-wrap: wrap;
 }
 
 #fetch-status .status-row label {
@@ -432,12 +457,38 @@ label {
   white-space: nowrap;
 }
 
+#fetch-cache-age-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  margin-top: 2px;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+#fetch-cache-age-label,
+#fetch-cache-age-value {
+  font-size: 14px;
+}
+
 #fetch-status .progress-row {
   display: flex;
   align-items: center;
   flex-basis: auto;
   padding-top: 2px;
   font-size: 14px;
+  width: 100%;
+}
+
+@media (min-width: 721px) {
+  #fetch-status .status-row {
+    flex-wrap: nowrap;
+  }
+
+  #fetch-cache-age-group {
+    margin-left: auto;
+  }
 }
 
 /* Panel-view collapsed state */
@@ -597,10 +648,23 @@ select.filter-disabled {
 
 .filters-content .controls {
   padding: 1px 10px 6px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.filters-content .controls > * {
+  min-width: 0;
+}
+
+.filters-content .controls > #search-control-bar {
+  grid-column: 1 / -1;
+}
+
+.filters-content .controls > #fieldset-node-link-filters,
+.filters-content .controls > #fieldset-diag-filters {
+  width: 100%;
 }
 
 /* ── Buttons ──────────────────────────────────────────────── */
@@ -761,6 +825,9 @@ button.active {
 #device-details {
   grid-column: 2;
   grid-row: 1 / 5;
+  position: sticky;
+  top: 12px;
+  align-self: start;
 }
 
 .topology-canvas-wrap {
@@ -1213,9 +1280,70 @@ td:last-child {
   }
 }
 
+@media (min-width: 841px) and (max-width: 1000px) {
+  #panel-view {
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 10px;
+  }
+
+  #device-details {
+    grid-column: 2;
+    grid-row: 1 / 5;
+    width: 280px;
+    max-height: 72vh;
+    position: sticky;
+    top: 12px;
+  }
+
+  #topology-view {
+    height: 72vh;
+  }
+
+  .node-details-panel {
+    max-height: 72vh;
+  }
+}
+
+@media (min-width: 1001px) and (max-width: 1280px) {
+  #panel-view {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 10px;
+  }
+
+  #device-details {
+    width: 300px;
+  }
+
+  #topology-view {
+    height: 72vh;
+  }
+
+  .node-details-panel {
+    max-height: 72vh;
+  }
+}
+
 @media (max-width: 720px) {
   .page {
     padding: 10px;
+  }
+
+  #panel-dataset-inner {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "controls"
+      "actions"
+      "status"
+      "cache";
+  }
+
+  #fetch-status {
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .filters-content .controls {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .dataset-controls {
