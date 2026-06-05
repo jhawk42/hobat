@@ -154,14 +154,72 @@ class TestShouldRegenerate(unittest.TestCase):
         self.assertTrue(_should_regenerate(p, self.fa, no_cache=True))
 
     def test_stale_file_returns_true(self) -> None:
-        # mtime 120 s in the past, max_age_s=60 → stale
+        # mtime 120 s in the past, max_age_s=60 -> stale
         p = self._write(mtime_offset=-120.0)
         self.assertTrue(_should_regenerate(p, self.fa, no_cache=False))
 
     def test_file_at_exact_boundary_is_fresh(self) -> None:
-        # mtime set to now → age ≈ 0, well within 60 s
+        # mtime set to now -> age ~= 0, well within 60 s
         p = self._write()
         self.assertFalse(_should_regenerate(p, self.fa, no_cache=False))
+
+
+class TestFileCacheMaxAgeResolution(unittest.TestCase):
+    """Validate CLI > ENV > default precedence for cache max-age."""
+
+    def test_defaults_when_cli_and_env_are_unset(self) -> None:
+        parser = td_webserver.build_parser()
+        with patch.dict(os.environ, {}, clear=True):
+            args = parser.parse_args([])
+            value, source = td_webserver._resolve_file_cache_max_age(args, parser)
+        self.assertEqual(value, td_webserver.TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT)
+        self.assertEqual(source, "default")
+
+    def test_env_used_when_cli_is_omitted(self) -> None:
+        parser = td_webserver.build_parser()
+        with patch.dict(
+            os.environ,
+            {td_webserver.TD_FILE_CACHE_MAX_AGE_ENV_NAME: "120"},
+            clear=True,
+        ):
+            args = parser.parse_args([])
+            value, source = td_webserver._resolve_file_cache_max_age(args, parser)
+        self.assertEqual(value, 120)
+        self.assertEqual(source, "env")
+
+    def test_cli_overrides_env(self) -> None:
+        parser = td_webserver.build_parser()
+        with patch.dict(
+            os.environ,
+            {td_webserver.TD_FILE_CACHE_MAX_AGE_ENV_NAME: "120"},
+            clear=True,
+        ):
+            args = parser.parse_args(["--file-cache-max-age", "30"])
+            value, source = td_webserver._resolve_file_cache_max_age(args, parser)
+        self.assertEqual(value, 30)
+        self.assertEqual(source, "cli")
+
+    def test_invalid_env_value_raises_parser_error(self) -> None:
+        parser = td_webserver.build_parser()
+        with patch.dict(
+            os.environ,
+            {td_webserver.TD_FILE_CACHE_MAX_AGE_ENV_NAME: "not-an-int"},
+            clear=True,
+        ):
+            args = parser.parse_args([])
+            with self.assertRaises(SystemExit):
+                td_webserver._resolve_file_cache_max_age(args, parser)
+
+    def test_negative_env_value_raises_parser_error(self) -> None:
+        parser = td_webserver.build_parser()
+        with patch.dict(
+            os.environ,
+            {td_webserver.TD_FILE_CACHE_MAX_AGE_ENV_NAME: "-1"},
+            clear=True,
+        ):
+            args = parser.parse_args([])
+            with self.assertRaises(SystemExit):
+                td_webserver._resolve_file_cache_max_age(args, parser)
 
 
 # ---------------------------------------------------------------------------

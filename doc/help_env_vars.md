@@ -13,3 +13,4 @@ List of environment variables fot tdash.
 | `util_ot_ctl.py` | `TD_OTBR_CONTAINER_USE` | `1` | Controls whether to use Docker container execution for `ot-ctl` (`1` = use container, `0` = run locally without `docker exec`). |
 | `td_webserver.py` | `HOST` | `""` (bind all interfaces) | Sets the default host/interface that the web server binds to when `--host` is not passed. |
 | `td_webserver.py` | `PORT` | `9165` | Sets the default web server port when `--port` is not passed. |
+| `td_webserver.py` | `TD_FILE_CACHE_MAX_AGE` | `86400` | Sets the default max-age (seconds) used for data file cache headers and freshness checks when `--file-cache-max-age` is not passed. |

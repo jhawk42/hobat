@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
@@ -91,6 +92,24 @@ class TestTopLevelCommands(unittest.TestCase):
         parser = td_webserver.build_parser()
         args = parser.parse_args([])
         self.assertEqual(args.port, 9165)
+
+    def test_webserver_module_accepts_file_cache_max_age(self):
+        parser = td_webserver.build_parser()
+        args = parser.parse_args(["--file-cache-max-age", "120"])
+        self.assertEqual(args.file_cache_max_age, 120)
+
+    def test_webserver_module_rejects_negative_file_cache_max_age(self):
+        parser = td_webserver.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["--file-cache-max-age", "-1"])
+
+    def test_webserver_module_cli_cache_max_age_overrides_env(self):
+        parser = td_webserver.build_parser()
+        with patch.dict(os.environ, {"TD_FILE_CACHE_MAX_AGE": "600"}, clear=True):
+            args = parser.parse_args(["--file-cache-max-age", "42"])
+            value, source = td_webserver._resolve_file_cache_max_age(args, parser)
+        self.assertEqual(value, 42)
+        self.assertEqual(source, "cli")
 
 
 # ---------------------------------------------------------------------------
