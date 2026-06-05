@@ -669,18 +669,16 @@ def fetch_network_diag_topology(
         # Skip the retries but still check if we need to expand children for this node if expand_children is True, since the multicast query might not have included the child table data for this node if it was using a simpler TLV set. So we can still enrich the existing node data with child information if needed by doing a direct query just for the child table TLV, but we can skip the full diagnostic query with all TLVs since we already have that data from the multicast response.
         if (not record_exists):
             # Start with ROUTER TLV_VALUES_DETAILED for first attempt
-            tlv_detail_level = 6
+            tlv_detail_level = 10
+            retry_tlv_detail_levels = {
+                retries - 2: 9,
+                retries - 1: 8,
+            }
 
             for r in range(retries):
-                # On last retries, try with simpler TLV set in case detailed one is causing issues
-                if r == retries - 2:
-                    tlv_detail_level = 9
-                    logging.info(
-                        f"Router Node {rloc16} not found after {r} attempts, trying with tlv_detail_level {tlv_detail_level} {get_tlv_values_for_detail_level(tlv_detail_level)} TLV set."
-                    )
-
-                if r == retries - 1:
-                    tlv_detail_level = 8
+                # On retry attempts, switch to the configured TLV level and log once.
+                if r in retry_tlv_detail_levels:
+                    tlv_detail_level = retry_tlv_detail_levels[r]
                     logging.info(
                         f"Router Node {rloc16} not found after {r} attempts, trying with tlv_detail_level {tlv_detail_level} {get_tlv_values_for_detail_level(tlv_detail_level)} TLV set."
                     )
@@ -738,6 +736,14 @@ def fetch_network_diag_topology(
                     for child in network_topology_node.get("children", [])
                     if child.get("rloc16")
                 ]
+
+                # index child table by rloc16 for quick lookup
+                child_table_by_rloc16 = {
+                    child.get("rloc16"): child
+                    for child in network_topology_node.get("children", [])
+                    if child.get("rloc16")
+                }
+
                 for child_rloc in children_rlocs:
                     # Check if child RLOC16 is already in topology map (e.g. from multicast query),
                     # if so skip the direct query and use the existing data to populate the topology map
@@ -751,6 +757,11 @@ def fetch_network_diag_topology(
                         # in case the child sleeping (5 seconds), is not fully attached or responsive yet,
                         # otherwise add with default values
 
+                        # child has mode which includes device_type 
+                        # device_type 1 is FTD
+                        # device_type 0 is MTD
+                        is_child_ftd = child_table_by_rloc16.get(child_rloc, {}).get("mode", {}).get("device_type") == 1
+
                         child_retries = 5  # number of retries
 
                         child_delay_max = 2.0  # max delay between retries
@@ -760,37 +771,24 @@ def fetch_network_diag_topology(
                         # - Start with detailed TLV (includes child table, IPv6 list); may not respond to simpler sets
                         # - Fall back to simpler TLV if detailed responses fail; still get basic node info
                         # - Maximize response chances while attempting to maximize detail level
-                        child_tlv_detail_level = 4
 
+                        child_tlv_detail_level = 4 # "detailed" for FTD children
+                        if not is_child_ftd:
+                            child_tlv_detail_level = 3 # "medium tv mac" for MTD children, since they might not respond to the more detailed TLV sets that include child table info which is not relevant for MTDs 
+
+                        child_retry_tlv_detail_levels = {
+                            child_retries - 4: (2, "medium mac"),
+                            child_retries - 3: (2, "medium mac"),
+                            child_retries - 2: (1, "simple"),
+                            child_retries - 1: (1, "simple"),
+                        }
+  
                         for cr in range(child_retries):
-                            # On last retries, try with simpler TLV set in case detailed one is causing issues
-
-                            if cr == child_retries - 4:
-                                # MEDIUM
-                                child_tlv_detail_level = 3
+                            # On retry attempts, switch to the configured TLV level and log once.
+                            if cr in child_retry_tlv_detail_levels:
+                                child_tlv_detail_level, detail_level_name = child_retry_tlv_detail_levels[cr]
                                 logging.info(
-                                    f"Child node {child_rloc} not found after {cr} attempts, trying with tlv_detail_level {child_tlv_detail_level} {get_tlv_values_for_detail_level(child_tlv_detail_level)} medium detail TLV set."
-                                )
-
-                            if cr == child_retries - 3:
-                                # MEDIUM
-                                child_tlv_detail_level = 2
-                                logging.info(
-                                    f"Child node {child_rloc} not found after {cr} attempts, trying with tlv_detail_level {child_tlv_detail_level} {get_tlv_values_for_detail_level(child_tlv_detail_level)} medium detail TLV set."
-                                )
-
-                            if cr == child_retries - 2:
-                                # SIMPLE
-                                child_tlv_detail_level = 1
-                                logging.info(
-                                    f"Child node {child_rloc} not found after {cr} attempts, trying with tlv_detail_level {child_tlv_detail_level} {get_tlv_values_for_detail_level(child_tlv_detail_level)} simple detail TLV set."
-                                )
-
-                            if cr == child_retries - 1:
-                                # BASIC
-                                child_tlv_detail_level = 1
-                                logging.info(
-                                    f"Child node {child_rloc} not found after {cr} attempts, trying with tlv_detail_level {child_tlv_detail_level} {get_tlv_values_for_detail_level(child_tlv_detail_level)} simple detail TLV set."
+                                    f"Child node {child_rloc} not found after {cr} attempts, trying with tlv_detail_level {child_tlv_detail_level} {get_tlv_values_for_detail_level(child_tlv_detail_level)} {detail_level_name} detail TLV set."
                                 )
 
                             child_node = fetch_network_diag_for_device(
@@ -829,14 +827,15 @@ def fetch_network_diag_topology(
                             else:
                                 child_node["omr_ipv6_addr"] = None
                             
+                            # DEBUG
+                            #if child_node["tlv_values"]:
+                            #    child_node["tlv_values"] = f"attempts: {cr+1}/{child_retries}. level: {child_tlv_detail_level} tlvs: {child_node['tlv_values']}"
+
                             # Use _upsert_device_record to handle potential RLOC16 changes
                             _upsert_device_record(network_topology_map, child_node, extaddr_to_rloc)
                             
-                            # logging.info(
-                            #    f"Added child node {child_rloc} {child_node.get('extaddr', 'Unknown')} {child_node.get('device_label', 'Unknown')} to topology map. {r}/{retries} attempts.  TLV detail level: {tlv_detail_level}"
-                            # )
                             logging.info(
-                                f"Added child node {child_rloc} {child_node.get('extaddr', 'Unknown')} {child_node.get('device_label', 'Unknown')} under parent {rloc16} {network_topology_node.get('extaddr', 'Unknown')} {network_topology_node.get('device_label', 'Unknown')} to topology map. {cr+1}/{child_retries} attempts.  TLV detail level: {child_tlv_detail_level} {get_tlv_values_for_detail_level(child_tlv_detail_level)}"
+                                f"Added child node {child_rloc} {child_node.get('extaddr', 'Unknown')} {child_node.get('device_label', 'Unknown')} under parent {rloc16} {network_topology_node.get('extaddr', 'Unknown')} {network_topology_node.get('device_label', 'Unknown')} to topology map.  attempts: {cr+1}/{child_retries}. detail level: {child_tlv_detail_level} TLVs: {get_tlv_values_for_detail_level(child_tlv_detail_level)}"
                             )
                             logging.info(
                                 f"Poll Child {len(network_topology_map)} unique devices so far"
