@@ -1,7 +1,7 @@
 name: Build Docker Image
 on:
   push:
-    branches: [ "dev" ]
+    branches: [ "main", "dev" ]
   schedule:
     # Nightly build at 11:30am UTC on dev branch
     - cron: '30 11 * * *'
@@ -13,7 +13,6 @@ jobs:
     permissions:
       packages: write
       contents: read
-    if: github.event_name != 'schedule' || github.ref == 'refs/heads/dev'
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -35,10 +34,16 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             echo "tags=ghcr.io/${{ github.repository_owner }}/tdash:nightly" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "tags=ghcr.io/${{ github.repository_owner }}/tdash:latest,ghcr.io/${{ github.repository_owner }}/tdash:${{ github.sha }}" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
             echo "tags=ghcr.io/${{ github.repository_owner }}/tdash:dev,ghcr.io/${{ github.repository_owner }}/tdash:dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Manual builds are only permitted on main or dev branches. Current ref: ${{ github.ref }}" >&2
+            exit 1
           else
-            echo "tags=ghcr.io/${{ github.repository_owner }}/tdash:latest,ghcr.io/${{ github.repository_owner }}/tdash:${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "Unsupported ref for docker publish: ${{ github.ref }}" >&2
+            exit 1
           fi
 
       - name: Build and push image
