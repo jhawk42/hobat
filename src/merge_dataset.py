@@ -175,25 +175,29 @@ MERGE_IDENTITY_FIELDS = {
 # Phase 3: Source Precedence Rules (Priority: Higher = Wins)
 # Used to resolve conflicts when multiple sources provide same field
 SOURCE_PRECEDENCE = {
-    "td-static-extaddr-device-label.json": 101, # Highest priority (most detailed)
-    "td-otbr-restapi-diagnostics-fetch-all.json": 100, # Highest priority (most detailed)
-    "td-otbr-restapi-mesh-diagnostics-fetch-all.json": 99,
-    "td-otbr-restapi-diagnostics-list.json": 98,
-    "td-otbr-restapi-diagnostics.json": 97,      
-    "td-otbr-restapi-devices-fetch.json": 96,
-    "td-otbr-restapi-devices-list.json": 95,
-    "td-otbr-restapi-devices.json": 94,
-    "td-otbr-cli-networkdiag-fetch-all.json": 90,
-    "td-otbr-cli-networkdiag-multicast-network.json": 85,
-    "td-otbr-cli-meshdiag-topology.json": 80,
-    "td-otbr-cli-meshdiag-router-neighbortables.json": 75,
-    "td-otbr-cli-meshdiag-router-childtables.json": 74,
-    "td-otbr-cli-router-table.json": 70,
-    "td-mdns-scopes-thread.json": 55,
-    "td-mdns-scopes-br.json": 60,                # mDNS scopes (service discovery)
-    "td-mdns-scopes-hap.json": 50,
-    "td-mdns-scopes-matter.json": 45,
-    "td-eve-topology.json": 10,                  # Lowest priority 
+    "td-static-extaddr-device-label.json": 101, # Highest priority
+
+    "td-otbr-cli-networkdiag-fetch-all.json": 100, # Highest priority (most detailed)
+    "td-otbr-cli-networkdiag-multicast-network.json": 99,
+    "td-otbr-cli-meshdiag-topology.json": 98,
+    "td-otbr-cli-meshdiag-router-neighbortables.json": 97,
+    "td-otbr-cli-meshdiag-router-childtables.json": 96,
+    "td-otbr-cli-router-table.json": 95,
+
+    "td-otbr-restapi-diagnostics-fetch-all.json": 90, 
+    "td-otbr-restapi-mesh-diagnostics-fetch-all.json": 89,
+    "td-otbr-restapi-diagnostics-list.json": 88,
+    "td-otbr-restapi-diagnostics.json": 87,      
+    "td-otbr-restapi-devices-fetch.json": 86,
+    "td-otbr-restapi-devices-list.json": 85,
+    "td-otbr-restapi-devices.json": 84,
+
+    "td-eve-topology.json": 60,
+
+    "td-mdns-scopes-thread.json": 50,
+    "td-mdns-scopes-br.json": 49,                # mDNS scopes (service discovery)
+    "td-mdns-scopes-hap.json": 48,
+    "td-mdns-scopes-matter.json": 47
 }
 
 DEFAULT_INPUT_FILES = [

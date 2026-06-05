@@ -35,13 +35,29 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "networkdiag_multicast_network_only",
-    label: "Device (ftd) details topology [networkdiag-multicast ndmc]",
+    label: "Device (ftd) topology [network multicast ndmc]",
     files: ["td-otbr-cli-networkdiag-multicast-network.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 16
+  },
+
+  // ── Multi-file merged (otbr-cli) ──
+  {
+    source: "otbr-cli",
+    value: "merged_otbr_cli_meshdiag_networkdiag_multicast",
+    label: "Device (ftd) & Mesh topology [md, ndmc]",
+    files: [
+      "td-otbr-cli-meshdiag-topology.json",
+      "td-otbr-cli-networkdiag-multicast-network.json"
+    ],
+    mergeStrategy: "by-identity",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 30
   },
 
   // ── Multi-file merged (otbr-cli, mdns) ──
@@ -61,41 +77,12 @@ export const DATASET_REGISTRY = [
     estimateActionCostSecs: 80
   },
 
-  // ── Single-file simple datasets (otbr-cli) ───
-  {
-    source: "otbr-cli",
-    value: "networkdiag_only",
-    label: "Device (ftd,sed) detailed topology Networkdiag fetch all (ndfa)⏰",
-    files: ["td-otbr-cli-networkdiag-fetch-all.json"],
-    mergeStrategy: "none",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 600
-  }, 
-
-  // ── Multi-file merged (otbr-cli) ──
-  {
-    source: "otbr-cli",
-    value: "merged_otbr_cli_meshdiag_networkdiag_fetch_all_mdns",
-    label: "Detailed topology [md, ndfa, mdns] ⏰",
-    files: [
-      "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-fetch-all.json",
-      "td-mdns-scopes-thread.json"
-    ],
-    mergeStrategy: "by-identity",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 720
-  },
-
+ 
 
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast_mdns",
-    label: "Detailed topology [md, ndmc, mdn, mdc, mdns] ⏰",
+    label: "Device (all) detailed topology [md, ndmc, mdn, mdc, mdns] ⏰",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json",
@@ -108,12 +95,42 @@ export const DATASET_REGISTRY = [
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 270
+  },  
+
+  // ── Single-file simple datasets (otbr-cli) ───
+  {
+    source: "otbr-cli",
+    value: "networkdiag_only",
+    label: "Device (all) detailed topology [network fetch all (ndfa)]⏰",
+    files: ["td-otbr-cli-networkdiag-fetch-all.json"],
+    mergeStrategy: "none",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 600
   }, 
+
+  // ── Multi-file merged (otbr-cli) ──
+  {
+    source: "otbr-cli",
+    value: "merged_otbr_cli_meshdiag_networkdiag_fetch_all_mdns",
+    label: "Device (all) detailed topology [md, ndfa, mdns] ⏰",
+    files: [
+      "td-otbr-cli-meshdiag-topology.json",
+      "td-otbr-cli-networkdiag-fetch-all.json",
+      "td-mdns-scopes-thread.json"
+    ],
+    mergeStrategy: "by-identity",
+    topologyMode: "meshdiag-networkdiag",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 720
+  },
 
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_poll_all_mdns",
-    label: "Detailed topology [md, ndfa, mdn, mdc, mdns] ⏰",
+    label: "Device (all) detailed topology [md, ndfa, mdn, mdc, mdns] ⏰",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-fetch-all.json",
@@ -127,23 +144,6 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 900
   },
-
-  /*
-  // ── Multi-file merged (otbr-cli) ──
-  {
-    source: "otbr-cli",
-    value: "merged_otbr_cli_meshdiag_networkdiag_multicast",
-    label: "Rapid fetch topology [md, ndmc]",
-    files: [
-      "td-otbr-cli-meshdiag-topology.json",
-      "td-otbr-cli-networkdiag-multicast-network.json"
-    ],
-    mergeStrategy: "by-identity",
-    topologyMode: "meshdiag-networkdiag",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links"
-  },
-*/
 
   {
     source: "otbr-cli",
