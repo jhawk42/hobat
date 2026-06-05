@@ -12,6 +12,10 @@ import {
   enrichRawFiles,
   setForceFresh,
   setOnlyCache,
+  startFetchSession,
+  endFetchSession,
+  cancelActiveFetchSession,
+  isFetchCancelledError,
 } from "./tdash-dataset.js";
 import {
   renderTopologyForDataset,
@@ -65,6 +69,7 @@ let _physicsEnabled = true;
 let _enhanceEnabled = true;
 let _lastFetchStartedAt = null;
 let _currentSearchQuery = "";
+let _fetchInProgress = false;
 
 export function getSearchQuery() {
   return _currentSearchQuery;
@@ -557,11 +562,35 @@ function updateEstimatedFetchTime(estimateSeconds) {
   }
 }
 
+function setFetchButtonsState(fetching) {
+  const fetchBtn = document.getElementById("btn-fetch");
+  const cancelBtn = document.getElementById("btn-fetch-cancel");
+  if (fetchBtn) fetchBtn.disabled = fetching;
+  if (cancelBtn) cancelBtn.disabled = !fetching;
+}
+
+function resetFetchTimeTakenProgressToDefault() {
+  const progressEl = document.getElementById("fetch-timetaken-progress");
+  if (!progressEl) return;
+  progressEl.removeAttribute("value");
+}
+
 // Fetch dataset function
 async function doFetchDataset() {
+  if (_fetchInProgress) return;
+
+  _fetchInProgress = true;
+  setFetchButtonsState(true);
+
   _lastFetchStartedAt = Date.now();
   const selectedValue = document.getElementById("dataset-select").value;
-  if (!selectedValue) return;
+  if (!selectedValue) {
+    _fetchInProgress = false;
+    setFetchButtonsState(false);
+    return;
+  }
+
+  const sessionId = startFetchSession();
 
   // Reset status bars to loading state
   _setStatusSpans(_FETCH_STATUS_IDS, "…");
@@ -577,12 +606,32 @@ async function doFetchDataset() {
   }
 
   try {
-    await loadDataset(selectedValue);
+    await loadDataset(selectedValue, { sessionId });
   } catch (err) {
-    console.error("loadDataset threw:", err);
-    _setStatusSpans(_FETCH_STATUS_IDS, "—");
-    _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+    if (isFetchCancelledError(err)) {
+      resetFetchTimeTakenProgressToDefault();
+
+      const statusEl = document.getElementById("fetch-status-line-content");
+      if (statusEl) statusEl.textContent = `Fetch cancelled for "${selectedValue}".`;
+
+      // Keep current view intact and restore status bars from current dataset.
+      if (currentDataset) {
+        renderCurrentView();
+        updateFetchStatusBar(_lastFetchStartedAt);
+      } else {
+        _setStatusSpans(_FETCH_STATUS_IDS, "—");
+        _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+      }
+    } else {
+      console.error("loadDataset threw:", err);
+      _setStatusSpans(_FETCH_STATUS_IDS, "—");
+      _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+    }
     return;
+  } finally {
+    endFetchSession(sessionId);
+    _fetchInProgress = false;
+    setFetchButtonsState(false);
   }
 
   // loadDataset returns early without updating currentDataset when all files fail.
@@ -603,6 +652,21 @@ async function doFetchDataset() {
 
 // Fetch button drives data acquisition.
 document.getElementById("btn-fetch").addEventListener("click", doFetchDataset);
+
+document.getElementById("btn-fetch-cancel")?.addEventListener("click", async () => {
+  if (!_fetchInProgress) return;
+
+  const cancelBtn = document.getElementById("btn-fetch-cancel");
+  if (cancelBtn) cancelBtn.disabled = true;
+
+  try {
+    await cancelActiveFetchSession();
+  } catch (err) {
+    console.warn("Failed to cancel active fetch session:", err);
+  }
+});
+
+setFetchButtonsState(false);
 
 // Auto-fetch when dataset is selected and chk-auto-fetch is enabled
 document.getElementById("dataset-select").addEventListener("change", async () => {

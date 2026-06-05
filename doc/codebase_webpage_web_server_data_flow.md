@@ -29,6 +29,7 @@ _Covers `td_webserver.py`, `tdash.html`, and all `js/*.js` modules._
                                    │ HTTP (fetch API)
                         /api/data/{filename}
                         /api/job/{job_id}
+                        DELETE /api/job/{job_id}
                         /tdash.html, /js/*, /tdash.css
 ┌──────────────────────────────────┴──────────────────────────────────┐
 │  td_webserver.py  (aiohttp)                                         │
@@ -67,7 +68,43 @@ There are four distinct layers:
 | `GET /` | `handle_root` | 302 redirect to `/tdash.html` |
 | `GET /api/data/{filename}` | `handle_data_api` | Serve or regenerate a data file |
 | `GET /api/job/{job_id}` | `handle_job_api` | Poll a long-running background job |
+| `DELETE /api/job/{job_id}` | `handle_job_cancel_api` | Request cancellation of a running long-cost job |
 | `GET /**` | static file server | All other paths served from `src/` directory |
+
+### Phase 1 contract: cancellation state model
+
+Phase 1 establishes a shared status model used by both browser polling and
+server responses.  The model defines five states:
+
+- `running`
+- `cancelling`
+- `cancelled`
+- `done`
+- `error`
+
+Terminal states are `cancelled`, `done`, and `error`.
+The only cancellable state is `running`.
+
+For browser behavior, Phase 1 also codifies two decisions:
+
+- Cancel scope: cancel all in-flight jobs for the active fetch session.
+- Partial-result policy: ignore partial results and keep the currently rendered
+  view unchanged after cancellation.
+
+Phase 1 does not yet introduce subprocess kill mechanics; those are implemented
+in later phases on top of this contract.
+
+### Cancel endpoint contract (`DELETE /api/job/{job_id}`)
+
+The cancellation endpoint semantics are:
+
+- Unknown `job_id` → `404 Not Found`
+- Job already terminal (`done`, `error`, `cancelled`) → `409 Conflict`
+- Job currently `running` → `202 Accepted` and transition to `cancelling`
+
+After `202`, the server cancels the background task and terminates the tracked
+`td_cli` subprocess (graceful terminate with force-kill fallback), then polling
+transitions to `cancelled`.
 
 Static assets (`tdash.html`, `tdash.css`, `js/*.js`) get `Cache-Control: no-cache` so browsers revalidate via ETag / If-Modified-Since but never serve stale bytes without checking the server.
 
@@ -126,6 +163,28 @@ serve file      force_async or action_cost_s > 300s?
            every 5 s
 ```
 
+  ### Cancellation flow for polled jobs
+
+  ```
+  click #btn-fetch-cancel
+      │
+      ▼
+  cancelActiveFetchSession() [tdash-dataset.js]
+    - marks current session cancelRequested
+    - aborts local fetch/poll waits
+    - sends DELETE /api/job/{id} for all tracked active jobs
+      │
+      ▼
+  handle_job_cancel_api() [td_webserver.py]
+    - running -> cancelling
+    - cancels runtime task
+    - cancellation path terminates td_cli subprocess
+      │
+      ▼
+  poll /api/job/{id}
+    cancelling -> cancelled
+  ```
+
 ### Per-source serialisation
 
 `_source_locks` is a `dict[source_name → asyncio.Lock]`.  All subprocess calls for the same source (`"otbr-cli"`, `"mdns"`, `"otbr-restapi"`) share one lock, so they never run concurrently — preventing hardware and socket conflicts in the underlying CLI layer.
@@ -146,6 +205,7 @@ Data files get `Cache-Control: max-age=<n>` plus `Last-Modified` and an ETag der
 | `staticExtaddrLabelMap` | `Map<lowercase-extaddr, device_label>` pre-loaded at startup |
 | `fileMaxAgeCache` | `Map<filename, { maxAge, fetchedAt, lastModifiedAt }>` — per-file cache |
 | `_forceFresh` / `_onlyCache` | Toggle flags set by the Force Refresh / Only Cache checkboxes |
+| `_activeFetchSession` | Current fetch session state: `id`, `cancelRequested`, `AbortController`, and tracked active `job_id`s |
 
 ### `loadDataset(entryValue)` walkthrough
 
@@ -426,6 +486,23 @@ updateDeviceStatusBar(counts)
 refreshDiagnosticFilterForCurrentSource()
 ```
 
+### Fetch cancel flow (triggered by Cancel button)
+
+```
+click #btn-fetch-cancel
+    │
+    ▼
+cancelActiveFetchSession()             ← tdash-dataset.js
+  - abort local waits (AbortController)
+  - DELETE /api/job/{id} for active session jobs
+    │
+    ▼
+doFetchDataset() catch branch          ← tdash-ui.js
+  - detect FetchCancelledError
+  - keep current rendered view unchanged (no partial overwrite)
+  - update status line to cancelled
+```
+
 ### Control-to-action mapping
 
 | Control | Event | Action |
@@ -433,6 +510,7 @@ refreshDiagnosticFilterForCurrentSource()
 | `#datasource-filter` | `change` | Re-populate dataset select; auto-fetch if enabled |
 | `#dataset-select` | `change` | Auto-fetch if enabled; auto-switch view if `defaultView` set |
 | `#btn-fetch` | `click` | `doFetchDataset()` |
+| `#btn-fetch-cancel` | `click` | `cancelActiveFetchSession()` for current fetch session |
 | `#btn-topology` | `click` | `switchView('topology')` → re-render |
 | `#btn-table` | `click` | `switchView('table')` → re-render |
 | `#node-filter` | `change` | Topology: `applyFilters()`; Table: `applyTableFilters()` |
@@ -563,7 +641,7 @@ doFetchDataset() [tdash-ui.js]
 loadDataset(value) [tdash-dataset.js]
   ├── fetch /api/data/<file> per entry.files[]
   │     └── server: check freshness → run python3 -m td_cli {command} if stale → return JSON
-  │     └── HTTP 202: poll /api/job/{id} until "done"
+  │     └── HTTP 202: poll /api/job/{id} until terminal status (done/error/cancelled)
   │
   ├── normalizeRows() per loaded file group [tdash-merge.js]
   ├── mergeRowsByIdentity() / mergeRowsByRloc16() / pass-through [tdash-merge.js]
@@ -598,3 +676,17 @@ Filter dropdown change [tdash-ui.js]
 ```
 
 Filter changes never re-fetch data or re-run the adaptor. They update the existing `vis.DataSet` objects or toggle table row visibility directly — making all filter interactions instant regardless of dataset size.
+
+---
+
+## 10. Cancellation Failure and Race Outcomes
+
+Implemented edge-case behavior:
+
+- `cancel-after-done`: `DELETE /api/job/{id}` returns `409` with terminal status.
+- Unknown job id: `DELETE /api/job/{id}` returns `404`.
+- Concurrent complete vs cancel:
+  - cancel-first: `running -> cancelling -> cancelled`
+  - complete-first: terminal (`done`/`error`) and cancel returns `409`
+- Cancel while queued on source lock: task is cancelled before subprocess start and transitions to `cancelled`.
+- Cancel while subprocess is running: task cancellation path in `run_td_cli` terminates subprocess (terminate, then kill fallback).

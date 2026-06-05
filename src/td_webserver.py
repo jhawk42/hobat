@@ -11,6 +11,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Sequence
+from collections.abc import Callable
 
 import aiohttp.web
 import aiohttp_cors
@@ -298,18 +299,97 @@ def _get_source_lock(source: str) -> asyncio.Lock:
 # async job tracking
 _LONG_COST_THRESHOLD_S = 300  # actions with cost > this get 202 + polling
 
+# Phase 1 contract: explicit job status model used by polling/cancel APIs.
+JOB_STATUS_RUNNING = "running"
+JOB_STATUS_CANCELLING = "cancelling"
+JOB_STATUS_CANCELLED = "cancelled"
+JOB_STATUS_DONE = "done"
+JOB_STATUS_ERROR = "error"
+
+_JOB_TERMINAL_STATUSES: set[str] = {
+    JOB_STATUS_CANCELLED,
+    JOB_STATUS_DONE,
+    JOB_STATUS_ERROR,
+}
+
+_JOB_CANCELLABLE_STATUSES: set[str] = {JOB_STATUS_RUNNING}
+
 
 @dataclasses.dataclass
 class JobStatus:
     job_id: str
     filename: str
-    status: str  # "running" | "done" | "error"
+    # "running" | "cancelling" | "cancelled" | "done" | "error"
+    status: str
     detail: str = ""
     created_at: float = dataclasses.field(default_factory=time.time)
 
 
+@dataclasses.dataclass
+class JobRuntime:
+    """In-memory runtime handles for a long-cost job."""
+
+    job_id: str
+    filename: str
+    source: str
+    task: "asyncio.Task[None]"
+    process: "asyncio.subprocess.Process | None" = None
+
+
+def _is_terminal_job_status(status: str) -> bool:
+    """Return True when *status* is a terminal job state."""
+    return status in _JOB_TERMINAL_STATUSES
+
+
+def _is_cancellable_job_status(status: str) -> bool:
+    """Return True when *status* is currently cancellable."""
+    return status in _JOB_CANCELLABLE_STATUSES
+
+
+def _build_job_poll_body(job: JobStatus) -> dict[str, str]:
+    """Build JSON payload for GET /api/job/{job_id} based on status."""
+    if job.status == JOB_STATUS_RUNNING:
+        return {"status": JOB_STATUS_RUNNING}
+    if job.status == JOB_STATUS_CANCELLING:
+        return {"status": JOB_STATUS_CANCELLING}
+    if job.status == JOB_STATUS_CANCELLED:
+        return {"status": JOB_STATUS_CANCELLED, "detail": job.detail}
+    if job.status == JOB_STATUS_DONE:
+        return {"status": JOB_STATUS_DONE, "filename": job.filename}
+    # Unknown statuses are surfaced as error payloads to keep polling robust.
+    if job.status != JOB_STATUS_ERROR:
+        return {
+            "status": JOB_STATUS_ERROR,
+            "detail": f"Unknown job status: {job.status}",
+        }
+    return {"status": JOB_STATUS_ERROR, "detail": job.detail}
+
+
+def _set_job_runtime_process(
+    job_id: str,
+    process: "asyncio.subprocess.Process | None",
+) -> None:
+    """Set or clear the active subprocess handle for *job_id*."""
+    runtime = _job_runtime_registry.get(job_id)
+    if runtime is not None:
+        runtime.process = process
+
+
+def _clear_job_runtime(job_id: str) -> None:
+    """Drop runtime tracking for *job_id* and remove reverse task index."""
+    runtime = _job_runtime_registry.pop(job_id, None)
+    if runtime is not None:
+        _job_id_by_task.pop(runtime.task, None)
+
+
 # Registry of in-flight and recently-completed jobs.
 _job_registry: dict[str, JobStatus] = {}
+
+# Phase 2 runtime index: O(1) lookup of active job task/process by job_id.
+_job_runtime_registry: dict[str, JobRuntime] = {}
+
+# Reverse index used by done-callback to clean up job runtime state in O(1).
+_job_id_by_task: dict["asyncio.Task[None]", str] = {}
 
 # Anchor set that keeps references to fire-and-forget background Tasks so the
 # garbage collector cannot collect them before they complete (CPython allows GC
@@ -319,11 +399,18 @@ _background_tasks: set["asyncio.Task[None]"] = set()
 # Cleanup schedule for the job registry.
 _JOB_TTL_S = 900       # evict completed/errored jobs after 15 minutes
 _CLEANUP_INTERVAL_S = 60  # run eviction sweep every 60 seconds
+_JOB_CANCEL_GRACE_DETAIL = "Cancellation requested by client."
+_PROCESS_TERMINATE_GRACE_S = 2.0
 
 
 def _on_background_task_done(task: "asyncio.Task[None]") -> None:
     """Done-callback: discard the task from the anchor set and log any exception."""
     _background_tasks.discard(task)
+
+    job_id = _job_id_by_task.pop(task, None)
+    if job_id is not None:
+        _clear_job_runtime(job_id)
+
     if not task.cancelled():
         exc = task.exception()
         if exc is not None:
@@ -342,10 +429,11 @@ async def _cleanup_job_registry_loop() -> None:
         expired = [
             jid
             for jid, j in list(_job_registry.items())
-            if j.status != "running" and (now - j.created_at) > _JOB_TTL_S
+            if _is_terminal_job_status(j.status) and (now - j.created_at) > _JOB_TTL_S
         ]
         for jid in expired:
             _job_registry.pop(jid, None)
+            _clear_job_runtime(jid)
         if expired:
             logging.debug(
                 "Evicted %d expired job(s) from registry", len(expired))
@@ -367,6 +455,8 @@ async def run_td_cli(
     data_dir: Path,
     *,
     timeout_s: float | None = None,
+    on_process_started: "Callable[[asyncio.subprocess.Process], None] | None" = None,
+    on_process_ended: "Callable[[], None] | None" = None,
 ) -> int:
     """Invoke td_cli.py as a subprocess and return its exit code.
 
@@ -388,6 +478,8 @@ async def run_td_cli(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    if on_process_started is not None:
+        on_process_started(process)
     _t0 = time.monotonic()
     try:
         if timeout_s is not None:
@@ -396,6 +488,23 @@ async def run_td_cli(
             )
         else:
             stdout, stderr = await process.communicate()
+    except asyncio.CancelledError:
+        logging.info(
+            "Subprocess cancelled; terminating process (args: %s)",
+            " ".join(action_args),
+        )
+        try:
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(
+                        process.communicate(), timeout=_PROCESS_TERMINATE_GRACE_S
+                    )
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.communicate()
+        finally:
+            raise
     except asyncio.TimeoutError:
         logging.warning(
             "Subprocess timed out after %.1f s (args: %s); killing process",
@@ -409,6 +518,8 @@ async def run_td_cli(
         await process.communicate()  
         raise
     finally:
+        if on_process_ended is not None:
+            on_process_ended()
         logging.debug(
             "Subprocess elapsed %.3f s  %s %s %s",
             time.monotonic() - _t0,
@@ -459,7 +570,8 @@ def _resolve_and_validate(filename: str, data_dir: Path) -> tuple["FileAction", 
 
 
 # ---------------------------------------------------------------------------
-# R2a — long-cost (202 + polling) dispatch (touches _job_registry, _background_tasks)
+# R2a — long-cost (202 + polling) dispatch
+# (touches _job_registry, _background_tasks, _job_runtime_registry)
 # ---------------------------------------------------------------------------
 
 async def _dispatch_long_cost(
@@ -473,13 +585,14 @@ async def _dispatch_long_cost(
     Deduplicates against an already-running job for the same filename.
     Spawns a background Task anchored in ``_background_tasks``.
     Returns a 202 Response immediately.
-    Touches: ``_job_registry``, ``_background_tasks``.
+    Touches: ``_job_registry``, ``_background_tasks``,
+    ``_job_runtime_registry``.
     """
     # Re-use an existing job for the same filename if already running.
     existing_job = next(
         (
             j for j in _job_registry.values()
-            if j.filename == filename and j.status == "running"
+            if j.filename == filename and j.status == JOB_STATUS_RUNNING
         ),
         None,
     )
@@ -487,7 +600,11 @@ async def _dispatch_long_cost(
         job_id = existing_job.job_id
     else:
         job_id = str(uuid.uuid4())
-        job = JobStatus(job_id=job_id, filename=filename, status="running")
+        job = JobStatus(
+            job_id=job_id,
+            filename=filename,
+            status=JOB_STATUS_RUNNING,
+        )
         _job_registry[job_id] = job
 
         async def _run_job(
@@ -496,27 +613,76 @@ async def _dispatch_long_cost(
             ddir: Path = data_dir,
             tmo: float = file_action.action_cost_s * 1.5,
         ) -> None:
-            # Acquire per-source lock so that only one long-cost subprocess
-            # per source runs at a time.  The 202 was already returned to the
-            # client; this serialization is transparent to the caller.
-            source = args[0]
-            async with _get_source_lock(source):
-                exit_code = await run_td_cli(args, ddir, timeout_s=tmo)
+            try:
+                # Acquire per-source lock so that only one long-cost subprocess
+                # per source runs at a time.  The 202 was already returned to the
+                # client; this serialization is transparent to the caller.
+                source = args[0]
+                async with _get_source_lock(source):
+                    # Cancellation may happen while queued on the source lock.
+                    j = _job_registry.get(jid)
+                    if j is None:
+                        return
+                    if j.status == JOB_STATUS_CANCELLING:
+                        j.status = JOB_STATUS_CANCELLED
+                        if not j.detail:
+                            j.detail = _JOB_CANCEL_GRACE_DETAIL
+                        return
+
+                    try:
+                        exit_code = await run_td_cli(
+                            args,
+                            ddir,
+                            timeout_s=tmo,
+                            on_process_started=lambda process: _set_job_runtime_process(
+                                jid, process
+                            ),
+                            on_process_ended=lambda: _set_job_runtime_process(jid, None),
+                        )
+                    except TypeError as exc:
+                        # Backward-compatible fallback for tests/mocks that
+                        # patch run_td_cli with the older signature.
+                        if (
+                            "on_process_started" not in str(exc)
+                            and "on_process_ended" not in str(exc)
+                        ):
+                            raise
+                        exit_code = await run_td_cli(args, ddir, timeout_s=tmo)
+            except asyncio.CancelledError:
+                j = _job_registry.get(jid)
+                if j is not None and j.status == JOB_STATUS_CANCELLING:
+                    j.status = JOB_STATUS_CANCELLED
+                    if not j.detail:
+                        j.detail = _JOB_CANCEL_GRACE_DETAIL
+                raise
+
             j = _job_registry.get(jid)
             if j is None:
                 return
+            if j.status == JOB_STATUS_CANCELLING:
+                j.status = JOB_STATUS_CANCELLED
+                if not j.detail:
+                    j.detail = _JOB_CANCEL_GRACE_DETAIL
+                return
             if exit_code == 0:
-                j.status = "done"
+                j.status = JOB_STATUS_DONE
             else:
-                j.status = "error"
+                j.status = JOB_STATUS_ERROR
                 j.detail = f"td_cli exit code {exit_code}"
 
         _t = asyncio.create_task(_run_job())
+        _job_runtime_registry[job_id] = JobRuntime(
+            job_id=job_id,
+            filename=filename,
+            source=action_args[0],
+            task=_t,
+        )
+        _job_id_by_task[_t] = job_id
         _background_tasks.add(_t)
         _t.add_done_callback(_on_background_task_done)
 
     body = json.dumps(
-        {"job_id": job_id, "status": "running", "filename": filename}
+        {"job_id": job_id, "status": JOB_STATUS_RUNNING, "filename": filename}
     )
     return aiohttp.web.Response(
         status=202,
@@ -714,14 +880,70 @@ async def handle_job_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     if job is None:
         raise aiohttp.web.HTTPNotFound(reason=f"Unknown job: {job_id}")
 
-    if job.status == "running":
-        body = {"status": "running"}
-    elif job.status == "done":
-        body = {"status": "done", "filename": job.filename}
-    else:
-        body = {"status": "error", "detail": job.detail}
+    body = _build_job_poll_body(job)
 
     return aiohttp.web.Response(
+        content_type="application/json",
+        text=json.dumps(body),
+    )
+
+
+async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """DELETE /api/job/{job_id} — request cancellation of a long-running job."""
+    job_id = request.match_info["job_id"]
+    job = _job_registry.get(job_id)
+    if job is None:
+        raise aiohttp.web.HTTPNotFound(reason=f"Unknown job: {job_id}")
+
+    if job.status == JOB_STATUS_CANCELLING:
+        body = {
+            "job_id": job_id,
+            "status": JOB_STATUS_CANCELLING,
+            "filename": job.filename,
+            "detail": job.detail,
+        }
+        return aiohttp.web.Response(
+            status=202,
+            content_type="application/json",
+            text=json.dumps(body),
+        )
+
+    if not _is_cancellable_job_status(job.status):
+        body = {
+            "job_id": job_id,
+            "status": job.status,
+            "filename": job.filename,
+            "detail": job.detail,
+            "error": "Job is not cancellable in its current state.",
+        }
+        return aiohttp.web.Response(
+            status=409,
+            content_type="application/json",
+            text=json.dumps(body),
+        )
+
+    job.status = JOB_STATUS_CANCELLING
+    if not job.detail:
+        job.detail = _JOB_CANCEL_GRACE_DETAIL
+
+    runtime = _job_runtime_registry.get(job_id)
+    if runtime is not None:
+        process = runtime.process
+        if process is not None and process.returncode is None and not runtime.task.done():
+            # Cancel task; run_td_cli handles graceful terminate/kill cleanup.
+            runtime.task.cancel()
+        elif process is None and not runtime.task.done():
+            # If still queued before subprocess start, cancel the task directly.
+            runtime.task.cancel()
+
+    body = {
+        "job_id": job_id,
+        "status": JOB_STATUS_CANCELLING,
+        "filename": job.filename,
+        "detail": job.detail,
+    }
+    return aiohttp.web.Response(
+        status=202,
         content_type="application/json",
         text=json.dumps(body),
     )
@@ -875,12 +1097,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         cleanup_task: asyncio.Task | None = app.get("_cleanup_task")
         if cleanup_task is not None:
             cleanup_task.cancel()
+
+        # Cancel short-cost synchronous tasks tracked by filename.
+        short_tasks = list(_active_processes.values())
+        for t in short_tasks:
+            t.cancel()
+
         # Cancel all in-flight background job tasks and wait for them to finish.
         tasks = list(_background_tasks)
         for t in tasks:
             t.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+
+        wait_tasks = short_tasks + tasks
+        if wait_tasks:
+            await asyncio.gather(*wait_tasks, return_exceptions=True)
+
+        _active_processes.clear()
+        _job_runtime_registry.clear()
+        _job_id_by_task.clear()
 
     app.on_startup.append(_start_cleanup)
     app.on_shutdown.append(_on_shutdown)
@@ -904,6 +1138,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.router.add_get("/", handle_root)
     cors.add(app.router.add_get("/api/data/{filename}", handle_data_api))
     cors.add(app.router.add_get("/api/job/{job_id}", handle_job_api))
+    cors.add(app.router.add_delete("/api/job/{job_id}", handle_job_cancel_api))
     # Serve all static assets (HTML, JS, CSS, …) from the src/ directory.
     app.router.add_static(
         "/", static_root, show_index=False, follow_symlinks=False)
