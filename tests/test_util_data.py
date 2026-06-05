@@ -9,7 +9,7 @@ import util_data
 
 
 class ResolveTdDataDirTests(unittest.TestCase):
-    def test_env_var_has_highest_priority_over_cli(self) -> None:
+    def test_cli_arg_has_highest_priority_over_env_var(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             env_dir = Path(tmpdir) / "env_data"
             cli_dir = Path(tmpdir) / "cli_data"
@@ -20,14 +20,14 @@ class ResolveTdDataDirTests(unittest.TestCase):
                 cwd=tmpdir,
             )
 
-            self.assertEqual(resolved, env_dir.resolve())
+            self.assertEqual(resolved, cli_dir.resolve())
 
             detailed = util_data.resolve_data_dir_with_source(
                 data_dir=str(cli_dir),
                 env={"TD_DATA_DIR": str(env_dir)},
                 cwd=tmpdir,
             )
-            self.assertEqual(detailed.source, util_data.TDDataDirSource.ENV)
+            self.assertEqual(detailed.source, util_data.TDDataDirSource.CLI)
             self.assertFalse(detailed.created)
 
     def test_cli_priority_when_env_missing(self) -> None:

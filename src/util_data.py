@@ -82,24 +82,24 @@ def resolve_data_dir_with_source(
 ) -> TDDataDirResolution:
     """Resolve td_data_dir and include resolution metadata.
 
-    Precedence: environment variable, then explicit CLI argument, then defaults.
+    Precedence: explicit CLI argument, then environment variable, then defaults.
     """
     env_map = os.environ if env is None else env
     base_cwd = _normalize_path(cwd or Path.cwd())
-
-    env_value = _normalize_optional_path(env_map.get(TD_DATA_DIR_ENV_VAR))
-    if env_value is not None:
-        return TDDataDirResolution(
-            path=_normalize_path(env_value, base_cwd),
-            source=TDDataDirSource.ENV,
-            created=False,
-        )
 
     datadir_value = _normalize_optional_path(data_dir)
     if datadir_value is not None:
         return TDDataDirResolution(
             path=_normalize_path(datadir_value, base_cwd),
             source=TDDataDirSource.CLI,
+            created=False,
+        )
+
+    env_value = _normalize_optional_path(env_map.get(TD_DATA_DIR_ENV_VAR))
+    if env_value is not None:
+        return TDDataDirResolution(
+            path=_normalize_path(env_value, base_cwd),
+            source=TDDataDirSource.ENV,
             created=False,
         )
 
@@ -126,11 +126,11 @@ def resolve_data_dir(
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
 ) -> Path:
-    """Resolve the TD data directory using ENV -> CLI -> defaults precedence.
+    """Resolve the TD data directory using CLI -> ENV -> defaults precedence.
 
     Precedence (exactly as required):
-    1. Environment variable TD_DATA_DIR
-    2. Command line argument --datadir
+    1. Command line argument --datadir
+    2. Environment variable TD_DATA_DIR
     3. Defaults:
        - if /data exists, use /data
        - otherwise create ./data under cwd and use it

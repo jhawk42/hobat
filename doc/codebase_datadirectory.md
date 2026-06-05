@@ -2,14 +2,14 @@
 
 All JSON file reads/writes use one effective data directory (`td_data_directory`) resolved in this order:
 
-1. `TD_DATA_DIR` environment variable
-2. `--datadir DIR` command line argument
+1. `--datadir DIR` command line argument
+2. `TD_DATA_DIR` environment variable
 3. Defaults
    - If `/data` exists, use `/data`
    - Otherwise create and use `./data` under the current run directory
 
 Important behavior:
-- `TD_DATA_DIR` takes precedence over `--datadir`.
+- `--datadir` takes precedence over `TD_DATA_DIR`.
 - User-supplied `TD_DATA_DIR`/`--datadir` paths are resolved to absolute paths.
 - Local default `./data` is auto-created when selected.
 
@@ -17,10 +17,13 @@ Important behavior:
 ## Data Directory Usage Examples
 
 ```bash
-# Highest priority: environment variable
-TD_DATA_DIR=/tmp/td-data python3 -m td_cli otbr-restapi download
+# Highest priority: CLI argument
+TD_DATA_DIR=/tmp/td-data python3 -m td_cli --datadir /tmp/cli-data otbr-restapi download
 
-# CLI argument when TD_DATA_DIR is not set
+# Environment variable when --datadir is not set
+TD_DATA_DIR=/tmp/td-data python3 -m td_cli mdns thread
+
+# CLI argument
 python3 -m td_cli --datadir ./data mdns thread
 
 # web-server JSON reads from the effective data directory

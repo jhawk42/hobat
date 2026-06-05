@@ -29,7 +29,7 @@ These options apply to every command and must be placed **before** the subcomman
 | `--accept MIME` | `application/vnd.api+json` | Default `Accept` header; choices: `application/vnd.api+json`, `application/json`, `text/plain` |
 | `--raw` | off | Return raw JSON:API envelopes instead of flattened output |
 | `--output FILE` | — | Write JSON result to a file instead of stdout |
-| `--datadir DIR` | auto | Data directory for file reads/writes (falls back to `$TD_DATA_DIR`, then `/data`, then `./data`) |
+| `--datadir DIR` | auto | Data directory for file reads/writes (takes precedence over `$TD_DATA_DIR`; if omitted: `$TD_DATA_DIR`, then `/data`, then `./data`) |
 | `--poll-interval FLOAT` | `2.0` | Seconds between action status polls |
 | `--poll-timeout FLOAT` | `8.0` | Max wall-clock seconds to wait for an action to complete |
 | `--no-progress` | off | Suppress per-device `[N/T] id → status (Xs)` progress lines printed to stderr on `fetch-all` commands |

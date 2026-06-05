@@ -18,7 +18,7 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 | `--verbose`, `-v` | Enable verbose (INFO) logging |
 | `--debug`, `-d` | Enable debug logging |
 | `--output FILE`, `-o FILE` | Write command output to file |
-| `--datadir DIR` | Data directory for JSON reads/writes when `TD_DATA_DIR` is not set. If omitted and `TD_DATA_DIR` is unset: use `/data` when present; otherwise create/use `./data` under the current run directory. |
+| `--datadir DIR` | Data directory for JSON reads/writes (takes precedence over `TD_DATA_DIR`). If omitted and `TD_DATA_DIR` is unset: use `/data` when present; otherwise create/use `./data` under the current run directory. |
 
 ---
 
@@ -117,8 +117,8 @@ These options must be placed after `otbr-restapi` and before its subcommand.
 
 Data directory resolution precedence:
 
-1. `TD_DATA_DIR` environment variable
-2. `--datadir` CLI argument
+1. `--datadir` CLI argument
+2. `TD_DATA_DIR` environment variable
 3. Defaults (`/data` when present, otherwise `./data` under the current run directory)
 
 ---

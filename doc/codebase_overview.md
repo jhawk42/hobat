@@ -298,7 +298,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | File | Purpose |
 |---|---|
 | `td_const.py` | Shared constants used across all modules: `TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`, `TD_DATA_DIR_RESOLUTION_SUMMARY`, `TD_DATA_DIR_ARG_HELP`, and `EXTADDR_DEVICE_LABEL_MAP_FILENAME`.  The `td_` prefix aligns this project-level file with `td_cli.py` and `td_webserver.py`. |
-| `util_data.py` | Data-directory resolution utilities.  Provides `TDDataDirSource` (enum), `TDDataDirResolution` (dataclass), `parse_datadir_from_argv()`, `resolve_data_dir()`, `resolve_data_dir_with_source()`, `ensure_data_dir_exists()`, `format_data_dir_log_message()`, `data_file_path()`, `resolve_data_file_path()`, and `save_json_atomic()`.  Implements the `TD_DATA_DIR` env → `--datadir` CLI → `/data` → `./data` precedence chain. |
+| `util_data.py` | Data-directory resolution utilities.  Provides `TDDataDirSource` (enum), `TDDataDirResolution` (dataclass), `parse_datadir_from_argv()`, `resolve_data_dir()`, `resolve_data_dir_with_source()`, `ensure_data_dir_exists()`, `format_data_dir_log_message()`, `data_file_path()`, `resolve_data_file_path()`, and `save_json_atomic()`.  Implements the `--datadir` CLI → `TD_DATA_DIR` env → `/data` → `./data` precedence chain. |
 | `util_ot_ctl.py` | Low-level wrapper that runs `ot-ctl <command>` inside a named Docker container via `docker exec`.  The container name defaults to `"otbr"` and can be overridden with `TD_OTBR_CONTAINER_NAME`.  Docker container use itself can be disabled via `TD_OTBR_CONTAINER_USE=0`, which falls back to running `ot-ctl` locally without `docker exec`.  The subprocess timeout defaults to 30 s and is overridable via `TD_OT_CTL_TIMEOUT`. |
 | `util_network.py` | Network helpers: mesh-local and OMR prefix retrieval, IPv6 address prefix formatting, RLOC16 manipulation, OMR address matching in an address list, and full `get_network_dataset_info()` aggregator. |
 | `util_convert.py` | Base64 ↔ hex conversion for 64-bit extended addresses (handles JSON-escaped slashes and optional byte-order reversal for 802.15.4 little-endianness). |
@@ -338,7 +338,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 
 | File | Purpose |
 |---|---|
-| `td_cli.py` | Top-level CLI entry point.  Builds the flattened `argparse` tree and dispatches to the appropriate module `main()`.  Supported top-level commands: `otbr-cli`, `mdns`, `otbr-restapi`, `process-eve`, `merge-dataset`, `merge-extaddr`.  The web server is a separate module (`td_webserver.py`) and is **not** a `td_cli.py` subcommand.  Accepts a global `--datadir` option (overridden by `TD_DATA_DIR` env var) that is forwarded to every subcommand.  Unknown trailing arguments are forwarded via `parse_known_args` to subordinate modules. |
+| `td_cli.py` | Top-level CLI entry point.  Builds the flattened `argparse` tree and dispatches to the appropriate module `main()`.  Supported top-level commands: `otbr-cli`, `mdns`, `otbr-restapi`, `process-eve`, `merge-dataset`, `merge-extaddr`.  The web server is a separate module (`td_webserver.py`) and is **not** a `td_cli.py` subcommand.  Accepts a global `--datadir` option (which takes precedence over `TD_DATA_DIR`) that is forwarded to every subcommand.  Unknown trailing arguments are forwarded via `parse_known_args` to subordinate modules. |
 
 ---
 
@@ -350,8 +350,8 @@ All JSON data files (collected snapshots, merged output, static label map) are r
 
 | Priority | Source | Notes |
 |---|---|---|
-| 1 | `TD_DATA_DIR` environment variable | Highest priority; overrides all other settings |
-| 2 | `--datadir` CLI argument | Passed globally to `td_cli.py` or directly to any module |
+| 1 | `--datadir` CLI argument | Highest priority; overrides all other settings |
+| 2 | `TD_DATA_DIR` environment variable | Used when CLI `--datadir` is not provided |
 | 3 | `/data` (Docker default) | Used when the path exists (i.e. running inside the Docker container) |
 | 4 | `./data` (local default) | Created under the current working directory if it does not exist |
 

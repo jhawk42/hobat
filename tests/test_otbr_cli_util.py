@@ -214,19 +214,34 @@ class TestResolveCollectorRuntime:
         assert runtime1.output_path.name == "childtables.json"
         assert runtime2.output_path.name == "neighbortables.json"
     
-    def test_respects_td_data_dir_env_var(self, tmp_path, monkeypatch):
-        """Should prioritize TD_DATA_DIR environment variable."""
+    def test_respects_datadir_arg_over_td_data_dir_env_var(self, tmp_path, monkeypatch):
+        """Should prioritize explicit datadir_arg over TD_DATA_DIR."""
         env_datadir = tmp_path / "env_data"
+        cli_datadir = tmp_path / "cli_data"
         env_datadir.mkdir()
+        cli_datadir.mkdir()
         
         monkeypatch.setenv("TD_DATA_DIR", str(env_datadir))
         
-        # Pass None to test env var takes precedence
+        runtime = resolve_collector_runtime(
+            datadir_arg=str(cli_datadir),
+            default_output_filename="output.json",
+        )
+        
+        assert runtime.td_data_dir == cli_datadir
+
+    def test_respects_td_data_dir_env_var_when_datadir_arg_missing(self, tmp_path, monkeypatch):
+        """Should use TD_DATA_DIR when explicit datadir_arg is not provided."""
+        env_datadir = tmp_path / "env_data"
+        env_datadir.mkdir()
+
+        monkeypatch.setenv("TD_DATA_DIR", str(env_datadir))
+
         runtime = resolve_collector_runtime(
             datadir_arg=None,
             default_output_filename="output.json",
         )
-        
+
         assert runtime.td_data_dir == env_datadir
 
 

@@ -38,10 +38,11 @@ def test_source_precedence_configuration():
     
     assert len(missing_precedence) == 0, f"Missing precedence for: {missing_precedence}"
     
-    # Check precedence order
-    assert SOURCE_PRECEDENCE["td-otbr-restapi-diagnostics.json"] > SOURCE_PRECEDENCE["td-otbr-cli-networkdiag-fetch-all.json"]
-    assert SOURCE_PRECEDENCE["td-otbr-cli-networkdiag-fetch-all.json"] > SOURCE_PRECEDENCE["td-mdns-scopes-br.json"]
-    assert SOURCE_PRECEDENCE["td-mdns-scopes-br.json"] > SOURCE_PRECEDENCE["td-eve-topology.json"]
+    # Check precedence order: static labels > CLI > REST API > Eve > mDNS
+    assert SOURCE_PRECEDENCE["td-static-extaddr-device-label.json"] > SOURCE_PRECEDENCE["td-otbr-cli-networkdiag-fetch-all.json"]
+    assert SOURCE_PRECEDENCE["td-otbr-cli-networkdiag-fetch-all.json"] > SOURCE_PRECEDENCE["td-otbr-restapi-diagnostics.json"]
+    assert SOURCE_PRECEDENCE["td-otbr-restapi-diagnostics.json"] > SOURCE_PRECEDENCE["td-eve-topology.json"]
+    assert SOURCE_PRECEDENCE["td-eve-topology.json"] > SOURCE_PRECEDENCE["td-mdns-scopes-br.json"]
     
     # Check mDNS files added to defaults
     assert "td-mdns-scopes-br.json" in DEFAULT_INPUT_FILES
