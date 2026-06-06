@@ -6,7 +6,9 @@ import sys
 import time
 import logging
 import argparse
+import io
 from typing import Sequence
+from contextlib import redirect_stderr
 from td_const import TD_DATA_DIR_ARG, TD_DATA_DIR_ARG_HELP, TD_DATA_DIR_RESOLUTION_SUMMARY
 
 # Note: The imports below are organized to reflect the different components of the project, such as OTBR CLI parsing, REST API interactions, dataset merging, and the web interface. This structure helps maintain clarity and separation of concerns within the codebase.
@@ -130,7 +132,7 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         formatter_class=TDHelpFormatter,
     )
     meshdiag_sub = meshdiag_p.add_subparsers(
-        dest="meshdiag_command", required=True)
+        dest="meshdiag_command", required=False)
     meshdiag_sub.add_parser("topology", help="Scan and save meshdiag topology")
     meshdiag_sub.add_parser(
         "routerneighbortable", help="Scan and save meshdiag router-neighbour table"
@@ -140,7 +142,6 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
     meshdiag_sub.add_parser(
         "childip6", help="Scan and save meshdiag child IPv6 addresses"
     )
-    meshdiag_sub.add_parser("all", help="Run all meshdiag scans")
 
     networkdiag_p = otbr_cli_sub.add_parser(
         "networkdiag",
@@ -148,7 +149,7 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         formatter_class=TDHelpFormatter,
     )
     networkdiag_sub = networkdiag_p.add_subparsers(
-        dest="networkdiag_command", required=True
+        dest="networkdiag_command", required=False
     )
     networkdiag_topology_p = networkdiag_sub.add_parser(
         "fetch-all", help="Scan and poll networkdiag topology (unicast, router-by-router)"
@@ -178,7 +179,6 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Scan networkdiag topology via multicast to one-hop neighbors (ff02::1)",
     )
 
-    otbr_cli_sub.add_parser("all", help="Run all otbr-cli scans")
 
     # mdns
     mdns_p = subparsers.add_parser(
@@ -355,7 +355,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- hand-crafted "Commands usage:" epilog ---
     parser.epilog = """Commands usage:
     otbr-cli
-        usage: td_cli otbr-cli [-h] {thread-network-info,router-table,meshdiag,networkdiag,all} ...
+        usage: td_cli otbr-cli [-h] {thread-network-info,router-table,meshdiag,networkdiag} ...
 
     otbr-restapi
         usage: td_cli otbr-restapi [-h] {download,node,devices,diagnostics,actions,mesh-diagnostics,topology} ...
@@ -386,6 +386,71 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _subparsers_action(
+    parser: argparse.ArgumentParser,
+) -> argparse._SubParsersAction | None:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return action
+    return None
+
+
+def _action_for_option(
+    parser: argparse.ArgumentParser, option: str
+) -> argparse.Action | None:
+    for action in parser._actions:
+        if option in action.option_strings:
+            return action
+    return None
+
+
+def _option_consumes_value(action: argparse.Action) -> bool:
+    if action.nargs == 0:
+        return False
+    if action.nargs in ("*", "+", argparse.REMAINDER):
+        return False
+    return True
+
+
+def _print_help_for_typo_or_invalid_command(
+    parser: argparse.ArgumentParser, argv: list[str]
+) -> bool:
+    """Print closest contextual help for typo/invalid command tokens.
+
+    Returns True when help was printed and caller should exit success.
+    """
+    current = parser
+    idx = 0
+    while idx < len(argv):
+        token = argv[idx]
+
+        if token in ("-h", "--help"):
+            return False
+
+        if token.startswith("-"):
+            action = _action_for_option(current, token)
+            if action is None:
+                return False
+            idx += 1
+            if _option_consumes_value(action) and idx < len(argv):
+                idx += 1
+            continue
+
+        sub_action = _subparsers_action(current)
+        if sub_action is None:
+            return False
+
+        child = sub_action.choices.get(token)
+        if not isinstance(child, argparse.ArgumentParser):
+            current.print_help()
+            return True
+
+        current = child
+        idx += 1
+
+    return False
+
+
 def _load_extaddr_device_label_map() -> dict:
     """lazily load the extaddr-to-device-label map for scan commands."""
     default_filename = "threadstatic-extaddr.json"
@@ -397,6 +462,40 @@ def _load_extaddr_device_label_map() -> dict:
         f"Extaddr JSON file '{default_filename}' not found; using empty mapping."
     )
     return {}
+
+
+def _find_child_subparser(
+    parser: argparse.ArgumentParser, subcommand: str
+) -> argparse.ArgumentParser | None:
+    """Return a named child subparser from parser, if present."""
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        child = action.choices.get(subcommand)
+        if isinstance(child, argparse.ArgumentParser):
+            return child
+    return None
+
+
+def _print_child_subparser_help(
+    parser: argparse.ArgumentParser, subcommand: str
+) -> bool:
+    """Print help for a named child subparser. Returns True when printed."""
+    child = _find_child_subparser(parser, subcommand)
+    if child is None:
+        return False
+    child.print_help()
+    return True
+
+
+def _print_restapi_resource_help(resource: str) -> bool:
+    """Print otbr_restapi_cli help for a resource command and return success."""
+    rest_parser = otbr_restapi_cli.build_parser()
+    child = _find_child_subparser(rest_parser, resource)
+    if child is None:
+        return False
+    child.print_help()
+    return True
 
 
 def dispatch(
@@ -453,6 +552,10 @@ def dispatch(
 
         if cli_cmd == "meshdiag":
             meshdiag_cmd = args.meshdiag_command
+            if not meshdiag_cmd:
+                if not _print_child_subparser_help(sub_parsers["otbr-cli"], "meshdiag"):
+                    sub_parsers["otbr-cli"].print_help()
+                return 0
             if meshdiag_cmd == "topology":
                 return (
                     otbr_cli_meshdiag_topology.main(
@@ -478,16 +581,13 @@ def dispatch(
                         _forward_with_datadir(extra_args))
                     or 0
                 )
-            if meshdiag_cmd == "all":
-                forwarded = _forward_with_datadir(extra_args)
-                rc = otbr_cli_meshdiag_topology.main(forwarded) or 0
-                rc = rc or otbr_cli_meshdiag_routerneighbortable.main(
-                    forwarded) or 0
-                rc = rc or otbr_cli_meshdiag_childtable.main(forwarded) or 0
-                rc = rc or otbr_cli_meshdiag_childip6.main(forwarded) or 0
-                return rc
+
 
         if cli_cmd == "networkdiag":
+            if not args.networkdiag_command:
+                if not _print_child_subparser_help(sub_parsers["otbr-cli"], "networkdiag"):
+                    sub_parsers["otbr-cli"].print_help()
+                return 0
             if args.networkdiag_command == "fetch-all":
                 expand_children_argv = (
                     [] if getattr(args, "expand_children", True) else ["-cno"]
@@ -513,19 +613,6 @@ def dispatch(
                     or 0
                 )
 
-        if cli_cmd == "all":
-            forwarded = _forward_with_datadir(extra_args)
-            rc = otbr_cli_thread_network_info.main(forwarded) or 0
-            rc = rc or otbr_cli_router_table.main(forwarded) or 0
-            rc = rc or otbr_cli_meshdiag_topology.main(forwarded) or 0
-            rc = rc or otbr_cli_networkdiag_topology.main_multicast_network(
-                forwarded) or 0
-            rc = rc or otbr_cli_meshdiag_routerneighbortable.main(
-                forwarded) or 0
-            rc = rc or otbr_cli_meshdiag_childtable.main(forwarded) or 0
-            rc = rc or otbr_cli_meshdiag_childip6.main(forwarded) or 0
-            rc = rc or otbr_cli_networkdiag_topology.main(forwarded) or 0
-            return rc
 
     # --- mdns ---
     if args.command == "mdns":
@@ -586,6 +673,10 @@ def dispatch(
         )
 
         if restapi_cmd in _RESTAPI_RESOURCE_CMDS:
+            if not extra_args:
+                if not _print_restapi_resource_help(restapi_cmd):
+                    sub_parsers["otbr-restapi"].print_help()
+                return 0
             experimental_cmd = _experimental_restapi_command_name(restapi_cmd, list(extra_args))
             if experimental_cmd and not getattr(args, "lab", False):
                 print(
@@ -640,7 +731,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # parse_known_args lets option-style args for subordinate modules (--host, --input, etc.)
     # pass through as extras instead of being rejected by the routing-only subparsers.
-    args, extras = parser.parse_known_args(argv_list)
+    parse_err = io.StringIO()
+    with redirect_stderr(parse_err):
+        try:
+            args, extras = parser.parse_known_args(argv_list)
+        except SystemExit as exc:
+            if exc.code != 0 and _print_help_for_typo_or_invalid_command(parser, argv_list):
+                return 0
+            err_text = parse_err.getvalue()
+            if err_text:
+                print(err_text, file=sys.stderr, end="")
+            return exc.code if isinstance(exc.code, int) else 2
 
     # Apply verbosity / debug flags
     if args.debug:

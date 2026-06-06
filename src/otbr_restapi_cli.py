@@ -5,9 +5,11 @@ import json
 import sys
 import logging
 import time
+import io
 
 from pathlib import Path
 from typing import Any, Sequence
+from contextlib import redirect_stderr
 from util_data import resolve_data_file_path, resolve_data_dir
 from td_const import TD_DATA_DIR_ARG_HELP
 
@@ -139,7 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable debug logging",
     )
 
-    subparsers = parser.add_subparsers(dest="resource", required=True)
+    subparsers = parser.add_subparsers(dest="resource", required=False)
     _add_node_commands(subparsers)
     _add_devices_commands(subparsers)
     _add_diagnostics_commands(subparsers)
@@ -156,7 +158,7 @@ def _add_node_commands(
         "node", help="Read or mutate local OTBR node data"
     )
     node_subparsers = node_parser.add_subparsers(
-        dest="node_command", required=True)
+        dest="node_command", required=False)
 
     node_get = node_subparsers.add_parser(
         "get", help="Get the OTBR node record from /api/node"
@@ -166,7 +168,7 @@ def _add_node_commands(
     state_parser = node_subparsers.add_parser(
         "state", help="Get or set Thread state")
     state_subparsers = state_parser.add_subparsers(
-        dest="state_command", required=True)
+        dest="state_command", required=False)
     state_subparsers.add_parser("get", help="Get current Thread state")
     state_set = state_subparsers.add_parser(
         "set",
@@ -179,13 +181,13 @@ def _add_node_commands(
         "dataset", help="Operate on node datasets"
     )
     dataset_subparsers = dataset_parser.add_subparsers(
-        dest="dataset_kind", required=True
+        dest="dataset_kind", required=False
     )
     active_parser = dataset_subparsers.add_parser(
         "active", help="Operate on active dataset"
     )
     active_subparsers = active_parser.add_subparsers(
-        dest="dataset_command", required=True
+        dest="dataset_command", required=False
     )
     active_get = active_subparsers.add_parser("get", help="Get active dataset")
     active_get.add_argument(
@@ -210,7 +212,7 @@ def _add_devices_commands(
 ) -> None:
     devices_parser = subparsers.add_parser("devices", help="Read OTBR devices")
     devices_subparsers = devices_parser.add_subparsers(
-        dest="devices_command", required=True
+        dest="devices_command", required=False
     )
 
     devices_list = devices_subparsers.add_parser("list", help="List devices")
@@ -258,7 +260,7 @@ def _add_diagnostics_commands(
         "diagnostics", help="Read OTBR diagnostics"
     )
     diagnostics_subparsers = diagnostics_parser.add_subparsers(
-        dest="diagnostics_command", required=True
+        dest="diagnostics_command", required=False
     )
 
     diagnostics_list = diagnostics_subparsers.add_parser(
@@ -389,7 +391,7 @@ def _add_actions_commands(
         "actions", help="Read or enqueue OTBR actions"
     )
     actions_subparsers = actions_parser.add_subparsers(
-        dest="actions_command", required=True
+        dest="actions_command", required=False
     )
 
     actions_list = actions_subparsers.add_parser("list", help="List actions")
@@ -410,7 +412,7 @@ def _add_actions_commands(
         "enqueue", help="Enqueue a new OTBR task"
     )
     enqueue_subparsers = enqueue_parser.add_subparsers(
-        dest="enqueue_type", required=True
+        dest="enqueue_type", required=False
     )
 
     add_thread_device = enqueue_subparsers.add_parser(
@@ -512,7 +514,7 @@ def _add_mesh_diagnostics_commands(
         ),
     )
     mesh_subparsers = mesh_parser.add_subparsers(
-        dest="mesh_diag_command", required=True
+        dest="mesh_diag_command", required=False
     )
 
     def _mesh_device_args(
@@ -988,6 +990,150 @@ def build_client(args: argparse.Namespace) -> OTBRRestApiClient:
     return build_rest_client_from_args(args)
 
 
+def _find_child_subparser(
+    parser: argparse.ArgumentParser, subcommand: str
+) -> argparse.ArgumentParser | None:
+    """Return a named child subparser from parser, if present."""
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        child = action.choices.get(subcommand)
+        if isinstance(child, argparse.ArgumentParser):
+            return child
+    return None
+
+
+def _print_incomplete_command_help(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> bool:
+    """Print contextual help for incomplete command chains.
+
+    Returns True if help was printed and CLI should exit success.
+    """
+    resource = getattr(args, "resource", None)
+    if not resource:
+        parser.print_help()
+        return True
+
+    resource_parser = _find_child_subparser(parser, resource)
+    if resource_parser is None:
+        return False
+
+    if resource == "node":
+        node_cmd = getattr(args, "node_command", None)
+        if not node_cmd:
+            resource_parser.print_help()
+            return True
+        if node_cmd == "state":
+            state_parser = _find_child_subparser(resource_parser, "state")
+            if getattr(args, "state_command", None) is None and state_parser is not None:
+                state_parser.print_help()
+                return True
+        if node_cmd == "dataset":
+            dataset_parser = _find_child_subparser(resource_parser, "dataset")
+            dataset_kind = getattr(args, "dataset_kind", None)
+            if dataset_kind is None and dataset_parser is not None:
+                dataset_parser.print_help()
+                return True
+            if dataset_kind == "active" and dataset_parser is not None:
+                active_parser = _find_child_subparser(dataset_parser, "active")
+                if getattr(args, "dataset_command", None) is None and active_parser is not None:
+                    active_parser.print_help()
+                    return True
+        return False
+
+    if resource == "devices" and getattr(args, "devices_command", None) is None:
+        resource_parser.print_help()
+        return True
+
+    if resource == "diagnostics" and getattr(args, "diagnostics_command", None) is None:
+        resource_parser.print_help()
+        return True
+
+    if resource == "actions":
+        actions_cmd = getattr(args, "actions_command", None)
+        if actions_cmd is None:
+            resource_parser.print_help()
+            return True
+        if actions_cmd == "enqueue":
+            enqueue_parser = _find_child_subparser(resource_parser, "enqueue")
+            if getattr(args, "enqueue_type", None) is None and enqueue_parser is not None:
+                enqueue_parser.print_help()
+                return True
+        return False
+
+    if resource == "mesh-diagnostics" and getattr(args, "mesh_diag_command", None) is None:
+        resource_parser.print_help()
+        return True
+
+    return False
+
+
+def _subparsers_action(
+    parser: argparse.ArgumentParser,
+) -> argparse._SubParsersAction | None:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return action
+    return None
+
+
+def _action_for_option(
+    parser: argparse.ArgumentParser, option: str
+) -> argparse.Action | None:
+    for action in parser._actions:
+        if option in action.option_strings:
+            return action
+    return None
+
+
+def _option_consumes_value(action: argparse.Action) -> bool:
+    if action.nargs == 0:
+        return False
+    if action.nargs in ("*", "+", argparse.REMAINDER):
+        return False
+    return True
+
+
+def _print_help_for_typo_or_invalid_command(
+    parser: argparse.ArgumentParser, argv: list[str]
+) -> bool:
+    """Print closest contextual help for typo/invalid command tokens.
+
+    Returns True when help was printed and caller should exit success.
+    """
+    current = parser
+    idx = 0
+    while idx < len(argv):
+        token = argv[idx]
+
+        if token in ("-h", "--help"):
+            return False
+
+        if token.startswith("-"):
+            action = _action_for_option(current, token)
+            if action is None:
+                return False
+            idx += 1
+            if _option_consumes_value(action) and idx < len(argv):
+                idx += 1
+            continue
+
+        sub_action = _subparsers_action(current)
+        if sub_action is None:
+            return False
+
+        child = sub_action.choices.get(token)
+        if not isinstance(child, argparse.ArgumentParser):
+            current.print_help()
+            return True
+
+        current = child
+        idx += 1
+
+    return False
+
+
 def _experimental_command_name(args: argparse.Namespace) -> str | None:
     """Return the experimental command path when --lab gating applies."""
     if args.resource == "node":
@@ -1252,7 +1398,21 @@ def run_cli(
     """Standard CLI entry-point scaffold shared by both client CLIs."""
     # Parse arguments first to check debug flag before setting up logging
     parser = build_parser_fn()
-    args = parser.parse_args(argv)
+    argv_list = list(sys.argv[1:] if argv is None else argv)
+    parse_err = io.StringIO()
+    with redirect_stderr(parse_err):
+        try:
+            args = parser.parse_args(argv_list)
+        except SystemExit as exc:
+            if exc.code != 0 and _print_help_for_typo_or_invalid_command(parser, argv_list):
+                return EXIT_SUCCESS
+            err_text = parse_err.getvalue()
+            if err_text:
+                print(err_text, file=sys.stderr, end="")
+            return exc.code if isinstance(exc.code, int) else EXIT_USAGE
+
+    if _print_incomplete_command_help(parser, args):
+        return EXIT_SUCCESS
     
     # Configure logging based on debug flag
     log_level = logging.DEBUG if getattr(args, "debug", False) else logging.INFO

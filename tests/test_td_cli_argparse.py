@@ -123,9 +123,15 @@ class TestOtbrCliParser(unittest.TestCase):
         self.assertEqual(args.command, "otbr-cli")
         self.assertIsNone(args.cli_command)
 
-    def test_meshdiag_requires_subcommand(self):
-        with self.assertRaises(SystemExit):
-            _parse(["otbr-cli", "meshdiag"])
+    def test_meshdiag_without_subcommand_is_allowed(self):
+        args = _parse(["otbr-cli", "meshdiag"])
+        self.assertEqual(args.cli_command, "meshdiag")
+        self.assertIsNone(args.meshdiag_command)
+
+    def test_networkdiag_without_subcommand_is_allowed(self):
+        args = _parse(["otbr-cli", "networkdiag"])
+        self.assertEqual(args.cli_command, "networkdiag")
+        self.assertIsNone(args.networkdiag_command)
 
     def test_meshdiag_childip6(self):
         args = _parse(["otbr-cli", "meshdiag", "childip6"])
@@ -208,6 +214,24 @@ class TestDispatchOtbrCli(unittest.TestCase):
         m.assert_called_once_with([])
         self.assertEqual(rc, 0)
 
+    def test_meshdiag_without_subcommand_prints_help(self):
+        parser = td_cli.build_parser()
+        args, extras = parser.parse_known_args(["otbr-cli", "meshdiag"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = td_cli.dispatch(args, extras, parser)
+        self.assertEqual(rc, 0)
+        self.assertIn("usage: td_cli otbr-cli meshdiag", buf.getvalue())
+
+    def test_networkdiag_without_subcommand_prints_help(self):
+        parser = td_cli.build_parser()
+        args, extras = parser.parse_known_args(["otbr-cli", "networkdiag"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = td_cli.dispatch(args, extras, parser)
+        self.assertEqual(rc, 0)
+        self.assertIn("usage: td_cli otbr-cli networkdiag", buf.getvalue())
+
     def test_meshdiag_childip6_calls_module_main(self):
         with patch.object(
             td_cli.otbr_cli_meshdiag_childip6, "main", return_value=0
@@ -283,6 +307,36 @@ class TestDispatchOtherCommands(unittest.TestCase):
         m.assert_called_once_with(
             ["--url", "http://localhost:8080/api/v1/diagnostics"])
         self.assertEqual(rc, 0)
+
+    def test_restapi_actions_without_subcommand_prints_help(self):
+        parser = td_cli.build_parser()
+        args, extras = parser.parse_known_args(["otbr-restapi", "actions"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = td_cli.dispatch(args, extras, parser)
+        self.assertEqual(rc, 0)
+        self.assertIn("usage:", buf.getvalue())
+        self.assertIn("{list,get,enqueue}", buf.getvalue())
+
+    def test_restapi_node_without_subcommand_prints_help(self):
+        parser = td_cli.build_parser()
+        args, extras = parser.parse_known_args(["otbr-restapi", "node"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = td_cli.dispatch(args, extras, parser)
+        self.assertEqual(rc, 0)
+        self.assertIn("usage:", buf.getvalue())
+        self.assertIn("{get,state,dataset}", buf.getvalue())
+
+    def test_restapi_devices_without_subcommand_prints_help(self):
+        parser = td_cli.build_parser()
+        args, extras = parser.parse_known_args(["otbr-restapi", "devices"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = td_cli.dispatch(args, extras, parser)
+        self.assertEqual(rc, 0)
+        self.assertIn("usage:", buf.getvalue())
+        self.assertIn("{list,get,fetch}", buf.getvalue())
 
     def test_restapi_devices_list_dispatches_to_restapi_cli(self):
         with patch.object(td_cli.otbr_restapi_cli, "main", return_value=0) as m:
@@ -360,6 +414,20 @@ class TestMain(unittest.TestCase):
         with patch.object(td_cli.otbr_cli_router_table, "main", return_value=0):
             td_cli.main(["--debug", "otbr-cli", "router-table"])
         self.assertEqual(logging.getLogger().level, logging.DEBUG)
+
+    def test_main_typo_restapi_subcommand_prints_help_and_returns_zero(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = td_cli.main(["otbr-restapi", "device"])
+        self.assertEqual(rc, 0)
+        self.assertIn("usage: td_cli otbr-restapi", buf.getvalue())
+
+    def test_main_typo_meshdiag_subcommand_prints_help_and_returns_zero(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = td_cli.main(["otbr-cli", "meshdiag", "topologg"])
+        self.assertEqual(rc, 0)
+        self.assertIn("usage: td_cli otbr-cli meshdiag", buf.getvalue())
 
 
 if __name__ == "__main__":

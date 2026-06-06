@@ -40,7 +40,7 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 ### `otbr-cli`
 
 ```text
-td_cli otbr-cli {thread-network-info,router-table,meshdiag,networkdiag,all} ...
+td_cli otbr-cli {thread-network-info,router-table,meshdiag,networkdiag} ...
 ```
 
 ### `otbr-restapi`
@@ -123,39 +123,49 @@ Data directory resolution precedence:
 
 ---
 
+## Command Group Help Behavior
+
+If you invoke a command group without the required deeper subcommand, `td_cli` prints contextual help for that group and exits successfully.
+
+Examples:
+
+- `td_cli otbr-cli meshdiag` prints `otbr-cli meshdiag` subcommand help
+- `td_cli otbr-cli networkdiag` prints `otbr-cli networkdiag` subcommand help
+- `td_cli otbr-restapi actions` prints `otbr-restapi actions` subcommand help
+
+---
+
 ## Subcommand Help Snapshots
 
 ### `otbr-cli`
 
 ```
 usage: td_cli otbr-cli [-h]
-                       {thread-network-info,router-table,meshdiag,networkdiag,all}
+                       {thread-network-info,router-table,meshdiag,networkdiag}
                        ...
 
 positional arguments:
-  {thread-network-info,router-table,meshdiag,networkdiag,all}
+  {thread-network-info,router-table,meshdiag,networkdiag}
     thread-network-info        Scan and save thread network info
     router-table                Scan and save router table
     meshdiag                    Mesh diagnostic scans
     networkdiag                 Network diagnostic scans
-    all                         Run all otbr-cli scans
 ```
 
 ### `otbr-cli meshdiag`
 
 ```
 usage: td_cli otbr-cli meshdiag [-h]
-                                {topology,routerneighbortable,childtable,childip6,all}
+                                {topology,routerneighbortable,childtable,childip6}
                                 ...
 
 positional arguments:
-  {topology,routerneighbortable,childtable,childip6,all}
+  {topology,routerneighbortable,childtable,childip6}
     topology            Scan meshdiag topology
     routerneighbortable
                         Scan meshdiag router-neighbour table
     childtable          Scan meshdiag child table
     childip6            Scan meshdiag child IPv6 addresses
-    all                 Run all meshdiag scans
 ```
 
 ### `otbr-cli networkdiag`
