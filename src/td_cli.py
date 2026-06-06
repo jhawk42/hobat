@@ -243,6 +243,17 @@ def _add_otbr_restapi_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Suppress per-device progress output (forwarded)")
     restapi_p.add_argument("--no-auto-output", action="store_true", default=False,
         help="Disable automatic output file naming (forwarded)")
+    restapi_p.add_argument(
+        "--lab",
+        action="store_true",
+        default=False,
+        help=(
+            "Allow experimental otbr-restapi mutating commands "
+            "(node state set, node dataset active set, "
+            "actions enqueue add-thread-device, "
+            "actions enqueue reset-network-diag-counter)"
+        ),
+    )
 
     restapi_sub = restapi_p.add_subparsers(
         dest="restapi_command", required=False)
@@ -404,6 +415,26 @@ def dispatch(
             return [TD_DATA_DIR_ARG, str(args.datadir)] + list(argv)
         return list(argv)
 
+    def _experimental_restapi_command_name(
+        restapi_cmd: str | None, forwarded_args: list[str]
+    ) -> str | None:
+        if restapi_cmd == "node":
+            if len(forwarded_args) >= 2 and forwarded_args[0] == "state" and forwarded_args[1] == "set":
+                return "node state set"
+            if (
+                len(forwarded_args) >= 3
+                and forwarded_args[0] == "dataset"
+                and forwarded_args[1] == "active"
+                and forwarded_args[2] == "set"
+            ):
+                return "node dataset active set"
+        if restapi_cmd == "actions" and len(forwarded_args) >= 2 and forwarded_args[0] == "enqueue":
+            if forwarded_args[1] == "add-thread-device":
+                return "actions enqueue add-thread-device"
+            if forwarded_args[1] == "reset-network-diag-counter":
+                return "actions enqueue reset-network-diag-counter"
+        return None
+
     # --- otbr-cli ---
     if args.command == "otbr-cli":
         cli_cmd = args.cli_command
@@ -546,6 +577,8 @@ def dispatch(
                 fwd += ["--no-progress"]
             if getattr(args, "no-auto-output", False):
                 fwd += ["--no-auto-output"]
+            if getattr(args, "lab", False):
+                fwd += ["--lab"]
             return fwd
 
         _RESTAPI_RESOURCE_CMDS = frozenset(
@@ -553,6 +586,16 @@ def dispatch(
         )
 
         if restapi_cmd in _RESTAPI_RESOURCE_CMDS:
+            experimental_cmd = _experimental_restapi_command_name(restapi_cmd, list(extra_args))
+            if experimental_cmd and not getattr(args, "lab", False):
+                print(
+                    (
+                        f"Command '{experimental_cmd}' is currently experimental and requires --lab. "
+                        "Use only in controlled lab/test environments."
+                    ),
+                    file=sys.stderr,
+                )
+                return 2
             return otbr_restapi_cli.main(
                 _forward_with_datadir(_restapi_globals() + [restapi_cmd] + extra_args)
             ) or 0

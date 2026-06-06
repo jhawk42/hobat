@@ -122,6 +122,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--lab",
+        action="store_true",
+        default=False,
+        help=(
+            "Allow experimental mutating commands: node state set, "
+            "node dataset active set, actions enqueue add-thread-device, "
+            "actions enqueue reset-network-diag-counter"
+        ),
+    )
+    parser.add_argument(
         "--debug",
         "-d",
         action="store_true",
@@ -159,7 +169,9 @@ def _add_node_commands(
         dest="state_command", required=True)
     state_subparsers.add_parser("get", help="Get current Thread state")
     state_set = state_subparsers.add_parser(
-        "set", help="Enable or disable Thread")
+        "set",
+        help="Enable or disable Thread [EXPERIMENTAL: requires --lab]",
+    )
     state_set.add_argument("--value", required=True,
                            choices=["enable", "disable"])
 
@@ -181,7 +193,7 @@ def _add_node_commands(
     )
 
     active_set = active_subparsers.add_parser(
-        "set", help="Create or update active dataset"
+        "set", help="Create or update active dataset [EXPERIMENTAL: requires --lab]"
     )
     group = active_set.add_mutually_exclusive_group(required=True)
     group.add_argument("--json", help="Inline JSON payload for dataset")
@@ -402,7 +414,8 @@ def _add_actions_commands(
     )
 
     add_thread_device = enqueue_subparsers.add_parser(
-        "add-thread-device", help="Enqueue addThreadDeviceTask"
+        "add-thread-device",
+        help="Enqueue addThreadDeviceTask [EXPERIMENTAL: requires --lab]",
     )
     add_thread_device.add_argument("--pskd", required=True)
     identity_group = add_thread_device.add_mutually_exclusive_group(
@@ -436,7 +449,8 @@ def _add_actions_commands(
     )
 
     reset_network_diag = enqueue_subparsers.add_parser(
-        "reset-network-diag-counter", help="Enqueue resetNetworkDiagCounterTask"
+        "reset-network-diag-counter",
+        help="Enqueue resetNetworkDiagCounterTask [EXPERIMENTAL: requires --lab]",
     )
     reset_network_diag.add_argument(
         "--types", nargs="+", required=True, help="Counter TLVs by name or integer"
@@ -974,7 +988,34 @@ def build_client(args: argparse.Namespace) -> OTBRRestApiClient:
     return build_rest_client_from_args(args)
 
 
+def _experimental_command_name(args: argparse.Namespace) -> str | None:
+    """Return the experimental command path when --lab gating applies."""
+    if args.resource == "node":
+        if getattr(args, "node_command", None) == "state" and getattr(args, "state_command", None) == "set":
+            return "node state set"
+        if (
+            getattr(args, "node_command", None) == "dataset"
+            and getattr(args, "dataset_kind", None) == "active"
+            and getattr(args, "dataset_command", None) == "set"
+        ):
+            return "node dataset active set"
+    if args.resource == "actions" and getattr(args, "actions_command", None) == "enqueue":
+        enqueue_type = getattr(args, "enqueue_type", None)
+        if enqueue_type == "add-thread-device":
+            return "actions enqueue add-thread-device"
+        if enqueue_type == "reset-network-diag-counter":
+            return "actions enqueue reset-network-diag-counter"
+    return None
+
+
 def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:
+    experimental_cmd = _experimental_command_name(args)
+    if experimental_cmd and not getattr(args, "lab", False):
+        raise OTBRUsageError(
+            f"Command '{experimental_cmd}' is currently experimental and requires --lab. "
+            "Use only in controlled lab/test environments."
+        )
+
     raw_arg = True if args.raw else _RAW_UNSET
     effective_raw = client._resolve_raw(raw_arg)
     fields = build_fields_mapping(getattr(args, "fields", None))

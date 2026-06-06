@@ -34,7 +34,11 @@ These options apply to every command and must be placed **before** the subcomman
 | `--poll-timeout FLOAT` | `8.0` | Max wall-clock seconds to wait for an action to complete |
 | `--no-progress` | off | Suppress per-device `[N/T] id → status (Xs)` progress lines printed to stderr on `fetch-all` commands |
 | `--no-auto-output` | off | Disable automatic output file naming; send JSON to stdout instead of `<datadir>/td-otbr-restapi-<resource>-<command>.json` |
+| `--lab` | off | Allow currently experimental mutating commands (`node state set`, `node dataset active set`, `actions enqueue add-thread-device`, `actions enqueue reset-network-diag-counter`) |
 | `--debug`, `-d` | off | Enable debug logging |
+
+> **Experimental command gate:** The following commands are currently experimental and require `--lab`:
+> `node state set`, `node dataset active set`, `actions enqueue add-thread-device`, `actions enqueue reset-network-diag-counter`.
 
 ---
 
@@ -44,9 +48,9 @@ These options apply to every command and must be placed **before** the subcomman
 |---|---|
 | `node get` | Get full OTBR node record from `/api/node` |
 | `node state get` | Get current Thread radio state |
-| `node state set` | Enable or disable Thread |
+| `node state set` | Enable or disable Thread (**experimental; requires `--lab`**) |
 | `node dataset active get` | Get active Thread dataset (JSON or TLV hex) |
-| `node dataset active set` | Create or update active Thread dataset |
+| `node dataset active set` | Create or update active Thread dataset (**experimental; requires `--lab`**) |
 | `devices list` | List all known devices from `/api/devices` |
 | `devices get` | Get a single device by extAddress |
 | `devices fetch` | Trigger updateDeviceCollectionTask, wait, return device list |
@@ -56,9 +60,9 @@ These options apply to every command and must be placed **before** the subcomman
 | `diagnostics fetch-all` | Fetch diagnostics for all (or given) devices |
 | `actions list` | List all actions |
 | `actions get` | Get a single action by ID |
-| `actions enqueue add-thread-device` | Enqueue `addThreadDeviceTask` |
+| `actions enqueue add-thread-device` | Enqueue `addThreadDeviceTask` (**experimental; requires `--lab`**) |
 | `actions enqueue get-network-diagnostic` | Enqueue `getNetworkDiagnosticTask` |
-| `actions enqueue reset-network-diag-counter` | Enqueue `resetNetworkDiagCounterTask` |
+| `actions enqueue reset-network-diag-counter` | Enqueue `resetNetworkDiagCounterTask` (**experimental; requires `--lab`**) |
 | `actions enqueue get-energy-scan` | Enqueue `getEnergyScanTask` |
 | `actions enqueue update-device-collection` | Enqueue `updateDeviceCollectionTask` |
 | `mesh-diagnostics children` | Fetch child table for a device (TLV 29) |
@@ -126,6 +130,8 @@ PYTHONPATH=src python3 -m td_cli otbr-restapi --host 192.168.1.10 node state get
 
 Enable or disable Thread.
 
+> **Warning:** This command is currently experimental and requires `--lab`.
+
 ```
 node state set --value {enable,disable}
 ```
@@ -137,9 +143,9 @@ node state set --value {enable,disable}
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 -m td_cli otbr-restapi node state set --value enable
+PYTHONPATH=src python3 -m td_cli otbr-restapi --lab node state set --value enable
 
-PYTHONPATH=src python3 -m td_cli otbr-restapi node state set --value disable
+PYTHONPATH=src python3 -m td_cli otbr-restapi --lab node state set --value disable
 ```
 
 ---
@@ -172,6 +178,8 @@ PYTHONPATH=src python3 -m td_cli otbr-restapi node dataset active get --text
 
 Create or update the active Thread dataset. Exactly one input source is required.
 
+> **Warning:** This command is currently experimental and requires `--lab`.
+
 ```
 node dataset active set (--json JSON | --json-file FILE | --text TEXT | --text-file FILE)
 ```
@@ -186,10 +194,10 @@ node dataset active set (--json JSON | --json-file FILE | --text TEXT | --text-f
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 -m td_cli otbr-restapi \
+PYTHONPATH=src python3 -m td_cli otbr-restapi --lab \
     node dataset active set --json-file data/dataset.json
 
-PYTHONPATH=src python3 -m td_cli otbr-restapi \
+PYTHONPATH=src python3 -m td_cli otbr-restapi --lab \
     node dataset active set --text 0e080000000000010000000300000f...
 ```
 
@@ -489,6 +497,8 @@ PYTHONPATH=src python3 -m td_cli otbr-restapi \
 
 Enqueue `addThreadDeviceTask` to commission a new joiner device.
 
+> **Warning:** This command is currently experimental and requires `--lab`.
+
 ```
 actions enqueue add-thread-device --pskd PSKD
     (--eui EUI | --discerner DISCERNER | --joiner-id JOINER_ID)
@@ -506,13 +516,13 @@ actions enqueue add-thread-device --pskd PSKD
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 -m td_cli otbr-restapi \
+PYTHONPATH=src python3 -m td_cli otbr-restapi --lab \
     actions enqueue add-thread-device \
     --eui aabbccddeeff0022 \
     --pskd J01NME \
     --timeout 120
 
-PYTHONPATH=src python3 -m td_cli otbr-restapi \
+PYTHONPATH=src python3 -m td_cli otbr-restapi --lab \
     actions enqueue add-thread-device \
     --discerner 0xabc \
     --pskd S3CRET
@@ -565,6 +575,8 @@ PYTHONPATH=src python3 -m td_cli otbr-restapi \
 
 Enqueue `resetNetworkDiagCounterTask`. Only `macCounters` (TLV 9) and `mleCounters` (TLV 34) are resettable; passing any other TLV name is rejected client-side before the request is sent.
 
+> **Warning:** This command is currently experimental and requires `--lab`.
+
 ```
 actions enqueue reset-network-diag-counter --types TYPE ...
     [--destination DEST]
@@ -582,12 +594,12 @@ actions enqueue reset-network-diag-counter --types TYPE ...
 **Examples:**
 
 ```bash
-PYTHONPATH=src python3 -m td_cli otbr-restapi \
+PYTHONPATH=src python3 -m td_cli otbr-restapi --lab \
     actions enqueue reset-network-diag-counter \
     --destination aabbccddeeff0011 \
     --types macCounters mleCounters
 
-PYTHONPATH=src python3 -m td_cli otbr-restapi \
+PYTHONPATH=src python3 -m td_cli otbr-restapi --lab \
     actions enqueue reset-network-diag-counter \
     --destination aabbccddeeff0011 \
     --types mleCounters \
@@ -1211,7 +1223,7 @@ PYTHONPATH=src python3 -m td_cli otbr-restapi \
 ### 9. Reset diagnostic counters
 
 ```bash
-PYTHONPATH=src python3 -m td_cli otbr-restapi \
+PYTHONPATH=src python3 -m td_cli otbr-restapi --lab \
     actions enqueue reset-network-diag-counter \
     --destination aabbccddeeff0011 \
     --types macCounters mleCounters
