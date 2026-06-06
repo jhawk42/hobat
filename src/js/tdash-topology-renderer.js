@@ -360,7 +360,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
       ? ` Search: "${searchQuery}" — ${matchCount} of ${totalCount} rows match.`
       : "";
     const fetchStatusEl = document.getElementById("fetch-status-line-content");
-    if (fetchStatusEl) fetchStatusEl.textContent = `Loaded ${sourceNames.join(", ")}`;
+    if (fetchStatusEl) fetchStatusEl.textContent = `Loaded: ${sourceNames.join(", ")}`;
     statusEl.textContent =
       `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links.${neighborSuffix}${searchSuffix}`;
   }

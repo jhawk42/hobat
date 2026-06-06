@@ -319,7 +319,7 @@ function updateTableStatus(visibleRowCount, columnCount, totalFilteredCount, sea
   const nodeLabel = nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
   const diagLabel = diagFilterEl.options[diagFilterEl.selectedIndex].text;
   const fetchStatusEl = document.getElementById("fetch-status-line-content");
-  if (fetchStatusEl) fetchStatusEl.textContent = `Loaded ${_tableDatasetLabel}`;
+  if (fetchStatusEl) fetchStatusEl.textContent = `Loaded: ${_tableDatasetLabel}`;
   let statusText =
     `Total: ${_tableRows.length} rows, ${_tableColumns.length} columns. ` +
     `Showing: ${visibleRowCount} rows, ${columnCount} columns. Node Filter: ${nodeLabel}. Diagnostic Filter: ${diagLabel}.`;

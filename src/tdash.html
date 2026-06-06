@@ -24,7 +24,7 @@
 
     <!-- Title bar -->
     <div id="panel-home" class="controls">
-      <a href="" class="home-link" title="tdash home">🏠 tdash: </a>
+      <a href="" class="home-link" title="tdash home">🏠 tdash </a>
       <!-- fetch status line  -->
       <div id="fetch-status-line-panel">
         <div id="fetch-status-line-content" role="status" aria-live="polite">
@@ -109,6 +109,7 @@
           <!-- Fetch button -->
           <div>
             <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch</button>
+            <button id="btn-fetch-cancel" title="Cancel pending fetch">✕</button>
             <button id="btn-fetch-toggle-status-chk-cache" title="Toggle Fetch Status and Cache Options">⧨</button>
           </div>
 
@@ -128,7 +129,7 @@
                 </label>
                 <div class="progress-row">
                   <progress id="fetch-timetaken-progress" max="100"></progress>
-                  <button id="btn-fetch-cancel" title="Cancel pending fetch">✕</button>
+                  
                 </div>
               </div>
               <div id="fetch-cache-age-group">
