@@ -1328,6 +1328,10 @@ td:last-child {
     padding: 10px;
   }
 
+  #topology-view {
+    height: 64vh;
+  }
+
   #panel-dataset-inner {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
