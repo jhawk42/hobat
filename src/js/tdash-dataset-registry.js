@@ -64,7 +64,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast_mdns",
-    label: "Device & Mesh topology w/mdns [ttd,md,ndmc,mdns] ",
+    label: "Device & Mesh topology w/mdns [ftd,md,ndmc,mdns] ",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json",
@@ -80,7 +80,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast_mdns",
-    label: "Device (all) detailed topology [md,ndmc,mdn,mdc,mdns] ⏰",
+    label: "Device & Mesh topology [md,ndmc,mdn,mdc,mdns] ⏰",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json",
