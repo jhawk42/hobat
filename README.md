@@ -1,12 +1,14 @@
 # tdash - thread mesh network dashboard and tools
 
-The tdash tools and dashboard enable visualizing and querying a Thread Network using dataset sources : Open Thread Border Router (OTBR) and related thread mDNS records. Also visualizes using the Eve app thread layout file. I have the tdash dashboard and tools running on Debian inside a Docker container (it can also run directly on the host). I access the dashboard from my laptop and phone. See: [tdash backstory](https://github.com/jhawk42/smarthome/blob/main/tdash_backstory.md) for more details.
+The tdash tools and dashboard enable visualizing and querying a Thread Network using dataset sources: Open Thread Border Router (OTBR) and related thread mDNS records. Also visualizes using the Eve app thread layout file. 
+
+Environment: tdash dashboard and tools running on Debian inside a Docker container. It can also run directly Debian. Access the dashboard from laptop and phone. See: [tdash backstory](https://github.com/jhawk42/smarthome/blob/main/tdash_backstory.md) for more details.
 
 Jump to: [Getting Started](#getting-started) [help docs](./doc/) [td_cli](./doc/help_td_cli.md) [td cli rest-api](./doc/help_td_restapi_cli.md) [td_webserver](./doc/help_td_webserver.md) [env vars](./doc/help_env_vars.md) [openthread](https://github.com/openthread/openthread) 
 
 ## Overview
 
-At a high level the tdash tools (td_cli) fetch Thread device info from an Open Thread Border Router (OBTR) for a thread network and the thread device info is stored into a local cache in the tdash data directory. The tdash dashboard reads from the data directory cache to visualize the Thread mesh network in both topology and table views. This model helps to reduce traffic on the thread network so thread devices can continue to communicate and also reduces load on the battery powered Sleepy End Devices (SED) when running queries over the thread device info. The tdash dashboard and tools can run diagnostics queries over the thread info for: Node type, Link Quality, MAC (radio) counters and MLE (thread mesh & role time counters). 
+Tdash tools (td_cli) fetch Thread device info from an Open Thread Border Router (OBTR) for a thread network and the thread device info is stored into a local cache in the tdash data directory. The tdash dashboard reads from the data directory cache to visualize the Thread mesh network in both topology and table views. This model helps to reduce traffic on the thread network so thread devices can continue to communicate and also reduces load on the battery powered Sleepy End Devices (SED) when running queries over the thread device info. The tdash dashboard and tools can run diagnostics queries over the thread info for: Node type, Link Quality, MAC (radio) counters and MLE (thread mesh & role time counters). 
 
 The tdash dashboard and tools provide:
 
