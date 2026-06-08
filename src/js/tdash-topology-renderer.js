@@ -414,7 +414,16 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
           });
           return deg;
         })(),
-        is_router: node.shape !== "ellipse",
+        // check both is_router field and shape to determine router status for details panel, since some adaptors may not set is_router but use shape to indicate router status
+        // also is node.selectedId is an rloc16 that starts with '0x'. and ends with '00', which conventionally indicates a router in Thread networks, treat it as a router as well
+        // Additionally, check if the type or role fields indicate "router" to cover more cases where router status might be implied
+        // check if rloc16 is 6 characters long to avoid misclassifying non-rloc16 IDs that coincidentally start with '0x' and end with '00'
+        is_router: node.is_router || 
+          (typeof node.rloc16 === "string" &&
+            node.rloc16.toLowerCase().startsWith("0x") &&
+            node.rloc16.toLowerCase().endsWith("00") &&
+            node.rloc16.length === 6) ||
+          toText(node.role).toLowerCase() === "router",
         has_children: routerIdsWithChildrenRef
           ? routerIdsWithChildrenRef.has(selectedId)
           : undefined,

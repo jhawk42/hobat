@@ -728,8 +728,8 @@ export function adaptMergedDetailed(fileMap) {
     rawNodeById.set(nodeId, node);
     const rloc16Text = toText(node.rloc16).toLowerCase();
     const modeDevice = toText(node['mode.device'] || node.mode?.device).toUpperCase();
-    const isRouterLike = rloc16Text.endsWith('00') || modeDevice === 'FTD' || toText(node.type).toLowerCase() === 'router';
-    const isChildLike = modeDevice === 'MTD' || toText(node.type).toLowerCase().includes('child');
+    const isRouterLike = rloc16Text.endsWith('00') || modeDevice === 'FTD' || toText(node.role).toLowerCase() === 'router';
+    const isChildLike = modeDevice === 'MTD' || toText(node.role).toLowerCase().includes('child');
     upsertMergedNode(nodeId, node, {
       source: 'merged-detailed',
       shape: isChildLike && !isRouterLike ? 'ellipse' : 'box',

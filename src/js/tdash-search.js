@@ -51,9 +51,13 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   
   // === Device Type & Role ===
   "type",
+  "role",
   "Role",
-  "br",
+  "is_router",
+  "isRouter",
+  "is_border_router",
   "isBorderRouter",
+  "br",
   "leader",
   "isLeader",
   

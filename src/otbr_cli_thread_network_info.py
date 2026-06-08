@@ -20,6 +20,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     save_json_atomic(thread_network_info, save_json_path)
     logging.debug("Saved thread network info data into %s as JSON:\n%s",
             save_json_path, json.dumps(thread_network_info, indent=4))
-
+    logging.info(f"Saved thread network info with {len(thread_network_info)} entries into {save_json_path}.")
 if __name__ == "__main__":
     raise SystemExit(main())

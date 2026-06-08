@@ -164,11 +164,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     save_json_atomic(router_neighbor_tables, runtime.output_path)
     
-    logging.info(
-        f"Meshdiag routerneighbortables data saved to {runtime.output_path}")
-
     logging.debug("Saved meshdiag routerneighbortables data into %s as JSON:\n%s",
                   runtime.output_path, json.dumps(router_neighbor_tables, indent=4))
+  
+    logging.info(f"Saved meshdiag routerneighbortables with {len(router_neighbor_tables)} entries into {runtime.output_path}.")
 
 
 if __name__ == "__main__":

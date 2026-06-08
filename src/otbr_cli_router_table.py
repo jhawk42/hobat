@@ -179,7 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         logging.debug("Saved router-table data into %s as JSON:\n%s",
                 save_path, json.dumps(router_table_data, indent=4))
         # log a summary of the data
-        logging.info(f"Fetched and parsed router table with {len(router_table_data)} entries.")
+        logging.info(f"Saved router table with {len(router_table_data)} entries into {save_path}.")
         
     except FileNotFoundError as e:
         logging.error(f"Error: File not found - {e}")

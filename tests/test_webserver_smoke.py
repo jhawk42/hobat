@@ -78,8 +78,8 @@ class TestSmokePath_A_StaticFile(SmokeTestBase):
     """Path A: a STATIC file that exists on disk is served with 200."""
 
     async def test_static_file_returns_200_with_content(self) -> None:
-        # "td-static-extaddr-device-label.json" is STATIC in FILE_ACTION_MAP.
-        filename = "td-static-extaddr-device-label.json"
+        # "Eve Thread Network Layout.evethreadlayout" is STATIC in FILE_ACTION_MAP.
+        filename = "Eve Thread Network Layout.evethreadlayout"
         content = b'{"devices": []}'
         (self.data_dir / filename).write_bytes(content)
 
@@ -95,7 +95,7 @@ class TestSmokePath_A_StaticFile(SmokeTestBase):
         """A STATIC file that is absent on disk must yield 404, not a regen attempt."""
         import aiohttp.web
 
-        filename = "td-static-extaddr-device-label.json"
+        filename = "Eve Thread Network Layout.evethreadlayout"
         # Do NOT write the file — it should be absent.
         app = _make_app(self.data_dir)
         req = _make_request(filename, app)

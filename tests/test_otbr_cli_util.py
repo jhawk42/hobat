@@ -573,7 +573,7 @@ class TestCollectPerRouter:
         
         assert len(caplog.records) == 1
         log_message = caplog.records[0].message
-        assert "Getting meshdiag childtable" in log_message
+        assert "Fetching meshdiag childtable" in log_message
         assert "0x5000" in log_message
         assert "Living Room Bulb" in log_message
         assert "aabbccddeeff0011" in log_message

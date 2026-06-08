@@ -3,6 +3,8 @@ from unittest import case
 import util_ot_ctl
 import logging
 
+THREAD_RLOC16_ADDRESS_PREFIX = ":0:ff:fe00:"
+
 def is_router(rloc16):
     """
     Determines if a given rloc16 value corresponds to a router based on its hexadecimal suffix.
@@ -62,7 +64,7 @@ def _build_ipv6_prefix_by_type(prefix, kind):
     base_prefix = _strip_prefix_mask(prefix)
 
     if kind == "meshlocal":
-        return base_prefix + ":0:ff:fe00:"
+        return base_prefix + THREAD_RLOC16_ADDRESS_PREFIX
     if kind == "omr":
         return base_prefix
 
@@ -131,6 +133,8 @@ def is_ipv6_address_in_meshlocal_prefix(addr, meshlocal_prefix):
     Returns:
         True if the IPv6 address is within the prefix, False otherwise.
     """
+    if not isinstance(addr, str) or not isinstance(meshlocal_prefix, str):
+        return False
     return addr.startswith(meshlocal_prefix)
 
 
@@ -170,6 +174,8 @@ def is_ipv6_address_in_omr_prefix(addr, omr_prefix):
     Returns:
         True if the IPv6 address is within the prefix, False otherwise.
     """
+    if not isinstance(addr, str) or not isinstance(omr_prefix, str):
+        return False
     return addr.startswith(omr_prefix)
 
 
@@ -189,7 +195,8 @@ def find_omr_address_in_list(ipv6_addrs, omr_prefix):
             return addr
     return None
 
-def is_border_router_from_ipv6_addrs(ipv6_addrs, meshlocal_prefix):
+
+def is_border_router_from_ipv6_addrs(ipv6_addrs, meshlocal_prefix: str = None):
     """
     fcXX - The suffix fcXX is a specific Service Anycast Address used to reach an available 
     Border Router that provides external network connectivity (IPv6 infrastructure reachability).
@@ -208,22 +215,30 @@ def is_border_router_from_ipv6_addrs(ipv6_addrs, meshlocal_prefix):
     # ALOC Service Anycast Address Range: fc10 to fc1f
     aloc_service_anycast_suffix_range_start = "fc10"
     aloc_service_anycast_suffix_range_end = "fc1f"
-    
-    # Check if any ip address in the list start with meshlocal prefix and ends with fcXX suffix
-    for addr in ipv6_addrs:        
+
+    for addr in ipv6_addrs:
+        if not isinstance(addr, str):
+            continue
+
+        # Check if ip address in the list start with meshlocal prefix and ends with fcXX suffix
         is_meshlocal_addr = is_ipv6_address_in_meshlocal_prefix(addr, meshlocal_prefix)
-        if is_meshlocal_addr:
+        # Check if ip address in the list contains RLOC16 prefix (indicating it's a Border Router)
+        contains_rloc16_prefix = THREAD_RLOC16_ADDRESS_PREFIX in addr
+        if is_meshlocal_addr or contains_rloc16_prefix:
             suffix = addr.split(":")[-1]  # Get the last segment of the IPv6 address
-            ##logging.debug(f"[DEBUG] Checking if address {addr} is a Border Router address with prefix {meshlocal_prefix} and suffix {suffix}\n")
-            
             # Check if suffix is in the range of fc10 to fc1f
             if aloc_service_anycast_suffix_range_start <= suffix <= aloc_service_anycast_suffix_range_end:
-                logging.debug(f"[DEBUG] Found Border Router Address {addr} with suffix {suffix} in the range of {aloc_service_anycast_suffix_range_start} to {aloc_service_anycast_suffix_range_end}.\n")
+                logging.debug(
+                    f"[DEBUG] Found Border Router Address {addr} with suffix {suffix} in the range of "
+                    f"{aloc_service_anycast_suffix_range_start} to {aloc_service_anycast_suffix_range_end}.\n"
+                )
+                return True
 
-                # This address is a Service Anycast address for Border Router, so we consider it as a Border Router address
-                return True  
+        if meshlocal_prefix is None:
+            logging.debug(f"[DEBUG] No meshlocal prefix provided. Skipping check for address {addr}.\n")
 
     return False
+
 
 def fetch_dataset_active(hide_sensitive_info=True):
     """

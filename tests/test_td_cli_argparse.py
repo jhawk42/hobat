@@ -240,27 +240,9 @@ class TestDispatchOtbrCli(unittest.TestCase):
         m.assert_called_once_with([])
         self.assertEqual(rc, 0)
 
-    def test_meshdiag_all_calls_all_meshdiag_modules(self):
-        with (
-            patch.object(
-                td_cli.otbr_cli_meshdiag_topology, "main", return_value=0
-            ) as mt,
-            patch.object(
-                td_cli.otbr_cli_meshdiag_routerneighbortable, "main", return_value=0
-            ) as mr,
-            patch.object(
-                td_cli.otbr_cli_meshdiag_childtable, "main", return_value=0
-            ) as mc,
-            patch.object(
-                td_cli.otbr_cli_meshdiag_childip6, "main", return_value=0
-            ) as mi,
-        ):
-            rc = self._dispatch(["otbr-cli", "meshdiag", "all"])
-        mt.assert_called_once_with([])
-        mr.assert_called_once_with([])
-        mc.assert_called_once_with([])
-        mi.assert_called_once_with([])
-        self.assertEqual(rc, 0)
+    def test_meshdiag_all_is_invalid_choice(self):
+        with self.assertRaises(SystemExit):
+            _parse(["otbr-cli", "meshdiag", "all"])
 
     def test_networkdiag_children_no_forwards_cno(self):
         with patch.object(

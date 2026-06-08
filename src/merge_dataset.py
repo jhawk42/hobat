@@ -48,12 +48,15 @@ PRIORITY_FIELDS = [
     
     # === TIER 3: Device Role & Status (Important P1) ===
     "type",
+    "role",
     "Role",                    # Eve format
-    "br",                      # CLI - is border router
+    "is_router",               # CLI - is router
+    "isRouter",                # REST API alias
+    "is_border_router",         # CLI - is border router
     "isBorderRouter",          # REST API alias
+    "br",                      # CLI - is border router
     "leader",                  # Leader status
     "isLeader",                # REST API alias
-    "is_router",               # CLI - is router
     "isPrimaryBBR",            # Is primary backbone router
     "status",
     "mode.device",
@@ -512,9 +515,10 @@ FIELD_ALIASES_BIDIRECTIONAL = {
     "sed_datagram_count": ["sedDatagramCount"],
     
     # Border router flags
-    "br": ["isBorderRouter"],
     "leader": ["isLeader"],
     "is_router": ["isRouter"],
+    "is_border_router": ["isBorderRouter"],
+    "br": ["isBorderRouter"],
     
     # Vendor fields
     "vendor_name": ["vendorName"],

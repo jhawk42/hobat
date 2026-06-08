@@ -617,6 +617,7 @@ export function sortDetailsWithPriority(details) {
     "Role",
     "br",
     "isBorderRouter",
+    "isRouter",
     "leader",
     "isLeader",
     "is_router",

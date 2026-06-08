@@ -77,6 +77,7 @@ export const FIELD_ALIASES = Object.freeze({
   sed_datagram_count:   ["sedDatagramCount"],
   br:                   ["isBorderRouter"],
   leader:               ["isLeader"],
+  is_border_router:     ["isBorderRouter"],
   is_router:            ["isRouter"],
   vendor_name:          ["vendorName"],
   vendor_model:         ["vendorModel"],
@@ -228,7 +229,7 @@ export const NODE_FILTER_OPTIONS = Object.freeze([
     value: "main-routers",
     label: "Routers",
     group: null,
-    topoNodeField: "isMainRouter",
+    topoNodeField: "isRouter",
     tableRowField: "rloc16", // rloc16 ending in '00' → main router
   },
   {

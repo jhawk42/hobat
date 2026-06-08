@@ -863,6 +863,11 @@ class OTBRRestApiClient:
         """
         raw = self._resolve_raw(raw)
         try:
+            logging.info(
+                "Sent updateDeviceCollectionTask action"
+                " (deviceCount=%d, maxAge=%ds, maxRetries=%d, taskTimeout=%ds);",
+                device_count, max_age, max_retries, task_timeout
+            )
             action = self.trigger_and_wait_device_collection(
                 device_count=device_count,
                 max_age=max_age,

@@ -1395,7 +1395,7 @@ def run_cli(
     build_client_fn,
     argv: Sequence[str] | None = None,
 ) -> int:
-    """Standard CLI entry-point scaffold shared by both client CLIs."""
+    """Standard CLI entry-point scaffold shared by client CLIs."""
     # Parse arguments first to check debug flag before setting up logging
     parser = build_parser_fn()
     argv_list = list(sys.argv[1:] if argv is None else argv)
@@ -1433,6 +1433,8 @@ def run_cli(
         client = build_client_fn(args)
         result = dispatch_fn(client, args)
         emit_output(result, output_path)
+        print(f"Saved {len(result) if result is not None else 0} records to {output_path}" if output_path else "Output written to stdout")
+
         return EXIT_SUCCESS
     except OTBRClientError as exc:
         emit_error(exc)

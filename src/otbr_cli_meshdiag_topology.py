@@ -171,7 +171,7 @@ def parse_meshdiag_topology_output(
     return routers
 
 
-def enhance_topology_router_links(
+def enrich_topology_routers(
     topology_data, thread_network_info=None
 ):
     """
@@ -194,16 +194,26 @@ def enhance_topology_router_links(
     for router in topology_data:
         enhanced_router = router.copy()
 
-        # Enhancement: OMR IPv6 address
+        # Enrich: OMR IPv6 address
         if omr_ipv6addr_prefix:
             enhanced_router["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
                 router.get("ipv6_addrs", []), omr_ipv6addr_prefix
             )
 
-        # Enhancement: Count total children
+        # Enrich: Border Router role base on BR flag
+        if router.get("br", False):
+            enhanced_router["is_border_router"] = router.get("br", False)
+            enhanced_router["type"] = "border router"
+            enhanced_router["role"] = "border router"
+        else:
+            enhanced_router["is_router"] = True
+            enhanced_router["type"] = "router"
+            enhanced_router["role"] = "router"
+
+        # Enrich: Count total children
         enhanced_router["total_children"] = len(router.get("children", []))
 
-        # Enhancement: Count total links
+        # Enrich: Count total links
         enhanced_router["total_links"] = (
             len(router.get("3_links", []))
             + len(router.get("2_links", []))
@@ -270,7 +280,7 @@ def get_meshdiag_topology(
 
     # enhance links by decoding link IDs to objects with id and device_label
     enhanced_links = (
-        enhance_topology_router_links(
+        enrich_topology_routers(
             topology_data_enhanced, thread_network_info
         )
     )
@@ -318,7 +328,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logging.debug("Saved meshdiag topology data into %s as JSON:\n%s",
                   save_path, json.dumps(meshdiag_topology_data, indent=4))
-
+    logging.info(f"Saved meshdiag topology with {len(meshdiag_topology_data)} entries into {save_path}.")
 
 if __name__ == "__main__":
     raise SystemExit(main())

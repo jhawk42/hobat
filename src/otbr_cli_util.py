@@ -268,12 +268,12 @@ def collect_per_router(
                 else "Unknown"
             )
             logging.info(
-                f"Getting {collection_name} for router rloc16 {rloc16} "
+                f"Fetching {collection_name} for router rloc16 {rloc16} "
                 f"(Node: {device_label}, ExtAddr: {extaddr})..."
             )
         else:
             logging.info(
-                f"Getting {collection_name} for router rloc16 {rloc16} "
+                f"Fetching {collection_name} for router rloc16 {rloc16} "
                 "(Node: Unknown, ExtAddr: Unknown)..."
             )
         

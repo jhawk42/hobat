@@ -121,6 +121,43 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
         self.assertIs(result, payload)
         self.assertNotIn("iftotalpkts", result[0]["macCounters"])
 
+    def test_list_enrichment_skips_invalid_ipv6_addresses(self) -> None:
+        payload = [
+            {
+                "id": "diag-1",
+                "ipv6Addresses": [None, 123, "fdde:ad00:beef::fc11"],
+                "macCounters": {
+                    "ifInUcastPkts": 0,
+                    "ifInBroadcastPkts": 0,
+                    "ifOutUcastPkts": 0,
+                    "ifOutBroadcastPkts": 0,
+                    "ifInErrors": 0,
+                    "ifOutErrors": 0,
+                    "ifInDiscards": 0,
+                    "ifOutDiscards": 0,
+                },
+                "mleCounters": {
+                    "totalTrackingTime": 1,
+                    "routerRoleTime": 0,
+                    "childRoleTime": 0,
+                    "leaderRoleTime": 0,
+                    "detachedRoleTime": 0,
+                    "radioDisabledTime": 0,
+                },
+            }
+        ]
+        self.client.list_diagnostics.return_value = payload
+
+        result = diagnostics_module.dispatch_diagnostics(
+            self.client,
+            self._args(),
+            _RAW_UNSET,
+            fields=None,
+        )
+
+        self.assertIs(result, payload)
+        self.assertEqual(result[0]["ipv6Addresses"], [None, 123, "fdde:ad00:beef::fc11"])
+
 
 class DiagnosticsListParserTests(unittest.TestCase):
     def test_diagnostics_list_accepts_no_enrich_mac_counters_flag(self) -> None:

@@ -216,6 +216,15 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     # responder_ipv6: keep existing (first responder wins)
     # (no update needed)
 
+    # is_router: take new if new is True and existing is not True, else keep existing
+    if new.get("is_router") and not existing.get("is_router"):
+        existing["is_router"] = new["is_router"]
+        existing["role"] = "router"
+
+    # is_border_router: take new if new is True and existing is not True, else keep existing
+    if new.get("is_border_router") and not existing.get("is_border_router"):
+        existing["is_border_router"] = new["is_border_router"]
+
     # "br": take new if new is non-empty dict and existing is empty, else keep existing
     if not existing.get("br") and new.get("br"):
         existing["br"] = new["br"]
@@ -223,6 +232,10 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     # "type": take new if new is non-empty dict and existing is empty, else keep existing
     if not existing.get("type") and new.get("type"):
         existing["type"] = new["type"]
+
+    # "role": take new if new is non-empty dict and existing is empty, else keep existing
+    if not existing.get("role") and new.get("role"):
+        existing["role"] = new["role"]
 
     # children: take new if new is non-empty list and existing is empty list
     if not existing.get("children") and new.get("children"):

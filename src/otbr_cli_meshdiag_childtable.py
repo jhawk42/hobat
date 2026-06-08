@@ -187,10 +187,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     save_json_atomic(router_child_tables, runtime.output_path)
 
-    logging.info(
-        f"Meshdiag router childtables data saved to {runtime.output_path}")
     logging.debug("Saved meshdiag router childtables data into %s as JSON:\n%s",
                   runtime.output_path, json.dumps(router_child_tables, indent=4))
+    logging.info(f"Saved meshdiag router childtables with {len(router_child_tables)} entries into {runtime.output_path}.")
 
 
 if __name__ == "__main__":

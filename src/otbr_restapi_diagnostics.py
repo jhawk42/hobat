@@ -16,6 +16,7 @@ from otbr_restapi_util import (
     OTBRInvalidResponseError,
     OTBRRestApiClient,
 )
+import util_network
 
 _MEDIUM_DIAGNOSTIC_TLVS: list[str] = [
     t for t in RECOMMENDED_DIAGNOSTIC_TLVS if t not in {"threadStackVersion", "mleCounters"}
@@ -154,6 +155,40 @@ def _apply_time_stats_enrichment(diagnostics: list[Any]) -> list[Any]:
         enrich_time_statistics(record)
     return diagnostics
 
+
+def enrich_border_router(record: dict[str, Any]) -> None:
+
+    # isRouter 
+    rloc16 = record.get("rloc16")
+    if isinstance(rloc16, str):
+        # check last two bytes of rloc16 for "00" which is a common indicator of routers (including border routers)
+        rloc16 = rloc16.lower()
+        if rloc16.endswith("00"):
+            record["isRouter"] = True
+            record["is_router"] = True
+            record["role"] = "router"
+
+    addrs = record.get("ipv6Addresses")
+    if not isinstance(addrs, list):
+        return
+
+    # isBorderRouter - check for presence of border router indicators in IPv6 addresses (e.g., "br" or "border-router" in address labels or types)
+    is_border_router = util_network.is_border_router_from_ipv6_addrs(addrs)
+    if is_border_router is not None:
+        if is_border_router:
+            record["isBorderRouter"] = True
+            record["is_border_router"] = True
+            record["role"] = "border router"
+            record["br"] = True
+
+    
+def _apply_border_router_enrichment(diagnostics: list[Any]) -> list[Any]:
+    """Apply enrich_border_router in-place to each diagnostic record."""
+    for record in diagnostics:
+        if not isinstance(record, dict):
+            continue
+        enrich_border_router(record)
+    return diagnostics
 
 def make_progress_fn(total: int, enabled: bool):
     if not enabled or total == 0:
@@ -302,11 +337,13 @@ def dispatch_diagnostics(
             if isinstance(items, list):
                 _apply_mac_enrichment(items)
                 _apply_time_stats_enrichment(items)
+                _apply_border_router_enrichment(items)
             return diagnostics
 
         if isinstance(diagnostics, list):
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
+            _apply_border_router_enrichment(diagnostics)
         return diagnostics
     if args.diagnostics_command == "get":
         return client.get_diagnostic(args.diagnostics_id, raw=raw_arg)
@@ -357,6 +394,7 @@ def dispatch_diagnostics(
         if do_enrich:
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
+            _apply_border_router_enrichment(diagnostics)
         return diagnostics
 
     raise ValueError("Unsupported diagnostics command")

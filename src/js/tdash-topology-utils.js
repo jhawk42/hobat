@@ -280,8 +280,6 @@ export function buildVisNodeData(
 ) {
   return Array.from(nodeMap.values()).map((node) => {
     const displayName = toText(node.device_label) || toText(node.name);
-    const unknown = isUnknownNodeName(displayName);
-    const effectiveShape = unknown ? "ellipse" : node.shape;
     const rloc16Text = toText(node.rloc16).toLowerCase();
     const neighborStats = computeRouterNeighborStats(
       routerNeighborByRloc16.get(rloc16Text)?.router_neighbor_table,
@@ -290,10 +288,12 @@ export function buildVisNodeData(
     const childStats = computeRouterChildStats(
       childTableRow?.router_child_table,
     );
-    const isRouter = effectiveShape !== "ellipse";
     const hasChildren = routerIdsWithChildren.has(node.id);
-    const isMainRouter = rloc16Text.endsWith("00");
-    const isBorderRouter = isMainRouter && node.br === true;
+    const isRouter = node.is_router || rloc16Text.endsWith("00") || toText(node.type).toLowerCase() === "router" || toText(node.role).toLowerCase() === "router" 
+    const isBorderRouter = isRouter && (node.br === true || node.is_border_router === true) || toText(node.role).toLowerCase() === "border router" || toText(node.role).toLowerCase() === "border router";
+    const unknown = isUnknownNodeName(displayName) && !isRouter && !isBorderRouter;
+    const effectiveShape = unknown ? "ellipse" : node.shape;
+    
     let borderWidth = 1;
     let fontSize = 13;
     let widthConstraint = { minimum: 109, maximum: 109 };
@@ -324,7 +324,7 @@ export function buildVisNodeData(
       group: unknown ? "unknown" : "known",
       isRouter,
       hasChildren,
-      isMainRouter,
+      isRouter,
       isBorderRouter,
       borderWidth,
       ifindiscards_pct: node.ifindiscards_pct,

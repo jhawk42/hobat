@@ -118,11 +118,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     save_json_atomic(router_child_ip6_tables, runtime.output_path)
 
-    logging.info(f"Meshdiag router childip6 data saved to {runtime.output_path}")
     logging.debug("Saved meshdiag router childip6 data into %s as JSON:\n%s",
                   runtime.output_path, json.dumps(router_child_ip6_tables, indent=4))
-
-    return 0
+    logging.info(f"Saved meshdiag router childip6 tables with {len(router_child_ip6_tables)} entries into {runtime.output_path}.")
 
 
 if __name__ == "__main__":

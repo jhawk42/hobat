@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from otbr_restapi_diagnostics import (
+    _apply_border_router_enrichment,
     _apply_mac_enrichment,
+    _apply_time_stats_enrichment,
     fetch_all_with_fallback,
     make_progress_fn,
     resolve_fallback_types,
@@ -73,6 +75,8 @@ def dispatch_topology(
         )
         if do_enrich:
             _apply_mac_enrichment(diagnostics)
+            _apply_time_stats_enrichment(diagnostics)
+            _apply_border_router_enrichment(diagnostics)
         path = data_dir / "td-otbr-restapi-diagnostics-fetch-all.json"
         emit_rest_payload_output(diagnostics, path, logging.getLogger(__name__))
         elapsed = time.monotonic() - step_start

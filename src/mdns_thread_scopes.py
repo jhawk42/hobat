@@ -267,6 +267,14 @@ class MDNSDumpListener(ServiceListener):
             "xa", {}).get("hex", None)
         if extaddr is not None:
             retobj["extaddr"] = extaddr
+            
+        # promote BR role to top level for easier access
+        decoded_mn = service_info.get("properties", {}).get("mn", {}).get("decoded", None)
+        if decoded_mn is not None:
+            if decoded_mn == "BorderRouter":
+                retobj["is_border_router"] = True  
+                retobj["role"] = "border router"
+                
         # Add omr_ipv6_addr if exists. promote to top level for easier access
         if omr_ipv6_addr is not None:
             retobj["omr_ipv6_addr"] = omr_ipv6_addr
