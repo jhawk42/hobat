@@ -2,7 +2,7 @@
 
 The tdash dashboard and tools enable visualizing and querying a Thread Network using the following dataset sources: Open Thread Border Router (OTBR) via cli & restapi and related thread mDNS records. It visualizes the thread networks using a Eve app thread layout file. 
 
-Environment: The tdash dashboard and tools runs on a Debian base image inside a Docker container. It can also run fine directly on a Debian based host. The dashboard can be accessed via a web browser from a laptop and phone. See: [tdash backstory](https://github.com/jhawk42/smarthome/blob/main/tdash_backstory.md) for more details.
+Environment: The tdash dashboard and tools runs on a Debian base image inside a Docker container. It can also run fine directly on a Debian based host. The dashboard can be accessed via a web browser from a laptop and phone. See: [tdash backstory](https://github.com/jhawk42/smarthome/blob/main/tdash/tdash_backstory.md) for more details.
 
 Jump to: [Getting Started](#getting-started) [help docs](./doc/) [td_cli](./doc/help_td_cli.md) [td cli rest-api](./doc/help_td_restapi_cli.md) [td_webserver](./doc/help_td_webserver.md) [env vars](./doc/help_env_vars.md) [openthread](https://github.com/openthread/openthread) 
 
