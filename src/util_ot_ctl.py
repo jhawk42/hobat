@@ -10,6 +10,7 @@ TD_OTBR_CONTAINER_USE_DEFAULT = 1
 TD_OTBR_CONTAINER_USE_ENV = "TD_OTBR_CONTAINER_USE"
 
 # Default container name for OTBR Docker image
+TD_OTBR_CONTAINER_NAME_HAOS_ADDON = "addon_core_openthread_border_router"
 TD_OTBR_CONTAINER_NAME_DEFAULT = "otbr"
 TD_OTBR_CONTAINER_NAME_ENV = (
     "TD_OTBR_CONTAINER_NAME"  # Environment variable name for OTBR container name
