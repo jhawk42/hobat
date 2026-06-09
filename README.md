@@ -2,23 +2,23 @@
 
 The tdash dashboard and tools enable visualizing and querying a Thread Network using the following dataset sources: Open Thread Border Router (OTBR) via cli & restapi and related thread mDNS records. It visualizes the thread networks using a Eve app thread layout file. 
 
-Environment: The tdash dashboard and tools runs on a Debian base image inside a Docker container. It can also run fine directly on a Debian based host. The dashboard can be accessed via a web browser from a laptop and phone. See: [tdash backstory](https://github.com/jhawk42/smarthome/blob/main/tdash/tdash_backstory.md) for more details.
+Environment: I run the tdash dashboard and tools on a Debian base image inside a Docker container. I also run tdash directly on a Debian based Linux host. The dashboard can be accessed via a web browser from a laptop and phone. See: [tdash backstory](https://github.com/jhawk42/smarthome/blob/main/tdash/tdash_backstory.md) for more details.
 
 Jump to: [Getting Started](#getting-started) [help docs](./doc/) [td_cli](./doc/help_td_cli.md) [td cli rest-api](./doc/help_td_restapi_cli.md) [td_webserver](./doc/help_td_webserver.md) [env vars](./doc/help_env_vars.md) [openthread](https://github.com/openthread/openthread) 
 
 ## Overview
 
-The tdash tools (td_cli) fetch Thread device info from an Open Thread Border Router (OBTR) for a thread network and store the data into a local cache in the tdash data directory. 
+The tdash tools (td_cli) fetch Thread device data from an Open Thread Border Router (OBTR) for a thread network and store the data into a local cache in the tdash data directory. 
 
-The tdash dashboard reads from the data directory cache to visualize the Thread mesh network in both topology and table views. The tdash dashboard and tools can run diagnostics queries over the thread info for: Node type, Link Quality, MAC (radio) counters and MLE (thread mesh & role time counters). The dashboard can trigger a fresh of data directory. 
+The tdash dashboard reads from the data directory cache to visualize the Thread mesh network in both topology and table views. The tdash dashboard and tools can run diagnostics queries over the thread data for: Node type, Link Quality, MAC (radio) counters and MLE (thread mesh & role time counters). The dashboard can trigger a fresh of data directory. 
 
-This model helps to reduce traffic on the thread network so thread devices can continue to communicate and also reduces load on the battery powered Sleepy End Devices (SED) when running queries over the thread device info.  
+This model helps to reduce traffic on the thread network so thread devices can continue to communicate and also reduces load on the battery powered Sleepy End Devices (SED) when running queries over the Thread device data.  
 
 The tdash dashboard and tools provide:
 
 ### CLI toolkit
 
-CLI toolkit (Python) fetches thread device info from a thread network and then stores into a local cache in the tdash data directory for offline querying and processing. Fetch thread device info from these sources:
+CLI toolkit (Python) fetches Thread device data from a thread network and then stores into a local cache in the tdash data directory for offline querying and processing. Fetch Thread device data from these sources:
 - Open Thread Border Router (OTBR): otbr-cli via OTBR ot-ctl tool. 
 - Open Thread Border Router (OTBR): otbr-restapi via OTBR REST endpoint.
 - Multicast DNS (mDNS) records.
@@ -26,7 +26,7 @@ CLI toolkit (Python) fetches thread device info from a thread network and then s
 
 ### Dashboard
 
-The dashboard runs in a browser web page for visualizing and querying thread mesh network info.
+The dashboard runs in a browser web page for visualizing and querying thread mesh network data.
 
 Search devices by: rloc16, extaddr, device_label, name, routerId and a number of other fields.
 
@@ -49,16 +49,16 @@ Labeling for thread devices uses a simple JSON file mechanism to enable a extadd
 
 ### otbr-cli
 
-The otbr-cli dataset source fetches thread device info from an OpenThread Border Router (OTBR) instance via ot-ctl commands. **Note:** ot-ctl bypasses the OTBR RESTAPI cache. By default use docker exec to call into the "otbr" docker container. Common ot-ctl commands used:
+The otbr-cli dataset source fetches Thread device data from an OpenThread Border Router (OTBR) instance via ot-ctl commands. **Note:** ot-ctl bypasses the OTBR RESTAPI cache. By default use docker exec to call into the "otbr" docker container. Common ot-ctl commands used:
 - router table (quick, seconds, summary)
-- meshdiag topology (quick, seconds, summary). Optionally also calls these sub commands (long, more detailed info) routerneighbortable, childtable, childip6
+- meshdiag topology (quick, seconds, summary). Optionally also calls these sub commands (long, more detailed data) routerneighbortable, childtable, childip6
 - networkdiag (takes time, minutes, detailed). The td_cli networkdiag supports multicast (quick, full thread devices) and fetch-all (all devices including routers, full thread devices, SED/minimal thread devices) 
 
 Note: Also supports calling otbr on the host.
 
 ### otbr-restapi
 
-The otbr-restapi datset source fetches thread device info from the OpenThread Border Router (OTBR) REST API web-server endpoint.
+The otbr-restapi datset source fetches Thread device data from the OpenThread Border Router (OTBR) REST API web-server endpoint.
 - node: 	     get, state get, state set, dataset active get, dataset active set	Read/mutate local OTBR node and active dataset
 - devices:	 list, get, fetch	List, read, or refresh device collection
 - diagnostics: list, get, fetch, fetch-all	Read or fetch network diagnostics
@@ -72,16 +72,16 @@ The otbr-restapi datset source fetches thread device info from the OpenThread Bo
   - Queue Eviction: The OTBR REST server manages action tasks using a fixed-size queue. If the queue fills up, the oldest historical task states (and their associated cached result payloads) are systematically evicted to free up space. [2, 3] 
 
 ### mdns
-The mdns dataset source fetches thread-related mdns scope records: _meshcop, _hap, _matter for thread device info.
+The mdns dataset source fetches thread-related mdns scope records: _meshcop, _hap, _matter for Thread device data.
 - thread:      All thread scopes _meshcop, _hap, _matter      
 - br:          Thread Border Routers in _meshcop scope
 - hap:         Apple HomeKit Accessory Protocol (HAP) devices in _hap scope
 - matter:      Matter over thread devices in _matter scope
 
 ## eve layout
-Eve app layout json file: Enhances and visualizes the eve layout file info.
-- The Eve app (iOS) supports querying a thread network for devices and sharing device info to a JSON layout file.
-- Note: It appears that the Eve app needs at least one powered Eve thread device (smart plug) to collect info as the eve device has diagnostics code in device firmware to collect thread device info.
+Eve app layout json file: Enhances and visualizes the eve layout file data.
+- The Eve app (iOS) supports querying a thread network for devices and sharing device data to a JSON layout file.
+- Note: It appears that the Eve app needs at least one powered Eve thread device (smart plug) to collect data as the eve device has diagnostics code in device firmware to collect Thread device data.
 - Eve app works well with Apple Homekit (HAP) thread networks.
 
 ## Getting Started
@@ -98,7 +98,7 @@ docker pull ghcr.io/jhawk42/tdash:latest
 
 Notes: 
 - The tdash docker container automatically starts the td_webserver.py with the dashboard. Default port is 9165.
-- The otbr-cli datasetsource requires the tdash docker container to have access to the docker socket to enable td_cli otbr-cli to call between docker containers. This enables td_cli in the tdash container to call into the otbr container to execute ot-ctl commands via: docker exec -it otbr /usr/sbin/ot-ctl to fetch thread device info.
+- The otbr-cli datasetsource requires the tdash docker container to have access to the docker socket to enable td_cli otbr-cli to call between docker containers. This enables td_cli in the tdash container to call into the otbr container to execute ot-ctl commands via: docker exec -it otbr /usr/sbin/ot-ctl to fetch Thread device data.
 - See [Environment Variables](./doc/help_env_vars.md) for changing the:
   - td_webserver.py http access to Dashboard : HOST, PORT 
   - otbr-restapi access: OT_REST_LISTEN_ADDR, OT_REST_LISTEN_PORT
@@ -108,7 +108,7 @@ Notes:
 ### Create Data Directrory
 
 tdash uses a data directory for:
-  - Caching thread device info
+  - Caching Thread device data
   - Extended MAC Address to device label via a side json file
   - Loading eve layout file
 
@@ -142,7 +142,7 @@ scp "Eve Thread Network Layout.evethreadlayout" user@hostname:/your/directory/he
 
 To enable device labeling via a lookup json file, add a file named td-static-extaddr-device-label.json with the format below into the data directory. Map this directory into the docker container via docker run. See below for example.
 
-The td_cli commands and dash dasboard will use the file if it exists to lookup extaddr (Extended MAC Address) to device_label mapping. The td_cli commands enhance the collect thread device info with the device_label. The thread dashboard will use the extaddr device_label to lookup extaddr to device label mapping. 
+The td_cli commands and dash dasboard will use the file if it exists to lookup extaddr (Extended MAC Address) to device_label mapping. The td_cli commands enhance the collect Thread device data with the device_label. The thread dashboard will use the extaddr device_label to lookup extaddr to device label mapping. 
 
 ```
 nano $PWD/data/td-static-extaddr-device-label.json
@@ -204,9 +204,9 @@ http://localhost:9165/
 http://<your-host-ip-addr>:9165/
 ```
 
-Note: The tdash webserver will automatically use td_cli.py to refresh the thread network cached info files:
-- When cached info files don't exist.
-- When cached info files are stale beyond a certain threshold. See help for details on environment variables.
+Note: The tdash webserver will automatically use td_cli.py to refresh the thread network cached data files:
+- When cached data files don't exist.
+- When cached data files are stale beyond a certain threshold. See help for details on environment variables.
 
 ### Dashboard Features
 
