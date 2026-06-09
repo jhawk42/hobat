@@ -426,8 +426,8 @@ export const DATASET_REGISTRY = [
   // ── Single-file simple dataset ───
   {
     source: "eve",
-    value: "eve_enhanced_topology",
-    label: "enhanced: td-eve-topology.json",
+    value: "eve_processed_topology",
+    label: "processed: td-eve-topology.json",
     files: ["td-eve-topology.json"],
     mergeStrategy: "none",
     topologyMode: "eve_enhanced",

@@ -6,6 +6,7 @@ import {
 } from "./tdash-utils.js";
 import { normalizeLinkCategories } from "./tdash-filters.js";
 import { EDGE_LQ_STYLES, NODE_COLORS } from "./tdash-constants.js";
+import { EDGE_CATEGORY_LABELS } from "./tdash-constants.js";
 
 // ── Node-id selection ─────────────────────────────────────────────────────────
 
@@ -79,6 +80,72 @@ export function lqStyleFromLinkMargin(linkMargin) {
 
 export function addEdge(edgeMap, edgeData, from, to, style) {
   if (!from || !to || from === to) return;
+
+  function lqiBarSuffix(lqiValue) {
+    const level = toFiniteNumber(lqiValue);
+    if (!Number.isFinite(level) || level <= 0) return "";
+    if (level >= 3) return " ▂▄▆";
+    if (level >= 2) return " ▂▄";
+    return " ▂";
+  }
+
+  function linkMarginBarSuffix(linkMarginValue) {
+    const margin = toFiniteNumber(linkMarginValue);
+    if (!Number.isFinite(margin)) return "";
+    if (margin > 30) return " ▂▄▆█";
+    if (margin >= 20) return " ▂▄▆";
+    if (margin >= 10) return " ▂▄";
+    return " ▂";
+  }
+
+  function buildEdgeTitle(edgeStyle) {
+    const edgeType =
+      Array.isArray(edgeStyle.linkCategories) && edgeStyle.linkCategories.length > 0
+        ? `${edgeStyle.linkCategories.join(", ")}`
+        : null;
+
+    // Convert edgeType to display form if it matches known categories.
+    const edgeTypeReadable = edgeType
+      ? `Type: ${edgeType
+          .split(", ")
+          .map((category) => EDGE_CATEGORY_LABELS[category] ?? category)
+          .join(", ")}`
+      : null;
+
+    const styleLqLevel =
+      edgeStyle.lqLevel !== undefined
+        ? `LQI: ${edgeStyle.lqLevel}${lqiBarSuffix(edgeStyle.lqLevel)}`
+        : "";
+    const lqiIn =
+      Number.isFinite(edgeStyle.lqiIn)
+        ? `LQI in: ${edgeStyle.lqiIn}${lqiBarSuffix(edgeStyle.lqiIn)}`
+        : null;
+    const lqiOut =
+      Number.isFinite(edgeStyle.lqiOut)
+        ? `LQI out: ${edgeStyle.lqiOut}${lqiBarSuffix(edgeStyle.lqiOut)}`
+        : null;
+    const linkMargin =
+      Number.isFinite(edgeStyle.linkMargin)
+        ? `Link margin: ${edgeStyle.linkMargin} dB${linkMarginBarSuffix(edgeStyle.linkMargin)}`
+        : null;
+    const edgeFrom = toText(edgeStyle.edgeFromTitle)
+      ? `from: ${toText(edgeStyle.edgeFromTitle)}`
+      : null;
+    const edgeTo = toText(edgeStyle.edgeToTitle)
+      ? `to: ${toText(edgeStyle.edgeToTitle)}`
+      : null;
+    const titleParts = [
+      edgeTypeReadable,
+      styleLqLevel,
+      lqiIn,
+      lqiOut,
+      linkMargin,
+      edgeFrom,
+      edgeTo,
+    ].filter(Boolean);
+    return titleParts.join("\n");
+  }
+
   const suffix = toText(style.edgeKeySuffix);
   const keyBase = [from, to].sort().join("|");
   const key = suffix ? `${keyBase}|${suffix}` : keyBase;
@@ -92,6 +159,16 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
     ]);
     existing.linkCategories = Array.from(merged);
     if (style.isParentChild === true) existing.isParentChild = true;
+    if (Number.isFinite(style.lqiIn)) existing.lqiIn = style.lqiIn;
+    if (Number.isFinite(style.lqiOut)) existing.lqiOut = style.lqiOut;
+    if (toText(style.edgeFromTitle)) existing.edgeFromTitle = toText(style.edgeFromTitle);
+    if (toText(style.edgeToTitle)) existing.edgeToTitle = toText(style.edgeToTitle);
+    if (
+      Number.isFinite(style.linkMargin) &&
+      !Number.isFinite(existing.linkMargin)
+    ) {
+      existing.linkMargin = style.linkMargin;
+    }
     if (
       style.lqLevel !== undefined &&
       (existing.lqLevel === undefined || style.lqLevel > existing.lqLevel)
@@ -100,10 +177,18 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
       existing.color = style.color;
       existing.dashes = style.dashes;
     }
+    existing.title = buildEdgeTitle(existing);
     return;
   }
+
+  // Build title to include edgeType and LQI level if present
+  // Include lqi in and out if present, as well as link margin if present
+  // Include lqLevel even if it's 0, to distinguish from undefined
+  // Include edge type if present in style.linkCategories
+  const title = buildEdgeTitle(style);
+
   const { edgeKeySuffix: _s, ...edgeStyle } = style;
-  const edge = { from, to, ...edgeStyle };
+  const edge = { from, to, title, ...edgeStyle };
   edge.id = key;
   edge.baseHidden = style.hidden === true;
   edge.linkCategories = normalizeLinkCategories(style.linkCategories);

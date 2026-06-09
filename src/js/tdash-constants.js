@@ -135,6 +135,21 @@ export const EDGE_CATEGORY_EVE_CHILD = "eve_child";
 export const EDGE_CATEGORY_EVE_NATIVE_ROUTE = "eve_native_route";
 export const EDGE_CATEGORY_EVE_NATIVE_CHILD = "eve_native_child";
 
+// Map Edge categories to common readable labels (used in filter option tooltips and legends)
+export const EDGE_CATEGORY_LABELS = Object.freeze({
+  default_children: "Parent-child",
+  default_1_links: "Route",
+  default_2_links: "Route",
+  default_3_links: "Route",
+  router_neighbor: "Router-Neighbor",
+  otbr_route: "Route",
+  otbr_child: "Parent-child",
+  eve_route: "Route",
+  eve_child: "Parent-child",
+  eve_native_route: "Route",
+  eve_native_child: "Parent-child",
+});
+
 // ── Color palette — unified design system ────────────────────────────────────
 //
 // Single source of truth for all theme colors. Keeps CSS tokens, JS constants,
@@ -808,10 +823,8 @@ export const TABLE_PRIORITY_COLUMNS = [
   // === TIER 1: Primary Identity ===
   "rloc16",
   "extaddr",
-  "extAddress",
   "device_label",
   "name",
-  "routerId",
   "router_id",
   "eui64",
   "id",
@@ -819,7 +832,6 @@ export const TABLE_PRIORITY_COLUMNS = [
   
   // === TIER 2: Secondary Identity ===
   "omr_ipv6_addr",
-  "omrIpv6Address",
   "mlEidIid",
   "room",
   "Extended MAC",
@@ -833,10 +845,10 @@ export const TABLE_PRIORITY_COLUMNS = [
   "type",
   "Role",
   "br",
-  "isBorderRouter",
+  "is_router",
+  "is_border_router",
   "leader",
   "isLeader",
-  "is_router",
   "isPrimaryBBR",
   "status",
   "mode.device",
@@ -845,7 +857,6 @@ export const TABLE_PRIORITY_COLUMNS = [
   "version",
   "thread_version",
   "thread_stack_version",
-  "threadStackVersion",
   "room",
   "icon",
   
@@ -875,11 +886,8 @@ export const TABLE_PRIORITY_COLUMNS = [
   "icon",
   "scope",
   "vendor_name",
-  "vendorName",
   "vendor_model",
-  "vendorModel",
   "vendor_sw_version",
-  "vendorSwVersion",
   "tlv_values",
   "mac_counters.ifinerrors_pct",
   "mac_counters.ifouterrors_pct",
