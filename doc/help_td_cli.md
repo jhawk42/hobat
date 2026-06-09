@@ -98,6 +98,7 @@ These options must be placed after `otbr-restapi` and before its subcommand.
 | `--poll-timeout FLOAT` | Max seconds to wait for action completion |
 | `--no-progress` | Suppress per-device progress output |
 | `--no-auto-output` | Disable automatic output file naming |
+| `--lab` | Allow experimental `otbr-restapi` mutating commands (`node state set`, `node dataset active set`, `actions enqueue add-thread-device`, `actions enqueue reset-network-diag-counter`) |
 
 ### Commands and Subcommands
 
@@ -182,6 +183,17 @@ positional arguments:
                         Scan networkdiag topology via multicast to one-hop neighbors (ff02::1)
 ```
 
+### `otbr-cli networkdiag fetch-all`
+
+```
+usage: td_cli otbr-cli networkdiag fetch-all [-h] [-c | -cno]
+
+options:
+  -h, --help           show this help message and exit
+  -c, --children       Expand and include child nodes in the topology map (default)
+  -cno, --children-no  Do not expand child nodes in the topology map
+```
+
 ### `mdns`
 
 ```
@@ -211,7 +223,7 @@ options:
 usage: td_cli otbr-restapi [-h] [--host HOST] [--port PORT] [--base-url URL]
                            [--timeout SECS] [--accept MIME] [--raw]
                            [--poll-interval FLOAT] [--poll-timeout FLOAT]
-                           [--no-progress] [--no-auto-output]
+                           [--no-progress] [--no-auto-output] [--lab]
                            {download,node,devices,diagnostics,actions,mesh-diagnostics,topology}
                            ...
 
@@ -242,6 +254,10 @@ options:
                         (forwarded)
   --no-progress         Suppress per-device progress output (forwarded)
   --no-auto-output      Disable automatic output file naming (forwarded)
+  --lab                 Allow experimental otbr-restapi mutating commands
+                        (node state set, node dataset active set, actions
+                        enqueue add-thread-device, actions enqueue reset-
+                        network-diag-counter)
 ```
 
 ### `otbr-restapi node`

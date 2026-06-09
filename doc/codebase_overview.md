@@ -25,7 +25,9 @@ tdash/
 │   ├── codebase_overview.md    # This file
 │   ├── help_td_cli.md          # td_cli --help snapshot
 │   ├── help_td_webserver.md    # td_webserver --help snapshot
-│   └── merge_strategy.md       # Merge strategy reference
+│   ├── help_td_restapi_cli.md  # otbr-restapi command reference
+│   ├── help_env_vars.md        # Environment variable reference
+│   └── codebase_webpage_web_server_data_flow.md # Web UI + server flow design
 ├── src/                        # All source code
 │   ├── td_cli.py               # Unified CLI dispatcher (top-level entry point)
 │   ├── td_webserver.py         # HTTP web server module
@@ -42,6 +44,7 @@ tdash/
 │   │   ├── tdash-topology-renderer.js # vis-network topology renderer
 │   │   ├── tdash-topology-utils.js # Node/edge helper utilities
 │   │   ├── tdash-ui.js             # UI event wiring and render dispatch
+│   │   ├── tdash-search.js         # Search query parsing and row filtering
 │   │   └── tdash-utils.js          # Canonical identity and type helpers
 │   ├── otbr_restapi_*.py       # OTBR REST API collectors and CLI handlers
 │   ├── otbr_cli_*.py           # ot-ctl CLI collectors and parsers
@@ -97,7 +100,7 @@ The Python codebase has six distinct layers, each with a single responsibility. 
                                    │ HTTP (fetch API)
 ┌──────────────────────────────────▼──────────────────────────────────────┐
 │  Layer 5 — HTTP Server  (td_webserver.py)                               │
-│  aiohttp + aiohttp_cors; routes: /, /api/data/{f}, /api/job/{id}, /**   │
+│  aiohttp + aiohttp_cors; routes: /, /api/data/{f}, /api/job/{id}, DELETE /api/job/{id}, /** │
 │  • FILE_ACTION_MAP: filename → FileAction (max_age_s, action, cost)     │
 │  • Cache gating: freshness check → serve 200/304 or regenerate          │
 │  • Short-cost (≤300 s): sync subprocess → 200                           │
@@ -412,7 +415,7 @@ Static assets (`tdash.html`, `js/*.js`, `tdash.css`) receive `Cache-Control: no-
 
 ### CORS
 
-CORS is configured via `aiohttp_cors` (an explicit third-party dependency).  The `/api/data/{filename}` and `/api/job/{job_id}` routes are wrapped to allow all origins (`*`) with any request headers and exposed response headers.  Static routes are same-origin by design and not CORS-wrapped.
+CORS is configured via `aiohttp_cors` (an explicit third-party dependency).  The `/api/data/{filename}`, `/api/job/{job_id}` (GET), and `/api/job/{job_id}` (DELETE) routes are wrapped to allow all origins (`*`) with any request headers and exposed response headers.  Static routes are same-origin by design and not CORS-wrapped.
 
 ### Job Registry TTL Cleanup
 
@@ -669,10 +672,7 @@ python3 -m td_cli otbr-restapi download
 # Collect thread network info (provides OMR / mesh-local prefixes used by other collectors)
 python3 -m td_cli otbr-cli thread-network-info
 
-# Collect all CLI topology data in one shot
-python3 -m td_cli otbr-cli all
-
-# Or collect individual CLI sources
+# Collect CLI topology data via individual commands
 python3 -m td_cli otbr-cli router-table
 python3 -m td_cli otbr-cli meshdiag topology
 python3 -m td_cli otbr-cli meshdiag childtable
@@ -690,7 +690,8 @@ python3 -m td_cli process-eve
 python3 -m td_cli merge-dataset
 
 # Use a custom data directory (overrides TD_DATA_DIR env var)
-python3 -m td_cli --datadir /path/to/data otbr-cli all
+python3 -m td_cli --datadir /path/to/data otbr-cli router-table
+python3 -m td_cli --datadir /path/to/data otbr-cli networkdiag fetch-all
 python3 -m td_cli --datadir /path/to/data merge-dataset
 ```
 

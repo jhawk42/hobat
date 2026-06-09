@@ -270,7 +270,7 @@ devices fetch [--device-count N] [--task-timeout SECS] [--max-age SECS] [--max-r
 | Option | Default | Description |
 |---|---|---|
 | `--device-count` | `255` | Max devices to discover |
-| `--task-timeout` | `6` | Server-side task timeout in seconds |
+| `--task-timeout` | `8` | Server-side task timeout in seconds |
 | `--max-age` | `60` | Max age of cached device entries in seconds |
 | `--max-retries` | `2` | Max retries per device |
 
@@ -354,7 +354,7 @@ diagnostics fetch --device-id DEVICE_ID
 | `--device-id` | required | Device extAddress (16-char hex) |
 | `--types` | recommended set | Space-separated diagnostic TLV names |
 | `--preset` | — | `recommended`, `full`, `minimal`, or `basic`; overrides `--types` |
-| `--task-timeout` | `6` | Server-side task timeout in seconds |
+| `--task-timeout` | `8` | Server-side task timeout in seconds |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 | `--no-fallback` | off | Disable TLV fallback retry; skip the device immediately on failure |
 | `--fallback-preset` | `minimal` | TLV preset to retry with when the primary request fails: `medium`, `minimal`, or `basic` |
@@ -400,7 +400,7 @@ diagnostics fetch-all [--device-ids ID ...]
 | `--device-ids` | all devices | Space-separated extAddress IDs to query |
 | `--types` | recommended set | Diagnostic TLV names |
 | `--preset` | — | `recommended`, `full`, `minimal`, or `basic`; overrides `--types` |
-| `--task-timeout` | `6` | Server-side task timeout per device in seconds |
+| `--task-timeout` | `8` | Server-side task timeout per device in seconds |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 | `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list |
 | `--no-fallback` | off | Disable per-device TLV fallback retry on failure |
