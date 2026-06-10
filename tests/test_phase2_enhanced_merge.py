@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Phase 2 Enhanced Merge Tests
+Phase 2 Enriched Merge Tests
 
 Tests for the new Phase 2 functionality:
 - Field name normalization (camelCase ↔ snake_case)
@@ -507,7 +507,7 @@ def test_integration_cli_and_rest_api():
 def run_all_tests():
     """Run all Phase 2 tests."""
     print("=" * 70)
-    print("Phase 2 Enhanced Merge Tests")
+    print("Phase 2 Enriched Merge Tests")
     print("=" * 70)
     
     test_field_normalization()

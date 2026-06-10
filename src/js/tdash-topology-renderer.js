@@ -24,6 +24,8 @@ import {
   routerNeighborRowMatchesDiagnosticFilter,
   isChildLinkQualityDiagnosticMode,
   childMatchesLinkQualityFilter,
+  isRouterChildDiagnosticMode,
+  routerChildRowMatchesDiagnosticFilter,
   normalizeLinkCategories,
 } from "./tdash-filters.js";
 import { rowMatchesSearch, parseSearchQuery } from "./tdash-search.js";
@@ -253,6 +255,43 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
           )
           .forEach((child) => {
             const childId = toText(child.rloc16) || toText(child.id);
+            if (!childId) return;
+            matchedTargetNodeIds.add(childId);
+            visibleNodeIds.add(childId);
+            edgesDataset.forEach((edge) => {
+              const cats = normalizeLinkCategories(edge.linkCategories);
+              if (
+                !cats.includes(EDGE_CATEGORY_DEFAULT_CHILDREN) &&
+                !cats.includes(EDGE_CATEGORY_OTBR_CHILD)
+              )
+                return;
+              if (
+                (areNodeIdsEquivalent(edge.from, parentNodeId) &&
+                  areNodeIdsEquivalent(edge.to, childId)) ||
+                (areNodeIdsEquivalent(edge.to, parentNodeId) &&
+                  areNodeIdsEquivalent(edge.from, childId))
+              ) {
+                forcedVisibleEdgeIds.add(edge.id);
+              }
+            });
+          });
+      });
+    }
+
+    // For router-child diagnostic modes: expose matched child nodes + force their edges visible
+    if (isRouterChildDiagnosticMode(diagnosticFilterMode)) {
+      Array.from(visibleNodeIds).forEach((parentNodeId) => {
+        const parentRaw = rawByIdForDetails.get(parentNodeId);
+        if (!parentRaw) return;
+        const childTableRows = Array.isArray(parentRaw.router_child_table)
+          ? parentRaw.router_child_table
+          : [];
+        childTableRows
+          .filter((child) =>
+            routerChildRowMatchesDiagnosticFilter(child, diagnosticFilterMode),
+          )
+          .forEach((child) => {
+            const childId = toText(child.rloc16) || toText(child.extaddr);
             if (!childId) return;
             matchedTargetNodeIds.add(childId);
             visibleNodeIds.add(childId);

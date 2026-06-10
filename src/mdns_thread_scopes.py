@@ -163,7 +163,7 @@ class MDNSDumpListener(ServiceListener):
         if info and hasattr(info, "parsed_addresses"):
             try:
                 parsed_addresses = info.parsed_addresses()
-                # Enhance node with OMR IPv6 address  using OMR prefix
+                # Enrich node with OMR IPv6 address  using OMR prefix
                 if self._omr_ipv6addr_prefix:
                     omr_ipv6_addr = util_network.find_omr_address_in_list(
                         parsed_addresses, self._omr_ipv6addr_prefix

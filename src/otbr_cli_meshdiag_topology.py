@@ -79,7 +79,7 @@ def parse_meshdiag_topology_output(
             # Check for leader flag
             router["leader"] = "- leader" in first_line or "leader -" in first_line
 
-            # Enhance with device label from extaddr_map if available
+            # Enrich with device label from extaddr_map if available
             # Add device_label from extaddr_map if available
             extaddr_lower = router["extaddr"].lower()
             if extaddr_lower in extaddr_map:
@@ -175,13 +175,13 @@ def enrich_topology_routers(
     topology_data, thread_network_info=None
 ):
     """
-    Enhances thread topology IP6 addresses and children data with additional processing.
+    Enriches thread topology IP6 addresses and children data with additional processing.
 
     Args:
         topology_data: List of router dictionaries from get_thread_topology_ip6addrs_children_data()
 
     Returns:
-        Enhanced topology data with additional fields/calculations
+        Enriched topology data with additional fields/calculations
     """
 
     omr_ipv6addr_prefix = (
@@ -265,7 +265,7 @@ def get_meshdiag_topology(
         extaddr_map: Optional dictionary mapping extended MAC to node name.
         thread_network_info: Optional dictionary containing thread network information.
     Returns:
-        Enhanced topology data with decoded link IDs and additional fields
+        Enriched topology data with decoded link IDs and additional fields
     """
 
     topology_data_enhanced = []

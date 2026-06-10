@@ -154,7 +154,7 @@ export function setOnlyCache(enabled) {
   _onlyCache = enabled;
 }
 
-// ── Enrichment helpers (used by Enhance toggle) ───────────────────────────────
+// ── Enrichment helpers (used by Enrich toggle) ───────────────────────────────
 
 // Returns an enriched copy of a single node/row; original is not mutated.
 // Eligible when: no device_label AND no name AND extaddr is present in map.

@@ -72,7 +72,6 @@ function buildEdgeEndpointTitlePart(nodeLike, fallbackId = '') {
     || toText(nodeLike?.extaddr)
     || toText(nodeLike?.extAddress)
     || '';
-//  return `rloc16: ${rloc16} device_label: ${deviceLabel}`;
   return `${rloc16} ${deviceLabel}`;
 }
 
@@ -279,12 +278,17 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
       const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
       const linkMargin = findRouterChildLinkMargin(node.rloc16, child.rloc16);
+      const childLq = toFiniteNumber(child.lq) || toFiniteNumber(child.link_quality);
+      const lqStyle = Number.isFinite(childLq)
+        ? lqStyleFromAvgLqi(childLq, 3)
+        : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
       upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
         { source: 'meshdiag', shape: 'ellipse', color: NODE_COLORS.child });
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
         isParentChild: true,
+        ...lqStyle,
         linkMargin,
         ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
         linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN]
@@ -362,11 +366,14 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
         },
         { source: 'networkdiagnostic', shape: 'ellipse', color: NODE_COLORS.child }
       );
+      const linkMargin = toFiniteNumber(child.linkMargin);
+      const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
         isParentChild: true,
-        linkMargin: toFiniteNumber(child.linkMargin),
+        ...lqStyle,
+        linkMargin,
         ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
         linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
       });
@@ -379,12 +386,17 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
       const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
       const linkMargin = findRouterChildLinkMargin(node.rloc16, child.rloc16);
+      const childLq = toFiniteNumber(child.lq) || toFiniteNumber(child.link_quality);
+      const lqStyle = Number.isFinite(childLq)
+        ? lqStyleFromAvgLqi(childLq, 3)
+        : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
       upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
         { source: 'networkdiagnostic', shape: 'ellipse', color: NODE_COLORS.child });
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
         isParentChild: true,
+        ...lqStyle,
         linkMargin,
         ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
         linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN]
@@ -438,6 +450,10 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
       const childRloc16 = buildChildRloc16(node.rloc16, child.childId);
       const linkMargin = findRouterChildLinkMargin(node.rloc16, childRloc16);
+      const childLq = toFiniteNumber(child.linkQuality);
+      const lqStyle = Number.isFinite(childLq)
+        ? lqStyleFromAvgLqi(childLq, 3)
+        : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
       const childId = ensureNode(
         childRloc16 || `${fromId}-rest-child-${ci + 1}`,
         {
@@ -450,6 +466,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
         isParentChild: true,
+        ...lqStyle,
         linkMargin,
         ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
         linkCategories: [EDGE_CATEGORY_OTBR_CHILD]
@@ -610,15 +627,19 @@ export function adaptEve(fileMap) {
       });
     });
     (Array.isArray(node.children) ? node.children : []).forEach((child) => {
+      const childObj = typeof child === 'string' ? {} : (child || {});
       const childId = toText(typeof child === 'string' ? child : child.id);
       if (!childId) return;
       if (!nodeMap.has(childId)) {
         upsertEveNode(childId, { id: childId }, { source: 'eve', shape: 'ellipse', color: NODE_COLORS.child });
       }
+      const childLq = toFiniteNumber(childObj.lq) || toFiniteNumber(childObj.link_quality);
+      const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 255) : {};
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
         isParentChild: true,
+        ...lqStyle,
         ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
         linkCategories: [EDGE_CATEGORY_EVE_CHILD]
       });
@@ -734,15 +755,19 @@ export function adaptEveNative(fileMap) {
     });
 
     (Array.isArray(node.children) ? node.children : []).forEach((child) => {
+      const childObj = typeof child === 'string' ? {} : (child || {});
       const childId = toText(typeof child === 'string' ? child : child.id);
       if (!childId) return;
       if (!nodeMap.has(childId)) {
         upsertEveNativeNode(childId, { id: childId }, { source: 'eve_native', shape: 'ellipse', color: NODE_COLORS.child });
       }
+      const childLq = toFiniteNumber(childObj.lq);
+      const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {};
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
         isParentChild: true,
+        ...lqStyle,
         ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
         linkCategories: [EDGE_CATEGORY_EVE_NATIVE_CHILD]
       });
@@ -975,6 +1000,7 @@ export function adaptMergedDetailed(fileMap) {
     (Array.isArray(node.router_child_table) ? node.router_child_table : []).forEach((child, ci) => {
       const childId = toText(child.rloc16) || `${fromId}-rct-child-${ci + 1}`;
       const linkMargin = toFiniteNumber(child.rss_margin);
+      const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
       const childType = toText(child.type).toLowerCase();
       const isChildLikeNode = childType === 'mtd' || child.rx_on === false;
       const isRouterLikeNode = childType === 'ftd' && childId.toLowerCase().endsWith('00');
@@ -993,6 +1019,7 @@ export function adaptMergedDetailed(fileMap) {
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false, isParentChild: true,
+        ...lqStyle,
         linkMargin,
         ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
         linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN],
@@ -1290,6 +1317,8 @@ export function adaptOtbrRestApi(fileMap) {
 
     (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
       const childRloc16 = buildChildRloc16(toText(fromNode.rloc16), child.childId);
+      const childLq = toFiniteNumber(child.linkQuality);
+      const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {};
       const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
         || childRloc16
         || `${fromId}-child-${ci + 1}`;
@@ -1301,6 +1330,7 @@ export function adaptOtbrRestApi(fileMap) {
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
         isParentChild: true,
+        ...lqStyle,
         ...buildEdgeEndpointTitles(
           fromNode,
           childNodeEnriched,
@@ -1329,11 +1359,14 @@ export function adaptOtbrRestApi(fileMap) {
         }, { shape: 'ellipse', color: NODE_COLORS.child });
       }
       if (childRloc16) rloc16ToNodeId.set(childRloc16.toLowerCase(), childId);
+      const linkMargin = toFiniteNumber(child.linkMargin);
+      const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
         isParentChild: true,
-        linkMargin: toFiniteNumber(child.linkMargin),
+        ...lqStyle,
+        linkMargin,
         ...buildEdgeEndpointTitles(
           fromNode,
           childNodeEnriched,

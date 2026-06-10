@@ -83,10 +83,11 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
 
   function lqiBarSuffix(lqiValue) {
     const level = toFiniteNumber(lqiValue);
-    if (!Number.isFinite(level) || level <= 0) return "";
+    if (!Number.isFinite(level)) return "";
     if (level >= 3) return " ▂▄▆";
     if (level >= 2) return " ▂▄";
-    return " ▂";
+    if (level >= 1) return "  ▂";
+    return "  _";
   }
 
   function linkMarginBarSuffix(linkMarginValue) {

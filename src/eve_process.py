@@ -53,7 +53,7 @@ def load_and_parse_eve_file(path, thread_network_info=None):
         ipv6_addrs = node.get("ip_addresses", [])
         node["ipv6_addrs"] = ipv6_addrs
 
-        # Enhance node with OMR IPv6 address  using OMR prefix
+        # Enrich node with OMR IPv6 address  using OMR prefix
         if omr_ipv6addr_prefix:
             node["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
                 ipv6_addrs, omr_ipv6addr_prefix
@@ -63,7 +63,7 @@ def load_and_parse_eve_file(path, thread_network_info=None):
         if "ip_addresses" in node:
             del node["ip_addresses"]
 
-        # Enhance node with hex rloc16 and short rloc for easier mapping
+        # Enrich node with hex rloc16 and short rloc for easier mapping
         if rloc16_decimal is not None:
             rloc16_hex = f"0x{rloc16_decimal:04x}"
             node["rloc16"] = (
@@ -144,7 +144,7 @@ def enhance_eve_routes(eve_data):
         node_copy = copy.deepcopy(original_node)
         rloc16_hex = node_copy.get("rloc16_hex", original_key)
 
-        # Enhance route entries with "to_name" by resolving route["to"] to node names using the original data maps
+        # Enrich route entries with "to_name" by resolving route["to"] to node names using the original data maps
         routes = node_copy.get("routes")
         if isinstance(routes, list):
             for route in routes:
@@ -200,7 +200,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         eve_json_file_path, thread_network_info
     )
 
-    # Enhance the eve_data json data structure to add route destination node names for reference
+    # Enrich the eve_data json data structure to add route destination node names for reference
     eve_data_enhanced = enhance_eve_routes(eve_data_raw)
 
     # Save json data structures for reference

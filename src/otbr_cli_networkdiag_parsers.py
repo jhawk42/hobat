@@ -248,7 +248,7 @@ def parse_mac_counters(output):
                 except ValueError:
                     pass
 
-    # Enhance MAC counters with totals
+    # Enrich MAC counters with totals
     if counters:
         # Calculate total packets by summing unicast and broadcast packets for both in and out directions.
         # This provides a more comprehensive view of the overall traffic volume at the MAC layer, which can
@@ -463,7 +463,7 @@ def parse_mle_counters(output):
                 except ValueError:
                     pass
 
-    # Enhance MLE counters with totals
+    # Enrich MLE counters with totals
     if counters:
         counters["totalparentpartitionchanges"] = (
             counters.get("parentchanges", 0)
