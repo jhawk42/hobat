@@ -80,7 +80,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast_mdns",
-    label: "Device & Mesh topology [md,ndmc,mdn,mdc,mdns] ⏰",
+    label: "Device & Mesh topology [md,ndmc,mdn,mdc,mdns] ⏱️",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json",
@@ -99,7 +99,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "networkdiag_only",
-    label: "Device (all) detailed topology [network fetch all (ndfa)]⏰",
+    label: "Device (all) detailed topology [network fetch all (ndfa)]⏱️",
     files: ["td-otbr-cli-networkdiag-fetch-all.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
@@ -112,7 +112,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_fetch_all_mdns",
-    label: "Device (all) detailed topology [md, ndfa, mdns] ⏰",
+    label: "Device (all) detailed topology [md, ndfa, mdns] ⏱️",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-fetch-all.json",
@@ -128,7 +128,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_poll_all_mdns",
-    label: "Device (all) detailed topology [md, ndfa, mdn, mdc, mdns] ⏰",
+    label: "Device (all) detailed topology [md, ndfa, mdn, mdc, mdns] ⏱️",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-fetch-all.json",
@@ -146,7 +146,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "router_neighbortables",
-    label: "Meshdiag neighbors (mdn)⏰",
+    label: "Meshdiag neighbors (mdn)⏱️",
     files: ["td-otbr-cli-meshdiag-router-neighbortables.json"],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
@@ -157,7 +157,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "router_childtables",
-    label: "Meshdiag children (mdc)⏰",
+    label: "Meshdiag children (mdc)⏱️",
     files: ["td-otbr-cli-meshdiag-router-childtables.json"],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
@@ -239,7 +239,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_fetch_diagnostics_fetch_all",
-    label: "Devices & Diag Topology fetch: [devf,diagfa]⏰",
+    label: "Devices & Diag Topology fetch: [devf,diagfa]⏱️",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
       "td-otbr-restapi-diagnostics-fetch-all.json"
@@ -255,7 +255,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_fetch_diagnostics_fetch_mesh-diagnostics-fetch_all",
-    label: "Devices, Diag & Mesh Topology: [devf,diagfa,mdfa]⏰",
+    label: "Devices, Diag & Mesh Topology: [devf,diagfa,mdfa]⏱️",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
       "td-otbr-restapi-diagnostics-fetch-all.json",
@@ -272,7 +272,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_diagnostics_fetch_all",
-    label: "Diag Topology: diagnostics fetch all [diagfa]⏰",
+    label: "Diag Topology: diagnostics fetch all [diagfa]⏱️",
     files: ["td-otbr-restapi-diagnostics-fetch-all.json"],
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
@@ -285,7 +285,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_mesh_diagnostics_fetch_all",
-    label: "Mesh Topology: mesh diagnostics fetch all (mdfa)⏰",
+    label: "Mesh Topology: mesh diagnostics fetch all (mdfa)⏱️",
     files: ["td-otbr-restapi-mesh-diagnostics-fetch-all.json"],
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
@@ -455,7 +455,7 @@ export const DATASET_REGISTRY = [
   {
     source: "merged",
     value: "merged_otbr_cli_otbr_restapi",
-    label: "dynamic merge:otbr-cli, otbr-restapi, mdns ⏰",
+    label: "dynamic merge:otbr-cli, otbr-restapi, mdns ⏱️",
     files: [
       "td-static-extaddr-device-label.json",
       "td-otbr-cli-meshdiag-topology.json",

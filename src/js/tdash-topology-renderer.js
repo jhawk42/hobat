@@ -1,6 +1,8 @@
 import {
   VIS_OPTIONS,
   EDGE_CATEGORY_ROUTER_NEIGHBOR,
+  EDGE_CATEGORY_DEFAULT_CHILDREN,
+  EDGE_CATEGORY_OTBR_CHILD,
 } from "./tdash-constants.js";
 import {
   toText,
@@ -20,6 +22,8 @@ import {
   edgeMatchesLinkFilter,
   isRouterNeighborDiagnosticMode,
   routerNeighborRowMatchesDiagnosticFilter,
+  isChildLinkQualityDiagnosticMode,
+  childMatchesLinkQualityFilter,
   normalizeLinkCategories,
 } from "./tdash-filters.js";
 import { rowMatchesSearch, parseSearchQuery } from "./tdash-search.js";
@@ -138,15 +142,19 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
 
   const nodesDataset = new vis.DataSet(nodeData);
   const edgesDataset = new vis.DataSet(edgeData);
+
+  function cloneNodeStyle(style) {
+    return {
+      color: style?.color ? { ...style.color } : style?.color,
+      borderWidth: style?.borderWidth,
+      font: style?.font ? { ...style.font } : style?.font,
+    };
+  }
   
   // Store original styling for each node so we can restore it when search is cleared
   _originalNodeStyling = new Map();
   nodeData.forEach((node) => {
-    _originalNodeStyling.set(node.id, {
-      color: node.color,
-      borderWidth: node.borderWidth,
-      font: node.font,
-    });
+    _originalNodeStyling.set(node.id, cloneNodeStyle(node));
   });
   
   const effectiveOptions = physicsEnabled
@@ -231,6 +239,43 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
       });
     }
 
+    // For child link quality diagnostic modes: expose matched child nodes + force their edges visible
+    if (isChildLinkQualityDiagnosticMode(diagnosticFilterMode)) {
+      Array.from(visibleNodeIds).forEach((parentNodeId) => {
+        const parentRaw = rawByIdForDetails.get(parentNodeId);
+        if (!parentRaw) return;
+        const childrenArray = Array.isArray(parentRaw.children)
+          ? parentRaw.children
+          : [];
+        childrenArray
+          .filter((child) =>
+            childMatchesLinkQualityFilter(child, diagnosticFilterMode),
+          )
+          .forEach((child) => {
+            const childId = toText(child.rloc16) || toText(child.id);
+            if (!childId) return;
+            matchedTargetNodeIds.add(childId);
+            visibleNodeIds.add(childId);
+            edgesDataset.forEach((edge) => {
+              const cats = normalizeLinkCategories(edge.linkCategories);
+              if (
+                !cats.includes(EDGE_CATEGORY_DEFAULT_CHILDREN) &&
+                !cats.includes(EDGE_CATEGORY_OTBR_CHILD)
+              )
+                return;
+              if (
+                (areNodeIdsEquivalent(edge.from, parentNodeId) &&
+                  areNodeIdsEquivalent(edge.to, childId)) ||
+                (areNodeIdsEquivalent(edge.to, parentNodeId) &&
+                  areNodeIdsEquivalent(edge.from, childId))
+              ) {
+                forcedVisibleEdgeIds.add(edge.id);
+              }
+            });
+          });
+      });
+    }
+
     nodesDataset.forEach((node) => {
       nodesDataset.update({
         id: node.id,
@@ -258,6 +303,17 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     };
   }
 
+  // Shared canonical restore path for node visual styles.
+  function restoreOriginalNodeStyling() {
+    if (!_originalNodeStyling) return;
+    nodesDataset.update(
+      Array.from(_originalNodeStyling.entries()).map(([nodeId, originalStyle]) => ({
+        id: nodeId,
+        ...cloneNodeStyle(originalStyle),
+      })),
+    );
+  }
+
   // ── Search highlight ─────────────────────────────────────────────────────
 
   function applySearchHighlight(searchQuery, advancedMode) {
@@ -265,14 +321,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
 
     if (!searchQuery) {
       // Restore all nodes to their original appearance using stored original styling
-      nodesDataset.update(
-        Array.from(_originalNodeStyling.entries()).map(([nodeId, originalStyle]) => ({
-          id: nodeId,
-          color: originalStyle.color,
-          borderWidth: originalStyle.borderWidth,
-          font: originalStyle.font,
-        })),
-      );
+      restoreOriginalNodeStyling();
       // Clear search from status line
       updateStatus(lastStatusCounts);
       return;
@@ -298,7 +347,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
             id: nodeId,
             color: { background: originalStyle.color.background, border: "#d97706" },
             borderWidth: Math.max(originalStyle.borderWidth ?? 2, 4),
-            font: originalStyle.font,
+            font: originalStyle.font ? { ...originalStyle.font } : originalStyle.font,
           };
         }
         return {
@@ -456,6 +505,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
   _topologyFilterHandlers = {
     applyFilters,
     applySearchHighlight,
+    restoreOriginalNodeStyling,
     updateStatus,
     fitIfEnabled: () => {
       if (_autoZoomEnabled && _visNetwork) {
@@ -477,14 +527,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
   updateStatus(initial);
   
   // Apply visual styling after filters to ensure correct colors are displayed
-  nodesDataset.update(
-    Array.from(_originalNodeStyling.entries()).map(([nodeId, originalStyle]) => ({
-      id: nodeId,
-      color: originalStyle.color,
-      borderWidth: originalStyle.borderWidth,
-      font: originalStyle.font,
-    })),
-  );
+  restoreOriginalNodeStyling();
   
   _topologyFilterHandlers.fitIfEnabled();
 }

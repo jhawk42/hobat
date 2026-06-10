@@ -178,7 +178,7 @@ MERGE_IDENTITY_FIELDS = {
 # Phase 3: Source Precedence Rules (Priority: Higher = Wins)
 # Used to resolve conflicts when multiple sources provide same field
 SOURCE_PRECEDENCE = {
-    "td-static-extaddr-device-label.json": 101, # Highest priority
+    ##"td-static-extaddr-device-label.json": 101, # Highest priority
 
     "td-otbr-cli-networkdiag-fetch-all.json": 100, # Highest priority (most detailed)
     "td-otbr-cli-networkdiag-multicast-network.json": 99,
@@ -197,14 +197,14 @@ SOURCE_PRECEDENCE = {
 
     "td-eve-topology.json": 60,
 
-    "td-mdns-scopes-thread.json": 50,
+    ##"td-mdns-scopes-thread.json": 50,
     "td-mdns-scopes-br.json": 49,                # mDNS scopes (service discovery)
     "td-mdns-scopes-hap.json": 48,
-    "td-mdns-scopes-matter.json": 47
+    ##"td-mdns-scopes-matter.json": 47
 }
 
 DEFAULT_INPUT_FILES = [
-    "td-static-extaddr-device-label.json",
+    ##"td-static-extaddr-device-label.json",
     "td-otbr-cli-router-table.json",
     "td-otbr-cli-meshdiag-topology.json",
     "td-otbr-cli-networkdiag-fetch-all.json",
@@ -213,15 +213,15 @@ DEFAULT_INPUT_FILES = [
     "td-otbr-cli-meshdiag-router-childtables.json",
     "td-otbr-restapi-diagnostics-fetch-all.json",
     "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
-    "td-otbr-restapi-diagnostics-list.json",
-    "td-otbr-restapi-diagnostics.json",
-    "td-otbr-restapi-devices-fetch.json",
-    "td-otbr-restapi-devices-list.json",
-    "td-otbr-restapi-devices.json",   
-    "td-mdns-scopes-thread.json",                # Phase 3: mDNS Thread devices
+    ##"td-otbr-restapi-diagnostics-list.json",
+    ##"td-otbr-restapi-diagnostics.json",
+    ##"td-otbr-restapi-devices-fetch.json",
+    ##"td-otbr-restapi-devices-list.json",
+    ##"td-otbr-restapi-devices.json",   
+    ##"td-mdns-scopes-thread.json",                # Phase 3: mDNS Thread devices
     "td-mdns-scopes-br.json",                    # Phase 3: mDNS Border Router discovery
     "td-mdns-scopes-hap.json",                   # Phase 3: mDNS HomeKit devices
-    "td-mdns-scopes-matter.json",                # Phase 3: mDNS Matter devices
+    ##"td-mdns-scopes-matter.json",                # Phase 3: mDNS Matter devices
     "td-eve-topology.json",
 ]
 

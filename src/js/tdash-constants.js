@@ -877,9 +877,7 @@ export const TABLE_PRIORITY_COLUMNS = [
   "connectivity.link_quality_2",
   "connectivity.linkQuality1",
   "connectivity.link_quality_1",
-  "leaderData.partitionId",
   "leader_data.partition_id",
-  "leaderData.leaderRouterId",
   "leader_data.leader_router_id",
   
   // === TIER 5: Advanced/Diagnostic ===

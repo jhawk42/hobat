@@ -913,6 +913,19 @@ export function isRouterNeighborDiagnosticMode(mode) {
   );
 }
 
+export function isChildLinkQualityDiagnosticMode(mode) {
+  return mode === "child-lq-medium" || mode === "child-lq-poor";
+}
+
+export function childMatchesLinkQualityFilter(child, mode) {
+  const lqRaw = child?.lq !== undefined ? child.lq : child?.link_quality;
+  const lqNum = Number.parseInt(lqRaw, 10);
+  if (!Number.isFinite(lqNum)) return false;
+  if (mode === "child-lq-medium") return lqNum <= 2;
+  if (mode === "child-lq-poor") return lqNum === 1;
+  return false;
+}
+
 export function routerNeighborRowMatchesDiagnosticFilter(row, mode) {
   const fp = toFiniteNumber(row?.err_rate_frame_pct);
   const mp = toFiniteNumber(row?.err_rate_msg_pct);

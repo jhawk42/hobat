@@ -274,6 +274,33 @@ function resetNodeDetailsLists() {
     });
 }
 
+// Common topology select-change path: reapply filters first,
+// then restore canonical node styling to preserve node type colors.
+function refreshTopologyFiltersWithRestoredStyling() {
+  if (!currentDataset || currentView !== "topology") return false;
+  const handlers = getTopologyFilterHandlers();
+  if (!handlers) return false;
+
+  const linkFilterEl = document.getElementById("link-filter");
+  const nodeFilterEl = document.getElementById("node-filter");
+  const diagFilterEl = document.getElementById("diagnostic-filter");
+  const counts = handlers.applyFilters(
+    nodeFilterEl.value,
+    linkFilterEl.value,
+    diagFilterEl.value,
+  );
+  handlers.updateStatus(counts);
+
+  // Apply visual styling after filters to ensure correct colors are displayed
+  if (typeof handlers.restoreOriginalNodeStyling === "function") {
+    handlers.restoreOriginalNodeStyling();
+  }
+
+  handlers.fitIfEnabled();
+  resetNodeDetailsLists();
+  return true;
+}
+
 document
   .getElementById("datasource-filter")
   .addEventListener("change", async (event) => {
@@ -319,60 +346,20 @@ document
 document.getElementById("node-filter").addEventListener("change", () => {
   if (!currentDataset) return;
   if (currentView === "topology") {
-    const handlers = getTopologyFilterHandlers();
-    if (handlers) {
-      const linkFilterEl = document.getElementById("link-filter");
-      const nodeFilterEl = document.getElementById("node-filter");
-      const diagFilterEl = document.getElementById("diagnostic-filter");
-      const counts = handlers.applyFilters(
-        nodeFilterEl.value,
-        linkFilterEl.value,
-        diagFilterEl.value,
-      );
-      handlers.updateStatus(counts);
-      handlers.fitIfEnabled();
-      resetNodeDetailsLists();
-    }
+    refreshTopologyFiltersWithRestoredStyling();
   } else {
     applyTableFilters();
   }
 });
 
 document.getElementById("link-filter").addEventListener("change", () => {
-  if (!currentDataset || currentView !== "topology") return;
-  const handlers = getTopologyFilterHandlers();
-  if (handlers) {
-    const linkFilterEl = document.getElementById("link-filter");
-    const nodeFilterEl = document.getElementById("node-filter");
-    const diagFilterEl = document.getElementById("diagnostic-filter");
-    const counts = handlers.applyFilters(
-      nodeFilterEl.value,
-      linkFilterEl.value,
-      diagFilterEl.value,
-    );
-    handlers.updateStatus(counts);
-    handlers.fitIfEnabled();
-    resetNodeDetailsLists();
-  }
+  refreshTopologyFiltersWithRestoredStyling();
 });
 
 document.getElementById("diagnostic-filter").addEventListener("change", () => {
   if (!currentDataset) return;
   if (currentView === "topology") {
-    const handlers = getTopologyFilterHandlers();
-    if (handlers) {
-      const linkFilterEl = document.getElementById("link-filter");
-      const nodeFilterEl = document.getElementById("node-filter");
-      const diagFilterEl = document.getElementById("diagnostic-filter");
-      const counts = handlers.applyFilters(
-        nodeFilterEl.value,
-        linkFilterEl.value,
-        diagFilterEl.value,
-      );
-      handlers.updateStatus(counts);
-      handlers.fitIfEnabled();
-      resetNodeDetailsLists();
-    }
+    refreshTopologyFiltersWithRestoredStyling();
   } else {
     applyTableFilters();
   }
@@ -395,20 +382,7 @@ document.getElementById("diagnostic-source-filter").addEventListener("change", (
   // Trigger a change event on the diagnostic-filter to apply the new filters
   if (!currentDataset) return;
   if (currentView === "topology") {
-    const handlers = getTopologyFilterHandlers();
-    if (handlers) {
-      const linkFilterEl = document.getElementById("link-filter");
-      const nodeFilterEl = document.getElementById("node-filter");
-      const diagFilterEl = document.getElementById("diagnostic-filter");
-      const counts = handlers.applyFilters(
-        nodeFilterEl.value,
-        linkFilterEl.value,
-        diagFilterEl.value,
-      );
-      handlers.updateStatus(counts);
-      handlers.fitIfEnabled();
-      resetNodeDetailsLists();
-    }
+    refreshTopologyFiltersWithRestoredStyling();
   } else {
     applyTableFilters();
   }
@@ -706,6 +680,9 @@ document.getElementById("search-input")?.addEventListener("keydown", (e) => {
 document.getElementById("btn-search-clear")?.addEventListener("click", () => {
   document.getElementById("search-input").value = "";
   _currentSearchQuery = "";
+  if (currentView === "topology") {
+    refreshTopologyFiltersWithRestoredStyling();
+  }
   applySearch();
 });
 

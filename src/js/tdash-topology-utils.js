@@ -106,7 +106,7 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
 
     // Convert edgeType to display form if it matches known categories.
     const edgeTypeReadable = edgeType
-      ? `Type: ${edgeType
+      ? `type: ${edgeType
           .split(", ")
           .map((category) => EDGE_CATEGORY_LABELS[category] ?? category)
           .join(", ")}`
@@ -136,12 +136,12 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
       : null;
     const titleParts = [
       edgeTypeReadable,
-      styleLqLevel,
-      lqiIn,
-      lqiOut,
-      linkMargin,
       edgeFrom,
+      lqiOut,
       edgeTo,
+      lqiIn,
+      styleLqLevel,
+      linkMargin,
     ].filter(Boolean);
     return titleParts.join("\n");
   }
@@ -402,7 +402,7 @@ export function buildVisNodeData(
       id: node.id,
       label: labelFn(node),
       shape: effectiveShape,
-      color: effectiveColor,
+      color: effectiveColor ? { ...effectiveColor } : effectiveColor,
       font: { size: fontSize, face: "monospace", multi: "md" },
       heightConstraint,
       widthConstraint,
