@@ -240,6 +240,26 @@ def is_border_router_from_ipv6_addrs(ipv6_addrs, meshlocal_prefix: str = None):
     return False
 
 
+def extract_rloc16_from_ipv6_addresses(ipv6_addrs):
+    """
+    Extracts the rloc16 value from a list of IPv6 addresses based on the presence of the RLOC16 prefix.
+
+    Args:
+        ipv6_addrs: List of IPv6 address strings to check (e.g., ["fdde:ad00:beef:0:0:ff:fe00:5000", "fdde:ad00:beef:0:0:ff:fe00:6000"])
+
+    Returns:
+        The rloc16 value as a hex string (e.g., "0x5000") if found, or None if no valid rloc16 is found in the IPv6 addresses.
+    """
+    for addr in ipv6_addrs:
+        if is_ipv6_address_in_meshlocal_prefix(addr, build_rloc_ipv6_address_prefix(fetch_meshlocal_prefix())):
+            # Extract the last 4 characters of the address as the rloc16 hex value
+            # add the 0x prefix to convert it to a proper hex string
+            rloc16_hex = addr.split(":")[-1]
+            rloc16_hex_full = f"0x{rloc16_hex}" 
+            return rloc16_hex_full
+
+    return None
+
 def fetch_dataset_active(hide_sensitive_info=True):
     """
     Retrieves the active Thread dataset from the network.

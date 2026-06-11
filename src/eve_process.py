@@ -45,23 +45,14 @@ def load_and_parse_eve_file(path, thread_network_info=None):
         logging.error(f"Invalid JSON in Eve file {path!r}: {e}")
         return result
 
+    logging.info(f"Eve native: {len(data.get('nodes', []))} records in eve file.")
+
     for node in data.get("nodes", []):
+        node_id = node.get("id")
+        
         # Conform rloc16 to hex string for consistent mapping
+        rloc16_hex = None
         rloc16_decimal = node.get("rloc16")
-
-        # Conform from 'ip_addresses' to "ipv6_addrs" for consistent naming and mapping
-        ipv6_addrs = node.get("ip_addresses", [])
-        node["ipv6_addrs"] = ipv6_addrs
-
-        # Enrich node with OMR IPv6 address  using OMR prefix
-        if omr_ipv6addr_prefix:
-            node["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
-                ipv6_addrs, omr_ipv6addr_prefix
-            )
-
-        # Remove original 'ip_addresses' to avoid confusion since we have 'ipv6_addrs' now
-        if "ip_addresses" in node:
-            del node["ip_addresses"]
 
         # Enrich node with hex rloc16 and short rloc for easier mapping
         if rloc16_decimal is not None:
@@ -77,12 +68,51 @@ def load_and_parse_eve_file(path, thread_network_info=None):
                 rloc16_decimal  # Preserve original decimal rloc16 for reference
             )
 
-        node["node_name_eve"] = node.get(
-            "name"
-        )  # Preserve original node name from Eve for reference
-        node["node_id_eve"] = node.get(
-            "id"
-        )  # Preserve original node ID from Eve for reference
+        # Conform from 'ip_addresses' to "ipv6_addrs" for consistent naming and mapping
+        ipv6_addrs = node.get("ip_addresses", [])
+        node["ipv6_addrs"] = ipv6_addrs
+
+        # Enrich with rloc16 in hex from rloc16 ipv6 addresses if rloc16 field is missing
+        if rloc16_decimal is None:
+            
+            # Note: some eve nodes don't have a rloc16 field. For these nodes, attempt to extract rloc16 from 
+            # their IPv6 addresses if available, since rloc16 may be encoded in the IPv6 addresses for Thread devices.
+            # Call extract_rloc16_from_ipv6_addresses to extract the rloc16 as hex from the IPv6 addresses
+            if ipv6_addrs:
+                rloc16_hex = util_network.extract_rloc16_from_ipv6_addresses(
+                    ipv6_addrs
+                )
+                if rloc16_hex is not None:
+                    node["rloc16"] = rloc16_hex  # Patch original rloc16 field to hex string for consistency in the node data structure
+                    node["rloc16_hex"] = rloc16_hex  # Add hex rloc16 for reference
+                    node["rloc16_hexshort"] = util_network.strip_rloc16_hex_prefix(
+                        rloc16_hex
+                    )  # Add short rloc for reference
+                    rloc16_decimal = int(rloc16_hex, 16)  # Preserve original decimal rloc16 for reference
+                    node["rloc16_decimal"] = rloc16_decimal
+                    logging.debug(
+                        f"Extracted rloc16 {rloc16_hex} from IPv6 addresses for node {node.get('name', 'Unknown')} (id: {node.get('id', 'Unknown')})."
+                    )
+                else:
+                    logging.warning(
+                        f"No valid RLOC16 found in IPv6 addresses for node {node.get('name', 'Unknown')} (id: {node.get('id', 'Unknown')}). Skipping rloc16 enrichment for this node."
+                    )
+
+        # Enrich node with OMR IPv6 address  using OMR prefix
+        if omr_ipv6addr_prefix:
+            node["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
+                ipv6_addrs, omr_ipv6addr_prefix
+            )
+
+        # Remove original 'ip_addresses' to avoid confusion since we have 'ipv6_addrs' now
+        if "ip_addresses" in node:
+            del node["ip_addresses"]
+
+        # Preserve original node name from Eve for reference
+        node["node_name_eve"] = node.get("name")
+
+        # Preserve original node ID from Eve for reference
+        node["node_id_eve"] = node.get("id")
 
         # Convert base64 extAddress to hex string for consistent mapping
         thread_networks = node.get("threadNetworks", [])
@@ -92,22 +122,24 @@ def load_and_parse_eve_file(path, thread_network_info=None):
                 # Convert base64 extAddress to hex string
                 ext_addr_hex = b64_to_extended_address(ext_addr_b64)
 
-                # store enhanced hex extAddress for reference
+                # store enriched hex extAddress for reference
                 # Add hex extAddress to threadNetworks for reference
                 thread_networks[0]["extAddress_hex"] = ext_addr_hex
 
                 # Add extaddr in hex format for consistent mapping
                 thread_networks[0]["extaddr"] = ext_addr_hex
+          
+        ## Index by rloc16. Preserve all fields from the node
+        #if rloc16_hex is not None:
+        #    result[rloc16_hex] = node
+        result[node_id] = node  # Also index by node id for reference
 
-        # Preserve all fields from the node
-        if rloc16_decimal is not None:
-            result[rloc16_hex] = node
     return result
 
 
-def enhance_eve_routes(eve_data):
+def enrich_eve_nodes(eve_data):
     """
-    Rebuild Eve enhanced data keyed by rloc16_hex and enrich route entries.
+    Rebuild Eve nodes and enrich rloc16, route entries.
 
     - Preserves all fields from original nodes.
     - Keys output by each node's rloc16_hex.
@@ -115,17 +147,27 @@ def enhance_eve_routes(eve_data):
     using the original eve_data structure.
     """
 
+    # var to be returned from function with nodes keyed by rloc16_hex and enriched route entries
+    result = {}
+
     # Build lookup maps from original data for route destination resolution.
     # route "to" values may be node ids (UUID). We will attempt to resolve them to node names.
     id_to_name = {}
     id_to_rloc16_hex = {}
     key_to_name = {}
+    rloc16_hex_to_id = {}
 
+    # Build maps
     for original_key, original_node in eve_data.items():
         if not isinstance(original_node, dict):
             continue
 
-        # build maps for resolving route "to" values to node names
+        # Build map for rloc16 to node id
+        rloc16_hex_build = original_node.get("rloc16_hex")
+        if rloc16_hex_build is not None:
+            rloc16_hex_to_id[rloc16_hex_build] = original_node.get("id")
+
+        # Build map for resolving route "to" values to node names
         node_name = original_node.get("name")
         # rloc16 to name mapping for direct dataset key resolution
         key_to_name[original_key] = node_name
@@ -134,7 +176,56 @@ def enhance_eve_routes(eve_data):
         if node_id:
             id_to_name[node_id] = node_name
             id_to_rloc16_hex[node_id] = original_node.get("rloc16_hex")
-    result = {}
+
+    # Occasionally the eve layout format has some fields missiing
+    # Try to patch missing parent-child relationships based on rloc16 hierarchy for nodes that have rloc16 but are missing "children" field in their parent node. This is to enrich the data structure for better reference and mapping, since rloc16 hierarchy can indicate parent-child relationships in Thread networks.
+    for original_key, original_node in eve_data.items():
+        # If missing in the original Eve data
+        # Check if need to patch parent-child relationships based on rloc16 hierarchy 
+        rloc16_hex = original_node.get("rloc16_hex")
+        if rloc16_hex is not None:
+            if rloc16_hex.endswith("00"): # Skip if a router
+                continue
+            
+            node_id = original_node.get("id")
+
+            # Find potential parent rloc16 by replacing the last 2 characters of the rloc16 with 0x00, which 
+            # is the parent node rloc16 in Thread networks. For example, if the rloc16 is 0x1234, the 
+            # parent rloc16 would be 0x1200,
+            parent_rloc16_hex = rloc16_hex[:4] + "00"
+            parent_node_id = rloc16_hex_to_id.get(parent_rloc16_hex)
+            parent_node = eve_data[parent_node_id] if parent_node_id else None
+
+            if parent_node is not None and node_id is not None:
+                # Check if parent_node.children already contains this node "id" field
+                parent_node_id = parent_node.get("id")
+                parent_node_children = parent_node.get("children")
+
+                # Check if children array is present. 
+                if parent_node_children is None:
+                    logging.debug(
+                        f"Parent node {parent_node.get('name', 'Unknown')} (id: {parent_node_id}) has no children array. Initializing children array and adding child node {original_node.get('name', 'Unknown')} (id: {node_id}) based on rloc16 relationship."
+                    )
+                    # If not present, initialize it as an empty array and add the child node id to it. 
+                    parent_node_children = []
+                    parent_node_children.append(node_id)  # Add child node id to the new children array
+                   
+                    # Patch original eve_data structure to add children array for parent node
+                    eve_data[parent_node_id]["children"] = parent_node_children  
+                    
+                    logging.debug(
+                        f"Adding child node {original_node.get('name', 'Unknown')} (id: {node_id}, rloc16:{rloc16_hex}) to parent node {parent_node.get('name', 'Unknown')} (id: {parent_node.get('id', 'Unknown')}, rloc16:{parent_rloc16_hex}) based on rloc16 relationship."
+                    )
+
+                    logging.debug(
+                        f"Updated parent node {parent_node.get('name', 'Unknown')} (id: {parent_node_id}, rloc16:{parent_rloc16_hex}) with new child node {original_node.get('name', 'Unknown')} (id: {node_id}, rloc16:{rloc16_hex})."
+                    )
+                elif node_id not in parent_node_children:
+                    logging.debug(
+                        f"Adding child node {original_node.get('name', 'Unknown')} (id: {node_id}, rloc16:{rloc16_hex}) to parent node {parent_node.get('name', 'Unknown')} (id: {parent_node.get('id', 'Unknown')}, rloc16:{parent_rloc16_hex}) based on rloc16 relationship."
+                    )
+                    eve_data[parent_node_id]["children"].append(node_id)  # Patch original eve_data structure to add child node id to parent's children array   
+
 
     # Rebuild nodes keyed by rloc16_hex while preserving all original fields.
     for original_key, original_node in eve_data.items():
@@ -201,7 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     # Enrich the eve_data json data structure to add route destination node names for reference
-    eve_data_enhanced = enhance_eve_routes(eve_data_raw)
+    eve_data_enhanced = enrich_eve_nodes(eve_data_raw)
 
     # Save json data structures for reference
     file_path = data_file_path("td-eve-topology.json", td_data_dir)
