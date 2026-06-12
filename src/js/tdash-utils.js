@@ -96,6 +96,40 @@ export function normalizeFieldNames(row) {
   return result;
 }
 
+/**
+ * Normalizes field names for objects within an array (e.g., neighbor/child tables).
+ * Applies normalizeFieldNames to each object and handles percentage field conversion.
+ * 
+ * For fields ending with "_pct", if the source value is a decimal (0-1), it's
+ * converted to percentage (0-100). This ensures REST API decimal error rates
+ * (e.g., 0.061) are converted to percentages (6.1) to match filter thresholds.
+ * 
+ * @param {Array} arr - Array of objects to normalize
+ * @returns {Array} New array with normalized objects containing both camelCase
+ *                  and snake_case field names
+ */
+export function normalizeNestedArrayFields(arr) {
+  if (!Array.isArray(arr)) return arr;
+  return arr.map(item => {
+    if (!isPlainObject(item)) return item;
+    const normalized = normalizeFieldNames(item);
+    
+    // Handle percentage field conversion for link quality metrics
+    // If a canonical field ends with _pct and its value is decimal (0-1), multiply by 100
+    Object.keys(normalized).forEach(key => {
+      if (key.endsWith('_pct') && typeof normalized[key] === 'number') {
+        const val = normalized[key];
+        // If value is between 0 and 1 (decimal), convert to percentage
+        if (val >= 0 && val <= 1) {
+          normalized[key] = val * 100;
+        }
+      }
+    });
+    
+    return normalized;
+  });
+}
+
 // ── Mode/device-type derivation ───────────────────────────────────────────────
 
 /**

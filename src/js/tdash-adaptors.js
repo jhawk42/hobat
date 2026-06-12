@@ -11,7 +11,8 @@ import {
   getCanonicalRloc16, getCanonicalExtaddr,
   getCanonicalOmrIpv6Address,
   mergeForDisplay,
-  getColumnValue
+  getColumnValue,
+  normalizeNestedArrayFields
 } from './tdash-utils.js';
 import {
   chooseNodeId, buildLabel,
@@ -1190,7 +1191,16 @@ export function adaptRawArray(fileMap) {
 
 export function adaptOtbrRestApi(fileMap) {
   const devicesRaw = fileMap.get(FILE_RESTAPI_DEVICES) ?? fileMap.get(FILE_RESTAPI_DEVICES_LIST) ?? fileMap.get(FILE_RESTAPI_DEVICES_FETCH);
-  const diagRaw = fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL) ?? fileMap.get(FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL);
+  
+  // Load both basic diagnostics AND mesh diagnostics (which has link quality data)
+  // Prioritize mesh-diagnostics-fetch-all over diagnostics-fetch-all when both are present
+  const diagRaw = fileMap.get(FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL);
+  
+  // If we have BOTH mesh-diagnostics AND regular diagnostics, load the basic one too for additional fields
+  const basicDiagRaw = fileMap.has(FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL) 
+    ? (fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL))
+    : null;
+  
   // Accept JSON:API envelope ({data:[...]}), pre-flattened array, or a single diagnostic object
   function extractItems(raw) {
     if (!raw) return [];
@@ -1201,6 +1211,7 @@ export function adaptOtbrRestApi(fileMap) {
   }
   const devicesData = extractItems(devicesRaw);
   const diagData = extractItems(diagRaw);
+  const basicDiagData = extractItems(basicDiagRaw);
 
   // Flatten each item: merge top-level fields + attributes sub-object
   function flattenRestApiItem(item) {
@@ -1211,6 +1222,27 @@ export function adaptOtbrRestApi(fileMap) {
 
   const devices = devicesData.map(flattenRestApiItem);
   const diagnostics = diagData.map(flattenRestApiItem);
+  const basicDiagnostics = basicDiagData.map(flattenRestApiItem);
+  
+  // Merge basic diagnostics with mesh diagnostics (mesh diagnostics take precedence)
+  // If we have both, combine them by extAddress so we get both basic fields AND link quality data
+  if (basicDiagnostics.length > 0) {
+    const basicByExtaddr = new Map();
+    basicDiagnostics.forEach(item => {
+      const extaddr = toText(item.extAddress).toLowerCase();
+      if (extaddr) basicByExtaddr.set(extaddr, item);
+    });
+    
+    // Merge basic data into diagnostics for matching extAddresses
+    diagnostics.forEach((item, index) => {
+      const extaddr = toText(item.extAddress).toLowerCase();
+      const basic = basicByExtaddr.get(extaddr);
+      if (basic) {
+        // Merge basic fields into item (mesh fields take precedence)
+        diagnostics[index] = { ...basic, ...item };
+      }
+    });
+  }
 
   const nodeMap = new Map();
   const rawByIdForDetails = new Map();
@@ -1219,6 +1251,7 @@ export function adaptOtbrRestApi(fileMap) {
   const edgeData = [];
   const routerIdsWithChildren = new Set();
   const routerNeighborByRloc16 = new Map();
+  const routerChildByRloc16 = new Map();
 
   function upsertOtbrRestApiNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
@@ -1376,6 +1409,20 @@ export function adaptOtbrRestApi(fileMap) {
         linkCategories: [EDGE_CATEGORY_OTBR_CHILD]
       });
       routerIdsWithChildren.add(fromId);
+      
+      // Store child data for diagnostic filter support
+      const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
+      if (fromRloc16) {
+        if (!routerChildByRloc16.has(fromRloc16)) {
+          routerChildByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_child_table: [] });
+        }
+        const childRow = routerChildByRloc16.get(fromRloc16);
+        if (Array.isArray(childRow.router_child_table)) {
+          // Normalize field names (frameErrorRate → err_rate_frame_pct, etc.) and convert decimals to percentages
+          const normalizedChild = normalizeNestedArrayFields([child])[0];
+          childRow.router_child_table.push(normalizedChild);
+        }
+      }
     });
 
     // Pass 3b: edges from routerNeighbors (mesh-diagnostics-fetch-all)
@@ -1423,21 +1470,23 @@ export function adaptOtbrRestApi(fileMap) {
         }
         const neighborRow = routerNeighborByRloc16.get(fromRloc16);
         if (Array.isArray(neighborRow.router_neighbor_table)) {
-          neighborRow.router_neighbor_table.push(neighbor);
+          // Normalize field names (frameErrorRate → err_rate_frame_pct, etc.) and convert decimals to percentages
+          const normalizedNeighbor = normalizeNestedArrayFields([neighbor])[0];
+          neighborRow.router_neighbor_table.push(normalizedNeighbor);
         }
       }
     });
   });
 
   // Pass 4: group isolated unknown nodes
-  const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel);
+  const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel, routerChildByRloc16);
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 
   const sourceNames = [];
   if (devices.length > 0) sourceNames.push('otbr_restapi_devices');
   if (diagnostics.length > 0) sourceNames.push('otbr_restapi_diagnostics');
 
-  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames };
+  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, routerChildByRloc16, sourceNames };
 }
 
 // ── Dispatch: pick adaptor based on topologyMode ──────────────────────────────

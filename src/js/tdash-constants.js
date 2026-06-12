@@ -103,6 +103,12 @@ export const FIELD_ALIASES = Object.freeze({
   iftotaldiscards_totalpkts_ratio: ["ifTotalDiscardsTotalPktsRatio"],
   router_pct:           ["routerPct"],
   detached_disabled_pct: ["detachedDisabledPct"],
+  // ── Link quality fields (router neighbors & children) ─────────────────────
+  err_rate_frame_pct:   ["frameErrorRate"],
+  err_rate_msg_pct:     ["messageErrorRate"],
+  rss_ave:              ["averageRssi"],
+  rss_margin:           ["linkMargin"],
+  q_msg:                ["queuedMessageCount"],
 });
 
 // ── Link filter constants ─────────────────────────────────────────────────────
