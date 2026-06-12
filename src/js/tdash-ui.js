@@ -27,6 +27,7 @@ import {
   setAnimationEnabled,
   isAutoZoomEnabled,
   isAnimationEnabled,
+  setOnPhysicsDisabledCallback,
 } from "./tdash-topology-renderer.js";
 import {
   renderTableForDataset,
@@ -142,6 +143,8 @@ function renderCurrentView() {
     : currentDataset;
 
   if (view === "topology") {
+    // Re-enable physics for new dataset so it can stabilize
+    setPhysics(true);
     renderTopologyForDataset(effectiveDataset, _physicsEnabled);
     const counts = getTopologyDatasetCounts();
     if (counts) updateDeviceStatusBar(counts);
@@ -389,6 +392,9 @@ document.getElementById("diagnostic-source-filter").addEventListener("change", (
 });
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
+
+// Register callback to sync physics button state when auto-disabled after stabilization
+setOnPhysicsDisabledCallback(() => setPhysics(false));
 
 const initialSource = document.getElementById("datasource-filter").value;
 populateDatasetSelect(initialSource);

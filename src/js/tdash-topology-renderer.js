@@ -42,6 +42,7 @@ let _topologyNodeData = null;  // Store nodeData from last render for filter val
 let _topologyRawRows = null;   // Map<nodeId, rawRow> from last render, used for search
 let _topologyDatasetCounts = null;  // Counts derived from last topology render
 let _originalNodeStyling = null;  // Map<nodeId, {color, borderWidth, font}> — original styling for search restore
+let _onPhysicsDisabledCallback = null;  // Callback invoked when physics is auto-disabled after stabilization
 
 // ── Exported accessors / setters ──────────────────────────────────────────────
 
@@ -68,6 +69,9 @@ export function isAutoZoomEnabled() {
 }
 export function isAnimationEnabled() {
   return _animationEnabled;
+}
+export function setOnPhysicsDisabledCallback(callback) {
+  _onPhysicsDisabledCallback = callback;
 }
 
 // ── Debug accessors (for development/troubleshooting) ────────────────────────
@@ -539,6 +543,15 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
   _visNetwork.on("zoom", refreshStatusScale);
   _visNetwork.on("animationFinished", refreshStatusScale);
   _visNetwork.once("stabilized", refreshStatusScale);
+
+  // Turn off physics when stabilization is complete to stop graph movement
+  _visNetwork.on("stabilizationIterationsDone", function () {
+    _visNetwork.setOptions({ physics: false });
+    // Notify UI layer that physics has been disabled
+    if (_onPhysicsDisabledCallback) {
+      _onPhysicsDisabledCallback();
+    }
+  });
 
   // ── Store filter handlers so the toggle/filter wiring can call them ──
   _topologyFilterHandlers = {
