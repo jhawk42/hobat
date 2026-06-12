@@ -76,6 +76,44 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.assertCountEqual(record["_source_files"], ["one.json", "two.json"])
             self.assertEqual(report["multi_source_nodes_total"], 1)
 
+    def test_merges_omr_ipv6_address_camelcase_alias(self) -> None:
+        """Test that omrIpv6Address (REST API camelCase) merges with omr_ipv6_addr (CLI snake_case)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            # CLI source with snake_case
+            self.write_json(
+                base_dir,
+                "cli.json",
+                [{"omr_ipv6_addr": "FD00:ABCD::1234", "name": "cli-node"}],
+            )
+            # REST API source with camelCase
+            self.write_json(
+                base_dir,
+                "restapi.json",
+                [{"omrIpv6Address": "fd00:abcd::1234", "device_label": "API Node"}],
+            )
+
+            merged_records, report = build_merged_records(
+                base_dir,
+                "fd00:abcd::",
+                ["cli.json", "restapi.json"],
+                {},
+            )
+
+            # Should merge into ONE record, not two
+            self.assertEqual(len(merged_records), 1)
+            record = merged_records[0]
+            # Canonical field name should be set
+            self.assertEqual(record["omr_ipv6_addr"], "fd00:abcd::1234")
+            # Both fields merged
+            self.assertEqual(record["name"], "cli-node")
+            self.assertEqual(record["device_label"], "API Node")
+            # Both sources recorded
+            self.assertCountEqual(record["_source_files"], ["cli.json", "restapi.json"])
+            # Should be counted as multi-source node
+            self.assertEqual(report["multi_source_nodes_total"], 1)
+            self.assertEqual(report["single_source_nodes_total"], 0)
+
     def test_records_with_distinct_identities_do_not_merge(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base_dir = Path(temp_dir)

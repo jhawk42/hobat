@@ -171,7 +171,7 @@ MERGE_STRATEGIES = {
 
 MERGE_IDENTITY_FIELDS = {
     "extaddr_aliases": ("extaddr", "extAddress", "Extended MAC"),
-    "omr_ipv6_addr": "omr_ipv6_addr",
+    "omr_ipv6_addr_aliases": ("omr_ipv6_addr", "omrIpv6Address"),
     "rloc16": "rloc16",
 }
 
@@ -213,11 +213,11 @@ DEFAULT_INPUT_FILES = [
     "td-otbr-cli-meshdiag-router-childtables.json",
     "td-otbr-restapi-diagnostics-fetch-all.json",
     "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
-    ##"td-otbr-restapi-diagnostics-list.json",
-    ##"td-otbr-restapi-diagnostics.json",
-    ##"td-otbr-restapi-devices-fetch.json",
-    ##"td-otbr-restapi-devices-list.json",
-    ##"td-otbr-restapi-devices.json",   
+    "td-otbr-restapi-diagnostics-list.json",
+    "td-otbr-restapi-diagnostics.json",
+    "td-otbr-restapi-devices-fetch.json",
+    "td-otbr-restapi-devices-list.json",
+    "td-otbr-restapi-devices.json",   
     ##"td-mdns-scopes-thread.json",                # Phase 3: mDNS Thread devices
     "td-mdns-scopes-br.json",                    # Phase 3: mDNS Border Router discovery
     "td-mdns-scopes-hap.json",                   # Phase 3: mDNS HomeKit devices
@@ -250,9 +250,7 @@ def get_canonical_extaddr(record: dict[str, Any]) -> str:
 
 
 def get_canonical_omr(record: dict[str, Any]) -> str:
-    return normalize_identifier_text(
-        record.get(MERGE_IDENTITY_FIELDS["omr_ipv6_addr"])
-    )
+    return first_normalized_identifier(record, MERGE_IDENTITY_FIELDS["omr_ipv6_addr_aliases"])
 
 
 def is_placeholder_extaddr(value: Any) -> bool:
