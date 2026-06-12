@@ -617,7 +617,7 @@ export function adaptEve(fileMap) {
       const lqiIn = toFiniteNumber(route.in);
       const lqiOut = toFiniteNumber(route.out);
       const avgLqi = (Number.isFinite(lqiIn) && Number.isFinite(lqiOut)) ? (lqiIn + lqiOut) / 2 : (lqiIn || lqiOut);
-      const lqStyle = lqStyleFromAvgLqi(avgLqi, 255);
+      const lqStyle = lqStyleFromAvgLqi(avgLqi, 3);
       const toNodeEnriched = nodeMap.get(toId);
       addEdge(edgeMap, edgeData, fromId, toId, {
         ...lqStyle,
