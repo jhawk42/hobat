@@ -246,6 +246,20 @@ currentDataset = { entry, rows, rawFiles }
 
 When two rows share any key, they are merged: the first non-empty value wins; conflicts are recorded in `_merge_conflicts`; `_source_files` arrays are unioned.
 
+### Field alias system (`FIELD_ALIASES` registry)
+
+Different data sources use inconsistent field naming conventions—OTBR CLI uses snake_case (`err_rate_frame_pct`, `rss_ave`) while OTBR REST API uses camelCase (`frameErrorRate`, `averageRssi`). To unify these, the application maintains a centralized `FIELD_ALIASES` registry in `tdash-constants.js` that maps canonical snake_case field names to arrays of known aliases.
+
+**Normalization flow:**
+
+1. `normalizeFieldNames(row)` (in `tdash-utils.js`) walks the `FIELD_ALIASES` registry and adds canonical snake_case field names alongside any matching camelCase aliases found in the row. The original field names are preserved, so both `frameErrorRate` and `err_rate_frame_pct` exist in the normalized row.
+
+2. `normalizeNestedArrayFields(arr)` extends this to nested arrays (`router_neighbor_table[]`, `router_child_table[]`) commonly found in OTBR REST API mesh diagnostics. It applies field normalization to each array element and converts decimal error rates (0–1 range) to percentages (0–100 range) for fields ending in `_pct`.
+
+3. The normalization happens in `adaptOtbrRestApi()` for REST API data sources, ensuring that by the time data reaches the filter system (`tdash-filters.js`), all diagnostic fields use the canonical snake_case names that filter predicates expect.
+
+**Example:** OTBR REST API returns `{ frameErrorRate: 0.05, averageRssi: -65 }` in a neighbor entry. After normalization, the row contains both the original fields plus `{ err_rate_frame_pct: 5, rss_ave: -65 }`, allowing filter predicates like `row.err_rate_frame_pct >= 2` to work correctly regardless of the data source.
+
 ### Static label enrichment
 
 `enrichRows(rows)` / `enrichRawFiles(rawFiles)` are called by `renderCurrentView()` when the **Enhance** toggle is on. They walk every node/row, look up `staticExtaddrLabelMap` by canonical extaddr, and inject `device_label` on a spread copy — the originals in `currentDataset` are never mutated.
