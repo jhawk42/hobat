@@ -183,13 +183,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Load extaddr map with unified helper
     extaddr_map = load_extaddr_map_or_empty(runtime.extaddr_map_path)
 
-    router_child_tables = fetch_all_meshdiag_child_tables(extaddr_map)
+    try:
+        router_child_tables = fetch_all_meshdiag_child_tables(extaddr_map)
 
-    save_json_atomic(router_child_tables, runtime.output_path)
+        save_json_atomic(router_child_tables, runtime.output_path)
 
-    logging.debug("Saved meshdiag router childtables data into %s as JSON:\n%s",
-                  runtime.output_path, json.dumps(router_child_tables, indent=4))
-    logging.info(f"Saved meshdiag router childtables with {len(router_child_tables)} entries into {runtime.output_path}.")
+        logging.debug("Saved meshdiag router childtables data into %s as JSON:\n%s",
+                      runtime.output_path, json.dumps(router_child_tables, indent=4))
+        logging.info(f"Saved meshdiag router childtables with {len(router_child_tables)} entries into {runtime.output_path}.")
+        return 0
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        logging.error(f"Invalid payload while collecting meshdiag-childtable: {exc}")
+        return 5
+    except Exception as exc:
+        logging.error(f"Runtime failure while collecting meshdiag-childtable: {exc}")
+        return 3
 
 
 if __name__ == "__main__":

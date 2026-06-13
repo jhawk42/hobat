@@ -317,18 +317,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         extaddr_map = {}
 
-    thread_network_info = util_network.fetch_thread_network_info()
+    try:
+        thread_network_info = util_network.fetch_thread_network_info()
 
-    meshdiag_topology_data = get_meshdiag_topology(
-        extaddr_map, thread_network_info
-    )
-    save_path = data_file_path(
-        "td-otbr-cli-meshdiag-topology.json", td_data_dir)
-    save_json_atomic(meshdiag_topology_data, save_path)
+        meshdiag_topology_data = get_meshdiag_topology(
+            extaddr_map, thread_network_info
+        )
+        save_path = data_file_path(
+            "td-otbr-cli-meshdiag-topology.json", td_data_dir)
+        save_json_atomic(meshdiag_topology_data, save_path)
 
-    logging.debug("Saved meshdiag topology data into %s as JSON:\n%s",
-                  save_path, json.dumps(meshdiag_topology_data, indent=4))
-    logging.info(f"Saved meshdiag topology with {len(meshdiag_topology_data)} entries into {save_path}.")
+        logging.debug("Saved meshdiag topology data into %s as JSON:\n%s",
+                      save_path, json.dumps(meshdiag_topology_data, indent=4))
+        logging.info(f"Saved meshdiag topology with {len(meshdiag_topology_data)} entries into {save_path}.")
+        return 0
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        logging.error(f"Invalid payload while collecting meshdiag-topology: {exc}")
+        return 5
+    except Exception as exc:
+        logging.error(f"Runtime failure while collecting meshdiag-topology: {exc}")
+        return 3
 
 if __name__ == "__main__":
     raise SystemExit(main())

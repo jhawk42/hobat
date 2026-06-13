@@ -16,7 +16,13 @@ import sys
 from pathlib import Path
 
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
-from util_data import data_file_path, resolve_data_dir, save_json_atomic
+from util_data import (
+    TDRequiredInputMissingError,
+    data_file_path,
+    require_existing_input_file,
+    resolve_data_dir,
+    save_json_atomic,
+)
 
 OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME = 'td-otbr-cli-networkdiag-fetch-all.json'
 MDNS_SCOPES_BR_FILENAME = "td-mdns-scopes-br.json"
@@ -211,17 +217,23 @@ def main(argv=None):
             merge_input_file, td_data_dir
         )
     
-    # Validate files exist
-    if not extaddr_json_filename.exists():
-        print(f"Error: Static file not found: {extaddr_json_filename}", file=sys.stderr)
-        return 1
-    
-    if not merge_input_file.exists():
-        print(f"Error: Merge input file not found: {merge_input_file}", file=sys.stderr)
-        return 1
-    
     # Perform merge
     try:
+        require_existing_input_file(
+            extaddr_json_filename,
+            command_path="merge-extaddr-map",
+            data_dir=td_data_dir,
+            classification="required",
+            action="fail code=4",
+        )
+        require_existing_input_file(
+            Path(merge_input_file),
+            command_path="merge-extaddr-map",
+            data_dir=td_data_dir,
+            classification="required",
+            action="fail code=4",
+        )
+
         num_added, added_entries, num_overridden, overridden_entries = merge_extaddr_files(
             extaddr_json_filename,
             merge_input_file,
@@ -246,9 +258,15 @@ def main(argv=None):
         
         return 0
     
+    except TDRequiredInputMissingError as exc:
+        print(str(exc), file=sys.stderr)
+        return 4
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        print(f"Invalid payload while merging extaddr map: {exc}", file=sys.stderr)
+        return 5
     except Exception as e:
         print(f"Error during merge: {e}", file=sys.stderr)
-        return 1
+        return 3
 
 
 if __name__ == '__main__':

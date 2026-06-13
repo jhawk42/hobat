@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -166,6 +167,86 @@ class DataPathHelpersTests(unittest.TestCase):
     def test_data_file_arg_or_default_rejects_blank(self) -> None:
         with self.assertRaises(ValueError):
             util_data.resolve_data_file_path("   ", Path("/tmp/td-data"))
+
+
+class InputLoaderHelpersTests(unittest.TestCase):
+    def test_require_existing_input_file_returns_path_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = Path(tmpdir) / "input.json"
+            file_path.write_text("{}", encoding="utf-8")
+
+            resolved = util_data.require_existing_input_file(
+                file_path,
+                command_path="merge-dataset",
+                data_dir=Path(tmpdir),
+            )
+            self.assertEqual(resolved, file_path)
+
+    def test_require_existing_input_file_raises_typed_error_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing = Path(tmpdir) / "missing.json"
+            with self.assertRaises(util_data.TDRequiredInputMissingError) as ctx:
+                util_data.require_existing_input_file(
+                    missing,
+                    command_path="merge-dataset",
+                    data_dir=Path(tmpdir),
+                )
+
+            self.assertIn("command_path=merge-dataset", str(ctx.exception))
+            self.assertIn("classification=required", str(ctx.exception))
+
+    def test_load_optional_input_returns_loaded_value(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = Path(tmpdir) / "input.json"
+            payload = {"k": "v"}
+            file_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            result = util_data.load_optional_input(
+                file_path,
+                loader=lambda p: json.loads(p.read_text(encoding="utf-8")),
+                default_value={},
+                command_path="otbr-cli",
+                data_dir=Path(tmpdir),
+            )
+
+            self.assertFalse(result.used_fallback)
+            self.assertEqual(result.value, payload)
+            self.assertIsNone(result.warning)
+
+    def test_load_optional_input_falls_back_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing = Path(tmpdir) / "missing.json"
+            default = {"empty": True}
+
+            result = util_data.load_optional_input(
+                missing,
+                loader=lambda p: json.loads(p.read_text(encoding="utf-8")),
+                default_value=default,
+                command_path="otbr-cli",
+                data_dir=Path(tmpdir),
+            )
+
+            self.assertTrue(result.used_fallback)
+            self.assertEqual(result.value, default)
+            self.assertIsNotNone(result.warning)
+
+    def test_load_optional_input_falls_back_on_json_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = Path(tmpdir) / "invalid.json"
+            file_path.write_text("{ invalid", encoding="utf-8")
+            default = {"empty": True}
+
+            result = util_data.load_optional_input(
+                file_path,
+                loader=lambda p: json.loads(p.read_text(encoding="utf-8")),
+                default_value=default,
+                command_path="otbr-cli",
+                data_dir=Path(tmpdir),
+            )
+
+            self.assertTrue(result.used_fallback)
+            self.assertEqual(result.value, default)
+            self.assertIsNotNone(result.warning)
 
 
 if __name__ == "__main__":

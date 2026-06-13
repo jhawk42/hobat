@@ -14,6 +14,8 @@ PYTHONPATH=src python3 -m td_cli otbr-restapi [global-options] <command> ...
 
 The wrapper forwards the same OTBR REST API global options to `otbr_restapi_cli.py`.
 
+Compatibility note: `otbr-restapi` keeps its existing exit-code contract. In this codebase, rc `4` still means an HTTP/action failure, not a missing local input file.
+
 ---
 
 ## Global Options

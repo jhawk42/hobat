@@ -69,6 +69,12 @@ tdash/
 Collector and utility files use source-first prefixes (`otbr_restapi_`, `otbr_cli_`, `mdns_`, `eve_`, `util_`). The REST API, ot-ctl, and mDNS families are split across handler and helper modules rather than a single large file.
 Test files use `test_*.py` names that follow the module under test.
 
+Several command families are designed to tolerate an empty or partially populated `TD_DATA_DIR`:
+
+- `otbr-cli` collectors continue when `td-static-extaddr-device-label.json` is missing and log a warning instead of failing.
+- `merge-dataset` requires `td-otbr-cli-thread-network-info.json` as its seed, but treats the static extaddr map and most merge sources as optional inputs.
+- `process-eve` and `merge-extaddr` still treat their local file inputs as required and return rc `4` when those files are missing.
+
 ---
 
 ## CLI vs REST API Naming
@@ -237,6 +243,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | ETag + conditional GET | `td_webserver.py` `_build_file_response` | Allows browsers to revalidate cheaply without re-downloading unchanged JSON |
 | `TD_OTBR_CONTAINER_USE=0` | `util_ot_ctl.py` | Allows running `ot-ctl` locally without Docker (development / bare-metal OTBR) |
 | `_cleanup_job_registry_loop` | `td_webserver.py` | Prevents unbounded growth of `_job_registry` in long-lived server processes |
+| Missing-file resilience helpers | `util_data.py`, `td_cli.py`, collector/merge modules | Provide consistent required/optional input handling and preserve explicit exit codes |
 
 ---
 

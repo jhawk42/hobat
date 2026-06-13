@@ -2,12 +2,18 @@ import argparse
 import copy
 import json
 import logging
-import os
 from typing import Sequence
 
 import util_network
 from util_convert import b64_to_extended_address
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
+from util_data import (
+    TDRequiredInputMissingError,
+    data_file_path,
+    parse_datadir_from_argv,
+    require_existing_input_file,
+    resolve_data_dir,
+    save_json_atomic,
+)
 
 EVE_NATIVE_LAYOUT_FILENAME = "Eve Thread Network Layout.evethreadlayout"
 
@@ -35,15 +41,8 @@ def load_and_parse_eve_file(path, thread_network_info=None):
     )
 
     # Load the Eve JSON file
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except OSError as e:
-        logging.error(f"Failed to open Eve JSON file {path!r}: {e}")
-        return result
-    except json.JSONDecodeError as e:
-        logging.error(f"Invalid JSON in Eve file {path!r}: {e}")
-        return result
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
 
     logging.info(f"Eve native: {len(data.get('nodes', []))} records in eve file.")
 
@@ -280,27 +279,45 @@ def main(argv: Sequence[str] | None = None) -> int:
         data_dir=args.datadir or parse_datadir_from_argv(argv)
     )
 
-    # Main execution:
+    try:
+        # Main execution:
 
-    # Get thread network info for reference in parsing and enriching Eve data
-    thread_network_info = util_network.fetch_thread_network_info()
+        # Get thread network info for reference in parsing and enriching Eve data
+        thread_network_info = util_network.fetch_thread_network_info()
 
-    # Parse the Eve JSON file to build an enhanced data structure keyed by rloc16_hex with all node fields preserved and extAddress in hex format for easier mapping and reference.
-    eve_json_file_path = data_file_path(EVE_NATIVE_LAYOUT_FILENAME, td_data_dir)
-    eve_data_raw = load_and_parse_eve_file(
-        eve_json_file_path, thread_network_info
-    )
+        # Parse the Eve JSON file to build an enhanced data structure keyed by rloc16_hex with all node fields preserved and extAddress in hex format for easier mapping and reference.
+        eve_json_file_path = data_file_path(EVE_NATIVE_LAYOUT_FILENAME, td_data_dir)
+        require_existing_input_file(
+            eve_json_file_path,
+            command_path="process-eve",
+            data_dir=td_data_dir,
+            classification="required",
+            action="fail code=4",
+        )
+        eve_data_raw = load_and_parse_eve_file(
+            eve_json_file_path, thread_network_info
+        )
 
-    # Enrich the eve_data json data structure to add route destination node names for reference
-    eve_data_enhanced = enrich_eve_nodes(eve_data_raw)
+        # Enrich the eve_data json data structure to add route destination node names for reference
+        eve_data_enhanced = enrich_eve_nodes(eve_data_raw)
 
-    # Save json data structures for reference
-    file_path = data_file_path("td-eve-topology.json", td_data_dir)
-    save_json_atomic(eve_data_enhanced, file_path)
+        # Save json data structures for reference
+        file_path = data_file_path("td-eve-topology.json", td_data_dir)
+        save_json_atomic(eve_data_enhanced, file_path)
 
-    # Print the parsed data structure with route names
-    logging.debug("Saved eve topology data into %s as JSON:\n%s",
-            file_path, json.dumps(eve_data_enhanced, indent=4))
+        # Print the parsed data structure with route names
+        logging.debug("Saved eve topology data into %s as JSON:\n%s",
+                file_path, json.dumps(eve_data_enhanced, indent=4))
+        return 0
+    except TDRequiredInputMissingError as exc:
+        logging.error(str(exc))
+        return 4
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        logging.error(f"Invalid payload while processing Eve layout: {exc}")
+        return 5
+    except Exception as exc:
+        logging.error(f"Runtime failure while processing Eve layout: {exc}")
+        return 3
 
 if __name__ == "__main__":
     raise SystemExit(main())

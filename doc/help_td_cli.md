@@ -122,6 +122,23 @@ Data directory resolution precedence:
 2. `TD_DATA_DIR` environment variable
 3. Defaults (`/data` when present, otherwise `./data` under the current run directory)
 
+When `TD_DATA_DIR` points at an empty or partially populated directory, command families now behave consistently:
+
+| Family | Required local inputs | Optional local inputs | Missing-file behavior |
+|---|---|---|---|
+| `otbr-cli` | none | `td-static-extaddr-device-label.json` | Continue with no enrichment and log a warning |
+| `mdns` | none | none | Continue unless the runtime browse/discovery itself fails |
+| `process-eve` | `Eve Thread Network Layout.evethreadlayout` | none | Return `4` when the file is missing |
+| `merge-extaddr` | `td-static-extaddr-device-label.json` and merge input file | none | Return `4` when a required file is missing |
+| `merge-dataset` | `td-otbr-cli-thread-network-info.json` | `td-static-extaddr-device-label.json` and the merge source files listed in the plan | Return `4` when the seed is missing or no viable optional source loads |
+| `otbr-restapi` | none, unless an explicit file argument is used by a mutating set command | command-dependent | Preserve OTBR REST API exit-code semantics |
+
+Troubleshooting empty-data-dir runs:
+
+- If `merge-dataset` returns `4`, confirm `td-otbr-cli-thread-network-info.json` exists and contains `prefix_omr_ipv6addr_prefix`.
+- If an OTBR CLI command emits a warning about `td-static-extaddr-device-label.json`, the command still completed and wrote output without label enrichment.
+- If `otbr-restapi` returns `4`, that still indicates an HTTP/action failure, not a local missing-file error.
+
 ---
 
 ## Command Group Help Behavior

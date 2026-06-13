@@ -6,6 +6,8 @@ usage: python3 -m td_webserver [-h] [--verbose] [--debug] [--host HOST]
 
 Start the Thread Network Topology Dashboard web server.
 
+When the webserver regenerates data files by invoking `td_cli`, it surfaces the underlying command return codes instead of normalizing them away. That matters for empty- or partial-data-directory runs, where missing local inputs now distinguish rc `4` from runtime rc `3` and invalid-payload rc `5`.
+
 
 ## Options
 

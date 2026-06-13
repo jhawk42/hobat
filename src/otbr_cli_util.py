@@ -18,7 +18,7 @@ from typing import Any
 
 from extaddr_device_label_map import load_extaddr_device_label_map
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
-from util_data import data_file_path, resolve_data_dir
+from util_data import data_file_path, load_optional_input, resolve_data_dir
 
 
 @dataclass(frozen=True)
@@ -66,18 +66,21 @@ def load_extaddr_map_or_empty(
             "No extaddr map path provided. Continuing with empty label map."
         )
         return {}
-    
-    if not os.path.exists(path):
-        logger.warning(
-            f"Extended address mapping file not found: {path}. "
-            "Continuing with Unknown labels."
-        )
-        return {}
-    
+
     logger.info(
         f"Loading extended address to device label mapping from {path}..."
     )
-    return load_extaddr_device_label_map(path)
+    result = load_optional_input(
+        path,
+        loader=lambda p: load_extaddr_device_label_map(str(p)),
+        default_value={},
+        command_path="otbr-cli",
+        data_dir=Path(path).resolve().parent,
+        logger=logger,
+        classification="optional",
+        fallback_action="continue fallback=empty-map",
+    )
+    return result.value
 
 
 def resolve_collector_runtime(

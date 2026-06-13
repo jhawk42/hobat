@@ -514,6 +514,28 @@ def dispatch(
             return [TD_DATA_DIR_ARG, str(args.datadir)] + list(argv)
         return list(argv)
 
+    def _normalize_module_rc(raw_rc: object, module_name: str) -> int:
+        """Normalize subordinate module return values into a process exit code.
+
+        Compatibility behavior:
+        - None is treated as success (0), because some existing collectors do not
+          return explicit values on success paths yet.
+        - Non-int return values are treated as internal errors (1).
+        """
+        if raw_rc is None:
+            logging.debug(
+                "%s returned None; treating as rc=0 for compatibility.", module_name
+            )
+            return 0
+        if isinstance(raw_rc, int):
+            return raw_rc
+        logging.error(
+            "%s returned non-int exit code (%s); treating as rc=1.",
+            module_name,
+            type(raw_rc).__name__,
+        )
+        return 1
+
     def _experimental_restapi_command_name(
         restapi_cmd: str | None, forwarded_args: list[str]
     ) -> str | None:
@@ -542,13 +564,16 @@ def dispatch(
             return 0
 
         if cli_cmd == "thread-network-info":
-            return (
-                otbr_cli_thread_network_info.main(
-                    _forward_with_datadir(extra_args)) or 0
+            return _normalize_module_rc(
+                otbr_cli_thread_network_info.main(_forward_with_datadir(extra_args)),
+                "otbr_cli_thread_network_info.main",
             )
 
         if cli_cmd == "router-table":
-            return otbr_cli_router_table.main(_forward_with_datadir(extra_args)) or 0
+            return _normalize_module_rc(
+                otbr_cli_router_table.main(_forward_with_datadir(extra_args)),
+                "otbr_cli_router_table.main",
+            )
 
         if cli_cmd == "meshdiag":
             meshdiag_cmd = args.meshdiag_command
@@ -557,29 +582,28 @@ def dispatch(
                     sub_parsers["otbr-cli"].print_help()
                 return 0
             if meshdiag_cmd == "topology":
-                return (
+                return _normalize_module_rc(
                     otbr_cli_meshdiag_topology.main(
-                        _forward_with_datadir(extra_args))
-                    or 0
+                        _forward_with_datadir(extra_args)
+                    ),
+                    "otbr_cli_meshdiag_topology.main",
                 )
             if meshdiag_cmd == "routerneighbortable":
-                return (
+                return _normalize_module_rc(
                     otbr_cli_meshdiag_routerneighbortable.main(
                         _forward_with_datadir(extra_args)
-                    )
-                    or 0
+                    ),
+                    "otbr_cli_meshdiag_routerneighbortable.main",
                 )
             if meshdiag_cmd == "childtable":
-                return (
-                    otbr_cli_meshdiag_childtable.main(
-                        _forward_with_datadir(extra_args))
-                    or 0
+                return _normalize_module_rc(
+                    otbr_cli_meshdiag_childtable.main(_forward_with_datadir(extra_args)),
+                    "otbr_cli_meshdiag_childtable.main",
                 )
             if meshdiag_cmd == "childip6":
-                return (
-                    otbr_cli_meshdiag_childip6.main(
-                        _forward_with_datadir(extra_args))
-                    or 0
+                return _normalize_module_rc(
+                    otbr_cli_meshdiag_childip6.main(_forward_with_datadir(extra_args)),
+                    "otbr_cli_meshdiag_childip6.main",
                 )
 
 
@@ -592,25 +616,25 @@ def dispatch(
                 expand_children_argv = (
                     [] if getattr(args, "expand_children", True) else ["-cno"]
                 )
-                return (
+                return _normalize_module_rc(
                     otbr_cli_networkdiag_topology.main(
                         _forward_with_datadir(expand_children_argv)
-                    )
-                    or 0
+                    ),
+                    "otbr_cli_networkdiag_topology.main",
                 )
             if args.networkdiag_command == "multicast-network":
-                return (
+                return _normalize_module_rc(
                     otbr_cli_networkdiag_topology.main_multicast_network(
                         _forward_with_datadir([])
-                    )
-                    or 0
+                    ),
+                    "otbr_cli_networkdiag_topology.main_multicast_network",
                 )
             if args.networkdiag_command == "multicast-neighbors":
-                return (
+                return _normalize_module_rc(
                     otbr_cli_networkdiag_topology.main_multicast_neighbors(
                         _forward_with_datadir([])
-                    )
-                    or 0
+                    ),
+                    "otbr_cli_networkdiag_topology.main_multicast_neighbors",
                 )
 
 
@@ -624,7 +648,10 @@ def dispatch(
         if getattr(args, "mattertcpsupported", False):
             mdns_argv.append("--mattertcpsupported")
         mdns_argv += list(extra_args)
-        return mdns_thread_scopes.main(_forward_with_datadir(mdns_argv)) or 0
+        return _normalize_module_rc(
+            mdns_thread_scopes.main(_forward_with_datadir(mdns_argv)),
+            "mdns_thread_scopes.main",
+        )
 
     # --- otbr-restapi ---
     if args.command == "otbr-restapi":
@@ -634,7 +661,10 @@ def dispatch(
             return 0
 
         if restapi_cmd == "download":
-            return otbr_restapi_download.main(_forward_with_datadir(extra_args)) or 0
+            return _normalize_module_rc(
+                otbr_restapi_download.main(_forward_with_datadir(extra_args)),
+                "otbr_restapi_download.main",
+            )
 
         # Build the base global-option args that otbr_restapi_cli expects before the
         # resource subcommand.  --output and --datadir are td_cli globals consumed by
@@ -687,27 +717,44 @@ def dispatch(
                     file=sys.stderr,
                 )
                 return 2
-            return otbr_restapi_cli.main(
-                _forward_with_datadir(_restapi_globals() + [restapi_cmd] + extra_args)
-            ) or 0
+            return _normalize_module_rc(
+                otbr_restapi_cli.main(
+                    _forward_with_datadir(
+                        _restapi_globals() + [restapi_cmd] + extra_args
+                    )
+                ),
+                "otbr_restapi_cli.main",
+            )
 
         if restapi_cmd == "topology":
-            return otbr_restapi_cli.main(
-                _forward_with_datadir(_restapi_globals() + ["topology"] + extra_args)
-            ) or 0
+            return _normalize_module_rc(
+                otbr_restapi_cli.main(
+                    _forward_with_datadir(_restapi_globals() + ["topology"] + extra_args)
+                ),
+                "otbr_restapi_cli.main",
+            )
 
 
     # --- process-eve ---
     if args.command == "process-eve":
-        return eve_process.main(_forward_with_datadir(extra_args)) or 0
+        return _normalize_module_rc(
+            eve_process.main(_forward_with_datadir(extra_args)),
+            "eve_process.main",
+        )
 
     # --- merge-dataset ---
     if args.command in ("merge-dataset", "merge-data"):
-        return merge_dataset.main(_forward_with_datadir(extra_args)) or 0
+        return _normalize_module_rc(
+            merge_dataset.main(_forward_with_datadir(extra_args)),
+            "merge_dataset.main",
+        )
 
     # --- merge-extaddr ---
     if args.command == "merge-extaddr":
-        return merge_extaddr_device_label_map.main(_forward_with_datadir(extra_args)) or 0
+        return _normalize_module_rc(
+            merge_extaddr_device_label_map.main(_forward_with_datadir(extra_args)),
+            "merge_extaddr_device_label_map.main",
+        )
 
     # --- unhandled command ---
     raise ValueError(f"Unhandled command: {args.command}")
@@ -776,6 +823,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
         return 130
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        logging.exception("Unhandled exception during command dispatch")
+        return 1
 
     # log complete message
     logging.info("complete.")

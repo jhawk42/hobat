@@ -1120,27 +1120,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         extaddr_map = {}
 
-    thread_network_info = util_network.fetch_thread_network_info()
+    try:
+        thread_network_info = util_network.fetch_thread_network_info()
 
-    # Get the networkdiagnostic topology data
-    networkdiagnostic_topology_data = fetch_network_diag_topology(
-        extaddr_map, thread_network_info, expand_children=args.expand_children
-    )
+        # Get the networkdiagnostic topology data
+        networkdiagnostic_topology_data = fetch_network_diag_topology(
+            extaddr_map, thread_network_info, expand_children=args.expand_children
+        )
 
-    # print the topology in tree format to console
-    print_network_diag_topology(networkdiagnostic_topology_data)
+        # print the topology in tree format to console
+        print_network_diag_topology(networkdiagnostic_topology_data)
 
-    # save the topology as JSON to file
-    save_json_filename = data_file_path(
-        "td-otbr-cli-networkdiag-fetch-all.json", td_data_dir
-    )
-    save_topology_to_json_list(
-        networkdiagnostic_topology_data, save_json_filename
-    )
+        # save the topology as JSON to file
+        save_json_filename = data_file_path(
+            "td-otbr-cli-networkdiag-fetch-all.json", td_data_dir
+        )
+        save_topology_to_json_list(
+            networkdiagnostic_topology_data, save_json_filename
+        )
 
-    # Print the raw topology dictionary as JSON to console for debugging
-    logging.debug("Raw topology data as JSON:\n%s", json.dumps(
-        networkdiagnostic_topology_data, indent=4))
+        # Print the raw topology dictionary as JSON to console for debugging
+        logging.debug("Raw topology data as JSON:\n%s", json.dumps(
+            networkdiagnostic_topology_data, indent=4))
+        return 0
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        logging.error(f"Invalid payload while collecting networkdiag-topology: {exc}")
+        return 5
+    except Exception as exc:
+        logging.error(f"Runtime failure while collecting networkdiag-topology: {exc}")
+        return 3
 
 
 if __name__ == "__main__":

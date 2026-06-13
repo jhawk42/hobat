@@ -254,6 +254,18 @@ class TestDispatchOtbrCli(unittest.TestCase):
         m.assert_called_once_with(["-cno"])
         self.assertEqual(rc, 0)
 
+    def test_router_table_none_return_keeps_compat_success(self):
+        with patch.object(td_cli.otbr_cli_router_table, "main", return_value=None) as m:
+            rc = self._dispatch(["otbr-cli", "router-table"])
+        m.assert_called_once_with([])
+        self.assertEqual(rc, 0)
+
+    def test_router_table_non_int_return_is_internal_error(self):
+        with patch.object(td_cli.otbr_cli_router_table, "main", return_value="bad") as m:
+            rc = self._dispatch(["otbr-cli", "router-table"])
+        m.assert_called_once_with([])
+        self.assertEqual(rc, 1)
+
 
 class TestDispatchOtherCommands(unittest.TestCase):
     def _dispatch(self, argv: list[str]) -> int:

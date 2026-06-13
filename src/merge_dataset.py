@@ -17,7 +17,13 @@ from extaddr_device_label_map import (
     load_extaddr_device_label_map_flexible,
 )
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
-from util_data import resolve_data_dir, save_json_atomic
+from util_data import (
+    load_optional_input,
+    require_existing_input_file,
+    resolve_data_dir,
+    save_json_atomic,
+)
+from util_data import TDRequiredInputMissingError
 
 
 PRIORITY_FIELDS = [
@@ -1598,77 +1604,179 @@ def main(argv: Sequence[str] | None = None) -> int:
     include_files = parse_file_list_args(args.include_files)
     exclude_files = parse_file_list_args(args.exclude_files)
 
-    input_files = resolve_input_files(
-        DEFAULT_INPUT_FILES, include_files, exclude_files)
+    try:
+        input_files = resolve_input_files(
+            DEFAULT_INPUT_FILES, include_files, exclude_files)
 
-    for filename in input_files:
-        if not (base_dir / filename).is_file():
-            raise FileNotFoundError(
-                f"Input file not found: {base_dir / filename}")
-
-    extaddr_map_path = base_dir / args.extaddr_map_file
-    if not extaddr_map_path.is_file():
-        raise FileNotFoundError(
-            f"Reference file not found: {extaddr_map_path}")
-    device_label_map = load_extaddr_device_label_map_flexible(
-        str(extaddr_map_path),
-        extaddr_aliases=EXTADDR_FIELD_ALIASES,
-    )
-
-    dataset = load_json(base_dir / args.dataset_file)
-    omr_prefix = dataset.get("prefix_omr_ipv6addr_prefix", "")
-    if not isinstance(omr_prefix, str) or not omr_prefix:
-        raise ValueError(
-            "Missing or invalid prefix_omr_ipv6addr_prefix in dataset file."
+        extaddr_map_path = base_dir / args.extaddr_map_file
+        extaddr_map_result = load_optional_input(
+            extaddr_map_path,
+            loader=lambda path: load_extaddr_device_label_map_flexible(
+                str(path),
+                extaddr_aliases=EXTADDR_FIELD_ALIASES,
+            ),
+            default_value={},
+            command_path="merge-dataset",
+            data_dir=base_dir,
+            logger=logging.getLogger(__name__),
+            classification="optional",
+            fallback_action="continue fallback=empty-map",
         )
+        device_label_map = extaddr_map_result.value
 
-    merged_records, report = build_merged_records(
-        base_dir,
-        omr_prefix,
-        input_files,
-        device_label_map,
-    )
-    report["reference_extaddr_map_file"] = args.extaddr_map_file
-    report["reference_extaddr_map_entries"] = len(device_label_map)
+        dataset_path = base_dir / args.dataset_file
+        dataset_result = load_optional_input(
+            dataset_path,
+            loader=lambda path: load_json(path),
+            default_value={},
+            command_path="merge-dataset",
+            data_dir=base_dir,
+            logger=logging.getLogger(__name__),
+            classification="optional",
+            fallback_action="continue fallback=empty-dataset",
+        )
+        dataset = dataset_result.value
+        omr_prefix = ""
+        if isinstance(dataset, dict):
+            omr_prefix_value = dataset.get("prefix_omr_ipv6addr_prefix", "")
+            if isinstance(omr_prefix_value, str):
+                omr_prefix = omr_prefix_value
 
-    if args.merge_strategy == "none":
-        # Pass-through: collect all records without identity matching.
-        passthrough_records: list[dict[str, Any]] = []
+        available_input_files: list[str] = []
+        skipped_input_files: list[dict[str, str]] = []
+
+        include_file_set = set(include_files)
         for filename in input_files:
-            data = load_json(base_dir / filename)
-            records = extract_records(filename, data)
-            for raw_record in records:
-                record = normalize_identifiers(raw_record, omr_prefix)
-                record.setdefault("_source_files", [filename])
-                passthrough_records.append(record)
-        merged_records = passthrough_records
-        report["merge_strategy"] = "none"
-        report["passthrough_record_count"] = len(passthrough_records)
-        logging.info(
-            f"merge-strategy=none: collected {len(passthrough_records)} "
-            "records without merging."
+            source_path = base_dir / filename
+            if source_path.exists():
+                available_input_files.append(filename)
+                continue
+
+            # Explicitly included files are treated as required.
+            if filename in include_file_set:
+                raise TDRequiredInputMissingError(
+                    command_path="merge-dataset",
+                    data_dir=base_dir,
+                    missing_file=source_path,
+                    classification="required",
+                    action="fail code=4",
+                )
+
+            warning = (
+                f"merge-dataset: skipping missing optional input file {source_path}"
+            )
+            logging.warning(warning)
+            skipped_input_files.append(
+                {
+                    "file": filename,
+                    "reason": "missing",
+                }
+            )
+
+        if not available_input_files:
+            raise TDRequiredInputMissingError(
+                command_path="merge-dataset",
+                data_dir=base_dir,
+                missing_file=base_dir / "<all-input-files>",
+                classification="required-seed",
+                action="fail code=4",
+            )
+
+        merged_records, report = build_merged_records(
+            base_dir,
+            omr_prefix,
+            available_input_files,
+            device_label_map,
         )
-    else:
-        report["merge_strategy"] = "merge"
+        report["input_files"] = input_files
+        report["loaded_input_files"] = available_input_files
+        report["skipped_input_files"] = skipped_input_files
+        report["reference_extaddr_map_file"] = args.extaddr_map_file
+        report["reference_extaddr_map_entries"] = len(device_label_map)
+        report["optional_reference_files"] = [
+            {
+                "file": args.extaddr_map_file,
+                "loaded": not extaddr_map_result.used_fallback,
+                "fallback": extaddr_map_result.used_fallback,
+            },
+            {
+                "file": args.dataset_file,
+                "loaded": not dataset_result.used_fallback,
+                "fallback": dataset_result.used_fallback,
+            }
+        ]
 
-    output_path = base_dir / args.output
-    save_json_atomic(merged_records, output_path, indent=2, add_trailing_newline=True)
-    logging.debug("Saved merged records into %s as JSON:\n%s",
-            output_path, json.dumps(merged_records, indent=2))
-    if args.report_file:
-        report_path = base_dir / args.report_file
-        save_json_atomic(report, report_path, indent=2, add_trailing_newline=True)
-        logging.info(f"Wrote merge report to {report_path}")
+        identity_seed_record_count = 0
+        for node in merged_records:
+            if not isinstance(node, dict):
+                continue
+            extaddr = get_canonical_extaddr(node)
+            rloc16 = normalize_identifier_text(node.get("rloc16"))
+            omr_addr = get_canonical_omr(node)
+            if (extaddr and not is_placeholder_extaddr(extaddr)) or rloc16 or omr_addr:
+                identity_seed_record_count += 1
 
-    logging.info(
-        f"Wrote {len(merged_records)} merged records to {output_path}")
-    logging.info(
-        "Validation summary: "
-        f"multi_source_nodes={report['multi_source_nodes_total']}, "
-        f"single_source_nodes={report['single_source_nodes_total']}, "
-        f"identity_collisions={report['identity_collision_count']}"
-    )
-    return 0
+        required_seed_status = {
+            "dataset_file": args.dataset_file,
+            "loaded_input_file_count": len(available_input_files),
+            "identity_seed_record_count": identity_seed_record_count,
+            "viable": identity_seed_record_count > 0,
+        }
+        report["required_seed_status"] = required_seed_status
+
+        if args.merge_strategy == "none":
+            # Pass-through: collect all records without identity matching.
+            passthrough_records: list[dict[str, Any]] = []
+            for filename in available_input_files:
+                data = load_json(base_dir / filename)
+                records = extract_records(filename, data)
+                for raw_record in records:
+                    record = normalize_identifiers(raw_record, omr_prefix)
+                    record.setdefault("_source_files", [filename])
+                    passthrough_records.append(record)
+            merged_records = passthrough_records
+            report["merge_strategy"] = "none"
+            report["passthrough_record_count"] = len(passthrough_records)
+            logging.info(
+                f"merge-strategy=none: collected {len(passthrough_records)} "
+                "records without merging."
+            )
+        else:
+            report["merge_strategy"] = "merge"
+
+        output_path = base_dir / args.output
+        save_json_atomic(merged_records, output_path, indent=2, add_trailing_newline=True)
+        logging.debug("Saved merged records into %s as JSON:\n%s",
+                output_path, json.dumps(merged_records, indent=2))
+        if args.report_file:
+            report_path = base_dir / args.report_file
+            save_json_atomic(report, report_path, indent=2, add_trailing_newline=True)
+            logging.info(f"Wrote merge report to {report_path}")
+
+        logging.info(
+            f"Wrote {len(merged_records)} merged records to {output_path}")
+        logging.info(
+            "Validation summary: "
+            f"multi_source_nodes={report['multi_source_nodes_total']}, "
+            f"single_source_nodes={report['single_source_nodes_total']}, "
+            f"identity_collisions={report['identity_collision_count']}"
+        )
+
+        if not required_seed_status["viable"]:
+            logging.error(
+                "merge-dataset: no viable seed identities found in loaded input files"
+            )
+            return 3
+        return 0
+    except TDRequiredInputMissingError as exc:
+        logging.error(str(exc))
+        return 4
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        logging.error(f"merge-dataset invalid payload: {exc}")
+        return 5
+    except Exception as exc:
+        logging.error(f"merge-dataset runtime failure: {exc}")
+        return 3
 
 
 if __name__ == "__main__":

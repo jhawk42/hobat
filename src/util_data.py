@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, TypeVar
 
 from td_const import (
     TD_DATA_DIR_DOCKER_DEFAULT,
@@ -31,6 +31,47 @@ class TDDataDirResolution:
     path: Path
     source: TDDataDirSource
     created: bool = False
+
+
+class TDRequiredInputMissingError(FileNotFoundError):
+    """Raised when a command requires a local input file that is missing."""
+
+    def __init__(
+        self,
+        *,
+        command_path: str,
+        data_dir: Path,
+        missing_file: Path,
+        classification: str = "required",
+        action: str = "fail code=4",
+    ) -> None:
+        self.command_path = command_path
+        self.data_dir = data_dir
+        self.missing_file = missing_file
+        self.classification = classification
+        self.action = action
+        super().__init__(
+            format_missing_file_message(
+                command_path=command_path,
+                data_dir=data_dir,
+                missing_file=missing_file,
+                classification=classification,
+                action=action,
+            )
+        )
+
+
+@dataclass(frozen=True)
+class OptionalInputLoadResult:
+    """Result wrapper for optional input loading with fallback metadata."""
+
+    value: Any
+    used_fallback: bool
+    warning: str | None
+    input_path: Path | None
+
+
+T = TypeVar("T")
 
 
 def _normalize_path(
@@ -182,6 +223,121 @@ def resolve_data_file_path(file_path: str, td_data_dir: Path) -> Path:
     if value.is_absolute():
         return value.resolve()
     return (td_data_dir / value).resolve()
+
+
+def format_missing_file_message(
+    *,
+    command_path: str,
+    data_dir: Path,
+    missing_file: Path,
+    classification: str,
+    action: str,
+) -> str:
+    """Render a standard missing-file message for logs and exceptions."""
+    return (
+        "input file not found: "
+        f"command_path={command_path} "
+        f"data_dir={data_dir} "
+        f"missing_file={missing_file} "
+        f"classification={classification} "
+        f"action={action}"
+    )
+
+
+def require_existing_input_file(
+    path: str | os.PathLike[str],
+    *,
+    command_path: str,
+    data_dir: Path,
+    classification: str = "required",
+    action: str = "fail code=4",
+) -> Path:
+    """Validate that a required input file exists and is a regular file."""
+    input_path = Path(path)
+    if input_path.is_file():
+        return input_path
+
+    raise TDRequiredInputMissingError(
+        command_path=command_path,
+        data_dir=data_dir,
+        missing_file=input_path,
+        classification=classification,
+        action=action,
+    )
+
+
+def load_optional_input(
+    input_path: str | os.PathLike[str] | None,
+    *,
+    loader: Callable[[Path], T],
+    default_value: T,
+    command_path: str,
+    data_dir: Path,
+    logger: logging.Logger | None = None,
+    classification: str = "optional",
+    fallback_action: str = "continue fallback=default",
+) -> OptionalInputLoadResult:
+    """Load optional input via loader; fallback to default with warning metadata."""
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    if input_path is None:
+        warning = (
+            f"command_path={command_path} "
+            f"data_dir={data_dir} "
+            f"missing_file=<none> "
+            f"classification={classification} "
+            f"action={fallback_action}"
+        )
+        logger.warning(warning)
+        return OptionalInputLoadResult(
+            value=default_value,
+            used_fallback=True,
+            warning=warning,
+            input_path=None,
+        )
+
+    resolved = Path(input_path)
+    if not resolved.is_file():
+        warning = format_missing_file_message(
+            command_path=command_path,
+            data_dir=data_dir,
+            missing_file=resolved,
+            classification=classification,
+            action=fallback_action,
+        )
+        logger.warning(warning)
+        return OptionalInputLoadResult(
+            value=default_value,
+            used_fallback=True,
+            warning=warning,
+            input_path=resolved,
+        )
+
+    try:
+        loaded = loader(resolved)
+        return OptionalInputLoadResult(
+            value=loaded,
+            used_fallback=False,
+            warning=None,
+            input_path=resolved,
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        warning = (
+            f"command_path={command_path} "
+            f"data_dir={data_dir} "
+            f"missing_file={resolved} "
+            f"classification={classification} "
+            f"action={fallback_action} "
+            f"reason={type(exc).__name__}: {exc}"
+        )
+        logger.warning(warning)
+        return OptionalInputLoadResult(
+            value=default_value,
+            used_fallback=True,
+            warning=warning,
+            input_path=resolved,
+        )
 
 
 def save_json_atomic(data, filename: str | os.PathLike, indent: int = 4, add_trailing_newline: bool = False) -> None:
