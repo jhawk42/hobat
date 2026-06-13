@@ -1,15 +1,15 @@
 import {
+  LINK_FILTER_ALL,
+  LINK_FILTER_EVE_NATIVE,
+  LINK_FILTER_EVE_ENHANCED,
   LINK_FILTER_DEFAULT,
   LINK_FILTER_DEFAULT_PLUS_NEIGHBORS,
-  LINK_FILTER_OTBR_REST_API,
-  LINK_FILTER_EVE_ENHANCED,
-  LINK_FILTER_EVE_NATIVE,
-  LINK_FILTER_ALL,
+  LINK_FILTER_ROUTES,
+  LINK_FILTER_PARENT_CHILD,
+  LINK_FILTER_ROUTER_NEIGHBOR,
   LINK_FILTER_LQ_HIGH,
   LINK_FILTER_LQ_MEDIUM,
   LINK_FILTER_LQ_LOW,
-  LINK_FILTER_PARENT_CHILD,
-  LINK_FILTER_OTBR_NEIGHBOR,
   LINK_FILTER_LQ_NONE,
   EDGE_CATEGORY_DEFAULT_CHILDREN,
   EDGE_CATEGORY_DEFAULT_1,
@@ -47,13 +47,32 @@ export function edgeMatchesLinkFilter(edge, mode) {
   const cats = normalizeLinkCategories(edge.linkCategories);
   if (cats.length === 0) return mode === LINK_FILTER_ALL;
   const hasAny = (...wanted) => wanted.some((c) => cats.includes(c));
+  
+   if (mode === LINK_FILTER_ALL) return true;
+   if (mode === LINK_FILTER_EVE_ENHANCED)
+    return hasAny(EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD);
+  if (mode === LINK_FILTER_EVE_NATIVE)
+    return hasAny(
+      EDGE_CATEGORY_EVE_NATIVE_ROUTE,
+      EDGE_CATEGORY_EVE_NATIVE_CHILD,
+    );
+  if (mode === LINK_FILTER_PARENT_CHILD) return edge.isParentChild === true;
+  /*
+      EDGE_CATEGORY_DEFAULT_CHILDREN,
+      EDGE_CATEGORY_OTBR_CHILD,
+      EDGE_CATEGORY_EVE_CHILD,
+      EDGE_CATEGORY_EVE_NATIVE_CHILD,  
+  */  
   if (mode === LINK_FILTER_DEFAULT) {
     return hasAny(
       EDGE_CATEGORY_DEFAULT_CHILDREN,
+      EDGE_CATEGORY_OTBR_CHILD,      
+      EDGE_CATEGORY_EVE_CHILD,
+      EDGE_CATEGORY_EVE_NATIVE_CHILD,
       EDGE_CATEGORY_DEFAULT_1,
       EDGE_CATEGORY_DEFAULT_2,
       EDGE_CATEGORY_DEFAULT_3,
-      EDGE_CATEGORY_OTBR_CHILD,
+      EDGE_CATEGORY_OTBR_ROUTE,
     );
   }
   if (mode === LINK_FILTER_DEFAULT_PLUS_NEIGHBORS) {
@@ -66,26 +85,24 @@ export function edgeMatchesLinkFilter(edge, mode) {
       EDGE_CATEGORY_ROUTER_NEIGHBOR,
     );
   }
-  if (mode === LINK_FILTER_OTBR_REST_API)
-    return hasAny(EDGE_CATEGORY_OTBR_ROUTE, EDGE_CATEGORY_OTBR_CHILD);
-  if (mode === LINK_FILTER_EVE_ENHANCED)
-    return hasAny(EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD);
-  if (mode === LINK_FILTER_EVE_NATIVE)
+  if (mode === LINK_FILTER_ROUTES)
     return hasAny(
-      EDGE_CATEGORY_EVE_NATIVE_ROUTE,
-      EDGE_CATEGORY_EVE_NATIVE_CHILD,
+      EDGE_CATEGORY_DEFAULT_1,
+      EDGE_CATEGORY_DEFAULT_2,
+      EDGE_CATEGORY_DEFAULT_3,
+      EDGE_CATEGORY_OTBR_ROUTE,
     );
-  if (mode === LINK_FILTER_ALL) return true;
+
+  if (mode === LINK_FILTER_ROUTER_NEIGHBOR)
+    return hasAny(
+      EDGE_CATEGORY_OTBR_ROUTE,
+      EDGE_CATEGORY_ROUTER_NEIGHBOR,
+    );
+
   if (mode === LINK_FILTER_LQ_HIGH) return (edge.lqLevel ?? 0) === 3;
   if (mode === LINK_FILTER_LQ_MEDIUM) return (edge.lqLevel ?? 0) === 2;
   if (mode === LINK_FILTER_LQ_LOW) return (edge.lqLevel ?? 0) === 1;
-  if (mode === LINK_FILTER_PARENT_CHILD) return edge.isParentChild === true;
-  if (mode === LINK_FILTER_OTBR_NEIGHBOR)
-    return hasAny(
-      EDGE_CATEGORY_OTBR_ROUTE,
-      EDGE_CATEGORY_OTBR_CHILD,
-      EDGE_CATEGORY_ROUTER_NEIGHBOR,
-    );
+ 
   if (mode === LINK_FILTER_LQ_NONE) return !edge.lqLevel || edge.lqLevel === 0;
   return false;
 }

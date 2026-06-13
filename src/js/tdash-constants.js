@@ -113,18 +113,17 @@ export const FIELD_ALIASES = Object.freeze({
 
 // ── Link filter constants ─────────────────────────────────────────────────────
 
-export const LINK_FILTER_DEFAULT = "default_links";
-export const LINK_FILTER_DEFAULT_PLUS_NEIGHBORS =
-  "default_plus_router_neighbors";
-export const LINK_FILTER_OTBR_REST_API = "otbr_rest_api";
-export const LINK_FILTER_EVE_ENHANCED = "eve_enhanced_routes_children";
-export const LINK_FILTER_EVE_NATIVE = "eve_native_routes_children";
 export const LINK_FILTER_ALL = "all_links";
+export const LINK_FILTER_EVE_NATIVE = "eve_native_routes_children";
+export const LINK_FILTER_EVE_ENHANCED = "eve_enhanced_routes_children";
+export const LINK_FILTER_DEFAULT = "default_links";
+export const LINK_FILTER_DEFAULT_PLUS_NEIGHBORS = "default_plus_router_neighbors";
+export const LINK_FILTER_ROUTES = "otbr_routes";
+export const LINK_FILTER_PARENT_CHILD = "lq_parent_child";
+export const LINK_FILTER_ROUTER_NEIGHBOR = "lq_otbr_neighbor";
 export const LINK_FILTER_LQ_HIGH = "lq_high";
 export const LINK_FILTER_LQ_MEDIUM = "lq_medium";
 export const LINK_FILTER_LQ_LOW = "lq_low";
-export const LINK_FILTER_PARENT_CHILD = "lq_parent_child";
-export const LINK_FILTER_OTBR_NEIGHBOR = "lq_otbr_neighbor";
 export const LINK_FILTER_LQ_NONE = "lq_none";
 
 // ── Edge category constants ───────────────────────────────────────────────────
@@ -299,51 +298,7 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
     alwaysShow: true, 
     group: null 
   },
-  {
-    value: LINK_FILTER_DEFAULT,
-    label: "Standard",
-    title: "Shows parent-child relationships and link quality indicators",
-    group: null,
-    requiredEdgeCategories: [
-      EDGE_CATEGORY_DEFAULT_CHILDREN,
-      EDGE_CATEGORY_DEFAULT_1,
-      EDGE_CATEGORY_DEFAULT_2,
-      EDGE_CATEGORY_DEFAULT_3,
-      EDGE_CATEGORY_OTBR_CHILD,
-    ],
-  },
-  {
-    value: LINK_FILTER_OTBR_REST_API,
-    label: "Standard (restapi)",
-    title: "OTBR REST API: Shows parent-child relationships and link quality",
-    group: null,
-    requiredEdgeCategories: [
-      EDGE_CATEGORY_OTBR_ROUTE,
-      EDGE_CATEGORY_OTBR_CHILD,
-    ],
-  },
-
-  // ── Link Type filters ─────────────────────────────────────────────────
-  {
-    value: LINK_FILTER_PARENT_CHILD,
-    label: "Parent\u2013Child",
-    group: "Link Types",
-    requiredEdgeCategories: [
-      EDGE_CATEGORY_DEFAULT_CHILDREN,
-      EDGE_CATEGORY_EVE_CHILD,
-      EDGE_CATEGORY_EVE_NATIVE_CHILD,
-      EDGE_CATEGORY_OTBR_CHILD,
-    ],
-  },
-  {
-    value: LINK_FILTER_OTBR_NEIGHBOR,
-    label: "Router Neighbors",
-    group: "Link Types",
-    requiredEdgeCategories: [
-      EDGE_CATEGORY_OTBR_ROUTE,
-      EDGE_CATEGORY_ROUTER_NEIGHBOR,
-    ],
-  },
+  /*
   {
     value: LINK_FILTER_EVE_NATIVE,
     label: "Eve Native",
@@ -361,6 +316,58 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
     group: null,
     requiredEdgeCategories: [EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD],
   },
+  {
+    value: LINK_FILTER_DEFAULT,
+    label: "Routes & Parent\u2013Child",
+    title: "Shows parent-child relationships and routes w/link quality indicators",
+    group: null,
+    requiredEdgeCategories: [
+      EDGE_CATEGORY_DEFAULT_CHILDREN,
+      EDGE_CATEGORY_OTBR_CHILD,      
+      EDGE_CATEGORY_EVE_CHILD,
+      EDGE_CATEGORY_EVE_NATIVE_CHILD,
+      EDGE_CATEGORY_DEFAULT_1,
+      EDGE_CATEGORY_DEFAULT_2,
+      EDGE_CATEGORY_DEFAULT_3,
+      EDGE_CATEGORY_OTBR_ROUTE,
+    ],
+  },
+  */
+
+  // ── Link Type filters ─────────────────────────────────────────────────
+   {
+    value: LINK_FILTER_PARENT_CHILD,
+    label: "Parent\u2013Child",
+    group: "Link Types",
+    requiredEdgeCategories: [
+      EDGE_CATEGORY_DEFAULT_CHILDREN,
+      EDGE_CATEGORY_OTBR_CHILD,
+      EDGE_CATEGORY_EVE_CHILD,
+      EDGE_CATEGORY_EVE_NATIVE_CHILD,
+    ],
+  },
+  {
+    value: LINK_FILTER_ROUTES,
+    label: "Routes",
+    title: "Shows Routes",
+    group: "Link Types",
+    requiredEdgeCategories: [
+      EDGE_CATEGORY_OTBR_ROUTE,
+      EDGE_CATEGORY_DEFAULT_1,
+      EDGE_CATEGORY_DEFAULT_2,
+      EDGE_CATEGORY_DEFAULT_3,
+    ],
+  },  
+  {
+    value: LINK_FILTER_ROUTER_NEIGHBOR,
+    label: "Router Neighbors",
+    group: "Link Types",
+    requiredEdgeCategories: [
+      EDGE_CATEGORY_OTBR_ROUTE,
+      EDGE_CATEGORY_ROUTER_NEIGHBOR,
+    ],
+  },
+
   // ── Link Quality filters ──────────────────────────────────────────────
   {
     value: LINK_FILTER_LQ_HIGH,

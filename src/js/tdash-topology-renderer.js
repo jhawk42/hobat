@@ -438,11 +438,11 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
       forcedVisibleLinkCount = 0,
     } = counts;
     const nodeFilterLabel =
-      nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
+      nodeFilterEl?.options[nodeFilterEl.selectedIndex]?.text || "All";
     const linkFilterLabel =
-      linkFilterEl.options[linkFilterEl.selectedIndex].text;
+      linkFilterEl?.options[linkFilterEl.selectedIndex]?.text || "All";
     const diagFilterLabel =
-      diagnosticFilterEl.options[diagnosticFilterEl.selectedIndex].text;
+      diagnosticFilterEl?.options[diagnosticFilterEl.selectedIndex]?.text || "None";
     const neighborSuffix = isRouterNeighborDiagnosticMode(
       diagnosticFilterEl.value,
     )

@@ -54,13 +54,32 @@ function populateDatasetSelect(sourceFilter = null) {
     ? DATASET_REGISTRY.filter((entry) => entry.source === sourceFilter)
     : DATASET_REGISTRY;
 
-  filteredRegistry.forEach((entry) => {
+  let currentGroupLabel = undefined;
+  let currentOptgroup = null;
+
+  for (let i = 0; i < filteredRegistry.length; i++) {
+    const entry = filteredRegistry[i];
+
+    // Create new optgroup when group changes
+    if (entry.group !== currentGroupLabel) {
+      currentGroupLabel = entry.group;
+      if (entry.group != null) {
+        currentOptgroup = document.createElement("optgroup");
+        currentOptgroup.label = entry.group;
+        sel.appendChild(currentOptgroup);
+      } else {
+        currentOptgroup = null;
+      }
+    }
+
     const opt = document.createElement("option");
     opt.value = entry.value;
     opt.textContent = entry.label;
     opt.title = entry.label; // Use the label as the tooltip content
-    sel.appendChild(opt);
-  });
+
+    // Append to optgroup if one exists, otherwise to select element
+    (currentOptgroup ?? sel).appendChild(opt);
+  }
 }
 
 // ── Render dispatcher ────────────────────────────────────────────────────────
