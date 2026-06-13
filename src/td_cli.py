@@ -752,12 +752,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("")
     # log args at debug level
     logging.debug("Parsed arguments: %s", args)
-    # log command='otbr-cli', cli_command='router-table')
+    # Build a flattened sub-command string from parsed namespace fields so
+    # nested commands (for example: networkdiag multicast-network) are visible.
+    subcommand_parts: list[str] = []
+    for attr in (
+        "cli_command",
+        "meshdiag_command",
+        "networkdiag_command",
+        "restapi_command",
+    ):
+        value = getattr(args, attr, None)
+        if value:
+            subcommand_parts.append(str(value))
+    subcommand_text = " ".join(subcommand_parts) if subcommand_parts else ""
+
+    # log command, sub-command path, and extras[]
     print(
-        f"Command: {getattr(args, 'command', None)}, sub-command: {getattr(args, 'cli_command', None)}"
+        f"Command: {getattr(args, 'command', None)}, sub-command: {subcommand_text}"
     )
     # dispatch command
-    rc = dispatch(args, extras, parser)
+    try:
+        rc = dispatch(args, extras, parser)
+    except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr)
+        return 130
 
     # log complete message
     logging.info("complete.")
