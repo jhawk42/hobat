@@ -1356,7 +1356,7 @@ export function adaptOtbrRestApi(fileMap) {
         || childRloc16
         || `${fromId}-child-${ci + 1}`;
       if (!nodeMap.has(childId)) {
-        upsertOtbrRestApiNode(childId, { rloc16: childRloc16, id: childId },
+        upsertOtbrRestApiNode(childId, { rloc16: childRloc16, id: childId, mode: child.mode },
           { shape: 'ellipse', color: NODE_COLORS.child });
       }
       const childNodeEnriched = nodeMap.get(childId);
@@ -1389,6 +1389,7 @@ export function adaptOtbrRestApi(fileMap) {
           rloc16: childRloc16,
           extAddress: childExtaddr,
           role: child.deviceTypeFTD === true ? 'router' : 'child',
+          mode: { deviceTypeFTD: child.deviceTypeFTD },
         }, { shape: 'ellipse', color: NODE_COLORS.child });
       }
       if (childRloc16) rloc16ToNodeId.set(childRloc16.toLowerCase(), childId);
