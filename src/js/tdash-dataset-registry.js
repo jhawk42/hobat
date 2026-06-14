@@ -1,3 +1,17 @@
+
+// ── Datasource Registry ──────────────────────────────────────────────────────────
+
+// Keep this list in sync with DATASET_REGISTRY source values.
+export const DATASOURCE_REGISTRY = [
+  { value: "otbr-cli", label: "otbr-cli" },
+  { value: "otbr-restapi", label: "otbr-restapi" },
+  { value: "eve", label: "eve" },
+  { value: "mdns", label: "mdns" },
+  { value: "merged", label: "multi-source" },
+  { value: "system", label: "system" },
+];
+
+
 // ── Dataset Registry ──────────────────────────────────────────────────────────
 //
 // Each entry describes one selectable dataset.
@@ -40,7 +54,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "networkdiag_multicast_network_only",
-    label: "Device topology [ftd,network multicast ndmc]",
+    label: "Device topology [network multicast FTD ndmc]",
     group: "Fast",
     files: ["td-otbr-cli-networkdiag-multicast-network.json"],
     mergeStrategy: "none",
@@ -54,8 +68,8 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast",
-    label: "Device & Mesh topology [ftd,md]",
-    group: "Fast",
+    label: "Device & Mesh topology [FTD ndmc,md]",
+    group: "Versatile: more time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json"
@@ -71,8 +85,8 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast_mdns",
-    label: "Device & Mesh topology w/mdns [ftd,md,ndmc,mdns] ",
-    group: "Versatile, more time",
+    label: "Device & Mesh topology w/mdns [md,FTD ndmc,mdns] ",
+    group: "Versatile: more time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json",
@@ -88,8 +102,8 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast_mdns",
-    label: "Device & Mesh topology [md,ndmc,mdn,mdc,mdns] ⏱️",
-    group: "Versatile, more time",
+    label: "Device & Mesh topology neighbors, children w/mdns [md,FTD ndmc,mdn,mdc,mdns] ⏱️",
+    group: "Versatile: more time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-multicast-network.json",
@@ -104,12 +118,38 @@ export const DATASET_REGISTRY = [
     estimateActionCostSecs: 270
   },  
 
+  {
+    source: "otbr-cli",
+    value: "router_neighbortables",
+    label: "Meshdiag neighbors (mdn)⏱️",
+    group: "Versatile: more time",
+    files: ["td-otbr-cli-meshdiag-router-neighbortables.json"],
+    mergeStrategy: "none",
+    topologyMode: "merged-detailed",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 90
+  },
+  {
+    source: "otbr-cli",
+    value: "router_childtables",
+    label: "Meshdiag children (mdc)⏱️",
+    group: "Versatile: more time",
+    files: ["td-otbr-cli-meshdiag-router-childtables.json"],
+    mergeStrategy: "none",
+    topologyMode: "merged-detailed",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 90
+  },
+
+
   // ── Single-file simple datasets (otbr-cli) ───
   {
     source: "otbr-cli",
     value: "networkdiag_only",
-    label: "Device (all) most detailed topology [network fetch all (ndfa)]⏱️",
-    group: "Detailed, most time",
+    label: "Device topology all [network fetch all (ndfa)]⏱️",
+    group: "Detailed: most time",
     files: ["td-otbr-cli-networkdiag-fetch-all.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
@@ -122,8 +162,8 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_fetch_all_mdns",
-    label: "Device (all) most detailed topology [md, ndfa, mdns] ⏱️",
-    group: "Detailed, most time",
+    label: "Device topology all w/mdns [md, ndfa, mdns] ⏱️",
+    group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-fetch-all.json",
@@ -139,8 +179,8 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_poll_all_mdns",
-    label: "Device (all) most detailed topology [md, ndfa, mdn, mdc, mdns] ⏱️",
-    group: "Detailed, most time",
+    label: "Device topology all neighbors, children w/mdns [md, ndfa, mdn, mdc, mdns] ⏱️",
+    group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
       "td-otbr-cli-networkdiag-fetch-all.json",
@@ -153,31 +193,6 @@ export const DATASET_REGISTRY = [
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 900
-  },
-
-  {
-    source: "otbr-cli",
-    value: "router_neighbortables",
-    label: "Meshdiag neighbors (mdn)⏱️",
-    group: "Detailed, most time",
-    files: ["td-otbr-cli-meshdiag-router-neighbortables.json"],
-    mergeStrategy: "none",
-    topologyMode: "merged-detailed",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 90
-  },
-  {
-    source: "otbr-cli",
-    value: "router_childtables",
-    label: "Meshdiag children (mdc)⏱️",
-    group: "Detailed, most time",
-    files: ["td-otbr-cli-meshdiag-router-childtables.json"],
-    mergeStrategy: "none",
-    topologyMode: "merged-detailed",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 90
   },
 
   // ── Single-file simple datasets (otbr-cli) ───
@@ -195,21 +210,7 @@ export const DATASET_REGISTRY = [
   },
 
   // otbr-restapi
-  // ── Single-file simple datasets ───
-  {
-    source: "otbr-restapi",
-    value: "restapi_diagnostics_list",
-    label: "Diag topology [diagnostics list dial]",
-    group: "Fast",
-    files: ["td-otbr-restapi-diagnostics-list.json"],
-    mergeStrategy: "none",
-    topologyMode: "otbr_restapi",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 1
-  },
-
-  // ── Multi-file topology datasets (otbr-restapi) ────────────
+   // ── Multi-file topology datasets (otbr-restapi) ────────────
   {
     source: "otbr-restapi",
     value: "restapi_devices_diagnostics_list",
@@ -224,7 +225,20 @@ export const DATASET_REGISTRY = [
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 2
-  },   
+  },  
+  // ── Single-file simple datasets ───
+  {
+    source: "otbr-restapi",
+    value: "restapi_diagnostics_list",
+    label: "Diag topology [diagnostics list dial]",
+    group: "Fast",
+    files: ["td-otbr-restapi-diagnostics-list.json"],
+    mergeStrategy: "none",
+    topologyMode: "otbr_restapi",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1
+  },
 
   // ── Single-file simple datasets ───
   {
@@ -245,7 +259,7 @@ export const DATASET_REGISTRY = [
     source: "otbr-restapi",
     value: "restapi_devices_fetch",
     label: "Devices fetch (devf)",
-    group: "Fast",
+    group: "Versatile: more time",
     files: ["td-otbr-restapi-devices-fetch.json"],
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
@@ -259,7 +273,7 @@ export const DATASET_REGISTRY = [
     source: "otbr-restapi",
     value: "restapi_devices_fetch_diagnostics_fetch_all",
     label: "Devices & Diag Topology fetch: [devf,diagfa]⏱️",
-    group: "Versatile, more time",
+    group: "Versatile: more time",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
       "td-otbr-restapi-diagnostics-fetch-all.json"
@@ -276,7 +290,7 @@ export const DATASET_REGISTRY = [
     source: "otbr-restapi",
     value: "restapi_devices_fetch_diagnostics_fetch_mesh-diagnostics-fetch_all",
     label: "Devices, Diag & Mesh Topology: [devf,diagfa,mdfa]⏱️",
-    group: "Detailed, most time",
+    group: "Detailed: most time",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
       "td-otbr-restapi-diagnostics-fetch-all.json",
@@ -294,7 +308,7 @@ export const DATASET_REGISTRY = [
     source: "otbr-restapi",
     value: "restapi_diagnostics_fetch_all",
     label: "Diag Topology: diagnostics fetch all [diagfa]⏱️",
-    group: "Detailed, most time",
+    group: "Detailed: most time",
     files: ["td-otbr-restapi-diagnostics-fetch-all.json"],
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
@@ -308,7 +322,7 @@ export const DATASET_REGISTRY = [
     source: "otbr-restapi",
     value: "restapi_mesh_diagnostics_fetch_all",
     label: "Mesh Topology: mesh diagnostics fetch all (mdfa)⏱️",
-    group: "Detailed, most time",
+    group: "Detailed: most time",
     files: ["td-otbr-restapi-mesh-diagnostics-fetch-all.json"],
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
@@ -316,51 +330,6 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 600
   },
-
-  /*
-  // ── Multi-file topology datasets (otbr-restapi) ────────────
-  {
-    source: "otbr-restapi",
-    value: "restapi_devices_diagnostics",
-    label: "topo: [dev, diag]",
-    group: "Fast",
-    files: [
-      "td-otbr-restapi-devices.json", 
-      "td-otbr-restapi-diagnostics.json"
-    ],
-    mergeStrategy: "by-identity",
-    topologyMode: "otbr_restapi",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links",
-  },
-
-  // ── Single-file simple datasets ───
-  {
-    source: "otbr-restapi",
-    value: "restapi_devices",
-    label: "topo: [dev]",
-    group: "Fast",
-    files: ["td-otbr-restapi-devices.json"],
-    mergeStrategy: "none",
-    topologyMode: "otbr_restapi",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links"
-  },
-
-  // ── Single-file simple datasets ───
-  {
-    source: "otbr-restapi",
-    value: "restapi_diagnostics",
-    label: "diagnostics (di)",
-    group: "Fast",
-    files: ["td-otbr-restapi-diagnostics.json"],
-    mergeStrategy: "none",
-    topologyMode: "otbr_restapi",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links"
-  },
-  */
- 
   // ── Single-file simple datasets ───
   {
     source: "otbr-restapi",
@@ -385,6 +354,33 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultView: "table",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1
+  },
+
+  // ── Single-file simple dataset ───
+  {
+    source: "eve",
+    value: "eve_native_threadlayout",
+    label: "Eve Thread Network Layout",
+    group: "Native",
+    files: ["Eve Thread Network Layout.evethreadlayout"],
+    mergeStrategy: "none",
+    topologyMode: "eve_native",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1
+  },
+  // ── Single-file simple dataset ───
+  {
+    source: "eve",
+    value: "eve_processed_topology",
+    label: "Eve Thread Network Layout",
+    group: "Processed",
+    files: ["td-eve-topology.json"],
+    mergeStrategy: "none",
+    topologyMode: "eve_enhanced",
+    defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1
   },
@@ -431,40 +427,13 @@ export const DATASET_REGISTRY = [
     source: "mdns",
     value: "mdns_scopes_thread",
     label: "Thread scopes (BR, HAP, Matter)",
-    group: "Versatile, more time",
+    group: "Versatile: more time",
     files: ["td-mdns-scopes-thread.json"],
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultLinkFilter: "all_links",
     defaultView: "table",
     estimateActionCostSecs: 60
-  },
-
-  // ── Single-file simple dataset ───
-  {
-    source: "eve",
-    value: "eve_native_threadlayout",
-    label: "native: Eve Thread Network Layout",
-    group: null,
-    files: ["Eve Thread Network Layout.evethreadlayout"],
-    mergeStrategy: "none",
-    topologyMode: "eve_native",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 1
-  },
-  // ── Single-file simple dataset ───
-  {
-    source: "eve",
-    value: "eve_processed_topology",
-    label: "processed: Eve Thread Network Layout",
-    group: null,
-    files: ["td-eve-topology.json"],
-    mergeStrategy: "none",
-    topologyMode: "eve_enhanced",
-    defaultView: "topology",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 1
   },
 
   // ── Merged (all nodes) ─

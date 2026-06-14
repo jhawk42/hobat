@@ -3,7 +3,7 @@ if ('scrollRestoration' in history) {
   history.scrollRestoration = 'manual';
 }
 
-import { DATASET_REGISTRY } from "./tdash-dataset-registry.js";
+import { DATASET_REGISTRY, DATASOURCE_REGISTRY } from "./tdash-dataset-registry.js";
 import {
   currentDataset,
   loadDataset,
@@ -43,6 +43,23 @@ import {
   populateDiagnosticFilterBySourceWithCapabilities,
 } from "./tdash-filters.js";
 import { parseSearchQuery, filterRowsBySearch } from "./tdash-search.js";
+
+// ── Build datasource <select> ────────────────────────────────────────
+
+function populateDatasourceSelect() {
+  const sel = document.getElementById("datasource-filter");
+  sel.innerHTML = ""; // Clear existing options
+
+  for (let i = 0; i < DATASOURCE_REGISTRY.length; i++) {
+    const entry = DATASOURCE_REGISTRY[i];
+    const opt = document.createElement("option");
+    opt.value = entry.value;
+    opt.textContent = entry.label;
+    opt.title = entry.label;
+    sel.appendChild(opt);
+  }
+}
+
 
 // ── Section 2: Build dataset <select> ────────────────────────────────────────
 
@@ -415,6 +432,7 @@ document.getElementById("diagnostic-source-filter").addEventListener("change", (
 // Register callback to sync physics button state when auto-disabled after stabilization
 setOnPhysicsDisabledCallback(() => setPhysics(false));
 
+populateDatasourceSelect();
 const initialSource = document.getElementById("datasource-filter").value;
 populateDatasetSelect(initialSource);
 populateFilterSelects();
