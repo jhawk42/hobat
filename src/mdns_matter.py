@@ -163,33 +163,39 @@ def decode_matter_icd_capability(icd_value):
 
 
 def parse_fabric_and_node_ids_from_name(service_name):
-    """Extract FabricID and NodeID from Matter operational service instance name
+    """Extract Compressed Fabric ID and Node ID from Matter operational service instance name.
 
-    Format: [64-bit Compressed Fabric ID]-[64-bit Node ID]._matter._tcp.local
-    Example: 0000000000001234-000000000000ABCD._matter._tcp.local
+    Format: [Compressed Fabric ID]-[Node ID]._matter._tcp.local.
+    Both IDs are 16-character uppercase hex strings (64-bit values).
+    Example: 2906C908D115D362-8FC7772401CD0696._matter._tcp.local.
+
+    Note: the leading component is the *Compressed* Fabric ID (HKDF-derived),
+    not the raw Matter Fabric ID.
     """
     try:
-        instance_name = service_name.replace("._matter._tcp.local", "").replace(
-            "._matterc._udp.local", ""
-        )
+        # Strip trailing dot then service suffix (handle both with and without trailing dot)
+        instance_name = service_name.rstrip(".")
+        for suffix in ("._matter._tcp.local", "._matterc._udp.local"):
+            if instance_name.endswith(suffix):
+                instance_name = instance_name[: -len(suffix)]
+                break
 
         if "-" in instance_name:
-            parts = instance_name.split("-")
-            if len(parts) >= 2:
-                fabric_id_hex = parts[0]
-                node_id_hex = parts[1]
+            parts = instance_name.split("-", 1)
+            compressed_fabric_id_hex = parts[0]
+            node_id_hex = parts[1]
 
-                try:
-                    fabric_id_decimal = int(fabric_id_hex, 16)
-                    node_id_decimal = int(node_id_hex, 16)
-                    return (
-                        fabric_id_hex,
-                        node_id_hex,
-                        fabric_id_decimal,
-                        node_id_decimal,
-                    )
-                except ValueError:
-                    return fabric_id_hex, node_id_hex, None, None
+            try:
+                compressed_fabric_id_decimal = int(compressed_fabric_id_hex, 16)
+                node_id_decimal = int(node_id_hex, 16)
+                return (
+                    compressed_fabric_id_hex,
+                    node_id_hex,
+                    compressed_fabric_id_decimal,
+                    node_id_decimal,
+                )
+            except ValueError:
+                return compressed_fabric_id_hex, node_id_hex, None, None
 
         return None, None, None, None
     except Exception:
@@ -324,7 +330,7 @@ def _enrich_field_ICD(raw_value, full_name: str) -> dict:
 
 _MATTER_STANDARD_FIELDS = {
     "txtvers", "VP", "DT", "DN", "RI", "PI", "CD", "D",
-    "FabricID", "NodeID", "SII", "SAI", "SAT", "T", "PH", "ICD",
+    "FabricID", "FabricID_compressed", "NodeID", "SII", "SAI", "SAT", "T", "PH", "ICD",
 }
 
 
@@ -431,21 +437,32 @@ def print_matter_service_info(name: str, type_: str, info, props: dict) -> None:
         )
         print(f"    - Pairing Instruction (PI): {pi_str}")
 
-    # Fabric ID (Operational only)
+    # Compressed Fabric ID and Node ID (Operational only — encoded in instance name)
+    compressed_fabric_id_hex, node_id_hex, compressed_fabric_id_dec, node_id_dec = (
+        parse_fabric_and_node_ids_from_name(name)
+    )
+
+    # Raw Fabric ID — only present when explicitly carried in TXT props (rare)
     if "FabricID" in props:
         fabric_val = props["FabricID"]
         fabric_str = (
             fabric_val.decode("utf-8") if isinstance(fabric_val, bytes) else fabric_val
         )
-        print(f"    - Fabric ID: {fabric_str}")
-    else:
-        fabric_id_hex, node_id_hex, fabric_id_dec, node_id_dec = (
-            parse_fabric_and_node_ids_from_name(name)
+        print(f"    - Fabric ID (raw): {fabric_str}")
+
+    # Compressed Fabric ID — derived via HKDF from RootPublicKey + FabricID;
+    # always present for operational records, encoded as the first 16 hex chars
+    # of the instance name: <CompressedFabricID>-<NodeID>._matter._tcp.local.
+    if "FabricID_compressed" in props:
+        cfid_val = props["FabricID_compressed"]
+        cfid_str = (
+            cfid_val.decode("utf-8") if isinstance(cfid_val, bytes) else cfid_val
         )
-        if fabric_id_hex:
-            print(f"    - Fabric ID (from name): {fabric_id_hex}")
-            if fabric_id_dec is not None:
-                print(f"      * Decimal: {fabric_id_dec}")
+        print(f"    - Compressed Fabric ID (from name): {cfid_str}")
+    elif compressed_fabric_id_hex:
+        print(f"    - Compressed Fabric ID (from name): {compressed_fabric_id_hex}")
+        if compressed_fabric_id_dec is not None:
+            print(f"      * Decimal: {compressed_fabric_id_dec}")
 
     # Node ID (Operational only)
     if "NodeID" in props:
@@ -454,14 +471,10 @@ def print_matter_service_info(name: str, type_: str, info, props: dict) -> None:
             node_val.decode("utf-8") if isinstance(node_val, bytes) else node_val
         )
         print(f"    - Node ID: {node_str}")
-    else:
-        fabric_id_hex, node_id_hex, fabric_id_dec, node_id_dec = (
-            parse_fabric_and_node_ids_from_name(name)
-        )
-        if node_id_hex:
-            print(f"    - Node ID (from name): {node_id_hex}")
-            if node_id_dec is not None:
-                print(f"      * Decimal: {node_id_dec}")
+    elif node_id_hex:
+        print(f"    - Node ID (from name): {node_id_hex}")
+        if node_id_dec is not None:
+            print(f"      * Decimal: {node_id_dec}")
 
     # Sleepy Idle Interval (SII) - Optional, for sleepy end devices
     if "SII" in props:

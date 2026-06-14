@@ -181,35 +181,33 @@ class MDNSDumpListener(ServiceListener):
         if info and getattr(info, "properties", None):
             properties = _enrich_properties(info.properties)
 
-        # For Matter operational scope, inject FabricID / NodeID extracted from
-        # the service instance name when they are absent from the TXT properties.
+        # For Matter operational scope, inject CompressedFabricID / NodeID extracted
+        # from the service instance name when they are absent from the TXT properties.
+        # The instance name encodes the *Compressed* Fabric ID (HKDF-derived 8 bytes),
+        # not the raw Matter Fabric ID. Store it under a distinct key so consumers
+        # are never confused between the two values.
         if type_ == "_matter._tcp.local.":
-            if "FabricID" not in properties:
-                fabric_id_hex, node_id_hex, fabric_id_dec, node_id_dec = (
-                    parse_fabric_and_node_ids_from_name(name)
-                )
-                if fabric_id_hex:
-                    entry = {
-                        "full_name": FIELD_METADATA.get("FabricID", "Fabric ID"),
-                        "decoded": fabric_id_hex,
-                        "source": "instance_name",
-                    }
-                    if fabric_id_dec is not None:
-                        entry["int_value"] = fabric_id_dec
-                    properties["FabricID"] = entry
-            if "NodeID" not in properties:
-                fabric_id_hex, node_id_hex, fabric_id_dec, node_id_dec = (
-                    parse_fabric_and_node_ids_from_name(name)
-                )
-                if node_id_hex:
-                    entry = {
-                        "full_name": FIELD_METADATA.get("NodeID", "Node ID"),
-                        "decoded": node_id_hex,
-                        "source": "instance_name",
-                    }
-                    if node_id_dec is not None:
-                        entry["int_value"] = node_id_dec
-                    properties["NodeID"] = entry
+            compressed_fabric_id_hex, node_id_hex, compressed_fabric_id_dec, node_id_dec = (
+                parse_fabric_and_node_ids_from_name(name)
+            )
+            if "FabricID_compressed" not in properties and compressed_fabric_id_hex:
+                entry = {
+                    "full_name": "Compressed Fabric ID",
+                    "decoded": compressed_fabric_id_hex,
+                    "source": "instance_name",
+                }
+                if compressed_fabric_id_dec is not None:
+                    entry["int_value"] = compressed_fabric_id_dec
+                properties["FabricID_compressed"] = entry
+            if "NodeID" not in properties and node_id_hex:
+                entry = {
+                    "full_name": FIELD_METADATA.get("NodeID", "Node ID"),
+                    "decoded": node_id_hex,
+                    "source": "instance_name",
+                }
+                if node_id_dec is not None:
+                    entry["int_value"] = node_id_dec
+                properties["NodeID"] = entry
 
         service_info = {}
         if info:
