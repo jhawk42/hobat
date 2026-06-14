@@ -54,7 +54,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "networkdiag_multicast_network_only",
-    label: "Device topology [network multicast FTD ndmc]",
+    label: "Diag topology [network multicast FTD ndmc]",
     group: "Fast",
     files: ["td-otbr-cli-networkdiag-multicast-network.json"],
     mergeStrategy: "none",
@@ -68,7 +68,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast",
-    label: "Device & Mesh topology [FTD ndmc,md]",
+    label: "Diag & Mesh topology [FTD ndmc,md]",
     group: "Versatile: more time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -85,7 +85,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast_mdns",
-    label: "Device & Mesh topology w/mdns [md,FTD ndmc,mdns] ",
+    label: "Diag & Mesh topology w/mdns [md,FTD ndmc,mdns] ",
     group: "Versatile: more time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -102,7 +102,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast_mdns",
-    label: "Device & Mesh topology neighbors, children w/mdns [md,FTD ndmc,mdn,mdc,mdns] ⏱️",
+    label: "Diag & Mesh topology neighbors, children w/mdns [md,FTD ndmc,mdn,mdc,mdns] ⏱️",
     group: "Versatile: more time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -148,7 +148,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "networkdiag_only",
-    label: "Device topology all [network fetch all (ndfa)]⏱️",
+    label: "Diag topology all [network fetch all (ndfa)]⏱️",
     group: "Detailed: most time",
     files: ["td-otbr-cli-networkdiag-fetch-all.json"],
     mergeStrategy: "none",
@@ -162,7 +162,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_fetch_all_mdns",
-    label: "Device topology all w/mdns [md, ndfa, mdns] ⏱️",
+    label: "Diag topology all w/mdns [md, ndfa, mdns] ⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -179,7 +179,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_poll_all_mdns",
-    label: "Device topology all neighbors, children w/mdns [md, ndfa, mdn, mdc, mdns] ⏱️",
+    label: "Diag topology all neighbors, children w/mdns [md, ndfa, mdn, mdc, mdns] ⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
