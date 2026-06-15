@@ -347,7 +347,7 @@ class MDNSDumpListener(ServiceListener):
                 return
         self._upsert_record(self._build_record_from_service_info(
             type_, name, None, "remove"))
-        print(f"Service Removed: {name}")
+        logging.info("Service Removed: %s", name)
 
     def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         self._update_last_event_time()
@@ -356,14 +356,17 @@ class MDNSDumpListener(ServiceListener):
             return
         self._upsert_record(
             self._build_record_from_service_info(type_, name, info, "add"))
+        logging.info("Service Added: %s (%s)", name, type_)
         if info:
-            print(f"\n[ SCOPE: {type_} ]")
-            print(f"  Name:    {name}")
-            print(
-                f"  Address: {socket.inet_ntoa(info.addresses[0]) if info.addresses else 'Unknown'}:{info.port}"
+            logging.debug("\n[ SCOPE: %s ]", type_)
+            logging.debug("  Name:    %s", name)
+            logging.debug(
+                "  Address: %s:%s",
+                socket.inet_ntoa(info.addresses[0]) if info.addresses else "Unknown",
+                info.port,
             )
             if hasattr(info, "parsed_addresses"):
-                print(f"  Parsed Addresses: {info.parsed_addresses()}")
+                logging.debug("  Parsed Addresses: %s", info.parsed_addresses())
 
             if info.properties:
                 is_thread_br_scope = type_ in [
@@ -387,13 +390,15 @@ class MDNSDumpListener(ServiceListener):
                     print_matter_service_info(name, type_, info, props)
                 else:
                     # For non-Thread BR, non-HAP, and non-Matter scopes, print all TXT records
-                    print("  TXT Records:")
+                    logging.debug("  TXT Records:")
                     for key, value in info.properties.items():
                         val_str = (
                             value.decode("utf-8") if isinstance(value, bytes) else value
                         )
-                        print(
-                            f"    - {key.decode('utf-8') if isinstance(key, bytes) else key}: {val_str}"
+                        logging.debug(
+                            "    - %s: %s",
+                            key.decode("utf-8") if isinstance(key, bytes) else key,
+                            val_str,
                         )
 
 
@@ -447,7 +452,18 @@ options:
         help="Include _matter._tcp records where T=1 (TCP supported). "
         "By default those records are excluded.",
     )
+    parser.add_argument(
+        "--debug",
+        "-d",
+        action="store_true",
+        default=False,
+        help="Enable debug logging for detailed mDNS service output.",
+    )
     args = parser.parse_args(argv)
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+
     td_data_dir = resolve_data_dir(data_dir=args.datadir)
 
     scopes_all = [
@@ -539,7 +555,7 @@ options:
         save_json_atomic(records, output_file, indent=2)
 
         logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
-        logging.info(json.dumps(records, indent=2))
+        logging.debug(json.dumps(records, indent=2))
         logging.debug("Saved mDNS scope data into %s as JSON:\n%s",
                 output_file, json.dumps(records, indent=2))
 

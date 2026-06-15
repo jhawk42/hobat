@@ -4,6 +4,7 @@ Provides decode/format helpers, TXT field enrichers, and a console print
 function for HAP service records discovered by MDNSDumpListener.
 """
 import base64
+import logging
 import socket
 
 from mdns_thread_util import _base_field_dict
@@ -267,7 +268,7 @@ _HAP_STANDARD_FIELDS = {"id", "md", "pv", "ci", "c#", "s#", "sf", "ff", "sh"}
 
 def print_hap_service_info(name: str, info, props: dict) -> None:
     """Print a human-readable summary of a _hap._udp.local. service record."""
-    print("\n  HomeKit Accessory Protocol (HAP) Attributes:")
+    logging.debug("\n  HomeKit Accessory Protocol (HAP) Attributes:")
 
     # Device ID (id) - Mandatory
     if "id" in props:
@@ -275,7 +276,7 @@ def print_hap_service_info(name: str, info, props: dict) -> None:
         id_str = (
             id_val.decode("utf-8") if isinstance(id_val, bytes) else id_val
         )
-        print(f"    - Device ID (id): {id_str}")
+        logging.debug("    - Device ID (id): %s", id_str)
 
     # Model Name (md) - Mandatory
     if "md" in props:
@@ -283,7 +284,7 @@ def print_hap_service_info(name: str, info, props: dict) -> None:
         md_str = (
             md_val.decode("utf-8") if isinstance(md_val, bytes) else md_val
         )
-        print(f"    - Model Name (md): {md_str}")
+        logging.debug("    - Model Name (md): %s", md_str)
 
     # Protocol Version (pv) - Mandatory
     if "pv" in props:
@@ -291,7 +292,7 @@ def print_hap_service_info(name: str, info, props: dict) -> None:
         pv_str = (
             pv_val.decode("utf-8") if isinstance(pv_val, bytes) else pv_val
         )
-        print(f"    - Protocol Version (pv): {pv_str}")
+        logging.debug("    - Protocol Version (pv): %s", pv_str)
 
     # Category Identifier (ci) - Mandatory
     if "ci" in props:
@@ -300,7 +301,7 @@ def print_hap_service_info(name: str, info, props: dict) -> None:
             ci_val.decode("utf-8") if isinstance(ci_val, bytes) else str(ci_val)
         )
         ci_name = get_hap_category_name(ci_str)
-        print(f"    - Category Identifier (ci): {ci_str} ({ci_name})")
+        logging.debug("    - Category Identifier (ci): %s (%s)", ci_str, ci_name)
 
     # Configuration Number (c#) - Mandatory
     if "c#" in props:
@@ -310,7 +311,7 @@ def print_hap_service_info(name: str, info, props: dict) -> None:
             if isinstance(c_hash_val, bytes)
             else str(c_hash_val)
         )
-        print(f"    - Configuration Number (c#): {c_hash_str}")
+        logging.debug("    - Configuration Number (c#): %s", c_hash_str)
 
     # State Number (s#) - Mandatory
     if "s#" in props:
@@ -320,7 +321,7 @@ def print_hap_service_info(name: str, info, props: dict) -> None:
             if isinstance(s_hash_val, bytes)
             else str(s_hash_val)
         )
-        print(f"    - State Number (s#): {s_hash_str}")
+        logging.debug("    - State Number (s#): %s", s_hash_str)
 
     # Status Flags (sf) - Mandatory
     if "sf" in props:
@@ -329,16 +330,18 @@ def print_hap_service_info(name: str, info, props: dict) -> None:
             sf_val.decode("utf-8") if isinstance(sf_val, bytes) else str(sf_val)
         )
         sf_bits = decode_hap_status_flags(sf_str)
-        print(f"    - Status Flags (sf): {sf_str}")
+        logging.debug("    - Status Flags (sf): %s", sf_str)
         if sf_bits:
-            print(f"      * {format_hap_status_flags(sf_bits)}")
-            print(f"      * Individual Bits:")
-            print(f"        - Bit 0 (Pairing Status): {sf_bits['pairing_status']}")
-            print(
-                f"        - Bit 1 (IP Networking): {'Enabled' if sf_bits['ip_networking_enabled'] else 'Disabled'}"
+            logging.debug("      * %s", format_hap_status_flags(sf_bits))
+            logging.debug("      * Individual Bits:")
+            logging.debug("        - Bit 0 (Pairing Status): %s", sf_bits["pairing_status"])
+            logging.debug(
+                "        - Bit 1 (IP Networking): %s",
+                "Enabled" if sf_bits["ip_networking_enabled"] else "Disabled",
             )
-            print(
-                f"        - Bit 2 (Problem Detected): {'Yes' if sf_bits['problem_detected'] else 'No'}"
+            logging.debug(
+                "        - Bit 2 (Problem Detected): %s",
+                "Yes" if sf_bits["problem_detected"] else "No",
             )
 
     # Feature Flags (ff) - Optional
@@ -352,9 +355,9 @@ def print_hap_service_info(name: str, info, props: dict) -> None:
             else ff_val
         )
         ff_bits = decode_hap_feature_flags(ff_int)
-        print(f"    - Feature Flags (ff): {ff_int}")
+        logging.debug("    - Feature Flags (ff): %s", ff_int)
         if ff_bits:
-            print(f"      * Supported Features: {format_hap_feature_flags(ff_bits)}")
+            logging.debug("      * Supported Features: %s", format_hap_feature_flags(ff_bits))
 
     # Setup Hash (sh) - Optional, Base64-encoded 4-byte hash
     if "sh" in props:
@@ -363,18 +366,18 @@ def print_hap_service_info(name: str, info, props: dict) -> None:
             sh_val.decode("utf-8") if isinstance(sh_val, bytes) else str(sh_val)
         )
         sh_hex = decode_hap_setup_hash(sh_val)
-        print(f"    - Setup Hash (sh): {sh_b64_str}")
+        logging.debug("    - Setup Hash (sh): %s", sh_b64_str)
         if sh_hex:
-            print(f"      * Hex Value: {sh_hex}")
-            print(
-                f"      * Purpose: Hash derived from Setup ID and Device ID for pairing verification"
+            logging.debug("      * Hex Value: %s", sh_hex)
+            logging.debug(
+                "      * Purpose: Hash derived from Setup ID and Device ID for pairing verification"
             )
 
     other_fields = {k: v for k, v in props.items() if k not in _HAP_STANDARD_FIELDS}
     if other_fields:
-        print("\n  Additional Metadata:")
+        logging.debug("\n  Additional Metadata:")
         for key, val in other_fields.items():
             val_str = (
                 val.decode("utf-8", errors="ignore") if isinstance(val, bytes) else val
             )
-            print(f"    - {key}: {val_str}")
+            logging.debug("    - %s: %s", key, val_str)

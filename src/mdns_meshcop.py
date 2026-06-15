@@ -3,6 +3,7 @@
 Provides decode/format helpers, TXT field enrichers, and a console print
 function for meshcop service records discovered by MDNSDumpListener.
 """
+import logging
 import socket
 
 from mdns_thread_util import (
@@ -289,97 +290,102 @@ _MESHCOP_STANDARD_FIELDS = {
 
 def print_meshcop_service_info(name: str, info, props: dict) -> None:
     """Print a human-readable summary of a _meshcop._udp.local. service record."""
-    print(f"\n[ THREAD BORDER ROUTER FOUND ]")
-    print(f"  Instance Name: {name}")
-    print(f"  Hostname:      {info.server}")
-    print(
-        f"  Address:       {socket.inet_ntoa(info.addresses[0]) if info.addresses else 'Unknown'}:{info.port}"
+    logging.debug("\n[ THREAD BORDER ROUTER FOUND ]")
+    logging.debug("  Instance Name: %s", name)
+    logging.debug("  Hostname:      %s", info.server)
+    logging.debug(
+        "  Address:       %s:%s",
+        socket.inet_ntoa(info.addresses[0]) if info.addresses else "Unknown",
+        info.port,
     )
 
-    print("\n  Thread Border Router Identity & Capabilities:")
+    logging.debug("\n  Thread Border Router Identity & Capabilities:")
 
     if "rv" in props and isinstance(props["rv"], bytes):
-        print(f"    - Protocol Revision (rv): {props['rv'].decode('utf-8')}")
+        logging.debug("    - Protocol Revision (rv): %s", props["rv"].decode("utf-8"))
 
     if "vn" in props and isinstance(props["vn"], bytes):
-        print(f"    - Vendor Name (vn): {props['vn'].decode('utf-8')}")
+        logging.debug("    - Vendor Name (vn): %s", props["vn"].decode("utf-8"))
 
     if "mn" in props and isinstance(props["mn"], bytes):
-        print(f"    - Model Name (mn): {props['mn'].decode('utf-8')}")
+        logging.debug("    - Model Name (mn): %s", props["mn"].decode("utf-8"))
 
     if "tv" in props and isinstance(props["tv"], bytes):
-        print(f"    - Thread Version (tv): {props['tv'].decode('utf-8')}")
+        logging.debug("    - Thread Version (tv): %s", props["tv"].decode("utf-8"))
 
     if "nn" in props and isinstance(props["nn"], bytes):
-        print(f"    - Network Name (nn): {props['nn'].decode('utf-8')}")
+        logging.debug("    - Network Name (nn): %s", props["nn"].decode("utf-8"))
 
     if "xp" in props and isinstance(props["xp"], bytes):
         xp_hex = props["xp"].hex().upper()
-        print(f"    - Extended PAN ID (xp): {xp_hex}")
+        logging.debug("    - Extended PAN ID (xp): %s", xp_hex)
 
     if "xa" in props and isinstance(props["xa"], bytes):
         xa_hex = props["xa"].hex().upper()
-        print(f"    - Extended Address (xa): {xa_hex}")
+        logging.debug("    - Extended Address (xa): %s", xa_hex)
 
     if "dd" in props and isinstance(props["dd"], bytes):
         dd_hex = props["dd"].hex().upper()
-        print(f"    - Discriminator ID (dd): {dd_hex}")
+        logging.debug("    - Discriminator ID (dd): %s", dd_hex)
 
     if "sq" in props and isinstance(props["sq"], bytes):
-        print(f"    - Sequence Number (sq): {props['sq'].decode('utf-8')}")
+        logging.debug("    - Sequence Number (sq): %s", props["sq"].decode("utf-8"))
 
     if "at" in props and isinstance(props["at"], bytes):
         at_hex = props["at"].hex().upper()
         oui = at_hex[:6]
         vendor = get_vendor_from_oui(at_hex)
         ext_id = at_hex[6:]
-        print(f"    - Extended Address (at): {at_hex}")
-        print(f"      * OUI (Vendor): {oui} ({vendor})")
-        print(f"      * Extension ID: {ext_id}")
+        logging.debug("    - Extended Address (at): %s", at_hex)
+        logging.debug("      * OUI (Vendor): %s (%s)", oui, vendor)
+        logging.debug("      * Extension ID: %s", ext_id)
 
     if "id" in props and isinstance(props["id"], bytes):
-        print(f"    - Border Agent ID (id): {props['id'].hex().upper()}")
+        logging.debug("    - Border Agent ID (id): %s", props["id"].hex().upper())
 
     if "sb" in props and isinstance(props["sb"], bytes):
         sb_hex = props["sb"].hex().upper()
         sb_bits = decode_state_bitmap_br(sb_hex)
-        print(f"    - State Bitmap (sb): {sb_hex}")
+        logging.debug("    - State Bitmap (sb): %s", sb_hex)
         if sb_bits:
-            print(f"      * Status: {format_state_bitmap_br(sb_bits)}")
-            print(f"      * Individual Bits:")
-            print(f"        - Bit 0 (Connection Allowed): {sb_bits['connection_allowed']}")
-            print(f"        - Bit 1 (Native Commissioner): {sb_bits['native_commissioner']}")
-            print(f"        - Bit 2 (Active Commissioner): {sb_bits['active_commissioner']}")
-            print(f"        - Bit 3 (Active Thread Partition): {sb_bits['active_thread_partition']}")
-            print(f"        - Bit 4 (Leader Role): {sb_bits['leader_role']}")
-            print(f"        - Bit 5 (Backbone Router): {sb_bits['backbone_router']}")
+            logging.debug("      * Status: %s", format_state_bitmap_br(sb_bits))
+            logging.debug("      * Individual Bits:")
+            logging.debug("        - Bit 0 (Connection Allowed): %s", sb_bits["connection_allowed"])
+            logging.debug("        - Bit 1 (Native Commissioner): %s", sb_bits["native_commissioner"])
+            logging.debug("        - Bit 2 (Active Commissioner): %s", sb_bits["active_commissioner"])
+            logging.debug("        - Bit 3 (Active Thread Partition): %s", sb_bits["active_thread_partition"])
+            logging.debug("        - Bit 4 (Leader Role): %s", sb_bits["leader_role"])
+            logging.debug("        - Bit 5 (Backbone Router): %s", sb_bits["backbone_router"])
 
     if "dt" in props and isinstance(props["dt"], bytes):
-        print(f"    - Device Type (dt): {props['dt'].decode('utf-8', errors='ignore')}")
+        logging.debug(
+            "    - Device Type (dt): %s",
+            props["dt"].decode("utf-8", errors="ignore"),
+        )
 
     if "pt" in props and isinstance(props["pt"], bytes):
         pt_val = props["pt"]
         pt_int, pt_hex = decode_thread_partition_id(pt_val)
         if pt_int is not None:
-            print(f"    - Partition Identifier (pt): {pt_int} (0x{pt_hex})")
+            logging.debug("    - Partition Identifier (pt): %s (0x%s)", pt_int, pt_hex)
         else:
-            print(f"    - Partition Identifier (pt): {pt_int}")
+            logging.debug("    - Partition Identifier (pt): %s", pt_int)
 
     if "bb" in props and isinstance(props["bb"], bytes):
         bb_val = props["bb"]
         bb_str = bb_val.hex().upper()
         bb_int, bb_hex, bb_bits = decode_thread_beacon_bitmap(bb_val)
         if bb_int is not None:
-            print(f"    - Beacon Bitmap (bb): {bb_str} (0x{bb_hex})")
+            logging.debug("    - Beacon Bitmap (bb): %s (0x%s)", bb_str, bb_hex)
             if bb_bits:
                 status_str = format_thread_beacon_bitmap(bb_bits)
-                print(f"      * Status: {status_str}")
+                logging.debug("      * Status: %s", status_str)
         else:
-            print(f"    - Beacon Bitmap (bb): {bb_str}")
+            logging.debug("    - Beacon Bitmap (bb): %s", bb_str)
 
     if "dn" in props and isinstance(props["dn"], bytes):
         dn_str = props["dn"].decode("utf-8")
-        print(f"    - Domain Name (dn): {dn_str}")
+        logging.debug("    - Domain Name (dn): %s", dn_str)
 
     other_fields = {
         k.decode("utf-8"): v
@@ -387,11 +393,11 @@ def print_meshcop_service_info(name: str, info, props: dict) -> None:
         if k.decode("utf-8") not in _MESHCOP_STANDARD_FIELDS
     }
     if other_fields:
-        print("\n  Additional Metadata:")
+        logging.debug("\n  Additional Metadata:")
         for key, val in other_fields.items():
             val_str = (
                 val.decode("utf-8", errors="ignore")
                 if isinstance(val, bytes)
                 else val
             )
-            print(f"    - {key}: {val_str}")
+            logging.debug("    - %s: %s", key, val_str)
