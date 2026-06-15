@@ -130,17 +130,22 @@ When conflicts occur, source precedence determines the winner:
 
 | Source | Priority | Description |
 |--------|----------|-------------|
-| REST API diagnostics | 100 | Most authoritative source |
-| CLI networkdiag (poll) | 90 | Detailed diagnostic data |
-| CLI networkdiag (multicast) | 85 | Network-wide diagnostics |
-| CLI meshdiag neighbors | 80 | Router neighbor tables |
-| CLI meshdiag topology | 75 | Mesh topology summary |
-| CLI router table | 70 | Router table snapshot |
-| mDNS Border Router | 60 | Service discovery (BR) |
-| mDNS Thread | 55 | Service discovery (Thread) |
-| mDNS HAP | 50 | Service discovery (HAP) |
-| mDNS Matter | 45 | Service discovery (Matter) |
-| Eve topology | 10 | Legacy format |
+| CLI networkdiag (fetch-all) | 100 | Most detailed CLI diagnostic data |
+| CLI networkdiag (multicast-network) | 99 | Network-wide diagnostics |
+| CLI meshdiag topology | 98 | Mesh topology summary |
+| CLI meshdiag router neighbor tables | 97 | Router neighbor tables |
+| CLI meshdiag router child tables | 96 | Router child table data |
+| CLI router table | 95 | Router table snapshot |
+| REST API diagnostics fetch-all | 90 | Most authoritative REST diagnostics |
+| REST API mesh diagnostics fetch-all | 89 | Mesh diagnostics from REST API |
+| REST API diagnostics list | 88 | Diagnostic list summary |
+| REST API diagnostics | 87 | Diagnostic details |
+| REST API devices fetch | 86 | Device list fetch details |
+| REST API devices list | 85 | Device list summary |
+| REST API devices | 84 | Device details |
+| Eve topology | 60 | Legacy topology format |
+| mDNS Border Router | 49 | Service discovery (BR) |
+| mDNS HAP | 48 | Service discovery (HAP) |
 
 ### 7. Conflict Tracking and Provenance
 
