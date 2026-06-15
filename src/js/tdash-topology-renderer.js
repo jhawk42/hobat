@@ -139,7 +139,7 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
   // Four explicit rings from center.
   const ring2MinRadius = routerRingRadius + 170;  // FTD children (pushed farther from parents)
   const ring3MinRadius = routerRingRadius + 300;  // non-FTD children linked to routers
-  const ring4Radius = routerRingRadius + 430;     // unconnected nodes (pushed farther out)
+  const ring4Radius = routerRingRadius + 570;     // unconnected nodes (pushed farther out)
 
   // Build LQ3 router affinity graph.
   const lq3NeighborByRouter = new Map();
@@ -186,14 +186,17 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
     }
   }
 
-  // Use variable angular gaps: LQ3-adjacent routers get tighter spacing.
+  // Use variable angular gaps: LQ3-adjacent routers get tighter spacing,
+  // but keep a modest minimum gap so dense clusters stay readable.
+  const LQ3_ADJACENT_GAP_WEIGHT = 0.95;
+  const NON_LQ3_GAP_WEIGHT = 1.05;
   const gapWeights = [];
   const ringCount = orderedRouterIds.length;
   for (let i = 0; i < ringCount; i += 1) {
     const aId = orderedRouterIds[i];
     const bId = orderedRouterIds[(i + 1) % ringCount];
     const areLq3Neighbors = lq3NeighborByRouter.get(aId)?.has(bId) === true;
-    gapWeights.push(areLq3Neighbors ? 0.65 : 1.15);
+    gapWeights.push(areLq3Neighbors ? LQ3_ADJACENT_GAP_WEIGHT : NON_LQ3_GAP_WEIGHT);
   }
   const totalWeight = gapWeights.reduce((sum, w) => sum + w, 0) || ringCount;
 
@@ -257,15 +260,28 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
     const weight = isExplicitChild ? 12 : (edge.lqLevel === 3 ? 3 : 1);
     bumpRouterScoreWeighted(nonRouterNode.id, routerNode.id, weight);
 
-    if (isChildLike) {
+    // Only register an explicit parent-child edge here; implicit relationships
+    // (e.g. OTBR_ROUTE edges from child nodes to every router in their routing
+    // table) are handled via nodeRouterScores below.  Calling pushChild for all
+    // isChildLike edges would add each child to parentToChildren for *every*
+    // router it has a route entry to, and the last placeBandChildren call would
+    // win — placing children far from their real parent.
+    if (isExplicitChild) {
       pushChild(routerNode.id, nonRouterNode.id);
     }
   });
 
   // Assign any remaining router-connected non-router node to its strongest router.
+  // Skip nodes that were already explicitly pushed via a parent-child edge above,
+  // since their explicit parent always scores highest (weight 12 vs max 3 for routes).
+  const explicitlyAssignedChildren = new Set();
+  for (const [, childIds] of parentToChildren.entries()) {
+    childIds.forEach((id) => explicitlyAssignedChildren.add(id));
+  }
   for (const [nodeId, scoreByRouter] of nodeRouterScores.entries()) {
     const node = nodeById.get(nodeId);
     if (!node || node.isRouter === true) continue;
+    if (explicitlyAssignedChildren.has(nodeId)) continue;
     let bestRouterId = null;
     let bestScore = -1;
     for (const [routerId, score] of scoreByRouter.entries()) {
