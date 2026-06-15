@@ -162,7 +162,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_fetch_all_mdns",
-    label: "Diag topology all w/mdns [md, ndfa, mdns] ⏱️",
+    label: "Mesh & Diag topology all w/mdns [md, ndfa, mdns] ⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -179,7 +179,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_poll_all_mdns",
-    label: "Diag topology all neighbors, children w/mdns [md, ndfa, mdn, mdc, mdns] ⏱️",
+    label: "Mesh & Diag topology all neighbors, children w/mdns [md, ndfa, mdn, mdc, mdns] ⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
