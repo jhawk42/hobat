@@ -175,6 +175,11 @@ MERGE_STRATEGIES = {
     "by_identity": "by-identity",
 }
 
+MATTER_IDENTITY_MERGE_MODES = {
+    "strict_omr": "strict-omr",
+    "composite_guard": "composite-guard",
+}
+
 MERGE_IDENTITY_FIELDS = {
     "extaddr_aliases": ("extaddr", "extAddress", "Extended MAC"),
     "omr_ipv6_addr_aliases": ("omr_ipv6_addr", "omrIpv6Address"),
@@ -184,7 +189,7 @@ MERGE_IDENTITY_FIELDS = {
 # Phase 3: Source Precedence Rules (Priority: Higher = Wins)
 # Used to resolve conflicts when multiple sources provide same field
 SOURCE_PRECEDENCE = {
-    ##"td-static-extaddr-device-label.json": 101, # Highest priority
+    "td-static-extaddr-device-label.json": 101, # Highest priority
 
     "td-otbr-cli-networkdiag-fetch-all.json": 100, # Highest priority (most detailed)
     "td-otbr-cli-networkdiag-multicast-network.json": 99,
@@ -203,10 +208,10 @@ SOURCE_PRECEDENCE = {
 
     "td-eve-topology.json": 60,
 
-    ##"td-mdns-scopes-thread.json": 50,
+    "td-mdns-scopes-thread.json": 50,
     "td-mdns-scopes-br.json": 49,                # mDNS scopes (service discovery)
     "td-mdns-scopes-hap.json": 48,
-    ##"td-mdns-scopes-matter.json": 47
+    "td-mdns-scopes-matter.json": 47,
 }
 
 DEFAULT_INPUT_FILES = [
@@ -224,10 +229,10 @@ DEFAULT_INPUT_FILES = [
     "td-otbr-restapi-devices-fetch.json",
     "td-otbr-restapi-devices-list.json",
     "td-otbr-restapi-devices.json",   
-    ##"td-mdns-scopes-thread.json",                # Phase 3: mDNS Thread devices
+    "td-mdns-scopes-thread.json",                # Phase 3: mDNS Thread devices
     "td-mdns-scopes-br.json",                    # Phase 3: mDNS Border Router discovery
     "td-mdns-scopes-hap.json",                   # Phase 3: mDNS HomeKit devices
-    ##"td-mdns-scopes-matter.json",                # Phase 3: mDNS Matter devices
+    "td-mdns-scopes-matter.json",                # Phase 3: mDNS Matter devices
     "td-eve-topology.json",
 ]
 
@@ -1042,6 +1047,203 @@ def merge_mdns_records(
     return result
 
 
+def is_mdns_record(record: dict[str, Any]) -> bool:
+    """Return True when a record appears to be an mDNS capture row."""
+    if not isinstance(record, dict):
+        return False
+    if isinstance(record.get("record_key"), str) and "|" in record["record_key"]:
+        return True
+    scope = record.get("scope")
+    if isinstance(scope, str) and scope.startswith("_") and scope.endswith(".local."):
+        return True
+    return False
+
+
+def is_matter_operational_mdns_record(record: dict[str, Any]) -> bool:
+    """Return True for Matter operational mDNS records."""
+    if not is_mdns_record(record):
+        return False
+    scope = record.get("scope")
+    return isinstance(scope, str) and scope.strip().lower() == "_matter._tcp.local."
+
+
+def _normalize_alias_text(value: Any, lower: bool = False) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if not text:
+        return ""
+    return text.lower() if lower else text
+
+
+def _append_unique_alias(container: dict[str, Any], key: str, value: str) -> None:
+    if not value:
+        return
+    existing = container.get(key)
+    if not isinstance(existing, list):
+        existing = []
+    if value not in existing:
+        existing.append(value)
+    container[key] = existing
+
+
+def _extract_service_info_property_decoded(record: dict[str, Any], key: str) -> str:
+    service_info = record.get("service_info")
+    if not isinstance(service_info, dict):
+        return ""
+    props = service_info.get("properties")
+    if not isinstance(props, dict):
+        return ""
+    prop_obj = props.get(key)
+    if not isinstance(prop_obj, dict):
+        return ""
+    decoded = prop_obj.get("decoded")
+    if isinstance(decoded, str):
+        return decoded.strip()
+    return ""
+
+
+def get_matter_fabric_node_identity(record: dict[str, Any]) -> str:
+    """Return normalized Matter composite identity from FabricID_compressed + NodeID."""
+    if not isinstance(record, dict):
+        return ""
+
+    fabric_id = _normalize_alias_text(
+        _extract_service_info_property_decoded(record, "FabricID_compressed"),
+        lower=True,
+    )
+    node_id = _normalize_alias_text(
+        _extract_service_info_property_decoded(record, "NodeID"),
+        lower=True,
+    )
+
+    if not fabric_id or not node_id:
+        return ""
+    return f"{fabric_id}|{node_id}"
+
+
+def update_mdns_aliases(target: dict[str, Any], record: dict[str, Any]) -> None:
+    """Collect stable alias values observed across mDNS records for one merged node."""
+    if not isinstance(target, dict) or not isinstance(record, dict):
+        return
+
+    aliases = target.setdefault("_mdns_aliases", {})
+    if not isinstance(aliases, dict):
+        aliases = {}
+        target["_mdns_aliases"] = aliases
+
+    name_value = _normalize_alias_text(record.get("name"), lower=False)
+    server_value = _normalize_alias_text(record.get("server"), lower=False)
+    server_key_value = _normalize_alias_text(record.get("server_key"), lower=True)
+
+    if not server_value:
+        service_info = record.get("service_info")
+        if isinstance(service_info, dict):
+            server_value = _normalize_alias_text(service_info.get("server"), lower=False)
+            if not server_key_value:
+                server_key_value = _normalize_alias_text(service_info.get("key"), lower=True)
+
+    fabric_id = _normalize_alias_text(
+        _extract_service_info_property_decoded(record, "FabricID_compressed"),
+        lower=False,
+    )
+    node_id = _normalize_alias_text(
+        _extract_service_info_property_decoded(record, "NodeID"),
+        lower=False,
+    )
+
+    _append_unique_alias(aliases, "name_aliases", name_value)
+    _append_unique_alias(aliases, "server_aliases", server_value)
+    _append_unique_alias(aliases, "server_key_aliases", server_key_value)
+    _append_unique_alias(aliases, "fabric_id_compressed_aliases", fabric_id)
+    _append_unique_alias(aliases, "node_id_aliases", node_id)
+
+    matter_composite = get_matter_fabric_node_identity(record)
+    if matter_composite:
+        _append_unique_alias(aliases, "matter_fabric_node_aliases", matter_composite)
+
+
+def extract_mdns_merge_view(record: dict[str, Any]) -> dict[str, Any]:
+    """Extract an mDNS-focused view suitable for merge_mdns_records."""
+    if not isinstance(record, dict):
+        return {}
+
+    mdns_fields = (
+        "record_key",
+        "event",
+        "captured_at_epoch",
+        "captured_at_iso",
+        "scope",
+        "name",
+        "extaddr",
+        "omr_ipv6_addr",
+        "is_border_router",
+        "role",
+        "service_info",
+        "server",
+        "server_key",
+    )
+
+    out: dict[str, Any] = {}
+    for key in mdns_fields:
+        if key in record:
+            out[key] = deepcopy(record[key])
+
+    service_info = out.get("service_info")
+    if isinstance(service_info, dict):
+        if "server" not in out and isinstance(service_info.get("server"), str):
+            out["server"] = service_info.get("server")
+        if "server_key" not in out and isinstance(service_info.get("key"), str):
+            out["server_key"] = service_info.get("key")
+
+    return out
+
+
+def apply_mdns_merge_view(target: dict[str, Any], merged: dict[str, Any]) -> None:
+    """Write merged mDNS fields back onto the merged node without touching non-mDNS fields."""
+    if not isinstance(target, dict) or not isinstance(merged, dict):
+        return
+
+    for key in (
+        "record_key",
+        "event",
+        "captured_at_epoch",
+        "captured_at_iso",
+        "scope",
+        "name",
+        "extaddr",
+        "omr_ipv6_addr",
+        "is_border_router",
+        "role",
+        "service_info",
+        "server",
+        "server_key",
+    ):
+        if key in merged:
+            target[key] = deepcopy(merged[key])
+
+
+def merge_mdns_record_into_node(target: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """Merge incoming mDNS row into a merged target node using mDNS-specific precedence."""
+    if not is_mdns_record(incoming):
+        return
+
+    update_mdns_aliases(target, target)
+    update_mdns_aliases(target, incoming)
+
+    base_view = extract_mdns_merge_view(target)
+    incoming_view = extract_mdns_merge_view(incoming)
+    if not incoming_view:
+        return
+
+    merged_view = (
+        merge_mdns_records(base_view, incoming_view)
+        if base_view
+        else deepcopy(incoming_view)
+    )
+    apply_mdns_merge_view(target, merged_view)
+
+
 def deep_merge(
     base: dict[str, Any],
     incoming: dict[str, Any],
@@ -1209,6 +1411,11 @@ def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
     if rloc16:
         identities["rloc16"] = rloc16
 
+    if is_matter_operational_mdns_record(record):
+        matter_id = get_matter_fabric_node_identity(record)
+        if matter_id:
+            identities["matter_fabric_node"] = matter_id
+
     return identities
 
 
@@ -1217,12 +1424,14 @@ def find_candidate_node_ids(
     by_rloc16: dict[str, int],
     by_extaddr: dict[str, int],
     by_omr: dict[str, int],
+    by_matter_fabric_node: dict[str, int],
 ) -> set[int]:
     candidate_ids: set[int] = set()
 
     rloc16 = identity_values.get("rloc16")
     extaddr = identity_values.get("extaddr")
     omr = identity_values.get("omr_ipv6_addr")
+    matter_id = identity_values.get("matter_fabric_node")
 
     if isinstance(extaddr, str) and extaddr in by_extaddr:
         candidate_ids.add(by_extaddr[extaddr])
@@ -1230,6 +1439,8 @@ def find_candidate_node_ids(
         candidate_ids.add(by_omr[omr])
     if isinstance(rloc16, str) and rloc16 in by_rloc16:
         candidate_ids.add(by_rloc16[rloc16])
+    if isinstance(matter_id, str) and matter_id in by_matter_fabric_node:
+        candidate_ids.add(by_matter_fabric_node[matter_id])
 
     return candidate_ids
 
@@ -1240,12 +1451,14 @@ def index_node_identity_values(
     by_rloc16: dict[str, int],
     by_extaddr: dict[str, int],
     by_omr: dict[str, int],
+    by_matter_fabric_node: dict[str, int],
 ) -> dict[str, str]:
     identity_values = collect_merge_identity_values(node)
 
     rloc16 = identity_values.get("rloc16")
     extaddr = identity_values.get("extaddr")
     omr = identity_values.get("omr_ipv6_addr")
+    matter_id = identity_values.get("matter_fabric_node")
 
     if isinstance(extaddr, str):
         node["extaddr"] = extaddr
@@ -1256,8 +1469,62 @@ def index_node_identity_values(
     if isinstance(rloc16, str):
         node["rloc16"] = rloc16
         add_identifier(by_rloc16, rloc16, node_id)
+    if isinstance(matter_id, str):
+        add_identifier(by_matter_fabric_node, matter_id, node_id)
 
     return identity_values
+
+
+def filter_candidate_ids_for_matter_identity_consistency(
+    candidate_ids: set[int],
+    incoming_record: dict[str, Any],
+    nodes: dict[int, dict[str, Any]],
+) -> set[int]:
+    """For Matter operational mDNS records, avoid OMR-only false merges.
+
+    Rules:
+    - If incoming record has no Fabric+Node composite identity, keep all candidates.
+    - If candidate has concrete extaddr matching incoming extaddr, keep (strong identity).
+    - Else if candidate has Matter composite identity, keep only exact match.
+    - Else keep only when rloc16 also matches; otherwise drop (OMR-only weak match).
+    """
+    if not is_matter_operational_mdns_record(incoming_record):
+        return candidate_ids
+
+    incoming_matter_id = get_matter_fabric_node_identity(incoming_record)
+    if not incoming_matter_id:
+        return candidate_ids
+
+    incoming_extaddr = get_canonical_extaddr(incoming_record)
+    incoming_rloc16 = normalize_identifier_text(incoming_record.get("rloc16"))
+
+    filtered: set[int] = set()
+    for node_id in candidate_ids:
+        node = nodes.get(node_id)
+        if not isinstance(node, dict):
+            continue
+
+        node_extaddr = get_canonical_extaddr(node)
+        if (
+            incoming_extaddr
+            and node_extaddr
+            and not is_placeholder_extaddr(node_extaddr)
+            and node_extaddr == incoming_extaddr
+        ):
+            filtered.add(node_id)
+            continue
+
+        node_matter_id = get_matter_fabric_node_identity(node)
+        if node_matter_id:
+            if node_matter_id == incoming_matter_id:
+                filtered.add(node_id)
+            continue
+
+        node_rloc16 = normalize_identifier_text(node.get("rloc16"))
+        if incoming_rloc16 and node_rloc16 and incoming_rloc16 == node_rloc16:
+            filtered.add(node_id)
+
+    return filtered
 
 
 def add_identifier(
@@ -1306,15 +1573,17 @@ def merge_nodes(
     by_rloc16: dict[str, int],
     by_extaddr: dict[str, int],
     by_omr: dict[str, int],
+    by_matter_fabric_node: dict[str, int],
 ) -> int:
     if target_id == source_id:
         return target_id
 
     target = nodes[target_id]
     source = nodes[source_id]
+    merge_mdns_record_into_node(target, source)
     deep_merge(target, source)
 
-    for lookup in (by_rloc16, by_extaddr, by_omr):
+    for lookup in (by_rloc16, by_extaddr, by_omr, by_matter_fabric_node):
         for key, value in list(lookup.items()):
             if value == source_id:
                 lookup[key] = target_id
@@ -1328,11 +1597,13 @@ def build_merged_records(
     omr_prefix: str,
     input_files: list[str],
     device_label_map: dict[str, str],
+    matter_identity_mode: str = MATTER_IDENTITY_MERGE_MODES["strict_omr"],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     nodes: dict[int, dict[str, Any]] = {}
     by_rloc16: dict[str, int] = {}
     by_extaddr: dict[str, int] = {}
     by_omr: dict[str, int] = {}
+    by_matter_fabric_node: dict[str, int] = {}
     next_id = 1
 
     records_read_by_source: dict[str, int] = {}
@@ -1365,7 +1636,11 @@ def build_merged_records(
             omr = identity_values.get("omr_ipv6_addr")
 
             candidate_ids = find_candidate_node_ids(
-                identity_values, by_rloc16, by_extaddr, by_omr
+                identity_values,
+                by_rloc16,
+                by_extaddr,
+                by_omr,
+                by_matter_fabric_node,
             )
 
             # Guard against collapsing distinct devices that only share weak identities
@@ -1377,10 +1652,19 @@ def build_merged_records(
                     nodes,
                 )
 
+            if matter_identity_mode == MATTER_IDENTITY_MERGE_MODES["composite_guard"]:
+                candidate_ids = filter_candidate_ids_for_matter_identity_consistency(
+                    candidate_ids,
+                    record,
+                    nodes,
+                )
+
             if not candidate_ids:
                 node_id = next_id
                 next_id += 1
                 nodes[node_id] = deepcopy(record)
+                if is_mdns_record(record):
+                    update_mdns_aliases(nodes[node_id], record)
                 new_nodes_by_source[filename] += 1
             else:
                 matched_existing_by_source[filename] += 1
@@ -1405,7 +1689,9 @@ def build_merged_records(
                         by_rloc16,
                         by_extaddr,
                         by_omr,
+                        by_matter_fabric_node,
                     )
+                merge_mdns_record_into_node(nodes[node_id], record)
                 deep_merge(nodes[node_id], record)
                 existing_sources = nodes[node_id].setdefault(
                     "_source_files", [])
@@ -1415,7 +1701,12 @@ def build_merged_records(
             # Re-read after merges in case node id changed.
             active = nodes[node_id]
             active_identity_values = index_node_identity_values(
-                active, node_id, by_rloc16, by_extaddr, by_omr
+                active,
+                node_id,
+                by_rloc16,
+                by_extaddr,
+                by_omr,
+                by_matter_fabric_node,
             )
             active_extaddr = active_identity_values.get("extaddr")
             if isinstance(active_extaddr, str):
@@ -1480,6 +1771,7 @@ def build_merged_records(
 
     report = {
         "input_files": input_files,
+        "matter_identity_mode": matter_identity_mode,
         "records_read_by_source": records_read_by_source,
         "new_nodes_by_source": dict(sorted(new_nodes_by_source.items())),
         "matched_existing_by_source": dict(sorted(matched_existing_by_source.items())),
@@ -1590,6 +1882,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "collected as-is without identity matching or deduplication."
         ),
     )
+    parser.add_argument(
+        "--matter-identity-mode",
+        default=MATTER_IDENTITY_MERGE_MODES["strict_omr"],
+        choices=[
+            MATTER_IDENTITY_MERGE_MODES["strict_omr"],
+            MATTER_IDENTITY_MERGE_MODES["composite_guard"],
+        ],
+        help=(
+            "strict-omr (default): collapse Matter mDNS records by shared OMR identity and "
+            "preserve per-fabric/per-node distinctions in _mdns_aliases. "
+            "composite-guard: prevent OMR-only merges when FabricID_compressed+NodeID differ."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1687,6 +1992,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             omr_prefix,
             available_input_files,
             device_label_map,
+            matter_identity_mode=args.matter_identity_mode,
         )
         report["input_files"] = input_files
         report["loaded_input_files"] = available_input_files

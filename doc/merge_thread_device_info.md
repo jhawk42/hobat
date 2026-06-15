@@ -124,6 +124,17 @@ Merges service discovery data from four mDNS scopes:
 - Service info deeply merged with nested structure preservation
 - Vendor, model, and version information extracted from TXT records
 
+**Matter mDNS OMR dedup:**
+- Default mode: `strict-omr`
+- `_matter._tcp.local.` records that share the same `omr_ipv6_addr` are collapsed into a single merged output row
+- Distinct Matter identities are preserved in `_mdns_aliases` instead of producing separate top-level rows
+- Alias preservation includes `matter_fabric_node_aliases`, `fabric_id_compressed_aliases`, `node_id_aliases`, `name_aliases`, `server_aliases`, and `server_key_aliases`
+- The active top-level Matter fields still follow normal mDNS precedence rules: newer `captured_at_epoch` wins, then event priority (`add` > `update` > `remove`)
+
+**Fallback Matter identity mode:**
+- Use `--matter-identity-mode composite-guard` to prevent OMR-only collapse when Matter `FabricID_compressed` + `NodeID` identities differ
+- In `composite-guard` mode, records with the same OMR but different Matter composite identities remain separate merged rows
+
 ### 6. Source Precedence Rules
 
 When conflicts occur, source precedence determines the winner:
@@ -207,6 +218,10 @@ Performance scales linearly with dataset size. Networks with 100+ nodes complete
 - Special handling for Thread-specific structures (route_data, children, service_info)
 - Path tracking for conflict reporting
 
+**Matter alias preservation:**
+- When `strict-omr` collapses multiple Matter operational mDNS rows into one record, the per-fabric/per-node distinctions are retained under `_mdns_aliases`
+- This keeps one output row per unique OMR while preserving the distinct Matter operational identities that were observed
+
 **Edge Cases Handled:**
 - Null vs empty array distinction preserved
 - Missing identity fields (records without extaddr)
@@ -217,16 +232,22 @@ Performance scales linearly with dataset size. Networks with 100+ nodes complete
 
 ## Input Files Processed
 
-**Default Input Files (12 total):**
+**Default Input Files (18 total):**
 
-CLI sources (5):
+CLI sources (6):
 - `td-otbr-cli-router-table.json`
 - `td-otbr-cli-meshdiag-topology.json`
 - `td-otbr-cli-networkdiag-fetch-all.json`
 - `td-otbr-cli-networkdiag-multicast-network.json`
 - `td-otbr-cli-meshdiag-router-neighbortables.json`
+- `td-otbr-cli-meshdiag-router-childtables.json`
 
-REST API sources (2):
+REST API sources (7):
+- `td-otbr-restapi-diagnostics-fetch-all.json`
+- `td-otbr-restapi-mesh-diagnostics-fetch-all.json`
+- `td-otbr-restapi-diagnostics-list.json`
+- `td-otbr-restapi-devices-fetch.json`
+- `td-otbr-restapi-devices-list.json`
 - `td-otbr-restapi-devices.json`
 - `td-otbr-restapi-diagnostics.json`
 
@@ -245,10 +266,17 @@ Legacy sources (1):
 # Basic merge with defaults
 python3 -m td_cli merge-dataset
 
+# Basic merge with explicit strict OMR Matter collapse (same as default)
+python3 -m td_cli merge-dataset --matter-identity-mode strict-omr
+
+# Fallback mode: keep same-OMR Matter rows separate when FabricID_compressed + NodeID differ
+python3 -m td_cli merge-dataset --matter-identity-mode composite-guard
+
 # Direct invocation with options
 python3 src/merge_dataset.py \
   --base-dir data/ \
-  --output td-merged-topology-all.json \
+   --output td-merged-topology-all.json \
+   --matter-identity-mode strict-omr \
   --report-file td-merge-report.json
 
 # Custom file selection

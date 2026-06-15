@@ -12,6 +12,8 @@ Tests for Phase 4 comprehensive test coverage:
 """
 
 import sys
+import json
+import tempfile
 from pathlib import Path
 from copy import deepcopy
 
@@ -20,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from merge_dataset import (
     deep_merge,
+    build_merged_records,
     normalize_field_names_in_record,
     get_partition_id,
     is_sequence_newer,
@@ -750,6 +753,217 @@ def test_complex_integration_all_features():
 
 
 # =============================================================================
+# Test 16: Production Flow - mDNS OMR Dedup + Aliases
+# =============================================================================
+
+def test_production_flow_mdns_omr_dedup_aliases():
+    """Validate build_merged_records dedups Matter mDNS by OMR and aggregates aliases."""
+    print("\n=== Test: Production Flow - mDNS OMR Dedup + Aliases ===")
+
+    record_a = {
+        "record_key": "_matter._tcp.local.|A._matter._tcp.local.",
+        "scope": "_matter._tcp.local.",
+        "event": "add",
+        "captured_at_epoch": 1000.0,
+        "captured_at_iso": "2026-06-01T00:00:00Z",
+        "name": "A._matter._tcp.local.",
+        "omr_ipv6_addr": "fd00:abcd::1234",
+        "service_info": {
+            "server": "56A2B29EC702D2D2.local.",
+            "key": "56a2b29ec702d2d2.local.",
+            "properties": {
+                "FabricID_compressed": {"decoded": "1E4513C35D4A3E6E"},
+                "NodeID": {"decoded": "000000000CD1308E"},
+            },
+        },
+    }
+
+    record_b = {
+        "record_key": "_matter._tcp.local.|B._matter._tcp.local.",
+        "scope": "_matter._tcp.local.",
+        "event": "update",
+        "captured_at_epoch": 2000.0,
+        "captured_at_iso": "2026-06-01T00:16:40Z",
+        "name": "B._matter._tcp.local.",
+        "omr_ipv6_addr": "fd00:abcd::1234",
+        "service_info": {
+            "server": "56A2B29EC702D2D2-2.local.",
+            "key": "56a2b29ec702d2d2-2.local.",
+            "properties": {
+                "FabricID_compressed": {"decoded": "1E4513C35D4A3E6E"},
+                "NodeID": {"decoded": "000000000CD1308E"},
+            },
+        },
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base_dir = Path(tmpdir)
+        file_thread = base_dir / "td-mdns-scopes-thread.json"
+        file_matter = base_dir / "td-mdns-scopes-matter.json"
+        file_thread.write_text(json.dumps([record_a]), encoding="utf-8")
+        file_matter.write_text(json.dumps([record_b]), encoding="utf-8")
+
+        merged, report = build_merged_records(
+            base_dir=base_dir,
+            omr_prefix="fd00:abcd::",
+            input_files=["td-mdns-scopes-thread.json", "td-mdns-scopes-matter.json"],
+            device_label_map={},
+        )
+
+    assert len(merged) == 1, f"Expected 1 merged node, got {len(merged)}"
+    node = merged[0]
+
+    # Newer mDNS row should drive active scalar fields.
+    assert node.get("captured_at_epoch") == 2000.0
+    assert node.get("name") == "B._matter._tcp.local."
+    assert node.get("omr_ipv6_addr") == "fd00:abcd::1234"
+
+    # Alias rollups should preserve both records' variants.
+    aliases = node.get("_mdns_aliases", {})
+    assert "A._matter._tcp.local." in aliases.get("name_aliases", [])
+    assert "B._matter._tcp.local." in aliases.get("name_aliases", [])
+    assert "56A2B29EC702D2D2.local." in aliases.get("server_aliases", [])
+    assert "56A2B29EC702D2D2-2.local." in aliases.get("server_aliases", [])
+    assert "56a2b29ec702d2d2.local." in aliases.get("server_key_aliases", [])
+    assert "56a2b29ec702d2d2-2.local." in aliases.get("server_key_aliases", [])
+    assert "1E4513C35D4A3E6E" in aliases.get("fabric_id_compressed_aliases", [])
+    assert "000000000CD1308E" in aliases.get("node_id_aliases", [])
+    assert "1e4513c35d4a3e6e|000000000cd1308e" in aliases.get("matter_fabric_node_aliases", [])
+    assert len(aliases.get("fabric_id_compressed_aliases", [])) == 1
+    assert len(aliases.get("node_id_aliases", [])) == 1
+
+    assert set(node.get("_source_files", [])) == {
+        "td-mdns-scopes-thread.json",
+        "td-mdns-scopes-matter.json",
+    }
+    assert report.get("total_merged_nodes") == 1
+
+    print("✅ PASS: build_merged_records dedups Matter mDNS rows by OMR with aliases")
+
+
+# =============================================================================
+# Test 17: Production Flow - Matter Composite Guard
+# =============================================================================
+
+def test_production_flow_strict_omr_preserves_distinct_matter_identities_in_aliases():
+    """Strict OMR mode should merge by OMR and preserve distinct Matter identities in aliases."""
+    print("\n=== Test: Production Flow - Strict OMR Aliases ===")
+
+    record_a = {
+        "record_key": "_matter._tcp.local.|A._matter._tcp.local.",
+        "scope": "_matter._tcp.local.",
+        "event": "add",
+        "captured_at_epoch": 3000.0,
+        "name": "A._matter._tcp.local.",
+        "omr_ipv6_addr": "fd00:abcd::9999",
+        "service_info": {
+            "properties": {
+                "FabricID_compressed": {"decoded": "AAAAAAAAAAAAAAAA"},
+                "NodeID": {"decoded": "0000000000000001"},
+            },
+        },
+    }
+
+    record_b = {
+        "record_key": "_matter._tcp.local.|B._matter._tcp.local.",
+        "scope": "_matter._tcp.local.",
+        "event": "add",
+        "captured_at_epoch": 3001.0,
+        "name": "B._matter._tcp.local.",
+        "omr_ipv6_addr": "fd00:abcd::9999",
+        "service_info": {
+            "properties": {
+                "FabricID_compressed": {"decoded": "BBBBBBBBBBBBBBBB"},
+                "NodeID": {"decoded": "0000000000000002"},
+            },
+        },
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base_dir = Path(tmpdir)
+        file_thread = base_dir / "td-mdns-scopes-thread.json"
+        file_matter = base_dir / "td-mdns-scopes-matter.json"
+        file_thread.write_text(json.dumps([record_a]), encoding="utf-8")
+        file_matter.write_text(json.dumps([record_b]), encoding="utf-8")
+
+        merged, report = build_merged_records(
+            base_dir=base_dir,
+            omr_prefix="fd00:abcd::",
+            input_files=["td-mdns-scopes-thread.json", "td-mdns-scopes-matter.json"],
+            device_label_map={},
+        )
+
+    assert len(merged) == 1, f"Expected 1 merged node, got {len(merged)}"
+    node = merged[0]
+    aliases = node.get("_mdns_aliases", {})
+    composite_aliases = aliases.get("matter_fabric_node_aliases", [])
+    assert "aaaaaaaaaaaaaaaa|0000000000000001" in composite_aliases
+    assert "bbbbbbbbbbbbbbbb|0000000000000002" in composite_aliases
+    assert report.get("matter_identity_mode") == "strict-omr"
+
+    print("✅ PASS: strict-omr mode merged by OMR and preserved Matter identities in aliases")
+
+
+def test_production_flow_composite_guard_prevents_false_omr_merge():
+    """composite-guard mode should keep different Fabric+Node identities separate."""
+    print("\n=== Test: Production Flow - Composite Guard Mode ===")
+
+    record_a = {
+        "record_key": "_matter._tcp.local.|A._matter._tcp.local.",
+        "scope": "_matter._tcp.local.",
+        "event": "add",
+        "captured_at_epoch": 3000.0,
+        "name": "A._matter._tcp.local.",
+        "omr_ipv6_addr": "fd00:abcd::9999",
+        "service_info": {
+            "properties": {
+                "FabricID_compressed": {"decoded": "AAAAAAAAAAAAAAAA"},
+                "NodeID": {"decoded": "0000000000000001"},
+            },
+        },
+    }
+
+    record_b = {
+        "record_key": "_matter._tcp.local.|B._matter._tcp.local.",
+        "scope": "_matter._tcp.local.",
+        "event": "add",
+        "captured_at_epoch": 3001.0,
+        "name": "B._matter._tcp.local.",
+        "omr_ipv6_addr": "fd00:abcd::9999",
+        "service_info": {
+            "properties": {
+                "FabricID_compressed": {"decoded": "BBBBBBBBBBBBBBBB"},
+                "NodeID": {"decoded": "0000000000000002"},
+            },
+        },
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base_dir = Path(tmpdir)
+        file_thread = base_dir / "td-mdns-scopes-thread.json"
+        file_matter = base_dir / "td-mdns-scopes-matter.json"
+        file_thread.write_text(json.dumps([record_a]), encoding="utf-8")
+        file_matter.write_text(json.dumps([record_b]), encoding="utf-8")
+
+        merged, report = build_merged_records(
+            base_dir=base_dir,
+            omr_prefix="fd00:abcd::",
+            input_files=["td-mdns-scopes-thread.json", "td-mdns-scopes-matter.json"],
+            device_label_map={},
+            matter_identity_mode="composite-guard",
+        )
+
+    assert len(merged) == 2, f"Expected 2 merged nodes, got {len(merged)}"
+    names = {node.get("name") for node in merged}
+    assert "A._matter._tcp.local." in names
+    assert "B._matter._tcp.local." in names
+    assert report.get("total_merged_nodes") == 2
+    assert report.get("matter_identity_mode") == "composite-guard"
+
+    print("✅ PASS: composite-guard mode prevented false OMR-only merge")
+
+
+# =============================================================================
 # Run All Tests
 # =============================================================================
 
@@ -787,6 +1001,9 @@ def run_all_tests():
     
     # Complex integration
     test_complex_integration_all_features()
+    test_production_flow_mdns_omr_dedup_aliases()
+    test_production_flow_strict_omr_preserves_distinct_matter_identities_in_aliases()
+    test_production_flow_composite_guard_prevents_false_omr_merge()
     
     print("\n" + "=" * 70)
     print("✅ ALL PHASE 4 TESTS PASSED!")
@@ -800,7 +1017,7 @@ def run_all_tests():
     print("  ✅ Conflict tracking (source files and field conflicts)")
     print("  ✅ Complex integration (all Phase 2-4 features combined)")
     print("\nPhase 4 implementation is COMPLETE and VALIDATED!")
-    print(f"\nTotal Tests Run: 15")
+    print(f"\nTotal Tests Run: 18")
     print("Test Pass Rate: 100%")
 
 

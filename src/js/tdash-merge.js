@@ -48,12 +48,78 @@ export function getRowMergeIdentityKeys(row, strategy) {
     const omr_ipv6_addr = getCanonicalOmrIpv6Address(row);
     if (extaddr) keys.push(`extaddr:${extaddr}`);
     if (omr_ipv6_addr) keys.push(`omr_ipv6_addr:${omr_ipv6_addr}`);
+
+    const matterComposite = getMatterFabricNodeIdentity(row);
+    if (matterComposite) keys.push(`matter_fabric_node:${matterComposite}`);
   }
 
   const rloc16 = getCanonicalRloc16(row);
   if (rloc16) keys.push(`rloc16:${rloc16}`);
 
   return [...new Set(keys)];
+}
+
+function isMatterOperationalMdnsRow(row) {
+  if (!isPlainObject(row)) return false;
+  const scope = toText(row.scope).toLowerCase();
+  return scope === "_matter._tcp.local.";
+}
+
+function getServiceInfoPropDecodedText(row, key) {
+  const props = row?.service_info?.properties;
+  if (!isPlainObject(props)) return "";
+  const obj = props[key];
+  if (!isPlainObject(obj)) return "";
+  const decoded = toText(obj.decoded);
+  return decoded ? decoded.toLowerCase() : "";
+}
+
+function getMatterFabricNodeIdentity(row) {
+  if (!isMatterOperationalMdnsRow(row)) return "";
+  const fabricId = getServiceInfoPropDecodedText(row, "FabricID_compressed");
+  const nodeId = getServiceInfoPropDecodedText(row, "NodeID");
+  if (!fabricId || !nodeId) return "";
+  return `${fabricId}|${nodeId}`;
+}
+
+function filterCandidateIdsForMatterIdentityConsistency(candidateIds, incomingRow, mergedRows) {
+  if (!isMatterOperationalMdnsRow(incomingRow)) return candidateIds;
+
+  const incomingMatterId = getMatterFabricNodeIdentity(incomingRow);
+  if (!incomingMatterId) return candidateIds;
+
+  const incomingExtaddr = getCanonicalExtaddr(incomingRow);
+  const incomingRloc16 = getCanonicalRloc16(incomingRow);
+
+  const filtered = [];
+  candidateIds.forEach((nodeId) => {
+    const node = mergedRows.get(nodeId);
+    if (!isPlainObject(node)) return;
+
+    const nodeExtaddr = getCanonicalExtaddr(node);
+    if (incomingExtaddr && nodeExtaddr && incomingExtaddr === nodeExtaddr) {
+      filtered.push(nodeId);
+      return;
+    }
+
+    const nodeMatterId = getMatterFabricNodeIdentity(node);
+    if (nodeMatterId) {
+      if (nodeMatterId === incomingMatterId) filtered.push(nodeId);
+      return;
+    }
+
+    const nodeRloc16 = getCanonicalRloc16(node);
+    if (incomingRloc16 && nodeRloc16 && incomingRloc16 === nodeRloc16) {
+      filtered.push(nodeId);
+    }
+  });
+
+  return filtered;
+}
+
+function getMatterIdentityMode(options = {}) {
+  const mode = toText(options.matterIdentityMode).toLowerCase();
+  return mode === "composite-guard" ? "composite-guard" : "strict-omr";
 }
 
 export function isEmptyMergeValue(value) {
@@ -154,7 +220,195 @@ export function mergeRowMetadata(target, source) {
   }
 }
 
+function isMdnsRecord(row) {
+  if (!isPlainObject(row)) return false;
+  if (typeof row.record_key === "string" && row.record_key.includes("|")) return true;
+  return (
+    typeof row.scope === "string" &&
+    row.scope.startsWith("_") &&
+    row.scope.endsWith(".local.")
+  );
+}
+
+function getMdnsEventPriority(event) {
+  const priorities = { add: 3, update: 2, remove: 1 };
+  return priorities[toText(event).toLowerCase()] ?? 0;
+}
+
+function mergeMdnsServiceInfo(baseServiceInfo, incomingServiceInfo, baseTs, incomingTs) {
+  if (!isPlainObject(baseServiceInfo)) return { ...incomingServiceInfo };
+  if (!isPlainObject(incomingServiceInfo)) return { ...baseServiceInfo };
+
+  const mergeMissing = (primary, secondary) => {
+    const out = { ...primary };
+    Object.keys(secondary).forEach((k) => {
+      const pv = out[k];
+      const sv = secondary[k];
+      if (isEmptyMergeValue(pv) && !isEmptyMergeValue(sv)) {
+        out[k] = sv;
+      } else if (isPlainObject(pv) && isPlainObject(sv)) {
+        out[k] = mergeMdnsServiceInfo(pv, sv, undefined, undefined);
+      }
+    });
+    return out;
+  };
+
+  if (Number.isFinite(baseTs) && Number.isFinite(incomingTs)) {
+    return incomingTs > baseTs
+      ? mergeMissing(incomingServiceInfo, baseServiceInfo)
+      : mergeMissing(baseServiceInfo, incomingServiceInfo);
+  }
+
+  return mergeMissing(baseServiceInfo, incomingServiceInfo);
+}
+
+function mergeMdnsRecords(base, incoming) {
+  const baseTs = Number(base?.captured_at_epoch);
+  const incomingTs = Number(incoming?.captured_at_epoch);
+  const hasBaseTs = Number.isFinite(baseTs);
+  const hasIncomingTs = Number.isFinite(incomingTs);
+
+  const mergeMissingFields = (primary, secondary) => {
+    const out = { ...primary };
+    Object.keys(secondary).forEach((k) => {
+      if (k === "service_info") return;
+      const pv = out[k];
+      const sv = secondary[k];
+      if (isEmptyMergeValue(pv) && !isEmptyMergeValue(sv)) {
+        out[k] = sv;
+      }
+    });
+    if (isPlainObject(primary.service_info) || isPlainObject(secondary.service_info)) {
+      out.service_info = mergeMdnsServiceInfo(
+        isPlainObject(primary.service_info) ? primary.service_info : {},
+        isPlainObject(secondary.service_info) ? secondary.service_info : {},
+        hasBaseTs ? baseTs : undefined,
+        hasIncomingTs ? incomingTs : undefined,
+      );
+    }
+    return out;
+  };
+
+  if (hasBaseTs && hasIncomingTs) {
+    if (incomingTs > baseTs) return mergeMissingFields(incoming, base);
+    if (incomingTs < baseTs) return mergeMissingFields(base, incoming);
+
+    const basePrio = getMdnsEventPriority(base?.event);
+    const incomingPrio = getMdnsEventPriority(incoming?.event);
+    return incomingPrio > basePrio
+      ? mergeMissingFields(incoming, base)
+      : mergeMissingFields(base, incoming);
+  }
+
+  return mergeMissingFields(base, incoming);
+}
+
+function appendUniqueAlias(aliasMap, key, value) {
+  const text = toText(value);
+  if (!text) return;
+  const arr = Array.isArray(aliasMap[key]) ? aliasMap[key] : [];
+  if (!arr.includes(text)) arr.push(text);
+  aliasMap[key] = arr;
+}
+
+function getServiceInfoPropDecoded(row, key) {
+  const props = row?.service_info?.properties;
+  if (!isPlainObject(props)) return "";
+  const node = props[key];
+  if (!isPlainObject(node)) return "";
+  return toText(node.decoded);
+}
+
+function updateMdnsAliases(target, row) {
+  if (!isPlainObject(target) || !isPlainObject(row)) return;
+  const aliasMap = isPlainObject(target._mdns_aliases) ? target._mdns_aliases : {};
+
+  appendUniqueAlias(aliasMap, "name_aliases", row.name);
+  appendUniqueAlias(aliasMap, "server_aliases", row.server ?? row?.service_info?.server);
+  appendUniqueAlias(
+    aliasMap,
+    "server_key_aliases",
+    toText(row.server_key ?? row?.service_info?.key).toLowerCase(),
+  );
+  appendUniqueAlias(
+    aliasMap,
+    "fabric_id_compressed_aliases",
+    getServiceInfoPropDecoded(row, "FabricID_compressed"),
+  );
+  appendUniqueAlias(aliasMap, "node_id_aliases", getServiceInfoPropDecoded(row, "NodeID"));
+
+  target._mdns_aliases = aliasMap;
+}
+
+function extractMdnsMergeView(row) {
+  if (!isPlainObject(row)) return {};
+  const fields = [
+    "record_key",
+    "event",
+    "captured_at_epoch",
+    "captured_at_iso",
+    "scope",
+    "name",
+    "extaddr",
+    "omr_ipv6_addr",
+    "is_border_router",
+    "role",
+    "service_info",
+    "server",
+    "server_key",
+  ];
+  const out = {};
+  fields.forEach((k) => {
+    if (Object.prototype.hasOwnProperty.call(row, k)) out[k] = row[k];
+  });
+  if (!out.server && typeof out?.service_info?.server === "string") {
+    out.server = out.service_info.server;
+  }
+  if (!out.server_key && typeof out?.service_info?.key === "string") {
+    out.server_key = out.service_info.key;
+  }
+  return out;
+}
+
+function applyMdnsMergeView(target, merged) {
+  [
+    "record_key",
+    "event",
+    "captured_at_epoch",
+    "captured_at_iso",
+    "scope",
+    "name",
+    "extaddr",
+    "omr_ipv6_addr",
+    "is_border_router",
+    "role",
+    "service_info",
+    "server",
+    "server_key",
+  ].forEach((k) => {
+    if (Object.prototype.hasOwnProperty.call(merged, k)) target[k] = merged[k];
+  });
+}
+
+function mergeMdnsRowIntoTarget(target, source) {
+  if (!isMdnsRecord(source)) return;
+
+  updateMdnsAliases(target, target);
+  updateMdnsAliases(target, source);
+
+  const baseView = extractMdnsMergeView(target);
+  const incomingView = extractMdnsMergeView(source);
+  if (!isPlainObject(incomingView) || Object.keys(incomingView).length === 0) return;
+
+  const merged =
+    isPlainObject(baseView) && Object.keys(baseView).length > 0
+      ? mergeMdnsRecords(baseView, incomingView)
+      : { ...incomingView };
+  applyMdnsMergeView(target, merged);
+}
+
 export function mergeRowFields(target, source) {
+  mergeMdnsRowIntoTarget(target, source);
   mergeRowMetadata(target, source);
   Object.keys(source).forEach((key) => {
     if (key.startsWith("_")) return;
@@ -443,8 +697,13 @@ export function mergeRowsByStrategy(rowGroups, strategy, options = {}) {
         ),
       ].sort((a, b) => a - b);
 
+      const filteredCandidateIds =
+        getMatterIdentityMode(options) === "composite-guard"
+          ? filterCandidateIdsForMatterIdentityConsistency(candidateIds, row, mergedRows)
+          : candidateIds;
+
       let targetId;
-      if (candidateIds.length === 0) {
+      if (filteredCandidateIds.length === 0) {
         targetId = nextNodeId;
         nextNodeId += 1;
         mergedRows.set(targetId, {
@@ -452,19 +711,19 @@ export function mergeRowsByStrategy(rowGroups, strategy, options = {}) {
           _merge_identity_keys: [...identityKeys],
         });
       } else {
-        targetId = candidateIds[0];
+        targetId = filteredCandidateIds[0];
         const target = mergedRows.get(targetId) || { ...row };
         mergedRows.set(targetId, target);
 
-        if (candidateIds.length > 1) {
+        if (filteredCandidateIds.length > 1) {
           // Multiple existing nodes resolve to this incoming record — log collision.
           console.warn(
-            `[tdash-merge] identity collision: incoming row matches ${candidateIds.length} existing nodes`,
-            { identityKeys, candidateIds },
+            `[tdash-merge] identity collision: incoming row matches ${filteredCandidateIds.length} existing nodes`,
+            { identityKeys, candidateIds: filteredCandidateIds },
           );
         }
 
-        candidateIds.slice(1).forEach((sourceId) => {
+        filteredCandidateIds.slice(1).forEach((sourceId) => {
           const source = mergedRows.get(sourceId);
           if (!source) return;
           mergeRowFields(target, source);
