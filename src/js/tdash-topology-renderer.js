@@ -1,8 +1,13 @@
 import {
   VIS_OPTIONS,
+  getPhysicsProfile,
+  getPhysicsProfileLabel,
+  PHYSICS_PROFILE_RING_STAR,
   EDGE_CATEGORY_ROUTER_NEIGHBOR,
   EDGE_CATEGORY_DEFAULT_CHILDREN,
   EDGE_CATEGORY_OTBR_CHILD,
+  EDGE_CATEGORY_EVE_CHILD,
+  EDGE_CATEGORY_EVE_NATIVE_CHILD,
 } from "./tdash-constants.js";
 import {
   toText,
@@ -87,15 +92,326 @@ if (typeof window !== 'undefined') {
   window.tdashDebug.getOriginalNodeStyling = function() { return _originalNodeStyling; };
 }
 
+function applyRingStarSeedLayout(nodeData, edgeData) {
+  const nodeById = new Map(nodeData.map((n) => [n.id, n]));
+  const visibleEdges = edgeData.filter((e) => e.baseHidden !== true);
+  const routers = nodeData
+    .filter((n) => n.isRouter === true)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
+  if (routers.length === 0) return;
+
+  function toUpperText(value) {
+    return typeof value === "string" ? value.trim().toUpperCase() : "";
+  }
+
+  function stableHash(text) {
+    const s = String(text || "");
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i += 1) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0);
+  }
+
+  function jitterFromId(id, amplitude) {
+    const u = stableHash(id) / 0xffffffff;
+    return (u - 0.5) * 2 * amplitude;
+  }
+
+  function isFtdChildNode(node) {
+    if (!node || node.isRouter === true) return false;
+    if (toUpperText(node.mode_device) === "FTD") return true;
+    // Fallback for sparse datasets where mode_device is empty.
+    return /\bFTD\b/i.test(String(node.label || ""));
+  }
+
+  function getEdgeCategories(edge) {
+    return normalizeLinkCategories(edge.linkCategories || edge.linkCategory || edge.category);
+  }
+
+  const routerCount = routers.length;
+  const routerRingRadius = Math.max(380, routerCount * 38);
+  const routerIdSet = new Set(routers.map((r) => r.id));
+  const routerById = new Map(routers.map((r) => [r.id, r]));
+
+  // Four explicit rings from center.
+  const ring2MinRadius = routerRingRadius + 170;  // FTD children (pushed farther from parents)
+  const ring3MinRadius = routerRingRadius + 300;  // non-FTD children linked to routers
+  const ring4Radius = routerRingRadius + 430;     // unconnected nodes (pushed farther out)
+
+  // Build LQ3 router affinity graph.
+  const lq3NeighborByRouter = new Map();
+  routers.forEach((r) => lq3NeighborByRouter.set(r.id, new Set()));
+  visibleEdges.forEach((edge) => {
+    const a = nodeById.get(edge.from);
+    const b = nodeById.get(edge.to);
+    if (!a || !b) return;
+    if (!routerIdSet.has(a.id) || !routerIdSet.has(b.id)) return;
+    if (edge.lqLevel !== 3) return;
+    lq3NeighborByRouter.get(a.id).add(b.id);
+    lq3NeighborByRouter.get(b.id).add(a.id);
+  });
+
+  // Ring 1 order: greedy walk favoring LQ3-connected routers.
+  const unvisited = new Set(routers.map((r) => r.id));
+  const orderedRouterIds = [];
+  function degreeOf(routerId) {
+    return lq3NeighborByRouter.get(routerId)?.size || 0;
+  }
+  while (unvisited.size > 0) {
+    const candidates = Array.from(unvisited).sort((a, b) => {
+      const degreeDiff = degreeOf(b) - degreeOf(a);
+      if (degreeDiff !== 0) return degreeDiff;
+      return String(a).localeCompare(String(b));
+    });
+    let current = candidates[0];
+    orderedRouterIds.push(current);
+    unvisited.delete(current);
+
+    while (unvisited.size > 0) {
+      const lq3Candidates = Array.from(unvisited)
+        .filter((id) => lq3NeighborByRouter.get(current)?.has(id))
+        .sort((a, b) => {
+          const degreeDiff = degreeOf(b) - degreeOf(a);
+          if (degreeDiff !== 0) return degreeDiff;
+          return String(a).localeCompare(String(b));
+        });
+      const next = lq3Candidates[0];
+      if (!next) break;
+      orderedRouterIds.push(next);
+      unvisited.delete(next);
+      current = next;
+    }
+  }
+
+  // Use variable angular gaps: LQ3-adjacent routers get tighter spacing.
+  const gapWeights = [];
+  const ringCount = orderedRouterIds.length;
+  for (let i = 0; i < ringCount; i += 1) {
+    const aId = orderedRouterIds[i];
+    const bId = orderedRouterIds[(i + 1) % ringCount];
+    const areLq3Neighbors = lq3NeighborByRouter.get(aId)?.has(bId) === true;
+    gapWeights.push(areLq3Neighbors ? 0.65 : 1.15);
+  }
+  const totalWeight = gapWeights.reduce((sum, w) => sum + w, 0) || ringCount;
+
+  const routerAngleById = new Map();
+  let cumulative = -Math.PI / 2;
+  for (let i = 0; i < ringCount; i += 1) {
+    const routerId = orderedRouterIds[i];
+    routerAngleById.set(routerId, cumulative);
+    cumulative += ((2 * Math.PI) * gapWeights[i]) / totalWeight;
+  }
+
+  const placed = new Set();
+
+  // 1) Ring 1: pin routers on the ring. LQ3 neighbors are positioned with tighter arc spacing.
+  orderedRouterIds.forEach((routerId) => {
+    const router = routerById.get(routerId);
+    const angle = routerAngleById.get(routerId) || 0;
+    router.x = Math.round(routerRingRadius * Math.cos(angle));
+    router.y = Math.round(routerRingRadius * Math.sin(angle));
+    router.fixed = { x: true, y: true };
+    router.physics = false;
+    placed.add(router.id);
+  });
+
+  const parentToChildren = new Map();
+  const nodeRouterScores = new Map();
+  function pushChild(parentId, childId) {
+    if (!parentToChildren.has(parentId)) parentToChildren.set(parentId, []);
+    parentToChildren.get(parentId).push(childId);
+  }
+
+  function bumpRouterScoreWeighted(nodeId, routerId, weight) {
+    if (!nodeRouterScores.has(nodeId)) nodeRouterScores.set(nodeId, new Map());
+    const scoreByRouter = nodeRouterScores.get(nodeId);
+    scoreByRouter.set(routerId, (scoreByRouter.get(routerId) || 0) + weight);
+  }
+
+  // 2) Build parent-child relation from parent-child and child-category edges.
+  visibleEdges.forEach((edge) => {
+    const a = nodeById.get(edge.from);
+    const b = nodeById.get(edge.to);
+    if (!a || !b) return;
+    const cats = getEdgeCategories(edge);
+    const aIsRouter = routerIdSet.has(a.id);
+    const bIsRouter = routerIdSet.has(b.id);
+    if (aIsRouter === bIsRouter) return;
+
+    const routerNode = aIsRouter ? a : b;
+    const nonRouterNode = aIsRouter ? b : a;
+
+    const isExplicitChild =
+      edge.isParentChild === true ||
+      cats.includes(EDGE_CATEGORY_DEFAULT_CHILDREN) ||
+      cats.includes(EDGE_CATEGORY_OTBR_CHILD) ||
+      cats.includes(EDGE_CATEGORY_EVE_CHILD) ||
+      cats.includes(EDGE_CATEGORY_EVE_NATIVE_CHILD);
+
+    const isChildLike = isExplicitChild || !cats.includes(EDGE_CATEGORY_ROUTER_NEIGHBOR);
+
+    // Prefer explicit parent-child semantics, then high-LQ links, then weak fallback.
+    const weight = isExplicitChild ? 12 : (edge.lqLevel === 3 ? 3 : 1);
+    bumpRouterScoreWeighted(nonRouterNode.id, routerNode.id, weight);
+
+    if (isChildLike) {
+      pushChild(routerNode.id, nonRouterNode.id);
+    }
+  });
+
+  // Assign any remaining router-connected non-router node to its strongest router.
+  for (const [nodeId, scoreByRouter] of nodeRouterScores.entries()) {
+    const node = nodeById.get(nodeId);
+    if (!node || node.isRouter === true) continue;
+    let bestRouterId = null;
+    let bestScore = -1;
+    for (const [routerId, score] of scoreByRouter.entries()) {
+      if (score > bestScore) {
+        bestScore = score;
+        bestRouterId = routerId;
+      }
+    }
+    if (bestRouterId != null) pushChild(bestRouterId, nodeId);
+  }
+
+  // Helper for ring 2/3 placement around each parent router angle.
+  function placeBandChildren(parent, parentAngle, childIds, bandMinRadius, distanceFromParentBase, spreadScale) {
+    const sortedIds = Array.from(new Set(childIds)).sort((a, b) => String(a).localeCompare(String(b)));
+    const childCount = sortedIds.length;
+    if (childCount === 0) return;
+
+    const spread = Math.min(Math.PI * 1.65, Math.max(Math.PI / 3, childCount * spreadScale));
+    sortedIds.forEach((childId, idx) => {
+      const child = nodeById.get(childId);
+      if (!child) return;
+
+      const localOffset = childCount === 1
+        ? 0
+        : (-spread / 2) + (spread * (idx / (childCount - 1)));
+      const layer = Math.floor(idx / 3);
+      const theta = parentAngle + localOffset + jitterFromId(`${parent.id}|${childId}|theta`, Math.PI / 9);
+      const parentDist = distanceFromParentBase + (layer * 56) + jitterFromId(`${parent.id}|${childId}|radius`, 34);
+
+      let x = parent.x + (parentDist * Math.cos(theta));
+      let y = parent.y + (parentDist * Math.sin(theta));
+
+      // Enforce the band's minimum radial distance from center.
+      const r = Math.hypot(x, y);
+      const minBandR = bandMinRadius + (layer * 34);
+      if (r < minBandR) {
+        const scale = minBandR / Math.max(1, r);
+        x *= scale;
+        y *= scale;
+      }
+
+      child.x = Math.round(x);
+      child.y = Math.round(y);
+      child.fixed = { x: true, y: true };
+      child.physics = false;
+      placed.add(child.id);
+    });
+  }
+
+  // 2 & 3) Ring 2 = FTD children, Ring 3 = other router-linked children.
+  for (const [parentId, childIdsRaw] of parentToChildren.entries()) {
+    const parent = nodeById.get(parentId);
+    if (!parent) continue;
+    const parentAngle = routerAngleById.get(parentId) ?? 0;
+
+    const childIds = Array.from(new Set(childIdsRaw));
+    const ftdChildren = childIds.filter((childId) => {
+      const child = nodeById.get(childId);
+      return isFtdChildNode(child);
+    });
+    const otherChildren = childIds.filter((childId) => !ftdChildren.includes(childId));
+
+    placeBandChildren(parent, parentAngle, ftdChildren, ring2MinRadius, 180, 0.24);
+    placeBandChildren(parent, parentAngle, otherChildren, ring3MinRadius, 255, 0.30);
+  }
+
+  // After all children are placed, push overlapping non-router nodes apart.
+  // Node shape sizes (from buildVisNodeData): routers ~187×77, children ~109×41.
+  // We use a conservative bounding circle radius per type to drive separation.
+  const MIN_CHILD_SEP = 130; // px — desired minimum centre-to-centre gap for child nodes
+  const MAX_ITERS = 80;
+  const DAMPING = 0.55;
+  const childNodes = nodeData.filter((n) => n.isRouter !== true && placed.has(n.id));
+  for (let iter = 0; iter < MAX_ITERS; iter += 1) {
+    let moved = false;
+    for (let i = 0; i < childNodes.length; i += 1) {
+      const a = childNodes[i];
+      for (let j = i + 1; j < childNodes.length; j += 1) {
+        const b = childNodes[j];
+        const dx = (b.x || 0) - (a.x || 0);
+        const dy = (b.y || 0) - (a.y || 0);
+        const dist = Math.hypot(dx, dy) || 0.01;
+        if (dist >= MIN_CHILD_SEP) continue;
+        const overlap = (MIN_CHILD_SEP - dist) * DAMPING;
+        const nx = dx / dist;
+        const ny = dy / dist;
+        // Push each node equally away from the other.
+        a.x = Math.round((a.x || 0) - nx * overlap * 0.5);
+        a.y = Math.round((a.y || 0) - ny * overlap * 0.5);
+        b.x = Math.round((b.x || 0) + nx * overlap * 0.5);
+        b.y = Math.round((b.y || 0) + ny * overlap * 0.5);
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+
+  // 4) Ring 4: nodes with no links at all.
+  const connectedNodeIds = new Set();
+  visibleEdges.forEach((edge) => {
+    connectedNodeIds.add(edge.from);
+    connectedNodeIds.add(edge.to);
+  });
+  const unconnectedNodes = nodeData
+    .filter((n) => !connectedNodeIds.has(n.id))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const unconnectedCount = unconnectedNodes.length;
+  unconnectedNodes.forEach((node, idx) => {
+    const angle = -Math.PI / 2 + ((2 * Math.PI * idx) / Math.max(1, unconnectedCount));
+    node.x = Math.round(ring4Radius * Math.cos(angle));
+    node.y = Math.round(ring4Radius * Math.sin(angle));
+    node.fixed = { x: true, y: true };
+    node.physics = false;
+    placed.add(node.id);
+  });
+
+  // Fallback: place any remaining non-router nodes outside ring 4.
+  const remaining = nodeData
+    .filter((n) => !placed.has(n.id))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const fallbackRadius = ring4Radius + 110;
+  const remCount = remaining.length;
+  remaining.forEach((node, idx) => {
+    const angle = -Math.PI / 2 + ((2 * Math.PI * idx) / Math.max(1, remCount));
+    node.x = Math.round(fallbackRadius * Math.cos(angle));
+    node.y = Math.round(fallbackRadius * Math.sin(angle));
+    node.fixed = { x: true, y: true };
+    node.physics = false;
+  });
+}
+
 // ── Main renderer ─────────────────────────────────────────────────────────────
 
-export function renderTopologyForDataset(dataset, physicsEnabled) {
+export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfileName = "baseline") {
   const container = document.getElementById("topology-view");
   const statusEl = document.getElementById("view-status-line-content");
   const nodeFilterEl = document.getElementById("node-filter");
   const linkFilterEl = document.getElementById("link-filter");
   const diagnosticFilterEl = document.getElementById("diagnostic-filter");
   let lastStatusCounts = null;
+  let lastStabilizationMs = null;
+  const renderStartedAt = (typeof performance !== "undefined" && typeof performance.now === "function")
+    ? performance.now()
+    : Date.now();
+  const physicsProfile = getPhysicsProfile(physicsProfileName);
+  const physicsProfileLabel = getPhysicsProfileLabel(physicsProfileName);
 
   // Destroy previous network instance to free memory
   if (_visNetwork) {
@@ -135,6 +451,10 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     sourceNames,
   } = adaptorResult;
 
+  if (physicsProfileName === PHYSICS_PROFILE_RING_STAR) {
+    applyRingStarSeedLayout(nodeData, edgeData);
+  }
+
   // Store nodeData and raw rows for filter validation and search
   _topologyNodeData = nodeData;
   _topologyRawRows = rawByIdForDetails;
@@ -163,10 +483,17 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     _originalNodeStyling.set(node.id, cloneNodeStyle(node));
   });
   
+  const optionsWithProfile = Object.assign({}, VIS_OPTIONS, {
+    physics: Object.assign({}, VIS_OPTIONS.physics, {
+      barnesHut: Object.assign({}, VIS_OPTIONS.physics?.barnesHut, physicsProfile.barnesHut),
+      stabilization: Object.assign({}, VIS_OPTIONS.physics?.stabilization, physicsProfile.stabilization),
+    }),
+  });
+
   const effectiveOptions = physicsEnabled
-    ? VIS_OPTIONS
+    ? optionsWithProfile
     : Object.assign({}, VIS_OPTIONS, {
-      physics: Object.assign({}, VIS_OPTIONS.physics, { enabled: false }),
+      physics: Object.assign({}, optionsWithProfile.physics, { enabled: false }),
     });
   _visNetwork = new vis.Network(
     container,
@@ -451,10 +778,13 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
     const searchSuffix = searchQuery
       ? ` Search: "${searchQuery}" — ${matchCount} of ${totalCount} rows match.`
       : "";
+    const stabilizationSuffix = Number.isFinite(lastStabilizationMs)
+      ? ` Stabilized: ${(lastStabilizationMs / 1000).toFixed(2)}s.`
+      : "";
     const fetchStatusEl = document.getElementById("fetch-status-line-content");
     if (fetchStatusEl) fetchStatusEl.textContent = `Loaded: ${sourceNames.join(", ")}`;
     statusEl.textContent =
-      `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links.${neighborSuffix}${searchSuffix}`;
+      `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Physics profile: ${physicsProfileLabel}.${stabilizationSuffix}${neighborSuffix}${searchSuffix}`;
   }
 
   // ── Node detail click handler ──────────────────────────────────────────
@@ -546,11 +876,40 @@ export function renderTopologyForDataset(dataset, physicsEnabled) {
 
   // Turn off physics when stabilization is complete to stop graph movement
   _visNetwork.on("stabilizationIterationsDone", function () {
+    const stabilizedAt = (typeof performance !== "undefined" && typeof performance.now === "function")
+      ? performance.now()
+      : Date.now();
+    lastStabilizationMs = Math.max(0, stabilizedAt - renderStartedAt);
+
+    if (typeof window !== "undefined") {
+      window.tdashDebug = window.tdashDebug || {};
+      window.tdashDebug.phase1Runs = Array.isArray(window.tdashDebug.phase1Runs)
+        ? window.tdashDebug.phase1Runs
+        : [];
+      window.tdashDebug.phase1Runs.push({
+        timestampIso: new Date().toISOString(),
+        profile: physicsProfileName,
+        profileLabel: physicsProfileLabel,
+        stabilizationMs: Math.round(lastStabilizationMs),
+        nodeCount: nodeData.length,
+        edgeCount: edgeData.filter((e) => e.baseHidden !== true).length,
+      });
+    }
+
     _visNetwork.setOptions({ physics: false });
+    if (physicsProfileName === PHYSICS_PROFILE_RING_STAR && _autoZoomEnabled) {
+      requestAnimationFrame(() => {
+        if (_visNetwork) {
+          _visNetwork.fit({ animation: _animationEnabled });
+        }
+      });
+    }
     // Notify UI layer that physics has been disabled
     if (_onPhysicsDisabledCallback) {
       _onPhysicsDisabledCallback();
     }
+
+    if (lastStatusCounts) updateStatus(lastStatusCounts);
   });
 
   // ── Store filter handlers so the toggle/filter wiring can call them ──

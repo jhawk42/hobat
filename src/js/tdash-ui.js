@@ -36,6 +36,15 @@ import {
   isMoreInfoEnabled,
 } from "./tdash-table-renderer.js";
 import { EDGE_LQ_STYLES } from "./tdash-constants.js";
+import {
+  PHYSICS_PROFILE_BASELINE,
+  PHYSICS_PROFILE_DENSE,
+  PHYSICS_PROFILE_BALANCED,
+  PHYSICS_PROFILE_SPARSE,
+  PHYSICS_PROFILE_RING_STAR,
+  PHYSICS_PROFILES,
+  getPhysicsProfileLabel,
+} from "./tdash-constants.js";
 import { initDetailPanelToggles, formatAgo, formatDuration, toFiniteNumber } from "./tdash-utils.js";
 import {
   populateFilterSelects,
@@ -103,6 +112,8 @@ function populateDatasetSelect(sourceFilter = null) {
 
 let currentView = "topology";
 let _physicsEnabled = true;
+let _physicsProfileName = PHYSICS_PROFILE_BASELINE;
+const PHYSICS_PROFILE_AUTO = "auto";
 let _enhanceEnabled = true;
 let _lastFetchStartedAt = null;
 let _currentSearchQuery = "";
@@ -181,7 +192,13 @@ function renderCurrentView() {
   if (view === "topology") {
     // Re-enable physics for new dataset so it can stabilize
     setPhysics(true);
-    renderTopologyForDataset(effectiveDataset, _physicsEnabled);
+    const selectedEntry = effectiveDataset?.entry || getSelectedDatasetEntry();
+    const effectivePhysicsProfileName = getEffectivePhysicsProfileName(selectedEntry);
+    renderTopologyForDataset(
+      effectiveDataset,
+      _physicsEnabled,
+      effectivePhysicsProfileName,
+    );
     const counts = getTopologyDatasetCounts();
     if (counts) updateDeviceStatusBar(counts);
   } else {
@@ -198,6 +215,87 @@ function renderCurrentView() {
 
   // Refresh diagnostic filter to show only relevant options for this dataset
   refreshDiagnosticFilterForCurrentSource();
+}
+
+function getPhysicsProfileSelect() {
+  return document.getElementById("physics-profile-select");
+}
+
+function getSelectedDatasetEntry() {
+  const selectedValue = document.getElementById("dataset-select")?.value;
+  return DATASET_REGISTRY.find((entry) => entry.value === selectedValue) || null;
+}
+
+function getModeMappedPhysicsProfileName(entry) {
+  const topologyMode = entry?.topologyMode;
+  if (topologyMode === "meshdiag-networkdiag") return PHYSICS_PROFILE_DENSE;
+  if (topologyMode === "merged-detailed") return PHYSICS_PROFILE_RING_STAR;
+  if (topologyMode === "router-table") return PHYSICS_PROFILE_SPARSE;
+  if (topologyMode === "eve_native") return PHYSICS_PROFILE_BALANCED;
+  if (topologyMode === "eve_enhanced") return PHYSICS_PROFILE_BALANCED;
+  if (topologyMode === "raw-array") return PHYSICS_PROFILE_BALANCED;
+  if (topologyMode === "otbr_restapi") {
+    const files = Array.isArray(entry?.files) ? entry.files : [];
+    const hasMeshDiagnostics = files.includes("td-otbr-restapi-mesh-diagnostics-fetch-all.json");
+    return hasMeshDiagnostics ? PHYSICS_PROFILE_DENSE : PHYSICS_PROFILE_BALANCED;
+  }
+  return PHYSICS_PROFILE_BASELINE;
+}
+
+function getEffectivePhysicsProfileName(entry = getSelectedDatasetEntry()) {
+  if (_physicsProfileName !== PHYSICS_PROFILE_AUTO) return _physicsProfileName;
+  return getModeMappedPhysicsProfileName(entry);
+}
+
+function getPhysicsProfileStatusLabel(entry = getSelectedDatasetEntry()) {
+  const effective = getEffectivePhysicsProfileName(entry);
+  if (_physicsProfileName === PHYSICS_PROFILE_AUTO) {
+    return `Auto (${getPhysicsProfileLabel(effective)})`;
+  }
+  return getPhysicsProfileLabel(effective);
+}
+
+function setPhysicsProfile(profileName) {
+  const key = typeof profileName === "string" ? profileName.toLowerCase() : "";
+  _physicsProfileName = key === PHYSICS_PROFILE_AUTO || Object.prototype.hasOwnProperty.call(PHYSICS_PROFILES, key)
+    ? key
+    : PHYSICS_PROFILE_BASELINE;
+
+  const select = getPhysicsProfileSelect();
+  if (select) select.value = _physicsProfileName;
+
+  try {
+    localStorage.setItem("tdash.physicsProfile", _physicsProfileName);
+  } catch {
+    // Ignore localStorage failures (e.g., private mode policies)
+  }
+
+  const statusEl = document.getElementById("view-status-line-content");
+  if (statusEl && !currentDataset) {
+    statusEl.textContent = `Showing: no dataset loaded. Select a dataset and click Fetch. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
+  }
+}
+
+function initPhysicsProfileSelector() {
+  const select = getPhysicsProfileSelect();
+  if (!select) return;
+
+  let initialProfile = PHYSICS_PROFILE_AUTO;
+  try {
+    //const stored = localStorage.getItem("tdash.physicsProfile");
+    //if (stored) initialProfile = stored;
+  } catch {
+    // Ignore localStorage failures
+  }
+
+  setPhysicsProfile(initialProfile);
+
+  select.addEventListener("change", () => {
+    setPhysicsProfile(select.value);
+    if (currentDataset && currentView === "topology") {
+      renderCurrentView();
+    }
+  });
 }
 
 // ── Section 7: View Toggle ────────────────────────────────────────────────────
@@ -380,6 +478,13 @@ document
     } else {
       updateEstimatedFetchTime(null);
     }
+
+    if (_physicsProfileName === PHYSICS_PROFILE_AUTO && !currentDataset) {
+      const statusEl = document.getElementById("view-status-line-content");
+      if (statusEl) {
+        statusEl.textContent = `Showing: no dataset loaded. Select a dataset and click Fetch. Physics profile: ${getPhysicsProfileStatusLabel(selectedDataset)}.`;
+      }
+    }
   });
 
 document.getElementById("node-filter").addEventListener("change", () => {
@@ -441,6 +546,7 @@ const initialDiagSource = document.getElementById("diagnostic-source-filter").va
 populateDiagnosticFilterBySource(initialDiagSource);
 applyLegendLineStylesFromConstants();
 await loadStaticLabelMap();
+initPhysicsProfileSelector();
 
 // Initialize estimated fetch time from the initially selected dataset
 const initialDatasetValue = document.getElementById("dataset-select").value;
@@ -453,7 +559,7 @@ if (initialDatasetValue) {
 
 // do not auto-load on startup; prompt the user instead.
 document.getElementById("view-status-line-content").textContent =
-  "Showing: no dataset loaded. Select a dataset and click Fetch.";
+  `Showing: no dataset loaded. Select a dataset and click Fetch. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
 
 initDetailPanelToggles(document.getElementById("device-details"));
 

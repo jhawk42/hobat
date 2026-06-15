@@ -806,6 +806,113 @@ export const VIS_OPTIONS = {
   interaction: { hover: true, navigationButtons: true },
 };
 
+// ── Phase 1: physics profile presets for dry-run comparisons ─────────────────
+
+export const PHYSICS_PROFILE_BASELINE = "baseline";
+export const PHYSICS_PROFILE_DENSE = "dense";
+export const PHYSICS_PROFILE_BALANCED = "balanced";
+export const PHYSICS_PROFILE_SPARSE = "sparse";
+export const PHYSICS_PROFILE_RING_STAR = "ring-star";
+
+export const PHYSICS_PROFILES = Object.freeze({
+  [PHYSICS_PROFILE_BASELINE]: Object.freeze({
+    label: "Baseline",
+    barnesHut: Object.freeze({
+      gravitationalConstant: -9500,
+      centralGravity: 0.15,
+      springLength: 380,
+      springConstant: 0.01,
+      damping: 0.22,
+      avoidOverlap: 1.5,
+    }),
+    stabilization: Object.freeze({ enabled: true, iterations: 1500, updateInterval: 25 }),
+  }),
+  [PHYSICS_PROFILE_DENSE]: Object.freeze({
+    label: "Dense",
+    barnesHut: Object.freeze({
+      gravitationalConstant: -12000,
+      centralGravity: 0.10,
+      springLength: 300,
+      springConstant: 0.012,
+      damping: 0.30,
+      avoidOverlap: 1.8,
+    }),
+    stabilization: Object.freeze({ enabled: true, iterations: 2200, updateInterval: 25 }),
+  }),
+  [PHYSICS_PROFILE_BALANCED]: Object.freeze({
+    label: "Balanced",
+    barnesHut: Object.freeze({
+      gravitationalConstant: -10000,
+      centralGravity: 0.14,
+      springLength: 360,
+      springConstant: 0.011,
+      damping: 0.25,
+      avoidOverlap: 1.5,
+    }),
+    stabilization: Object.freeze({ enabled: true, iterations: 1700, updateInterval: 25 }),
+  }),
+  [PHYSICS_PROFILE_SPARSE]: Object.freeze({
+    label: "Sparse",
+    barnesHut: Object.freeze({
+      gravitationalConstant: -8000,
+      centralGravity: 0.22,
+      springLength: 260,
+      springConstant: 0.014,
+      damping: 0.20,
+      avoidOverlap: 1.1,
+    }),
+    stabilization: Object.freeze({ enabled: true, iterations: 1100, updateInterval: 25 }),
+  }),
+  [PHYSICS_PROFILE_RING_STAR]: Object.freeze({
+    label: "Ring-Star",
+    barnesHut: Object.freeze({
+      gravitationalConstant: -6000,
+      centralGravity: 0.01,
+      springLength: 180,
+      springConstant: 0.04,
+      damping: 0.45,
+      avoidOverlap: 1.2,
+    }),
+    stabilization: Object.freeze({ enabled: true, iterations: 600, updateInterval: 25 }),
+  }),
+});
+
+export function getPhysicsProfile(profileName) {
+  const key = typeof profileName === "string" ? profileName.toLowerCase() : "";
+  return PHYSICS_PROFILES[key] || PHYSICS_PROFILES[PHYSICS_PROFILE_BASELINE];
+}
+
+export function getPhysicsProfileLabel(profileName) {
+  return getPhysicsProfile(profileName).label;
+}
+
+// ── Phase 3: isolated-node anchor A/B presets ───────────────────────────────
+
+export const ISOLATED_ANCHOR_PRESET_A = "a";
+export const ISOLATED_ANCHOR_PRESET_B = "b";
+
+export const ISOLATED_ANCHOR_PRESETS = Object.freeze({
+  [ISOLATED_ANCHOR_PRESET_A]: Object.freeze({
+    label: "A",
+    unknown: Object.freeze({ clusterLength: 60, anchorLength: 180 }),
+    known: Object.freeze({ clusterLength: 110, anchorLength: 240 }),
+  }),
+  [ISOLATED_ANCHOR_PRESET_B]: Object.freeze({
+    label: "B",
+    unknown: Object.freeze({ clusterLength: 75, anchorLength: 150 }),
+    known: Object.freeze({ clusterLength: 95, anchorLength: 200 }),
+  }),
+});
+
+export function getIsolatedAnchorPreset(name) {
+  const key = typeof name === "string" ? name.toLowerCase() : "";
+  return ISOLATED_ANCHOR_PRESETS[key] || ISOLATED_ANCHOR_PRESETS[ISOLATED_ANCHOR_PRESET_A];
+}
+
+export function getIsolatedAnchorPresetLabel(name) {
+  return getIsolatedAnchorPreset(name).label;
+}
+
 // ── Table column priority order ───────────────────────────────────────────────
 
 /**
