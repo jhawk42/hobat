@@ -584,9 +584,6 @@ export function adaptEve(fileMap) {
       merged.color = NODE_COLORS.borderRouter;
     } else if (merged.shape === 'ellipse') {
       // Child nodes (ellipse shape) should always use child color
-      if (['0x4c00', '0xa800'].includes(nodeId)) {
-        console.log(`[upsertEveNativeNode] Setting ellipse color for ${nodeId}: from`, existing?.color, 'to', NODE_COLORS.child);
-      }
       merged.color = NODE_COLORS.child;
     }
     nodeMap.set(nodeId, merged);

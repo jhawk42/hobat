@@ -41,9 +41,8 @@
     <!-- Fetch device status and network health bar -->
     <div id="device-status" class="controls" role="status" aria-live="polite">
       <!--
-        Devices: nn Border Routers: nn Routers: nn Child nodes: nn Links: LQ3: nn nn LQ2: nn LQ1: nn 
-        Devices: 🖥 12 Nodes | 🛤 3 Border Routers | NN Routers |NN Child nodes| ⚠ 2 Low-Quality Links | 
-        -->
+        ⛬ Total: nn ■ TBR: nn ⬟ Router: nn ● End Device: nn 📶 Links: nn LQ3: nn LQ2: nn LQ1: nn
+      -->
       <fieldset class="cache-options" id="fieldset-devices">
         <legend><button class="legend-toggle-btn" id="btn-toggle-devices" aria-expanded="true"><span
               class="legend-toggle-arrow">▶</span>Devices</button>
@@ -124,7 +123,6 @@
                 </label>
                 <div class="progress-row">
                   <progress id="fetch-timetaken-progress" max="100"></progress>
-                  
                 </div>
               </div>
               <div id="fetch-cache-age-group">
@@ -195,15 +193,14 @@
               <label for="diagnostic-source-filter" title="Filter diagnostics by source">Source</label>
               <select id="diagnostic-source-filter" title="Filter diagnostics by source">
                 <!-- populated by JS from DIAGNOSTIC_SOURCE_FILTER_OPTIONS -->
-                <option value="mac_counters" title="MAC counters track physical/link-layer frame statistics (such as radio interference, retries, and dropped packets). 
-">MAC Counters</option>
-                <option value="mle_counters" title="MLE (Mesh Link Establishment) counters track network-layer events (such as attachment attempts, parent changes, and routing state).
-">MLE Counters</option>
+                <option value="mac_counters" 
+                  title="MAC counters track physical/link-layer frame statistics (such as radio interference, retries, and dropped packets).">MAC Counters</option>
+                <option value="mle_counters" 
+                  title="MLE (Mesh Link Establishment) counters track network-layer events (such as attachment attempts, parent changes, and routing state).">MLE Counters</option>
                 <option value="time_statistics"
                   title="Time statistics track various time-related metrics in the network.">Time Statistics</option>
-                <option value="link_quality" title="Link quality metrics track the quality of links between devices.">
-                  Link
-                  Quality</option>
+                <option value="link_quality" 
+                  title="Link quality metrics track the quality of links between devices.">Link Quality</option>
               </select>
               <label for="diagnostic-filter" title="Filter diagnostics by type or severity">Diagnostics</label>
               <select id="diagnostic-filter" title="Filter diagnostics by type or severity">
@@ -258,6 +255,12 @@
               <button id="btn-legend-toggle" title="Toggle link quality legend" aria-expanded="false">
                 Legend
               </button>
+              <select id="physics-profile-select" title="Physics profile selector" aria-label="Physics profile">
+                <option value="auto">Auto (Mode)</option>
+                <option value="balanced">Balanced</option>
+                <option value="sparse">Sparse</option>
+                <option value="ring-star">Ring-Star</option>
+              </select>
               <button id="btn-physics" title="Toggle physics simulation" aria-label="Pause physics simulation">
                 ⏸
               </button>
@@ -304,7 +307,7 @@
         </div>
       </div>
 
-      <!-- Unified Device Details Panel (shared by topology and table views) -->
+      <!-- Device Details Panel (shared by topology and table views) -->
       <div id="device-details" class="node-details-panel">
         <h2>Device details:</h2>
         <ul id="summary-list" class="node-details-list">

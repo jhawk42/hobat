@@ -5,8 +5,29 @@ import {
   getCanonicalOmrIpv6Address,
 } from "./tdash-utils.js";
 import { normalizeLinkCategories } from "./tdash-filters.js";
-import { EDGE_LQ_STYLES, NODE_COLORS } from "./tdash-constants.js";
+import {
+  EDGE_LQ_STYLES,
+  NODE_COLORS,
+  ISOLATED_ANCHOR_PRESET_A,
+  getIsolatedAnchorPreset,
+  getIsolatedAnchorPresetLabel,
+} from "./tdash-constants.js";
 import { EDGE_CATEGORY_LABELS } from "./tdash-constants.js";
+
+let _isolatedAnchorPresetName = ISOLATED_ANCHOR_PRESET_A;
+
+export function setIsolatedAnchorPreset(name) {
+  const key = typeof name === "string" ? name.toLowerCase() : "";
+  _isolatedAnchorPresetName = key || ISOLATED_ANCHOR_PRESET_A;
+}
+
+export function getIsolatedAnchorPresetName() {
+  return _isolatedAnchorPresetName;
+}
+
+export function getIsolatedAnchorPresetStatusLabel() {
+  return getIsolatedAnchorPresetLabel(_isolatedAnchorPresetName);
+}
 
 // ── Node-id selection ─────────────────────────────────────────────────────────
 
@@ -293,7 +314,8 @@ export function computeRouterChildStats(routerChildTable) {
 // Groups isolated (degree-0) nodes with phantom hidden edges to keep the
 // layout tidy.  Returns a nodeDegree Map for optional use by callers.
 
-export function groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap) {
+export function groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap, presetName = _isolatedAnchorPresetName) {
+  const preset = getIsolatedAnchorPreset(presetName);
   const nodeDegree = new Map();
   for (const edge of edgeData) {
     nodeDegree.set(edge.from, (nodeDegree.get(edge.from) || 0) + 1);
@@ -338,8 +360,8 @@ export function groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap) {
     .filter((n) => n.group === "unknown" && (nodeDegree.get(n.id) || 0) === 0)
     .map((n) => n.id);
   clusterIsolatedNodeIds(unknownIds, {
-    clusterLength: 60,
-    anchorLength: 180,
+    clusterLength: preset.unknown.clusterLength,
+    anchorLength: preset.unknown.anchorLength,
     anchorId: connectedAnchorId,
   });
 
@@ -347,8 +369,8 @@ export function groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap) {
     .filter((n) => n.group !== "unknown" && (nodeDegree.get(n.id) || 0) === 0)
     .map((n) => n.id);
   clusterIsolatedNodeIds(knownIsolatedIds, {
-    clusterLength: 110,
-    anchorLength: 240,
+    clusterLength: preset.known.clusterLength,
+    anchorLength: preset.known.anchorLength,
     anchorId: connectedAnchorId,
   });
 
