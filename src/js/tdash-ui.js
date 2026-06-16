@@ -228,9 +228,9 @@ function getSelectedDatasetEntry() {
 
 function getModeMappedPhysicsProfileName(entry) {
   const topologyMode = entry?.topologyMode;
-  if (topologyMode === "meshdiag-networkdiag") return PHYSICS_PROFILE_DENSE;
+  if (topologyMode === "meshdiag-networkdiag") return PHYSICS_PROFILE_BALANCED;
   if (topologyMode === "merged-detailed") return PHYSICS_PROFILE_RING_STAR;
-  if (topologyMode === "router-table") return PHYSICS_PROFILE_SPARSE;
+  if (topologyMode === "router-table") return PHYSICS_PROFILE_BALANCED;
   if (topologyMode === "eve_native") return PHYSICS_PROFILE_BALANCED;
   if (topologyMode === "eve_enhanced") return PHYSICS_PROFILE_BALANCED;
   if (topologyMode === "raw-array") return PHYSICS_PROFILE_BALANCED;
