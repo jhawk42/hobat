@@ -40,7 +40,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "meshdiag_only",
-    label: "Mesh topology [meshdiag md]",
+    label: "Mesh Topology (meshdiag)",
     group: "Fast",
     files: ["td-otbr-cli-meshdiag-topology.json"],
     mergeStrategy: "none",
@@ -54,7 +54,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "networkdiag_multicast_network_only",
-    label: "Diag topology [network multicast FTD ndmc]",
+    label: "Network Diagnostics (multicast FTD)",
     group: "Fast",
     files: ["td-otbr-cli-networkdiag-multicast-network.json"],
     mergeStrategy: "none",
@@ -68,7 +68,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast",
-    label: "Diag & Mesh topology [FTD ndmc,md]",
+    label: "Mesh + FTD Diagnostics",
     group: "Versatile: more time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -85,7 +85,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_multicast_mdns",
-    label: "Diag & Mesh topology w/mdns [md,FTD ndmc,mdns] ",
+    label: "Mesh + FTD Diagnostics + mDNS",
     group: "Versatile: more time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -102,7 +102,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_all_multicast_mdns",
-    label: "Diag & Mesh topology neighbors, children w/mdns [md,FTD ndmc,mdn,mdc,mdns] ⏱️",
+    label: "Mesh + FTD + Neighbor/Child + mDNS",
     group: "Versatile: more time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -121,7 +121,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "router_neighbortables",
-    label: "Meshdiag neighbors (mdn)⏱️",
+    label: "Router Neighbor Table",
     group: "Versatile: more time",
     files: ["td-otbr-cli-meshdiag-router-neighbortables.json"],
     mergeStrategy: "none",
@@ -133,7 +133,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "router_childtables",
-    label: "Meshdiag children (mdc)⏱️",
+    label: "Router Child Table",
     group: "Versatile: more time",
     files: ["td-otbr-cli-meshdiag-router-childtables.json"],
     mergeStrategy: "none",
@@ -148,7 +148,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "networkdiag_only",
-    label: "Diag topology all [network fetch all (ndfa)]⏱️",
+    label: "Network Diagnostics (fetch-all)⏱️",
     group: "Detailed: most time",
     files: ["td-otbr-cli-networkdiag-fetch-all.json"],
     mergeStrategy: "none",
@@ -162,7 +162,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_meshdiag_networkdiag_fetch_all_mdns",
-    label: "Diag & Mesh topology all w/mdns [md, ndfa, mdns] ⏱️",
+    label: "Mesh + Diagnostics All + mDNS⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -179,7 +179,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "merged_otbr_cli_poll_all_mdns",
-    label: "Diag & Mesh topology all neighbors, children w/mdns [md, ndfa, mdn, mdc, mdns] ⏱️",
+    label: "Mesh + Diag All + Neighbor/Child + mDNS⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -199,7 +199,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "router_table",
-    label: "Router table (rt)",
+    label: "Router Table",
     group: "System",
     files: ["td-otbr-cli-router-table.json"],
     mergeStrategy: "none",
@@ -214,7 +214,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_diagnostics_list",
-    label: "Diag & Device topology list [dial,devl]",
+    label: "Devices + Diagnostics (list)",
     group: "Fast",
     files: [
       "td-otbr-restapi-devices-list.json", 
@@ -230,7 +230,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_diagnostics_list",
-    label: "Diag topology [diagnostics list dial]",
+    label: "Diagnostics (list)",
     group: "Fast",
     files: ["td-otbr-restapi-diagnostics-list.json"],
     mergeStrategy: "none",
@@ -244,7 +244,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_list",
-    label: "Devices list (devl)",
+    label: "Devices (list)",
     group: "Fast",
     files: ["td-otbr-restapi-devices-list.json"],
     mergeStrategy: "none",
@@ -258,7 +258,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_fetch",
-    label: "Devices fetch (devf)",
+    label: "Devices (fetch)",
     group: "Versatile: more time",
     files: ["td-otbr-restapi-devices-fetch.json"],
     mergeStrategy: "none",
@@ -272,7 +272,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_fetch_diagnostics_fetch_all",
-    label: "Devices & Diag Topology fetch: [devf,diagfa]⏱️",
+    label: "Devices Fetch + Diagnostics Fetch-All⏱️",
     group: "Versatile: more time",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
@@ -289,7 +289,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_devices_fetch_diagnostics_fetch_mesh-diagnostics-fetch_all",
-    label: "Devices, Diag & Mesh Topology: [devf,diagfa,mdfa]⏱️",
+    label: "Devices + Diagnostics + Mesh Diagnostics⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
@@ -307,7 +307,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_diagnostics_fetch_all",
-    label: "Diag Topology: diagnostics fetch all [diagfa]⏱️",
+    label: "Diagnostics (fetch-all)⏱️",
     group: "Detailed: most time",
     files: ["td-otbr-restapi-diagnostics-fetch-all.json"],
     mergeStrategy: "by-identity",
@@ -321,7 +321,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_mesh_diagnostics_fetch_all",
-    label: "Mesh Topology: mesh diagnostics fetch all (mdfa)⏱️",
+    label: "Mesh Diagnostics (fetch-all)⏱️",
     group: "Detailed: most time",
     files: ["td-otbr-restapi-mesh-diagnostics-fetch-all.json"],
     mergeStrategy: "by-identity",
@@ -334,23 +334,9 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "restapi_actions_list",
-    label: "actions list (al)",
+    label: "Actions (list)",
     group: "System",
     files: ["td-otbr-restapi-actions-list.json"],
-    mergeStrategy: "none",
-    topologyMode: "raw-array",
-    defaultView: "table",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 1
-  },
-
-  // ── Single-file simple datasets ───
-  {
-    source: "otbr-restapi",
-    value: "restapi_dataset_active",
-    label: "dataset active",
-    group: "System",
-    files: ["td-otbr-restapi-dataset-active.json"],
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultView: "table",
@@ -362,7 +348,7 @@ export const DATASET_REGISTRY = [
   {
     source: "eve",
     value: "eve_native_threadlayout",
-    label: "Eve Thread Network Layout",
+    label: "Eve Layout (native)",
     group: "Native",
     files: ["Eve Thread Network Layout.evethreadlayout"],
     mergeStrategy: "none",
@@ -375,7 +361,7 @@ export const DATASET_REGISTRY = [
   {
     source: "eve",
     value: "eve_processed_topology",
-    label: "Eve Thread Network Layout",
+    label: "Eve Topology (processed)",
     group: "Processed",
     files: ["td-eve-topology.json"],
     mergeStrategy: "none",
@@ -389,7 +375,7 @@ export const DATASET_REGISTRY = [
   {
     source: "mdns",
     value: "mdns_scopes_br",
-    label: "BR scope",
+    label: "mDNS Border Router Scope",
     group: "Versatile: more time",
     files: ["td-mdns-scopes-br.json"],
     mergeStrategy: "none",
@@ -401,7 +387,7 @@ export const DATASET_REGISTRY = [
   {
     source: "mdns",
     value: "mdns_scopes_hap",
-    label: "HAP scope",
+    label: "mDNS HomeKit (HAP) Scope",
     group: "Versatile: more time",
     files: ["td-mdns-scopes-hap.json"],
     mergeStrategy: "none",
@@ -413,7 +399,7 @@ export const DATASET_REGISTRY = [
   {
     source: "mdns",
     value: "mdns_scopes_matter",
-    label: "Matter scope",
+    label: "mDNS Matter Scope",
     group: "Versatile: more time",
     files: ["td-mdns-scopes-matter.json"],
     mergeStrategy: "none",
@@ -426,7 +412,7 @@ export const DATASET_REGISTRY = [
   {
     source: "mdns",
     value: "mdns_scopes_thread",
-    label: "Thread scopes (BR, HAP, Matter)",
+    label: "mDNS Thread Scopes (all)",
     group: "Detailed: most time",
     files: ["td-mdns-scopes-thread.json"],
     mergeStrategy: "none",
@@ -440,7 +426,7 @@ export const DATASET_REGISTRY = [
   {
     source: "merged",
     value: "merged_all_deep_wide_otbr_cli_restapi_eve",
-    label: "premerged: topology [otbr-cli, otbr-restapi, mdns ...] deep & wide. may be stale",
+    label: "Premerged Multi-Source Topology",
     group: null,
     files: [
       "td-merged-topology-all.json"
@@ -456,7 +442,7 @@ export const DATASET_REGISTRY = [
   {
     source: "merged",
     value: "merged_otbr_cli_otbr_restapi",
-    label: "dynamic merge:otbr-cli, otbr-restapi, mdns ⏱️",
+    label: "Dynamic Merge: CLI + REST + mDNS",
     group: null,
     files: [
       "td-static-extaddr-device-label.json",
@@ -477,7 +463,7 @@ export const DATASET_REGISTRY = [
   {
     source: "system",
     value: "static_extaddr_device_label",
-    label: "Extended MAC to Device Label map",
+    label: "ExtAddr to Device Label Map",
     group: null,
     files: ["td-static-extaddr-device-label.json"],
     mergeStrategy: "none",
