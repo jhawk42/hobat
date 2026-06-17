@@ -31,6 +31,10 @@ export const DATASOURCE_REGISTRY = [
 //   topologyMode     — which topology adaptor to call:
 //                       'meshdiag-networkdiag' | 'merged-detailed' | 'eve'
 //                       'router-table' | 'raw-array'
+//   physicsProfile   — (optional) physics engine profile override:
+//                       'mesh-baseline' | 'mesh-dense' | 'mesh-balanced' | 'mesh-sparse' | 'mesh-ring'
+//                       If omitted, auto-selected based on topologyMode.
+//                       Precedence: manual user selection > dataset physicsProfile > topologyMode mapping
 //   defaultLinkFilter — value pre-selected in #link-filter when this dataset loads
 
 export const DATASET_REGISTRY = [
@@ -153,6 +157,7 @@ export const DATASET_REGISTRY = [
     files: ["td-otbr-cli-networkdiag-fetch-all.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
+    physicsProfile: "mesh-ring",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 600
@@ -298,6 +303,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
+    physicsProfile: "mesh-ring",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1206
@@ -366,6 +372,7 @@ export const DATASET_REGISTRY = [
     files: ["td-eve-topology.json"],
     mergeStrategy: "none",
     topologyMode: "eve_enhanced",
+    physicsProfile: "mesh-ring",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1
@@ -433,6 +440,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
+    physicsProfile: "mesh-ring",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1
@@ -454,6 +462,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
+    physicsProfile: "mesh-ring",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 720

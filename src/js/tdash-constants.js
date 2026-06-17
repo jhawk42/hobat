@@ -808,15 +808,15 @@ export const VIS_OPTIONS = {
 
 // ── Phase 1: physics profile presets for dry-run comparisons ─────────────────
 
-export const PHYSICS_PROFILE_BASELINE = "baseline";
-export const PHYSICS_PROFILE_DENSE = "dense";
-export const PHYSICS_PROFILE_BALANCED = "balanced";
-export const PHYSICS_PROFILE_SPARSE = "sparse";
-export const PHYSICS_PROFILE_RING_STAR = "ring-star";
+export const PHYSICS_PROFILE_MESH_BASELINE = "mesh-baseline";
+export const PHYSICS_PROFILE_MESH_DENSE = "mesh-dense";
+export const PHYSICS_PROFILE_MESH_BALANCED = "mesh-balanced";
+export const PHYSICS_PROFILE_MESH_SPARSE = "mesh-sparse";
+export const PHYSICS_PROFILE_MESH_RING = "mesh-ring";
 
 export const PHYSICS_PROFILES = Object.freeze({
-  [PHYSICS_PROFILE_BASELINE]: Object.freeze({
-    label: "Baseline",
+  [PHYSICS_PROFILE_MESH_BASELINE]: Object.freeze({
+    label: "Mesh Baseline",
     barnesHut: Object.freeze({
       gravitationalConstant: -9500,
       centralGravity: 0.15,
@@ -827,8 +827,8 @@ export const PHYSICS_PROFILES = Object.freeze({
     }),
     stabilization: Object.freeze({ enabled: true, iterations: 1500, updateInterval: 25 }),
   }),
-  [PHYSICS_PROFILE_DENSE]: Object.freeze({
-    label: "Dense",
+  [PHYSICS_PROFILE_MESH_DENSE]: Object.freeze({
+    label: "Mesh Dense",
     barnesHut: Object.freeze({
       gravitationalConstant: -12000,
       centralGravity: 0.10,
@@ -839,8 +839,8 @@ export const PHYSICS_PROFILES = Object.freeze({
     }),
     stabilization: Object.freeze({ enabled: true, iterations: 2200, updateInterval: 25 }),
   }),
-  [PHYSICS_PROFILE_BALANCED]: Object.freeze({
-    label: "Balanced",
+  [PHYSICS_PROFILE_MESH_BALANCED]: Object.freeze({
+    label: "Mesh Balanced",
     barnesHut: Object.freeze({
       gravitationalConstant: -10000,
       centralGravity: 0.14,
@@ -851,8 +851,8 @@ export const PHYSICS_PROFILES = Object.freeze({
     }),
     stabilization: Object.freeze({ enabled: true, iterations: 1700, updateInterval: 25 }),
   }),
-  [PHYSICS_PROFILE_SPARSE]: Object.freeze({
-    label: "Sparse",
+  [PHYSICS_PROFILE_MESH_SPARSE]: Object.freeze({
+    label: "Mesh Sparse",
     barnesHut: Object.freeze({
       gravitationalConstant: -8000,
       centralGravity: 0.22,
@@ -863,8 +863,8 @@ export const PHYSICS_PROFILES = Object.freeze({
     }),
     stabilization: Object.freeze({ enabled: true, iterations: 1100, updateInterval: 25 }),
   }),
-  [PHYSICS_PROFILE_RING_STAR]: Object.freeze({
-    label: "Ring-Star",
+  [PHYSICS_PROFILE_MESH_RING]: Object.freeze({
+    label: "Mesh Ring",
     barnesHut: Object.freeze({
       gravitationalConstant: -6000,
       centralGravity: 0.01,
@@ -879,7 +879,7 @@ export const PHYSICS_PROFILES = Object.freeze({
 
 export function getPhysicsProfile(profileName) {
   const key = typeof profileName === "string" ? profileName.toLowerCase() : "";
-  return PHYSICS_PROFILES[key] || PHYSICS_PROFILES[PHYSICS_PROFILE_BASELINE];
+  return PHYSICS_PROFILES[key] || PHYSICS_PROFILES[PHYSICS_PROFILE_MESH_BASELINE];
 }
 
 export function getPhysicsProfileLabel(profileName) {

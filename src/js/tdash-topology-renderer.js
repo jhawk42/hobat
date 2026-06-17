@@ -2,7 +2,7 @@ import {
   VIS_OPTIONS,
   getPhysicsProfile,
   getPhysicsProfileLabel,
-  PHYSICS_PROFILE_RING_STAR,
+  PHYSICS_PROFILE_MESH_RING,
   EDGE_CATEGORY_ROUTER_NEIGHBOR,
   EDGE_CATEGORY_DEFAULT_CHILDREN,
   EDGE_CATEGORY_OTBR_CHILD,
@@ -415,7 +415,7 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
 
 // ── Main renderer ─────────────────────────────────────────────────────────────
 
-export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfileName = "baseline") {
+export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfileName = "mesh-baseline") {
   const container = document.getElementById("topology-view");
   const statusEl = document.getElementById("view-status-line-content");
   const nodeFilterEl = document.getElementById("node-filter");
@@ -467,7 +467,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
     sourceNames,
   } = adaptorResult;
 
-  if (physicsProfileName === PHYSICS_PROFILE_RING_STAR) {
+  if (physicsProfileName === PHYSICS_PROFILE_MESH_RING) {
     applyRingStarSeedLayout(nodeData, edgeData);
   }
 
@@ -913,7 +913,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
     }
 
     _visNetwork.setOptions({ physics: false });
-    if (physicsProfileName === PHYSICS_PROFILE_RING_STAR && _autoZoomEnabled) {
+    if (physicsProfileName === PHYSICS_PROFILE_MESH_RING && _autoZoomEnabled) {
       requestAnimationFrame(() => {
         if (_visNetwork) {
           _visNetwork.fit({ animation: _animationEnabled });

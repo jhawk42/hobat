@@ -37,11 +37,11 @@ import {
 } from "./tdash-table-renderer.js";
 import { EDGE_LQ_STYLES } from "./tdash-constants.js";
 import {
-  PHYSICS_PROFILE_BASELINE,
-  PHYSICS_PROFILE_DENSE,
-  PHYSICS_PROFILE_BALANCED,
-  PHYSICS_PROFILE_SPARSE,
-  PHYSICS_PROFILE_RING_STAR,
+  PHYSICS_PROFILE_MESH_BASELINE,
+  PHYSICS_PROFILE_MESH_DENSE,
+  PHYSICS_PROFILE_MESH_BALANCED,
+  PHYSICS_PROFILE_MESH_SPARSE,
+  PHYSICS_PROFILE_MESH_RING,
   PHYSICS_PROFILES,
   getPhysicsProfileLabel,
 } from "./tdash-constants.js";
@@ -112,7 +112,7 @@ function populateDatasetSelect(sourceFilter = null) {
 
 let currentView = "topology";
 let _physicsEnabled = true;
-let _physicsProfileName = PHYSICS_PROFILE_BASELINE;
+let _physicsProfileName = PHYSICS_PROFILE_MESH_BASELINE;
 const PHYSICS_PROFILE_AUTO = "auto";
 let _enhanceEnabled = true;
 let _lastFetchStartedAt = null;
@@ -228,22 +228,28 @@ function getSelectedDatasetEntry() {
 
 function getModeMappedPhysicsProfileName(entry) {
   const topologyMode = entry?.topologyMode;
-  if (topologyMode === "meshdiag-networkdiag") return PHYSICS_PROFILE_BALANCED;
-  if (topologyMode === "merged-detailed") return PHYSICS_PROFILE_RING_STAR;
-  if (topologyMode === "router-table") return PHYSICS_PROFILE_BALANCED;
-  if (topologyMode === "eve_native") return PHYSICS_PROFILE_BALANCED;
-  if (topologyMode === "eve_enhanced") return PHYSICS_PROFILE_BALANCED;
-  if (topologyMode === "raw-array") return PHYSICS_PROFILE_BALANCED;
+  if (topologyMode === "meshdiag-networkdiag") return PHYSICS_PROFILE_MESH_BALANCED;
+  if (topologyMode === "merged-detailed") return PHYSICS_PROFILE_MESH_RING;
+  if (topologyMode === "router-table") return PHYSICS_PROFILE_MESH_BALANCED;
+  if (topologyMode === "eve_native") return PHYSICS_PROFILE_MESH_BALANCED;
+  if (topologyMode === "eve_enhanced") return PHYSICS_PROFILE_MESH_BALANCED;
+  if (topologyMode === "raw-array") return PHYSICS_PROFILE_MESH_BALANCED;
   if (topologyMode === "otbr_restapi") {
     const files = Array.isArray(entry?.files) ? entry.files : [];
     const hasMeshDiagnostics = files.includes("td-otbr-restapi-mesh-diagnostics-fetch-all.json");
-    return hasMeshDiagnostics ? PHYSICS_PROFILE_DENSE : PHYSICS_PROFILE_BALANCED;
+    return hasMeshDiagnostics ? PHYSICS_PROFILE_MESH_DENSE : PHYSICS_PROFILE_MESH_BALANCED;
   }
-  return PHYSICS_PROFILE_BASELINE;
+  return PHYSICS_PROFILE_MESH_BASELINE;
 }
 
 function getEffectivePhysicsProfileName(entry = getSelectedDatasetEntry()) {
+  // Manual user selection (not auto) has highest precedence
   if (_physicsProfileName !== PHYSICS_PROFILE_AUTO) return _physicsProfileName;
+  
+  // If auto mode: dataset-level physicsProfile takes precedence over topologyMode mapping
+  if (entry?.physicsProfile) return entry.physicsProfile;
+  
+  // Fall back to topologyMode-based auto mapping
   return getModeMappedPhysicsProfileName(entry);
 }
 
@@ -259,7 +265,7 @@ function setPhysicsProfile(profileName) {
   const key = typeof profileName === "string" ? profileName.toLowerCase() : "";
   _physicsProfileName = key === PHYSICS_PROFILE_AUTO || Object.prototype.hasOwnProperty.call(PHYSICS_PROFILES, key)
     ? key
-    : PHYSICS_PROFILE_BASELINE;
+    : PHYSICS_PROFILE_MESH_BASELINE;
 
   const select = getPhysicsProfileSelect();
   if (select) select.value = _physicsProfileName;
