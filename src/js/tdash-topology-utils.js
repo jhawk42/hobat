@@ -8,6 +8,7 @@ import { normalizeLinkCategories } from "./tdash-filters.js";
 import {
   EDGE_LQ_STYLES,
   NODE_COLORS,
+  NODE_SHAPES,
   ISOLATED_ANCHOR_PRESET_A,
   getIsolatedAnchorPreset,
   getIsolatedAnchorPresetLabel,
@@ -389,6 +390,7 @@ export function buildVisNodeData(
   return Array.from(nodeMap.values()).map((node) => {
     const displayName = toText(node.device_label) || toText(node.name);
     const rloc16Text = toText(node.rloc16).toLowerCase();
+    const modeDevice = toText(node.mode_device).toUpperCase();
     const neighborStats = computeRouterNeighborStats(
       routerNeighborByRloc16.get(rloc16Text)?.router_neighbor_table,
     );
@@ -397,10 +399,20 @@ export function buildVisNodeData(
       childTableRow?.router_child_table,
     );
     const hasChildren = routerIdsWithChildren.has(node.id);
-    const isRouter = node.is_router || rloc16Text.endsWith("00") || toText(node.type).toLowerCase() === "router" || toText(node.role).toLowerCase() === "router" 
+    const isRouter = node.is_router || rloc16Text.endsWith("00") || toText(node.type).toLowerCase() === "router" || toText(node.role).toLowerCase() === "router";
     const isBorderRouter = isRouter && (node.br === true || node.is_border_router === true) || toText(node.role).toLowerCase() === "border router" || toText(node.role).toLowerCase() === "border router";
     const unknown = isUnknownNodeName(displayName) && !isRouter && !isBorderRouter;
-    const effectiveShape = unknown ? "ellipse" : node.shape;
+    const isChildFtd = !isRouter && modeDevice === "FTD";
+    const isChildMtd = !isRouter && modeDevice === "MTD";
+    const effectiveShape = unknown
+      ? NODE_SHAPES.unknown
+      : (isBorderRouter
+        ? NODE_SHAPES.borderRouter
+        : (isRouter
+          ? NODE_SHAPES.router
+          : (isChildFtd
+            ? NODE_SHAPES.childFtd
+            : (isChildMtd ? NODE_SHAPES.childMtd : NODE_SHAPES.child))));
     
     let borderWidth = 1;
     let fontSize = 13;
@@ -417,16 +429,31 @@ export function buildVisNodeData(
       widthConstraint = { minimum: 187, maximum: 187 };
       heightConstraint = { minimum: 77, maximum: 77 };
     }
-    // Ensure ellipse nodes always have child color, especially for unknown nodes
-    const effectiveColor = (effectiveShape === "ellipse" && !node.br) 
-      ? NODE_COLORS.child 
-      : node.color;
+    const font = {
+      size: fontSize,
+      face: "monospace",
+      multi: "md",
+      color: "#e8f1ff",
+      strokeWidth: 0,
+      background: "rgba(7, 18, 40, 0.62)",
+    };
+    if (isRouter) {
+      // vis-network renders labels below polygon shapes (square/hexagon) by default.
+      // Pull router labels upward so they remain clearly visible with role-based shapes.
+      font.vadjust = -8;
+    }
+    // Enforce role-based color independently from shape strings.
+    const effectiveColor = unknown
+      ? (node.color || NODE_COLORS.unknown)
+      : ((!isRouter && !isBorderRouter)
+        ? NODE_COLORS.child
+        : node.color);
     return {
       id: node.id,
       label: labelFn(node),
       shape: effectiveShape,
       color: effectiveColor ? { ...effectiveColor } : effectiveColor,
-      font: { size: fontSize, face: "monospace", multi: "md" },
+      font,
       heightConstraint,
       widthConstraint,
       group: unknown ? "unknown" : "known",

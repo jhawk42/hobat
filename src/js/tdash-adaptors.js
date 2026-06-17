@@ -4,7 +4,7 @@ import {
   EDGE_CATEGORY_ROUTER_NEIGHBOR, EDGE_CATEGORY_OTBR_ROUTE,
   EDGE_CATEGORY_OTBR_CHILD, EDGE_CATEGORY_EVE_ROUTE,
   EDGE_CATEGORY_EVE_CHILD, EDGE_CATEGORY_EVE_NATIVE_ROUTE,
-  EDGE_CATEGORY_EVE_NATIVE_CHILD, NODE_COLORS, PALETTE
+  EDGE_CATEGORY_EVE_NATIVE_CHILD, NODE_COLORS, NODE_SHAPES, PALETTE
 } from './tdash-constants.js';
 import {
   toText, toFiniteNumber, isPlainObject,
@@ -202,14 +202,14 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_meshdiag: (style.source === 'meshdiag') || (existing ? existing.from_meshdiag === true : false),
       from_networkdiagnostic: (style.source === 'networkdiagnostic') || (existing ? existing.from_networkdiagnostic === true : false),
-      shape: (existing && existing.shape === 'ellipse') ? 'ellipse' : (style.shape || (existing ? existing.shape : 'box')),
+      shape: (existing && existing.shape === NODE_SHAPES.child) ? NODE_SHAPES.child : (style.shape || (existing ? existing.shape : NODE_SHAPES.router)),
       color: style.color || (existing ? existing.color : NODE_COLORS.router)
     };
     merged.is_ftd_router = merged.mode_device === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
     // Apply role-based color overrides
     if (merged.br) {
       merged.color = NODE_COLORS.borderRouter;
-    } else if (merged.shape === 'ellipse') {
+    } else if (merged.shape === NODE_SHAPES.child) {
       // Child nodes (ellipse shape) should always use child color, not router default
       merged.color = NODE_COLORS.child;
     }
@@ -228,7 +228,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     const meshRawId = toText(node.id);
     if (meshRawId) meshIdToUnifiedId.set(meshRawId, uid);
     upsertNode(uid, node, {
-      source: 'meshdiag', shape: 'box',
+      source: 'meshdiag', shape: NODE_SHAPES.router,
       color: node.br ? NODE_COLORS.borderRouter : NODE_COLORS.router
     });
   });
@@ -236,13 +236,13 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
   networkDiag.forEach((node, index) => {
     const uid = chooseNodeId(node, 'netdiag-node', index + 1);
     networkDiagById.set(uid, node);
-    upsertNode(uid, node, { source: 'networkdiagnostic', shape: 'box', color: NODE_COLORS.router });
+    upsertNode(uid, node, { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.router });
   });
 
   restApiDiagnostics.forEach((node, index) => {
     const uid = chooseNodeId(node, 'restapi-node', index + 1);
     restApiById.set(uid, node);
-    upsertNode(uid, node, { source: 'networkdiagnostic', shape: 'box', color: NODE_COLORS.router });
+    upsertNode(uid, node, { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.router });
   });
 
   routerNeighborTables.forEach((row) => {
@@ -284,7 +284,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
         ? lqStyleFromAvgLqi(childLq, 3)
         : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
       upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
-        { source: 'meshdiag', shape: 'ellipse', color: NODE_COLORS.child });
+        { source: 'meshdiag', shape: NODE_SHAPES.child, color: NODE_COLORS.child });
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
@@ -305,7 +305,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
         if (!toId) return;
         if (!nodeMap.has(toId)) {
           upsertNode(toId, { device_label: toText(link.device_label), rloc16: toText(link.rloc16), id: linkMeshId || toId },
-            { source: 'meshdiag', shape: 'box', color: NODE_COLORS.eve });
+            { source: 'meshdiag', shape: NODE_SHAPES.router, color: NODE_COLORS.eve });
         }
         const toNodeEnriched = nodeMap.get(toId);
         addEdge(edgeMap, edgeData, fromId, toId, {
@@ -324,7 +324,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
           rloc16: toText(neighbor.rloc16), extaddr: toText(neighbor.extaddr), device_label: toText(neighbor.device_label),
           id: toText(neighbor.rloc16) || toText(neighbor.extaddr)
         },
-        { source: 'meshdiag', shape: 'box', color: NODE_COLORS.eve }
+        { source: 'meshdiag', shape: NODE_SHAPES.router, color: NODE_COLORS.eve }
       );
       const toNodeEnriched = nodeMap.get(toId);
       addEdge(edgeMap, edgeData, fromId, toId, {
@@ -345,7 +345,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
           device_label: toText(neighbor.device_label),
           id: toText(neighbor.rloc16) || toText(neighbor.extAddress)
         },
-        { source: 'networkdiagnostic', shape: 'box', color: NODE_COLORS.eve }
+        { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.eve }
       );
       const toNodeEnriched = nodeMap.get(toId);
       addEdge(edgeMap, edgeData, fromId, toId, {
@@ -365,7 +365,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
           device_label: toText(child.device_label),
           id: toText(child.rloc16) || toText(child.extAddress) || `${fromId}-restmesh-child-${ci + 1}`
         },
-        { source: 'networkdiagnostic', shape: 'ellipse', color: NODE_COLORS.child }
+        { source: 'networkdiagnostic', shape: NODE_SHAPES.child, color: NODE_COLORS.child }
       );
       const linkMargin = toFiniteNumber(child.linkMargin);
       const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
@@ -392,7 +392,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
         ? lqStyleFromAvgLqi(childLq, 3)
         : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
       upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
-        { source: 'networkdiagnostic', shape: 'ellipse', color: NODE_COLORS.child });
+        { source: 'networkdiagnostic', shape: NODE_SHAPES.child, color: NODE_COLORS.child });
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
@@ -416,7 +416,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       const toId = ensureNode(
         toRloc16,
         { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
-        { source: 'networkdiagnostic', shape: 'box', color: NODE_COLORS.router }
+        { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.router }
       );
 
       // Compute LQI-based edge style
@@ -440,7 +440,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
       const toRloc16 = buildMainRouterRloc16(route.routeId);
       const toId = ensureNode(toRloc16, { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
-        { source: 'networkdiagnostic', shape: 'box', color: NODE_COLORS.router });
+        { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.router });
       const toNodeEnriched = nodeMap.get(toId);
       addEdge(edgeMap, edgeData, fromId, toId, {
         width: 1.5,
@@ -461,7 +461,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
           rloc16: childRloc16, id: childRloc16 || `${fromId}-rest-child-${ci + 1}`,
           device_label: childRloc16 || `${fromId} child ${child.childId}`
         },
-        { source: 'networkdiagnostic', shape: 'ellipse', color: NODE_COLORS.child }
+        { source: 'networkdiagnostic', shape: NODE_SHAPES.child, color: NODE_COLORS.child }
       );
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
@@ -576,13 +576,13 @@ export function adaptEve(fileMap) {
         ? rawNode.mle_counters.parentchanges : (existing?.parentchanges),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_eve: true,
-      shape: style.shape || (existing ? existing.shape : 'box'),
+      shape: style.shape || (existing ? existing.shape : NODE_SHAPES.router),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
     // Apply role-based color overrides
     if (merged.br) {
       merged.color = NODE_COLORS.borderRouter;
-    } else if (merged.shape === 'ellipse') {
+    } else if (merged.shape === NODE_SHAPES.child) {
       // Child nodes (ellipse shape) should always use child color
       merged.color = NODE_COLORS.child;
     }
@@ -596,7 +596,7 @@ export function adaptEve(fileMap) {
     const isChildType = node.type === 'child' || node.type === 'sleepy-child';
     upsertEveNode(eveNodeId, node, {
       source: 'eve',
-      shape: isChildType ? 'ellipse' : 'box',
+      shape: isChildType ? NODE_SHAPES.child : NODE_SHAPES.router,
       color: node.br ? NODE_COLORS.borderRouter
         : (isChildType ? NODE_COLORS.child : NODE_COLORS.eve)
     });
@@ -609,7 +609,7 @@ export function adaptEve(fileMap) {
       const toId = toText(route.to);
       if (!toId) return;
       if (!nodeMap.has(toId)) {
-        upsertEveNode(toId, { id: toId }, { source: 'eve', shape: 'box', color: NODE_COLORS.eve });
+        upsertEveNode(toId, { id: toId }, { source: 'eve', shape: NODE_SHAPES.router, color: NODE_COLORS.eve });
       }
       const lqiIn = toFiniteNumber(route.in);
       const lqiOut = toFiniteNumber(route.out);
@@ -629,7 +629,7 @@ export function adaptEve(fileMap) {
       const childId = toText(typeof child === 'string' ? child : child.id);
       if (!childId) return;
       if (!nodeMap.has(childId)) {
-        upsertEveNode(childId, { id: childId }, { source: 'eve', shape: 'ellipse', color: NODE_COLORS.child });
+        upsertEveNode(childId, { id: childId }, { source: 'eve', shape: NODE_SHAPES.child, color: NODE_COLORS.child });
       }
       const childLq = toFiniteNumber(childObj.lq) || toFiniteNumber(childObj.link_quality);
       const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 255) : {};
@@ -700,13 +700,13 @@ export function adaptEveNative(fileMap) {
         || (existing ? existing.mode_device : ''),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_eve_native: true,
-      shape: style.shape || (existing ? existing.shape : 'box'),
+      shape: style.shape || (existing ? existing.shape : NODE_SHAPES.router),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
     // Apply role-based color overrides
     if (merged.br) {
       merged.color = NODE_COLORS.borderRouter;
-    } else if (merged.shape === 'ellipse') {
+    } else if (merged.shape === NODE_SHAPES.child) {
       // Child nodes (ellipse shape) should always use child color
       merged.color = NODE_COLORS.child;
     }
@@ -721,7 +721,7 @@ export function adaptEveNative(fileMap) {
     const isChildType = node.type === 'child' || node.type === 'sleepy-child';
     upsertEveNativeNode(eveNodeId, node, {
       source: 'eve_native',
-      shape: isChildType ? 'ellipse' : 'box',
+      shape: isChildType ? NODE_SHAPES.child : NODE_SHAPES.router,
       color: node.br ? NODE_COLORS.borderRouter
         : (isChildType ? NODE_COLORS.child : NODE_COLORS.eve)
     });
@@ -736,7 +736,7 @@ export function adaptEveNative(fileMap) {
       const toId = toText(route.to);
       if (!toId) return;
       if (!nodeMap.has(toId)) {
-        upsertEveNativeNode(toId, { id: toId }, { source: 'eve_native', shape: 'box', color: NODE_COLORS.eve });
+        upsertEveNativeNode(toId, { id: toId }, { source: 'eve_native', shape: NODE_SHAPES.router, color: NODE_COLORS.eve });
       }
       const lqiIn = toFiniteNumber(route.in);
       const lqiOut = toFiniteNumber(route.out);
@@ -757,7 +757,7 @@ export function adaptEveNative(fileMap) {
       const childId = toText(typeof child === 'string' ? child : child.id);
       if (!childId) return;
       if (!nodeMap.has(childId)) {
-        upsertEveNativeNode(childId, { id: childId }, { source: 'eve_native', shape: 'ellipse', color: NODE_COLORS.child });
+        upsertEveNativeNode(childId, { id: childId }, { source: 'eve_native', shape: NODE_SHAPES.child, color: NODE_COLORS.child });
       }
       const childLq = toFiniteNumber(childObj.lq);
       const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {};
@@ -877,7 +877,7 @@ export function adaptMergedDetailed(fileMap) {
         ? rawNode.time_statistics.detached_disabled_pct : (existing?.detached_disabled_pct),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_merged_detailed: true,
-      shape: style.shape || (existing ? existing.shape : 'box'),
+      shape: style.shape || (existing ? existing.shape : NODE_SHAPES.router),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
     merged.is_ftd_router = merged.mode_device === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
@@ -892,7 +892,7 @@ export function adaptMergedDetailed(fileMap) {
       upsertMergedNode(candidateId, {
         rloc16: toText(linkNode.rloc16), id: toText(linkNode.id) || candidateId,
         device_label: toText(linkNode.device_label), name: toText(linkNode.name)
-      }, { source: 'merged-detailed', shape: 'box', color: NODE_COLORS.eve });
+      }, { source: 'merged-detailed', shape: NODE_SHAPES.router, color: NODE_COLORS.eve });
     }
     return candidateId;
   }
@@ -907,7 +907,7 @@ export function adaptMergedDetailed(fileMap) {
     const isChildLike = modeDevice === 'MTD' || toText(node.role).toLowerCase().includes('child');
     upsertMergedNode(nodeId, node, {
       source: 'merged-detailed',
-      shape: isChildLike && !isRouterLike ? 'ellipse' : 'box',
+      shape: isChildLike && !isRouterLike ? NODE_SHAPES.child : NODE_SHAPES.router,
       color: isChildLike && !isRouterLike ? NODE_COLORS.child : NODE_COLORS.eve
     });
     // populate routerNeighborByRloc16 for filter support
@@ -1010,7 +1010,7 @@ export function adaptMergedDetailed(fileMap) {
         thread_version: toText(child.thread_version)
       }, {
         source: 'merged-detailed',
-        shape: isChildLikeNode && !isRouterLikeNode ? 'ellipse' : 'box',
+        shape: isChildLikeNode && !isRouterLikeNode ? NODE_SHAPES.child : NODE_SHAPES.router,
         color: isChildLikeNode && !isRouterLikeNode ? NODE_COLORS.child : NODE_COLORS.eve
       });
       if (!rawNodeById.has(childId)) rawNodeById.set(childId, child);
@@ -1066,7 +1066,7 @@ export function adaptRouterTable(fileMap) {
       type: 'router',
       mode_device: 'FTD',
       br: isBr,
-      shape: 'box',
+      shape: NODE_SHAPES.router,
       color: isBr ? NODE_COLORS.borderRouter : NODE_COLORS.router
     });
     rawByIdForDetails.set(nodeId, row);
@@ -1133,7 +1133,7 @@ export function adaptRawArray(fileMap) {
       partitionidchanges: row.mle_counters?.partitionidchanges,
       parentchanges: row.mle_counters?.parentchanges,
       br: row.br === true,
-      shape: isChildLike ? 'ellipse' : 'box',
+      shape: isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router,
       color: isBr ? NODE_COLORS.borderRouter
         : (isChildLike ? NODE_COLORS.child : NODE_COLORS.router)
     });
@@ -1286,7 +1286,7 @@ export function adaptOtbrRestApi(fileMap) {
         ?? (existing ? existing.detached_disabled_pct : undefined),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       from_otbr_restapi: true,
-      shape: style.shape || (existing ? existing.shape : (isChildLike ? 'ellipse' : 'box')),
+      shape: style.shape || (existing ? existing.shape : (isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router)),
       color: style.color || (existing ? existing.color : NODE_COLORS.router)
     };
     merged.is_ftd_router = merged.mode_device === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
@@ -1301,7 +1301,7 @@ export function adaptOtbrRestApi(fileMap) {
     const roleText = toText(node.role).toLowerCase();
     const isChildLike = roleText === 'child' || roleText.includes('sleepy');
     upsertOtbrRestApiNode(nodeId, node, {
-      shape: isChildLike ? 'ellipse' : 'box',
+      shape: isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router,
       color: isChildLike ? NODE_COLORS.child : NODE_COLORS.router
     });
     rawByIdForDetails.set(nodeId, node);
@@ -1312,7 +1312,7 @@ export function adaptOtbrRestApi(fileMap) {
     const nodeId = toText(node.extAddress || node.extaddr).toLowerCase() || toText(node.id);
     if (!nodeId) return;
     upsertOtbrRestApiNode(nodeId, node, {
-      shape: 'box',
+      shape: NODE_SHAPES.router,
       color: NODE_COLORS.router
     });
     const rloc16Val = toText(node.rloc16).toLowerCase();
@@ -1333,7 +1333,7 @@ export function adaptOtbrRestApi(fileMap) {
       let toId = rloc16ToNodeId.get(toRloc16.toLowerCase()) || toRloc16;
       if (!nodeMap.has(toId)) {
         upsertOtbrRestApiNode(toId, { rloc16: toRloc16, id: toId },
-          { shape: 'box', color: NODE_COLORS.router });
+          { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
       }
       const lqi = Math.max(toFiniteNumber(route.linkQualityOut) || 0, toFiniteNumber(route.linkQualityIn) || 0);
       const edgeWidth = lqi >= 3 ? 3 : (lqi >= 2 ? 2 : 1.5);
@@ -1354,7 +1354,7 @@ export function adaptOtbrRestApi(fileMap) {
         || `${fromId}-child-${ci + 1}`;
       if (!nodeMap.has(childId)) {
         upsertOtbrRestApiNode(childId, { rloc16: childRloc16, id: childId, mode: child.mode },
-          { shape: 'ellipse', color: NODE_COLORS.child });
+          { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
       }
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
@@ -1387,7 +1387,7 @@ export function adaptOtbrRestApi(fileMap) {
           extAddress: childExtaddr,
           role: child.deviceTypeFTD === true ? 'router' : 'child',
           mode: { deviceTypeFTD: child.deviceTypeFTD },
-        }, { shape: 'ellipse', color: NODE_COLORS.child });
+        }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
       }
       if (childRloc16) rloc16ToNodeId.set(childRloc16.toLowerCase(), childId);
       const linkMargin = toFiniteNumber(child.linkMargin);
@@ -1441,7 +1441,7 @@ export function adaptOtbrRestApi(fileMap) {
           extAddress: neighborExtaddr,
           rloc16: neighborRloc16,
           id: toId
-        }, { shape: 'box', color: NODE_COLORS.router });
+        }, { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
         if (neighborRloc16) rloc16ToNodeId.set(neighborRloc16, toId);
       }
 

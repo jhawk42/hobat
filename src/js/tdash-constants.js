@@ -195,6 +195,17 @@ export const NODE_COLORS = Object.freeze({
   unknown: { background: PALETTE.unknownBg, border: PALETTE.unknownBorder },
 });
 
+// ── Topology node shapes by Thread role ─────────────────────────────────────
+// Centralized role-shape mapping used across adaptors and final vis-node build.
+export const NODE_SHAPES = Object.freeze({
+  borderRouter: "square",
+  router: "hexagon",
+  childFtd: "dot",
+  childMtd: "dot",
+  child: "dot",
+  unknown: "dot",
+});
+
 // ── Link Quality edge style constants ─────────────────────────────────────────
 export const EDGE_LQ_STYLES = Object.freeze({
   high: { width: 8, color: PALETTE.lqHigh, dashes: false, lqLevel: 3 }, // LQ3 bold blue  (.lq-high)
