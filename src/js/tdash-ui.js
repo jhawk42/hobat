@@ -41,6 +41,7 @@ import {
   PHYSICS_PROFILE_MESH_DENSE,
   PHYSICS_PROFILE_MESH_BALANCED,
   PHYSICS_PROFILE_MESH_SPARSE,
+  PHYSICS_PROFILE_MESH_COMPACT,
   PHYSICS_PROFILE_MESH_RING,
   PHYSICS_PROFILES,
   getPhysicsProfileLabel,
@@ -228,17 +229,13 @@ function getSelectedDatasetEntry() {
 
 function getModeMappedPhysicsProfileName(entry) {
   const topologyMode = entry?.topologyMode;
-  if (topologyMode === "meshdiag-networkdiag") return PHYSICS_PROFILE_MESH_BALANCED;
+  if (topologyMode === "meshdiag-networkdiag") return PHYSICS_PROFILE_MESH_COMPACT;
   if (topologyMode === "merged-detailed") return PHYSICS_PROFILE_MESH_RING;
   if (topologyMode === "router-table") return PHYSICS_PROFILE_MESH_BALANCED;
-  if (topologyMode === "eve_native") return PHYSICS_PROFILE_MESH_BALANCED;
-  if (topologyMode === "eve_enhanced") return PHYSICS_PROFILE_MESH_BALANCED;
+  if (topologyMode === "eve_native") return PHYSICS_PROFILE_MESH_COMPACT;
+  if (topologyMode === "eve_enhanced") return PHYSICS_PROFILE_MESH_RING;
   if (topologyMode === "raw-array") return PHYSICS_PROFILE_MESH_BALANCED;
-  if (topologyMode === "otbr_restapi") {
-    const files = Array.isArray(entry?.files) ? entry.files : [];
-    const hasMeshDiagnostics = files.includes("td-otbr-restapi-mesh-diagnostics-fetch-all.json");
-    return hasMeshDiagnostics ? PHYSICS_PROFILE_MESH_DENSE : PHYSICS_PROFILE_MESH_BALANCED;
-  }
+  if (topologyMode === "otbr_restapi") return PHYSICS_PROFILE_MESH_COMPACT;
   return PHYSICS_PROFILE_MESH_BASELINE;
 }
 

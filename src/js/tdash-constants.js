@@ -888,7 +888,7 @@ export const PHYSICS_PROFILES = Object.freeze({
     stabilization: Object.freeze({ enabled: true, iterations: 600, updateInterval: 25 }),
   }),
   [PHYSICS_PROFILE_MESH_COMPACT]: Object.freeze({
-    label: "Mesh Lab",
+    label: "Mesh Compact",
     // Starts from mesh-balanced and then tuned for stronger separation and
     // parent-local child clustering in hybrid seeded layouts.
     barnesHut: Object.freeze({

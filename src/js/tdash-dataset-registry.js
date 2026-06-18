@@ -142,6 +142,7 @@ export const DATASET_REGISTRY = [
     files: ["td-otbr-cli-meshdiag-router-childtables.json"],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
+    physicsProfile: "mesh-compact",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 90
@@ -176,6 +177,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
+    physicsProfile: "mesh-ring",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 720
@@ -195,6 +197,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
+    physicsProfile: "mesh-ring",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 900
