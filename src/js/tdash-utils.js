@@ -468,8 +468,28 @@ function _createGroupNode(prefix, children) {
   return li;
 }
 
+function _normalizeMdnsDisplayKey(key) {
+  if (typeof key !== "string") return key;
+  if (key.startsWith("service_info.properties.")) {
+    return key.slice("service_info.properties.".length);
+  }
+  if (key.startsWith("properties.")) {
+    return key.slice("properties.".length);
+  }
+  return key;
+}
+
+function _isMdnsDetailsList(listEl) {
+  const listId = listEl?.id;
+  return typeof listId === "string" && listId.endsWith("mdns-list");
+}
+
 function _appendGrouped(entries, listEl) {
-  _groupEntriesByPrefix(entries).forEach((item) => {
+  const displayEntries = _isMdnsDetailsList(listEl)
+    ? entries.map(([key, value]) => [_normalizeMdnsDisplayKey(key), value])
+    : entries;
+
+  _groupEntriesByPrefix(displayEntries).forEach((item) => {
     if (item.type === "flat") {
       listEl.appendChild(createDetailValueNode(item.key, item.value));
     } else {
