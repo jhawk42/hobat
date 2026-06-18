@@ -40,7 +40,7 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 ### `otbr-cli`
 
 ```text
-td_cli otbr-cli {thread-network-info,router-table,meshdiag,networkdiag} ...
+td_cli otbr-cli {thread-network-info,router-table,topology,meshdiag,networkdiag} ...
 ```
 
 ### `otbr-restapi`
@@ -159,15 +159,25 @@ Examples:
 
 ```
 usage: td_cli otbr-cli [-h]
-                       {thread-network-info,router-table,meshdiag,networkdiag}
+                       {thread-network-info,router-table,topology,meshdiag,networkdiag}
                        ...
 
 positional arguments:
-  {thread-network-info,router-table,meshdiag,networkdiag}
+  {thread-network-info,router-table,topology,meshdiag,networkdiag}
     thread-network-info        Scan and save thread network info
     router-table                Scan and save router table
+    topology                    Run full otbr-cli topology sweep: thread-network-info, router-table, meshdiag topology, networkdiag multicast-network, networkdiag fetch-all, meshdiag routerneighbortable, meshdiag childtable
     meshdiag                    Mesh diagnostic scans
     networkdiag                 Network diagnostic scans
+```
+
+### `otbr-cli topology`
+
+```
+usage: td_cli otbr-cli topology [-h]
+
+options:
+  -h, --help  show this help message and exit
 ```
 
 ### `otbr-cli meshdiag`

@@ -7,7 +7,7 @@ import logging
 import os
 import unittest
 from contextlib import redirect_stdout
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import td_cli
 import td_webserver
@@ -167,6 +167,11 @@ class TestOtbrCliParser(unittest.TestCase):
         with self.assertRaises(SystemExit):
             _parse(["otbr-cli", "networkdiag", "topology"])
 
+    def test_otbr_cli_topology(self):
+        args = _parse(["otbr-cli", "topology"])
+        self.assertEqual(args.command, "otbr-cli")
+        self.assertEqual(args.cli_command, "topology")
+
 
 class TestForwardingParsers(unittest.TestCase):
     def test_restapi_devices_extras_preserved(self):
@@ -265,6 +270,123 @@ class TestDispatchOtbrCli(unittest.TestCase):
             rc = self._dispatch(["otbr-cli", "router-table"])
         m.assert_called_once_with([])
         self.assertEqual(rc, 1)
+
+    def test_topology_calls_all_steps_in_required_order(self):
+        order: list[str] = []
+
+        def _mark(name: str):
+            def _inner(_argv):
+                order.append(name)
+                return 0
+            return _inner
+
+        with patch.object(
+            td_cli.otbr_cli_thread_network_info, "main", side_effect=_mark("thread-network-info")
+        ) as m_thread_info, patch.object(
+            td_cli.otbr_cli_router_table, "main", side_effect=_mark("router-table")
+        ) as m_router_table, patch.object(
+            td_cli.otbr_cli_meshdiag_topology, "main", side_effect=_mark("meshdiag-topology")
+        ) as m_meshdiag_topology, patch.object(
+            td_cli.otbr_cli_networkdiag_topology,
+            "main_multicast_network",
+            side_effect=_mark("networkdiag-multicast-network"),
+        ) as m_networkdiag_multicast, patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main", side_effect=_mark("networkdiag-fetch-all")
+        ) as m_networkdiag_fetch_all, patch.object(
+            td_cli.otbr_cli_meshdiag_routerneighbortable,
+            "main",
+            side_effect=_mark("meshdiag-routerneighbortable"),
+        ) as m_meshdiag_neighbors, patch.object(
+            td_cli.otbr_cli_meshdiag_childtable, "main", side_effect=_mark("meshdiag-childtable")
+        ) as m_meshdiag_childtable:
+            rc = self._dispatch(["otbr-cli", "topology"])
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            order,
+            [
+                "thread-network-info",
+                "router-table",
+                "meshdiag-topology",
+                "networkdiag-multicast-network",
+                "networkdiag-fetch-all",
+                "meshdiag-routerneighbortable",
+                "meshdiag-childtable",
+            ],
+        )
+        self.assertEqual(
+            [
+                m_thread_info.call_args_list,
+                m_router_table.call_args_list,
+                m_meshdiag_topology.call_args_list,
+                m_networkdiag_multicast.call_args_list,
+                m_networkdiag_fetch_all.call_args_list,
+                m_meshdiag_neighbors.call_args_list,
+                m_meshdiag_childtable.call_args_list,
+            ],
+            [[call([])], [call([])], [call([])], [call([])], [call([])], [call([])], [call([])]],
+        )
+
+    def test_topology_best_effort_runs_all_steps_on_failure(self):
+        with patch.object(
+            td_cli.otbr_cli_thread_network_info, "main", return_value=0
+        ) as m_thread_info, patch.object(
+            td_cli.otbr_cli_router_table, "main", return_value=4
+        ) as m_router_table, patch.object(
+            td_cli.otbr_cli_meshdiag_topology, "main", return_value=0
+        ) as m_meshdiag_topology, patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main_multicast_network", return_value=0
+        ) as m_networkdiag_multicast, patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
+        ) as m_networkdiag_fetch_all, patch.object(
+            td_cli.otbr_cli_meshdiag_routerneighbortable, "main", return_value=0
+        ) as m_meshdiag_neighbors, patch.object(
+            td_cli.otbr_cli_meshdiag_childtable, "main", return_value=0
+        ) as m_meshdiag_childtable:
+            rc = self._dispatch(["otbr-cli", "topology"])
+
+        self.assertEqual(rc, 4)
+        for mocked in (
+            m_thread_info,
+            m_router_table,
+            m_meshdiag_topology,
+            m_networkdiag_multicast,
+            m_networkdiag_fetch_all,
+            m_meshdiag_neighbors,
+            m_meshdiag_childtable,
+        ):
+            mocked.assert_called_once_with([])
+
+    def test_topology_forwards_datadir_to_every_step(self):
+        with patch.object(
+            td_cli.otbr_cli_thread_network_info, "main", return_value=0
+        ) as m_thread_info, patch.object(
+            td_cli.otbr_cli_router_table, "main", return_value=0
+        ) as m_router_table, patch.object(
+            td_cli.otbr_cli_meshdiag_topology, "main", return_value=0
+        ) as m_meshdiag_topology, patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main_multicast_network", return_value=0
+        ) as m_networkdiag_multicast, patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
+        ) as m_networkdiag_fetch_all, patch.object(
+            td_cli.otbr_cli_meshdiag_routerneighbortable, "main", return_value=0
+        ) as m_meshdiag_neighbors, patch.object(
+            td_cli.otbr_cli_meshdiag_childtable, "main", return_value=0
+        ) as m_meshdiag_childtable:
+            rc = self._dispatch(["--datadir", "/tmp/td", "otbr-cli", "topology"])
+
+        self.assertEqual(rc, 0)
+        expected_argv = ["--datadir", "/tmp/td"]
+        for mocked in (
+            m_thread_info,
+            m_router_table,
+            m_meshdiag_topology,
+            m_networkdiag_multicast,
+            m_networkdiag_fetch_all,
+            m_meshdiag_neighbors,
+            m_meshdiag_childtable,
+        ):
+            mocked.assert_called_once_with(expected_argv)
 
 
 class TestDispatchOtherCommands(unittest.TestCase):

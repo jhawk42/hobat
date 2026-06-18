@@ -446,6 +446,7 @@ document
   .addEventListener("change", async (event) => {
     const selectedSource = event.target.value;
     populateDatasetSelect(selectedSource);
+    setPhysicsProfile(PHYSICS_PROFILE_AUTO);
     // Reset filter controls when source changes
     document.getElementById("node-filter").value = "all";
     document.getElementById("link-filter").value = "default_links";
@@ -462,6 +463,7 @@ document
   .addEventListener("change", async (event) => {
     document.getElementById("node-filter").value = "all";
     document.getElementById("diagnostic-filter").value = "all";
+    setPhysicsProfile(PHYSICS_PROFILE_AUTO);
 
     // Switch view based on the dataset's defaultView field if auto-view is enabled
     const autoViewEnabled = document.getElementById("chk-auto-view").checked;

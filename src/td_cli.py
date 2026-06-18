@@ -67,7 +67,7 @@ class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
 #   td_cli.py otbr-cli networkdiag fetch-all
 #   td_cli.py otbr-cli networkdiag multicast-network
 #   td_cli.py otbr-cli networkdiag multicast-neighbors
-#   td_cli.py otbr-cli all
+#   td_cli.py otbr-cli topology
 #
 # mdns examples:
 #   td_cli.py mdns
@@ -178,7 +178,14 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         "multicast-neighbors",
         help="Scan networkdiag topology via multicast to one-hop neighbors (ff02::1)",
     )
-
+    otbr_cli_sub.add_parser(
+        "topology",
+        help=(
+            "Run full otbr-cli topology sweep: thread-network-info, "
+            "router-table, meshdiag topology, networkdiag multicast-network, "
+            "networkdiag fetch-all, meshdiag routerneighbortable, meshdiag childtable"
+        ),
+    )
 
     # mdns
     mdns_p = subparsers.add_parser(
@@ -355,10 +362,10 @@ def build_parser() -> argparse.ArgumentParser:
     # --- hand-crafted "Commands usage:" epilog ---
     parser.epilog = """Commands usage:
     otbr-cli
-        usage: td_cli otbr-cli [-h] {thread-network-info,router-table,meshdiag,networkdiag} ...
+        usage: td_cli otbr-cli [-h] {thread-network-info,router-table,meshdiag,networkdiag,topology} ...
 
     otbr-restapi
-        usage: td_cli otbr-restapi [-h] {download,node,devices,diagnostics,actions,mesh-diagnostics,topology} ...
+        usage: td_cli otbr-restapi [-h] {node,devices,diagnostics,actions,mesh-diagnostics,topology,download} ...
 
     mdns
         usage: td_cli mdns [-h] [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
@@ -574,6 +581,52 @@ def dispatch(
                 otbr_cli_router_table.main(_forward_with_datadir(extra_args)),
                 "otbr_cli_router_table.main",
             )
+
+        if cli_cmd == "topology":
+            step_calls = [
+                (
+                    "otbr_cli_thread_network_info.main",
+                    otbr_cli_thread_network_info.main,
+                ),
+                (
+                    "otbr_cli_router_table.main",
+                    otbr_cli_router_table.main,
+                ),
+                (
+                    "otbr_cli_meshdiag_topology.main",
+                    otbr_cli_meshdiag_topology.main,
+                ),
+                (
+                    "otbr_cli_networkdiag_topology.main_multicast_network",
+                    otbr_cli_networkdiag_topology.main_multicast_network,
+                ),
+                (
+                    "otbr_cli_networkdiag_topology.main",
+                    otbr_cli_networkdiag_topology.main,
+                ),
+                (
+                    "otbr_cli_meshdiag_routerneighbortable.main",
+                    otbr_cli_meshdiag_routerneighbortable.main,
+                ),
+                (
+                    "otbr_cli_meshdiag_childtable.main",
+                    otbr_cli_meshdiag_childtable.main,
+                ),
+            ]
+
+            first_nonzero_rc = 0
+            for module_name, step_main in step_calls:
+                try:
+                    raw_rc = step_main(_forward_with_datadir(extra_args))
+                except Exception:
+                    logging.exception("topology step raised an exception: %s", module_name)
+                    raw_rc = 1
+                normalized_rc = _normalize_module_rc(raw_rc, module_name)
+                if first_nonzero_rc == 0 and normalized_rc != 0:
+                    first_nonzero_rc = normalized_rc
+                    logging.error("topology step failed: %s rc=%s", module_name, normalized_rc)
+
+            return first_nonzero_rc
 
         if cli_cmd == "meshdiag":
             meshdiag_cmd = args.meshdiag_command
