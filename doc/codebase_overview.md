@@ -479,7 +479,6 @@ The full set of pre-configured datasets is listed below, grouped by category:
 
 | Dataset key | Label | Files | Topology mode |
 |---|---|---|---|
-| `example_small_eve_native_threadlayout` | lab: eve native: example | `example-small-Eve Thread Network Layout` | `eve_native` |
 | `eve_native_threadlayout` | lab: eve native: Eve Thread Network Layout | `Eve Thread Network Layout.evethreadlayout` | `eve_native` |
 | `eve_enhanced_topology` | lab: eve enhanced: td-eve-topology.json | `td-eve-topology.json` | `eve_enhanced` |
 
@@ -504,11 +503,11 @@ The full set of pre-configured datasets is listed below, grouped by category:
 | **Fetch** | Manually re-fetches the currently selected dataset from the server without changing the dataset selection. |
 | **Topology** | Interactive [vis-network](https://visjs.github.io/vis-network/docs/network/) graph of the mesh.  Click any node to see all its properties in the side panel. |
 | **Table** | Flat [sortable](https://github.com/tofsjonas/sortable) table of all rows in the loaded dataset.  Click any column header to sort. |
-| **Physics** | Toggles the vis-network physics simulation on/off (spring-force layout vs. fixed positions).  Topology view only. |
-| **Auto Zoom** | Toggles automatic fit-to-view when a dataset loads.  Topology view only. |
 | **Legend** | Toggles the link-quality colour/style legend panel.  Starts active (legend visible).  Topology view only. |
 | **Advanced** | Toggles expanded column display in Table view — shows all discovered columns rather than the priority subset.  Table view only. |
-| **lab** | Placeholder lab/debug toggle (wired to the DOM but no handler yet). |
+| **Auto Modem** | Auto or manual pick physicsProfile.  Topology view only. |
+| **Physics** | Toggles the vis-network physics simulation on/off (spring-force layout vs. fixed positions).  Topology view only. |
+
 
 ### Node Filter
 
