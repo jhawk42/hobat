@@ -302,12 +302,11 @@ python3 -m td_cli otbr-cli meshdiag topology
 python3 -m td_cli otbr-cli meshdiag routerneighbortable
 python3 -m td_cli otbr-cli meshdiag childtable
 python3 -m td_cli otbr-cli meshdiag childip6
-python3 -m td_cli otbr-cli meshdiag all
 # Use -fetch-all sparingly. Consumes MTD/SED battery power.
 python3 -m td_cli otbr-cli networkdiag fetch-all
 python3 -m td_cli otbr-cli networkdiag multicast-network
 python3 -m td_cli otbr-cli networkdiag multicast-neighbors
-python3 -m td_cli otbr-cli all
+python3 -m td_cli otbr-cli topology
 
 # OTBR REST API
 # Note: fetch-all/fetch commands trigger an update device collection action and take time (minutes) to complete
@@ -318,8 +317,8 @@ python3 -m td_cli otbr-restapi diagnostics list
 # Use -fetch-all sparingly. Consumes MTD/SED battery power.
 python3 -m td_cli otbr-restapi diagnostics fetch-all
 python3 -m td_cli otbr-restapi mesh-diagnostics fetch-all
-python3 -m td_cli otbr-restapi download
-python3 -m td_cli actions list
+python3 -m td_cli otbr-restapi actions list
+python3 -m td_cli otbr-restapi topology
 
 # mDNS
 python3 -m td_cli mdns --help
