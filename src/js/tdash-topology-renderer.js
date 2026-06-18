@@ -856,6 +856,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
     nodeMap,
     rawByIdForDetails,
     routerNeighborByRloc16,
+    routerChildByRloc16 = new Map(),
     sourceNames,
   } = adaptorResult;
 
@@ -918,6 +919,66 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
 
   const nodesDataset = new vis.DataSet(nodeData);
   const edgesDataset = new vis.DataSet(edgeData);
+
+  const nodeIdByRloc16 = new Map();
+  const nodeIdByExtaddr = new Map();
+  nodeMap.forEach((node, nodeId) => {
+    const rloc16 = toText(node?.rloc16).toLowerCase();
+    if (rloc16) nodeIdByRloc16.set(rloc16, nodeId);
+    const extaddr = toText(node?.extaddr).toLowerCase();
+    if (extaddr) nodeIdByExtaddr.set(extaddr, nodeId);
+  });
+
+  function resolveDiagnosticTargetNodeId(row) {
+    const extaddr = toText(row?.extaddr || row?.extAddress).toLowerCase();
+    const rloc16 = toText(row?.rloc16).toLowerCase();
+    const rowId = toText(row?.id);
+
+    if (extaddr && nodeIdByExtaddr.has(extaddr)) {
+      return nodeIdByExtaddr.get(extaddr);
+    }
+    if (rloc16 && nodeIdByRloc16.has(rloc16)) {
+      return nodeIdByRloc16.get(rloc16);
+    }
+    if (rowId && nodeMap.has(rowId)) {
+      return rowId;
+    }
+    if (rowId && nodeMap.has(rowId.toLowerCase())) {
+      return rowId.toLowerCase();
+    }
+
+    return extaddr || rloc16 || rowId;
+  }
+
+  function getRouterChildRowsForParent(parentNodeId, parentRaw) {
+    const rowsFromRaw = Array.isArray(parentRaw?.router_child_table)
+      ? parentRaw.router_child_table
+      : [];
+    const parentRloc16 = toText(nodeMap.get(parentNodeId)?.rloc16).toLowerCase();
+    const rowsFromIndex = Array.isArray(
+      routerChildByRloc16.get(parentRloc16)?.router_child_table,
+    )
+      ? routerChildByRloc16.get(parentRloc16).router_child_table
+      : [];
+
+    if (rowsFromIndex.length === 0) return rowsFromRaw;
+    if (rowsFromRaw.length === 0) return rowsFromIndex;
+
+    const mergedRows = [];
+    const seen = new Set();
+    [...rowsFromIndex, ...rowsFromRaw].forEach((row) => {
+      const key = [
+        toText(row?.rloc16).toLowerCase(),
+        toText(row?.extaddr || row?.extAddress).toLowerCase(),
+        toText(row?.child_id || row?.childId).toLowerCase(),
+      ].join("|");
+      const dedupeKey = key === "||" ? `anon:${mergedRows.length}` : key;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      mergedRows.push(row);
+    });
+    return mergedRows;
+  }
 
   function cloneNodeStyle(style) {
     return {
@@ -1001,8 +1062,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
             ),
           )
           .forEach((neighbor) => {
-            const targetId =
-              toText(neighbor.rloc16) || toText(neighbor.extaddr);
+            const targetId = resolveDiagnosticTargetNodeId(neighbor);
             if (!targetId) return;
             matchedTargetNodeIds.add(targetId);
             visibleNodeIds.add(targetId);
@@ -1035,7 +1095,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
             childMatchesLinkQualityFilter(child, diagnosticFilterMode),
           )
           .forEach((child) => {
-            const childId = toText(child.rloc16) || toText(child.id);
+            const childId = resolveDiagnosticTargetNodeId(child);
             if (!childId) return;
             matchedTargetNodeIds.add(childId);
             visibleNodeIds.add(childId);
@@ -1064,15 +1124,13 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
       Array.from(visibleNodeIds).forEach((parentNodeId) => {
         const parentRaw = rawByIdForDetails.get(parentNodeId);
         if (!parentRaw) return;
-        const childTableRows = Array.isArray(parentRaw.router_child_table)
-          ? parentRaw.router_child_table
-          : [];
+        const childTableRows = getRouterChildRowsForParent(parentNodeId, parentRaw);
         childTableRows
           .filter((child) =>
             routerChildRowMatchesDiagnosticFilter(child, diagnosticFilterMode),
           )
           .forEach((child) => {
-            const childId = toText(child.rloc16) || toText(child.extaddr);
+            const childId = resolveDiagnosticTargetNodeId(child);
             if (!childId) return;
             matchedTargetNodeIds.add(childId);
             visibleNodeIds.add(childId);
