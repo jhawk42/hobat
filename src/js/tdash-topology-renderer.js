@@ -3,6 +3,7 @@ import {
   getPhysicsProfile,
   getPhysicsProfileLabel,
   PHYSICS_PROFILE_MESH_RING,
+  PHYSICS_PROFILE_MESH_COMPACT,
   EDGE_CATEGORY_ROUTER_NEIGHBOR,
   EDGE_CATEGORY_DEFAULT_CHILDREN,
   EDGE_CATEGORY_OTBR_CHILD,
@@ -413,6 +414,397 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
   });
 }
 
+function applyMeshLabHybridSeedLayout(nodeData, edgeData) {
+  const nodeById = new Map(nodeData.map((n) => [n.id, n]));
+  const visibleEdges = edgeData.filter((e) => e.baseHidden !== true);
+  const routers = nodeData
+    .filter((n) => n.isRouter === true)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  if (routers.length === 0) return;
+
+  function toUpperText(value) {
+    return typeof value === "string" ? value.trim().toUpperCase() : "";
+  }
+
+  function stableHash(text) {
+    const s = String(text || "");
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i += 1) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0);
+  }
+
+  function jitterFromId(id, amplitude) {
+    const u = stableHash(id) / 0xffffffff;
+    return (u - 0.5) * 2 * amplitude;
+  }
+
+  function getEdgeCategories(edge) {
+    return normalizeLinkCategories(edge.linkCategories || edge.linkCategory || edge.category);
+  }
+
+  function isChildMtdNode(node) {
+    if (!node || node.isRouter === true) return false;
+    return toUpperText(node.mode_device) === "MTD";
+  }
+
+  function isChildFtdNode(node) {
+    if (!node || node.isRouter === true) return false;
+    return toUpperText(node.mode_device) === "FTD";
+  }
+
+  const routerIdSet = new Set(routers.map((r) => r.id));
+  const routerById = new Map(routers.map((r) => [r.id, r]));
+
+  const parentToChildren = new Map();
+  const childTypeById = new Map();
+  const nodeRouterScores = new Map();
+  function pushChild(parentId, childId) {
+    if (!parentToChildren.has(parentId)) parentToChildren.set(parentId, []);
+    parentToChildren.get(parentId).push(childId);
+  }
+  function bumpRouterScoreWeighted(nodeId, routerId, weight) {
+    if (!nodeRouterScores.has(nodeId)) nodeRouterScores.set(nodeId, new Map());
+    const scoreByRouter = nodeRouterScores.get(nodeId);
+    scoreByRouter.set(routerId, (scoreByRouter.get(routerId) || 0) + weight);
+  }
+
+  visibleEdges.forEach((edge) => {
+    const a = nodeById.get(edge.from);
+    const b = nodeById.get(edge.to);
+    if (!a || !b) return;
+    const cats = getEdgeCategories(edge);
+    const aIsRouter = routerIdSet.has(a.id);
+    const bIsRouter = routerIdSet.has(b.id);
+    if (aIsRouter === bIsRouter) return;
+
+    const routerNode = aIsRouter ? a : b;
+    const nonRouterNode = aIsRouter ? b : a;
+    const isExplicitChild =
+      edge.isParentChild === true ||
+      cats.includes(EDGE_CATEGORY_DEFAULT_CHILDREN) ||
+      cats.includes(EDGE_CATEGORY_OTBR_CHILD) ||
+      cats.includes(EDGE_CATEGORY_EVE_CHILD) ||
+      cats.includes(EDGE_CATEGORY_EVE_NATIVE_CHILD);
+
+    const weight = isExplicitChild ? 14 : (edge.lqLevel === 3 ? 4 : 1);
+    bumpRouterScoreWeighted(nonRouterNode.id, routerNode.id, weight);
+    if (isExplicitChild) {
+      pushChild(routerNode.id, nonRouterNode.id);
+      childTypeById.set(
+        nonRouterNode.id,
+        isChildFtdNode(nonRouterNode) ? "ftd" : "mtd",
+      );
+    }
+  });
+
+  const explicitlyAssignedChildren = new Set();
+  for (const [, childIds] of parentToChildren.entries()) {
+    childIds.forEach((id) => explicitlyAssignedChildren.add(id));
+  }
+  for (const [nodeId, scoreByRouter] of nodeRouterScores.entries()) {
+    const node = nodeById.get(nodeId);
+    if (!node || node.isRouter === true) continue;
+    if (explicitlyAssignedChildren.has(nodeId)) continue;
+    let bestRouterId = null;
+    let bestScore = -1;
+    for (const [routerId, score] of scoreByRouter.entries()) {
+      if (score > bestScore) {
+        bestScore = score;
+        bestRouterId = routerId;
+      }
+    }
+    if (bestRouterId != null) {
+      pushChild(bestRouterId, nodeId);
+      childTypeById.set(nodeId, isChildFtdNode(node) ? "ftd" : "mtd");
+    }
+  }
+
+  const routersWithChildren = routers
+    .filter((r) => r.hasChildren === true || (parentToChildren.get(r.id)?.length || 0) > 0)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const routersWithoutChildren = routers
+    .filter((r) => !routersWithChildren.some((rc) => rc.id === r.id))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
+  const lq3NeighborByRouter = new Map();
+  routers.forEach((r) => lq3NeighborByRouter.set(r.id, new Set()));
+  visibleEdges.forEach((edge) => {
+    const a = nodeById.get(edge.from);
+    const b = nodeById.get(edge.to);
+    if (!a || !b) return;
+    if (!routerIdSet.has(a.id) || !routerIdSet.has(b.id)) return;
+    if (edge.lqLevel !== 3) return;
+    lq3NeighborByRouter.get(a.id).add(b.id);
+    lq3NeighborByRouter.get(b.id).add(a.id);
+  });
+
+  function degreeOf(routerId) {
+    return lq3NeighborByRouter.get(routerId)?.size || 0;
+  }
+
+  function orderRoutersByGreedyAffinity(routerSubset) {
+    const subsetIds = new Set(routerSubset.map((r) => r.id));
+    const unvisited = new Set(routerSubset.map((r) => r.id));
+    const ordered = [];
+    while (unvisited.size > 0) {
+      const candidates = Array.from(unvisited).sort((a, b) => {
+        const degreeDiff = degreeOf(b) - degreeOf(a);
+        if (degreeDiff !== 0) return degreeDiff;
+        return String(a).localeCompare(String(b));
+      });
+      let current = candidates[0];
+      ordered.push(current);
+      unvisited.delete(current);
+      while (unvisited.size > 0) {
+        const nextCandidates = Array.from(unvisited)
+          .filter((id) => subsetIds.has(id) && lq3NeighborByRouter.get(current)?.has(id))
+          .sort((a, b) => {
+            const degreeDiff = degreeOf(b) - degreeOf(a);
+            if (degreeDiff !== 0) return degreeDiff;
+            return String(a).localeCompare(String(b));
+          });
+        const next = nextCandidates[0];
+        if (!next) break;
+        ordered.push(next);
+        unvisited.delete(next);
+        current = next;
+      }
+    }
+    return ordered;
+  }
+
+  const orderedOuterRouterIds = orderRoutersByGreedyAffinity(routersWithChildren.length > 0 ? routersWithChildren : routers);
+  const outerCount = orderedOuterRouterIds.length;
+  const innerCount = routersWithoutChildren.length;
+  const outerRadius = Math.max(560, outerCount * 68);
+  const innerRadius = Math.max(335, Math.floor(outerRadius * 0.68));
+
+  const routerAngleById = new Map();
+  const gapWeights = [];
+  for (let i = 0; i < outerCount; i += 1) {
+    const aId = orderedOuterRouterIds[i];
+    const bId = orderedOuterRouterIds[(i + 1) % Math.max(1, outerCount)];
+    const areLq3Neighbors = lq3NeighborByRouter.get(aId)?.has(bId) === true;
+    gapWeights.push(areLq3Neighbors ? 0.92 : 1.08);
+  }
+  const totalWeight = gapWeights.reduce((sum, w) => sum + w, 0) || Math.max(1, outerCount);
+  let cumulative = -Math.PI / 2;
+  for (let i = 0; i < outerCount; i += 1) {
+    const routerId = orderedOuterRouterIds[i];
+    routerAngleById.set(routerId, cumulative);
+    cumulative += ((2 * Math.PI) * gapWeights[i]) / totalWeight;
+  }
+
+  orderedOuterRouterIds.forEach((routerId) => {
+    const router = routerById.get(routerId);
+    const angle = routerAngleById.get(routerId) || 0;
+    router.x = Math.round(outerRadius * Math.cos(angle));
+    router.y = Math.round(outerRadius * Math.sin(angle));
+    router.fixed = { x: true, y: true };
+    router.physics = false;
+  });
+
+  const sortedInnerRouters = routersWithoutChildren
+    .slice()
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  sortedInnerRouters.forEach((router, idx) => {
+    const anchorAngle =
+      -Math.PI / 2 + ((2 * Math.PI * idx) / Math.max(1, sortedInnerRouters.length));
+
+    const ringLayer = idx % 2;
+    const ringOffset = ringLayer === 0 ? -34 : 34;
+    const r = innerRadius + ringOffset + jitterFromId(`${router.id}|innerR`, 30);
+    const theta = anchorAngle + jitterFromId(`${router.id}|innerTheta`, Math.PI / 10);
+    router.x = Math.round(r * Math.cos(theta));
+    router.y = Math.round(r * Math.sin(theta));
+    router.fixed = { x: true, y: true };
+    router.physics = false;
+  });
+
+  function placeChildrenAroundParent(parent, childIds, bandConfig) {
+    const {
+      bandMinRadius,
+      distanceFromParentBase,
+      spreadScale,
+      jitterAngle,
+      jitterRadius,
+      pinChildren,
+    } = bandConfig;
+    const uniqueChildren = Array.from(new Set(childIds)).sort((a, b) => String(a).localeCompare(String(b)));
+    const childCount = uniqueChildren.length;
+    if (childCount === 0) return;
+
+    const parentR = Math.hypot(parent.x || 0, parent.y || 0) || 1;
+    const outwardTheta = Math.atan2(parent.y || 0, parent.x || 0);
+    const spread = Math.min(Math.PI * 1.82, Math.max(Math.PI / 3, childCount * spreadScale));
+
+    uniqueChildren.forEach((childId, idx) => {
+      const child = nodeById.get(childId);
+      if (!child) return;
+      const layer = Math.floor(idx / 3);
+      const offset = childCount === 1
+        ? 0
+        : (-spread / 2) + (spread * (idx / (childCount - 1)));
+      const theta = outwardTheta + offset + jitterFromId(`${parent.id}|${child.id}|theta`, jitterAngle);
+      const distFromParent = distanceFromParentBase + (layer * 66) + jitterFromId(`${parent.id}|${child.id}|r`, jitterRadius);
+      let x = (parent.x || 0) + (distFromParent * Math.cos(theta));
+      let y = (parent.y || 0) + (distFromParent * Math.sin(theta));
+
+      // Keep children near parent while still biasing outside the parent router ring.
+      const r = Math.hypot(x, y) || 1;
+      const minR = Math.max(parentR + 70, bandMinRadius + (layer * 36));
+      if (r < minR) {
+        const scale = minR / r;
+        x *= scale;
+        y *= scale;
+      }
+
+      child.x = Math.round(x);
+      child.y = Math.round(y);
+      child.fixed = pinChildren ? { x: true, y: true } : { x: false, y: false };
+      child.physics = !pinChildren;
+    });
+  }
+
+  for (const [parentId, childIds] of parentToChildren.entries()) {
+    const parent = nodeById.get(parentId);
+    if (!parent) continue;
+    const mtdChildren = childIds.filter((childId) => {
+      const child = nodeById.get(childId);
+      return isChildMtdNode(child) || childTypeById.get(childId) === "mtd";
+    });
+    const ftdChildren = childIds.filter((childId) => {
+      const child = nodeById.get(childId);
+      return isChildFtdNode(child) || childTypeById.get(childId) === "ftd";
+    });
+
+    placeChildrenAroundParent(parent, mtdChildren, {
+      bandMinRadius: outerRadius + 360,
+      distanceFromParentBase: 400,
+      spreadScale: 0.22,
+      jitterAngle: Math.PI / 11,
+      jitterRadius: 20,
+      pinChildren: true,
+    });
+    placeChildrenAroundParent(parent, ftdChildren, {
+      bandMinRadius: outerRadius + 70,
+      distanceFromParentBase: 150,
+      spreadScale: 0.28,
+      jitterAngle: Math.PI / 10,
+      jitterRadius: 26,
+      pinChildren: true,
+    });
+  }
+
+  // Relax overlap on seeded inner routers and children while preserving outer router anchors.
+  const outerRouterSet = new Set(orderedOuterRouterIds);
+  const parentByChild = new Map();
+  for (const [parentId, childIds] of parentToChildren.entries()) {
+    childIds.forEach((childId) => {
+      if (!parentByChild.has(childId)) parentByChild.set(childId, parentId);
+    });
+  }
+  const seededMovable = nodeData.filter((n) => {
+    if (outerRouterSet.has(n.id)) return false;
+    if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) return false;
+    return n.isRouter === true || parentByChild.has(n.id);
+  });
+
+  const MAX_ITERS = 90;
+  for (let iter = 0; iter < MAX_ITERS; iter += 1) {
+    let moved = false;
+    for (let i = 0; i < seededMovable.length; i += 1) {
+      const a = seededMovable[i];
+      for (let j = i + 1; j < seededMovable.length; j += 1) {
+        const b = seededMovable[j];
+        const aIsRouter = a.isRouter === true;
+        const bIsRouter = b.isRouter === true;
+        const minSep = aIsRouter || bIsRouter ? 205 : 138;
+        const dx = (b.x || 0) - (a.x || 0);
+        const dy = (b.y || 0) - (a.y || 0);
+        const dist = Math.hypot(dx, dy) || 0.01;
+        if (dist >= minSep) continue;
+        const overlap = (minSep - dist) * 0.57;
+        const nx = dx / dist;
+        const ny = dy / dist;
+        a.x = Math.round((a.x || 0) - nx * overlap * 0.5);
+        a.y = Math.round((a.y || 0) - ny * overlap * 0.5);
+        b.x = Math.round((b.x || 0) + nx * overlap * 0.5);
+        b.y = Math.round((b.y || 0) + ny * overlap * 0.5);
+        moved = true;
+      }
+    }
+
+    // Keep children parent-local after repulsion.
+    parentByChild.forEach((parentId, childId) => {
+      const parent = nodeById.get(parentId);
+      const child = nodeById.get(childId);
+      if (!parent || !child) return;
+      const dx = (child.x || 0) - (parent.x || 0);
+      const dy = (child.y || 0) - (parent.y || 0);
+      const dist = Math.hypot(dx, dy) || 0.01;
+      const maxParentDist = 380;
+      if (dist > maxParentDist) {
+        const scale = maxParentDist / dist;
+        child.x = Math.round((parent.x || 0) + dx * scale);
+        child.y = Math.round((parent.y || 0) + dy * scale);
+        moved = true;
+      }
+
+      const childType = childTypeById.get(childId);
+      const minBandRadius = childType === "ftd" ? outerRadius + 60 : outerRadius + 340;
+      const childRadius = Math.hypot(child.x || 0, child.y || 0) || 0;
+      if (childRadius < minBandRadius) {
+        const scale = minBandRadius / Math.max(1, childRadius);
+        child.x = Math.round((child.x || 0) * scale);
+        child.y = Math.round((child.y || 0) * scale);
+        moved = true;
+      }
+    });
+
+    if (!moved) break;
+  }
+
+  // Place uncategorized, unlinked nodes on a dedicated outer ring.
+  // Mirrors mesh-ring's explicit ring placement for degree-zero nodes.
+  const connectedNodeIds = new Set();
+  visibleEdges.forEach((edge) => {
+    connectedNodeIds.add(edge.from);
+    connectedNodeIds.add(edge.to);
+  });
+
+  const maxMtdRadius = nodeData.reduce((maxRadius, node) => {
+    if (childTypeById.get(node.id) !== "mtd") return maxRadius;
+    if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return maxRadius;
+    return Math.max(maxRadius, Math.hypot(node.x, node.y));
+  }, 0);
+
+  const uncategorizedOuterRadius = Math.max(outerRadius + 700, maxMtdRadius + 140);
+  const uncategorizedUnlinkedNodes = nodeData
+    .filter((node) => {
+      if (connectedNodeIds.has(node.id)) return false;
+      if (node.isBorderRouter === true) return false;
+      if (node.isRouter === true) return false;
+      if (childTypeById.has(node.id)) return false;
+      if (isChildFtdNode(node)) return false;
+      if (isChildMtdNode(node)) return false;
+      return true;
+    })
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
+  const uncategorizedCount = uncategorizedUnlinkedNodes.length;
+  uncategorizedUnlinkedNodes.forEach((node, idx) => {
+    const angle = -Math.PI / 2 + ((2 * Math.PI * idx) / Math.max(1, uncategorizedCount));
+    node.x = Math.round(uncategorizedOuterRadius * Math.cos(angle));
+    node.y = Math.round(uncategorizedOuterRadius * Math.sin(angle));
+    node.fixed = { x: true, y: true };
+    node.physics = false;
+  });
+}
+
 // ── Main renderer ─────────────────────────────────────────────────────────────
 
 export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfileName = "mesh-baseline") {
@@ -469,6 +861,48 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
 
   if (physicsProfileName === PHYSICS_PROFILE_MESH_RING) {
     applyRingStarSeedLayout(nodeData, edgeData);
+  } else if (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT) {
+    applyMeshLabHybridSeedLayout(nodeData, edgeData);
+  }
+
+  // Apply curved parent-child edges across all profiles to reduce overlap.
+  // Profile-specific branches below can still override roundness/length/physics.
+  edgeData.forEach((edge) => {
+    if (edge.baseHidden === true) return;
+    if (edge.isParentChild !== true) return;
+    const hashSeed = `${edge.from}|${edge.to}`;
+    const curveType = (hashSeed.length % 2 === 0) ? "curvedCW" : "curvedCCW";
+    edge.smooth = { enabled: true, type: curveType, roundness: 0.2 };
+  });
+
+  if (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT || physicsProfileName === PHYSICS_PROFILE_MESH_RING) {
+    const nodeById = new Map(nodeData.map((n) => [n.id, n]));
+    const isFtdChildNode = (node) => toText(node?.mode_device).toUpperCase() === "FTD";
+    edgeData.forEach((edge) => {
+      if (edge.baseHidden === true) return;
+      const fromNode = nodeById.get(edge.from);
+      const toNode = nodeById.get(edge.to);
+      const fromIsRouter = fromNode?.isRouter === true;
+      const toIsRouter = toNode?.isRouter === true;
+      const routerToChildLike = (fromIsRouter && !toIsRouter) || (!fromIsRouter && toIsRouter);
+
+      if (edge.isParentChild === true) {
+        const childNode = fromIsRouter ? toNode : fromNode;
+        const childBandLength = isFtdChildNode(childNode) ? 200 : 430;
+        edge.length = Number.isFinite(edge.length) ? Math.max(edge.length, childBandLength) : childBandLength;
+        edge.physics = true;
+        // Alternate curve direction to separate sibling parent-child edges.
+        const hashSeed = `${edge.from}|${edge.to}`;
+        const curveType = (hashSeed.length % 2 === 0) ? "curvedCW" : "curvedCCW";
+        edge.smooth = { enabled: true, type: curveType, roundness: 0.3 };
+      } else if (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT && routerToChildLike) {
+        // Keep non-parent router-to-child links visual, but remove spring force to
+        // avoid pulling children into dense central clusters.
+        edge.physics = false;
+      } else if (fromIsRouter && toIsRouter) {
+        edge.length = Number.isFinite(edge.length) ? Math.max(edge.length, 430) : 430;
+      }
+    });
   }
 
   // Store nodeData and raw rows for filter validation and search
