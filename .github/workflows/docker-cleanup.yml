@@ -1,0 +1,61 @@
+name: Cleanup Stale Docker Images
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cleanup-dev-images:
+    name: Delete dev images older than 2 weeks
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Delete stale dev-<sha> images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CUTOFF=$(date -d '2 weeks ago' --utc +%Y-%m-%dT%H:%M:%SZ)
+          echo "Deleting dev-<sha> images created before $CUTOFF"
+
+          DELETED=0
+          while IFS= read -r version_id; do
+            [ -z "$version_id" ] && continue
+            echo "Deleting version ID: $version_id"
+            gh api --method DELETE \
+              "/users/${{ github.repository_owner }}/packages/container/tdash/versions/$version_id"
+            DELETED=$((DELETED + 1))
+          done < <(
+            gh api --paginate \
+              "/users/${{ github.repository_owner }}/packages/container/tdash/versions" \
+              --jq --arg cutoff "$CUTOFF" \
+              '.[] | select(.metadata.container.tags | any(startswith("dev-"))) | select(.created_at < $cutoff) | .id | tostring'
+          )
+          echo "Deleted $DELETED dev image version(s)."
+
+  cleanup-main-images:
+    name: Delete main images older than 30 days
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Delete stale <sha> images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CUTOFF=$(date -d '30 days ago' --utc +%Y-%m-%dT%H:%M:%SZ)
+          echo "Deleting main <sha> images created before $CUTOFF"
+
+          DELETED=0
+          while IFS= read -r version_id; do
+            [ -z "$version_id" ] && continue
+            echo "Deleting version ID: $version_id"
+            gh api --method DELETE \
+              "/users/${{ github.repository_owner }}/packages/container/tdash/versions/$version_id"
+            DELETED=$((DELETED + 1))
+          done < <(
+            gh api --paginate \
+              "/users/${{ github.repository_owner }}/packages/container/tdash/versions" \
+              --jq --arg cutoff "$CUTOFF" \
+              '.[] | select(.metadata.container.tags | any(test("^[0-9a-f]{40}$"))) | select(.created_at < $cutoff) | .id | tostring'
+          )
+          echo "Deleted $DELETED main image version(s)."
