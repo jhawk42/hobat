@@ -4,6 +4,13 @@ tdash is a Thread mesh dashboard and toolkit for visualizing topology, diagnosin
 
 Environment: tdash runs on Debian-based Linux in a Docker container or directly on a host. The dashboard is browser-based and works well from desktops and phones. See [tdash backstory](https://github.com/jhawk42/smarthome/blob/main/tdash/tdash_backstory.md) for details.
 
+
+<a href="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash1.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash1.jpg?raw=true" alt="tdash1" width="200px" >
+<a href="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash2.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash2.jpg?raw=true" alt="tdash2" width="200px" >
+<a href="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash3.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash3.jpg?raw=true" alt="tdash3"  height="150px" >
+<a href="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash4.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash4.jpg?raw=true" alt="tdash4" height="150px" >
+
+
 Jump to: [Getting Started](#getting-started) [help docs](./doc/) [td_cli](./doc/help_td_cli.md) [td cli rest-api](./doc/help_td_restapi_cli.md) [td_webserver](./doc/help_td_webserver.md) [env vars](./doc/help_env_vars.md) [openthread](https://github.com/openthread/openthread)
 
 ## Overview
