@@ -9,10 +9,11 @@ This script:
 4. Writes the updated static extaddr file back to disk
 """
 
+import os
+import sys
 import argparse
 import json
 import logging
-import sys
 from pathlib import Path
 
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
@@ -23,6 +24,7 @@ from util_data import (
     resolve_data_dir,
     save_json_atomic,
 )
+from extaddr_device_label_map import load_extaddr_device_label_map
 
 OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME = 'td-otbr-cli-networkdiag-fetch-all.json'
 MDNS_SCOPES_BR_FILENAME = "td-mdns-scopes-br.json"
@@ -45,17 +47,47 @@ def merge_extaddr_files(extaddr_json_path, merge_input_file_path, merge_name_ove
         Tuple of (num_added, added_entries, num_overridden, overridden_entries)
     """
     # Load static extaddr file
-    with open(extaddr_json_path, 'r') as f:
-        static_data = json.load(f)
-    logging.info(f"Loaded {len(static_data)} entries from static extaddr file: {extaddr_json_path}")
 
-    # Load merge input file
-    with open(merge_input_file_path, 'r') as f:
-        merge_input_data = json.load(f)
-    logging.info(f"Loaded {len(merge_input_data)} entries from merge input file: {merge_input_file_path}")   
+#   with open(extaddr_json_path, 'r') as f:
+#         static_data = json.load(f)
+#     logging.info(f"Loaded {len(static_data)} entries from static extaddr file: {extaddr_json_path}")
 
-    # Extract extaddr values
-    static_extaddrs = {item['extaddr'] for item in static_data}
+#     # Extract extaddr values
+#     static_extaddrs = {item['extaddr'] for item in static_data}
+
+    # Check if file exists before parsing
+    if os.path.exists(extaddr_json_path):
+        logging.info(
+            f"Loading extended address to node name mapping from {extaddr_json_path}..."
+        )
+        extaddr_map = load_extaddr_device_label_map(
+            extaddr_json_path)
+    else:
+        extaddr_map = {}
+        logging.warning(f"Static extaddr file does not exist: {extaddr_json_path}. Starting with empty mapping.")
+
+    if not extaddr_map:
+        logging.warning(f"No valid entries found in static extaddr file: {extaddr_json_path}")  
+        static_data = []
+        static_extaddrs = set()
+    else:
+        logging.info(f"Loaded {len(extaddr_map)} entries from static extaddr file: {extaddr_json_path}")
+        static_data = [{'extaddr': extaddr, 'device_label': label} for extaddr, label in extaddr_map.items()]
+        static_extaddrs = {item['extaddr'] for item in static_data}
+
+    try:
+        # Short circuit if merge input file does not exist
+        if not os.path.exists(merge_input_file_path):
+            logging.error(f"Merge input file does not exist: {merge_input_file_path}")
+            return 0, [], 0, []
+
+        # Load merge input file
+        with open(merge_input_file_path, 'r') as f:
+            merge_input_data = json.load(f)
+        logging.info(f"Loaded {len(merge_input_data)} entries from merge input file: {merge_input_file_path}")
+    except Exception as e:
+        logging.error(f"Failed to load merge input file: {merge_input_file_path}: {e}")
+        return 0, [], 0, []
     
     # Build merge input entries dict, skipping items without required fields.
     # Prefer device_label; fall back to name when device_label is not usable.
@@ -218,14 +250,10 @@ def main(argv=None):
         )
     
     # Perform merge
-    try:
-        require_existing_input_file(
-            extaddr_json_filename,
-            command_path="merge-extaddr-map",
-            data_dir=td_data_dir,
-            classification="required",
-            action="fail code=4",
-        )
+    try:       
+        # Optional: static extaddr file 
+        # mDNS br records will have names for Thread Border Routers
+        
         require_existing_input_file(
             Path(merge_input_file),
             command_path="merge-extaddr-map",
