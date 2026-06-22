@@ -639,7 +639,7 @@ def _add_mesh_diagnostics_commands(
 def _add_topology_commands(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """P4 — Combined topology sweep: devices → diagnostics → mesh-diagnostics."""
+    """Combined topology sweep: devices → diagnostics → mesh-diagnostics."""
     topo_p = subparsers.add_parser(
         "topology",
         help=(
