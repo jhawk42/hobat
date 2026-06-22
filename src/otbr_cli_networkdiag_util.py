@@ -198,6 +198,14 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     if existing.get("thread_stack_version") == "Unknown" and new.get("thread_stack_version") != "Unknown":
         existing["thread_stack_version"] = new["thread_stack_version"]
 
+    # thread_version: take new if existing is not present, else keep existing
+    if not existing.get("thread_version") and new.get("thread_version"):
+        existing["thread_version"] = new["thread_version"]
+
+    # ver: take new if existing is not present", else keep existing
+    if not existing.get("ver") and new.get("ver"):
+        existing["ver"] = new["ver"]
+
     # mode: take new if new mode is non-empty dict and existing is empty, else keep existing
     if not existing.get("mode") and new.get("mode"):
         existing["mode"] = new["mode"]
@@ -212,6 +220,10 @@ def merge_device_record(existing: dict, new: dict) -> dict:
                 seen.add(addr)
     elif new.get("ipv6_addrs"):
         existing["ipv6_addrs"] = new["ipv6_addrs"]
+
+    # omr_ipv6_addr: keep existing (first responder wins)
+    if not existing.get("omr_ipv6_addr") and new.get("omr_ipv6_addr"):
+        existing["omr_ipv6_addr"] = new["omr_ipv6_addr"]
 
     # responder_ipv6: keep existing (first responder wins)
     # (no update needed)
@@ -229,13 +241,17 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     if not existing.get("br") and new.get("br"):
         existing["br"] = new["br"]
 
-    # "type": take new if new is non-empty dict and existing is empty, else keep existing
-    if not existing.get("type") and new.get("type"):
+    # "type": (take new if new is non-empty and existing is empty) or (take new if new is "border router" and existing is "router", else keep existing)
+    if (not existing.get("type") and new.get("type")) or (existing.get("type") == "router" and new.get("type") == "border router"):
         existing["type"] = new["type"]
 
-    # "role": take new if new is non-empty dict and existing is empty, else keep existing
-    if not existing.get("role") and new.get("role"):
+    # "role": (take new if new is non-empty and existing is empty) or (take new if new is "border router" and existing is "router", else keep existing)
+    if (not existing.get("role") and new.get("role")) or (existing.get("role") == "router" and new.get("role") == "border router"):
         existing["role"] = new["role"]
+    
+    # "leader": take new if new is non-empty and existing is empty, else keep existing
+    if not existing.get("leader") and new.get("leader"):
+        existing["leader"] = new["leader"]
 
     # children: take new if new is non-empty list and existing is empty list
     if not existing.get("children") and new.get("children"):

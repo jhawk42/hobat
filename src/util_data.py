@@ -340,6 +340,24 @@ def load_optional_input(
         )
 
 
+def create_checkpoint_filename(filename: str) -> str:
+    """Create a checkpoint filename from a base filename.
+    
+    Strips the extension from the input filename and appends the checkpoint suffix.
+    For example: 'td-fetch-all.json' becomes 'td-fetch-all.chkpt.json'
+    
+    Args:
+        filename: The base filename to create a checkpoint filename from
+        
+    Returns:
+        The checkpoint filename with extension stripped and suffix appended
+    """
+    from td_const import TD_CHECKPOINT_FILENAME_SUFFIX
+    
+    base_name = os.path.splitext(filename)[0]
+    return base_name + TD_CHECKPOINT_FILENAME_SUFFIX
+
+
 def save_json_atomic(data, filename: str | os.PathLike, indent: int = 4, add_trailing_newline: bool = False) -> None:
     """Save JSON data to file atomically using temporary file + rename.
     

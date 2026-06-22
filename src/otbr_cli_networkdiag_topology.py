@@ -13,7 +13,7 @@ import util_ot_ctl
 import util_network
 from otbr_cli_router_table import fetch_and_parse_router_table
 from extaddr_device_label_map import load_extaddr_device_label_map
-from util_data import data_file_path, resolve_data_dir, save_json_atomic
+from util_data import data_file_path, resolve_data_dir, save_json_atomic, create_checkpoint_filename
 
 from otbr_cli_networkdiag_util import (
     TLV_VALUES_DETAILED,
@@ -44,6 +44,16 @@ from otbr_cli_networkdiag_parsers import (
     parse_route_data,
     parse_multicast_diag_output,
 )
+
+from otbr_cli_meshdiag_topology import(
+    get_meshdiag_topology
+)
+
+
+NETWORKDIAG_MULTICAST_NETWORK_FILENAME = "td-otbr-cli-networkdiag-multicast-network.json"
+NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME = "td-otbr-cli-networkdiag-multicast-neighbors.json"
+NETWORKDIAG_FETCH_ALL_FILENAME = "td-otbr-cli-networkdiag-fetch-all.json"
+
 
 def fetch_network_diag_for_device(
     rloc16, rloc_prefix, extaddr_map=None, router_table_by_router_id=None, ipv6_addresses=None, tlv_detail_level=6
@@ -577,16 +587,23 @@ def _upsert_device_record(
 
 
 def fetch_network_diag_topology(
-    extaddr_map=None, thread_network_info=None, expand_children=True
+    extaddr_map=None, thread_network_info=None, expand_children=True, td_data_dir=None
 ):
     """Maps the full network topology and returns a Python dictionary."""
 
-    # expand_children controls whether to perform additional queries for each router to get their child table data and include that in the topology map. This can provide a more complete view of the network with parent-child relationships, but it also significantly increases the number of queries and overall runtime, especially in larger networks with many routers and children. By default, it's set to True to get the most detailed topology map, but it can be set to False to only get the parent nodes without expanding children for a faster but less detailed topology mapping.
+    # expand_children controls whether to perform additional queries for each router to get their child table data and include that in the topology map. 
     # Set to True to also query and include child nodes in the topology map (will increase runtime significantly)
     # Set to False to only get parent nodes without expanding children
 
     # 1. Initialize topology map and extaddr tracking
     network_topology_map = {}
+
+    # Create checkpoint filename for saving intermediate results during topology mapping.
+    checkpoint_filename = create_checkpoint_filename(NETWORKDIAG_FETCH_ALL_FILENAME)
+    checkpoint_filepath = data_file_path(checkpoint_filename,
+                                         td_data_dir)
+    logging.debug("Checkpoint filepath: %s", checkpoint_filepath)
+
     # Track extaddr -> rloc16 mapping to detect duplicate devices with changed RLOC16
     extaddr_to_rloc = {}
 
@@ -606,21 +623,96 @@ def fetch_network_diag_topology(
 
     # 4. Get all active routers (potential parents)
     router_table_data = fetch_and_parse_router_table(extaddr_map)
-    router_rlocs = [
-        router.get("rloc16") for router in router_table_data if router.get("rloc16")
-    ]
+    if router_table_data is not None:
+        network_topology_map_routers = {}
 
-    # build a dict of router_table_data indexed by router_id
-    router_table_by_router_id = {router.get(
-        "router_id"): router for router in router_table_data if router.get("router_id") is not None}
+        logging.info(f"Router table has {len(router_table_data)} entries")
 
-    # 5. Get IPv6 addresses for all routers
+        # Build lookup lists
+        # Extract RLOC16 values for all routers in the router table
+        router_rlocs = [
+            router.get("rloc16") for router in router_table_data if router.get("rloc16")
+        ]
+
+        # Build a dict of router_table_data indexed by router_id
+        router_table_by_router_id = {router.get(
+            "router_id"): router for router in router_table_data if router.get("router_id") is not None}
+
+        # Conform router table data into the topology record
+        for router in router_table_data:
+            extaddr = router.get("extaddr")
+            rloc16 = router.get("rloc16")
+            if extaddr or rloc16:
+                network_topology_map_routers[rloc16] = {
+                    "extaddr": extaddr,
+                    "rloc16": rloc16,
+                    "device_label": extaddr_map.get(router.get("extaddr"), f"Unknown-{rloc16}"),
+                    "role": "router",
+                    "is_router": True,
+                    "router_id": router.get("router_id"),
+                    "next_hop": router.get("next_hop"),
+                    "path_cost": router.get("path_cost"),
+                    "lq_in": router.get("lq_in"),
+                    "lq_out": router.get("lq_out"),
+                    "age": router.get("age"),
+                    "link": router.get("link"),
+                }
+        
+        # Merge router table data into the topology map, keyed by rloc16, with enriched fields for type/role based on router table data. 
+        for rloc16, device_record in network_topology_map_routers.items():
+            device_record
+            _upsert_device_record(network_topology_map, device_record, extaddr_to_rloc)
+
+        logging.info(f"After merging router table data, topology map has {len(network_topology_map)} devices (keyed by rloc16)")
+  
+        # Checkpoint to file    
+        save_topology_to_json_file(network_topology_map, checkpoint_filepath)
+    
+    else:
+        logging.warning("Router table is None. No routers found.")
+        router_table_data = []       
+
+    # 5a. Get IPv6 addresses for all routers
     # need this if nodes don't reponse to networkdiagnostic get with TLV 8 for IPv6 address list, then we can at least populate the topology map with known IPv6 addresses for each RLOC16 from this separate query. This way we can still have some reference to IPv6 addresses in the topology even if some nodes don't respond to the full diagnostic query.
     ipv6_addresses = fetch_ipv6_addresses()
     ipv6_addresses = (
         ipv6_addresses if ipv6_addresses else {}
     )  # Ensure it's a dict even if empty
 
+    meshdiag_topology_data = get_meshdiag_topology(
+        extaddr_map, thread_network_info
+    )
+
+    # 5b. Get meshdiag topology data and merge into main topology map, keyed by rloc16. 
+    if meshdiag_topology_data is not None:  
+        network_topology_map_meshdiag_routers = {}
+
+        # Conform meshdiag topology data into the topology record
+        for router in meshdiag_topology_data:
+            extaddr = router.get("extaddr")
+            rloc16 = router.get("rloc16")
+            if extaddr or rloc16:
+                network_topology_map_meshdiag_routers[rloc16] = {
+                    "extaddr": extaddr,
+                    "rloc16": rloc16,
+                    "device_label": extaddr_map.get(extaddr, f"Unknown-{rloc16}"),
+                    "thread_version": router.get("thread_version"),
+                    "ver": router.get("ver"),
+                    "role": "router",
+                    "is_router": True,
+                    "is_border_router": router.get("is_border_router", False),
+                    "omr_ipv6_addr": router.get("omr_ipv6_addr"),
+                    "mode": router.get("mode"),
+                    "ipv6_addrs": router.get("ipv6_addrs"),
+                }
+
+        for rloc16, device_record in network_topology_map_meshdiag_routers.items():
+            _upsert_device_record(network_topology_map, device_record, extaddr_to_rloc)
+        # Checkpoint to file
+        save_topology_to_json_file(network_topology_map, checkpoint_filepath)
+    else:
+        logging.warning("Meshdiag topology data is None. No meshdiag data to merge.")
+          
     # 6. Get the multicast topology data
     # This will give us a starting point with data from all devices that responded to the multicast query, which we can then enrich with additional direct queries for any missing data or child information as needed. The multicast query can help reduce the number of direct queries needed by providing data for many devices in one go, especially for those that respond with more detailed TLV sets in the initial retries.
     network_topology_map_multicast = fetch_network_diag_topology_multicast_network(
@@ -628,15 +720,17 @@ def fetch_network_diag_topology(
     )
 
     if network_topology_map_multicast:
-        logging.info(
-            f"Multicast topology map has {len(network_topology_map_multicast)} devices (keyed by rloc16)"
-        )
+        logging.info(f"Multicast topology map has {len(network_topology_map_multicast)} devices (keyed by rloc16)")
+
         # Merge multicast topology data into main topology map, keyed by rloc16
         for rloc16, device_record in network_topology_map_multicast.items():
             _upsert_device_record(network_topology_map, device_record, extaddr_to_rloc)
         logging.info(
             f"After merging multicast data, topology map has {len(network_topology_map)} devices (keyed by rloc16)"
         )
+
+        # Checkpoint thread device data to file after multicast collection before starting direct queries, so we have a record of what we got from multicast alone before we start enriching with direct queries. This can be useful for debugging and analysis to see the difference between what we get from multicast vs direct queries, and also to have a baseline record of the multicast responses in case some devices become unresponsive during the direct query phase.
+        save_topology_to_json_file(network_topology_map, checkpoint_filepath)
     else:
         logging.warning("Multicast topology map is empty or None")
 
@@ -721,6 +815,9 @@ def fetch_network_diag_topology(
                 logging.info(
                     f"Poll {len(network_topology_map)} unique devices so far"
                 )
+                # Checkpoint to file after each new record added to topology map
+                # used in progressive loading in dashboard UI
+                save_topology_to_json_file(network_topology_map, checkpoint_filepath)
 
             if expand_children:
                 # 8. Expand child nodes in topology:
@@ -841,6 +938,9 @@ def fetch_network_diag_topology(
                             logging.info(
                                 f"Poll Child {len(network_topology_map)} unique devices so far"
                             )
+                            # Checkpoint to file after each new record added to topology map
+                            # used in progressive loading in dashboard UI
+                            save_topology_to_json_file(network_topology_map, checkpoint_filepath)
 
     logging.info(
         f"Poll consolidation complete: {len(network_topology_map)} unique devices found in topology map."
@@ -915,17 +1015,8 @@ def print_network_diag_topology(topology):
         logging.debug("")
 
 
-def save_topology_to_json_dict(
-    data, filename="td-otbr-cli-networkdiag-fetch-all.json"
-):
-    """Serializes the dictionary to a pretty-printed JSON file."""
-    save_json_atomic(data, filename)
-    logging.info(f"Successfully exported {len(data)} records for topology to {filename}")
-    logging.debug("Saved topology data into %s as JSON:\n%s", filename, json.dumps(data, indent=4))
-
-
-def save_topology_to_json_list(
-    data, filename="thread-networkdiagnostic-topology-list.json"
+def save_topology_to_json_file(
+    data, filename=NETWORKDIAG_FETCH_ALL_FILENAME
 ):
     """Converts dict format to list format and saves to JSON."""
     network_map = []
@@ -940,13 +1031,16 @@ def save_topology_to_json_list(
             "tlv_values": data.get("tlv_values", []),
             "eui64": data.get("eui64"),
             "thread_stack_version": data.get("thread_stack_version", "Unknown"),
+            "thread_version": data.get("thread_version", "Unknown"),
+            "ver": data.get("ver", "Unknown"),
             "mode": data.get("mode", {}),
             "ipv6_addrs": data.get("ipv6_addrs", []),
             "type": data.get("type", "Unknown"),
             "role": data.get("role", "Unknown"),
             "br": data.get("br", None),
             "is_border_router": data.get("is_border_router", None),
-            "is_router": data.get("is_router", None),            
+            "is_router": data.get("is_router", None),
+            "leader": data.get("leader", None),
             "connectivity": data.get("connectivity", {}),
             "leader_data": data.get("leader_data", {}),
             "vendor_name": data.get("vendor_name"),
@@ -1012,9 +1106,9 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
 
     # Save the topology as JSON to file
     save_json_filename = data_file_path(
-        "td-otbr-cli-networkdiag-multicast-network.json", td_data_dir
+        NETWORKDIAG_MULTICAST_NETWORK_FILENAME, td_data_dir
     )
-    save_topology_to_json_list(data, save_json_filename)
+    save_topology_to_json_file(data, save_json_filename)
 
     # Print the raw topology dictionary as JSON to console for debugging
     logging.debug(json.dumps(data, indent=4))
@@ -1069,9 +1163,9 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
 
     # Save the topology as JSON to file
     save_json_filename = data_file_path(
-        "td-otbr-cli-networkdiag-multicast-neighbors.json", td_data_dir
+        NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME, td_data_dir
     )
-    save_topology_to_json_list(data, save_json_filename)
+    save_topology_to_json_file(data, save_json_filename)
 
     # Print the raw topology dictionary as JSON to console for debugging
     logging.debug("Raw multicast neighbors topology data as JSON:\n%s",
@@ -1080,7 +1174,7 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main_fetch_all(argv: Sequence[str] | None = None) -> int:
     """Main entry point with optional command-line arguments."""
 
     logging.basicConfig(
@@ -1123,20 +1217,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         thread_network_info = util_network.fetch_thread_network_info()
 
+        expand_children = args.expand_children
+        logging.info(f"Expand children is set to {expand_children}")
+
         # Get the networkdiagnostic topology data
         networkdiagnostic_topology_data = fetch_network_diag_topology(
-            extaddr_map, thread_network_info, expand_children=args.expand_children
+            extaddr_map, thread_network_info, expand_children=expand_children, td_data_dir=td_data_dir
         )
 
         # print the topology in tree format to console
         print_network_diag_topology(networkdiagnostic_topology_data)
 
         # save the topology as JSON to file
-        save_json_filename = data_file_path(
-            "td-otbr-cli-networkdiag-fetch-all.json", td_data_dir
+        save_json_filepath = data_file_path(
+            NETWORKDIAG_FETCH_ALL_FILENAME, td_data_dir
         )
-        save_topology_to_json_list(
-            networkdiagnostic_topology_data, save_json_filename
+        save_topology_to_json_file(
+            networkdiagnostic_topology_data, save_json_filepath
         )
 
         # Print the raw topology dictionary as JSON to console for debugging
@@ -1149,6 +1246,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception as exc:
         logging.error(f"Runtime failure while collecting networkdiag-topology: {exc}")
         return 3
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Main entry point with optional command-line arguments."""
+
+    return main_fetch_all(argv)
 
 
 if __name__ == "__main__":

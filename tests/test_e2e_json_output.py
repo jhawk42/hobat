@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from otbr_cli_networkdiag_topology import (
     parse_multicast_diag_output,
-    save_topology_to_json_list,
+    save_topology_to_json_file,
 )
 
 
@@ -68,7 +68,7 @@ def test_multicast_to_json_output_has_all_fields():
         tmp_filename = tmp.name
     
     try:
-        save_topology_to_json_list(data_by_rloc, tmp_filename)
+        save_topology_to_json_file(data_by_rloc, tmp_filename)
         
         # Read back the JSON
         with open(tmp_filename, 'r') as f:
