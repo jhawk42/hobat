@@ -1290,7 +1290,11 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
       ? ` Stabilized: ${(lastStabilizationMs / 1000).toFixed(2)}s.`
       : "";
     const fetchStatusEl = document.getElementById("fetch-status-line-content");
-    if (fetchStatusEl) fetchStatusEl.textContent = `Loaded: ${sourceNames.join(", ")}`;
+    const fetchStatusPinnedUntil = window.tdashDebug?.fetchStatusPinnedUntil ?? 0;
+    const isFetchStatusPinned = Date.now() < fetchStatusPinnedUntil;
+    if (fetchStatusEl && !isFetchStatusPinned) {
+      fetchStatusEl.textContent = `Loaded: ${sourceNames.join(", ")}`;
+    }
     statusEl.textContent =
       `Showing: ${visibleNodeCount} nodes, ${visibleEdgeCount} links. Physics profile: ${physicsProfileLabel}.${stabilizationSuffix}${neighborSuffix}${searchSuffix}`;
   }

@@ -88,8 +88,8 @@ The only cancellable state is `running`.
 For browser behavior, Phase 1 also codifies two decisions:
 
 - Cancel scope: cancel all in-flight jobs for the active fetch session.
-- Partial-result policy: ignore partial results and keep the currently rendered
-  view unchanged after cancellation.
+- Partial-result policy: when partial data is available, commit the partial view
+  and show a cancellation warning in the fetch status line.
 
 Phase 1 does not yet introduce subprocess kill mechanics; those are implemented
 in later phases on top of this contract.
@@ -201,38 +201,42 @@ Data files get `Cache-Control: max-age=<n>` plus `Last-Modified` and an ETag der
 
 | Symbol | Purpose |
 |---|---|
-| `currentDataset` | Exported live binding; holds `{ entry, rows, rawFiles, capabilities }` after a successful load |
+| `currentDataset` | Exported live binding; holds final or partial dataset state (`isPartial` flag) and fetch metrics |
 | `staticExtaddrLabelMap` | `Map<lowercase-extaddr, device_label>` pre-loaded at startup |
 | `fileMaxAgeCache` | `Map<filename, { maxAge, fetchedAt, lastModifiedAt }>` — per-file cache |
 | `_forceFresh` / `_onlyCache` | Toggle flags set by the Force Refresh / Only Cache checkboxes |
 | `_activeFetchSession` | Current fetch session state: `id`, `cancelRequested`, `AbortController`, and tracked active `job_id`s |
 
-### `loadDataset(entryValue)` walkthrough
+### `loadDataset(entryValue)` walkthrough (progressive)
 
 ```
 Looks up DATASET_REGISTRY entry by value
     │
     ▼
-Set default link-filter in UI from entry.defaultLinkFilter
+Evaluate progressive rollout gate
+  progressiveEnabled =
+    feature flag enabled (URL/localStorage) AND
+    dataset includes rollout-approved long files
     │
     ▼
-Promise.allSettled( entry.files.map( fetchJson ) )
-  Each fetchJson call:
-    - attaches per-file cached max-age header (or force-fresh / only-cache)
-    - if response.status === 202 → pollJobUntilDone() (5s polling)
-    - stores response max-age back into fileMaxAgeCache
+Start concurrent per-file fetches (Promise.allSettled)
+  Each file fetch:
+    - sends per-file cache header (force-fresh / only-cache / remembered max-age)
+    - if 202: enters pollJobUntilDone()
+      - polls /api/job/{job_id}
+      - when checkpoint metadata is fresher, fetches checkpoint file and emits onCheckpointData
+      - enforces monotonic freshness and redraw cadence guards
+    - on checkpoint or final file data:
+      - updates rawFilesInProgress[fileIdx]
+      - rebuilds partial dataset via _buildPartialDataset(...)
+      - sets currentDataset.isPartial = true
+      - notifies UI via onFileReady callback
     │
     ▼
-Build rawFiles[] (null for failed files)  and  loadedFiles[]
-    │
-    ▼
-Apply merge strategy:
-  'none'         → normalizeDatasetPayload on first loaded file → rows[]
-  'by-rloc16'    → normalizeRows per group → mergeRowsByRloc16(groups)
-  'by-identity'  → normalizeRows per group → mergeRowsByIdentity(groups)
-    │
-    ▼
-currentDataset = { entry, rows, rawFiles }
+After all files settle:
+  - build final rows with merge strategy
+  - set currentDataset.isPartial = false
+  - attach fetchMetrics
 ```
 
 ### Normalisation and merge (`tdash-merge.js`)
@@ -483,11 +487,17 @@ status: "Select a dataset to load."
 doFetchDataset()
     │
     ▼
-loadDataset(selectedValue)             ← tdash-dataset.js
-  (fetches files, merges rows, sets currentDataset)
+loadDataset(selectedValue, { onFileReady })  ← tdash-dataset.js
+  (fetches files, emits progressive partial updates, then final dataset)
     │
     ▼
-renderCurrentView()
+onFileReady() in UI
+  - coalesced via setTimeout(0) debounce
+  - renderCurrentView() on partial dataset
+  - status line: "⚠ Partial result: N of M files ready — still loading…"
+    │
+    ▼
+final reconciliation renderCurrentView()
   effectiveDataset = _enhanceEnabled
     ? { ...currentDataset, rows: enrichRows(rows), rawFiles: enrichRawFiles(rawFiles) }
     : currentDataset
@@ -498,6 +508,7 @@ renderCurrentView()
     ▼
 updateDeviceStatusBar(counts)
 refreshDiagnosticFilterForCurrentSource()
+  console.info("[tdash] fetch metrics", ...)
 ```
 
 ### Fetch cancel flow (triggered by Cancel button)
@@ -513,8 +524,10 @@ cancelActiveFetchSession()             ← tdash-dataset.js
     ▼
 doFetchDataset() catch branch          ← tdash-ui.js
   - detect FetchCancelledError
-  - keep current rendered view unchanged (no partial overwrite)
-  - update status line to cancelled
+  - if partial dataset is available: commit rendered partial view
+  - set status line: "⚠ Cancelled — partial result: N of M files loaded"
+  - pin this status for a short interval so renderer "Loaded:" updates cannot overwrite it
+  - if no partial dataset is available: show "Fetch cancelled for <dataset>"
 ```
 
 ### Control-to-action mapping
@@ -652,14 +665,24 @@ User selects dataset and clicks Fetch
 doFetchDataset() [tdash-ui.js]
         │
         ▼
-loadDataset(value) [tdash-dataset.js]
+loadDataset(value, { onFileReady }) [tdash-dataset.js]
   ├── fetch /api/data/<file> per entry.files[]
   │     └── server: check freshness → run python3 -m td_cli {command} if stale → return JSON
-  │     └── HTTP 202: poll /api/job/{id} until terminal status (done/error/cancelled)
+  │     └── HTTP 202: poll /api/job/{id} until terminal status
+  │           └── poll metadata may advertise fresher checkpoint file
+  │           └── client fetches checkpoint via /api/data/<checkpoint_filename>
+  │           └── client renders checkpoint-backed partial dataset while polling continues
   │
-  ├── normalizeRows() per loaded file group [tdash-merge.js]
-  ├── mergeRowsByIdentity() / mergeRowsByRloc16() / pass-through [tdash-merge.js]
-  └── currentDataset = { entry, rows, rawFiles }
+  ├── progressive partial path:
+  │     currentDataset = { ..., isPartial: true }
+  │     onFileReady() → debounced incremental render
+  │
+  ├── final path after all files settle:
+  │     normalizeRows() per loaded file group [tdash-merge.js]
+  │     mergeRowsByIdentity() / mergeRowsByRloc16() / pass-through [tdash-merge.js]
+  │     currentDataset = { ..., isPartial: false, fetchMetrics }
+  │
+  └── final reconciliation render
         │
         ▼
 renderCurrentView() [tdash-ui.js]
@@ -704,3 +727,29 @@ Implemented edge-case behavior:
   - complete-first: terminal (`done`/`error`) and cancel returns `409`
 - Cancel while queued on source lock: task is cancelled before subprocess start and transitions to `cancelled`.
 - Cancel while subprocess is running: task cancellation path in `run_td_cli` terminates subprocess (terminate, then kill fallback).
+
+UI-level outcomes during cancellation with progressive fetch enabled:
+
+- If at least one file/checkpoint has rendered, cancellation commits the partial view and surfaces a warning in the fetch status line.
+- The cancelled-partial warning is briefly pinned so view renderers cannot immediately replace it with "Loaded: ...".
+- If no partial data has rendered yet, the status line shows a plain cancellation message and the current view is preserved or cleared by existing fallback rules.
+
+---
+
+## 11. Rollout and Observability Additions
+
+Major improvements introduced by the progressive-fetch plan:
+
+- Independent dataset file rendering:
+  - each file can render as soon as it resolves, without waiting for all files.
+- Checkpoint partial rendering:
+  - long-running jobs expose checkpoint metadata from `/api/job/{job_id}`;
+  - clients fetch checkpoint files from `/api/data/{checkpoint_filename}` and render incremental updates.
+- Final reconciliation render:
+  - once all files settle, the UI performs one canonical final render (`isPartial = false`).
+- Feature-flagged rollout:
+  - progressive mode is default-off and enabled via query/local storage flag;
+  - additionally constrained to datasets containing approved long-running file set.
+- Built-in observability:
+  - metrics tracked and logged for `timeToFirstRenderMs`, `checkpointUpdateCount`, `completedFileUpdateCount`, and `timeToFinalRenderMs`.
+  - latest metrics are exposed at `window.tdashDebug.lastFetchMetrics` for browser-side validation.

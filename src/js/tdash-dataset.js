@@ -46,6 +46,50 @@ const JOB_POLL_STATUS = Object.freeze({
   ERROR: "error",
 });
 
+// Rollout flag: default off. Enable via URL param ?progressiveFetch=1
+// or localStorage key tdash.feature.progressiveFetch=true.
+// This flag is used to gate the progressive fetch feature for datasets that support it.
+const _FEATURE_PROGRESSIVE_FETCH_DEFAULT = true;
+
+// Progressive mode applies only to datasets containing at least one of these files.
+const _PROGRESSIVE_ROLLOUT_FILES = new Set([
+  "td-otbr-cli-meshdiag-topology.json",
+  "td-otbr-cli-meshdiag-router-neighbortables.json",
+  "td-otbr-cli-meshdiag-router-childtables.json",
+  "td-otbr-cli-networkdiag-fetch-all.json",
+  "td-otbr-cli-networkdiag-multicast-network.json",
+  "td-otbr-restapi-diagnostics-fetch-all.json",
+  "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+  "td-mdns-scopes-thread.json",
+  "td-mdns-scopes-br.json",
+  "td-mdns-scopes-hap.json",
+  "td-mdns-scopes-matter.json",
+]);
+
+function _isProgressiveFeatureEnabled() {
+
+  return _FEATURE_PROGRESSIVE_FETCH_DEFAULT;
+
+  // try {
+  //   const sp = new URLSearchParams(window.location.search);
+  //   if (sp.get("progressiveFetch") === "1") return true;
+  // } catch {
+  //   // Ignore URL parsing issues.
+  // }
+  // try {
+  //   const v = localStorage.getItem("tdash.feature.progressiveFetch");
+  //   if (v === "true" || v === "1") return true;
+  //   if (v === "false" || v === "0") return false;
+  // } catch {
+  //   // Ignore localStorage policy errors.
+  // }
+  // return _FEATURE_PROGRESSIVE_FETCH_DEFAULT;
+}
+
+function _datasetSupportsProgressiveFetch(entry) {
+  return (entry.files || []).some((f) => _PROGRESSIVE_ROLLOUT_FILES.has(f));
+}
+
 class FetchCancelledError extends Error {
   constructor(message) {
     super(message);
@@ -209,7 +253,7 @@ export function enrichRawFiles(rawFiles) {
 
 // accepts optional request headers; returns { data, responseMaxAge }.
 // handles HTTP 202 by delegating to pollJobUntilDone.
-async function fetchJson(url, requestHeaders = {}, sessionId = null) {
+async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpointData = null) {
   _assertFetchSessionActive(sessionId);
   const signal =
     sessionId != null && _activeFetchSession?.id === sessionId
@@ -237,6 +281,7 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null) {
         url,
         requestHeaders,
         sessionId,
+        onCheckpointData,
       );
       return { data, responseMaxAge: null };
     } finally {
@@ -256,7 +301,10 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null) {
 // Polls /api/job/{jobId} every 5 s until done or error.
 // On done, fetches /api/data/{filename} (without the original cache-miss headers)
 // and returns the JSON payload.
-const _JOB_POLL_INTERVAL_MS = 5000;
+const _JOB_POLL_INTERVAL_MS = 2000;
+// Minimum ms between checkpoint-driven re-renders; must be less than poll interval
+// to ensure guard passes reliably despite execution overhead and timing jitter.
+const _CHECKPOINT_REDRAW_INTERVAL_MS = 1500;
 const _JOB_TIMEOUT_MS = 900_000; // 15 minutes
 
 async function pollJobUntilDone(
@@ -265,6 +313,7 @@ async function pollJobUntilDone(
   originalUrl,
   originalHeaders,
   sessionId = null,
+  onCheckpointData = null,
 ) {
   const statusEl = document.getElementById("fetch-status-line-content");
   const startedAt = Date.now();
@@ -272,6 +321,10 @@ async function pollJobUntilDone(
     sessionId != null && _activeFetchSession?.id === sessionId
       ? _activeFetchSession.abortController.signal
       : undefined;
+  // Monotonic guard: epoch-ms of the last checkpoint rendered; prevents re-rendering unchanged data.
+  let lastCheckpointMs = 0;
+  // Wall-clock guard: enforces _CHECKPOINT_REDRAW_INTERVAL_MS between renders.
+  let lastCheckpointRenderMs = 0;
 
   while (true) {
     _assertFetchSessionActive(sessionId);
@@ -304,6 +357,34 @@ async function pollJobUntilDone(
       );
     }
     const pollBody = await pollResponse.json();
+
+    // Checkpoint render: fetch and render partial data while the job is in progress.
+    if (
+      onCheckpointData !== null &&
+      pollBody.checkpoint_is_newer_than_final === true &&
+      typeof pollBody.checkpoint_last_modified === "number" &&
+      pollBody.checkpoint_last_modified > lastCheckpointMs &&
+      Date.now() - lastCheckpointRenderMs >= _CHECKPOINT_REDRAW_INTERVAL_MS
+    ) {
+      try {
+        let cpResponse;
+        try {
+          cpResponse = await fetch(`/api/data/${pollBody.checkpoint_filename}`, { signal });
+        } catch (err) {
+          if (_isAbortError(err)) throw new FetchCancelledError(`Polling cancelled for ${filename}`);
+          throw err;
+        }
+        if (cpResponse.ok) {
+          const cpData = await cpResponse.json();
+          lastCheckpointMs = pollBody.checkpoint_last_modified;
+          lastCheckpointRenderMs = Date.now();
+          onCheckpointData(cpData);
+        }
+      } catch (err) {
+        if (err instanceof FetchCancelledError) throw err;
+        console.warn(`Checkpoint fetch failed for ${filename}:`, err);
+      }
+    }
 
     if (pollBody.status === JOB_POLL_STATUS.CANCELLING) {
       if (statusEl) {
@@ -385,8 +466,60 @@ export async function loadStaticLabelMap() {
 // rendering after awaiting this function.  This avoids a circular import:
 //   tdash-ui.js → loadDataset → renderCurrentView → tdash-ui.js (currentView etc.)
 
+// Builds a partial dataset from whichever entries in rawFiles are non-null.
+// Returns null when no file has arrived yet. Used for incremental rendering.
+function _buildPartialDataset(entry, rawFiles, loadStartTime) {
+  const loadedFiles = entry.files.filter((_, i) => rawFiles[i] !== null);
+  if (loadedFiles.length === 0) return null;
+
+  let rows;
+  if (entry.mergeStrategy === MERGE_STRATEGIES.byRloc16) {
+    const groups = rawFiles
+      .map((d, i) => (d !== null ? normalizeRows(d, entry.files[i]) : null))
+      .filter((g) => g !== null);
+    rows = mergeRowsByRloc16(groups);
+  } else if (entry.mergeStrategy === MERGE_STRATEGIES.byIdentity) {
+    const groups = rawFiles
+      .map((d, i) => (d !== null ? normalizeRows(d, entry.files[i]) : null))
+      .filter((g) => g !== null);
+    rows = mergeRowsByIdentity(groups);
+  } else {
+    const firstLoaded = rawFiles.find((d) => d !== null);
+    const firstLoadedIndex = rawFiles.findIndex((d) => d !== null);
+    const rowSource =
+      entry.topologyMode === "eve_native" && firstLoaded && Array.isArray(firstLoaded.nodes)
+        ? firstLoaded.nodes
+        : entry.topologyMode === "otbr_restapi" && firstLoaded && Array.isArray(firstLoaded.data)
+          ? firstLoaded.data
+          : firstLoaded;
+    rows = rowSource !== null ? normalizeRows(rowSource, entry.files[firstLoadedIndex]) : [];
+  }
+
+  let oldestLastModifiedAt = null;
+  for (const f of loadedFiles) {
+    const cached = fileMaxAgeCache.get(f);
+    if (cached?.lastModifiedAt != null) {
+      if (oldestLastModifiedAt === null || cached.lastModifiedAt < oldestLastModifiedAt) {
+        oldestLastModifiedAt = cached.lastModifiedAt;
+      }
+    }
+  }
+
+  return {
+    entry,
+    rawFiles: [...rawFiles],
+    rows,
+    loadedFiles,
+    fetchDurationMs: Date.now() - loadStartTime,
+    fileLastModifiedAt: oldestLastModifiedAt,
+    isPartial: true,
+  };
+}
+
 export async function loadDataset(entryValue, options = {}) {
   const sessionId = options.sessionId ?? null;
+  // Called with no args each time a file completes; lets caller trigger an incremental render.
+  const onFileReady = options.onFileReady ?? null;
   _assertFetchSessionActive(sessionId);
 
   const entry = DATASET_REGISTRY.find((e) => e.value === entryValue);
@@ -399,6 +532,21 @@ export async function loadDataset(entryValue, options = {}) {
   const statusEl = document.getElementById("fetch-status-line-content");
   const timerEl = document.getElementById("fetch-timetaken-value");
   const progressEl = document.getElementById("fetch-timetaken-progress");
+  const progressiveEnabled =
+    _isProgressiveFeatureEnabled() && _datasetSupportsProgressiveFetch(entry);
+
+  // Phase 7 observability counters.
+  let firstIncrementalRenderAtMs = null;
+  let checkpointUpdateCount = 0;
+  let completedFileUpdateCount = 0;
+
+  const _recordIncrementalUpdate = (kind) => {
+    if (firstIncrementalRenderAtMs === null) {
+      firstIncrementalRenderAtMs = Date.now() - loadStartTime;
+    }
+    if (kind === "checkpoint") checkpointUpdateCount += 1;
+    if (kind === "file") completedFileUpdateCount += 1;
+  };
   const estimateActionCostSecs = entry.estimateActionCostSecs ?? "?";
   const initialLabel = entry.label;
   const loadStartTime = Date.now();
@@ -423,11 +571,14 @@ export async function loadDataset(entryValue, options = {}) {
     linkFilterEl.value = entry.defaultLinkFilter;
   }
 
+  // Null-filled array updated as each file resolves; shared with _buildPartialDataset.
+  const rawFilesInProgress = entry.files.map(() => null);
+
   let settled;
   try {
     // fetch via /api/data/{filename} with per-file cache headers.
     settled = await Promise.allSettled(
-      entry.files.map((f) => {
+      entry.files.map((f, fileIdx) => {
         const reqHeaders = {};
         if (_forceFresh) {
           reqHeaders["Cache-Control"] = "no-cache";
@@ -438,7 +589,20 @@ export async function loadDataset(entryValue, options = {}) {
           const cached = fileMaxAgeCache.get(f);
           if (cached) reqHeaders["Cache-Control"] = `max-age=${cached.maxAge}`;
         }
-        return fetchJson(`/api/data/${f}`, reqHeaders, sessionId).then(
+        // Per-file callback: called by pollJobUntilDone whenever a fresher checkpoint is available.
+        const onCheckpointData = onFileReady !== null && progressiveEnabled
+          ? (checkpointData) => {
+              if (!_isFetchSessionActive(sessionId)) return;
+              rawFilesInProgress[fileIdx] = normalizeDatasetPayload(checkpointData);
+              const partialDataset = _buildPartialDataset(entry, rawFilesInProgress, loadStartTime);
+              if (partialDataset !== null) {
+                currentDataset = partialDataset;
+                _recordIncrementalUpdate("checkpoint");
+                onFileReady();
+              }
+            }
+          : null;
+        return fetchJson(`/api/data/${f}`, reqHeaders, sessionId, onCheckpointData).then(
           ({ data, responseMaxAge, lastModifiedAt }) => {
             if (responseMaxAge !== null) {
               fileMaxAgeCache.set(f, {
@@ -446,6 +610,15 @@ export async function loadDataset(entryValue, options = {}) {
                 fetchedAt: Date.now(),
                 lastModifiedAt,
               });
+            }
+            if (onFileReady !== null && progressiveEnabled && _isFetchSessionActive(sessionId)) {
+              rawFilesInProgress[fileIdx] = normalizeDatasetPayload(data);
+              const partialDataset = _buildPartialDataset(entry, rawFilesInProgress, loadStartTime);
+              if (partialDataset !== null) {
+                currentDataset = partialDataset;
+                _recordIncrementalUpdate("file");
+                onFileReady();
+              }
             }
             return data;
           },
@@ -544,7 +717,22 @@ export async function loadDataset(entryValue, options = {}) {
     }
   }
 
-  currentDataset = { entry, rawFiles, rows, loadedFiles, fetchDurationMs, fileLastModifiedAt: oldestLastModifiedAt };
+  currentDataset = {
+    entry,
+    rawFiles,
+    rows,
+    loadedFiles,
+    fetchDurationMs,
+    fileLastModifiedAt: oldestLastModifiedAt,
+    isPartial: false,
+    fetchMetrics: {
+      progressiveEnabled,
+      timeToFirstRenderMs: firstIncrementalRenderAtMs,
+      checkpointUpdateCount,
+      completedFileUpdateCount,
+      timeToFinalRenderMs: fetchDurationMs,
+    },
+  };
 
   // Set progress bar to 100% when fetch completes
   if (progressEl) {

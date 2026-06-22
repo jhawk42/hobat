@@ -671,6 +671,14 @@ function updateFetchStatusBar(fetchStartedAt) {
 const _FETCH_STATUS_IDS = ["fetch-timetaken-value", "fetch-cache-age-value"];
 const _DEVICE_STATUS_IDS = ["device-count", "br-count", "router-count", "child-count",
                              "link-count", "lq3-count", "lq2-count", "lq1-count"];
+const _CANCELLED_PARTIAL_STATUS_PIN_MS = 3000;
+
+function _pinFetchStatusLineMessage(message, pinDurationMs = _CANCELLED_PARTIAL_STATUS_PIN_MS) {
+  const statusEl = document.getElementById("fetch-status-line-content");
+  if (statusEl) statusEl.textContent = message;
+  window.tdashDebug = window.tdashDebug || {};
+  window.tdashDebug.fetchStatusPinnedUntil = Date.now() + pinDurationMs;
+}
 
 function _setStatusSpans(ids, text) {
   ids.forEach((id) => {
@@ -719,6 +727,28 @@ async function doFetchDataset() {
   }
 
   const sessionId = startFetchSession();
+  // Debounce handle: coalesces rapid-fire onFileReady calls (e.g. cached files all resolving in
+  // one tick) into a single incremental render. setTimeout(0) lets all microtask .then() callbacks
+  // settle before the render fires.
+  let _incrementalRenderTimer = null;
+
+  const _scheduleIncrementalRender = () => {
+    if (_incrementalRenderTimer !== null) clearTimeout(_incrementalRenderTimer);
+    _incrementalRenderTimer = setTimeout(() => {
+      _incrementalRenderTimer = null;
+      if (!currentDataset || currentDataset.entry?.value !== selectedValue) return;
+      renderCurrentView();
+      updateFetchStatusBar(_lastFetchStartedAt);
+      if (currentDataset.isPartial) {
+        const loadedCount = currentDataset.loadedFiles?.length ?? 0;
+        const totalCount = currentDataset.entry?.files?.length ?? 0;
+        const statusEl = document.getElementById("fetch-status-line-content");
+        if (statusEl) {
+          statusEl.textContent = `⚠ Partial result: ${loadedCount} of ${totalCount} files ready — still loading…`;
+        }
+      }
+    }, 0);
+  };
 
   // Reset status bars to loading state
   _setStatusSpans(_FETCH_STATUS_IDS, "…");
@@ -734,21 +764,39 @@ async function doFetchDataset() {
   }
 
   try {
-    await loadDataset(selectedValue, { sessionId });
+    await loadDataset(selectedValue, {
+      sessionId,
+      onFileReady: _scheduleIncrementalRender,
+    });
   } catch (err) {
+    if (_incrementalRenderTimer !== null) { clearTimeout(_incrementalRenderTimer); _incrementalRenderTimer = null; }
     if (isFetchCancelledError(err)) {
       resetFetchTimeTakenProgressToDefault();
 
       const statusEl = document.getElementById("fetch-status-line-content");
-      if (statusEl) statusEl.textContent = `Fetch cancelled for "${selectedValue}".`;
+      const hasPartialResult = currentDataset &&
+        currentDataset.entry?.value === selectedValue &&
+        currentDataset.isPartial === true;
 
-      // Keep current view intact and restore status bars from current dataset.
-      if (currentDataset) {
+      if (hasPartialResult) {
+        // Partial-with-warning committed state: render what loaded and surface the cancellation.
+        const loadedCount = currentDataset.loadedFiles?.length ?? 0;
+        const totalCount = currentDataset.entry?.files?.length ?? 0;
+        _pinFetchStatusLineMessage(
+          `⚠ Cancelled — partial result: ${loadedCount} of ${totalCount} files loaded`,
+        );
         renderCurrentView();
         updateFetchStatusBar(_lastFetchStartedAt);
       } else {
-        _setStatusSpans(_FETCH_STATUS_IDS, "—");
-        _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+        if (statusEl) statusEl.textContent = `Fetch cancelled for "${selectedValue}".`;
+        // No partial data available: keep current view or clear bars.
+        if (currentDataset) {
+          renderCurrentView();
+          updateFetchStatusBar(_lastFetchStartedAt);
+        } else {
+          _setStatusSpans(_FETCH_STATUS_IDS, "—");
+          _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+        }
       }
     } else {
       console.error("loadDataset threw:", err);
@@ -764,18 +812,40 @@ async function doFetchDataset() {
 
   // loadDataset returns early without updating currentDataset when all files fail.
   if (!currentDataset || currentDataset.entry?.value !== selectedValue) {
+    if (_incrementalRenderTimer !== null) { clearTimeout(_incrementalRenderTimer); _incrementalRenderTimer = null; }
     _setStatusSpans(_FETCH_STATUS_IDS, "—");
     _setStatusSpans(_DEVICE_STATUS_IDS, "—");
     return;
   }
+
+  // Cancel any pending incremental render — final reconciliation render takes over.
+  if (_incrementalRenderTimer !== null) { clearTimeout(_incrementalRenderTimer); _incrementalRenderTimer = null; }
 
   // Reset search state when a new dataset is loaded
   _currentSearchQuery = "";
   const _srchInput = document.getElementById("search-input");
   if (_srchInput) _srchInput.value = "";
 
+  // Final reconciliation render: all files settled, isPartial is false.
   renderCurrentView();
   updateFetchStatusBar(_lastFetchStartedAt);
+  if (currentDataset?.fetchMetrics) {
+    const fetchMetricsPayload = {
+      dataset: currentDataset.entry?.value,
+      ...currentDataset.fetchMetrics,
+    };
+    console.info("[tdash] fetch metrics", fetchMetricsPayload);
+    window.tdashDebug = window.tdashDebug || {};
+    window.tdashDebug.lastFetchMetrics = fetchMetricsPayload;
+  }
+  // Clear any "⚠ Partial" message from incremental renders; warn if some files unavailable.
+  const _fetchStatusEl = document.getElementById("fetch-status-line-content");
+  if (_fetchStatusEl) {
+    const failedCount = (currentDataset.entry?.files?.length ?? 0) - (currentDataset.loadedFiles?.length ?? 0);
+    _fetchStatusEl.textContent = failedCount > 0
+      ? `⚠ ${failedCount} file(s) unavailable — showing partial data`
+      : "";
+  }
 }
 
 // Fetch button drives data acquisition.

@@ -17,6 +17,7 @@ import aiohttp.web
 import aiohttp_cors
 
 from util_data import (
+    create_checkpoint_filename,
     format_data_dir_log_message,
     resolve_data_dir_with_source,
 )
@@ -185,11 +186,32 @@ _FILE_ACTION_MAP_LOWER: dict[str, FileAction] = {
 }
 
 
+# FileAction used for checkpoint partial files served via /api/data/{checkpoint_filename}.
+# max_age_s=0: clients must always re-fetch; checkpoints are transient and change frequently.
+# action="STATIC": serve file if present, 404 if absent; never trigger a regen subprocess.
+_CHECKPOINT_FILE_ACTION = FileAction(max_age_s=0, action="STATIC", action_cost_s=0)
+
+
+def _build_checkpoint_filename_set(file_action_map: dict[str, FileAction]) -> set[str]:
+    """Return lowercase checkpoint filenames for every dynamic entry in file_action_map."""
+    return {
+        create_checkpoint_filename(filename).lower()
+        for filename, fa in file_action_map.items()
+        if fa.action != "STATIC"
+    }
+
+
+# Set of lowercase checkpoint filenames (e.g. 'td-otbr-cli-networkdiag-fetch-all.partial.json').
+# Used by _resolve_and_validate for O(1) checkpoint acceptance without a FILE_ACTION_MAP entry.
+_CHECKPOINT_FILENAMES: set[str] = _build_checkpoint_filename_set(FILE_ACTION_MAP)
+
+
 def _set_default_file_cache_max_age(max_age_s: int) -> None:
-    """Rebuild FILE_ACTION_MAP and derived lowercase lookup with a new default."""
-    global FILE_ACTION_MAP, _FILE_ACTION_MAP_LOWER
+    """Rebuild FILE_ACTION_MAP and derived lookup tables with a new default."""
+    global FILE_ACTION_MAP, _FILE_ACTION_MAP_LOWER, _CHECKPOINT_FILENAMES
     FILE_ACTION_MAP = _build_file_action_map(max_age_s)
     _FILE_ACTION_MAP_LOWER = {k.lower(): v for k, v in FILE_ACTION_MAP.items()}
+    _CHECKPOINT_FILENAMES = _build_checkpoint_filename_set(FILE_ACTION_MAP)
 
 
 def get_file_action(filename: str) -> FileAction | None:
@@ -347,7 +369,7 @@ def _is_cancellable_job_status(status: str) -> bool:
     return status in _JOB_CANCELLABLE_STATUSES
 
 
-def _build_job_poll_body(job: JobStatus) -> dict[str, str]:
+def _build_job_poll_body(job: JobStatus) -> dict[str, object]:
     """Build JSON payload for GET /api/job/{job_id} based on status."""
     if job.status == JOB_STATUS_RUNNING:
         return {"status": JOB_STATUS_RUNNING}
@@ -364,6 +386,47 @@ def _build_job_poll_body(job: JobStatus) -> dict[str, str]:
             "detail": f"Unknown job status: {job.status}",
         }
     return {"status": JOB_STATUS_ERROR, "detail": job.detail}
+
+
+def _to_epoch_ms(ts: float) -> int:
+    """Convert a POSIX timestamp in seconds to integer epoch milliseconds."""
+    return int(ts * 1000)
+
+
+def _build_checkpoint_poll_metadata(filename: str, data_dir: Path) -> dict[str, object]:
+    """Build additive checkpoint metadata for a running long-cost job.
+
+    Metadata fields are omitted when inputs are unavailable. The caller is
+    expected to attach this only for non-terminal in-progress polling states.
+    """
+    checkpoint_filename = create_checkpoint_filename(filename)
+    checkpoint_path = data_dir / checkpoint_filename
+    final_path = data_dir / filename
+
+    metadata: dict[str, object] = {
+        "checkpoint_filename": checkpoint_filename,
+        "final_last_modified_if_exists": None,
+    }
+
+    final_mtime: float | None = None
+    checkpoint_mtime: float | None = None
+
+    try:
+        final_mtime = final_path.stat().st_mtime
+        metadata["final_last_modified_if_exists"] = _to_epoch_ms(final_mtime)
+    except FileNotFoundError:
+        pass
+
+    try:
+        checkpoint_mtime = checkpoint_path.stat().st_mtime
+    except FileNotFoundError:
+        return metadata
+
+    metadata["checkpoint_last_modified"] = _to_epoch_ms(checkpoint_mtime)
+    metadata["checkpoint_is_newer_than_final"] = (
+        final_mtime is None or checkpoint_mtime > final_mtime
+    )
+    return metadata
 
 
 def _set_job_runtime_process(
@@ -563,12 +626,18 @@ def _resolve_and_validate(filename: str, data_dir: Path) -> tuple["FileAction", 
 
     Raises ``HTTPNotFound`` for path-traversal attempts or unknown filenames.
     Does NOT check whether the file exists on disk.
+
+    Checkpoint partial files (e.g. *.partial.json) are accepted when they
+    correspond to a known dynamic FILE_ACTION_MAP entry. They are served as
+    STATIC with max_age_s=0; a 404 is returned when the file is absent.
     """
     if not _safe_filename(filename):
         raise aiohttp.web.HTTPNotFound()
     file_action = get_file_action(filename)
     if file_action is None:
-        raise aiohttp.web.HTTPNotFound(reason=f"Unknown filename: {filename}")
+        if filename.lower() not in _CHECKPOINT_FILENAMES:
+            raise aiohttp.web.HTTPNotFound(reason=f"Unknown filename: {filename}")
+        file_action = _CHECKPOINT_FILE_ACTION
     return file_action, data_dir / filename
 
 
@@ -884,6 +953,10 @@ async def handle_job_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
         raise aiohttp.web.HTTPNotFound(reason=f"Unknown job: {job_id}")
 
     body = _build_job_poll_body(job)
+    if job.status in {JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING}:
+        data_dir = request.app.get("td_data_dir")
+        if isinstance(data_dir, Path):
+            body.update(_build_checkpoint_poll_metadata(job.filename, data_dir))
 
     return aiohttp.web.Response(
         content_type="application/json",
