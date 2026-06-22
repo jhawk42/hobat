@@ -61,19 +61,19 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
         # Fetches mDNS using zeroconf. Browse window is ~60 sec per service type.
         "td-mdns-scopes-thread.json": FileAction(
             # ~60 sec browse
-            max_age_s=default_max_age_s, action=["mdns", "thread"], action_cost_s=60
+            max_age_s=default_max_age_s, action=["mdns", "thread"], action_cost_s=60, force_async=True,
         ),
         "td-mdns-scopes-br.json": FileAction(
             # ~60 sec browse
-            max_age_s=default_max_age_s, action=["mdns", "br"], action_cost_s=60
+            max_age_s=default_max_age_s, action=["mdns", "br"], action_cost_s=60, force_async=True
         ),
         "td-mdns-scopes-hap.json": FileAction(
             # ~60 sec browse
-            max_age_s=default_max_age_s, action=["mdns", "hap"], action_cost_s=60
+            max_age_s=default_max_age_s, action=["mdns", "hap"], action_cost_s=60, force_async=True
         ),
         "td-mdns-scopes-matter.json": FileAction(
             # ~60 sec browse
-            max_age_s=default_max_age_s, action=["mdns", "matter"], action_cost_s=60
+            max_age_s=default_max_age_s, action=["mdns", "matter"], action_cost_s=60, force_async=True
         ),
 
         # otbr-cli
@@ -113,6 +113,7 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s,
             action=["otbr-cli", "networkdiag", "fetch-all"],
             action_cost_s=600,  # ~10 min for ~60 routers with timeout retries
+            force_async=True,
         ),
         # networkdiag multicast-network — TLV request per router with retries; up to ~16 seconds on large networks.
         "td-otbr-cli-networkdiag-multicast-network.json": FileAction(
@@ -142,7 +143,7 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s, action=["otbr-restapi", "devices", "list"], action_cost_s=1
         ),
         "td-otbr-restapi-devices-fetch.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "devices", "fetch"], action_cost_s=6
+            max_age_s=default_max_age_s, action=["otbr-restapi", "devices", "fetch"], action_cost_s=8
         ),
         "td-otbr-restapi-diagnostics-list.json": FileAction(
             max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "list"], action_cost_s=1
@@ -151,10 +152,10 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s, action=["otbr-restapi", "actions", "list"], action_cost_s=1
         ),
         "td-otbr-restapi-mesh-diagnostics-fetch-all.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "mesh-diagnostics", "fetch-all"], action_cost_s=600
+            max_age_s=default_max_age_s, action=["otbr-restapi", "mesh-diagnostics", "fetch-all"], action_cost_s=600, force_async=True
         ),
         "td-otbr-restapi-diagnostics-fetch-all.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "fetch-all"], action_cost_s=600
+            max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "fetch-all"], action_cost_s=600, force_async=True
         ),
 
         # Eve topology exports — externally managed static files.

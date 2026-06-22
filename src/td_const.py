@@ -2,7 +2,7 @@
 
 EXTADDR_DEVICE_LABEL_MAP_FILENAME = "td-static-extaddr-device-label.json"
 
-TD_CHECKPOINT_FILENAME_SUFFIX = ".chkpt.json"
+TD_CHECKPOINT_FILENAME_SUFFIX = ".partial.json"
 
 
 TD_DATA_DIR_ENV_VAR = "TD_DATA_DIR"
