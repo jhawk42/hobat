@@ -194,6 +194,24 @@ def enrich_topology_routers(
     for router in topology_data:
         enhanced_router = router.copy()
 
+        # Enrich: mode
+        # "mode": "rdn"
+        if router.get("mode") == "rdn":
+            enhanced_router["mode"] = {
+                "rx_on_when_idle": 1,
+                "device": "FTD",
+                "device_type": 1,
+                "network_data": 1,
+            }
+        # "mode": "-"
+        if router.get("mode") == "-":
+            enhanced_router["mode"] = {
+                "rx_on_when_idle": 0,
+                "device": "MTD",
+                "device_type": 0,
+                "network_data": 0,
+            }
+
         # Enrich: OMR IPv6 address
         if omr_ipv6addr_prefix:
             enhanced_router["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
@@ -250,6 +268,68 @@ def enrich_topology_routers(
                 link_ids, topology_data
             )
 
+        # route_data
+        # Enrich: add route_data for each router based on its 3_links, 2_links, and 1_links
+        inner_route_data = []
+        for link_type in ["3_links", "2_links", "1_links"]:
+            # set link_quality based on link_type
+            link_quality = {"3_links": 3, "2_links": 2, "1_links": 1}[link_type]
+            for link in enhanced_router.get(link_type, []):
+                inner_route_data.append(
+                    {
+                        # add 0x prefix to route_id
+                        "route_id": "0x" + link.get("id"),
+                        "device_label": link.get("device_label"),
+                        "link_quality_out": link_quality,
+                        "link_quality_in": link_quality,  
+                        "rloc16": link.get("rloc16"),
+                        "link_type": link_type,
+                    }
+                )
+        # wrap route_data [] in a object with a route_data fields
+        outer_route_data = {"route_data": inner_route_data}
+        enhanced_router["route_data"] = outer_route_data
+
+        # children
+        # Enrich: add children data for each router based on its children list
+        # Each child will have rloc16, lq, mode
+        enriched_children = enhanced_router.get("children", [])
+        for child in enriched_children:
+            child_rloc16 = child.get("rloc16")
+            if child.get("device_label"):
+                child["device_label"] = child.get("device_label")
+            else:
+                child["device_label"] = f"Unknown-{child_rloc16}"  # default label if not found in extaddr_map
+           
+            child["link_quality"] = child.get("lq", 0)  # default lq if not found
+
+            # Enrich: mode
+            # "mode": "rdn"
+            if child.get("mode") == "rdn":
+                child["mode"] = {
+                    "rx_on_when_idle": 1,
+                    "device": "FTD",
+                    "device_type": 1,
+                    "network_data": 1,
+                }
+            # "mode": "-"
+            elif child.get("mode") == "-":
+                child["mode"] = {
+                    "rx_on_when_idle": 0,
+                    "device": "MTD",
+                    "device_type": 0,
+                    "network_data": 0,
+                }
+            else:
+                child["mode"] = {
+                    "rx_on_when_idle": 0,
+                    "device": "Unknown",
+                    "device_type": 0,
+                    "network_data": 0,
+                }
+        # Patch the enriched children back to the router
+        enhanced_router["children"] = enriched_children
+   
         topology_data_enhanced.append(enhanced_router)
 
     return topology_data_enhanced

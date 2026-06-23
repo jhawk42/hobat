@@ -442,8 +442,15 @@ def _enrich_device_role_and_prefix_flags(
 
     # Add OMR IPv6 address if prefix available
     if omr_ipv6addr_prefix:
+        ipv6_addrs = record.get("ipv6_addrs", [])
+        # Ensure ipv6_addrs is a list
+        if not isinstance(ipv6_addrs, list):
+            logging.warning(f"ipv6_addrs for device {record.get('rloc16', 'Unknown')} is not a list: {type(ipv6_addrs)}. Converting to list.")
+            ipv6_addrs = [ipv6_addrs] if ipv6_addrs else []
+            record["ipv6_addrs"] = ipv6_addrs
+        
         record["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
-            record.get("ipv6_addrs", []), omr_ipv6addr_prefix
+            ipv6_addrs, omr_ipv6addr_prefix
         )
     else:
         record["omr_ipv6_addr"] = None
@@ -463,8 +470,15 @@ def _enrich_device_role_and_prefix_flags(
 
     # Check if device is a border router based on mesh-local prefix
     if meshlocal_prefix:
+        ipv6_addrs = record.get("ipv6_addrs", [])
+        # Ensure ipv6_addrs is a list
+        if not isinstance(ipv6_addrs, list):
+            logging.warning(f"ipv6_addrs for device {record.get('rloc16', 'Unknown')} is not a list when checking border router: {type(ipv6_addrs)}. Converting to list.")
+            ipv6_addrs = [ipv6_addrs] if ipv6_addrs else []
+            record["ipv6_addrs"] = ipv6_addrs
+        
         is_border_router = util_network.is_border_router_from_ipv6_addrs(
-            record.get("ipv6_addrs", []), meshlocal_prefix
+            ipv6_addrs, meshlocal_prefix
         )
         if is_border_router:
             record["is_border_router"] = True
@@ -514,7 +528,7 @@ def _enrich_device_route_data_with_router_info(
         if route_id is not None:
             # Look up rloc16 for this router_id in the router_table_by_router_id
             matching_router = router_table_by_router_id.get(route_id)
-            if matching_router and matching_router.get("rloc16"):
+            if matching_router and isinstance(matching_router, dict) and matching_router.get("rloc16"):
                 route["rloc16"] = matching_router["rloc16"]
             else:
                 route["rloc16"] = "Unknown"
@@ -630,13 +644,23 @@ def fetch_network_diag_topology(
 
         # Build lookup lists
         # Extract RLOC16 values for all routers in the router table
-        router_rlocs = [
-            router.get("rloc16") for router in router_table_data if router.get("rloc16")
-        ]
+        router_rlocs = []
+        for router in router_table_data:
+            if not isinstance(router, dict):
+                logging.warning(f"Router in router_table_data is not a dict: {type(router)}, value: {router}. Skipping.")
+                continue
+            rloc16 = router.get("rloc16")
+            if rloc16:
+                router_rlocs.append(rloc16)
 
         # Build a dict of router_table_data indexed by router_id
-        router_table_by_router_id = {router.get(
-            "router_id"): router for router in router_table_data if router.get("router_id") is not None}
+        router_table_by_router_id = {}
+        for router in router_table_data:
+            if not isinstance(router, dict):
+                continue
+            router_id = router.get("router_id")
+            if router_id is not None:
+                router_table_by_router_id[router_id] = router
 
         # Conform router table data into the topology record
         for router in router_table_data:
@@ -672,12 +696,6 @@ def fetch_network_diag_topology(
         logging.warning("Router table is None. No routers found.")
         router_table_data = []       
 
-    # 5a. Get IPv6 addresses for all routers
-    # need this if nodes don't reponse to networkdiagnostic get with TLV 8 for IPv6 address list, then we can at least populate the topology map with known IPv6 addresses for each RLOC16 from this separate query. This way we can still have some reference to IPv6 addresses in the topology even if some nodes don't respond to the full diagnostic query.
-    ipv6_addresses = fetch_ipv6_addresses()
-    ipv6_addresses = (
-        ipv6_addresses if ipv6_addresses else {}
-    )  # Ensure it's a dict even if empty
 
     meshdiag_topology_data = get_meshdiag_topology(
         extaddr_map, thread_network_info
@@ -692,6 +710,14 @@ def fetch_network_diag_topology(
             extaddr = router.get("extaddr")
             rloc16 = router.get("rloc16")
             if extaddr or rloc16:
+                # Ensure ipv6_addrs is a list, not a string
+                ipv6_addrs = router.get("ipv6_addrs", [])
+                if not isinstance(ipv6_addrs, list):
+                    logging.warning(f"meshdiag ipv6_addrs for {rloc16} is not a list: {type(ipv6_addrs)}. Converting.")
+                    ipv6_addrs = [ipv6_addrs] if ipv6_addrs else []
+                
+                # patch
+
                 network_topology_map_meshdiag_routers[rloc16] = {
                     "extaddr": extaddr,
                     "rloc16": rloc16,
@@ -703,7 +729,9 @@ def fetch_network_diag_topology(
                     "is_border_router": router.get("is_border_router", False),
                     "omr_ipv6_addr": router.get("omr_ipv6_addr"),
                     "mode": router.get("mode"),
-                    "ipv6_addrs": router.get("ipv6_addrs"),
+                    "ipv6_addrs": ipv6_addrs,
+                    "route_data": router.get("route_data", {}),
+                    "children": router.get("children", []),
                 }
 
         for rloc16, device_record in network_topology_map_meshdiag_routers.items():
@@ -712,7 +740,25 @@ def fetch_network_diag_topology(
         save_topology_to_json_file(network_topology_map, checkpoint_filepath)
     else:
         logging.warning("Meshdiag topology data is None. No meshdiag data to merge.")
-          
+
+    # 5a. Get IPv6 addresses for all routers
+    # need this if nodes don't reponse to networkdiagnostic get with TLV 8 for IPv6 address list, then we can at least populate the topology map with known IPv6 addresses for each RLOC16 from this separate query. This way we can still have some reference to IPv6 addresses in the topology even if some nodes don't respond to the full diagnostic query.
+    ipv6_addresses = {}
+    if meshdiag_topology_data is not None: 
+        # Build a dict of IPv6 addresses by RLOC16 from meshdiag topology data
+        for router in meshdiag_topology_data:
+            rloc16 = router.get("rloc16")
+            ipv6_addrs = router.get("ipv6_addrs", [])
+            if rloc16:
+                ipv6_addresses[rloc16] = ipv6_addrs
+    else:
+        logging.warning("Meshdiag topology data is None. Cannot extract IPv6 addresses from meshdiag data.")
+        ipv6_addresses = fetch_ipv6_addresses()
+        ipv6_addresses = (
+            ipv6_addresses if ipv6_addresses else {}
+        )  # Ensure it's a dict even if empty
+
+
     # 6. Get the multicast topology data
     # This will give us a starting point with data from all devices that responded to the multicast query, which we can then enrich with additional direct queries for any missing data or child information as needed. The multicast query can help reduce the number of direct queries needed by providing data for many devices in one go, especially for those that respond with more detailed TLV sets in the initial retries.
     network_topology_map_multicast = fetch_network_diag_topology_multicast_network(
@@ -738,27 +784,38 @@ def fetch_network_diag_topology(
     # Inner child loop also handles children and build a more complete topology map with parent-child relationships instead of just a flat map of RLOC16 to data. This way we can represent the full tree structure of the network instead of just a list of nodes.
 
     for rloc16 in router_rlocs:
-        # Retry logic for networkdiagnostic get in case of transient errors or unresponsive nodes, retry N times with some delay before giving up and adding with default values
-        # 3 attempts gives {DETAILED, MEDIUM, SIMPLE}, 2 attempts gives {DETAILED, MEDIUM}, 1 attempt gives {DETAILED}
-        retries = 2
-        delay_start = 0.1  # seconds
+        try:
+            # Retry logic for networkdiagnostic get in case of transient errors or unresponsive nodes, retry N times with some delay before giving up and adding with default values
+            # 3 attempts gives {DETAILED, MEDIUM, SIMPLE}, 2 attempts gives {DETAILED, MEDIUM}, 1 attempt gives {DETAILED}
+            retries = 2
+            delay_start = 0.1  # seconds
 
-        # Initialize
-        network_topology_node = None
+            # Initialize
+            network_topology_node = None
 
-        # Check if we already have data for this RLOC16 from the multicast query, if so skip the direct query and use the existing data to populate the topology map. This way we can avoid unnecessary queries for nodes that already responded to the multicast request, which can help reduce overall runtime and network load. If we don't have data for this RLOC16 from the multicast query, then we proceed with the direct query with retries to try to get the data for this node.
-        record_exists = False
-        if rloc16 in network_topology_map:
-            record_exists = True
-            # We already have data for this RLOC16 from the multicast query, we can skip the direct query
-            # and use the existing data to populate the topology map. This way we can avoid unnecessary queries
-            # for nodes that already responded to the multicast request, which can help reduce overall runtime
-            # and network load. If we don't have data for this RLOC16 from the multicast query, then we proceed
-            # with the direct query with retries to try to get the data for this node.
-            network_topology_node = network_topology_map[rloc16]
-            logging.info(
-                f"RLOC16 {rloc16} already has data from multicast query, skipping direct query."
-            )
+            # Check if we already have data for this RLOC16 from the multicast query, if so skip the direct query and use the existing data to populate the topology map. This way we can avoid unnecessary queries for nodes that already responded to the multicast request, which can help reduce overall runtime and network load. If we don't have data for this RLOC16 from the multicast query, then we proceed with the direct query with retries to try to get the data for this node.
+            record_exists = False
+            if rloc16 in network_topology_map:
+                network_topology_node = network_topology_map[rloc16]
+                # Validate that the existing record is a dict, not a string or other type
+                if not isinstance(network_topology_node, dict):
+                    logging.error(f"RLOC16 {rloc16} has invalid data type in topology map: {type(network_topology_node)}. Expected dict, got {network_topology_node}. Will re-fetch.")
+                    network_topology_node = None
+                    record_exists = False
+                else:
+                    record_exists = True
+                    # We already have data for this RLOC16 from the multicast query, we can skip the direct query
+                    # and use the existing data to populate the topology map. This way we can avoid unnecessary queries
+                    # for nodes that already responded to the multicast request, which can help reduce overall runtime
+                    # and network load. If we don't have data for this RLOC16 from the multicast query, then we proceed
+                    # with the direct query with retries to try to get the data for this node.
+                    logging.info(
+                        f"RLOC16 {rloc16} already has data from multicast query, skipping direct query."
+                    )
+        except Exception as e:
+            logging.error(f"Error processing RLOC16 {rloc16} in initial check: {e}")
+            logging.error(f"rloc16: {rloc16}, network_topology_map keys: {list(network_topology_map.keys())[:10]}")
+            raise
 
         # Skip the retries but still check if we need to expand children for this node if expand_children is True, since the multicast query might not have included the child table data for this node if it was using a simpler TLV set. So we can still enrich the existing node data with child information if needed by doing a direct query just for the child table TLV, but we can skip the full diagnostic query with all TLVs since we already have that data from the multicast response.
         if (not record_exists):
@@ -800,9 +857,14 @@ def fetch_network_diag_topology(
             )
         else:
             # Enrich device record with role classification and prefix-based flags
-            _enrich_device_role_and_prefix_flags(
-                network_topology_node, meshlocal_prefix, omr_ipv6addr_prefix
-            )
+            try:
+                _enrich_device_role_and_prefix_flags(
+                    network_topology_node, meshlocal_prefix, omr_ipv6addr_prefix
+                )
+            except Exception as e:
+                logging.error(f"Error enriching device role for {rloc16}: {e}")
+                logging.error(f"network_topology_node type: {type(network_topology_node)}, value: {network_topology_node}")
+                raise
 
             # Merge with existing data in topology map if present (e.g. from multicast query) to enrich the node data with any missing fields that we couldn't get from the direct query due to unresponsive node or TLV issues, this way we can have the most complete data possible for each node by combining the results from both the multicast and direct queries, and we can also handle cases where some nodes might only respond to one of the query types but not the other.
             is_new_record = rloc16 not in network_topology_map
@@ -813,7 +875,7 @@ def fetch_network_diag_topology(
                     f"Added router node {rloc16} {network_topology_node.get('extaddr', 'Unknown')} {network_topology_node.get('device_label', 'Unknown')} to topology map. {r+1}/{retries} attempts.  TLV detail level: {tlv_detail_level} {get_tlv_values_for_detail_level(tlv_detail_level)}"
                 )
                 logging.info(
-                    f"Poll {len(network_topology_map)} unique devices so far"
+                    f"Found {len(network_topology_map)} unique devices so far"
                 )
                 # Checkpoint to file after each new record added to topology map
                 # used in progressive loading in dashboard UI
@@ -828,23 +890,35 @@ def fetch_network_diag_topology(
                 # - Gather RLOC16 values from child table and perform direct queries for each
                 # - Result: Topology map shows parent-child relationships instead of flat RLOC16-only map
 
-                children_rlocs = [
-                    child.get("rloc16")
-                    for child in network_topology_node.get("children", [])
-                    if child.get("rloc16")
-                ]
+                # Get children list and ensure it's valid
+                children_list = network_topology_node.get("children", [])
+                if not isinstance(children_list, list):
+                    logging.warning(f"Children for {rloc16} is not a list: {type(children_list)}. Converting to list.")
+                    children_list = [children_list] if children_list else []
+                
+                # Filter out non-dict children and extract rloc16 values
+                children_rlocs = []
+                for child in children_list:
+                    if not isinstance(child, dict):
+                        logging.warning(f"Child for {rloc16} is not a dict: {type(child)}, value: {child}. Skipping.")
+                        continue
+                    child_rloc = child.get("rloc16")
+                    if child_rloc:
+                        children_rlocs.append(child_rloc)
 
                 # index child table by rloc16 for quick lookup
-                child_table_by_rloc16 = {
-                    child.get("rloc16"): child
-                    for child in network_topology_node.get("children", [])
-                    if child.get("rloc16")
-                }
+                child_table_by_rloc16 = {}
+                for child in children_list:
+                    if not isinstance(child, dict):
+                        continue
+                    child_rloc = child.get("rloc16")
+                    if child_rloc:
+                        child_table_by_rloc16[child_rloc] = child
 
                 for child_rloc in children_rlocs:
                     # Check if child RLOC16 is already in topology map (e.g. from multicast query),
                     # if so skip the direct query and use the existing data to populate the topology map
-                    # for this child node. This way we can avoid unnecessary queries for child nodes that
+                    # for this child node. This way we can avoid unnecessary queries for child nodes (FTD) that
                     # already responded to the multicast request, which can help reduce overall runtime and
                     # network load. If we don't have data for this child RLOC16 from the multicast query, then
                     # we proceed with the direct query with retries to try to get the data for this child node.
@@ -857,10 +931,20 @@ def fetch_network_diag_topology(
                         # child has mode which includes device_type 
                         # device_type 1 is FTD
                         # device_type 0 is MTD
-                        is_child_ftd = child_table_by_rloc16.get(child_rloc, {}).get("mode", {}).get("device_type") == 1
+                        child_entry = child_table_by_rloc16.get(child_rloc, {})
+                        if not isinstance(child_entry, dict):
+                            logging.warning(f"Child entry for {child_rloc} in child_table_by_rloc16 is not a dict: {type(child_entry)}, value: {child_entry}. Assuming MTD.")
+                            is_child_ftd = False
+                        else:
+                            mode = child_entry.get("mode", {})
+                            if not isinstance(mode, dict):
+                                logging.warning(f"Mode for child {child_rloc} is not a dict: {type(mode)}. Assuming MTD.")
+                                is_child_ftd = False
+                            else:
+                                is_child_ftd = mode.get("device_type") == 1
 
-                        child_retries = 5  # number of retries
-
+                        child_retries = 2  # number of retries
+                      
                         child_delay_max = 2.0  # max delay between retries
                         child_delay_start = 0.25  # seconds 0.25 0.5 1.0 2.0 seconds
 
@@ -872,20 +956,22 @@ def fetch_network_diag_topology(
                         child_tlv_detail_level = 4 # "detailed" for FTD children
                         if not is_child_ftd:
                             child_tlv_detail_level = 3 # "medium tv mac" for MTD children, since they might not respond to the more detailed TLV sets that include child table info which is not relevant for MTDs 
+                            #child_tlv_detail_level = 1 # "simple" for MTD children, since they might not respond to the more detailed TLV sets that include child table info which is not relevant for MTDs
 
                         child_retry_tlv_detail_levels = {
-                            child_retries - 4: (2, "medium mac"),
-                            child_retries - 3: (2, "medium mac"),
-                            child_retries - 2: (1, "simple"),
-                            child_retries - 1: (1, "simple"),
+                            1: (2, "medium mac"),
+                            2: (1, "simple"),
+                            3: (1, "simple"),
+                            4: (1, "simple"),
+                            5: (1, "simple"),
                         }
   
-                        for cr in range(child_retries):
+                        for cr in range(child_retries+1):
                             # On retry attempts, switch to the configured TLV level and log once.
                             if cr in child_retry_tlv_detail_levels:
                                 child_tlv_detail_level, detail_level_name = child_retry_tlv_detail_levels[cr]
                                 logging.info(
-                                    f"Child node {child_rloc} not found after {cr} attempts, trying with tlv_detail_level {child_tlv_detail_level} {get_tlv_values_for_detail_level(child_tlv_detail_level)} {detail_level_name} detail TLV set."
+                                    f"Child node {child_rloc} not found after {cr+1} attempts, trying with tlv_detail_level {child_tlv_detail_level} {get_tlv_values_for_detail_level(child_tlv_detail_level)} {detail_level_name} detail TLV set."
                                 )
 
                             child_node = fetch_network_diag_for_device(
@@ -896,12 +982,19 @@ def fetch_network_diag_topology(
                                 ipv6_addresses,
                                 child_tlv_detail_level
                             )
+
+                            # If child_node is None, it means the child did not respond to the diagnostic query. 
+                            # if this is the first couple of attempts and child_tlv_detail_level = 1, it may be a sleeping child (MTD) that is not currently responsive.
+                            # We will retry a few times with increasing delay to give the child a chance to respond
+                          
                             if child_node is not None:
                                 child_node["type"] = "Child"
                                 break
                             logging.info(
                                 f"Child node {child_rloc} not found, retrying in {child_delay_start} seconds..."
                             )
+                            # if last iteration skip sleep to avoid unnecessary delay before giving up and adding with default values
+                            # SED MTD children may not respond to diagnostic queries if they are sleeping, so we will retry a few times with increasing delay to give them a chance to respond. If they still do not respond after the retries, we will add them to the topology map with default values and mark them as unknown devices.
                             if cr < child_retries - 1:
                                 # Increase delay with each retry
                                 c_delay = child_delay_start * (cr + 1)
@@ -936,7 +1029,7 @@ def fetch_network_diag_topology(
                                 f"Added child node {child_rloc} {child_node.get('extaddr', 'Unknown')} {child_node.get('device_label', 'Unknown')} under parent {rloc16} {network_topology_node.get('extaddr', 'Unknown')} {network_topology_node.get('device_label', 'Unknown')} to topology map.  attempts: {cr+1}/{child_retries}. detail level: {child_tlv_detail_level} TLVs: {get_tlv_values_for_detail_level(child_tlv_detail_level)}"
                             )
                             logging.info(
-                                f"Poll Child {len(network_topology_map)} unique devices so far"
+                                f"found {len(network_topology_map)} unique devices so far"
                             )
                             # Checkpoint to file after each new record added to topology map
                             # used in progressive loading in dashboard UI
@@ -969,8 +1062,12 @@ def print_network_diag_topology(topology):
         if data.get("children"):
             logging.debug(f"  Children ({len(data['children'])}):")
             for child in data["children"]:
+                # Validate child is a dict
+                if not isinstance(child, dict):
+                    logging.warning(f"Child is not a dict: {type(child)}, value: {child}. Skipping.")
+                    continue
                 logging.debug(
-                    f"    - ID: {child['id']}, Timeout: {child.get('timeout')}, Link Quality: {child.get('link_quality')}"
+                    f"    - ID: {child.get('id')}, Timeout: {child.get('timeout')}, Link Quality: {child.get('link_quality')}"
                 )
                 if child.get("mode"):
                     mode = child["mode"]
@@ -1244,7 +1341,9 @@ def main_fetch_all(argv: Sequence[str] | None = None) -> int:
         logging.error(f"Invalid payload while collecting networkdiag-topology: {exc}")
         return 5
     except Exception as exc:
+        import traceback
         logging.error(f"Runtime failure while collecting networkdiag-topology: {exc}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
         return 3
 
 def main(argv: Sequence[str] | None = None) -> int:

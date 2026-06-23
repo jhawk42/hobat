@@ -206,6 +206,10 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     if not existing.get("ver") and new.get("ver"):
         existing["ver"] = new["ver"]
 
+    # mode: take new if new mode is non empty even if existing is not empty, else keep existing
+    if new.get("mode"):
+        existing["mode"] = new["mode"]
+
     # mode: take new if new mode is non-empty dict and existing is empty, else keep existing
     if not existing.get("mode") and new.get("mode"):
         existing["mode"] = new["mode"]
@@ -224,9 +228,6 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     # omr_ipv6_addr: keep existing (first responder wins)
     if not existing.get("omr_ipv6_addr") and new.get("omr_ipv6_addr"):
         existing["omr_ipv6_addr"] = new["omr_ipv6_addr"]
-
-    # responder_ipv6: keep existing (first responder wins)
-    # (no update needed)
 
     # is_router: take new if new is True and existing is not True, else keep existing
     if new.get("is_router") and not existing.get("is_router"):
@@ -252,6 +253,19 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     # "leader": take new if new is non-empty and existing is empty, else keep existing
     if not existing.get("leader") and new.get("leader"):
         existing["leader"] = new["leader"]
+
+    # route_data: take new if new is non-empty dict even if existing is not empty, else keep existing
+    if new.get("route_data"):
+        existing["route_data"] = new["route_data"]
+
+    # route_data: take new if new is non-empty dict and existing is empty
+    if not existing.get("route_data") and new.get("route_data"):
+        existing["route_data"] = new["route_data"]
+
+    # children: take new if new is non-empty list even if existing is not empty, else keep existing
+    if new.get("children"):
+        existing["children"] = new["children"]
+        existing["total_children"] = len(existing["children"])
 
     # children: take new if new is non-empty list and existing is empty list
     if not existing.get("children") and new.get("children"):
@@ -294,9 +308,6 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     if not existing.get("vendor_sw_version") and new.get("vendor_sw_version"):
         existing["vendor_sw_version"] = new["vendor_sw_version"]
 
-    # route_data: take new if new is non-empty dict and existing is empty
-    if not existing.get("route_data") and new.get("route_data"):
-        existing["route_data"] = new["route_data"]
 
     return existing
 
@@ -307,7 +318,7 @@ def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
 
     Args:
         tlv_detail_level: Detail level (6=DETAILED, 5=MEDIUM, 4/3/2/1=SIMPLE, etc.)
-                         Levels 6-4 are for routers, 3-1 are for child devices.
+                         Levels 10-6 are for routers, 5-1 are for child devices.
 
     Returns:
         TLV values string (space-separated TLV numbers)
