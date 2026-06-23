@@ -834,7 +834,7 @@ async function doFetchDataset() {
       dataset: currentDataset.entry?.value,
       ...currentDataset.fetchMetrics,
     };
-    console.info("[tdash] fetch metrics", fetchMetricsPayload);
+    //console.info("[tdash] fetch metrics", fetchMetricsPayload);
     window.tdashDebug = window.tdashDebug || {};
     window.tdashDebug.lastFetchMetrics = fetchMetricsPayload;
   }
