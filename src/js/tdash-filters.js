@@ -171,9 +171,10 @@ export function computeTopologyCapabilities(nodeData, edgeData) {
     )
       hasFieldMacTotalErrorsPct = true;
     if (Number.isFinite(node.ifindiscards_pct)) hasFieldMacDiscardPct = true;
-    if (Number.isFinite(node.partitionidchanges))
+    if (Number.isFinite(node.partitionidchanges) || Number.isFinite(node.partIdChangesCount))
       hasFieldPartitionChanges = true;
-    if (Number.isFinite(node.parentchanges)) hasFieldParentChanges = true;
+    if (Number.isFinite(node.parentchanges) || Number.isFinite(node.newParentCount))
+      hasFieldParentChanges = true;
     if (Number.isFinite(node.router_neighbor_max_err_rate_frame_pct))
       hasNeighborFrameErrRate = true;
     if (Number.isFinite(node.router_neighbor_max_err_rate_msg_pct))
@@ -183,9 +184,9 @@ export function computeTopologyCapabilities(nodeData, edgeData) {
       Number.isFinite(node.router_neighbor_max_rss_ave)
     )
       hasNeighborRss = true;
-    if (Number.isFinite(node.lq3_ratio) || Number.isFinite(node.lq1_ratio))
+    if (Number.isFinite(node.lq3Ratio) || Number.isFinite(node.lq1Ratio))
       hasLinkQualityDistribution = true;
-    if (node.has_child_lq_medium === true || node.has_child_lq_poor === true)
+    if (node.hasChildLqMedium === true || node.hasChildLqPoor === true)
       hasChildLinkQuality = true;
     if (Number.isFinite(node.router_child_max_err_rate_frame_pct))
       hasChildFrameErrRate = true;
@@ -197,17 +198,17 @@ export function computeTopologyCapabilities(nodeData, edgeData) {
       hasChildRssMargin = true;
     if (node.router_child_has_queued_msgs === true)
       hasChildQueuedMsgs = true;
-    if (Number.isFinite(node.iftotalerrors_totalpkts_ratio))
+    if (Number.isFinite(node.ifTotalErrorsTotalPktsRatio))
       hasFieldMacTotalErrorsRatio = true;
-    if (Number.isFinite(node.iftotaldiscards_totalpkts_ratio))
+    if (Number.isFinite(node.ifTotalDiscardsTotalPktsRatio))
       hasFieldMacTotalDiscardsRatio = true;
-    if (Number.isFinite(node.betterpartitionattachattempts))
+    if (Number.isFinite(node.betterPartIdAttachAttemptsCount))
       hasFieldBetterPartitionAttach = true;
-    if (Number.isFinite(node.totalparentpartitionchanges))
+    if (Number.isFinite(node.totalParentPartitionChangesCount))
       hasFieldTotalParentPartitionChanges = true;
-    if (Number.isFinite(node.router_pct))
+    if (Number.isFinite(node.routerPct))
       hasFieldRouterPct = true;
-    if (Number.isFinite(node.detached_disabled_pct))
+    if (Number.isFinite(node.detachedDisabledPct))
       hasFieldDetachedDisabledPct = true;
   }
 
@@ -331,22 +332,22 @@ export function computeTableCapabilities(rows) {
       hasFieldParentChanges = true;
 
     const neighborRows = Array.isArray(
-      getColumnValue(row, "router_neighbor_table"),
+      getColumnValue(row, "routerNeighbors"),
     )
-      ? getColumnValue(row, "router_neighbor_table")
+      ? getColumnValue(row, "routerNeighbors")
       : [];
     for (const neighbor of neighborRows) {
-      if (Number.isFinite(toFiniteNumber(neighbor?.err_rate_frame_pct)))
+      if (Number.isFinite(toFiniteNumber(neighbor?.frameErrorRate)))
         hasNeighborFrameErrRate = true;
-      if (Number.isFinite(toFiniteNumber(neighbor?.err_rate_msg_pct)))
+      if (Number.isFinite(toFiniteNumber(neighbor?.messageErrorRate)))
         hasNeighborMsgErrRate = true;
-      if (Number.isFinite(toFiniteNumber(neighbor?.rss_ave)))
+      if (Number.isFinite(toFiniteNumber(neighbor?.averageRssi)))
         hasNeighborRss = true;
     }
 
     if (
-      Number.isFinite(toFiniteNumber(getColumnValue(row, "total_link_3"))) &&
-      Number.isFinite(toFiniteNumber(getColumnValue(row, "total_links")))
+      Number.isFinite(toFiniteNumber(getColumnValue(row, "links3"))) &&
+      Number.isFinite(toFiniteNumber(getColumnValue(row, "totalLinks")))
     )
       hasLinkQualityDistribution = true;
 
@@ -354,39 +355,39 @@ export function computeTableCapabilities(rows) {
       ? getColumnValue(row, "children")
       : [];
     for (const child of childrenForLQ) {
-      const lqRaw = child?.lq !== undefined ? child.lq : child?.link_quality;
+      const lqRaw = child?.lq !== undefined ? child.lq : child?.linkQuality;
       if (Number.isFinite(Number.parseInt(lqRaw, 10)))
         hasChildLinkQuality = true;
     }
 
-    const childTableRows = Array.isArray(getColumnValue(row, "router_child_table"))
-      ? getColumnValue(row, "router_child_table")
+    const childTableRows = Array.isArray(getColumnValue(row, "childTable"))
+      ? getColumnValue(row, "childTable")
       : [];
     for (const child of childTableRows) {
-      if (Number.isFinite(toFiniteNumber(child?.err_rate_frame_pct)))
+      if (Number.isFinite(toFiniteNumber(child?.frameErrorRate)))
         hasChildFrameErrRate = true;
-      if (Number.isFinite(toFiniteNumber(child?.err_rate_msg_pct)))
+      if (Number.isFinite(toFiniteNumber(child?.messageErrorRate)))
         hasChildMsgErrRate = true;
-      if (Number.isFinite(toFiniteNumber(child?.rss_ave)))
+      if (Number.isFinite(toFiniteNumber(child?.averageRssi)))
         hasChildRss = true;
-      if (Number.isFinite(toFiniteNumber(child?.rss_margin)))
+      if (Number.isFinite(toFiniteNumber(child?.linkMargin)))
         hasChildRssMargin = true;
-      const qMsg = toFiniteNumber(child?.q_msg);
+      const qMsg = toFiniteNumber(child?.queuedMessageCount);
       if (Number.isFinite(qMsg) && qMsg > 0)
         hasChildQueuedMsgs = true;
     }
 
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "mac_counters.iftotalerrors_totalpkts_ratio"))))
+    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "macCounters.ifTotalErrorsTotalPktsRatio"))))
       hasFieldMacTotalErrorsRatio = true;
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "mac_counters.iftotaldiscards_totalpkts_ratio"))))
+    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "macCounters.ifTotalDiscardsTotalPktsRatio"))))
       hasFieldMacTotalDiscardsRatio = true;
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "mle_counters.betterpartitionattachattempts"))))
+    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "mleCounters.betterPartIdAttachAttemptsCount"))))
       hasFieldBetterPartitionAttach = true;
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "mle_counters.totalparentpartitionchanges"))))
+    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "mleCounters.totalParentPartitionChangesCount"))))
       hasFieldTotalParentPartitionChanges = true;
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "time_statistics.router_pct"))))
+    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "timeStatistics.routerPct"))))
       hasFieldRouterPct = true;
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "time_statistics.detached_disabled_pct"))))
+    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "timeStatistics.detachedDisabledPct"))))
       hasFieldDetachedDisabledPct = true;
   }
 
@@ -823,16 +824,16 @@ export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
     return node.router_neighbor_has_rss_high === true;
   // Router link quality distribution
   if (filterMode === "low-lq3-ratio-medium")
-    return Number.isFinite(node.lq3_ratio) && node.lq3_ratio < 0.60;
+    return Number.isFinite(node.lq3Ratio) && node.lq3Ratio < 0.60;
   if (filterMode === "low-lq3-ratio-high")
-    return Number.isFinite(node.lq3_ratio) && node.lq3_ratio < 0.35;
+    return Number.isFinite(node.lq3Ratio) && node.lq3Ratio < 0.35;
   if (filterMode === "high-lq1-ratio-medium")
-    return Number.isFinite(node.lq1_ratio) && node.lq1_ratio >= 0.20;
+    return Number.isFinite(node.lq1Ratio) && node.lq1Ratio >= 0.20;
   if (filterMode === "high-lq1-ratio-high")
-    return Number.isFinite(node.lq1_ratio) && node.lq1_ratio >= 0.35;
+    return Number.isFinite(node.lq1Ratio) && node.lq1Ratio >= 0.35;
   // Children link quality
-  if (filterMode === "child-lq-medium") return node.has_child_lq_medium === true;
-  if (filterMode === "child-lq-poor")   return node.has_child_lq_poor === true;
+  if (filterMode === "child-lq-medium") return node.hasChildLqMedium === true;
+  if (filterMode === "child-lq-poor")   return node.hasChildLqPoor === true;
   // Router child err rate frame
   if (filterMode === "router-child-err-rate-frame-medium")
     return (
@@ -894,13 +895,13 @@ export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
   // Time statistics
   if (filterMode === "ftd-router-pct-low")
     return (
-      node.is_ftd_router === true &&
-      Number.isFinite(node.router_pct) && node.router_pct < 80
+      node.isFtdRouter === true &&
+      Number.isFinite(node.routerPct) && node.routerPct < 80
     );
   if (filterMode === "ftd-router-pct-very-low")
     return (
-      node.is_ftd_router === true &&
-      Number.isFinite(node.router_pct) && node.router_pct < 50
+      node.isFtdRouter === true &&
+      Number.isFinite(node.routerPct) && node.routerPct < 50
     );
   if (filterMode === "detached-disabled-pct-medium")
     return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
@@ -1065,79 +1066,79 @@ export function isRowVisibleByDiagnosticFilter(row, filterMode) {
   }
 
   const neighborRows = Array.isArray(
-    getColumnValue(row, "router_neighbor_table"),
+    getColumnValue(row, "routerNeighbors"),
   )
-    ? getColumnValue(row, "router_neighbor_table")
+    ? getColumnValue(row, "routerNeighbors")
     : [];
   const hasMatchingNeighbor = (pred) => neighborRows.some(pred);
 
   if (filterMode === "router-neighbor-err-rate-frame-low")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.err_rate_frame_pct);
+      const v = toFiniteNumber(n?.frameErrorRate);
       return Number.isFinite(v) && v >= 2;
     });
   if (filterMode === "router-neighbor-err-rate-frame-medium")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.err_rate_frame_pct);
+      const v = toFiniteNumber(n?.frameErrorRate);
       return Number.isFinite(v) && v >= 5;
     });
   if (filterMode === "router-neighbor-err-rate-frame-high")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.err_rate_frame_pct);
+      const v = toFiniteNumber(n?.frameErrorRate);
       return Number.isFinite(v) && v >= 10;
     });
   if (filterMode === "router-neighbor-err-rate-frame-critical")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.err_rate_frame_pct);
+      const v = toFiniteNumber(n?.frameErrorRate);
       return Number.isFinite(v) && v >= 30;
     });
   if (filterMode === "router-neighbor-err-rate-msg-low")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.err_rate_msg_pct);
+      const v = toFiniteNumber(n?.messageErrorRate);
       return Number.isFinite(v) && v >= 2;
     });
   if (filterMode === "router-neighbor-err-rate-msg-medium")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.err_rate_msg_pct);
+      const v = toFiniteNumber(n?.messageErrorRate);
       return Number.isFinite(v) && v >= 5;
     });
   if (filterMode === "router-neighbor-err-rate-msg-high")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.err_rate_msg_pct);
+      const v = toFiniteNumber(n?.messageErrorRate);
       return Number.isFinite(v) && v >= 10;
     });
   if (filterMode === "router-neighbor-err-rate-msg-critical")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.err_rate_msg_pct);
+      const v = toFiniteNumber(n?.messageErrorRate);
       return Number.isFinite(v) && v >= 30;
     });
   if (filterMode === "router-neighbor-rss-very-low")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.rss_ave);
+      const v = toFiniteNumber(n?.averageRssi);
       return Number.isFinite(v) && v < -80;
     });
   if (filterMode === "router-neighbor-rss-low")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.rss_ave);
+      const v = toFiniteNumber(n?.averageRssi);
       return Number.isFinite(v) && v >= -80 && v < -70;
     });
   if (filterMode === "router-neighbor-rss-medium")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.rss_ave);
+      const v = toFiniteNumber(n?.averageRssi);
       return Number.isFinite(v) && v >= -70 && v <= -60;
     });
   if (filterMode === "router-neighbor-rss-high")
     return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.rss_ave);
+      const v = toFiniteNumber(n?.averageRssi);
       return Number.isFinite(v) && v > -60;
     });
 
   // Router link quality distribution
   if (filterMode === "low-lq3-ratio-medium" || filterMode === "low-lq3-ratio-high" ||
       filterMode === "high-lq1-ratio-medium" || filterMode === "high-lq1-ratio-high") {
-    const tl3 = toFiniteNumber(getColumnValue(row, "total_link_3"));
-    const tl1 = toFiniteNumber(getColumnValue(row, "total_link_1"));
-    const tl = toFiniteNumber(getColumnValue(row, "total_links"));
+    const tl3 = toFiniteNumber(getColumnValue(row, "links3"));
+    const tl1 = toFiniteNumber(getColumnValue(row, "links1"));
+    const tl = toFiniteNumber(getColumnValue(row, "totalLinks"));
     if (!Number.isFinite(tl) || tl <= 0) return false;
     const lq3r = Number.isFinite(tl3) ? tl3 / tl : undefined;
     const lq1r = Number.isFinite(tl1) ? tl1 / tl : undefined;
@@ -1163,49 +1164,49 @@ export function isRowVisibleByDiagnosticFilter(row, filterMode) {
   }
 
   // Router child table filters
-  const childTableRows = Array.isArray(getColumnValue(row, "router_child_table"))
-    ? getColumnValue(row, "router_child_table")
+  const childTableRows = Array.isArray(getColumnValue(row, "childTable"))
+    ? getColumnValue(row, "childTable")
     : [];
   const hasMatchingChild = (pred) => childTableRows.some(pred);
 
   if (filterMode === "router-child-err-rate-frame-medium")
     return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.err_rate_frame_pct);
+      const v = toFiniteNumber(c?.frameErrorRate);
       return Number.isFinite(v) && v >= 10;
     });
   if (filterMode === "router-child-err-rate-frame-high")
     return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.err_rate_frame_pct);
+      const v = toFiniteNumber(c?.frameErrorRate);
       return Number.isFinite(v) && v >= 25;
     });
   if (filterMode === "router-child-err-rate-msg-low")
     return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.err_rate_msg_pct);
+      const v = toFiniteNumber(c?.messageErrorRate);
       return Number.isFinite(v) && v >= 1;
     });
   if (filterMode === "router-child-err-rate-msg-high")
     return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.err_rate_msg_pct);
+      const v = toFiniteNumber(c?.messageErrorRate);
       return Number.isFinite(v) && v >= 5;
     });
   if (filterMode === "router-child-rss-very-low")
     return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.rss_ave);
+      const v = toFiniteNumber(c?.averageRssi);
       return Number.isFinite(v) && v < -80;
     });
   if (filterMode === "router-child-rss-low")
     return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.rss_ave);
+      const v = toFiniteNumber(c?.averageRssi);
       return Number.isFinite(v) && v >= -80 && v < -70;
     });
   if (filterMode === "router-child-rss-margin-low")
     return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.rss_margin);
+      const v = toFiniteNumber(c?.linkMargin);
       return Number.isFinite(v) && v < 20;
     });
   if (filterMode === "router-child-has-queued-msgs")
     return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.q_msg);
+      const v = toFiniteNumber(c?.queuedMessageCount);
       return Number.isFinite(v) && v > 0;
     });
 

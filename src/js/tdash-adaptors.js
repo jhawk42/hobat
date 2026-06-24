@@ -123,23 +123,23 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     const mergedIpv6 = rawIpv6.length > 0 ? rawIpv6 : existingIpv6;
     const rawChildren = Array.isArray(rawNode.children) ? rawNode.children : [];
     const getRawMetric = (path) => toFiniteNumber(getColumnValue(rawNode, path));
-    const rawPacketErrorDiscardPct = getRawMetric('mac_counters.ifindiscards_pct');
-    const rawInerrorsPct = getRawMetric('mac_counters.ifinerrors_pct');
-    const rawOuterrorsPct = getRawMetric('mac_counters.ifouterrors_pct');
+    const rawPacketErrorDiscardPct = getRawMetric('macCounters.ifInDiscardsPercentage');
+    const rawInerrorsPct = getRawMetric('macCounters.ifInErrorsPercentage');
+    const rawOuterrorsPct = getRawMetric('macCounters.ifOutErrorsPercentage');
     const rawModeDevice = rawNode.mode && toText(rawNode.mode.device)
       ? toText(rawNode.mode.device)
       : (rawNode.mode?.deviceTypeFTD === true ? 'FTD' : (rawNode.mode?.deviceTypeFTD === false ? 'MTD' : ''));
-    const rawPartitionIdChanges = getRawMetric('mle_counters.partitionidchanges');
-    const rawParentChanges = getRawMetric('mle_counters.parentchanges');
+    const rawPartitionIdChanges = getRawMetric('mleCounters.partIdChangesCount');
+    const rawParentChanges = getRawMetric('mleCounters.newParentCount');
     // Phase 1a: new fields
-    const mergedTotalLink3 = Number.isFinite(rawNode.total_link_3) ? rawNode.total_link_3
-      : (existing && Number.isFinite(existing.total_link_3) ? existing.total_link_3 : undefined);
-    const mergedTotalLink2 = Number.isFinite(rawNode.total_link_2) ? rawNode.total_link_2
-      : (existing && Number.isFinite(existing.total_link_2) ? existing.total_link_2 : undefined);
-    const mergedTotalLink1 = Number.isFinite(rawNode.total_link_1) ? rawNode.total_link_1
-      : (existing && Number.isFinite(existing.total_link_1) ? existing.total_link_1 : undefined);
-    const mergedTotalLinks = Number.isFinite(rawNode.total_links) ? rawNode.total_links
-      : (existing ? existing.total_links : 0);
+    const mergedTotalLink3 = Number.isFinite(rawNode.links3) ? rawNode.links3
+      : (existing && Number.isFinite(existing.links3 ?? existing.total_link_3) ? (existing.links3 ?? existing.total_link_3) : undefined);
+    const mergedTotalLink2 = Number.isFinite(rawNode.links2) ? rawNode.links2
+      : (existing && Number.isFinite(existing.links2 ?? existing.total_link_2) ? (existing.links2 ?? existing.total_link_2) : undefined);
+    const mergedTotalLink1 = Number.isFinite(rawNode.links1) ? rawNode.links1
+      : (existing && Number.isFinite(existing.links1 ?? existing.total_link_1) ? (existing.links1 ?? existing.total_link_1) : undefined);
+    const mergedTotalLinks = Number.isFinite(rawNode.totalLinks) ? rawNode.totalLinks
+      : (existing ? (existing.totalLinks ?? existing.total_links ?? 0) : 0);
     const lq3Ratio = (Number.isFinite(mergedTotalLink3) && mergedTotalLinks > 0)
       ? mergedTotalLink3 / mergedTotalLinks : undefined;
     const lq1Ratio = (Number.isFinite(mergedTotalLink1) && mergedTotalLinks > 0)
@@ -147,19 +147,19 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     let hasChildLqMedium = false;
     let hasChildLqPoor = false;
     rawChildren.forEach((child) => {
-      const lqRaw = child.lq !== undefined ? child.lq : child.link_quality;
+      const lqRaw = child.lq !== undefined ? child.lq : child.linkQuality;
       const lqNum = Number.parseInt(lqRaw, 10);
       if (Number.isFinite(lqNum)) {
         if (lqNum <= 2) hasChildLqMedium = true;
         if (lqNum === 1) hasChildLqPoor = true;
       }
     });
-    const rawTotalErrorsRatio = getRawMetric('mac_counters.iftotalerrors_totalpkts_ratio');
-    const rawTotalDiscardsRatio = getRawMetric('mac_counters.iftotaldiscards_totalpkts_ratio');
-    const rawBetterPartition = getRawMetric('mle_counters.betterpartitionattachattempts');
-    const rawTotalParentPartition = getRawMetric('mle_counters.totalparentpartitionchanges');
-    const rawRouterPct = getRawMetric('time_statistics.router_pct');
-    const rawDetachedDisabledPct = getRawMetric('time_statistics.detached_disabled_pct');
+    const rawTotalErrorsRatio = getRawMetric('macCounters.ifTotalErrorsTotalPktsRatio');
+    const rawTotalDiscardsRatio = getRawMetric('macCounters.ifTotalDiscardsTotalPktsRatio');
+    const rawBetterPartition = getRawMetric('mleCounters.betterPartIdAttachAttemptsCount');
+    const rawTotalParentPartition = getRawMetric('mleCounters.totalParentPartitionChangesCount');
+    const rawRouterPct = getRawMetric('timeStatistics.routerPct');
+    const rawDetachedDisabledPct = getRawMetric('timeStatistics.detachedDisabledPct');
     const merged = {
       id: nodeId,
       deviceLabel: toText(rawNode.device_label) || (existing ? existing.deviceLabel || existing.device_label : ''),
@@ -561,23 +561,23 @@ export function adaptEve(fileMap) {
       type: toText(rawNode.type) || (existing ? existing.type : ''),
       threadVersion: toText(rawNode.thread_version) || (existing ? existing.threadVersion || existing.thread_version : ''),
       threadStackVersion: toText(rawNode.thread_stack_version) || (existing ? existing.threadStackVersion || existing.thread_stack_version : ''),
-      totalChildren: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.totalChildren || existing.total_children : 0),
-      totalLinks: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.totalLinks || existing.total_links : 0),
-      ifInDiscardsPct: Number.isFinite(rawNode.mac_counters?.ifindiscards_pct)
-        ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifInDiscardsPct || existing?.ifindiscards_pct),
-      ifTotalErrorsPct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
-        ? rawNode.mac_counters.iftotalerrors_pct : (existing?.ifTotalErrorsPct || existing?.iftotalerrors_pct),
-      ifTotalErrorsTotalPktsRatio: Number.isFinite(rawNode.mac_counters?.iftotalerrors_totalpkts_ratio)
-        ? rawNode.mac_counters.iftotalerrors_totalpkts_ratio : (existing?.ifTotalErrorsTotalPktsRatio || existing?.iftotalerrors_totalpkts_ratio),
-      ifTotalDiscardsTotalPktsRatio: Number.isFinite(rawNode.mac_counters?.iftotaldiscards_totalpkts_ratio)
-        ? rawNode.mac_counters.iftotaldiscards_totalpkts_ratio : (existing?.ifTotalDiscardsTotalPktsRatio || existing?.iftotaldiscards_totalpkts_ratio),
+      totalChildren: Number.isFinite(rawNode.totalChildren) ? rawNode.totalChildren : (existing ? existing.totalChildren || existing.total_children : 0),
+      totalLinks: Number.isFinite(rawNode.totalLinks) ? rawNode.totalLinks : (existing ? existing.totalLinks || existing.total_links : 0),
+      ifInDiscardsPct: Number.isFinite(rawNode.macCounters?.ifInDiscardsPercentage)
+        ? rawNode.macCounters.ifInDiscardsPercentage : (existing?.ifInDiscardsPct || existing?.ifindiscards_pct),
+      ifTotalErrorsPct: Number.isFinite(rawNode.macCounters?.ifTotalErrorsPercentage)
+        ? rawNode.macCounters.ifTotalErrorsPercentage : (existing?.ifTotalErrorsPct || existing?.iftotalerrors_pct),
+      ifTotalErrorsTotalPktsRatio: Number.isFinite(rawNode.macCounters?.ifTotalErrorsTotalPktsRatio)
+        ? rawNode.macCounters.ifTotalErrorsTotalPktsRatio : (existing?.ifTotalErrorsTotalPktsRatio || existing?.iftotalerrors_totalpkts_ratio),
+      ifTotalDiscardsTotalPktsRatio: Number.isFinite(rawNode.macCounters?.ifTotalDiscardsTotalPktsRatio)
+        ? rawNode.macCounters.ifTotalDiscardsTotalPktsRatio : (existing?.ifTotalDiscardsTotalPktsRatio || existing?.iftotaldiscards_totalpkts_ratio),
       modeDevice: toText(rawNode.mode?.device)
         || (rawNode.type === 'router' ? 'FTD' : (rawNode.type === 'child' || rawNode.type === 'sleepy-child' ? 'MTD' : ''))
         || (existing ? existing.modeDevice || existing.mode_device : ''),
-      partitionIdChanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges)
-        ? rawNode.mle_counters.partitionidchanges : (existing?.partitionIdChanges || existing?.partitionidchanges),
-      parentChanges: Number.isFinite(rawNode.mle_counters?.parentchanges)
-        ? rawNode.mle_counters.parentchanges : (existing?.parentChanges || existing?.parentchanges),
+      partitionIdChanges: Number.isFinite(rawNode.mleCounters?.partIdChangesCount)
+        ? rawNode.mleCounters.partIdChangesCount : (existing?.partitionIdChanges || existing?.partitionidchanges),
+      parentChanges: Number.isFinite(rawNode.mleCounters?.newParentCount)
+        ? rawNode.mleCounters.newParentCount : (existing?.parentChanges || existing?.parentchanges),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       fromEve: true,
       shape: style.shape || (existing ? existing.shape : NODE_SHAPES.router),
@@ -817,14 +817,14 @@ export function adaptMergedDetailed(fileMap) {
   function upsertMergedNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
     const rawMergedChildren = Array.isArray(rawNode.children) ? rawNode.children : [];
-    const mergedTotalLink3 = Number.isFinite(rawNode.total_link_3) ? rawNode.total_link_3
-      : (existing && Number.isFinite(existing.total_link_3) ? existing.total_link_3 : undefined);
-    const mergedTotalLink2 = Number.isFinite(rawNode.total_link_2) ? rawNode.total_link_2
-      : (existing && Number.isFinite(existing.total_link_2) ? existing.total_link_2 : undefined);
-    const mergedTotalLink1 = Number.isFinite(rawNode.total_link_1) ? rawNode.total_link_1
-      : (existing && Number.isFinite(existing.total_link_1) ? existing.total_link_1 : undefined);
-    const mergedTotalLinks = Number.isFinite(rawNode.total_links) ? rawNode.total_links
-      : (existing ? existing.total_links : 0);
+    const mergedTotalLink3 = Number.isFinite(rawNode.links3) ? rawNode.links3
+      : (existing && Number.isFinite(existing.links3 ?? existing.total_link_3) ? (existing.links3 ?? existing.total_link_3) : undefined);
+    const mergedTotalLink2 = Number.isFinite(rawNode.links2) ? rawNode.links2
+      : (existing && Number.isFinite(existing.links2 ?? existing.total_link_2) ? (existing.links2 ?? existing.total_link_2) : undefined);
+    const mergedTotalLink1 = Number.isFinite(rawNode.links1) ? rawNode.links1
+      : (existing && Number.isFinite(existing.links1 ?? existing.total_link_1) ? (existing.links1 ?? existing.total_link_1) : undefined);
+    const mergedTotalLinks = Number.isFinite(rawNode.totalLinks) ? rawNode.totalLinks
+      : (existing ? (existing.totalLinks ?? existing.total_links ?? 0) : 0);
     const lq3Ratio = (Number.isFinite(mergedTotalLink3) && mergedTotalLinks > 0)
       ? mergedTotalLink3 / mergedTotalLinks : undefined;
     const lq1Ratio = (Number.isFinite(mergedTotalLink1) && mergedTotalLinks > 0)
@@ -832,7 +832,7 @@ export function adaptMergedDetailed(fileMap) {
     let hasChildLqMedium = false;
     let hasChildLqPoor = false;
     rawMergedChildren.forEach((child) => {
-      const lqRaw = child.lq !== undefined ? child.lq : child.link_quality;
+      const lqRaw = child.lq !== undefined ? child.lq : child.linkQuality;
       const lqNum = Number.parseInt(lqRaw, 10);
       if (Number.isFinite(lqNum)) {
         if (lqNum <= 2) hasChildLqMedium = true;
@@ -858,27 +858,27 @@ export function adaptMergedDetailed(fileMap) {
       lq1Ratio: lq1Ratio,
       hasChildLqMedium: hasChildLqMedium || (existing ? (existing.hasChildLqMedium || existing.has_child_lq_medium) === true : false),
       hasChildLqPoor: hasChildLqPoor || (existing ? (existing.hasChildLqPoor || existing.has_child_lq_poor) === true : false),
-      ifInDiscardsPct: Number.isFinite(rawNode.mac_counters?.ifindiscards_pct)
-        ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifInDiscardsPct || existing?.ifindiscards_pct),
-      ifTotalErrorsPct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
-        ? rawNode.mac_counters.iftotalerrors_pct : (existing?.ifTotalErrorsPct || existing?.iftotalerrors_pct),
-      ifTotalErrorsTotalPktsRatio: Number.isFinite(rawNode.mac_counters?.iftotalerrors_totalpkts_ratio)
-        ? rawNode.mac_counters.iftotalerrors_totalpkts_ratio : (existing?.ifTotalErrorsTotalPktsRatio || existing?.iftotalerrors_totalpkts_ratio),
-      ifTotalDiscardsTotalPktsRatio: Number.isFinite(rawNode.mac_counters?.iftotaldiscards_totalpkts_ratio)
-        ? rawNode.mac_counters.iftotaldiscards_totalpkts_ratio : (existing?.ifTotalDiscardsTotalPktsRatio || existing?.iftotaldiscards_totalpkts_ratio),
+      ifInDiscardsPct: Number.isFinite(rawNode.macCounters?.ifInDiscardsPercentage)
+        ? rawNode.macCounters.ifInDiscardsPercentage : (existing?.ifInDiscardsPct || existing?.ifindiscards_pct),
+      ifTotalErrorsPct: Number.isFinite(rawNode.macCounters?.ifTotalErrorsPercentage)
+        ? rawNode.macCounters.ifTotalErrorsPercentage : (existing?.ifTotalErrorsPct || existing?.iftotalerrors_pct),
+      ifTotalErrorsTotalPktsRatio: Number.isFinite(rawNode.macCounters?.ifTotalErrorsTotalPktsRatio)
+        ? rawNode.macCounters.ifTotalErrorsTotalPktsRatio : (existing?.ifTotalErrorsTotalPktsRatio || existing?.iftotalerrors_totalpkts_ratio),
+      ifTotalDiscardsTotalPktsRatio: Number.isFinite(rawNode.macCounters?.ifTotalDiscardsTotalPktsRatio)
+        ? rawNode.macCounters.ifTotalDiscardsTotalPktsRatio : (existing?.ifTotalDiscardsTotalPktsRatio || existing?.iftotaldiscards_totalpkts_ratio),
       modeDevice: toText(rawNode['mode.device']) || toText(rawNode.mode?.device) || (existing ? existing.modeDevice || existing.mode_device : ''),
-      partitionIdChanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges)
-        ? rawNode.mle_counters.partitionidchanges : (existing?.partitionIdChanges || existing?.partitionidchanges),
-      parentChanges: Number.isFinite(rawNode.mle_counters?.parentchanges)
-        ? rawNode.mle_counters.parentchanges : (existing?.parentChanges || existing?.parentchanges),
-      betterPartitionAttachAttempts: Number.isFinite(rawNode.mle_counters?.betterpartitionattachattempts)
-        ? rawNode.mle_counters.betterpartitionattachattempts : (existing?.betterPartitionAttachAttempts || existing?.betterpartitionattachattempts),
-      totalParentPartitionChanges: Number.isFinite(rawNode.mle_counters?.totalparentpartitionchanges)
-        ? rawNode.mle_counters.totalparentpartitionchanges : (existing?.totalParentPartitionChanges || existing?.totalparentpartitionchanges),
-      routerPct: Number.isFinite(rawNode.time_statistics?.router_pct)
-        ? rawNode.time_statistics.router_pct : (existing?.routerPct || existing?.router_pct),
-      detachedDisabledPct: Number.isFinite(rawNode.time_statistics?.detached_disabled_pct)
-        ? rawNode.time_statistics.detached_disabled_pct : (existing?.detachedDisabledPct || existing?.detached_disabled_pct),
+      partitionIdChanges: Number.isFinite(rawNode.mleCounters?.partIdChangesCount)
+        ? rawNode.mleCounters.partIdChangesCount : (existing?.partitionIdChanges || existing?.partitionidchanges),
+      parentChanges: Number.isFinite(rawNode.mleCounters?.newParentCount)
+        ? rawNode.mleCounters.newParentCount : (existing?.parentChanges || existing?.parentchanges),
+      betterPartitionAttachAttempts: Number.isFinite(rawNode.mleCounters?.betterPartIdAttachAttemptsCount)
+        ? rawNode.mleCounters.betterPartIdAttachAttemptsCount : (existing?.betterPartitionAttachAttempts || existing?.betterpartitionattachattempts),
+      totalParentPartitionChanges: Number.isFinite(rawNode.mleCounters?.totalParentPartitionChangesCount)
+        ? rawNode.mleCounters.totalParentPartitionChangesCount : (existing?.totalParentPartitionChanges || existing?.totalparentpartitionchanges),
+      routerPct: Number.isFinite(rawNode.timeStatistics?.routerPct)
+        ? rawNode.timeStatistics.routerPct : (existing?.routerPct || existing?.router_pct),
+      detachedDisabledPct: Number.isFinite(rawNode.timeStatistics?.detachedDisabledPct)
+        ? rawNode.timeStatistics.detachedDisabledPct : (existing?.detachedDisabledPct || existing?.detached_disabled_pct),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       fromMergedDetailed: true,
       shape: style.shape || (existing ? existing.shape : NODE_SHAPES.router),
@@ -1272,21 +1272,21 @@ export function adaptOtbrRestApi(fileMap) {
       type: roleText || toText(rawNode.type) || (existing ? existing.type : ''),
       modeDevice: modeDevice || (existing ? existing.modeDevice || existing.mode_device : ''),
       omrIpv6Addr: toText(rawNode.omr_ipv6_addr) || (existing ? existing.omrIpv6Addr || existing.omr_ipv6_addr : ''),
-      ifTotalErrorsTotalPktsRatio: getRawMetric('mac_counters.iftotalerrors_totalpkts_ratio')
+      ifTotalErrorsTotalPktsRatio: getRawMetric('macCounters.ifTotalErrorsTotalPktsRatio')
         ?? (existing ? existing.ifTotalErrorsTotalPktsRatio || existing.iftotalerrors_totalpkts_ratio : undefined),
-      ifTotalDiscardsTotalPktsRatio: getRawMetric('mac_counters.iftotaldiscards_totalpkts_ratio')
+      ifTotalDiscardsTotalPktsRatio: getRawMetric('macCounters.ifTotalDiscardsTotalPktsRatio')
         ?? (existing ? existing.ifTotalDiscardsTotalPktsRatio || existing.iftotaldiscards_totalpkts_ratio : undefined),
-      partitionIdChanges: getRawMetric('mle_counters.partitionidchanges')
+      partitionIdChanges: getRawMetric('mleCounters.partIdChangesCount')
         ?? (existing ? existing.partitionIdChanges || existing.partitionidchanges : undefined),
-      parentChanges: getRawMetric('mle_counters.parentchanges')
+      parentChanges: getRawMetric('mleCounters.newParentCount')
         ?? (existing ? existing.parentChanges || existing.parentchanges : undefined),
-      betterPartitionAttachAttempts: getRawMetric('mle_counters.betterpartitionattachattempts')
+      betterPartitionAttachAttempts: getRawMetric('mleCounters.betterPartIdAttachAttemptsCount')
         ?? (existing ? existing.betterPartitionAttachAttempts || existing.betterpartitionattachattempts : undefined),
-      totalParentPartitionChanges: getRawMetric('mle_counters.totalparentpartitionchanges')
+      totalParentPartitionChanges: getRawMetric('mleCounters.totalParentPartitionChangesCount')
         ?? (existing ? existing.totalParentPartitionChanges || existing.totalparentpartitionchanges : undefined),
-      routerPct: getRawMetric('time_statistics.router_pct')
+      routerPct: getRawMetric('timeStatistics.routerPct')
         ?? (existing ? existing.routerPct || existing.router_pct : undefined),
-      detachedDisabledPct: getRawMetric('time_statistics.detached_disabled_pct')
+      detachedDisabledPct: getRawMetric('timeStatistics.detachedDisabledPct')
         ?? (existing ? existing.detachedDisabledPct || existing.detached_disabled_pct : undefined),
       br: rawNode.br === true || (existing ? existing.br === true : false),
       fromOtbrRestapi: true,

@@ -103,18 +103,18 @@ export const FIELD_ALIASES = Object.freeze({
   mac_counters:         ["macCounters"],
   mle_counters:         ["mleCounters"],
   time_statistics:      ["timeStatistics"],
-  partitionidchanges:   ["partIdChangesCount"],
-  parentchanges:        ["newParentCount"],
-  attachattempts:       ["attachAttemptsCount"],
-  childrole:            ["childRoleCount"],
-  detachedrole:         ["detachedRoleCount"],
-  leaderrole:           ["leaderRoleCount"],
-  routerrole:           ["routerRoleCount"],
-  disabledrole:         ["radioDisabledCount"],
-  betterpartitionattachattempts: ["betterPartIdAttachAttemptsCount"],
-  totalparentpartitionchanges: ["totalParentPartitionChangesCount"],
-  iftotalerrors_totalpkts_ratio: ["ifTotalErrorsTotalPktsRatio"],
-  iftotaldiscards_totalpkts_ratio: ["ifTotalDiscardsTotalPktsRatio"],
+  partitionidchanges:   ["partIdChangesCount", "partitionIdChanges"],
+  parentchanges:        ["newParentCount", "parentChanges"],
+  attachattempts:       ["attachAttemptsCount", "attachAttempts"],
+  childrole:            ["childRoleCount", "childRole"],
+  detachedrole:         ["detachedRoleCount", "detachedRole"],
+  leaderrole:           ["leaderRoleCount", "leaderRole"],
+  routerrole:           ["routerRoleCount", "routerRole"],
+  disabledrole:         ["radioDisabledCount", "disabledRole"],
+  betterpartitionattachattempts: ["betterPartIdAttachAttemptsCount", "betterPartitionAttachAttempts"],
+  totalparentpartitionchanges: ["totalParentPartitionChangesCount", "totalParentPartitionChanges"],
+  iftotalerrors_totalpkts_ratio: ["ifTotalErrorsTotalPktsRatio", "iftotalerrorsTotalpktsRatio"],
+  iftotaldiscards_totalpkts_ratio: ["ifTotalDiscardsTotalPktsRatio", "iftotaldiscardsTotalpktsRatio"],
   router_pct:           ["routerPct"],
   detached_disabled_pct: ["detachedDisabledPct"],
   ifinerrors_totalerrors_pct: ["ifInErrorsPercentage"],
@@ -295,7 +295,7 @@ export const NODE_FILTER_OPTIONS = Object.freeze([
     label: "Routers with Child Nodes",
     group: null,
     topoNodeField: "isRouter", // isRouter && hasChildren
-    tableRowField: "total_children", // > 0, or children[] length > 0
+    tableRowField: "totalChildren", // > 0, or children[] length > 0
   },
   {
     value: "routers-without-children",
@@ -308,7 +308,7 @@ export const NODE_FILTER_OPTIONS = Object.freeze([
     value: "ftd-devices",
     label: "Full Thread Devices",
     group: null,
-    topoNodeField: "mode_device",
+    topoNodeField: "modeDevice",
     topoNodeValue: "FTD",
     tableRowField: "mode.device",
     tableRowValue: "FTD",
@@ -317,7 +317,7 @@ export const NODE_FILTER_OPTIONS = Object.freeze([
     value: "mtd-devices",
     label: "Sleepy End Devices",
     group: null,
-    topoNodeField: "mode_device",
+    topoNodeField: "modeDevice",
     topoNodeValue: "MTD",
     tableRowField: "mode.device",
     tableRowValue: "MTD",
@@ -452,16 +452,16 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     value: "mac-total-errors-ratio-medium",
     label: "Mac Total Errors Ratio: Medium (>= 1.0)",
     group: "Mac Total Errors Ratio",
-    topoNodeField: "iftotalerrors_totalpkts_ratio",
-    tableRowField: "mac_counters.iftotalerrors_totalpkts_ratio",
+    topoNodeField: "ifTotalErrorsTotalPktsRatio",
+    tableRowField: "macCounters.ifTotalErrorsTotalPktsRatio",
   },
   {
     source: "mac_counters",
     value: "mac-total-errors-ratio-high",
     label: "Mac Total Errors Ratio: High (>= 5.0)",
     group: "Mac Total Errors Ratio",
-    topoNodeField: "iftotalerrors_totalpkts_ratio",
-    tableRowField: "mac_counters.iftotalerrors_totalpkts_ratio",
+    topoNodeField: "ifTotalErrorsTotalPktsRatio",
+    tableRowField: "macCounters.ifTotalErrorsTotalPktsRatio",
   },
   // ── Mac total discards ratio ──────────────────────────────────────────
   {
@@ -469,16 +469,16 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     value: "mac-total-discards-ratio-medium",
     label: "Mac Total Discards Ratio: Medium (>= 2.0)",
     group: "Mac Total Discards Ratio",
-    topoNodeField: "iftotaldiscards_totalpkts_ratio",
-    tableRowField: "mac_counters.iftotaldiscards_totalpkts_ratio",
+    topoNodeField: "ifTotalDiscardsTotalPktsRatio",
+    tableRowField: "macCounters.ifTotalDiscardsTotalPktsRatio",
   },
   {
     source: "mac_counters",
     value: "mac-total-discards-ratio-high",
     label: "Mac Total Discards Ratio: High (>= 8.0)",
     group: "Mac Total Discards Ratio",
-    topoNodeField: "iftotaldiscards_totalpkts_ratio",
-    tableRowField: "mac_counters.iftotaldiscards_totalpkts_ratio",
+    topoNodeField: "ifTotalDiscardsTotalPktsRatio",
+    tableRowField: "macCounters.ifTotalDiscardsTotalPktsRatio",
   },
 
   // ── Mle counters ──────────────────────────────────────────────────────
@@ -487,32 +487,32 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     value: "medium-partition-changes",
     label: "Partition Changes: Medium (>= 2)",
     group: "Mle Partition Changes",
-    topoNodeField: "partitionidchanges",
-    tableRowField: "mle_counters.partitionidchanges",
+    topoNodeField: "partIdChangesCount",
+    tableRowField: "mleCounters.partIdChangesCount",
   },
   {
     source: "mle_counters",
     value: "high-partition-changes",
     label: "Partition Changes: High (>= 5)",
     group: "Mle Partition Changes",
-    topoNodeField: "partitionidchanges",
-    tableRowField: "mle_counters.partitionidchanges",
+    topoNodeField: "partIdChangesCount",
+    tableRowField: "mleCounters.partIdChangesCount",
   },
   {
     source: "mle_counters",
     value: "medium-parent-changes",
     label: "Parent Changes: Medium (>= 2)",
     group: "MLE Parent Changes",
-    topoNodeField: "parentchanges",
-    tableRowField: "mle_counters.parentchanges",
+    topoNodeField: "newParentCount",
+    tableRowField: "mleCounters.newParentCount",
   },
   {
     source: "mle_counters",
     value: "high-parent-changes",
     label: "Parent Changes: High (>= 5)",
     group: "MLE Parent Changes",
-    topoNodeField: "parentchanges",
-    tableRowField: "mle_counters.parentchanges",
+    topoNodeField: "newParentCount",
+    tableRowField: "mleCounters.newParentCount",
   },
  
   // ── Mle better partition attach ───────────────────────────────────────
@@ -521,16 +521,16 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     value: "mle-better-partition-medium",
     label: "Better Partition Attach: Medium (>= 2)",
     group: "Mle Better Partition Attach",
-    topoNodeField: "betterpartitionattachattempts",
-    tableRowField: "mle_counters.betterpartitionattachattempts",
+    topoNodeField: "betterPartIdAttachAttemptsCount",
+    tableRowField: "mleCounters.betterPartIdAttachAttemptsCount",
   },
   {
     source: "mle_counters",
     value: "mle-better-partition-high",
     label: "Better Partition Attach: High (>= 5)",
     group: "Mle Better Partition Attach",
-    topoNodeField: "betterpartitionattachattempts",
-    tableRowField: "mle_counters.betterpartitionattachattempts",
+    topoNodeField: "betterPartIdAttachAttemptsCount",
+    tableRowField: "mleCounters.betterPartIdAttachAttemptsCount",
   },
   // ── Mle total parent partition changes ────────────────────────────────
   {
@@ -538,16 +538,16 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     value: "mle-total-parent-partition-medium",
     label: "Total Parent Partition Changes: Medium (>= 3)",
     group: "Mle Total Parent Partition Changes",
-    topoNodeField: "totalparentpartitionchanges",
-    tableRowField: "mle_counters.totalparentpartitionchanges",
+    topoNodeField: "totalParentPartitionChangesCount",
+    tableRowField: "mleCounters.totalParentPartitionChangesCount",
   },
   {
     source: "mle_counters",
     value: "mle-total-parent-partition-high",
     label: "Total Parent Partition Changes: High (>= 8)",
     group: "Mle Total Parent Partition Changes",
-    topoNodeField: "totalparentpartitionchanges",
-    tableRowField: "mle_counters.totalparentpartitionchanges",
+    topoNodeField: "totalParentPartitionChangesCount",
+    tableRowField: "mleCounters.totalParentPartitionChangesCount",
   },
 
   // ── link_quality ──────────────────────────────────────────────────────
@@ -558,7 +558,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor Err Rate Frame: Low (>= 2%)",
     group: "Router Neighbor Err Rate Frame",
     topoNodeField: "router_neighbor_max_err_rate_frame_pct",
-    tableNeighborField: "err_rate_frame_pct",
+    tableNeighborField: "frameErrorRate",
   },
   {
     source: "link_quality",
@@ -566,7 +566,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor Err Rate Frame: Medium (>= 5%)",
     group: "Router Neighbor Err Rate Frame",
     topoNodeField: "router_neighbor_max_err_rate_frame_pct",
-    tableNeighborField: "err_rate_frame_pct",
+    tableNeighborField: "frameErrorRate",
   },
   {
     source: "link_quality",
@@ -574,7 +574,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor Err Rate Frame: High (>= 10%)",
     group: "Router Neighbor Err Rate Frame",
     topoNodeField: "router_neighbor_max_err_rate_frame_pct",
-    tableNeighborField: "err_rate_frame_pct",
+    tableNeighborField: "frameErrorRate",
   },
   {
     source: "link_quality",
@@ -582,14 +582,14 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor Err Rate Frame: Critical (>= 30%)",
     group: "Router Neighbor Err Rate Frame",
     topoNodeField: "router_neighbor_max_err_rate_frame_pct",
-    tableNeighborField: "err_rate_frame_pct",
+    tableNeighborField: "frameErrorRate",
   },
   {
     value: "router-neighbor-err-rate-frame-critical",
     label: "Critical (>= 30%)",
     group: "Router Neighbor Err Rate Frame",
     topoNodeField: "router_neighbor_max_err_rate_frame_pct",
-    tableNeighborField: "err_rate_frame_pct",
+    tableNeighborField: "frameErrorRate",
   },
   // ── Router-neighbor: message error rate ───────────────────────────────
   {
@@ -598,7 +598,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor Err Rate Msg: Low (>= 2%)",
     group: "Router Neighbor Err Rate Msg",
     topoNodeField: "router_neighbor_max_err_rate_msg_pct",
-    tableNeighborField: "err_rate_msg_pct",
+    tableNeighborField: "messageErrorRate",
   },
   {
     source: "link_quality",
@@ -606,7 +606,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor Err Rate Msg: Medium (>= 5%)",
     group: "Router Neighbor Err Rate Msg",
     topoNodeField: "router_neighbor_max_err_rate_msg_pct",
-    tableNeighborField: "err_rate_msg_pct",
+    tableNeighborField: "messageErrorRate",
   },
   {
     source: "link_quality",
@@ -614,7 +614,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor Err Rate Msg: High (>= 10%)",
     group: "Router Neighbor Err Rate Msg",
     topoNodeField: "router_neighbor_max_err_rate_msg_pct",
-    tableNeighborField: "err_rate_msg_pct",
+    tableNeighborField: "messageErrorRate",
   },
   {
     source: "link_quality",
@@ -622,14 +622,14 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor Err Rate Msg: Critical (>= 30%)",
     group: "Router Neighbor Err Rate Msg",
     topoNodeField: "router_neighbor_max_err_rate_msg_pct",
-    tableNeighborField: "err_rate_msg_pct",
+    tableNeighborField: "messageErrorRate",
   },
   {
     value: "router-neighbor-err-rate-msg-critical",
     label: "Critical (>= 30%)",
     group: "Router Neighbor Err Rate Msg",
     topoNodeField: "router_neighbor_max_err_rate_msg_pct",
-    tableNeighborField: "err_rate_msg_pct",
+    tableNeighborField: "messageErrorRate",
   },
   // ── Router-neighbor: RSS ──────────────────────────────────────────────
   {
@@ -638,7 +638,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor RSS Ave: Bad (< -80 dBm)",
     group: "Router Neighbor RSS Ave",
     topoNodeField: "router_neighbor_has_rss_very_low",
-    tableNeighborField: "rss_ave",
+    tableNeighborField: "averageRssi",
   },
   {
     source: "link_quality",
@@ -646,7 +646,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor RSS Ave: Fair (-70 dBm To -80 dBm)",
     group: "Router Neighbor RSS Ave",
     topoNodeField: "router_neighbor_has_rss_low",
-    tableNeighborField: "rss_ave",
+    tableNeighborField: "averageRssi",
   },
   {
     source: "link_quality",
@@ -654,7 +654,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor RSS Ave: Good (-60 dBm To -70 dBm)",
     group: "Router Neighbor RSS Ave",
     topoNodeField: "router_neighbor_has_rss_medium",
-    tableNeighborField: "rss_ave",
+    tableNeighborField: "averageRssi",
   },
   {
     source: "link_quality",
@@ -662,7 +662,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Neighbor RSS Ave: Excellent (> -60 dBm)",
     group: "Router Neighbor RSS Ave",
     topoNodeField: "router_neighbor_has_rss_high",
-    tableNeighborField: "rss_ave",
+    tableNeighborField: "averageRssi",
   },
   // ── Router link quality distribution ─────────────────────────────────
   {
@@ -670,28 +670,28 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     value: "low-lq3-ratio-medium",
     label: "Router Link Quality Ratio: Low LQ3 (< 60%)",
     group: "Router Link Quality Distribution",
-    topoNodeField: "lq3_ratio",
+    topoNodeField: "lq3Ratio",
   },
   {
     source: "link_quality",
     value: "low-lq3-ratio-high",
     label: "Router Link Quality Ratio: Very Low LQ3 (< 35%)",
     group: "Router Link Quality Distribution",
-    topoNodeField: "lq3_ratio",
+    topoNodeField: "lq3Ratio",
   },
   {
     source: "link_quality",
     value: "high-lq1-ratio-medium",
     label: "Router Link Quality Ratio: High LQ1 (>= 20%)",
     group: "Router Link Quality Distribution",
-    topoNodeField: "lq1_ratio",
+    topoNodeField: "lq1Ratio",
   },
   {
     source: "link_quality",
     value: "high-lq1-ratio-high",
     label: "Router Link Quality Ratio: Very High LQ1 (>= 35%)",
     group: "Router Link Quality Distribution",
-    topoNodeField: "lq1_ratio",
+    topoNodeField: "lq1Ratio",
   },
   // ── Children link quality ─────────────────────────────────────────────
   {
@@ -699,14 +699,14 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     value: "child-lq-medium",
     label: "Children Link: Child LQ <= 2",
     group: "Children Link Quality",
-    topoNodeField: "has_child_lq_medium",
+    topoNodeField: "hasChildLqMedium",
   },
   {
     source: "link_quality",
     value: "child-lq-poor",
     label: "Children Link: Child LQ = 1",
     group: "Children Link Quality",
-    topoNodeField: "has_child_lq_poor",
+    topoNodeField: "hasChildLqPoor",
   },
   // ── Router child err rate frame ───────────────────────────────────────
   {
@@ -715,7 +715,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Child Err Rate Frame: Medium (>= 10%)",
     group: "Router Child Err Rate Frame",
     topoNodeField: "router_child_max_err_rate_frame_pct",
-    tableChildField: "err_rate_frame_pct",
+    tableChildField: "frameErrorRate",
   },
   {
     source: "link_quality",
@@ -723,7 +723,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Child Err Rate Frame: High (>= 25%)",
     group: "Router Child Err Rate Frame",
     topoNodeField: "router_child_max_err_rate_frame_pct",
-    tableChildField: "err_rate_frame_pct",
+    tableChildField: "frameErrorRate",
   },
   // ── Router child err rate msg ─────────────────────────────────────────
   {
@@ -732,7 +732,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Child Err Rate Msg: Low (>= 1%)",
     group: "Router Child Err Rate Msg",
     topoNodeField: "router_child_max_err_rate_msg_pct",
-    tableChildField: "err_rate_msg_pct",
+    tableChildField: "messageErrorRate",
   },
   {
     source: "link_quality",
@@ -740,7 +740,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Child Err Rate Msg: High (>= 5%)",
     group: "Router Child Err Rate Msg",
     topoNodeField: "router_child_max_err_rate_msg_pct",
-    tableChildField: "err_rate_msg_pct",
+    tableChildField: "messageErrorRate",
   },
   // ── Router child RSS ──────────────────────────────────────────────────
   {
@@ -749,7 +749,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Child RSS Ave: Bad (< -80 dBm)",
     group: "Router Child RSS Ave",
     topoNodeField: "router_child_has_rss_very_low",
-    tableChildField: "rss_ave",
+    tableChildField: "averageRssi",
   },
   {
     source: "link_quality",
@@ -757,7 +757,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Child RSS Ave: Fair (-80 to -70 dBm)",
     group: "Router Child RSS Ave",
     topoNodeField: "router_child_has_rss_low",
-    tableChildField: "rss_ave",
+    tableChildField: "averageRssi",
   },
   {
     source: "link_quality",
@@ -765,7 +765,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Child RSS: Low Margin (< 20 dB)",
     group: "Router Child RSS Margin",
     topoNodeField: "router_child_has_rss_margin_low",
-    tableChildField: "rss_margin",
+    tableChildField: "linkMargin",
   },
   // ── Router child queued messages ──────────────────────────────────────
   {
@@ -774,7 +774,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     label: "Router Child Has Queued Messages",
     group: "Router Child Queued Messages",
     topoNodeField: "router_child_has_queued_msgs",
-    tableChildField: "q_msg",
+    tableChildField: "queuedMessageCount",
   },
  
   // ── time_statistics────────────────────────────────────────────────────
@@ -784,16 +784,16 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     value: "ftd-router-pct-low",
     label: "FTD Router < 80% Uptime",
     group: "Time FTD Router Uptime",
-    topoNodeField: "router_pct",
-    tableRowField: "time_statistics.router_pct",
+    topoNodeField: "routerPct",
+    tableRowField: "timeStatistics.routerPct",
   },
   {
     source: "time_statistics",
     value: "ftd-router-pct-very-low",
     label: "Router Uptime: FTD Router < 50% Uptime",
     group: "Time FTD Router Uptime",
-    topoNodeField: "router_pct",
-    tableRowField: "time_statistics.router_pct",
+    topoNodeField: "routerPct",
+    tableRowField: "timeStatistics.routerPct",
   },
   // ── Time: Detached/Disabled % ─────────────────────────────────────────
   {
@@ -801,16 +801,16 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     value: "detached-disabled-pct-medium",
     label: "Time Detached/Disabled: Medium (>= 1%)",
     group: "Time Detached Disabled",
-    topoNodeField: "detached_disabled_pct",
-    tableRowField: "time_statistics.detached_disabled_pct",
+    topoNodeField: "detachedDisabledPct",
+    tableRowField: "timeStatistics.detachedDisabledPct",
   },
   {
     source: "time_statistics",
     value: "detached-disabled-pct-high",
     label: "Time Detached/Disabled: High (>= 5%)",
     group: "Time Detached Disabled",
-    topoNodeField: "detached_disabled_pct",
-    tableRowField: "time_statistics.detached_disabled_pct",
+    topoNodeField: "detachedDisabledPct",
+    tableRowField: "timeStatistics.detachedDisabledPct",
   },
 ]);
 

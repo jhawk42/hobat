@@ -472,11 +472,20 @@ export function buildVisNodeData(
       isRouter,
       isBorderRouter,
       borderWidth,
-      ifindiscards_pct: node.ifindiscards_pct,
-      ifinerrors_pct: node.ifinerrors_pct,
-      ifouterrors_pct: node.ifouterrors_pct,
-      iftotalerrors_totalpkts_ratio: node.iftotalerrors_totalpkts_ratio,
-      iftotaldiscards_totalpkts_ratio: node.iftotaldiscards_totalpkts_ratio,
+      ifInDiscardsPct: node.ifInDiscardsPct ?? node.ifindiscards_pct,
+      ifInErrorsPct: node.ifInErrorsPct ?? node.ifinerrors_pct,
+      ifOutErrorsPct: node.ifOutErrorsPct ?? node.ifouterrors_pct,
+      ifindiscards_pct: node.ifindiscards_pct ?? node.ifInDiscardsPct,
+      ifinerrors_pct: node.ifinerrors_pct ?? node.ifInErrorsPct,
+      ifouterrors_pct: node.ifouterrors_pct ?? node.ifOutErrorsPct,
+      ifTotalErrorsTotalPktsRatio:
+        node.ifTotalErrorsTotalPktsRatio ?? node.iftotalerrors_totalpkts_ratio,
+      ifTotalDiscardsTotalPktsRatio:
+        node.ifTotalDiscardsTotalPktsRatio ?? node.iftotaldiscards_totalpkts_ratio,
+      iftotalerrors_totalpkts_ratio:
+        node.iftotalerrors_totalpkts_ratio ?? node.ifTotalErrorsTotalPktsRatio,
+      iftotaldiscards_totalpkts_ratio:
+        node.iftotaldiscards_totalpkts_ratio ?? node.ifTotalDiscardsTotalPktsRatio,
       modeDevice: node.modeDevice ?? node.mode_device,
       mode_device: node.mode_device ?? node.modeDevice,
       totalLink3: node.totalLink3 ?? node.total_link_3,
@@ -489,15 +498,39 @@ export function buildVisNodeData(
       lq3_ratio: node.lq3_ratio,
       lq1Ratio: node.lq1Ratio ?? node.lq1_ratio,
       lq1_ratio: node.lq1_ratio,
-      has_child_lq_medium: node.has_child_lq_medium,
-      has_child_lq_poor: node.has_child_lq_poor,
-      partitionidchanges: node.partitionidchanges,
-      parentchanges: node.parentchanges,
-      betterpartitionattachattempts: node.betterpartitionattachattempts,
-      totalparentpartitionchanges: node.totalparentpartitionchanges,
-      router_pct: node.router_pct,
-      detached_disabled_pct: node.detached_disabled_pct,
-      is_ftd_router: node.is_ftd_router,
+      hasChildLqMedium: node.hasChildLqMedium ?? node.has_child_lq_medium,
+      hasChildLqPoor: node.hasChildLqPoor ?? node.has_child_lq_poor,
+      has_child_lq_medium: node.has_child_lq_medium ?? node.hasChildLqMedium,
+      has_child_lq_poor: node.has_child_lq_poor ?? node.hasChildLqPoor,
+      partIdChangesCount:
+        node.partIdChangesCount ?? node.partitionIdChanges ?? node.partitionidchanges,
+      newParentCount: node.newParentCount ?? node.parentChanges ?? node.parentchanges,
+      betterPartIdAttachAttemptsCount:
+        node.betterPartIdAttachAttemptsCount
+        ?? node.betterPartitionAttachAttempts
+        ?? node.betterpartitionattachattempts,
+      totalParentPartitionChangesCount:
+        node.totalParentPartitionChangesCount
+        ?? node.totalParentPartitionChanges
+        ?? node.totalparentpartitionchanges,
+      partitionidchanges:
+        node.partitionidchanges ?? node.partIdChangesCount ?? node.partitionIdChanges,
+      parentchanges: node.parentchanges ?? node.newParentCount ?? node.parentChanges,
+      betterpartitionattachattempts:
+        node.betterpartitionattachattempts
+        ?? node.betterPartIdAttachAttemptsCount
+        ?? node.betterPartitionAttachAttempts,
+      totalparentpartitionchanges:
+        node.totalparentpartitionchanges
+        ?? node.totalParentPartitionChangesCount
+        ?? node.totalParentPartitionChanges,
+      routerPct: node.routerPct ?? node.router_pct,
+      detachedDisabledPct: node.detachedDisabledPct ?? node.detached_disabled_pct,
+      router_pct: node.router_pct ?? node.routerPct,
+      detached_disabled_pct:
+        node.detached_disabled_pct ?? node.detachedDisabledPct,
+      isFtdRouter: node.isFtdRouter ?? node.is_ftd_router,
+      is_ftd_router: node.is_ftd_router ?? node.isFtdRouter,
       router_neighbor_max_err_rate_frame_pct:
         neighborStats.router_neighbor_max_err_rate_frame_pct,
       router_neighbor_max_err_rate_msg_pct:
