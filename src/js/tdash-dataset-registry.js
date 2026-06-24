@@ -33,6 +33,7 @@ export const DATASOURCE_REGISTRY = [
 //                       'router-table' | 'raw-array'
 //   physicsProfile   — (optional) physics engine profile override:
 //                       'mesh-baseline' | 'mesh-dense' | 'mesh-balanced' | 'mesh-compact' | 'mesh-sparse' | 'mesh-ring'
+//                       'mesh-tree-horizontal' | 'mesh-tree-vertical' (manual selector only in Phase 1 rollout)
 //                       If omitted, auto-selected based on topologyMode.
 //                       Precedence: manual user selection > dataset physicsProfile > topologyMode mapping
 //   defaultLinkFilter — value pre-selected in #link-filter when this dataset loads

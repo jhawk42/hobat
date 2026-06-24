@@ -847,6 +847,8 @@ export const PHYSICS_PROFILE_MESH_BALANCED = "mesh-balanced";
 export const PHYSICS_PROFILE_MESH_SPARSE = "mesh-sparse";
 export const PHYSICS_PROFILE_MESH_RING = "mesh-ring";
 export const PHYSICS_PROFILE_MESH_COMPACT = "mesh-compact";
+export const PHYSICS_PROFILE_MESH_TREE_HORIZONTAL = "mesh-tree-horizontal";
+export const PHYSICS_PROFILE_MESH_TREE_VERTICAL = "mesh-tree-vertical";
 
 export const PHYSICS_PROFILES = Object.freeze({
   [PHYSICS_PROFILE_MESH_BASELINE]: Object.freeze({
@@ -922,6 +924,32 @@ export const PHYSICS_PROFILES = Object.freeze({
       avoidOverlap: 2.5,
     }),
     stabilization: Object.freeze({ enabled: true, iterations: 2800, updateInterval: 25 }),
+  }),
+  [PHYSICS_PROFILE_MESH_TREE_HORIZONTAL]: Object.freeze({
+    label: "Mesh Tree Horizontal",
+    // Tuned for banded seeded layouts (left-to-right zone separation).
+    barnesHut: Object.freeze({
+      gravitationalConstant: -13500,
+      centralGravity: 0.04,
+      springLength: 420,
+      springConstant: 0.008,
+      damping: 0.34,
+      avoidOverlap: 2.4,
+    }),
+    stabilization: Object.freeze({ enabled: true, iterations: 2600, updateInterval: 25 }),
+  }),
+  [PHYSICS_PROFILE_MESH_TREE_VERTICAL]: Object.freeze({
+    label: "Mesh Tree Vertical",
+    // Tuned for banded seeded layouts (top-to-bottom zone separation).
+    barnesHut: Object.freeze({
+      gravitationalConstant: -13500,
+      centralGravity: 0.04,
+      springLength: 420,
+      springConstant: 0.008,
+      damping: 0.34,
+      avoidOverlap: 2.4,
+    }),
+    stabilization: Object.freeze({ enabled: true, iterations: 2600, updateInterval: 25 }),
   }),
 });
 

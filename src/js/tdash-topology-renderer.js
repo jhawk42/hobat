@@ -4,6 +4,8 @@ import {
   getPhysicsProfileLabel,
   PHYSICS_PROFILE_MESH_RING,
   PHYSICS_PROFILE_MESH_COMPACT,
+  PHYSICS_PROFILE_MESH_TREE_HORIZONTAL,
+  PHYSICS_PROFILE_MESH_TREE_VERTICAL,
   EDGE_CATEGORY_ROUTER_NEIGHBOR,
   EDGE_CATEGORY_DEFAULT_CHILDREN,
   EDGE_CATEGORY_OTBR_CHILD,
@@ -92,6 +94,700 @@ if (typeof window !== 'undefined') {
   window.tdashDebug.getVisNetwork = function() { return _visNetwork; };
   window.tdashDebug.getTopologyNodeData = function() { return _topologyNodeData; };
   window.tdashDebug.getOriginalNodeStyling = function() { return _originalNodeStyling; };
+  window.tdashDebug.getMeshTreeZoningContext = function(nodeData, edgeData) {
+    return _buildMeshTreeZoningContext(nodeData || [], edgeData || []);
+  };
+}
+
+function _meshTreeUpperText(value) {
+  return typeof value === "string" ? value.trim().toUpperCase() : "";
+}
+
+function _meshTreeStableHash(text) {
+  const s = String(text || "");
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function _meshTreeSortedIds(ids) {
+  return Array.from(ids).sort((a, b) => String(a).localeCompare(String(b)));
+}
+
+function _meshTreeJitterById(nodeId, amplitude = 1) {
+  const u = _meshTreeStableHash(nodeId) / 0xffffffff;
+  return (u - 0.5) * 2 * amplitude;
+}
+
+function _meshTreeEdgeCategories(edge) {
+  return normalizeLinkCategories(
+    edge.linkCategories || edge.linkCategory || edge.category,
+  );
+}
+
+function _buildMeshTreeZoningContext(nodeData, edgeData) {
+  const nonHiddenNodes = nodeData.filter((n) => n?.hidden !== true);
+  const nodeById = new Map(nonHiddenNodes.map((node) => [node.id, node]));
+  const visibleEdges = edgeData.filter((edge) => {
+    if (edge?.baseHidden === true || edge?.hidden === true) return false;
+    return nodeById.has(edge.from) && nodeById.has(edge.to);
+  });
+
+  const visibleEdgeSet = new Set(
+    visibleEdges.map((edge) => {
+      const a = String(edge.from);
+      const b = String(edge.to);
+      return a <= b ? `${a}|${b}` : `${b}|${a}`;
+    }),
+  );
+
+  const nodeDegreeById = new Map();
+  nodeById.forEach((_, nodeId) => nodeDegreeById.set(nodeId, 0));
+  visibleEdges.forEach((edge) => {
+    nodeDegreeById.set(edge.from, (nodeDegreeById.get(edge.from) || 0) + 1);
+    nodeDegreeById.set(edge.to, (nodeDegreeById.get(edge.to) || 0) + 1);
+  });
+
+  const routerIdSet = new Set(
+    nonHiddenNodes.filter((node) => node.isRouter === true).map((node) => node.id),
+  );
+
+  const explicitParentsByChild = new Map();
+  const routerScoresByChild = new Map();
+  function addExplicitParent(childId, routerId) {
+    if (!explicitParentsByChild.has(childId)) {
+      explicitParentsByChild.set(childId, new Set());
+    }
+    explicitParentsByChild.get(childId).add(routerId);
+  }
+  function bumpRouterScore(childId, routerId, weight) {
+    if (!routerScoresByChild.has(childId)) {
+      routerScoresByChild.set(childId, new Map());
+    }
+    const scoreByRouter = routerScoresByChild.get(childId);
+    scoreByRouter.set(routerId, (scoreByRouter.get(routerId) || 0) + weight);
+  }
+
+  visibleEdges.forEach((edge) => {
+    const fromNode = nodeById.get(edge.from);
+    const toNode = nodeById.get(edge.to);
+    if (!fromNode || !toNode) return;
+
+    const fromIsRouter = routerIdSet.has(fromNode.id);
+    const toIsRouter = routerIdSet.has(toNode.id);
+    if (fromIsRouter === toIsRouter) return;
+
+    const routerNode = fromIsRouter ? fromNode : toNode;
+    const childNode = fromIsRouter ? toNode : fromNode;
+    const categories = _meshTreeEdgeCategories(edge);
+
+    const isExplicitParentChild =
+      edge.isParentChild === true ||
+      categories.includes(EDGE_CATEGORY_DEFAULT_CHILDREN) ||
+      categories.includes(EDGE_CATEGORY_OTBR_CHILD) ||
+      categories.includes(EDGE_CATEGORY_EVE_CHILD) ||
+      categories.includes(EDGE_CATEGORY_EVE_NATIVE_CHILD);
+
+    const isRouterNeighborOnly = categories.length > 0 && categories.every(
+      (cat) => cat === EDGE_CATEGORY_ROUTER_NEIGHBOR,
+    );
+    const isImplicitChildLike = isExplicitParentChild || !isRouterNeighborOnly;
+    if (!isImplicitChildLike) return;
+
+    const weight = isExplicitParentChild ? 14 : (edge.lqLevel === 3 ? 4 : 1);
+    bumpRouterScore(childNode.id, routerNode.id, weight);
+
+    if (isExplicitParentChild) {
+      addExplicitParent(childNode.id, routerNode.id);
+    }
+  });
+
+  const parentByChild = new Map();
+  const childHasParentChildLink = new Set();
+
+  explicitParentsByChild.forEach((parentSet, childId) => {
+    childHasParentChildLink.add(childId);
+    const scoreByRouter = routerScoresByChild.get(childId) || new Map();
+    let selectedParentId = null;
+    let selectedScore = -1;
+    Array.from(parentSet).forEach((routerId) => {
+      const score = scoreByRouter.get(routerId) || 0;
+      if (score > selectedScore) {
+        selectedScore = score;
+        selectedParentId = routerId;
+      } else if (score === selectedScore && selectedParentId != null) {
+        if (String(routerId).localeCompare(String(selectedParentId)) < 0) {
+          selectedParentId = routerId;
+        }
+      }
+    });
+    if (selectedParentId != null) {
+      parentByChild.set(childId, selectedParentId);
+    }
+  });
+
+  routerScoresByChild.forEach((scoreByRouter, childId) => {
+    if (parentByChild.has(childId)) return;
+    let selectedParentId = null;
+    let selectedScore = -1;
+    scoreByRouter.forEach((score, routerId) => {
+      if (score > selectedScore) {
+        selectedScore = score;
+        selectedParentId = routerId;
+      } else if (score === selectedScore && selectedParentId != null) {
+        if (String(routerId).localeCompare(String(selectedParentId)) < 0) {
+          selectedParentId = routerId;
+        }
+      }
+    });
+    if (selectedParentId != null) {
+      parentByChild.set(childId, selectedParentId);
+    }
+  });
+
+  const childrenByParent = new Map();
+  parentByChild.forEach((parentId, childId) => {
+    if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
+    childrenByParent.get(parentId).push(childId);
+  });
+  childrenByParent.forEach((childIds, parentId) => {
+    childrenByParent.set(parentId, _meshTreeSortedIds(new Set(childIds)));
+  });
+
+  function isFtdChildNode(node) {
+    if (!node || node.isRouter === true) return false;
+    if (_meshTreeUpperText(node.mode_device) === "FTD") return true;
+    return /\bFTD\b/i.test(String(node.label || ""));
+  }
+
+  function isChildRoleCandidate(node, nodeId) {
+    if (!node) return false;
+    if (node.isBorderRouter === true || node.isRouter === true) return false;
+    if (isFtdChildNode(node)) return true;
+    if (_meshTreeUpperText(node.mode_device) === "MTD") return true;
+    if (routerScoresByChild.has(nodeId) || parentByChild.has(nodeId)) return true;
+    if ((nodeDegreeById.get(nodeId) || 0) > 0) return true;
+    return true;
+  }
+
+  const zoneByNodeId = new Map();
+  const zoneNodeIds = new Map([
+    [1, []],
+    [2, []],
+    [3, []],
+    [4, []],
+    [5, []],
+  ]);
+
+  nodeById.forEach((node, nodeId) => {
+    const isBorderRouter = node.isBorderRouter === true;
+    const isRouter = node.isRouter === true;
+    const isFtd = isFtdChildNode(node);
+    const childCandidate = isChildRoleCandidate(node, nodeId);
+    const hasParentChildLink = childHasParentChildLink.has(nodeId);
+
+    let zone = 5;
+    if (isBorderRouter) {
+      zone = 1;
+    } else if (isRouter) {
+      zone = 2;
+    } else if (isFtd && childCandidate) {
+      zone = 3;
+    } else if (childCandidate && !isBorderRouter && !isRouter && !isFtd && hasParentChildLink) {
+      zone = 4;
+    } else if (childCandidate && !isBorderRouter && !isRouter && !isFtd && !hasParentChildLink) {
+      zone = 5;
+    }
+
+    zoneByNodeId.set(nodeId, zone);
+    zoneNodeIds.get(zone).push(nodeId);
+  });
+
+  const zoneJitterByNodeId = new Map();
+  const zones = Object.freeze({
+    zone1: _meshTreeSortedIds(zoneNodeIds.get(1)),
+    zone2: _meshTreeSortedIds(zoneNodeIds.get(2)),
+    zone3: _meshTreeSortedIds(zoneNodeIds.get(3)),
+    zone4: _meshTreeSortedIds(zoneNodeIds.get(4)),
+    zone5: _meshTreeSortedIds(zoneNodeIds.get(5)),
+  });
+
+  Object.values(zones).forEach((zoneIds) => {
+    zoneIds.forEach((nodeId) => {
+      zoneJitterByNodeId.set(nodeId, _meshTreeJitterById(nodeId, 1));
+    });
+  });
+
+  return {
+    nodeById,
+    visibleEdges,
+    visibleEdgeSet,
+    nodeDegreeById,
+    routerIdSet,
+    parentByChild,
+    childrenByParent,
+    childHasParentChildLink,
+    routerScoresByChild,
+    zoneByNodeId,
+    zones,
+    zoneJitterByNodeId,
+    totalNodesClassified: zoneByNodeId.size,
+  };
+}
+
+function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
+  const zoning = _buildMeshTreeZoningContext(nodeData, edgeData);
+  if (!zoning || zoning.totalNodesClassified === 0) return;
+
+  const { nodeById, zones, parentByChild, childrenByParent, zoneByNodeId } = zoning;
+  const zoneOrder = [1, 2, 3, 4, 5];
+  const zoneIdsByIndex = {
+    1: zones.zone1,
+    2: zones.zone2,
+    3: zones.zone3,
+    4: zones.zone4,
+    5: zones.zone5,
+  };
+
+  const allZoneIds = zoneOrder.flatMap((z) => zoneIdsByIndex[z]);
+  const maxZoneCount = Math.max(1, ...zoneOrder.map((z) => zoneIdsByIndex[z].length));
+  const baseHalfSpanY = Math.max(780, Math.round(maxZoneCount * 86));
+
+  const zoneXAnchors = {
+    1: -2400,
+    2: -1200,
+    3: 0,
+    4: 600,
+    5: 2400,
+  };
+  const zoneYSpacing = {
+    1: 120,
+    2: 140,
+    3: 72,
+    4: 82,
+    5: 110,
+  };
+
+  function placeNode(node, x, y, policy) {
+    if (!node) return;
+    node.x = Math.round(x);
+    node.y = Math.round(y);
+    node.fixed = { x: Boolean(policy.fixX), y: Boolean(policy.fixY) };
+    node.physics = Boolean(policy.physics);
+  }
+
+  function clampY(y) {
+    const hardPad = 140;
+    const minY = -baseHalfSpanY - hardPad;
+    const maxY = baseHalfSpanY + hardPad;
+    return Math.max(minY, Math.min(maxY, y));
+  }
+
+  function distributeByIndex(sortedIds, zoneNum) {
+    const count = sortedIds.length;
+    if (count === 0) return;
+    const xAnchor = zoneXAnchors[zoneNum];
+    const ySpacing = zoneYSpacing[zoneNum];
+    const center = (count - 1) / 2;
+    sortedIds.forEach((nodeId, idx) => {
+      const node = nodeById.get(nodeId);
+      const jitter = _meshTreeJitterById(nodeId, 1);
+      const yJitter = zoneNum === 1 || zoneNum === 2 ? 10 : 14;
+      const y = clampY((idx - center) * ySpacing + jitter * yJitter);
+      const x = xAnchor + jitter * 18;
+      const isZone3or4 = zoneNum === 3 || zoneNum === 4;
+      placeNode(node, x, y, {
+        fixX: true,
+        fixY: !isZone3or4,
+        physics: isZone3or4,
+      });
+    });
+  }
+
+  // 1) Strict band placement for zones 1, 2, 5.
+  distributeByIndex(zoneIdsByIndex[1], 1);
+  distributeByIndex(zoneIdsByIndex[2], 2);
+  distributeByIndex(zoneIdsByIndex[5], 5);
+
+  // Enforce extra spacing for border routers and parent routers so child clusters
+  // inherit cleaner separation around their anchors.
+  const borderRouterIds = _meshTreeSortedIds(new Set(zoneIdsByIndex[1]));
+  const parentRouterIds = _meshTreeSortedIds(
+    new Set(
+      Array.from(childrenByParent.keys()).filter(
+        (nodeId) => zoneByNodeId.get(nodeId) === 2,
+      ),
+    ),
+  );
+
+  function relaxSpecificNodeY(nodeIds, minGap) {
+    const nodes = nodeIds
+      .map((nodeId) => nodeById.get(nodeId))
+      .filter(Boolean)
+      .sort((a, b) => (Number(a.y) || 0) - (Number(b.y) || 0));
+    if (nodes.length <= 1) return;
+    for (let i = 1; i < nodes.length; i += 1) {
+      const prev = nodes[i - 1];
+      const curr = nodes[i];
+      const py = Number(prev.y) || 0;
+      let cy = Number(curr.y) || 0;
+      if (cy - py < minGap) {
+        cy = py + minGap;
+        curr.y = clampY(cy);
+      }
+    }
+    nodes.forEach((node) => {
+      node.y = Math.round(Number(node.y) || 0);
+    });
+  }
+
+  relaxSpecificNodeY(borderRouterIds, 280);
+  relaxSpecificNodeY(parentRouterIds, 158);
+
+  // 2) Parent-affinity placement for zones 3 and 4 around the parent Y-axis.
+  function placeChildZoneWithParentAffinity(zoneNum) {
+    const zoneIds = zoneIdsByIndex[zoneNum];
+    const xAnchor = zoneXAnchors[zoneNum];
+    const parentToChildren = new Map();
+    const orphans = [];
+
+    zoneIds.forEach((childId) => {
+      const parentId = parentByChild.get(childId);
+      if (!parentId || !nodeById.has(parentId)) {
+        orphans.push(childId);
+        return;
+      }
+      if (!parentToChildren.has(parentId)) parentToChildren.set(parentId, []);
+      parentToChildren.get(parentId).push(childId);
+    });
+
+    const orderedParents = Array.from(parentToChildren.keys()).sort((a, b) => {
+      const ay = Number(nodeById.get(a)?.y) || 0;
+      const by = Number(nodeById.get(b)?.y) || 0;
+      if (ay !== by) return ay - by;
+      return String(a).localeCompare(String(b));
+    });
+
+    const used = new Set();
+    orderedParents.forEach((parentId) => {
+      const parentNode = nodeById.get(parentId);
+      const parentY = Number(parentNode?.y) || 0;
+      const childIds = _meshTreeSortedIds(parentToChildren.get(parentId) || []);
+      const center = (childIds.length - 1) / 2;
+      const localSpacing = zoneNum === 3 ? 66 : 76;
+      childIds.forEach((childId, idx) => {
+        const childNode = nodeById.get(childId);
+        const jitter = _meshTreeJitterById(`${parentId}|${childId}`, 1);
+        const y = clampY(parentY + (idx - center) * localSpacing + jitter * 10);
+        const x = xAnchor + jitter * 14;
+        placeNode(childNode, x, y, { fixX: true, fixY: false, physics: true });
+        used.add(childId);
+      });
+    });
+
+    const remaining = _meshTreeSortedIds(new Set([...orphans, ...zoneIds.filter((id) => !used.has(id))]));
+    const fallbackCenter = (remaining.length - 1) / 2;
+    remaining.forEach((childId, idx) => {
+      const childNode = nodeById.get(childId);
+      const jitter = _meshTreeJitterById(childId, 1);
+      const y = clampY((idx - fallbackCenter) * zoneYSpacing[zoneNum] + jitter * 12);
+      const x = xAnchor + jitter * 16;
+      placeNode(childNode, x, y, { fixX: true, fixY: false, physics: true });
+    });
+  }
+
+  placeChildZoneWithParentAffinity(3);
+  placeChildZoneWithParentAffinity(4);
+
+  // 3) Per-zone monotonic spacing pass to reduce immediate overlaps while
+  // preserving clear x-band separation and parent-relative ordering.
+  function relaxZoneYSpacing(zoneNum, minGap) {
+    const ids = _meshTreeSortedIds(
+      new Set(
+        allZoneIds.filter((nodeId) => zoneByNodeId.get(nodeId) === zoneNum),
+      ),
+    );
+    if (ids.length <= 1) return;
+    const nodes = ids
+      .map((nodeId) => nodeById.get(nodeId))
+      .filter(Boolean)
+      .sort((a, b) => (Number(a.y) || 0) - (Number(b.y) || 0));
+    for (let i = 1; i < nodes.length; i += 1) {
+      const prev = nodes[i - 1];
+      const curr = nodes[i];
+      const py = Number(prev.y) || 0;
+      let cy = Number(curr.y) || 0;
+      if (cy - py < minGap) {
+        cy = py + minGap;
+        curr.y = clampY(cy);
+      }
+    }
+    for (let i = nodes.length - 2; i >= 0; i -= 1) {
+      const next = nodes[i + 1];
+      const curr = nodes[i];
+      const ny = Number(next.y) || 0;
+      let cy = Number(curr.y) || 0;
+      if (ny - cy < minGap) {
+        cy = ny - minGap;
+        curr.y = clampY(cy);
+      }
+    }
+
+    // Prevent single child-node tails in zones 3/4 from drifting too far.
+    if (zoneNum === 3 || zoneNum === 4) {
+      const sortedY = nodes
+        .map((node) => Number(node.y) || 0)
+        .sort((a, b) => a - b);
+      const medianY = sortedY[Math.floor((sortedY.length - 1) / 2)] || 0;
+      const maxTail = Math.max(560, Math.round(nodes.length * 12));
+      const minAllowed = medianY - maxTail;
+      const maxAllowed = medianY + maxTail;
+      nodes.forEach((node) => {
+        const y = Number(node.y) || 0;
+        node.y = clampY(Math.max(minAllowed, Math.min(maxAllowed, y)));
+      });
+    }
+
+    nodes.forEach((node) => {
+      node.y = Math.round(Number(node.y) || 0);
+      node.x = Math.round(Number(node.x) || 0);
+    });
+  }
+
+  relaxZoneYSpacing(1, 108);
+  relaxZoneYSpacing(2, 120);
+  // Keep child clusters compact in zones 3/4; larger global gaps can create tails.
+  relaxZoneYSpacing(3, 24);
+  relaxZoneYSpacing(4, 28);
+  relaxZoneYSpacing(5, 88);
+}
+
+function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
+  const zoning = _buildMeshTreeZoningContext(nodeData, edgeData);
+  if (!zoning || zoning.totalNodesClassified === 0) return;
+
+  const { nodeById, zones, parentByChild, childrenByParent, zoneByNodeId } = zoning;
+  const zoneOrder = [1, 2, 3, 4, 5];
+  const zoneIdsByIndex = {
+    1: zones.zone1,
+    2: zones.zone2,
+    3: zones.zone3,
+    4: zones.zone4,
+    5: zones.zone5,
+  };
+
+  const allZoneIds = zoneOrder.flatMap((z) => zoneIdsByIndex[z]);
+  const maxZoneCount = Math.max(1, ...zoneOrder.map((z) => zoneIdsByIndex[z].length));
+  const baseHalfSpanX = Math.max(780, Math.round(maxZoneCount * 86));
+
+  const zoneYAnchors = {
+    1: -2400,
+    2: -1200,
+    3: 0,
+    4: 600,
+    5: 2400,
+  };
+  const zoneXSpacing = {
+    1: 120,
+    2: 140,
+    3: 72,
+    4: 82,
+    5: 110,
+  };
+
+  function placeNode(node, x, y, policy) {
+    if (!node) return;
+    node.x = Math.round(x);
+    node.y = Math.round(y);
+    node.fixed = { x: Boolean(policy.fixX), y: Boolean(policy.fixY) };
+    node.physics = Boolean(policy.physics);
+  }
+
+  function clampX(x) {
+    const hardPad = 140;
+    const minX = -baseHalfSpanX - hardPad;
+    const maxX = baseHalfSpanX + hardPad;
+    return Math.max(minX, Math.min(maxX, x));
+  }
+
+  function distributeByIndex(sortedIds, zoneNum) {
+    const count = sortedIds.length;
+    if (count === 0) return;
+    const yAnchor = zoneYAnchors[zoneNum];
+    const xSpacing = zoneXSpacing[zoneNum];
+    const center = (count - 1) / 2;
+    sortedIds.forEach((nodeId, idx) => {
+      const node = nodeById.get(nodeId);
+      const jitter = _meshTreeJitterById(nodeId, 1);
+      const xJitter = zoneNum === 1 || zoneNum === 2 ? 10 : 14;
+      const x = clampX((idx - center) * xSpacing + jitter * xJitter);
+      const y = yAnchor + jitter * 18;
+      const isZone3or4 = zoneNum === 3 || zoneNum === 4;
+      placeNode(node, x, y, {
+        fixX: !isZone3or4,
+        fixY: true,
+        physics: isZone3or4,
+      });
+    });
+  }
+
+  // 1) Strict band placement for zones 1, 2, 5.
+  distributeByIndex(zoneIdsByIndex[1], 1);
+  distributeByIndex(zoneIdsByIndex[2], 2);
+  distributeByIndex(zoneIdsByIndex[5], 5);
+
+  const borderRouterIds = _meshTreeSortedIds(new Set(zoneIdsByIndex[1]));
+  const parentRouterIds = _meshTreeSortedIds(
+    new Set(
+      Array.from(childrenByParent.keys()).filter(
+        (nodeId) => zoneByNodeId.get(nodeId) === 2,
+      ),
+    ),
+  );
+
+  function relaxSpecificNodeX(nodeIds, minGap) {
+    const nodes = nodeIds
+      .map((nodeId) => nodeById.get(nodeId))
+      .filter(Boolean)
+      .sort((a, b) => (Number(a.x) || 0) - (Number(b.x) || 0));
+    if (nodes.length <= 1) return;
+    for (let i = 1; i < nodes.length; i += 1) {
+      const prev = nodes[i - 1];
+      const curr = nodes[i];
+      const px = Number(prev.x) || 0;
+      let cx = Number(curr.x) || 0;
+      if (cx - px < minGap) {
+        cx = px + minGap;
+        curr.x = clampX(cx);
+      }
+    }
+    nodes.forEach((node) => {
+      node.x = Math.round(Number(node.x) || 0);
+    });
+  }
+
+  relaxSpecificNodeX(borderRouterIds, 280);
+  relaxSpecificNodeX(parentRouterIds, 158);
+
+  // 2) Parent-affinity placement for zones 3 and 4 around the parent X-axis.
+  function placeChildZoneWithParentAffinity(zoneNum) {
+    const zoneIds = zoneIdsByIndex[zoneNum];
+    const yAnchor = zoneYAnchors[zoneNum];
+    const parentToChildren = new Map();
+    const orphans = [];
+
+    zoneIds.forEach((childId) => {
+      const parentId = parentByChild.get(childId);
+      if (!parentId || !nodeById.has(parentId)) {
+        orphans.push(childId);
+        return;
+      }
+      if (!parentToChildren.has(parentId)) parentToChildren.set(parentId, []);
+      parentToChildren.get(parentId).push(childId);
+    });
+
+    const orderedParents = Array.from(parentToChildren.keys()).sort((a, b) => {
+      const ax = Number(nodeById.get(a)?.x) || 0;
+      const bx = Number(nodeById.get(b)?.x) || 0;
+      if (ax !== bx) return ax - bx;
+      return String(a).localeCompare(String(b));
+    });
+
+    const used = new Set();
+    orderedParents.forEach((parentId) => {
+      const parentNode = nodeById.get(parentId);
+      const parentX = Number(parentNode?.x) || 0;
+      const childIds = _meshTreeSortedIds(parentToChildren.get(parentId) || []);
+      const center = (childIds.length - 1) / 2;
+      const localSpacing = zoneNum === 3 ? 66 : 76;
+      childIds.forEach((childId, idx) => {
+        const childNode = nodeById.get(childId);
+        const jitter = _meshTreeJitterById(`${parentId}|${childId}`, 1);
+        const x = clampX(parentX + (idx - center) * localSpacing + jitter * 10);
+        const y = yAnchor + jitter * 14;
+        placeNode(childNode, x, y, { fixX: false, fixY: true, physics: true });
+        used.add(childId);
+      });
+    });
+
+    const remaining = _meshTreeSortedIds(new Set([...orphans, ...zoneIds.filter((id) => !used.has(id))]));
+    const fallbackCenter = (remaining.length - 1) / 2;
+    remaining.forEach((childId, idx) => {
+      const childNode = nodeById.get(childId);
+      const jitter = _meshTreeJitterById(childId, 1);
+      const x = clampX((idx - fallbackCenter) * zoneXSpacing[zoneNum] + jitter * 12);
+      const y = yAnchor + jitter * 16;
+      placeNode(childNode, x, y, { fixX: false, fixY: true, physics: true });
+    });
+  }
+
+  placeChildZoneWithParentAffinity(3);
+  placeChildZoneWithParentAffinity(4);
+
+  // 3) Per-zone monotonic spacing pass to reduce immediate overlaps while
+  // preserving clear y-band separation and parent-relative ordering.
+  function relaxZoneXSpacing(zoneNum, minGap) {
+    const ids = _meshTreeSortedIds(
+      new Set(
+        allZoneIds.filter((nodeId) => zoneByNodeId.get(nodeId) === zoneNum),
+      ),
+    );
+    if (ids.length <= 1) return;
+    const nodes = ids
+      .map((nodeId) => nodeById.get(nodeId))
+      .filter(Boolean)
+      .sort((a, b) => (Number(a.x) || 0) - (Number(b.x) || 0));
+    for (let i = 1; i < nodes.length; i += 1) {
+      const prev = nodes[i - 1];
+      const curr = nodes[i];
+      const px = Number(prev.x) || 0;
+      let cx = Number(curr.x) || 0;
+      if (cx - px < minGap) {
+        cx = px + minGap;
+        curr.x = clampX(cx);
+      }
+    }
+    for (let i = nodes.length - 2; i >= 0; i -= 1) {
+      const next = nodes[i + 1];
+      const curr = nodes[i];
+      const nx = Number(next.x) || 0;
+      let cx = Number(curr.x) || 0;
+      if (nx - cx < minGap) {
+        cx = nx - minGap;
+        curr.x = clampX(cx);
+      }
+    }
+
+    // Prevent single child-node tails in zones 3/4 from drifting too far.
+    if (zoneNum === 3 || zoneNum === 4) {
+      const sortedX = nodes
+        .map((node) => Number(node.x) || 0)
+        .sort((a, b) => a - b);
+      const medianX = sortedX[Math.floor((sortedX.length - 1) / 2)] || 0;
+      const maxTail = Math.max(560, Math.round(nodes.length * 12));
+      const minAllowed = medianX - maxTail;
+      const maxAllowed = medianX + maxTail;
+      nodes.forEach((node) => {
+        const x = Number(node.x) || 0;
+        node.x = clampX(Math.max(minAllowed, Math.min(maxAllowed, x)));
+      });
+    }
+
+    nodes.forEach((node) => {
+      node.y = Math.round(Number(node.y) || 0);
+      node.x = Math.round(Number(node.x) || 0);
+    });
+  }
+
+  relaxZoneXSpacing(1, 108);
+  relaxZoneXSpacing(2, 120);
+  // Keep child clusters compact in zones 3/4; larger global gaps can create tails.
+  relaxZoneXSpacing(3, 24);
+  relaxZoneXSpacing(4, 28);
+  relaxZoneXSpacing(5, 88);
 }
 
 function applyRingStarSeedLayout(nodeData, edgeData) {
@@ -865,6 +1561,10 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
     applyRingStarSeedLayout(nodeData, edgeData);
   } else if (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT) {
     applyMeshLabHybridSeedLayout(nodeData, edgeData);
+  } else if (physicsProfileName === PHYSICS_PROFILE_MESH_TREE_HORIZONTAL) {
+    applyMeshTreeHorizontalSeedLayout(nodeData, edgeData);
+  } else if (physicsProfileName === PHYSICS_PROFILE_MESH_TREE_VERTICAL) {
+    applyMeshTreeVerticalSeedLayout(nodeData, edgeData);
   }
 
   // Apply curved parent-child edges across all profiles to reduce overlap.
@@ -877,9 +1577,40 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
     edge.smooth = { enabled: true, type: curveType, roundness: 0.2 };
   });
 
-  if (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT || physicsProfileName === PHYSICS_PROFILE_MESH_RING) {
+  // Curve router-to-router edges so overlapping links become individually visible.
+  {
+    const nodeByIdForCurves = new Map(nodeData.map((n) => [n.id, n]));
+    edgeData.forEach((edge) => {
+      if (edge.baseHidden === true) return;
+      if (edge.isParentChild === true) return;
+      const fromNode = nodeByIdForCurves.get(edge.from);
+      const toNode = nodeByIdForCurves.get(edge.to);
+      if (fromNode?.isRouter !== true || toNode?.isRouter !== true) return;
+      const hashSeed = `${edge.from}|${edge.to}`;
+      const curveType = (hashSeed.length % 2 === 0) ? "curvedCW" : "curvedCCW";
+      edge.smooth = { enabled: true, type: curveType, roundness: 0.26 };
+    });
+  }
+
+  const isMeshTreeProfile =
+    physicsProfileName === PHYSICS_PROFILE_MESH_TREE_HORIZONTAL ||
+    physicsProfileName === PHYSICS_PROFILE_MESH_TREE_VERTICAL;
+  if (
+    physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT ||
+    physicsProfileName === PHYSICS_PROFILE_MESH_RING ||
+    isMeshTreeProfile
+  ) {
     const nodeById = new Map(nodeData.map((n) => [n.id, n]));
     const isFtdChildNode = (node) => toText(node?.mode_device).toUpperCase() === "FTD";
+    const meshTreeZoneByNodeId = isMeshTreeProfile
+      ? _buildMeshTreeZoningContext(nodeData, edgeData).zoneByNodeId
+      : null;
+    const applyMinEdgeLength = (edge, minLength) => {
+      edge.length = Number.isFinite(edge.length)
+        ? Math.max(edge.length, minLength)
+        : minLength;
+    };
+
     edgeData.forEach((edge) => {
       if (edge.baseHidden === true) return;
       const fromNode = nodeById.get(edge.from);
@@ -887,22 +1618,41 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
       const fromIsRouter = fromNode?.isRouter === true;
       const toIsRouter = toNode?.isRouter === true;
       const routerToChildLike = (fromIsRouter && !toIsRouter) || (!fromIsRouter && toIsRouter);
+      const fromZone = meshTreeZoneByNodeId?.get(edge.from);
+      const toZone = meshTreeZoneByNodeId?.get(edge.to);
+      const isCrossZoneLink =
+        Number.isInteger(fromZone) &&
+        Number.isInteger(toZone) &&
+        fromZone !== toZone;
 
       if (edge.isParentChild === true) {
         const childNode = fromIsRouter ? toNode : fromNode;
-        const childBandLength = isFtdChildNode(childNode) ? 200 : 430;
-        edge.length = Number.isFinite(edge.length) ? Math.max(edge.length, childBandLength) : childBandLength;
+        const childBandLength = isMeshTreeProfile
+          ? (isFtdChildNode(childNode) ? 170 : 250)
+          : (isFtdChildNode(childNode) ? 200 : 430);
+        applyMinEdgeLength(edge, childBandLength);
         edge.physics = true;
         // Alternate curve direction to separate sibling parent-child edges.
         const hashSeed = `${edge.from}|${edge.to}`;
         const curveType = (hashSeed.length % 2 === 0) ? "curvedCW" : "curvedCCW";
-        edge.smooth = { enabled: true, type: curveType, roundness: 0.3 };
-      } else if (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT && routerToChildLike) {
+        edge.smooth = {
+          enabled: true,
+          type: curveType,
+          roundness: isMeshTreeProfile ? 0.34 : 0.3,
+        };
+      } else if (
+        (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT || isMeshTreeProfile) &&
+        routerToChildLike
+      ) {
         // Keep non-parent router-to-child links visual, but remove spring force to
         // avoid pulling children into dense central clusters.
         edge.physics = false;
       } else if (fromIsRouter && toIsRouter) {
-        edge.length = Number.isFinite(edge.length) ? Math.max(edge.length, 430) : 430;
+        applyMinEdgeLength(edge, isMeshTreeProfile ? 620 : 430);
+      } else if (isMeshTreeProfile && isCrossZoneLink) {
+        // Increase spring length for non-parent links crossing zone bands
+        // to preserve explicit mesh-tree separation.
+        applyMinEdgeLength(edge, 520);
       }
     });
   }

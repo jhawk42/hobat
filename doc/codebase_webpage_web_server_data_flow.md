@@ -434,6 +434,24 @@ vis.Network click event → populateNodeDetailsLists()
   - reads rawByIdForDetails to populate all <ul data-fields="..."> panels
 ```
 
+#### Physics profile behavior (current)
+
+- Profile-specific seeded layout dispatch happens before `vis.Network(...)` construction.
+- `mesh-ring` runs `applyRingStarSeedLayout(...)`.
+- `mesh-compact` runs `applyMeshLabHybridSeedLayout(...)`.
+- `mesh-tree-horizontal` runs `applyMeshTreeHorizontalSeedLayout(...)`.
+- `mesh-tree-vertical` runs `applyMeshTreeVerticalSeedLayout(...)`.
+
+Mesh-tree profiles are currently manual-select only (not auto-mapped by `topologyMode`) and use shared five-zone classification precedence:
+
+1. Zone 1 border routers
+2. Zone 2 routers
+3. Zone 3 FTD child nodes
+4. Zone 4 non-FTD child nodes with parent-child links
+5. Zone 5 non-FTD child nodes without parent-child links
+
+Operational note: in dense merged datasets, route-only FTD non-router nodes can still behave as outliers in mesh-tree layouts; this is tracked as a known refinement area in layout documentation.
+
 ### Table renderer (`tdash-table-renderer.js`)
 
 ```

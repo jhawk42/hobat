@@ -43,6 +43,8 @@ import {
   PHYSICS_PROFILE_MESH_SPARSE,
   PHYSICS_PROFILE_MESH_COMPACT,
   PHYSICS_PROFILE_MESH_RING,
+  PHYSICS_PROFILE_MESH_TREE_HORIZONTAL,
+  PHYSICS_PROFILE_MESH_TREE_VERTICAL,
   PHYSICS_PROFILES,
   getPhysicsProfileLabel,
 } from "./tdash-constants.js";
@@ -242,9 +244,16 @@ function getModeMappedPhysicsProfileName(entry) {
 function getEffectivePhysicsProfileName(entry = getSelectedDatasetEntry()) {
   // Manual user selection (not auto) has highest precedence
   if (_physicsProfileName !== PHYSICS_PROFILE_AUTO) return _physicsProfileName;
+
+  const isMeshTreeProfile = (profileName) =>
+    profileName === PHYSICS_PROFILE_MESH_TREE_HORIZONTAL
+    || profileName === PHYSICS_PROFILE_MESH_TREE_VERTICAL;
   
   // If auto mode: dataset-level physicsProfile takes precedence over topologyMode mapping
-  if (entry?.physicsProfile) return entry.physicsProfile;
+  // Mesh-tree profiles are manual-only for initial rollout (Phase 6).
+  if (entry?.physicsProfile && !isMeshTreeProfile(entry.physicsProfile)) {
+    return entry.physicsProfile;
+  }
   
   // Fall back to topologyMode-based auto mapping
   return getModeMappedPhysicsProfileName(entry);
