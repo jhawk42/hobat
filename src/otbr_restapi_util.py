@@ -1922,6 +1922,7 @@ def emit_rest_payload_output(
         - Does nothing if output_path is None
     """
     from util_data import save_json_atomic
+    from json_key_normalizer import convert_keys_to_camel_case
     
     if output_path is None:
         return
@@ -1932,13 +1933,15 @@ def emit_rest_payload_output(
     
     output_file = Path(output_path)
     
+    payload_to_save = convert_keys_to_camel_case(payload)
+
     try:
-        save_json_atomic(payload, output_file)
+        save_json_atomic(payload_to_save, output_file)
         logger.info("Saved: %s", output_file)
         logger.debug(
             "Saved data into %s as JSON:\n%s",
             output_file,
-            json.dumps(payload, indent=4),
+            json.dumps(payload_to_save, indent=4),
         )
     except OSError as exc:
         logger.error("File write error for %s: %s", output_file, exc)

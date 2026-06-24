@@ -16,12 +16,12 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.write_json(
                 base_dir,
                 "one.json",
-                [{"extaddr": "AA11BB22CC33DD44", "name": "node-a"}],
+                [{"extAddress": "AA11BB22CC33DD44", "name": "node-a"}],
             )
             self.write_json(
                 base_dir,
                 "two.json",
-                [{"extAddress": "aa11bb22cc33dd44", "device_label": "Kitchen"}],
+                [{"extAddress": "aa11bb22cc33dd44", "deviceLabel": "Kitchen"}],
             )
             self.write_json(
                 base_dir,
@@ -38,9 +38,9 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
 
             self.assertEqual(len(merged_records), 1)
             record = merged_records[0]
-            self.assertEqual(record["extaddr"], "aa11bb22cc33dd44")
+            self.assertEqual(str(record["extAddress"]).lower(), "aa11bb22cc33dd44")
             self.assertEqual(record["name"], "node-a")
-            self.assertEqual(record["device_label"], "Kitchen")
+            self.assertEqual(record["deviceLabel"], "Kitchen")
             self.assertEqual(record["type"], "router")
             self.assertCountEqual(
                 record["_source_files"], ["one.json", "two.json", "three.json"]
@@ -53,12 +53,12 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.write_json(
                 base_dir,
                 "one.json",
-                [{"omr_ipv6_addr": "FD00:ABCD::1234", "name": "node-a"}],
+                [{"omrIpv6Addr": "FD00:ABCD::1234", "name": "node-a"}],
             )
             self.write_json(
                 base_dir,
                 "two.json",
-                [{"omr_ipv6_addr": "fd00:abcd::1234", "device_label": "Bedroom"}],
+                [{"omrIpv6Addr": "fd00:abcd::1234", "deviceLabel": "Bedroom"}],
             )
 
             merged_records, report = build_merged_records(
@@ -70,9 +70,9 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
 
             self.assertEqual(len(merged_records), 1)
             record = merged_records[0]
-            self.assertEqual(record["omr_ipv6_addr"], "fd00:abcd::1234")
+            self.assertEqual(str(record["omrIpv6Addr"]).lower(), "fd00:abcd::1234")
             self.assertEqual(record["name"], "node-a")
-            self.assertEqual(record["device_label"], "Bedroom")
+            self.assertEqual(record["deviceLabel"], "Bedroom")
             self.assertCountEqual(record["_source_files"], ["one.json", "two.json"])
             self.assertEqual(report["multi_source_nodes_total"], 1)
 
@@ -84,13 +84,13 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.write_json(
                 base_dir,
                 "cli.json",
-                [{"omr_ipv6_addr": "FD00:ABCD::1234", "name": "cli-node"}],
+                [{"omrIpv6Addr": "FD00:ABCD::1234", "name": "cli-node"}],
             )
             # REST API source with camelCase
             self.write_json(
                 base_dir,
                 "restapi.json",
-                [{"omrIpv6Address": "fd00:abcd::1234", "device_label": "API Node"}],
+                [{"omrIpv6Address": "fd00:abcd::1234", "deviceLabel": "API Node"}],
             )
 
             merged_records, report = build_merged_records(
@@ -104,10 +104,10 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.assertEqual(len(merged_records), 1)
             record = merged_records[0]
             # Canonical field name should be set
-            self.assertEqual(record["omr_ipv6_addr"], "fd00:abcd::1234")
+            self.assertEqual(str(record["omrIpv6Addr"]).lower(), "fd00:abcd::1234")
             # Both fields merged
             self.assertEqual(record["name"], "cli-node")
-            self.assertEqual(record["device_label"], "API Node")
+            self.assertEqual(record["deviceLabel"], "API Node")
             # Both sources recorded
             self.assertCountEqual(record["_source_files"], ["cli.json", "restapi.json"])
             # Should be counted as multi-source node
@@ -120,12 +120,12 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.write_json(
                 base_dir,
                 "one.json",
-                [{"extaddr": "aa11bb22cc33dd44", "device_label": "same-label"}],
+                [{"extAddress": "aa11bb22cc33dd44", "deviceLabel": "same-label"}],
             )
             self.write_json(
                 base_dir,
                 "two.json",
-                [{"extAddress": "ff00ee11dd22cc33", "device_label": "same-label"}],
+                [{"extAddress": "ff00ee11dd22cc33", "deviceLabel": "same-label"}],
             )
             self.write_json(base_dir, "three.json", [{"name": "no-identifiers"}])
 
@@ -140,9 +140,9 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.assertEqual(report["multi_source_nodes_total"], 0)
             self.assertCountEqual(
                 [
-                    record.get("extaddr", "")
+                    record.get("extAddress", "")
                     for record in merged_records
-                    if record.get("extaddr")
+                    if record.get("extAddress")
                 ],
                 ["aa11bb22cc33dd44", "ff00ee11dd22cc33"],
             )

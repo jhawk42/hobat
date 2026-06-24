@@ -12,7 +12,8 @@ import {
   getCanonicalOmrIpv6Address,
   mergeForDisplay,
   getColumnValue,
-  normalizeNestedArrayFields
+  normalizeNestedArrayFields,
+  normalizeFieldNames,
 } from './tdash-utils.js';
 import {
   chooseNodeId, buildLabel,
@@ -65,13 +66,16 @@ function buildFileMap(fileNames, rawFiles) {
 function buildEdgeEndpointTitlePart(nodeLike, fallbackId = '') {
   const rloc16 = toText(nodeLike?.rloc16) || toText(fallbackId) || 'n/a';
   const candidateId = toText(nodeLike?.id);
+  const canonicalExtaddr = getCanonicalExtaddr(nodeLike);
   const deviceLabel =
-    toText(nodeLike?.device_label)
+    toText(nodeLike?.deviceLabel)
+    || toText(nodeLike?.device_label)
     || toText(nodeLike?.name)
     || toText(nodeLike?.hostName)
     || (candidateId && candidateId !== rloc16 ? candidateId : '')
-    || toText(nodeLike?.extaddr)
     || toText(nodeLike?.extAddress)
+    || canonicalExtaddr
+    || toText(nodeLike?.extaddr)
     || '';
   return `${rloc16} ${deviceLabel}`;
 }
@@ -158,54 +162,54 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     const rawDetachedDisabledPct = getRawMetric('time_statistics.detached_disabled_pct');
     const merged = {
       id: nodeId,
-      device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
+      deviceLabel: toText(rawNode.device_label) || (existing ? existing.deviceLabel || existing.device_label : ''),
       rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
-      source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
-      extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
+      sourceId: toText(rawNode.id) || (existing ? existing.sourceId || existing.source_id : ''),
+      extAddress: toText(rawNode.extaddr) || (existing ? existing.extAddress || existing.extaddr : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
-      thread_version: toText(rawNode.thread_version) || (existing ? existing.thread_version : ''),
-      thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
-      ipv6_addrs: mergedIpv6,
-      total_children: Number.isFinite(rawNode.total_children)
-        ? rawNode.total_children : (rawChildren.length || (existing ? existing.total_children : 0)),
-      total_links: mergedTotalLinks,
-      total_link_3: mergedTotalLink3,
-      total_link_2: mergedTotalLink2,
-      total_link_1: mergedTotalLink1,
-      lq3_ratio: lq3Ratio,
-      lq1_ratio: lq1Ratio,
-      has_child_lq_medium: hasChildLqMedium || (existing ? existing.has_child_lq_medium === true : false),
-      has_child_lq_poor: hasChildLqPoor || (existing ? existing.has_child_lq_poor === true : false),
-      ifindiscards_pct: Number.isFinite(rawPacketErrorDiscardPct) ? rawPacketErrorDiscardPct
-        : (existing && Number.isFinite(existing.ifindiscards_pct) ? existing.ifindiscards_pct : undefined),
-      ifinerrors_pct: Number.isFinite(rawInerrorsPct) ? rawInerrorsPct
-        : (existing && Number.isFinite(existing.ifinerrors_pct) ? existing.ifinerrors_pct : undefined),
-      ifouterrors_pct: Number.isFinite(rawOuterrorsPct) ? rawOuterrorsPct
-        : (existing && Number.isFinite(existing.ifouterrors_pct) ? existing.ifouterrors_pct : undefined),
-      iftotalerrors_totalpkts_ratio: rawTotalErrorsRatio !== undefined ? rawTotalErrorsRatio
-        : (existing && Number.isFinite(existing.iftotalerrors_totalpkts_ratio) ? existing.iftotalerrors_totalpkts_ratio : undefined),
-      iftotaldiscards_totalpkts_ratio: rawTotalDiscardsRatio !== undefined ? rawTotalDiscardsRatio
-        : (existing && Number.isFinite(existing.iftotaldiscards_totalpkts_ratio) ? existing.iftotaldiscards_totalpkts_ratio : undefined),
-      mode_device: rawModeDevice || (existing ? existing.mode_device : ''),
-      partitionidchanges: Number.isFinite(rawPartitionIdChanges) ? rawPartitionIdChanges
-        : (existing && Number.isFinite(existing.partitionidchanges) ? existing.partitionidchanges : undefined),
-      parentchanges: Number.isFinite(rawParentChanges) ? rawParentChanges
-        : (existing && Number.isFinite(existing.parentchanges) ? existing.parentchanges : undefined),
-      betterpartitionattachattempts: rawBetterPartition !== undefined ? rawBetterPartition
-        : (existing && Number.isFinite(existing.betterpartitionattachattempts) ? existing.betterpartitionattachattempts : undefined),
-      totalparentpartitionchanges: rawTotalParentPartition !== undefined ? rawTotalParentPartition
-        : (existing && Number.isFinite(existing.totalparentpartitionchanges) ? existing.totalparentpartitionchanges : undefined),
-      router_pct: rawRouterPct !== undefined ? rawRouterPct
-        : (existing && Number.isFinite(existing.router_pct) ? existing.router_pct : undefined),
-      detached_disabled_pct: rawDetachedDisabledPct !== undefined ? rawDetachedDisabledPct
-        : (existing && Number.isFinite(existing.detached_disabled_pct) ? existing.detached_disabled_pct : undefined),
+      threadVersion: toText(rawNode.thread_version) || (existing ? existing.threadVersion || existing.thread_version : ''),
+      threadStackVersion: toText(rawNode.thread_stack_version) || (existing ? existing.threadStackVersion || existing.thread_stack_version : ''),
+      ipv6Addresses: mergedIpv6,
+      totalChildren: Number.isFinite(rawNode.total_children)
+        ? rawNode.total_children : (rawChildren.length || (existing ? existing.totalChildren || existing.total_children : 0)),
+      totalLinks: mergedTotalLinks,
+      totalLink3: mergedTotalLink3,
+      totalLink2: mergedTotalLink2,
+      totalLink1: mergedTotalLink1,
+      lq3Ratio: lq3Ratio,
+      lq1Ratio: lq1Ratio,
+      hasChildLqMedium: hasChildLqMedium || (existing ? (existing.hasChildLqMedium || existing.has_child_lq_medium) === true : false),
+      hasChildLqPoor: hasChildLqPoor || (existing ? (existing.hasChildLqPoor || existing.has_child_lq_poor) === true : false),
+      ifInDiscardsPct: Number.isFinite(rawPacketErrorDiscardPct) ? rawPacketErrorDiscardPct
+        : (existing && Number.isFinite(existing.ifInDiscardsPct || existing.ifindiscards_pct) ? (existing.ifInDiscardsPct || existing.ifindiscards_pct) : undefined),
+      ifInErrorsPct: Number.isFinite(rawInerrorsPct) ? rawInerrorsPct
+        : (existing && Number.isFinite(existing.ifInErrorsPct || existing.ifinerrors_pct) ? (existing.ifInErrorsPct || existing.ifinerrors_pct) : undefined),
+      ifOutErrorsPct: Number.isFinite(rawOuterrorsPct) ? rawOuterrorsPct
+        : (existing && Number.isFinite(existing.ifOutErrorsPct || existing.ifouterrors_pct) ? (existing.ifOutErrorsPct || existing.ifouterrors_pct) : undefined),
+      ifTotalErrorsTotalPktsRatio: rawTotalErrorsRatio !== undefined ? rawTotalErrorsRatio
+        : (existing && Number.isFinite(existing.ifTotalErrorsTotalPktsRatio || existing.iftotalerrors_totalpkts_ratio) ? (existing.ifTotalErrorsTotalPktsRatio || existing.iftotalerrors_totalpkts_ratio) : undefined),
+      ifTotalDiscardsTotalPktsRatio: rawTotalDiscardsRatio !== undefined ? rawTotalDiscardsRatio
+        : (existing && Number.isFinite(existing.ifTotalDiscardsTotalPktsRatio || existing.iftotaldiscards_totalpkts_ratio) ? (existing.ifTotalDiscardsTotalPktsRatio || existing.iftotaldiscards_totalpkts_ratio) : undefined),
+      modeDevice: rawModeDevice || (existing ? existing.modeDevice || existing.mode_device : ''),
+      partitionIdChanges: Number.isFinite(rawPartitionIdChanges) ? rawPartitionIdChanges
+        : (existing && Number.isFinite(existing.partitionIdChanges || existing.partitionidchanges) ? (existing.partitionIdChanges || existing.partitionidchanges) : undefined),
+      parentChanges: Number.isFinite(rawParentChanges) ? rawParentChanges
+        : (existing && Number.isFinite(existing.parentChanges || existing.parentchanges) ? (existing.parentChanges || existing.parentchanges) : undefined),
+      betterPartitionAttachAttempts: rawBetterPartition !== undefined ? rawBetterPartition
+        : (existing && Number.isFinite(existing.betterPartitionAttachAttempts || existing.betterpartitionattachattempts) ? (existing.betterPartitionAttachAttempts || existing.betterpartitionattachattempts) : undefined),
+      totalParentPartitionChanges: rawTotalParentPartition !== undefined ? rawTotalParentPartition
+        : (existing && Number.isFinite(existing.totalParentPartitionChanges || existing.totalparentpartitionchanges) ? (existing.totalParentPartitionChanges || existing.totalparentpartitionchanges) : undefined),
+      routerPct: rawRouterPct !== undefined ? rawRouterPct
+        : (existing && Number.isFinite(existing.routerPct || existing.router_pct) ? (existing.routerPct || existing.router_pct) : undefined),
+      detachedDisabledPct: rawDetachedDisabledPct !== undefined ? rawDetachedDisabledPct
+        : (existing && Number.isFinite(existing.detachedDisabledPct || existing.detached_disabled_pct) ? (existing.detachedDisabledPct || existing.detached_disabled_pct) : undefined),
       br: rawNode.br === true || (existing ? existing.br === true : false),
-      from_meshdiag: (style.source === 'meshdiag') || (existing ? existing.from_meshdiag === true : false),
-      from_networkdiagnostic: (style.source === 'networkdiagnostic') || (existing ? existing.from_networkdiagnostic === true : false),
+      fromMeshdiag: (style.source === 'meshdiag') || (existing ? (existing.fromMeshdiag || existing.from_meshdiag) === true : false),
+      fromNetworkdiagnostic: (style.source === 'networkdiagnostic') || (existing ? (existing.fromNetworkdiagnostic || existing.from_networkdiagnostic) === true : false),
       shape: (existing && existing.shape === NODE_SHAPES.child) ? NODE_SHAPES.child : (style.shape || (existing ? existing.shape : NODE_SHAPES.router)),
       color: style.color || (existing ? existing.color : NODE_COLORS.router)
     };
-    merged.is_ftd_router = merged.mode_device === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
+    merged.isFtdRouter = merged.modeDevice === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
     // Apply role-based color overrides
     if (merged.br) {
       merged.color = NODE_COLORS.borderRouter;
@@ -213,7 +217,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       // Child nodes (ellipse shape) should always use child color, not router default
       merged.color = NODE_COLORS.child;
     }
-    nodeMap.set(nodeId, merged);
+    nodeMap.set(nodeId, normalizeFieldNames(merged));
   }
 
   function ensureNode(nodeId, rawNode, style) {
@@ -550,32 +554,32 @@ export function adaptEve(fileMap) {
     const merged = {
       id: nodeId,
       name: toText(rawNode.name) || (existing ? existing.name : ''),
-      device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
+      deviceLabel: toText(rawNode.device_label) || (existing ? existing.deviceLabel || existing.device_label : ''),
       rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
-      source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
-      extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
+      sourceId: toText(rawNode.id) || (existing ? existing.sourceId || existing.source_id : ''),
+      extAddress: toText(rawNode.extaddr) || (existing ? existing.extAddress || existing.extaddr : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
-      thread_version: toText(rawNode.thread_version) || (existing ? existing.thread_version : ''),
-      thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
-      total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
-      total_links: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.total_links : 0),
-      ifindiscards_pct: Number.isFinite(rawNode.mac_counters?.ifindiscards_pct)
-        ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifindiscards_pct),
-      iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
-        ? rawNode.mac_counters.iftotalerrors_pct : (existing?.iftotalerrors_pct),
-      iftotalerrors_totalpkts_ratio: Number.isFinite(rawNode.mac_counters?.iftotalerrors_totalpkts_ratio)
-        ? rawNode.mac_counters.iftotalerrors_totalpkts_ratio : (existing?.iftotalerrors_totalpkts_ratio),
-      iftotaldiscards_totalpkts_ratio: Number.isFinite(rawNode.mac_counters?.iftotaldiscards_totalpkts_ratio)
-        ? rawNode.mac_counters.iftotaldiscards_totalpkts_ratio : (existing?.iftotaldiscards_totalpkts_ratio),
-      mode_device: toText(rawNode.mode?.device)
+      threadVersion: toText(rawNode.thread_version) || (existing ? existing.threadVersion || existing.thread_version : ''),
+      threadStackVersion: toText(rawNode.thread_stack_version) || (existing ? existing.threadStackVersion || existing.thread_stack_version : ''),
+      totalChildren: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.totalChildren || existing.total_children : 0),
+      totalLinks: Number.isFinite(rawNode.total_links) ? rawNode.total_links : (existing ? existing.totalLinks || existing.total_links : 0),
+      ifInDiscardsPct: Number.isFinite(rawNode.mac_counters?.ifindiscards_pct)
+        ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifInDiscardsPct || existing?.ifindiscards_pct),
+      ifTotalErrorsPct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
+        ? rawNode.mac_counters.iftotalerrors_pct : (existing?.ifTotalErrorsPct || existing?.iftotalerrors_pct),
+      ifTotalErrorsTotalPktsRatio: Number.isFinite(rawNode.mac_counters?.iftotalerrors_totalpkts_ratio)
+        ? rawNode.mac_counters.iftotalerrors_totalpkts_ratio : (existing?.ifTotalErrorsTotalPktsRatio || existing?.iftotalerrors_totalpkts_ratio),
+      ifTotalDiscardsTotalPktsRatio: Number.isFinite(rawNode.mac_counters?.iftotaldiscards_totalpkts_ratio)
+        ? rawNode.mac_counters.iftotaldiscards_totalpkts_ratio : (existing?.ifTotalDiscardsTotalPktsRatio || existing?.iftotaldiscards_totalpkts_ratio),
+      modeDevice: toText(rawNode.mode?.device)
         || (rawNode.type === 'router' ? 'FTD' : (rawNode.type === 'child' || rawNode.type === 'sleepy-child' ? 'MTD' : ''))
-        || (existing ? existing.mode_device : ''),
-      partitionidchanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges)
-        ? rawNode.mle_counters.partitionidchanges : (existing?.partitionidchanges),
-      parentchanges: Number.isFinite(rawNode.mle_counters?.parentchanges)
-        ? rawNode.mle_counters.parentchanges : (existing?.parentchanges),
+        || (existing ? existing.modeDevice || existing.mode_device : ''),
+      partitionIdChanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges)
+        ? rawNode.mle_counters.partitionidchanges : (existing?.partitionIdChanges || existing?.partitionidchanges),
+      parentChanges: Number.isFinite(rawNode.mle_counters?.parentchanges)
+        ? rawNode.mle_counters.parentchanges : (existing?.parentChanges || existing?.parentchanges),
       br: rawNode.br === true || (existing ? existing.br === true : false),
-      from_eve: true,
+      fromEve: true,
       shape: style.shape || (existing ? existing.shape : NODE_SHAPES.router),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
@@ -586,7 +590,7 @@ export function adaptEve(fileMap) {
       // Child nodes (ellipse shape) should always use child color
       merged.color = NODE_COLORS.child;
     }
-    nodeMap.set(nodeId, merged);
+    nodeMap.set(nodeId, normalizeFieldNames(merged));
   }
 
   eveArray.forEach((node) => {
@@ -710,7 +714,7 @@ export function adaptEveNative(fileMap) {
       // Child nodes (ellipse shape) should always use child color
       merged.color = NODE_COLORS.child;
     }
-    nodeMap.set(nodeId, merged);
+    nodeMap.set(nodeId, normalizeFieldNames(merged));
   }
 
   // Pass 1: register all nodes
@@ -807,7 +811,7 @@ export function adaptMergedDetailed(fileMap) {
   }
 
   function chooseMergedId(node, index) {
-    return toText(node.rloc16) || toText(node.id) || toText(node.extaddr) || `merged-node-${index + 1}`;
+    return toText(node.rloc16) || toText(node.id) || getCanonicalExtaddr(node) || `merged-node-${index + 1}`;
   }
 
   function upsertMergedNode(nodeId, rawNode, style) {
@@ -838,51 +842,51 @@ export function adaptMergedDetailed(fileMap) {
     const merged = {
       id: nodeId,
       name: toText(rawNode.name) || (existing ? existing.name : ''),
-      device_label: toText(rawNode.device_label) || (existing ? existing.device_label : ''),
+      deviceLabel: toText(rawNode.device_label) || (existing ? existing.deviceLabel || existing.device_label : ''),
       rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
-      source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
-      extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
+      sourceId: toText(rawNode.id) || (existing ? existing.sourceId || existing.source_id : ''),
+      extAddress: toText(rawNode.extaddr) || (existing ? existing.extAddress || existing.extaddr : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
-      thread_version: toText(rawNode.thread_version) || (existing ? existing.thread_version : ''),
-      thread_stack_version: toText(rawNode.thread_stack_version) || (existing ? existing.thread_stack_version : ''),
-      total_children: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.total_children : 0),
-      total_links: mergedTotalLinks,
-      total_link_3: mergedTotalLink3,
-      total_link_2: mergedTotalLink2,
-      total_link_1: mergedTotalLink1,
-      lq3_ratio: lq3Ratio,
-      lq1_ratio: lq1Ratio,
-      has_child_lq_medium: hasChildLqMedium || (existing ? existing.has_child_lq_medium === true : false),
-      has_child_lq_poor: hasChildLqPoor || (existing ? existing.has_child_lq_poor === true : false),
-      ifindiscards_pct: Number.isFinite(rawNode.mac_counters?.ifindiscards_pct)
-        ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifindiscards_pct),
-      iftotalerrors_pct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
-        ? rawNode.mac_counters.iftotalerrors_pct : (existing?.iftotalerrors_pct),
-      iftotalerrors_totalpkts_ratio: Number.isFinite(rawNode.mac_counters?.iftotalerrors_totalpkts_ratio)
-        ? rawNode.mac_counters.iftotalerrors_totalpkts_ratio : (existing?.iftotalerrors_totalpkts_ratio),
-      iftotaldiscards_totalpkts_ratio: Number.isFinite(rawNode.mac_counters?.iftotaldiscards_totalpkts_ratio)
-        ? rawNode.mac_counters.iftotaldiscards_totalpkts_ratio : (existing?.iftotaldiscards_totalpkts_ratio),
-      mode_device: toText(rawNode['mode.device']) || toText(rawNode.mode?.device) || (existing ? existing.mode_device : ''),
-      partitionidchanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges)
-        ? rawNode.mle_counters.partitionidchanges : (existing?.partitionidchanges),
-      parentchanges: Number.isFinite(rawNode.mle_counters?.parentchanges)
-        ? rawNode.mle_counters.parentchanges : (existing?.parentchanges),
-      betterpartitionattachattempts: Number.isFinite(rawNode.mle_counters?.betterpartitionattachattempts)
-        ? rawNode.mle_counters.betterpartitionattachattempts : (existing?.betterpartitionattachattempts),
-      totalparentpartitionchanges: Number.isFinite(rawNode.mle_counters?.totalparentpartitionchanges)
-        ? rawNode.mle_counters.totalparentpartitionchanges : (existing?.totalparentpartitionchanges),
-      router_pct: Number.isFinite(rawNode.time_statistics?.router_pct)
-        ? rawNode.time_statistics.router_pct : (existing?.router_pct),
-      detached_disabled_pct: Number.isFinite(rawNode.time_statistics?.detached_disabled_pct)
-        ? rawNode.time_statistics.detached_disabled_pct : (existing?.detached_disabled_pct),
+      threadVersion: toText(rawNode.thread_version) || (existing ? existing.threadVersion || existing.thread_version : ''),
+      threadStackVersion: toText(rawNode.thread_stack_version) || (existing ? existing.threadStackVersion || existing.thread_stack_version : ''),
+      totalChildren: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.totalChildren || existing.total_children : 0),
+      totalLinks: mergedTotalLinks,
+      totalLink3: mergedTotalLink3,
+      totalLink2: mergedTotalLink2,
+      totalLink1: mergedTotalLink1,
+      lq3Ratio: lq3Ratio,
+      lq1Ratio: lq1Ratio,
+      hasChildLqMedium: hasChildLqMedium || (existing ? (existing.hasChildLqMedium || existing.has_child_lq_medium) === true : false),
+      hasChildLqPoor: hasChildLqPoor || (existing ? (existing.hasChildLqPoor || existing.has_child_lq_poor) === true : false),
+      ifInDiscardsPct: Number.isFinite(rawNode.mac_counters?.ifindiscards_pct)
+        ? rawNode.mac_counters.ifindiscards_pct : (existing?.ifInDiscardsPct || existing?.ifindiscards_pct),
+      ifTotalErrorsPct: Number.isFinite(rawNode.mac_counters?.iftotalerrors_pct)
+        ? rawNode.mac_counters.iftotalerrors_pct : (existing?.ifTotalErrorsPct || existing?.iftotalerrors_pct),
+      ifTotalErrorsTotalPktsRatio: Number.isFinite(rawNode.mac_counters?.iftotalerrors_totalpkts_ratio)
+        ? rawNode.mac_counters.iftotalerrors_totalpkts_ratio : (existing?.ifTotalErrorsTotalPktsRatio || existing?.iftotalerrors_totalpkts_ratio),
+      ifTotalDiscardsTotalPktsRatio: Number.isFinite(rawNode.mac_counters?.iftotaldiscards_totalpkts_ratio)
+        ? rawNode.mac_counters.iftotaldiscards_totalpkts_ratio : (existing?.ifTotalDiscardsTotalPktsRatio || existing?.iftotaldiscards_totalpkts_ratio),
+      modeDevice: toText(rawNode['mode.device']) || toText(rawNode.mode?.device) || (existing ? existing.modeDevice || existing.mode_device : ''),
+      partitionIdChanges: Number.isFinite(rawNode.mle_counters?.partitionidchanges)
+        ? rawNode.mle_counters.partitionidchanges : (existing?.partitionIdChanges || existing?.partitionidchanges),
+      parentChanges: Number.isFinite(rawNode.mle_counters?.parentchanges)
+        ? rawNode.mle_counters.parentchanges : (existing?.parentChanges || existing?.parentchanges),
+      betterPartitionAttachAttempts: Number.isFinite(rawNode.mle_counters?.betterpartitionattachattempts)
+        ? rawNode.mle_counters.betterpartitionattachattempts : (existing?.betterPartitionAttachAttempts || existing?.betterpartitionattachattempts),
+      totalParentPartitionChanges: Number.isFinite(rawNode.mle_counters?.totalparentpartitionchanges)
+        ? rawNode.mle_counters.totalparentpartitionchanges : (existing?.totalParentPartitionChanges || existing?.totalparentpartitionchanges),
+      routerPct: Number.isFinite(rawNode.time_statistics?.router_pct)
+        ? rawNode.time_statistics.router_pct : (existing?.routerPct || existing?.router_pct),
+      detachedDisabledPct: Number.isFinite(rawNode.time_statistics?.detached_disabled_pct)
+        ? rawNode.time_statistics.detached_disabled_pct : (existing?.detachedDisabledPct || existing?.detached_disabled_pct),
       br: rawNode.br === true || (existing ? existing.br === true : false),
-      from_merged_detailed: true,
+      fromMergedDetailed: true,
       shape: style.shape || (existing ? existing.shape : NODE_SHAPES.router),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
-    merged.is_ftd_router = merged.mode_device === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
+    merged.isFtdRouter = merged.modeDevice === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
     if (merged.br) merged.color = NODE_COLORS.borderRouter;
-    nodeMap.set(nodeId, merged);
+    nodeMap.set(nodeId, normalizeFieldNames(merged));
   }
 
   function ensureNodeForLink(linkNode, fallbackId) {
@@ -1261,37 +1265,37 @@ export function adaptOtbrRestApi(fileMap) {
     const extaddrVal = toText(rawNode.extAddress || rawNode.extaddr).toLowerCase() || (existing ? existing.extaddr : '');
     const merged = {
       id: nodeId,
-      device_label: toText(rawNode.hostName) || toText(rawNode.device_label) || (existing ? existing.device_label : ''),
+      deviceLabel: toText(rawNode.hostName) || toText(rawNode.device_label) || (existing ? existing.deviceLabel || existing.device_label : ''),
       name: toText(rawNode.hostName) || toText(rawNode.device_label) || (existing ? existing.name : ''),
       rloc16: rloc16Val,
-      extaddr: extaddrVal,
+      extAddress: extaddrVal,
       type: roleText || toText(rawNode.type) || (existing ? existing.type : ''),
-      mode_device: modeDevice || (existing ? existing.mode_device : ''),
-      omr_ipv6_addr: toText(rawNode.omr_ipv6_addr) || (existing ? existing.omr_ipv6_addr : ''),
-      iftotalerrors_totalpkts_ratio: getRawMetric('mac_counters.iftotalerrors_totalpkts_ratio')
-        ?? (existing ? existing.iftotalerrors_totalpkts_ratio : undefined),
-      iftotaldiscards_totalpkts_ratio: getRawMetric('mac_counters.iftotaldiscards_totalpkts_ratio')
-        ?? (existing ? existing.iftotaldiscards_totalpkts_ratio : undefined),
-      partitionidchanges: getRawMetric('mle_counters.partitionidchanges')
-        ?? (existing ? existing.partitionidchanges : undefined),
-      parentchanges: getRawMetric('mle_counters.parentchanges')
-        ?? (existing ? existing.parentchanges : undefined),
-      betterpartitionattachattempts: getRawMetric('mle_counters.betterpartitionattachattempts')
-        ?? (existing ? existing.betterpartitionattachattempts : undefined),
-      totalparentpartitionchanges: getRawMetric('mle_counters.totalparentpartitionchanges')
-        ?? (existing ? existing.totalparentpartitionchanges : undefined),
-      router_pct: getRawMetric('time_statistics.router_pct')
-        ?? (existing ? existing.router_pct : undefined),
-      detached_disabled_pct: getRawMetric('time_statistics.detached_disabled_pct')
-        ?? (existing ? existing.detached_disabled_pct : undefined),
+      modeDevice: modeDevice || (existing ? existing.modeDevice || existing.mode_device : ''),
+      omrIpv6Addr: toText(rawNode.omr_ipv6_addr) || (existing ? existing.omrIpv6Addr || existing.omr_ipv6_addr : ''),
+      ifTotalErrorsTotalPktsRatio: getRawMetric('mac_counters.iftotalerrors_totalpkts_ratio')
+        ?? (existing ? existing.ifTotalErrorsTotalPktsRatio || existing.iftotalerrors_totalpkts_ratio : undefined),
+      ifTotalDiscardsTotalPktsRatio: getRawMetric('mac_counters.iftotaldiscards_totalpkts_ratio')
+        ?? (existing ? existing.ifTotalDiscardsTotalPktsRatio || existing.iftotaldiscards_totalpkts_ratio : undefined),
+      partitionIdChanges: getRawMetric('mle_counters.partitionidchanges')
+        ?? (existing ? existing.partitionIdChanges || existing.partitionidchanges : undefined),
+      parentChanges: getRawMetric('mle_counters.parentchanges')
+        ?? (existing ? existing.parentChanges || existing.parentchanges : undefined),
+      betterPartitionAttachAttempts: getRawMetric('mle_counters.betterpartitionattachattempts')
+        ?? (existing ? existing.betterPartitionAttachAttempts || existing.betterpartitionattachattempts : undefined),
+      totalParentPartitionChanges: getRawMetric('mle_counters.totalparentpartitionchanges')
+        ?? (existing ? existing.totalParentPartitionChanges || existing.totalparentpartitionchanges : undefined),
+      routerPct: getRawMetric('time_statistics.router_pct')
+        ?? (existing ? existing.routerPct || existing.router_pct : undefined),
+      detachedDisabledPct: getRawMetric('time_statistics.detached_disabled_pct')
+        ?? (existing ? existing.detachedDisabledPct || existing.detached_disabled_pct : undefined),
       br: rawNode.br === true || (existing ? existing.br === true : false),
-      from_otbr_restapi: true,
+      fromOtbrRestapi: true,
       shape: style.shape || (existing ? existing.shape : (isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router)),
       color: style.color || (existing ? existing.color : NODE_COLORS.router)
     };
-    merged.is_ftd_router = merged.mode_device === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
+    merged.isFtdRouter = merged.modeDevice === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
     if (merged.br) merged.color = NODE_COLORS.borderRouter;
-    nodeMap.set(nodeId, merged);
+    nodeMap.set(nodeId, normalizeFieldNames(merged));
   }
 
   // Pass 1: register nodes from devices (extAddress as node ID)

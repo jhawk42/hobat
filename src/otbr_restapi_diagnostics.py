@@ -16,6 +16,7 @@ from otbr_restapi_util import (
     OTBRInvalidResponseError,
     OTBRRestApiClient,
 )
+from json_key_normalizer import convert_keys_to_camel_case
 import util_network
 
 _MEDIUM_DIAGNOSTIC_TLVS: list[str] = [
@@ -338,13 +339,13 @@ def dispatch_diagnostics(
                 _apply_mac_enrichment(items)
                 _apply_time_stats_enrichment(items)
                 _apply_border_router_enrichment(items)
-            return diagnostics
+            return convert_keys_to_camel_case(diagnostics)
 
         if isinstance(diagnostics, list):
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
             _apply_border_router_enrichment(diagnostics)
-        return diagnostics
+        return convert_keys_to_camel_case(diagnostics)
     if args.diagnostics_command == "get":
         return client.get_diagnostic(args.diagnostics_id, raw=raw_arg)
     if args.diagnostics_command == "fetch":
@@ -363,7 +364,7 @@ def dispatch_diagnostics(
         )
         if not getattr(args, "no_enrich_mac_counters", False):
             _apply_mac_enrichment([result])
-        return result
+        return convert_keys_to_camel_case(result)
     if args.diagnostics_command == "fetch-all":
         resolved_types = resolve_types(args)
         fallback_types = resolve_fallback_types(args)
@@ -395,6 +396,6 @@ def dispatch_diagnostics(
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
             _apply_border_router_enrichment(diagnostics)
-        return diagnostics
+        return convert_keys_to_camel_case(diagnostics)
 
     raise ValueError("Unsupported diagnostics command")

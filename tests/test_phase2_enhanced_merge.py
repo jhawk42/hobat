@@ -97,15 +97,7 @@ def test_partition_extraction():
     """Test partition ID extraction."""
     print("\n=== Test: Partition ID Extraction ===")
     
-    # CLI format (snake_case)
-    record_cli = {
-        "leader_data": {
-            "partition_id": "0x12345678"
-        }
-    }
-    assert get_partition_id(record_cli) == "0x12345678"
-    
-    # REST API format (camelCase)
+    # Canonical format (camelCase)
     record_rest = {
         "leaderData": {
             "partitionId": 305419896  # Decimal
@@ -128,28 +120,28 @@ def test_route_data_merge_no_duplicates():
     owner_rloc16 = "0x1400"
     partition_id = "0x12345678"
     
-    # Base route_data object
+    # Base route object (canonical camelCase)
     base_route_data = {
-        "id_sequence": 100,
-        "route_data": [
-            {"route_id": "0x03", "link_quality_out": 3, "route_cost": 1}
+        "idSequence": 100,
+        "routeData": [
+            {"routeId": "0x03", "linkQualityOut": 3, "routeCost": 1}
         ]
     }
     
-    # Incoming route_data object with updated route to 0x03 with same sequence
+    # Incoming route object with updated route to 0x03 with same sequence
     incoming_route_data = {
-        "id_sequence": 100,
-        "route_data": [
-            {"route_id": "0x03", "link_quality_out": 2, "route_cost": 2}
+        "idSequence": 100,
+        "routeData": [
+            {"routeId": "0x03", "linkQualityOut": 2, "routeCost": 2}
         ]
     }
     
     result = merge_route_data(owner_rloc16, base_route_data, incoming_route_data, partition_id)
     
-    # Should have only ONE entry for route_id 0x03
-    routes = result.get("route_data", [])
+    # Should have only ONE entry for routeId 0x03
+    routes = result.get("routeData", [])
     assert len(routes) == 1
-    assert routes[0]["route_id"] == "0x03"
+    assert routes[0]["routeId"] == "0x03"
     
     print(f"✅ PASS: Route merge prevents duplicates (1 route, not 2)")
 
@@ -161,29 +153,29 @@ def test_route_data_sequence_precedence():
     owner_rloc16 = "0x1400"
     partition_id = "0x12345678"
     
-    # Base route_data has older sequence
+    # Base route has older sequence
     base_route_data = {
-        "id_sequence": 50,
-        "route_data": [
-            {"route_id": "0x03", "link_quality_out": 1}
+        "idSequence": 50,
+        "routeData": [
+            {"routeId": "0x03", "linkQualityOut": 1}
         ]
     }
     
-    # Incoming route_data has newer sequence
+    # Incoming route has newer sequence
     incoming_route_data = {
-        "id_sequence": 100,
-        "route_data": [
-            {"route_id": "0x03", "link_quality_out": 3}
+        "idSequence": 100,
+        "routeData": [
+            {"routeId": "0x03", "linkQualityOut": 3}
         ]
     }
     
     result = merge_route_data(owner_rloc16, base_route_data, incoming_route_data, partition_id)
     
     # Should use incoming (newer sequence)
-    seq = result.get("id_sequence")
+    seq = result.get("idSequence")
     assert seq == 100
-    routes = result.get("route_data", [])
-    assert routes[0]["link_quality_out"] == 3
+    routes = result.get("routeData", [])
+    assert routes[0]["linkQualityOut"] == 3
     
     print("✅ PASS: Route data respects sequence precedence (newer wins)")
 
@@ -195,49 +187,49 @@ def test_route_data_wraparound_sequence():
     owner_rloc16 = "0x1400"
     partition_id = "0x12345678"
     
-    # Base route_data has high sequence (near wrap)
+    # Base route has high sequence (near wrap)
     base_route_data = {
-        "id_sequence": 250,
-        "route_data": [
-            {"route_id": "0x03", "link_quality_out": 1}
+        "idSequence": 250,
+        "routeData": [
+            {"routeId": "0x03", "linkQualityOut": 1}
         ]
     }
     
-    # Incoming route_data has wrapped sequence (should be newer)
+    # Incoming route has wrapped sequence (should be newer)
     incoming_route_data = {
-        "id_sequence": 5,
-        "route_data": [
-            {"route_id": "0x03", "link_quality_out": 3}
+        "idSequence": 5,
+        "routeData": [
+            {"routeId": "0x03", "linkQualityOut": 3}
         ]
     }
     
     result = merge_route_data(owner_rloc16, base_route_data, incoming_route_data, partition_id)
     
     # Should use incoming (5 > 250 with wraparound)
-    seq = result.get("id_sequence")
+    seq = result.get("idSequence")
     assert seq == 5
-    routes = result.get("route_data", [])
-    assert routes[0]["link_quality_out"] == 3
+    routes = result.get("routeData", [])
+    assert routes[0]["linkQualityOut"] == 3
     
     print("✅ PASS: Route data handles sequence wraparound correctly")
 
 
 def test_route_data_camelcase_snakecase():
-    """Test route data merge with camelCase vs snake_case."""
-    print("\n=== Test: Route Data camelCase vs snake_case ===")
+    """Test route data merge with camelCase canonical format."""
+    print("\n=== Test: Route Data camelCase Canonical Format ===")
     
     owner_rloc16 = "0x1400"
     partition_id = "0x12345678"
     
-    # CLI format (snake_case)
+    # Base route (camelCase canonical)
     base_route_data = {
-        "id_sequence": 100,
-        "route_data": [
-            {"route_id": "0x03", "link_quality_out": 3}
+        "idSequence": 100,
+        "routeData": [
+            {"routeId": "0x03", "linkQualityOut": 3}
         ]
     }
     
-    # REST API format (camelCase, different parent name!)
+    # Incoming route (camelCase canonical)
     incoming_route = {
         "idSequence": 100,
         "routeData": [
@@ -245,14 +237,14 @@ def test_route_data_camelcase_snakecase():
         ]
     }
     
-    # Should recognize as same route despite different naming
+    # Should recognize as same route
     result = merge_route_data(owner_rloc16, base_route_data, incoming_route, partition_id)
     
     # Should have merged (no duplicates)
-    routes = result.get("route_data", [])
+    routes = result.get("routeData", [])
     assert len(routes) == 1
     
-    print("✅ PASS: Route data merges camelCase and snake_case correctly")
+    print("✅ PASS: Route data merges canonical camelCase correctly")
 
 
 def test_children_array_merge_no_duplicates():
@@ -261,10 +253,10 @@ def test_children_array_merge_no_duplicates():
     
     parent_rloc16 = "0x1400"
     
-    # Base has child with extaddr
+    # Base has child with extAddress
     base = [
         {
-            "extaddr": "0011223344556677",
+            "extAddress": "0011223344556677",
             "childId": 1,
             "age": 100,
         }
@@ -273,7 +265,7 @@ def test_children_array_merge_no_duplicates():
     # Incoming has same child with updated data
     incoming = [
         {
-            "extaddr": "0011223344556677",
+            "extAddress": "0011223344556677",
             "childId": 1,
             "age": 150,
             "averageRssi": -50,
@@ -284,7 +276,7 @@ def test_children_array_merge_no_duplicates():
     
     # Should have only ONE child entry
     assert len(result) == 1
-    assert result[0]["extaddr"] == "0011223344556677"
+    assert result[0]["extAddress"] == "0011223344556677"
     assert result[0]["averageRssi"] == -50  # Merged new field
     
     print("✅ PASS: Children array merge prevents duplicates")
@@ -298,7 +290,7 @@ def test_children_array_different_parents():
     parent_a_rloc16 = "0x1400"
     parent_a_children = [
         {
-            "extaddr": "0011223344556677",
+            "extAddress": "0011223344556677",
             "childId": 1,
         }
     ]
@@ -307,7 +299,7 @@ def test_children_array_different_parents():
     parent_b_rloc16 = "0x1800"
     parent_b_children = [
         {
-            "extaddr": "8899aabbccddeeff",
+            "extAddress": "8899aabbccddeeff",
             "childId": 1,  # Same childId, different child!
         }
     ]
@@ -318,7 +310,7 @@ def test_children_array_different_parents():
     
     assert len(result_a) == 1
     assert len(result_b) == 1
-    assert result_a[0]["extaddr"] != result_b[0]["extaddr"]
+    assert result_a[0]["extAddress"] != result_b[0]["extAddress"]
     
     print("✅ PASS: childId correctly treated as parent-local (not globally unique)")
 
@@ -329,7 +321,7 @@ def test_router_neighbors_merge():
     
     base = [
         {
-            "extaddr": "0011223344556677",
+            "extAddress": "0011223344556677",
             "rloc16": "0x1400",
             "linkQualityIn": 3,
         }
@@ -337,7 +329,7 @@ def test_router_neighbors_merge():
     
     incoming = [
         {
-            "extaddr": "0011223344556677",
+            "extAddress": "0011223344556677",
             "rloc16": "0x1400",
             "linkQualityOut": 2,
         }
@@ -347,7 +339,7 @@ def test_router_neighbors_merge():
     
     # Should merge into one neighbor
     assert len(result) == 1
-    assert result[0]["extaddr"] == "0011223344556677"
+    assert result[0]["extAddress"] == "0011223344556677"
     assert result[0]["linkQualityIn"] == 3
     assert result[0]["linkQualityOut"] == 2
     
@@ -360,24 +352,24 @@ def test_deep_merge_with_route_data():
     
     base = {
         "rloc16": "0x1400",
-        "extaddr": "0011223344556677",
-        "leader_data": {
-            "partition_id": "0x12345678"
+        "extAddress": "0011223344556677",
+        "leaderData": {
+            "partitionId": "0x12345678"
         },
-        "route_data": {
-            "id_sequence": 100,
-            "route_data": [
-                {"route_id": "0x03", "link_quality_out": 3}
+        "route": {
+            "idSequence": 100,
+            "routeData": [
+                {"routeId": "0x03", "linkQualityOut": 3}
             ]
         }
     }
     
     incoming = {
-        "route_data": {
-            "id_sequence": 100,
-            "route_data": [
-                {"route_id": "0x03", "link_quality_out": 2},
-                {"route_id": "0x05", "link_quality_out": 3},
+        "route": {
+            "idSequence": 100,
+            "routeData": [
+                {"routeId": "0x03", "linkQualityOut": 2},
+                {"routeId": "0x05", "linkQualityOut": 3},
             ]
         }
     }
@@ -385,8 +377,8 @@ def test_deep_merge_with_route_data():
     result = deep_merge(deepcopy(base), incoming)
     
     # Should have merged routes (no duplicate 0x03)
-    routes = result.get("route_data", {}).get("route_data", [])
-    route_ids = [r.get("route_id") for r in routes]
+    routes = result.get("route", {}).get("routeData", [])
+    route_ids = [r.get("routeId") for r in routes]
     assert "0x03" in route_ids
     assert "0x05" in route_ids
     assert len([rid for rid in route_ids if rid == "0x03"]) == 1  # No duplicate
@@ -400,54 +392,54 @@ def test_deep_merge_with_children():
     
     base = {
         "rloc16": "0x1400",
-        "extaddr": "0011223344556677",
-        "children": [
-            {"extaddr": "aabbccddeeff0011", "childId": 1, "age": 100}
+        "extAddress": "0011223344556677",
+        "childTable": [
+            {"extAddress": "aabbccddeeff0011", "childId": 1, "age": 100}
         ]
     }
     
     incoming = {
-        "children": [
-            {"extaddr": "aabbccddeeff0011", "childId": 1, "age": 150, "averageRssi": -50}
+        "childTable": [
+            {"extAddress": "aabbccddeeff0011", "childId": 1, "age": 150, "averageRssi": -50}
         ]
     }
     
     result = deep_merge(deepcopy(base), incoming)
     
     # Should have merged children (no duplicate)
-    children = result.get("children", [])
+    children = result.get("childTable", [])
     assert len(children) == 1
-    assert children[0]["extaddr"] == "aabbccddeeff0011"
+    assert children[0]["extAddress"] == "aabbccddeeff0011"
     assert children[0]["averageRssi"] == -50
     
     print("✅ PASS: deep_merge correctly handles children array")
 
 
-def test_integration_cli_and_rest_api():
-    """Test full integration: CLI + REST API merge."""
-    print("\n=== Test: Integration - CLI + REST API ===")
+def test_integration_canonical_merge():
+    """Test full integration: canonical camelCase merge."""
+    print("\n=== Test: Integration - Canonical camelCase Merge ===")
     
-    # CLI data (snake_case)
-    cli_node = {
-        "extaddr": "0011223344556677",
+    # First node data (camelCase canonical)
+    node1 = {
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "leader_data": {
-            "partition_id": "0x12345678"
+        "leaderData": {
+            "partitionId": "0x12345678"
         },
-        "route_data": {
-            "id_sequence": 100,
-            "route_data": [
-                {"route_id": "0x03", "link_quality_out": 3}
+        "route": {
+            "idSequence": 100,
+            "routeData": [
+                {"routeId": "0x03", "linkQualityOut": 3}
             ]
         },
-        "children": [
-            {"extaddr": "aabbccddeeff0011", "age": 100}
+        "childTable": [
+            {"extAddress": "aabbccddeeff0011", "age": 100}
         ],
         "_source_files": ["td-otbr-cli-networkdiag-fetch-all.json"]
     }
     
-    # REST API data (camelCase, different parent names)
-    rest_node = {
+    # Second node data (camelCase canonical)
+    node2 = {
         "extAddress": "0011223344556677",
         "rloc16": "0x1400",
         "leaderData": {
@@ -469,24 +461,20 @@ def test_integration_cli_and_rest_api():
         "_source_files": ["td-otbr-restapi-diagnostics.json"]
     }
     
-    result = deep_merge(deepcopy(cli_node), rest_node)
+    result = deep_merge(deepcopy(node1), node2)
     
     # Verify merged correctly
-    assert result["extaddr"] == "0011223344556677"
+    assert result["extAddress"] == "0011223344556677"
     assert len(result["_source_files"]) == 2
     
     # Verify route data merged (no duplicates for 0x03)
-    routes = []
-    if "route_data" in result:
-        route_obj = result["route_data"]
-        if isinstance(route_obj, dict):
-            routes = route_obj.get("route_data", [])
+    routes = result.get("route", {}).get("routeData", [])
     
-    # Extract route_ids from merged routes (check both snake_case and camelCase)
+    # Extract routeIds from merged routes
     route_ids = []
     for r in routes:
         if isinstance(r, dict):
-            rid = r.get("route_id") or r.get("routeId")
+            rid = r.get("routeId")
             if rid:
                 route_ids.append(rid)
     
@@ -494,14 +482,14 @@ def test_integration_cli_and_rest_api():
     assert "0x05" in route_ids, f"Should have route 0x05, got: {route_ids}"
     
     # Verify children merged
-    children = result.get("children", [])
+    children = result.get("childTable", [])
     assert len(children) == 1
     
     # Verify router neighbors added
     neighbors = result.get("routerNeighbors", [])
     assert len(neighbors) == 1
     
-    print("✅ PASS: Full CLI + REST API integration works correctly")
+    print("✅ PASS: Full canonical camelCase integration works correctly")
 
 
 def run_all_tests():

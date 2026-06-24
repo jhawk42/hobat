@@ -46,7 +46,7 @@ import {
   PHYSICS_PROFILES,
   getPhysicsProfileLabel,
 } from "./tdash-constants.js";
-import { initDetailPanelToggles, formatAgo, formatDuration, toFiniteNumber } from "./tdash-utils.js";
+import { initDetailPanelToggles, formatAgo, formatDuration, toFiniteNumber, getColumnValue, toText } from "./tdash-utils.js";
 import {
   populateFilterSelects,
   populateDiagnosticFilterBySource,
@@ -597,7 +597,7 @@ function updateCacheCheckboxes(changedCheckbox) {
 // Mirrors isChildNode() in tdash-topology-utils.js but operates on row objects.
 // Comparison is case-insensitive because some sources emit "Child" (capitalised).
 function isChildRow(r) {
-  const t = (r.type || "").toLowerCase();
+  const t = toText(getColumnValue(r, "type")).toLowerCase();
   return t === "child" || t === "sleepy-child";
 }
 
@@ -608,7 +608,7 @@ function isChildRow(r) {
 // (rloc16 / br / type), which is the case for non-Thread sources such as mDNS.
 function computeRowCounts(rows) {
   const hasThreadClassification = rows.some(
-    (r) => r.rloc16 != null || r.br != null || r.type != null,
+    (r) => getColumnValue(r, "rloc16") != null || getColumnValue(r, "br") != null || getColumnValue(r, "type") != null,
   );
   if (!hasThreadClassification) {
     return {
@@ -620,10 +620,10 @@ function computeRowCounts(rows) {
   let tl3 = 0, tl2 = 0, tl1 = 0, tl = 0, hasLinkFields = false;
   const routerRows = rows.filter((r) => !isChildRow(r));
   routerRows.forEach((r) => {
-    const v3 = toFiniteNumber(r.total_link_3);
-    const v2 = toFiniteNumber(r.total_link_2);
-    const v1 = toFiniteNumber(r.total_link_1);
-    const vt = toFiniteNumber(r.total_links);
+    const v3 = toFiniteNumber(getColumnValue(r, "totalLink3") ?? getColumnValue(r, "total_link_3"));
+    const v2 = toFiniteNumber(getColumnValue(r, "totalLink2") ?? getColumnValue(r, "total_link_2"));
+    const v1 = toFiniteNumber(getColumnValue(r, "totalLink1") ?? getColumnValue(r, "total_link_1"));
+    const vt = toFiniteNumber(getColumnValue(r, "totalLinks") ?? getColumnValue(r, "total_links"));
     if (Number.isFinite(v3)) { tl3 += v3; hasLinkFields = true; }
     if (Number.isFinite(v2)) { tl2 += v2; hasLinkFields = true; }
     if (Number.isFinite(v1)) { tl1 += v1; hasLinkFields = true; }
@@ -631,8 +631,8 @@ function computeRowCounts(rows) {
   });
   return {
     devices:       rows.length,
-    borderRouters: rows.filter((r) => r.br === true).length,
-    routers:       routerRows.filter((r) => !r.br).length,
+    borderRouters: rows.filter((r) => getColumnValue(r, "br") === true).length,
+    routers:       routerRows.filter((r) => getColumnValue(r, "br") !== true).length,
     children:      rows.filter((r) => isChildRow(r)).length,
     links: hasLinkFields ? Math.round(tl  / 2) : null,
     lq3:   hasLinkFields ? Math.round(tl3 / 2) : null,

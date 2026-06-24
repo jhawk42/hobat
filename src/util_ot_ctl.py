@@ -27,10 +27,11 @@ def exec_ot_ctl_dispatch(cmd, container_name=None):
     """
 
     # Construct the docker exec command
-    # 'sh -c' is often used to ensure the command executes correctly in the container shell
+    # -i flag keeps STDIN open, preventing premature termination for large outputs
     docker_cmd = [
         "docker",
         "exec",
+        "-i",
         container_name,
         "sh",
         "-c",

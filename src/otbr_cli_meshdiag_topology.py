@@ -8,6 +8,7 @@ from typing import Sequence
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 import util_ot_ctl
 import util_network
+from json_key_normalizer import convert_keys_to_camel_case
 from extaddr_device_label_map import load_extaddr_device_label_map
 from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
@@ -405,11 +406,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         save_path = data_file_path(
             "td-otbr-cli-meshdiag-topology.json", td_data_dir)
-        save_json_atomic(meshdiag_topology_data, save_path)
+
+        logging.info("Saving %d entries of meshdiag topology data into %s as JSON...", len(meshdiag_topology_data), save_path)
+        converted = convert_keys_to_camel_case(meshdiag_topology_data)
+        logging.info("Saved %d entries after converting keys to camel case for meshdiag topology data.", len(converted))
+        save_json_atomic(converted, save_path)
 
         logging.debug("Saved meshdiag topology data into %s as JSON:\n%s",
-                      save_path, json.dumps(meshdiag_topology_data, indent=4))
-        logging.info(f"Saved meshdiag topology with {len(meshdiag_topology_data)} entries into {save_path}.")
+                      save_path, json.dumps(converted, indent=4))
+        logging.info(f"Saved meshdiag topology with {len(converted)} entries into {save_path}.")
         return 0
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         logging.error(f"Invalid payload while collecting meshdiag-topology: {exc}")

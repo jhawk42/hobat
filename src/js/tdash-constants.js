@@ -52,11 +52,13 @@ export const SOURCE_PRECEDENCE = Object.freeze({
 //
 export const FIELD_ALIASES = Object.freeze({
   extaddr:              ["extAddress", "Extended MAC"],
-  omr_ipv6_addr:        ["omrIpv6Address"],
+  omr_ipv6_addr:        ["omrIpv6Address", "omrIpv6Addr"],
   router_id:            ["routerId"],
-  device_label:         ["name", "hostName"],
+  device_label:         ["deviceLabel", "name", "hostName"],
+  thread_version:       ["threadVersion"],
   eui64:                ["EUI64"],
-  route_data:           ["route"],
+  ipv6_addrs:           ["ipv6Addresses"],
+  route_data:           ["route", "routeData"],
   leader_data:          ["leaderData"],
   route_id:             ["routeId"],
   route_cost:           ["routeCost"],
@@ -83,7 +85,19 @@ export const FIELD_ALIASES = Object.freeze({
   vendor_model:         ["vendorModel"],
   vendor_sw_version:    ["vendorSwVersion"],
   thread_stack_version: ["threadStackVersion"],
+  total_children:       ["totalChildren"],
+  total_links:          ["totalLinks"],
+  total_link_3:         ["totalLink3"],
+  total_link_2:         ["totalLink2"],
+  total_link_1:         ["totalLink1"],
+  router_neighbor_table: ["routerNeighbors"],
+  router_neighbor_table_count: ["routerNeighborsCount"],
+  router_child_table:   ["childTable"],
+  router_child_table_count: ["childTableCount"],
+  conn_time:            ["connectionTime"],
+  ver:                  ["version"],
   rx_on_when_idle:      ["rxOnWhenIdle"],
+  rx_on:                ["rxOnWhenIdle"],
   device_type:          ["deviceTypeFTD"],
   network_data:         ["fullNetworkData"],
   mac_counters:         ["macCounters"],
@@ -103,12 +117,20 @@ export const FIELD_ALIASES = Object.freeze({
   iftotaldiscards_totalpkts_ratio: ["ifTotalDiscardsTotalPktsRatio"],
   router_pct:           ["routerPct"],
   detached_disabled_pct: ["detachedDisabledPct"],
+  ifinerrors_totalerrors_pct: ["ifInErrorsPercentage"],
+  ifouterrors_totalerrors_pct: ["ifOutErrorsPercentage"],
+  ifindiscards_totaldiscards_pct: ["ifInDiscardsPercentage"],
+  ifoutdiscards_totaldiscards_pct: ["ifOutDiscardsPercentage"],
   // ── Link quality fields (router neighbors & children) ─────────────────────
   err_rate_frame_pct:   ["frameErrorRate"],
   err_rate_msg_pct:     ["messageErrorRate"],
   rss_ave:              ["averageRssi"],
+  rss_last:             ["lastRssi"],
   rss_margin:           ["linkMargin"],
   q_msg:                ["queuedMessageCount"],
+  "3_links":           ["links3", "link3"],
+  "2_links":           ["links2", "link2"],
+  "1_links":           ["links1", "link1"],
 });
 
 // ── Link filter constants ─────────────────────────────────────────────────────
@@ -947,15 +969,15 @@ export function getIsolatedAnchorPresetLabel(name) {
  * Fields appear in the table view in this order (left to right).
  * The priority system organizes fields into 5 tiers:
  * 
- * - **TIER 1: Primary Identity** - Core device identifiers (rloc16, extaddr, device_label, routerId)
- * - **TIER 2: Secondary Identity** - Additional identifiers (omr_ipv6_addr, mlEidIid, room)
+ * - **TIER 1: Primary Identity** - Core device identifiers (rloc16, extAddress, deviceLabel, routerId)
+ * - **TIER 2: Secondary Identity** - Additional identifiers (omrIpv6Addr, mlEidIid, room)
  * - **TIER 3: Device Role & Status** - Device type, role, and mode information
  * - **TIER 4: Topology & Connectivity** - Network topology, link quality, connectivity metrics
  * - **TIER 5: Advanced/Diagnostic** - Detailed diagnostics, vendor info, MLE/MAC counters
  * 
  * **Field Naming Conventions:**
- * - Supports both snake_case (CLI datasets) and camelCase (REST API datasets)
- * - Both variants can appear (e.g., extaddr and extAddress, omr_ipv6_addr and omrIpv6Address)
+ * - Uses camelCase-first ordering while preserving legacy snake_case aliases
+ * - Both variants can appear (e.g., extAddress/extaddr, omrIpv6Addr/omr_ipv6_addr)
  * - Missing fields are gracefully hidden (no errors)
  * 
  * **Dataset Compatibility:**
@@ -970,16 +992,18 @@ export function getIsolatedAnchorPresetLabel(name) {
 export const TABLE_PRIORITY_COLUMNS = [
   // === TIER 1: Primary Identity ===
   "rloc16",
+  "extAddress",
   "extaddr",
-  "device_label",
+  "deviceLabel",
   "name",
-  "router_id",
+  "routerId",
   "eui64",
   "id",
   "ID",
   
   // === TIER 2: Secondary Identity ===
-  "omr_ipv6_addr",
+  "omrIpv6Addr",
+  "omrIpv6Address",
   "mlEidIid",
   "room",
   "Extended MAC",
@@ -993,7 +1017,9 @@ export const TABLE_PRIORITY_COLUMNS = [
   "type",
   "Role",
   "br",
+  "isRouter",
   "is_router",
+  "isBorderRouter",
   "is_border_router",
   "leader",
   "isLeader",
@@ -1003,19 +1029,29 @@ export const TABLE_PRIORITY_COLUMNS = [
   "mode.deviceTypeFTD",
   "ver",
   "version",
+  "threadVersion",
   "thread_version",
+  "threadStackVersion",
   "thread_stack_version",
   "room",
   "icon",
   
   // === TIER 4: Topology & Connectivity ===
+  "totalChildren",
   "total_children",
+  "hasChildren",
   "has_children",
+  "totalLinks",
   "total_links",
+  "totalLink3",
   "total_link_3",
+  "totalLink2",
   "total_link_2",
+  "totalLink1",
   "total_link_1",
+  "routerNeighborsCount",
   "router_neighbor_table_count",
+  "childTableCount",
   "router_child_table_count",
   "connectivity.activeRouters",
   "connectivity.active_routers",
@@ -1025,15 +1061,21 @@ export const TABLE_PRIORITY_COLUMNS = [
   "connectivity.link_quality_2",
   "connectivity.linkQuality1",
   "connectivity.link_quality_1",
+  "leaderData.partitionId",
   "leader_data.partition_id",
+  "leaderData.leaderRouterId",
   "leader_data.leader_router_id",
   
   // === TIER 5: Advanced/Diagnostic ===
   "icon",
   "scope",
+  "vendorName",
   "vendor_name",
+  "vendorModel",
   "vendor_model",
+  "vendorSwVersion",
   "vendor_sw_version",
+  "tlvValues",
   "tlv_values",
   "mac_counters.ifinerrors_pct",
   "mac_counters.ifouterrors_pct",

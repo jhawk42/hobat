@@ -5,6 +5,7 @@ import logging
 from typing import Sequence
 
 from extaddr_device_label_map import load_extaddr_device_label_map
+from json_key_normalizer import convert_keys_to_camel_case
 from otbr_cli_router_table import fetch_and_parse_router_table
 from otbr_cli_util import (
     build_timeout_error_record,
@@ -163,7 +164,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         router_neighbor_tables = fetch_all_meshdiag_router_neighbor_tables(
             extaddr_map)
 
-        save_json_atomic(router_neighbor_tables, runtime.output_path)
+        save_json_atomic(
+            convert_keys_to_camel_case(router_neighbor_tables),
+            runtime.output_path,
+        )
 
         logging.debug("Saved meshdiag routerneighbortables data into %s as JSON:\n%s",
                       runtime.output_path, json.dumps(router_neighbor_tables, indent=4))

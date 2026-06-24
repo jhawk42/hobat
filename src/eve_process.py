@@ -1,10 +1,10 @@
 import argparse
-import copy
 import json
 import logging
 from typing import Sequence
 
 import util_network
+from json_key_normalizer import convert_keys_to_camel_case
 from util_convert import b64_to_extended_address
 from util_data import (
     TDRequiredInputMissingError,
@@ -37,6 +37,12 @@ def load_and_parse_eve_file(path, thread_network_info=None):
     omr_ipv6addr_prefix = (
         thread_network_info["prefix_omr_ipv6addr_prefix"]
         if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
+        else None
+    )
+    
+    meshlocal_ipv6addr_prefix = (
+        thread_network_info["prefix_meshlocal_ipv6addr_prefix"]
+        if thread_network_info and "prefix_meshlocal_ipv6addr_prefix" in thread_network_info
         else None
     )
 
@@ -77,9 +83,9 @@ def load_and_parse_eve_file(path, thread_network_info=None):
             # Note: some eve nodes don't have a rloc16 field. For these nodes, attempt to extract rloc16 from 
             # their IPv6 addresses if available, since rloc16 may be encoded in the IPv6 addresses for Thread devices.
             # Call extract_rloc16_from_ipv6_addresses to extract the rloc16 as hex from the IPv6 addresses
-            if ipv6_addrs:
-                rloc16_hex = util_network.extract_rloc16_from_ipv6_addresses(
-                    ipv6_addrs
+            if ipv6_addrs and meshlocal_ipv6addr_prefix:
+                rloc16_hex = util_network.extract_rloc16_from_ipv6_addresses_cached(
+                    ipv6_addrs, meshlocal_ipv6addr_prefix
                 )
                 if rloc16_hex is not None:
                     node["rloc16"] = rloc16_hex  # Patch original rloc16 field to hex string for consistency in the node data structure
@@ -231,11 +237,10 @@ def enrich_eve_nodes(eve_data):
         if not isinstance(original_node, dict):
             continue
 
-        node_copy = copy.deepcopy(original_node)
-        rloc16_hex = node_copy.get("rloc16_hex", original_key)
+        rloc16_hex = original_node.get("rloc16_hex", original_key)
 
         # Enrich route entries with "to_name" by resolving route["to"] to node names using the original data maps
-        routes = node_copy.get("routes")
+        routes = original_node.get("routes")
         if isinstance(routes, list):
             for route in routes:
                 if not isinstance(route, dict):
@@ -250,7 +255,7 @@ def enrich_eve_nodes(eve_data):
                     destination, f"Unknown({destination})"
                 )
 
-        result[rloc16_hex] = node_copy
+        result[rloc16_hex] = original_node
 
     node_count = len(result)
     logging.info(
@@ -303,11 +308,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         # Save json data structures for reference
         file_path = data_file_path("td-eve-topology.json", td_data_dir)
-        save_json_atomic(eve_data_enhanced, file_path)
+        save_json_atomic(convert_keys_to_camel_case(eve_data_enhanced), file_path)
 
-        # Print the parsed data structure with route names
-        logging.debug("Saved eve topology data into %s as JSON:\n%s",
-                file_path, json.dumps(eve_data_enhanced, indent=4))
+        logging.info("Saved eve topology data to %s", file_path)
         return 0
     except TDRequiredInputMissingError as exc:
         logging.error(str(exc))

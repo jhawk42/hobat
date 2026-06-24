@@ -205,7 +205,7 @@ export function setOnlyCache(enabled) {
 // Eligible when: no device_label AND no name AND extaddr is present in map.
 function enrichNodeWithStaticLabel(node) {
   if (!isPlainObject(node)) return node;
-  if (toText(node.device_label) || toText(node.name)) return node;
+  if (toText(node.deviceLabel) || toText(node.device_label) || toText(node.name)) return node;
   // Restapi rows have shape { id, type, attributes: { extAddress, ... } };
   // extAddress lives in attributes, not at the top level.
   let extaddr = getCanonicalExtaddr(node);
@@ -214,7 +214,7 @@ function enrichNodeWithStaticLabel(node) {
   if (!extaddr) return node;
   const label = staticExtaddrLabelMap.get(extaddr);
   if (!label) return node;
-  return { ...node, device_label: label };
+  return { ...node, deviceLabel: label, device_label: label };
 }
 
 // Enriches a flat array of normalised rows (used by table renderer path).
@@ -447,8 +447,8 @@ export async function loadStaticLabelMap() {
     const { data } = await fetchJson("/api/data/td-static-extaddr-device-label.json");
     if (Array.isArray(data)) {
       data.forEach((entry) => {
-        const key = canonicalIdText(entry?.extaddr);
-        const label = toText(entry?.device_label);
+        const key = canonicalIdText(entry?.extAddress ?? entry?.extaddr);
+        const label = toText(entry?.deviceLabel ?? entry?.device_label);
         if (key && label) staticExtaddrLabelMap.set(key, label);
       });
     }

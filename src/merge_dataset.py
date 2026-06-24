@@ -16,6 +16,7 @@ from extaddr_device_label_map import (
     EXTADDR_FIELD_ALIASES,
     load_extaddr_device_label_map_flexible,
 )
+from json_key_normalizer import convert_keys_to_camel_case
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
 from util_data import (
     load_optional_input,
@@ -35,6 +36,7 @@ PRIORITY_FIELDS = [
     "name",
     "omr_ipv6_addr",           # More stable than rloc16
     "omrIpv6Address",          # REST API alias
+    "omrIpv6Addr",             # Phase 1 canonical camelCase
     "rloc16",                  # May change rapidly, partition-scoped
     "routerId",                # REST API
     "router_id",               # CLI snake_case
@@ -181,8 +183,8 @@ MATTER_IDENTITY_MERGE_MODES = {
 }
 
 MERGE_IDENTITY_FIELDS = {
-    "extaddr_aliases": ("extaddr", "extAddress", "Extended MAC"),
-    "omr_ipv6_addr_aliases": ("omr_ipv6_addr", "omrIpv6Address"),
+    "extaddr_aliases": ("extAddress", "Extended MAC"),
+    "omr_ipv6_addr_aliases": ("omrIpv6Address", "omrIpv6Addr"),
     "rloc16": "rloc16",
 }
 
@@ -277,9 +279,9 @@ def normalize_record_aliases(record: dict[str, Any]) -> dict[str, Any]:
     omr_addr = get_canonical_omr(record)
 
     if extaddr:
-        record["extaddr"] = extaddr
+        record["extAddress"] = extaddr
     if omr_addr:
-        record["omr_ipv6_addr"] = omr_addr
+        record["omrIpv6Addr"] = omr_addr
 
     return record
 
@@ -336,7 +338,7 @@ def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, 
     omr_addr = get_canonical_omr(record)
 
     if not omr_addr:
-        ipv6_values = record.get("ipv6_addrs")
+        ipv6_values = record.get("ipv6Addresses")
         if isinstance(ipv6_values, list):
             prefix = omr_prefix.lower()
             for ip_value in ipv6_values:
@@ -345,7 +347,7 @@ def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, 
                     break
 
     if omr_addr:
-        record["omr_ipv6_addr"] = omr_addr
+        record["omrIpv6Addr"] = omr_addr
 
     mode_device = derive_mode_device(record)
     if mode_device:
@@ -490,7 +492,7 @@ def merge_lists(left: list[Any], right: list[Any]) -> list[Any]:
 FIELD_ALIASES_BIDIRECTIONAL = {
     # Identity fields
     "extaddr": ["extAddress", "Extended MAC"],
-    "omr_ipv6_addr": ["omrIpv6Address"],
+    "omr_ipv6_addr": ["omrIpv6Address", "omrIpv6Addr"],
     "router_id": ["routerId"],
     "device_label": ["name", "hostName"],
     "eui64": ["EUI64"],
@@ -629,22 +631,11 @@ def compare_sequences(seq_a: int | None, seq_b: int | None) -> str:
 
 def get_partition_id(record: dict[str, Any]) -> str:
     """
-    Extract partition_id from leader_data or leaderData.
+    Extract partitionId from leaderData.
     
     Returns normalized partition_id string or "unknown" if not found.
     """
-    # Try CLI format
-    leader_data = record.get("leader_data")
-    if isinstance(leader_data, dict):
-        partition_id = leader_data.get("partition_id")
-        if partition_id is not None:
-            # Normalize to string
-            if isinstance(partition_id, int):
-                return f"0x{partition_id:08x}"
-            elif isinstance(partition_id, str):
-                return partition_id.strip().lower()
-    
-    # Try REST API format
+    # Canonical merged format
     leader_data = record.get("leaderData")
     if isinstance(leader_data, dict):
         partition_id = leader_data.get("partitionId")
@@ -669,27 +660,26 @@ def merge_route_data(
     partition_id: str,
 ) -> dict[str, Any]:
     """
-    Merge route_data using composite identity: (owner_rloc16, destination_route_id).
+    Merge route data using composite identity: (owner_rloc16, destination_route_id).
     
     Uses sequence number precedence (highest wins).
     Only merges routes within same partition.
     
     Args:
         owner_rloc16: RLOC16 of the node that owns this routing table
-        base_route_data: Existing route_data dict
-        incoming_route_data: New route_data dict
+        base_route_data: Existing route dict
+        incoming_route_data: New route dict
         partition_id: Partition ID for validation
     
     Returns:
-        Merged route_data dict
+        Merged route dict
     """
-    # Normalize field names (route_data vs route)
-    base = normalize_field_names_in_record(base_route_data)
-    incoming = normalize_field_names_in_record(incoming_route_data)
+    base = base_route_data
+    incoming = incoming_route_data
     
     # Extract sequence numbers
-    base_seq = base.get("id_sequence")
-    incoming_seq = incoming.get("id_sequence")
+    base_seq = base.get("idSequence")
+    incoming_seq = incoming.get("idSequence")
     
     # Compare sequences
     seq_comparison = compare_sequences(base_seq, incoming_seq)
@@ -707,9 +697,8 @@ def merge_route_data(
     # Sequences equal or both unknown - merge by route identity
     logging.debug(f"Route data: sequences equal ({base_seq}), merging by route identity")
     
-    # Get route arrays (check both snake_case and camelCase)
-    base_routes = base.get("route_data") or base.get("routeData", [])
-    incoming_routes = incoming.get("route_data") or incoming.get("routeData", [])
+    base_routes = base.get("routeData", [])
+    incoming_routes = incoming.get("routeData", [])
     
     if not isinstance(base_routes, list):
         base_routes = []
@@ -721,14 +710,14 @@ def merge_route_data(
     
     for route in base_routes:
         if isinstance(route, dict):
-            route_id = route.get("route_id") or route.get("routeId")
+            route_id = route.get("routeId")
             if route_id:
                 identity = (owner_rloc16, str(route_id))
                 merged_routes[identity] = deepcopy(route)
     
     for route in incoming_routes:
         if isinstance(route, dict):
-            route_id = route.get("route_id") or route.get("routeId")
+            route_id = route.get("routeId")
             if route_id:
                 identity = (owner_rloc16, str(route_id))
                 # If already exists, prefer non-zero link quality values
@@ -741,26 +730,21 @@ def merge_route_data(
                 else:
                     merged_routes[identity] = deepcopy(route)
     
-    # Reconstruct route_data maintaining original format
+    # Reconstruct canonical route object
     result = deepcopy(base_route_data) if base_route_data else deepcopy(incoming_route_data)
-    
-    # Determine parent key from original input
-    parent_key = "route_data" if "route_data" in base_route_data or "route_data" in incoming_route_data else "route"
-    route_array_key = "route_data" if parent_key == "route_data" else "routeData"
-    seq_key = "id_sequence" if parent_key == "route_data" else "idSequence"
     
     # Ensure result has proper structure
     if not isinstance(result, dict):
         result = {}
     
     # Set merged routes
-    result[route_array_key] = list(merged_routes.values())
+    result["routeData"] = list(merged_routes.values())
     
     # Preserve sequence number
     if base_seq is not None:
-        result[seq_key] = base_seq
+        result["idSequence"] = base_seq
     elif incoming_seq is not None:
-        result[seq_key] = incoming_seq
+        result["idSequence"] = incoming_seq
     
     return result
 
@@ -794,7 +778,7 @@ def merge_children_array(
             continue
         
         # Get child extaddr (globally unique)
-        child_extaddr = child.get("extaddr") or child.get("extAddress")
+        child_extaddr = child.get("extAddress")
         if not child_extaddr:
             # No extaddr - can't create composite identity
             # Add as-is (might be duplicate, but can't determine)
@@ -848,7 +832,7 @@ def merge_router_neighbors(
             continue
         
         # Identity by extaddr (preferred) or rloc16
-        extaddr = neighbor.get("extaddr") or neighbor.get("extAddress")
+        extaddr = neighbor.get("extAddress")
         rloc16 = neighbor.get("rloc16")
         
         if extaddr:
@@ -1291,37 +1275,17 @@ def deep_merge(
 
         current_path = f"{path_prefix}.{key}" if path_prefix else key
         
-        # Phase 2: Special handling for route_data / route (composite identity merge)
-        # NOTE: "route_data" (CLI) and "route" (REST API) are ALIASES for same data!
-        if key in ("route_data", "route") and isinstance(value, dict):
-            # Check if base has EITHER route_data or route
-            if "route_data" in base and isinstance(base["route_data"], dict):
-                # Base has route_data, merge into it
-                base["route_data"] = merge_route_data(
-                    owner_rloc16,
-                    base["route_data"],
-                    value,
-                    partition_id,
-                )
-            elif "route" in base and isinstance(base["route"], dict):
-                # Base has route (REST API format), merge into it
+        # Phase 3: canonical route merge on camelCase key only.
+        if key == "route" and isinstance(value, dict):
+            if "route" in base and isinstance(base["route"], dict):
                 base["route"] = merge_route_data(
                     owner_rloc16,
                     base["route"],
                     value,
                     partition_id,
                 )
-            elif key in base and isinstance(base[key], dict):
-                # Base has same key, merge normally
-                base[key] = merge_route_data(
-                    owner_rloc16,
-                    base[key],
-                    value,
-                    partition_id,
-                )
             else:
-                # Neither exists, just copy
-                base[key] = deepcopy(value)
+                base["route"] = deepcopy(value)
             continue
         
         # Phase 2: Special handling for children array (composite identity merge)
@@ -1373,7 +1337,7 @@ def deep_merge(
             base[key] = merge_lists(cur, value)
         elif value_is_empty(cur) and not value_is_empty(value):
             base[key] = deepcopy(value)
-        elif key in ("extaddr", "extAddress", "Extended MAC") and is_placeholder_extaddr(cur) and not is_placeholder_extaddr(value):
+        elif key == "extAddress" and is_placeholder_extaddr(cur) and not is_placeholder_extaddr(value):
             # Prefer a concrete extaddr over known placeholder values.
             base[key] = deepcopy(value)
         elif (
@@ -1461,10 +1425,10 @@ def index_node_identity_values(
     matter_id = identity_values.get("matter_fabric_node")
 
     if isinstance(extaddr, str):
-        node["extaddr"] = extaddr
+        node["extAddress"] = extaddr
         add_identifier(by_extaddr, extaddr, node_id)
     if isinstance(omr, str):
-        node["omr_ipv6_addr"] = omr
+        node["omrIpv6Addr"] = omr
         add_identifier(by_omr, omr, node_id)
     if isinstance(rloc16, str):
         node["rloc16"] = rloc16
@@ -1619,12 +1583,12 @@ def build_merged_records(
         for raw_record in records:
             record = normalize_identifiers(raw_record, omr_prefix)
 
-            record_extaddr = record.get("extaddr")
+            record_extaddr = record.get("extAddress")
             if isinstance(record_extaddr, str):
                 mapped_label = device_label_map.get(
                     record_extaddr.lower())
-                if mapped_label and value_is_empty(record.get("device_label")):
-                    record["device_label"] = mapped_label
+                if mapped_label and value_is_empty(record.get("deviceLabel")):
+                    record["deviceLabel"] = mapped_label
 
             record.setdefault("_source_files", [])
             if filename not in record["_source_files"]:
@@ -1677,7 +1641,7 @@ def build_merged_records(
                                 "candidate_node_ids": sorted(candidate_ids),
                                 "rloc16": rloc16,
                                 "extaddr": extaddr,
-                                "omr_ipv6_addr": omr,
+                                "omrIpv6Addr": omr,
                             }
                         )
                 node_id = min(candidate_ids)
@@ -1711,27 +1675,24 @@ def build_merged_records(
             active_extaddr = active_identity_values.get("extaddr")
             if isinstance(active_extaddr, str):
                 mapped_label = device_label_map.get(active_extaddr)
-                if mapped_label and value_is_empty(active.get("device_label")):
-                    active["device_label"] = mapped_label
+                if mapped_label and value_is_empty(active.get("deviceLabel")):
+                    active["deviceLabel"] = mapped_label
 
     merged_records: list[dict[str, Any]] = []
     for _, node in sorted(
         nodes.items(), key=lambda x: (x[1].get("rloc16") or "", x[0])
     ):
         source_files = node.get("_source_files")
-        if isinstance(source_files, list):
-            # Compatibility alias for older consumers expecting `_sources`.
-            node["_sources"] = list(source_files)
 
         # Build _merge_identity_keys (mirrors JS mergeRowsByStrategy output).
         identity_key_parts: list[str] = []
         iv = collect_merge_identity_values(node)
         if iv.get("extaddr"):
-            identity_key_parts.append(f"extaddr:{iv['extaddr']}")
+            identity_key_parts.append(f"extAddress:{iv['extaddr']}")
         if iv.get("rloc16"):
             identity_key_parts.append(f"rloc16:{iv['rloc16']}")
         if iv.get("omr_ipv6_addr"):
-            identity_key_parts.append(f"omr_ipv6_addr:{iv['omr_ipv6_addr']}")
+            identity_key_parts.append(f"omrIpv6Addr:{iv['omr_ipv6_addr']}")
         if identity_key_parts:
             node["_merge_identity_keys"] = identity_key_parts
 
@@ -1786,7 +1747,9 @@ def build_merged_records(
         "total_merged_nodes": len(merged_records),
     }
 
-    return merged_records, report
+    # Phase 3 cleanup: merged records are now canonical camelCase.
+    merged_records_camel = convert_keys_to_camel_case(merged_records)
+    return merged_records_camel, report
 
 
 def parse_file_list_args(values: list[str] | None) -> list[str]:
@@ -1943,7 +1906,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         dataset = dataset_result.value
         omr_prefix = ""
         if isinstance(dataset, dict):
-            omr_prefix_value = dataset.get("prefix_omr_ipv6addr_prefix", "")
+            omr_prefix_value = dataset.get("prefixOmrIpv6AddrPrefix", "")
             if isinstance(omr_prefix_value, str):
                 omr_prefix = omr_prefix_value
 
@@ -2051,16 +2014,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             report["merge_strategy"] = "merge"
 
         output_path = base_dir / args.output
-        save_json_atomic(merged_records, output_path, indent=2, add_trailing_newline=True)
+        merged_records_camel = convert_keys_to_camel_case(merged_records)
+        save_json_atomic(
+            merged_records_camel,
+            output_path,
+            indent=2,
+            add_trailing_newline=True,
+        )
         logging.debug("Saved merged records into %s as JSON:\n%s",
-                output_path, json.dumps(merged_records, indent=2))
+            output_path, json.dumps(merged_records_camel, indent=2))
         if args.report_file:
             report_path = base_dir / args.report_file
             save_json_atomic(report, report_path, indent=2, add_trailing_newline=True)
             logging.info(f"Wrote merge report to {report_path}")
 
         logging.info(
-            f"Wrote {len(merged_records)} merged records to {output_path}")
+            f"Wrote {len(merged_records_camel)} merged records to {output_path}")
         logging.info(
             "Validation summary: "
             f"multi_source_nodes={report['multi_source_nodes_total']}, "

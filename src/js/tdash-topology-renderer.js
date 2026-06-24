@@ -12,6 +12,7 @@ import {
 } from "./tdash-constants.js";
 import {
   toText,
+  getColumnValue,
   mergeForDisplay,
   flattenObjectEntries,
   shouldExcludeDetailPath,
@@ -925,12 +926,12 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
   nodeMap.forEach((node, nodeId) => {
     const rloc16 = toText(node?.rloc16).toLowerCase();
     if (rloc16) nodeIdByRloc16.set(rloc16, nodeId);
-    const extaddr = toText(node?.extaddr).toLowerCase();
+    const extaddr = toText(node?.extAddress || node?.extaddr).toLowerCase();
     if (extaddr) nodeIdByExtaddr.set(extaddr, nodeId);
   });
 
   function resolveDiagnosticTargetNodeId(row) {
-    const extaddr = toText(row?.extaddr || row?.extAddress).toLowerCase();
+    const extaddr = toText(row?.extAddress || row?.extaddr).toLowerCase();
     const rloc16 = toText(row?.rloc16).toLowerCase();
     const rowId = toText(row?.id);
 
@@ -951,14 +952,18 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
   }
 
   function getRouterChildRowsForParent(parentNodeId, parentRaw) {
-    const rowsFromRaw = Array.isArray(parentRaw?.router_child_table)
-      ? parentRaw.router_child_table
+    const rawChildTable = getColumnValue(parentRaw || {}, "childTable")
+      ?? getColumnValue(parentRaw || {}, "router_child_table");
+    const rowsFromRaw = Array.isArray(rawChildTable)
+      ? rawChildTable
       : [];
     const parentRloc16 = toText(nodeMap.get(parentNodeId)?.rloc16).toLowerCase();
-    const rowsFromIndex = Array.isArray(
-      routerChildByRloc16.get(parentRloc16)?.router_child_table,
-    )
-      ? routerChildByRloc16.get(parentRloc16).router_child_table
+    const indexedChildTable = getColumnValue(
+      routerChildByRloc16.get(parentRloc16) || {},
+      "childTable",
+    ) ?? getColumnValue(routerChildByRloc16.get(parentRloc16) || {}, "router_child_table");
+    const rowsFromIndex = Array.isArray(indexedChildTable)
+      ? indexedChildTable
       : [];
 
     if (rowsFromIndex.length === 0) return rowsFromRaw;
@@ -969,7 +974,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
     [...rowsFromIndex, ...rowsFromRaw].forEach((row) => {
       const key = [
         toText(row?.rloc16).toLowerCase(),
-        toText(row?.extaddr || row?.extAddress).toLowerCase(),
+        toText(row?.extAddress || row?.extaddr).toLowerCase(),
         toText(row?.child_id || row?.childId).toLowerCase(),
       ].join("|");
       const dedupeKey = key === "||" ? `anon:${mergedRows.length}` : key;
@@ -1049,10 +1054,10 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
         if (!sourceNode) return;
         const sourceRloc16 = toText(sourceNode.rloc16).toLowerCase();
         const neighborRow = routerNeighborByRloc16.get(sourceRloc16);
-        const neighborEntries = Array.isArray(
-          neighborRow?.router_neighbor_table,
-        )
-          ? neighborRow.router_neighbor_table
+        const neighborTable = getColumnValue(neighborRow || {}, "routerNeighbors")
+          ?? getColumnValue(neighborRow || {}, "router_neighbor_table");
+        const neighborEntries = Array.isArray(neighborTable)
+          ? neighborTable
           : [];
         neighborEntries
           .filter((neighbor) =>
@@ -1352,7 +1357,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
         // also is node.selectedId is an rloc16 that starts with '0x'. and ends with '00', which conventionally indicates a router in Thread networks, treat it as a router as well
         // Additionally, check if the type or role fields indicate "router" to cover more cases where router status might be implied
         // check if rloc16 is 6 characters long to avoid misclassifying non-rloc16 IDs that coincidentally start with '0x' and end with '00'
-        is_router: node.is_router || 
+        is_router: node.isRouter || node.is_router || 
           (typeof node.rloc16 === "string" &&
             node.rloc16.toLowerCase().startsWith("0x") &&
             node.rloc16.toLowerCase().endsWith("00") &&

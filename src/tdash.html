@@ -163,8 +163,8 @@
         <div class="controls">
           <div id="search-control-bar" class="control-pair control-pair-search">
             <label for="search-input">Search</label>
-            <input type="text" id="search-input" placeholder="extaddr, rloc16, device_label …"
-              title="Search device records by extaddr, rloc16, device_label, name, room, role, version, or other identity fields. Press Enter to search." />
+            <input type="text" id="search-input" placeholder="extAddress, rloc16, deviceLabel …"
+              title="Search device records by extAddress, rloc16, deviceLabel, name, room, role, version, or other identity fields. Press Enter to search." />
             <button id="btn-search-clear" title="Clear search and reset results">✕</button>
             <button id="btn-toggle-node-diag-filters" title="Toggle Nodes, Links, Diagnostics filters panel">⧨</button>
           </div>
@@ -317,18 +317,18 @@
         </ul>
         <h2>Keys:</h2>
         <ul id="identity-list" class="node-details-list"
-          data-fields="rloc16,extaddr,device_label,name,router_id,eui64,mlEidIid,omr_ipv6_addr,id,ID,graph.unified_id">
+          data-fields="rloc16,extAddress,deviceLabel,name,routerId,eui64,mlEidIid,omrIpv6Addr,id,graph.unifiedId,extaddr,device_label,router_id,omr_ipv6_addr,ID,graph.unified_id">
         </ul>
         <h2>Highlights:</h2>
         <ul id="highlights-list" class="node-details-list"
-          data-fields="type,Role,role,br,is_border_router,leader,isLeader,is_router,isPrimaryBBR,status,mode.device,mode.deviceTypeFTD,mode.rx_on_when_idle,mode.network_data,ver,version,thread_version,thread_stack_version,leader_data.partition_id,leaderData.partitionId,leader_data.leader_router_id,leaderData.leaderRouterId,vendor_name,vendorName,vendor_model,vendorModel,vendor_sw_version,vendorSwVersion,server,room,icon,graph.graph_link_count,graph.is_router,graph.is_border_router,graph.has_children">
+          data-fields="type,Role,role,br,isBorderRouter,leader,isLeader,isRouter,isPrimaryBBR,status,mode.device,mode.deviceTypeFTD,mode.rxOnWhenIdle,mode.networkData,version,threadVersion,threadStackVersion,leaderData.partitionId,leaderData.leaderRouterId,vendorName,vendorModel,vendorSwVersion,server,room,icon,graph.graphLinkCount,graph.isRouter,graph.isBorderRouter,graph.hasChildren,is_border_router,is_router,mode.rx_on_when_idle,mode.network_data,ver,thread_version,thread_stack_version,leader_data.partition_id,leader_data.leader_router_id,vendor_name,vendor_model,vendor_sw_version,graph.graph_link_count,graph.is_border_router,graph.is_router,graph.has_children">
         </ul>
         <h2>Network:</h2>
-        <ul id="network-list" class="node-details-list" data-fields="ipv6_addrs, ipv6Addresses">
+        <ul id="network-list" class="node-details-list" data-fields="ipv6Addresses,ipv6_addrs">
         </ul>
         <h2>Connections:</h2>
         <ul id="connections-list" class="node-details-list"
-          data-fields="total_children,has_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count,router_child_table_count,connectivity.active_routers,connectivity.activeRouters,connectivity.link_quality_3,connectivity.linkQuality3,connectivity.link_quality_2,connectivity.linkQuality2,connectivity.link_quality_1,connectivity.linkQuality1">
+          data-fields="totalChildren,hasChildren,totalLinks,totalLink3,totalLink2,totalLink1,routerNeighborsCount,childTableCount,connectivity.activeRouters,connectivity.linkQuality3,connectivity.linkQuality2,connectivity.linkQuality1,total_children,has_children,total_links,total_link_3,total_link_2,total_link_1,router_neighbor_table_count,router_child_table_count,connectivity.active_routers,connectivity.link_quality_3,connectivity.link_quality_2,connectivity.link_quality_1">
         </ul>
 
         <h2>MDNS:</h2>
@@ -338,21 +338,21 @@
 
         <h2>Routes & Links:</h2>
         <ul id="routes-links-list" class="node-details-list"
-          data-fields="routes,route,route.routeData,route_data,route_data.route_data,route_data.routeData,3_links,2_links,1_links">
+          data-fields="routes,route,route.routeData,routeData,routeData.routeData,route_data,route_data.route_data,route_data.routeData,links3,links2,links1,3_links,2_links,1_links">
         </ul>
 
         <h2>Neighbors:</h2>
-        <ul id="neighbors-list" class="node-details-list" data-fields="router_neighbor_table,routerNeighbors">
+        <ul id="neighbors-list" class="node-details-list" data-fields="routerNeighbors,router_neighbor_table">
         </ul>
 
         <h2>Children:</h2>
         <ul id="children-list" class="node-details-list"
-          data-fields="children,router_child_table,childTable,childIpv6Addresses">
+          data-fields="children,childTable,childIpv6Addresses,router_child_table">
         </ul>
 
         <h2>Counters:</h2>
         <ul id="counters-list" class="node-details-list"
-          data-fields="mac_counters.iftotalpkts,mac_counters.iftotaldiscards,mac_counters.iftotalerrors,mac_counters.iftotalerrors_totalpkts_ratio,mac_counters.iftotaldiscards_totalpkts_ratio,macCounters.ifInBroadcastPkts,macCounters.ifInDiscards,macCounters.ifInErrors,macCounters.ifInUcastPkts,macCounters.ifInUnknownProtos,macCounters.ifOutBroadcastPkts,macCounters.ifOutDiscards,macCounters.ifOutErrors,macCounters.ifOutUcastPkts,mle_counters.leaderrole,mle_counters.routerrole,mle_counters.childrole,mle_counters.partitionidchanges,mle_counters.betterpartitionattachattempts,mle_counters.parentchanges,mle_counters.totalparentpartitionchanges,mle_counters.attachattempts,mle_counters.detachedrole,mle_counters.disabledrole,mleCounters.attachAttemptsCount,mleCounters.betterPartIdAttachAttemptsCount,mleCounters.childRoleCount,mleCounters.childRoleTime,mleCounters.detachedRoleCount,mleCounters.detachedRoleTime,mleCounters.leaderRoleCount,mleCounters.leaderRoleTime,mleCounters.newParentCount,mleCounters.partIdChangesCount,mleCounters.radioDisabledCount,mleCounters.radioDisabledTime,mleCounters.routerRoleCount,mleCounters.routerRoleTime,mleCounters.totalTrackingTime,time_statistics.leader_pct,time_statistics.router_pct,time_statistics.child_pct,time_statistics.detached_disabled_pct,time_statistics.detached_pct,time_statistics.disabled_pct">
+          data-fields="macCounters.ifTotalPkts,macCounters.ifTotalDiscards,macCounters.ifTotalErrors,macCounters.ifTotalErrorsTotalPktsRatio,macCounters.ifTotalDiscardsTotalPktsRatio,macCounters.ifInBroadcastPkts,macCounters.ifInDiscards,macCounters.ifInErrors,macCounters.ifInUcastPkts,macCounters.ifInUnknownProtos,macCounters.ifOutBroadcastPkts,macCounters.ifOutDiscards,macCounters.ifOutErrors,macCounters.ifOutUcastPkts,mleCounters.leaderRoleCount,mleCounters.routerRoleCount,mleCounters.childRoleCount,mleCounters.partIdChangesCount,mleCounters.betterPartIdAttachAttemptsCount,mleCounters.newParentCount,mleCounters.totalParentPartitionChangesCount,mleCounters.attachAttemptsCount,mleCounters.detachedRoleCount,mleCounters.radioDisabledCount,mleCounters.childRoleTime,mleCounters.detachedRoleTime,mleCounters.leaderRoleTime,mleCounters.radioDisabledTime,mleCounters.routerRoleTime,mleCounters.totalTrackingTime,timeStatistics.leaderPct,timeStatistics.routerPct,timeStatistics.childPct,timeStatistics.detachedDisabledPct,timeStatistics.detachedPct,timeStatistics.disabledPct,mac_counters.iftotalpkts,mac_counters.iftotaldiscards,mac_counters.iftotalerrors,mac_counters.iftotalerrors_totalpkts_ratio,mac_counters.iftotaldiscards_totalpkts_ratio,mle_counters.leaderrole,mle_counters.routerrole,mle_counters.childrole,mle_counters.partitionidchanges,mle_counters.betterpartitionattachattempts,mle_counters.parentchanges,mle_counters.totalparentpartitionchanges,mle_counters.attachattempts,mle_counters.detachedrole,mle_counters.disabledrole,time_statistics.leader_pct,time_statistics.router_pct,time_statistics.child_pct,time_statistics.detached_disabled_pct,time_statistics.detached_pct,time_statistics.disabled_pct">
         </ul>
         <h2>Details:</h2>
         <ul id="details-list" class="node-details-list" data-fields="*">

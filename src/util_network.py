@@ -243,6 +243,9 @@ def is_border_router_from_ipv6_addrs(ipv6_addrs, meshlocal_prefix: str = None):
 def extract_rloc16_from_ipv6_addresses(ipv6_addrs):
     """
     Extracts the rloc16 value from a list of IPv6 addresses based on the presence of the RLOC16 prefix.
+    
+    Note: This function fetches the meshlocal prefix on each call. Use extract_rloc16_from_ipv6_addresses_cached
+    when calling in a loop to avoid repeated subprocess calls.
 
     Args:
         ipv6_addrs: List of IPv6 address strings to check (e.g., ["fdde:ad00:beef:0:0:ff:fe00:5000", "fdde:ad00:beef:0:0:ff:fe00:6000"])
@@ -250,8 +253,25 @@ def extract_rloc16_from_ipv6_addresses(ipv6_addrs):
     Returns:
         The rloc16 value as a hex string (e.g., "0x5000") if found, or None if no valid rloc16 is found in the IPv6 addresses.
     """
+    meshlocal_prefix = build_rloc_ipv6_address_prefix(fetch_meshlocal_prefix())
+    return extract_rloc16_from_ipv6_addresses_cached(ipv6_addrs, meshlocal_prefix)
+
+
+def extract_rloc16_from_ipv6_addresses_cached(ipv6_addrs, meshlocal_ipv6addr_prefix):
+    """
+    Extracts the rloc16 value from a list of IPv6 addresses using a pre-fetched meshlocal prefix.
+    
+    Use this version when calling in a loop to avoid repeated subprocess calls to fetch the prefix.
+
+    Args:
+        ipv6_addrs: List of IPv6 address strings to check
+        meshlocal_ipv6addr_prefix: Pre-fetched meshlocal IPv6 address prefix (e.g., "fdde:ad00:beef:0:0:ff:fe00:")
+
+    Returns:
+        The rloc16 value as a hex string (e.g., "0x5000") if found, or None if no valid rloc16 is found.
+    """
     for addr in ipv6_addrs:
-        if is_ipv6_address_in_meshlocal_prefix(addr, build_rloc_ipv6_address_prefix(fetch_meshlocal_prefix())):
+        if is_ipv6_address_in_meshlocal_prefix(addr, meshlocal_ipv6addr_prefix):
             # Extract the last 4 characters of the address as the rloc16 hex value
             # add the 0x prefix to convert it to a proper hex string
             rloc16_hex = addr.split(":")[-1]

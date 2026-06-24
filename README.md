@@ -37,7 +37,7 @@ The tdash dashboard and tools provide:
 
 The `tdash.html` browser dashboard supports topology and table views for visualizing and querying Thread mesh data.
 
-Search fields include rloc16, extaddr, device_label, name, and related identity fields.
+Search fields include rloc16, extAddress, deviceLabel, name, and related identity fields.
 
 Filter capabilities include:
 - Thread node roles and types: border router, router, ftd, sed/mtd child nodes, and related classes.
@@ -243,15 +243,15 @@ The tdash web dashboard provides comprehensive visualization and querying capabi
 
 - **Fetch from Multiple Data Sources:** Supports otbr-cli (meshdiag, networkdiag), otbr-restapi, mDNS, and Eve topology datasets
 - **Multiple Views:** Topology view (graph) and Table view for different analysis needs
-- **Search:** Search devices by rloc16, extaddr, device_label, routerId, and a number other identity fields
+- **Search:** Search devices by rloc16, extAddress, deviceLabel, routerId, and a number other identity fields
 - **Filtering:** Filter by device type (border router, router, FTD, MTD), link quality (LQ3/LQ2/LQ1), and diagnostic criteria
 - **Detail Panels:** Click any device to view comprehensive details organized into sections (Keys, Highlights, Connections, Routes & Links)
 - **Device Fields:** Supports detailed device information including:
-  - Identity: rloc16, extaddr, device_label, omrIpv6Address
+  - Identity: rloc16, extAddress, deviceLabel, omrIpv6Addr
   - Role & Status: type, mode flags, leaderData, border router/leader indicators
   - Connectivity: link quality, connectivity metrics, neighbor/child counts
   - Diagnostics: MLE counters, MAC counters, vendor information
-- **Flexible Field Naming:** Automatically handles both snake_case (CLI) and camelCase (REST API) field conventions
+- **Field Naming:** Canonical merged/dashboard fields are camelCase
 
 For complete field reference and dashboard usage, see [doc/dashboard_ui_fields.md](doc/dashboard_ui_fields.md).
 

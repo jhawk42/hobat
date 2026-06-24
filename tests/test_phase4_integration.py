@@ -42,27 +42,27 @@ def test_cross_source_integration_cli_rest_mdns():
     """Test merging data from CLI, REST API, and mDNS sources together."""
     print("\n=== Test: Cross-Source Integration (CLI + REST API + mDNS) ===")
     
-    # CLI data (snake_case)
+    # Canonical data (camelCase)
     cli_node = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "device_label": "Living Room HomePod",
-        "route_data": {
-            "id_sequence": 10,
-            "route_data": [
-                {"route_id": 5, "route_cost": 1, "link_quality_in": 3, "link_quality_out": 3}
+        "deviceLabel": "Living Room HomePod",
+        "route": {
+            "idSequence": 10,
+            "routeData": [
+                {"routeId": 5, "routeCost": 1, "linkQualityIn": 3, "linkQualityOut": 3}
             ]
         },
-        "leader_data": {
-            "partition_id": 12345,
-            "leader_router_id": 5,
+        "leaderData": {
+            "partitionId": 12345,
+            "leaderRouterId": 5,
         },
         "_source_files": ["td-otbr-cli-networkdiag-fetch-all.json"]
     }
     
     # REST API data (camelCase)
     rest_node = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
         "route": {
             "idSequence": 15,  # Newer sequence
@@ -71,9 +71,9 @@ def test_cross_source_integration_cli_rest_mdns():
                 {"routeId": 7, "routeCost": 2, "linkQualityIn": 2, "linkQualityOut": 2}  # Additional route
             ]
         },
-        "children": [
+        "childTable": [
             {
-                "extaddr": "aabbccddee001122",
+                "extAddress": "aabbccddee001122",
                 "childId": 1,
                 "rloc16": "0x1401",
                 "averageRssi": -45,
@@ -88,7 +88,7 @@ def test_cross_source_integration_cli_rest_mdns():
     
     # mDNS data
     mdns_node = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "record_key": "_meshcop._udp.local.|Living Room HomePod._meshcop._udp.local.",
         "event": "add",
         "captured_at_epoch": 1779806966.0,
@@ -108,28 +108,20 @@ def test_cross_source_integration_cli_rest_mdns():
     result = deep_merge(cli_node, rest_node)
     result = deep_merge(result, mdns_node)
     
-    # Verify route_data merged correctly (REST API sequence is newer)
-    # Note: route_data and route are kept separate (Phase 2 behavior)
-    assert "route_data" in result or "route" in result
+    # Verify route merged correctly (newer sequence wins)
+    assert "route" in result
     
-    # Check the route that was merged (should be in route_data since CLI was base)
-    if "route_data" in result:
-        route_data = result["route_data"]
-        # Should have newer sequence from REST API
-        seq = route_data.get("id_sequence") or route_data.get("idSequence")
-        assert seq == 15, f"Expected sequence 15, got {seq}"
-        route_array = route_data.get("route_data") or route_data.get("routeData", [])
-    else:
-        route_data = result["route"]
-        seq = route_data.get("id_sequence") or route_data.get("idSequence")
-        assert seq == 15, f"Expected sequence 15, got {seq}"
-        route_array = route_data.get("route_data") or route_data.get("routeData", [])
+    route_data = result["route"]
+    # Should have newer sequence from REST API
+    seq = route_data.get("idSequence")
+    assert seq == 15, f"Expected sequence 15, got {seq}"
+    route_array = route_data.get("routeData", [])
     assert len(route_array) == 2
     
     # Verify children merged
-    assert "children" in result
-    assert len(result["children"]) == 1
-    assert result["children"][0]["extaddr"] == "aabbccddee001122"
+    assert "childTable" in result
+    assert len(result["childTable"]) == 1
+    assert result["childTable"][0]["extAddress"] == "aabbccddee001122"
     
     # Verify mDNS service_info present
     assert "service_info" in result
@@ -153,29 +145,29 @@ def test_input_ordering_independence():
     print("\n=== Test: Input Ordering Independence ===")
     
     node_a = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "device_label": "Device A",
-        "route_data": {
-            "id_sequence": 10,
-            "route_data": [{"route_id": 5, "route_cost": 1}]
+        "deviceLabel": "Device A",
+        "route": {
+            "idSequence": 10,
+            "routeData": [{"routeId": 5, "routeCost": 1}]
         }
     }
     
     node_b = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "device_label": "Device A",
-        "route_data": {
-            "id_sequence": 15,  # Newer
-            "route_data": [{"route_id": 7, "route_cost": 2}]
+        "deviceLabel": "Device A",
+        "route": {
+            "idSequence": 15,  # Newer
+            "routeData": [{"routeId": 7, "routeCost": 2}]
         }
     }
     
     node_c = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "omr_ipv6_addr": "fd12:3456:7890::1",
+        "omrIpv6Addr": "fd12:3456:7890::1",
     }
     
     # Order 1: A -> B -> C
@@ -192,12 +184,12 @@ def test_input_ordering_independence():
     
     # All should have same route data (newest sequence wins)
     for result in [result1, result2, result3]:
-        route_data = result.get("route_data", {})
-        assert route_data.get("id_sequence") == 15, f"Expected sequence 15, got {route_data.get('id_sequence')}"
+        route_data = result.get("route", {})
+        assert route_data.get("idSequence") == 15, f"Expected sequence 15, got {route_data.get('idSequence')}"
     
-    # All should have omr_ipv6_addr
+    # All should have omrIpv6Addr
     for result in [result1, result2, result3]:
-        assert result["omr_ipv6_addr"] == "fd12:3456:7890::1"
+        assert result["omrIpv6Addr"] == "fd12:3456:7890::1"
     
     print("✅ PASS: Merge results independent of input order")
 
@@ -210,27 +202,27 @@ def test_edge_case_null_vs_empty_array():
     """Test handling of null vs empty arrays."""
     print("\n=== Test: Edge Case - Null vs Empty Array ===")
     
-    # Base with null children
+    # Base with null childTable
     base = {
-        "extaddr": "0011223344556677",
-        "children": None,
+        "extAddress": "0011223344556677",
+        "childTable": None,
     }
     
     # Incoming with empty array
     incoming = {
-        "extaddr": "0011223344556677",
-        "children": [],
+        "extAddress": "0011223344556677",
+        "childTable": [],
     }
     
     result = deep_merge(base, incoming)
     
     # Empty array should be preserved (not overwritten by null)
-    assert result["children"] == []
+    assert result["childTable"] == []
     
     # Reverse order
     result2 = deep_merge(incoming, base)
     # Null should not overwrite empty array
-    assert result2["children"] == []
+    assert result2["childTable"] == []
     
     print("✅ PASS: Null vs empty array handled correctly")
 
@@ -243,24 +235,24 @@ def test_edge_case_missing_identity_fields():
     """Test handling of records with missing identity fields."""
     print("\n=== Test: Edge Case - Missing Identity Fields ===")
     
-    # Record without extaddr (should still merge other fields)
+    # Record without extAddress (should still merge other fields)
     base = {
         "rloc16": "0x1400",
-        "device_label": "Device A",
+        "deviceLabel": "Device A",
     }
     
     incoming = {
         "rloc16": "0x1400",
-        "omr_ipv6_addr": "fd12:3456:7890::1",
+        "omrIpv6Addr": "fd12:3456:7890::1",
     }
     
     result = deep_merge(base, incoming)
     
     # Both fields should be present
-    assert result["device_label"] == "Device A"
-    assert result["omr_ipv6_addr"] == "fd12:3456:7890::1"
+    assert result["deviceLabel"] == "Device A"
+    assert result["omrIpv6Addr"] == "fd12:3456:7890::1"
     
-    print("✅ PASS: Records without extaddr merged correctly")
+    print("✅ PASS: Records without extAddress merged correctly")
 
 
 # =============================================================================
@@ -302,28 +294,28 @@ def test_edge_case_malformed_nested_structures():
     """Test handling of malformed nested structures."""
     print("\n=== Test: Edge Case - Malformed Nested Structures ===")
     
-    # Base with properly formed route_data
+    # Base with properly formed route
     base = {
-        "extaddr": "0011223344556677",
-        "route_data": {
-            "id_sequence": 10,
-            "route_data": [{"route_id": 5, "route_cost": 1}]
+        "extAddress": "0011223344556677",
+        "route": {
+            "idSequence": 10,
+            "routeData": [{"routeId": 5, "routeCost": 1}]
         }
     }
     
-    # Incoming with malformed route_data (missing array)
+    # Incoming with malformed route (missing array)
     incoming = {
-        "extaddr": "0011223344556677",
-        "route_data": {
-            "id_sequence": 15,
-            # Missing route_data array - malformed!
+        "extAddress": "0011223344556677",
+        "route": {
+            "idSequence": 15,
+            # Missing routeData array - malformed!
         }
     }
     
     result = deep_merge(base, incoming)
     
     # Should handle gracefully - newer sequence wins
-    assert result["route_data"]["id_sequence"] == 15
+    assert result["route"]["idSequence"] == 15
     
     # Route array behavior: merge_route_data handles missing/empty arrays
     # If incoming has no route array, base routes may be discarded per sequence precedence
@@ -342,30 +334,30 @@ def test_thread_edge_case_partition_fragmentation():
     
     # Node in partition 1
     node_partition1 = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "leader_data": {"partition_id": 10001},
-        "route_data": {
-            "id_sequence": 10,
-            "route_data": [{"route_id": 5, "route_cost": 1}]
+        "leaderData": {"partitionId": 10001},
+        "route": {
+            "idSequence": 10,
+            "routeData": [{"routeId": 5, "routeCost": 1}]
         }
     }
     
     # Same node in partition 2 (after fragmentation)
     node_partition2 = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x2400",  # Different RLOC16 in new partition
-        "leader_data": {"partition_id": 10002},
-        "route_data": {
-            "id_sequence": 20,
-            "route_data": [{"route_id": 9, "route_cost": 2}]
+        "leaderData": {"partitionId": 10002},
+        "route": {
+            "idSequence": 20,
+            "routeData": [{"routeId": 9, "routeCost": 2}]
         }
     }
     
     # Merge should handle different partitions
     result = deep_merge(node_partition1, node_partition2)
     
-    # Should merge, but note: partition_id will be from second merge (incoming wins for conflicts)
+    # Should merge, but note: partitionId will be from second merge (incoming wins for conflicts)
     partition = get_partition_id(result)
     assert partition is not None
     
@@ -382,35 +374,35 @@ def test_thread_edge_case_rloc16_reuse():
     
     # Device A with RLOC16 0x1400 in partition 1
     device_a = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "device_label": "Device A",
-        "leader_data": {"partition_id": 10001},
+        "deviceLabel": "Device A",
+        "leaderData": {"partitionId": 10001},
     }
     
-    # Device B with same RLOC16 0x1400 in partition 2 (different extaddr)
+    # Device B with same RLOC16 0x1400 in partition 2 (different extAddress)
     device_b = {
-        "extaddr": "aabbccddee001122",
+        "extAddress": "aabbccddee001122",
         "rloc16": "0x1400",
-        "device_label": "Device B",
-        "leader_data": {"partition_id": 10002},
+        "deviceLabel": "Device B",
+        "leaderData": {"partitionId": 10002},
     }
     
-    # In deep_merge, when both have non-empty extaddr values that differ,
+    # In deep_merge, when both have non-empty extAddress values that differ,
     # it creates a conflict and base value is kept
     result = deep_merge(device_a, device_b)
     
-    # Base extaddr is kept (conflict behavior)
-    assert result["extaddr"] == "0011223344556677"  # From base (conflict)
+    # Base extAddress is kept (conflict behavior)
+    assert result["extAddress"] == "0011223344556677"  # From base (conflict)
     
     # Other conflicting fields also keep base value
-    assert result["device_label"] == "Device A"  # From base (conflict)
+    assert result["deviceLabel"] == "Device A"  # From base (conflict)
     
     # Conflicts should be logged
     assert "_merge_conflicts" in result
     
     # This test validates deep_merge conflict behavior
-    # In practice, merge_nodes groups by extaddr first to avoid this
+    # In practice, merge_nodes groups by extAddress first to avoid this
     
     print("✅ PASS: RLOC16 reuse creates conflict (base wins)")
 
@@ -450,18 +442,18 @@ def test_thread_edge_case_missing_partition_id():
     """Test handling of missing or zero partition_id."""
     print("\n=== Test: Thread Edge Case - Missing/Zero Partition ID ===")
     
-    # Node without partition_id
+    # Node without partitionId
     node_no_partition = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "device_label": "Device A",
+        "deviceLabel": "Device A",
     }
     
-    # Node with partition_id = 0 (may indicate error or uninitialized)
+    # Node with partitionId = 0 (may indicate error or uninitialized)
     node_zero_partition = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "leader_data": {"partition_id": 0},
+        "leaderData": {"partitionId": 0},
     }
     
     # Extract partition IDs
@@ -475,7 +467,7 @@ def test_thread_edge_case_missing_partition_id():
     
     # Merge should still work
     result = deep_merge(node_no_partition, node_zero_partition)
-    assert result["extaddr"] == "0011223344556677"
+    assert result["extAddress"] == "0011223344556677"
     
     print("✅ PASS: Missing/zero partition_id handled")
 
@@ -489,9 +481,9 @@ def test_data_loss_verification_all_fields_preserved():
     print("\n=== Test: Data Loss Verification - All Fields Preserved ===")
     
     base = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "device_label": "Living Room",
+        "deviceLabel": "Living Room",
         "field_a": "value_a",
         "field_b": 123,
         "field_c": True,
@@ -499,8 +491,8 @@ def test_data_loss_verification_all_fields_preserved():
     }
     
     incoming = {
-        "extaddr": "0011223344556677",
-        "omr_ipv6_addr": "fd12::1",
+        "extAddress": "0011223344556677",
+        "omrIpv6Addr": "fd12::1",
         "field_d": "value_d",
         "nested": {"key3": "val3"}
     }
@@ -508,15 +500,15 @@ def test_data_loss_verification_all_fields_preserved():
     result = deep_merge(base, incoming)
     
     # All fields from base should be present
-    assert result["extaddr"] == "0011223344556677"
+    assert result["extAddress"] == "0011223344556677"
     assert result["rloc16"] == "0x1400"
-    assert result["device_label"] == "Living Room"
+    assert result["deviceLabel"] == "Living Room"
     assert result["field_a"] == "value_a"
     assert result["field_b"] == 123
     assert result["field_c"] == True
     
     # All fields from incoming should be present
-    assert result["omr_ipv6_addr"] == "fd12::1"
+    assert result["omrIpv6Addr"] == "fd12::1"
     assert result["field_d"] == "value_d"
     
     # Nested fields should all be present
@@ -536,24 +528,24 @@ def test_data_loss_verification_array_elements_preserved():
     print("\n=== Test: Data Loss Verification - Array Elements Preserved ===")
     
     base = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "route_data": {
-            "id_sequence": 10,
-            "route_data": [
-                {"route_id": 5, "route_cost": 1, "link_quality_in": 3},
-                {"route_id": 7, "route_cost": 2, "link_quality_in": 2},
+        "route": {
+            "idSequence": 10,
+            "routeData": [
+                {"routeId": 5, "routeCost": 1, "linkQualityIn": 3},
+                {"routeId": 7, "routeCost": 2, "linkQualityIn": 2},
             ]
         }
     }
     
     incoming = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "route_data": {
-            "id_sequence": 15,  # Newer sequence
-            "route_data": [
-                {"route_id": 9, "route_cost": 1, "link_quality_in": 3},
+        "route": {
+            "idSequence": 15,  # Newer sequence
+            "routeData": [
+                {"routeId": 9, "routeCost": 1, "linkQualityIn": 3},
             ]
         }
     }
@@ -561,12 +553,12 @@ def test_data_loss_verification_array_elements_preserved():
     result = deep_merge(base, incoming)
     
     # Should have routes from incoming (newer sequence)
-    route_data = result["route_data"]
-    assert route_data["id_sequence"] == 15
+    route_data = result["route"]
+    assert route_data["idSequence"] == 15
     
     # All unique routes should be preserved
-    route_array = route_data["route_data"]
-    route_ids = [r["route_id"] for r in route_array]
+    route_array = route_data["routeData"]
+    route_ids = [r["routeId"] for r in route_array]
     
     # Should have route 9 from incoming
     assert 9 in route_ids
@@ -583,19 +575,19 @@ def test_conflict_tracking_source_files():
     print("\n=== Test: Conflict Tracking - Source Files Tracked ===")
     
     node1 = {
-        "extaddr": "0011223344556677",
-        "device_label": "Device A",
+        "extAddress": "0011223344556677",
+        "deviceLabel": "Device A",
         "_source_files": ["td-otbr-cli-networkdiag-fetch-all.json"]
     }
     
     node2 = {
-        "extaddr": "0011223344556677",
-        "omr_ipv6_addr": "fd12::1",
+        "extAddress": "0011223344556677",
+        "omrIpv6Addr": "fd12::1",
         "_source_files": ["td-otbr-restapi-diagnostics.json"]
     }
     
     node3 = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "service_info": {"port": 49153},
         "_source_files": ["td-mdns-scopes-br.json"]
     }
@@ -622,31 +614,31 @@ def test_conflict_tracking_field_conflicts():
     print("\n=== Test: Conflict Tracking - Field Conflicts ===")
     
     base = {
-        "extaddr": "0011223344556677",
-        "device_label": "Living Room",
+        "extAddress": "0011223344556677",
+        "deviceLabel": "Living Room",
         "rloc16": "0x1400",
     }
     
     incoming = {
-        "extaddr": "0011223344556677",
-        "device_label": "Kitchen",  # Conflict!
+        "extAddress": "0011223344556677",
+        "deviceLabel": "Kitchen",  # Conflict!
         "rloc16": "0x1400",  # No conflict
     }
     
     result = deep_merge(base, incoming)
     
     # Base wins for conflicts in deep_merge
-    assert result["device_label"] == "Living Room"
+    assert result["deviceLabel"] == "Living Room"
     
     # Conflict should be logged
     assert "_merge_conflicts" in result
     conflicts = result["_merge_conflicts"]
     assert len(conflicts) > 0
     
-    # Find the device_label conflict
+    # Find the deviceLabel conflict
     device_label_conflict = None
     for conflict in conflicts:
-        if conflict.get("path") == "device_label":
+        if conflict.get("path") == "deviceLabel":
             device_label_conflict = conflict
             break
     
@@ -666,25 +658,25 @@ def test_complex_integration_all_features():
     """Complex integration test combining all Phase 2-4 features."""
     print("\n=== Test: Complex Integration - All Features Combined ===")
     
-    # CLI data with routes and partition
+    # Canonical data with routes and partition
     cli_data = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "device_label": "Border Router",
-        "route_data": {
-            "id_sequence": 10,
-            "route_data": [
-                {"route_id": 5, "route_cost": 1, "link_quality_in": 3, "link_quality_out": 3},
-                {"route_id": 7, "route_cost": 2, "link_quality_in": 2, "link_quality_out": 2},
+        "deviceLabel": "Border Router",
+        "route": {
+            "idSequence": 10,
+            "routeData": [
+                {"routeId": 5, "routeCost": 1, "linkQualityIn": 3, "linkQualityOut": 3},
+                {"routeId": 7, "routeCost": 2, "linkQualityIn": 2, "linkQualityOut": 2},
             ]
         },
-        "leader_data": {"partition_id": 12345, "leader_router_id": 5},
+        "leaderData": {"partitionId": 12345, "leaderRouterId": 5},
         "_source_files": ["td-otbr-cli-networkdiag-fetch-all.json"]
     }
     
     # REST API data with children (camelCase)
     rest_data = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "rloc16": "0x1400",
         "route": {
             "idSequence": 15,  # Newer sequence
@@ -693,9 +685,9 @@ def test_complex_integration_all_features():
                 {"routeId": 9, "routeCost": 1, "linkQualityIn": 3, "linkQualityOut": 3},  # New route
             ]
         },
-        "children": [
-            {"extaddr": "aabbccddee001122", "childId": 1, "rloc16": "0x1401", "averageRssi": -45},
-            {"extaddr": "aabbccddee003344", "childId": 2, "rloc16": "0x1402", "averageRssi": -50},
+        "childTable": [
+            {"extAddress": "aabbccddee001122", "childId": 1, "rloc16": "0x1401", "averageRssi": -45},
+            {"extAddress": "aabbccddee003344", "childId": 2, "rloc16": "0x1402", "averageRssi": -50},
         ],
         "leaderData": {"partitionId": 12345},
         "_source_files": ["td-otbr-restapi-diagnostics.json"]
@@ -703,7 +695,7 @@ def test_complex_integration_all_features():
     
     # mDNS data with service info
     mdns_data = {
-        "extaddr": "0011223344556677",
+        "extAddress": "0011223344556677",
         "record_key": "_meshcop._udp.local.|BR._meshcop._udp.local.",
         "event": "add",
         "captured_at_epoch": 1779806966.0,
@@ -724,18 +716,18 @@ def test_complex_integration_all_features():
     
     # Verify complex merge results
     # 1. Route data uses newer sequence (15 from REST API)
-    route_data = result.get("route_data") or result.get("route")
-    seq = route_data.get("id_sequence") or route_data.get("idSequence")
+    route_data = result.get("route")
+    seq = route_data.get("idSequence")
     assert seq == 15, f"Expected sequence 15, got {seq}"
     
     # 2. Routes should include both sources (with deduplication)
-    route_array = route_data.get("route_data") or route_data.get("routeData", [])
-    route_ids = [r.get("route_id") or r.get("routeId") for r in route_array]
+    route_array = route_data.get("routeData", [])
+    route_ids = [r.get("routeId") for r in route_array]
     assert 5 in route_ids
     assert 9 in route_ids
     
     # 3. Children preserved
-    assert len(result["children"]) == 2
+    assert len(result["childTable"]) == 2
     
     # 4. mDNS service info preserved
     assert "service_info" in result
@@ -743,7 +735,7 @@ def test_complex_integration_all_features():
     
     # 5. Partition data preserved
     partition = get_partition_id(result)
-    # partition_id is normalized to hex string format
+    # partitionId is normalized to hex string format
     assert partition == "0x00003039" or partition == 12345
     
     # 6. All sources tracked
@@ -767,7 +759,7 @@ def test_production_flow_mdns_omr_dedup_aliases():
         "captured_at_epoch": 1000.0,
         "captured_at_iso": "2026-06-01T00:00:00Z",
         "name": "A._matter._tcp.local.",
-        "omr_ipv6_addr": "fd00:abcd::1234",
+        "omrIpv6Addr": "fd00:abcd::1234",
         "service_info": {
             "server": "56A2B29EC702D2D2.local.",
             "key": "56a2b29ec702d2d2.local.",
@@ -785,7 +777,7 @@ def test_production_flow_mdns_omr_dedup_aliases():
         "captured_at_epoch": 2000.0,
         "captured_at_iso": "2026-06-01T00:16:40Z",
         "name": "B._matter._tcp.local.",
-        "omr_ipv6_addr": "fd00:abcd::1234",
+        "omrIpv6Addr": "fd00:abcd::1234",
         "service_info": {
             "server": "56A2B29EC702D2D2-2.local.",
             "key": "56a2b29ec702d2d2-2.local.",
@@ -814,23 +806,23 @@ def test_production_flow_mdns_omr_dedup_aliases():
     node = merged[0]
 
     # Newer mDNS row should drive active scalar fields.
-    assert node.get("captured_at_epoch") == 2000.0
+    assert node.get("capturedAtEpoch") == 2000.0
     assert node.get("name") == "B._matter._tcp.local."
-    assert node.get("omr_ipv6_addr") == "fd00:abcd::1234"
+    assert node.get("omrIpv6Addr") == "fd00:abcd::1234"
 
     # Alias rollups should preserve both records' variants.
     aliases = node.get("_mdns_aliases", {})
-    assert "A._matter._tcp.local." in aliases.get("name_aliases", [])
-    assert "B._matter._tcp.local." in aliases.get("name_aliases", [])
-    assert "56A2B29EC702D2D2.local." in aliases.get("server_aliases", [])
-    assert "56A2B29EC702D2D2-2.local." in aliases.get("server_aliases", [])
-    assert "56a2b29ec702d2d2.local." in aliases.get("server_key_aliases", [])
-    assert "56a2b29ec702d2d2-2.local." in aliases.get("server_key_aliases", [])
-    assert "1E4513C35D4A3E6E" in aliases.get("fabric_id_compressed_aliases", [])
-    assert "000000000CD1308E" in aliases.get("node_id_aliases", [])
-    assert "1e4513c35d4a3e6e|000000000cd1308e" in aliases.get("matter_fabric_node_aliases", [])
-    assert len(aliases.get("fabric_id_compressed_aliases", [])) == 1
-    assert len(aliases.get("node_id_aliases", [])) == 1
+    assert "A._matter._tcp.local." in aliases.get("nameAliases", [])
+    assert "B._matter._tcp.local." in aliases.get("nameAliases", [])
+    assert "56A2B29EC702D2D2.local." in aliases.get("serverAliases", [])
+    assert "56A2B29EC702D2D2-2.local." in aliases.get("serverAliases", [])
+    assert "56a2b29ec702d2d2.local." in aliases.get("serverKeyAliases", [])
+    assert "56a2b29ec702d2d2-2.local." in aliases.get("serverKeyAliases", [])
+    assert "1E4513C35D4A3E6E" in aliases.get("fabricIdCompressedAliases", [])
+    assert "000000000CD1308E" in aliases.get("nodeIdAliases", [])
+    assert "1e4513c35d4a3e6e|000000000cd1308e" in aliases.get("matterFabricNodeAliases", [])
+    assert len(aliases.get("fabricIdCompressedAliases", [])) == 1
+    assert len(aliases.get("nodeIdAliases", [])) == 1
 
     assert set(node.get("_source_files", [])) == {
         "td-mdns-scopes-thread.json",
@@ -855,7 +847,7 @@ def test_production_flow_strict_omr_preserves_distinct_matter_identities_in_alia
         "event": "add",
         "captured_at_epoch": 3000.0,
         "name": "A._matter._tcp.local.",
-        "omr_ipv6_addr": "fd00:abcd::9999",
+        "omrIpv6Addr": "fd00:abcd::9999",
         "service_info": {
             "properties": {
                 "FabricID_compressed": {"decoded": "AAAAAAAAAAAAAAAA"},
@@ -870,7 +862,7 @@ def test_production_flow_strict_omr_preserves_distinct_matter_identities_in_alia
         "event": "add",
         "captured_at_epoch": 3001.0,
         "name": "B._matter._tcp.local.",
-        "omr_ipv6_addr": "fd00:abcd::9999",
+        "omrIpv6Addr": "fd00:abcd::9999",
         "service_info": {
             "properties": {
                 "FabricID_compressed": {"decoded": "BBBBBBBBBBBBBBBB"},
@@ -896,7 +888,7 @@ def test_production_flow_strict_omr_preserves_distinct_matter_identities_in_alia
     assert len(merged) == 1, f"Expected 1 merged node, got {len(merged)}"
     node = merged[0]
     aliases = node.get("_mdns_aliases", {})
-    composite_aliases = aliases.get("matter_fabric_node_aliases", [])
+    composite_aliases = aliases.get("matterFabricNodeAliases", [])
     assert "aaaaaaaaaaaaaaaa|0000000000000001" in composite_aliases
     assert "bbbbbbbbbbbbbbbb|0000000000000002" in composite_aliases
     assert report.get("matter_identity_mode") == "strict-omr"
@@ -914,7 +906,7 @@ def test_production_flow_composite_guard_prevents_false_omr_merge():
         "event": "add",
         "captured_at_epoch": 3000.0,
         "name": "A._matter._tcp.local.",
-        "omr_ipv6_addr": "fd00:abcd::9999",
+        "omrIpv6Addr": "fd00:abcd::9999",
         "service_info": {
             "properties": {
                 "FabricID_compressed": {"decoded": "AAAAAAAAAAAAAAAA"},
@@ -929,7 +921,7 @@ def test_production_flow_composite_guard_prevents_false_omr_merge():
         "event": "add",
         "captured_at_epoch": 3001.0,
         "name": "B._matter._tcp.local.",
-        "omr_ipv6_addr": "fd00:abcd::9999",
+        "omrIpv6Addr": "fd00:abcd::9999",
         "service_info": {
             "properties": {
                 "FabricID_compressed": {"decoded": "BBBBBBBBBBBBBBBB"},

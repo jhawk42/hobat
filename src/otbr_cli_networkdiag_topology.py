@@ -11,6 +11,7 @@ from typing import Sequence
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP, TD_THREAD_MULTICAST_ADDRESSES_LINK_LOCAL_ALL_FTDS_AND_MEDS, TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS_AND_MEDS
 import util_ot_ctl
 import util_network
+from json_key_normalizer import convert_keys_to_camel_case
 from otbr_cli_router_table import fetch_and_parse_router_table
 from extaddr_device_label_map import load_extaddr_device_label_map
 from util_data import data_file_path, resolve_data_dir, save_json_atomic, create_checkpoint_filename
@@ -1153,7 +1154,7 @@ def save_topology_to_json_file(
         
         network_map.append(network_node)
 
-    save_json_atomic(network_map, filename)
+    save_json_atomic(convert_keys_to_camel_case(network_map), filename)
     logging.info(f"Successfully exported {len(network_map)} records for topology to {filename}")
     logging.debug("Saved topology data into %s as JSON:\n%s",
             filename, json.dumps(network_map, indent=4))

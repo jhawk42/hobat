@@ -12,6 +12,7 @@ from typing import Sequence
 import util_network
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
+from json_key_normalizer import convert_keys_to_camel_case
 from util_data import resolve_data_file_path, resolve_data_dir, save_json_atomic
 from td_const import TD_DATA_DIR_ARG_HELP
 
@@ -552,7 +553,7 @@ options:
         output_file = resolve_data_file_path(
             f"td-mdns-scopes-{scope_tag}.json", td_data_dir
         )
-        save_json_atomic(records, output_file, indent=2)
+        save_json_atomic(convert_keys_to_camel_case(records), output_file, indent=2)
 
         logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
         logging.debug(json.dumps(records, indent=2))

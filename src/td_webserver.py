@@ -575,9 +575,7 @@ async def run_td_cli(
         logging.warning(
             "Subprocess timed out after %.1f s (args: %s); killing process",
             timeout_s,
-            sys.executable,
-            td_cli_path,
-            " ".join(action_args),
+            f"{sys.executable} {td_cli_path} {' '.join(action_args)}",
             )
         process.kill()
         # reap the child to avoid zombie

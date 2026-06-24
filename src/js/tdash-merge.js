@@ -343,28 +343,42 @@ function updateMdnsAliases(target, row) {
 function extractMdnsMergeView(row) {
   if (!isPlainObject(row)) return {};
   const fields = [
+    "recordKey",
     "record_key",
     "event",
+    "capturedAtEpoch",
     "captured_at_epoch",
+    "capturedAtIso",
     "captured_at_iso",
     "scope",
     "name",
+    "extAddress",
     "extaddr",
+    "omrIpv6Addr",
     "omr_ipv6_addr",
+    "isBorderRouter",
     "is_border_router",
     "role",
+    "serviceInfo",
     "service_info",
     "server",
+    "serverKey",
     "server_key",
   ];
   const out = {};
   fields.forEach((k) => {
     if (Object.prototype.hasOwnProperty.call(row, k)) out[k] = row[k];
   });
+  if (!out.server && typeof out?.serviceInfo?.server === "string") {
+    out.server = out.serviceInfo.server;
+  }
   if (!out.server && typeof out?.service_info?.server === "string") {
     out.server = out.service_info.server;
   }
-  if (!out.server_key && typeof out?.service_info?.key === "string") {
+  if (!out.serverKey && !out.server_key && typeof out?.serviceInfo?.key === "string") {
+    out.serverKey = out.serviceInfo.key;
+  }
+  if (!out.serverKey && !out.server_key && typeof out?.service_info?.key === "string") {
     out.server_key = out.service_info.key;
   }
   return out;
@@ -372,18 +386,26 @@ function extractMdnsMergeView(row) {
 
 function applyMdnsMergeView(target, merged) {
   [
+    "recordKey",
     "record_key",
     "event",
+    "capturedAtEpoch",
     "captured_at_epoch",
+    "capturedAtIso",
     "captured_at_iso",
     "scope",
     "name",
+    "extAddress",
     "extaddr",
+    "omrIpv6Addr",
     "omr_ipv6_addr",
+    "isBorderRouter",
     "is_border_router",
     "role",
+    "serviceInfo",
     "service_info",
     "server",
+    "serverKey",
     "server_key",
   ].forEach((k) => {
     if (Object.prototype.hasOwnProperty.call(merged, k)) target[k] = merged[k];

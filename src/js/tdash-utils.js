@@ -36,7 +36,9 @@ export function getCanonicalExtaddr(row) {
 }
 
 export function getCanonicalOmrIpv6Address(row) {
-  return canonicalIdText(row?.[MERGE_IDENTITY_FIELDS.omr_ipv6_addr]);
+  if (!isPlainObject(row)) return "";
+  const value = _getOwnPropertyValueByAlias(row, "omrIpv6Addr");
+  return canonicalIdText(value);
 }
 
 // ── Field-name normalisation helpers ─────────────────────────────────────────
@@ -74,23 +76,34 @@ function _getOwnPropertyValueByAlias(obj, fieldName) {
   return undefined;
 }
 
-/** Returns the canonical (snake_case) form of a field name, or the name itself if unknown. */
+/** Returns the legacy canonical key from FIELD_ALIASES, or the name itself if unknown. */
 export function getCanonicalFieldName(fieldName) {
   return _ALIAS_TO_CANONICAL.get(fieldName) ?? fieldName;
 }
 
 /**
- * Returns a shallow copy of `row` with canonical field names added alongside
- * any aliases.  Original alias keys are preserved for backward compatibility.
- * If the canonical name already exists in the row, it is not overwritten.
+ * Returns the preferred frontend field name for Phase 2 (camelCase-first).
+ * Falls back to the legacy canonical key when no alias mapping exists.
+ */
+export function getPreferredFieldName(fieldName) {
+  const legacyCanonical = getCanonicalFieldName(fieldName);
+  const preferredAliases = FIELD_ALIASES[legacyCanonical] ?? [];
+  return preferredAliases[0] ?? legacyCanonical;
+}
+
+/**
+ * Returns a shallow copy of `row` with both preferred camelCase and legacy
+ * canonical keys added alongside aliases. Existing keys are never overwritten.
  */
 export function normalizeFieldNames(row) {
   if (!isPlainObject(row)) return row;
   const result = { ...row };
   Object.entries(row).forEach(([key, value]) => {
-    const canonical = getCanonicalFieldName(key);
-    if (canonical !== key && !(canonical in result)) {
-      result[canonical] = value;
+    const legacyCanonical = getCanonicalFieldName(key);
+    const preferred = getPreferredFieldName(key);
+    if (preferred !== key && !(preferred in result)) result[preferred] = value;
+    if (legacyCanonical !== key && !(legacyCanonical in result)) {
+      result[legacyCanonical] = value;
     }
   });
   return result;
@@ -106,7 +119,7 @@ export function normalizeFieldNames(row) {
  * 
  * @param {Array} arr - Array of objects to normalize
  * @returns {Array} New array with normalized objects containing both camelCase
- *                  and snake_case field names
+ *                  preferred names and legacy aliases
  */
 export function normalizeNestedArrayFields(arr) {
   if (!Array.isArray(arr)) return arr;
@@ -208,16 +221,23 @@ export function getOmrIpv6FromIpv6Addrs(row, omrPrefix) {
 
 export function normalizeRowMergeAliases(row, options = {}) {
   if (!isPlainObject(row)) return row;
-  // Step 1: normalise field names (camelCase → snake_case)
+  // Step 1: normalize field names (camelCase-first, plus legacy aliases)
   let normalized = normalizeFieldNames(row);
   // Step 2: canonical identity fields
   const extaddr = getCanonicalExtaddr(normalized);
-  let omr_ipv6_addr = getCanonicalOmrIpv6Address(normalized);
-  if (extaddr) normalized.extaddr = extaddr;
-  if (!omr_ipv6_addr && options.omrPrefix) {
-    omr_ipv6_addr = getOmrIpv6FromIpv6Addrs(normalized, options.omrPrefix);
+  let omrIpv6Addr = getCanonicalOmrIpv6Address(normalized);
+  if (extaddr) {
+    if (!normalized.extAddress) normalized.extAddress = extaddr;
+    if (!normalized.extaddr) normalized.extaddr = extaddr;
   }
-  if (omr_ipv6_addr) normalized.omr_ipv6_addr = omr_ipv6_addr;
+  if (!omrIpv6Addr && options.omrPrefix) {
+    omrIpv6Addr = getOmrIpv6FromIpv6Addrs(normalized, options.omrPrefix);
+  }
+  if (omrIpv6Addr) {
+    if (!normalized.omrIpv6Addr) normalized.omrIpv6Addr = omrIpv6Addr;
+    if (!normalized.omrIpv6Address) normalized.omrIpv6Address = omrIpv6Addr;
+    if (!normalized.omr_ipv6_addr) normalized.omr_ipv6_addr = omrIpv6Addr;
+  }
   // Step 3: derive mode.device (FTD/MTD) when not already set
   const existingModeDevice = normalized?.mode?.device ?? normalized?.["mode.device"];
   if (!existingModeDevice) {
@@ -625,8 +645,8 @@ export function shouldExcludeDetailPath(_path, _context) {
  * Highlights, Connections, Routes & Links) in this priority order.
  * 
  * **Priority Tiers:**
- * - **TIER 1: Primary Identity** - Core identifiers (rloc16, extaddr, routerId, device_label)
- * - **TIER 2: Secondary Identity** - Additional identifiers (omr_ipv6_addr, mlEidIid, room)
+ * - **TIER 1: Primary Identity** - Core identifiers (rloc16, extAddress, routerId, deviceLabel)
+ * - **TIER 2: Secondary Identity** - Additional identifiers (omrIpv6Addr, mlEidIid, room)
  * - **TIER 3: Device Role & Status** - Role, type, mode information
  * - **TIER 4: Topology & Connectivity** - Link quality, connectivity metrics
  * - **TIER 5: Advanced/Diagnostic** - Counters, vendor info, diagnostics
@@ -649,8 +669,9 @@ export function sortDetailsWithPriority(details) {
   const priorityKeys = [
     // === TIER 1: Primary Identity ===
     "rloc16",
-    "extaddr",
     "extAddress",
+    "extaddr",
+    "deviceLabel",
     "device_label",
     "name",
     "routerId",
@@ -660,8 +681,9 @@ export function sortDetailsWithPriority(details) {
     "ID",
     
     // === TIER 2: Secondary Identity ===
-    "omr_ipv6_addr",
+    "omrIpv6Addr",
     "omrIpv6Address",
+    "omr_ipv6_addr",
     "mlEidIid",
     "room",
     "Extended MAC",
@@ -671,10 +693,11 @@ export function sortDetailsWithPriority(details) {
     "Role",
     "br",
     "isBorderRouter",
+    "is_border_router",
     "isRouter",
+    "is_router",
     "leader",
     "isLeader",
-    "is_router",
     "isPrimaryBBR",
     "status",
     "icon",
@@ -683,26 +706,33 @@ export function sortDetailsWithPriority(details) {
     "mode.deviceTypeFTD",
     "ver",
     "version",
+    "threadVersion",
     "thread_version",
-    "thread_stack_version",
     "threadStackVersion",
-    "vendor_name",
+    "thread_stack_version",
     "vendorName",
-    "vendor_model",
+    "vendor_name",
     "vendorModel",
+    "vendor_model",
+    "vendorSwVersion",
     "vendor_sw_version",
-    "vendorSwVersion",    
-    "room",
-    "icon",
     
     // === TIER 4: Topology & Connectivity ===
+    "totalChildren",
     "total_children",
+    "hasChildren",
     "has_children",
+    "totalLinks",
     "total_links",
+    "totalLink3",
     "total_link_3",
+    "totalLink2",
     "total_link_2",
+    "totalLink1",
     "total_link_1",
+    "routerNeighborsCount",
     "router_neighbor_table_count",
+    "childTableCount",
     "router_child_table_count",
     "connectivity.activeRouters",
     "connectivity.active_routers",
@@ -718,6 +748,7 @@ export function sortDetailsWithPriority(details) {
     "leader_data.leader_router_id",
     
     // === TIER 5: Advanced/Diagnostic ===
+    "tlvValues",
     "tlv_values",
     "mac_counters.ifinerrors_pct",
     "mac_counters.ifouterrors_pct",

@@ -11,7 +11,7 @@ import { toText, getColumnValue, isPlainObject } from "./tdash-utils.js";
  * roles, and version information.
  * 
  * **Field Categories:**
- * - **Identity & Addresses** - Core identifiers like rloc16, extaddr, device_label, routerId
+ * - **Identity & Addresses** - Core identifiers like rloc16, extAddress, deviceLabel, routerId
  * - **Device Type & Role** - Role, type, br, leader, isBorderRouter
  * - **Versions** - Thread stack version, software version
  * - **Other** - mode.device, scope, status
@@ -22,8 +22,8 @@ import { toText, getColumnValue, isPlainObject } from "./tdash-utils.js";
  * - Search is case-insensitive and supports partial matches
  * 
  * **Field Naming:**
- * - Includes both snake_case (CLI) and camelCase (REST API) variants
- * - Examples: extaddr/extAddress, omr_ipv6_addr/omrIpv6Address, thread_stack_version/threadStackVersion
+ * - Uses camelCase-first targets with legacy snake_case fallbacks
+ * - Examples: extAddress/extaddr, omrIpv6Addr/omr_ipv6_addr, threadStackVersion/thread_stack_version
  * - Both variants are searchable to support all dataset types
  * 
  * @type {Readonly<string[]>}
@@ -33,30 +33,31 @@ import { toText, getColumnValue, isPlainObject } from "./tdash-utils.js";
 export const SEARCH_TARGET_FIELDS = Object.freeze([
   // === Identity & Addresses ===
   "rloc16",
-  "extaddr",
   "extAddress",
+  "extaddr",
   "eui64",
-  "device_label",
+  "deviceLabel",
   "name",
   "room",
   "ID",
   "Extended MAC",
   "routerId",
   "router_id",
-  "omr_ipv6_addr",
+  "omrIpv6Addr",
   "omrIpv6Address",
-  "rloc_ipv6_addr",
+  "omr_ipv6_addr",
   "rlocIpv6Address",
+  "rloc_ipv6_addr",
   "mlEidIid",
   
   // === Device Type & Role ===
   "type",
   "role",
   "Role",
-  "is_router",
   "isRouter",
-  "is_border_router",
+  "is_router",
   "isBorderRouter",
+  "is_border_router",
   "br",
   "leader",
   "isLeader",
@@ -64,20 +65,21 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   // === Versions ===
   "ver",
   "version",
+  "threadVersion",
   "thread_version",
-  "thread_stack_version",
   "threadStackVersion",
+  "thread_stack_version",
   
   // === Addresses & Network Info ===
-  "ipv6_addrs",
   "ipv6Addresses",
+  "ipv6_addrs",
 
   // === Other ===
   "mode.device",
   "scope",
   "status",
-  "vendor_name",
-  "vendorName"  
+  "vendorName",
+  "vendor_name"
 ]);
 
 // ── Query normalisation ────────────────────────────────────────────────────────

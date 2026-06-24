@@ -1,6 +1,7 @@
 import {
   toText,
   toFiniteNumber,
+  getColumnValue,
   getCanonicalExtaddr,
   getCanonicalOmrIpv6Address,
 } from "./tdash-utils.js";
@@ -39,8 +40,8 @@ export function chooseNodeId(node, fallbackPrefix, index) {
   if (idField) return idField;
   const extAddr = getCanonicalExtaddr(node);
   if (extAddr) return extAddr;
-  const omr_ipv6_addr = getCanonicalOmrIpv6Address(node);
-  if (omr_ipv6_addr) return omr_ipv6_addr;
+  const omrIpv6Addr = getCanonicalOmrIpv6Address(node);
+  if (omrIpv6Addr) return omrIpv6Addr;
   return `${fallbackPrefix}-${index}`;
 }
 
@@ -48,7 +49,7 @@ export function chooseNodeId(node, fallbackPrefix, index) {
 
 export function buildLabel(node) {
   const nodeName =
-    toText(node.device_label) || toText(node.name) || "Unknown node";
+    toText(node.deviceLabel) || toText(node.device_label) || toText(node.name) || "Unknown node";
   const rloc16 = toText(node.rloc16) || "rloc16:n/a";
   return `${nodeName}\n${rloc16}`;
 }
@@ -388,19 +389,28 @@ export function buildVisNodeData(
   routerChildByRloc16 = new Map(),
 ) {
   return Array.from(nodeMap.values()).map((node) => {
-    const displayName = toText(node.device_label) || toText(node.name);
+    const displayName = toText(node.deviceLabel) || toText(node.device_label) || toText(node.name);
     const rloc16Text = toText(node.rloc16).toLowerCase();
-    const modeDevice = toText(node.mode_device).toUpperCase();
+    const modeDevice = toText(node.modeDevice || node.mode_device).toUpperCase();
     const neighborStats = computeRouterNeighborStats(
-      routerNeighborByRloc16.get(rloc16Text)?.router_neighbor_table,
+      getColumnValue(routerNeighborByRloc16.get(rloc16Text) || {}, "routerNeighbors")
+      ?? getColumnValue(routerNeighborByRloc16.get(rloc16Text) || {}, "router_neighbor_table"),
     );
     const childTableRow = routerChildByRloc16.get(rloc16Text);
     const childStats = computeRouterChildStats(
-      childTableRow?.router_child_table,
+      getColumnValue(childTableRow || {}, "childTable")
+      ?? getColumnValue(childTableRow || {}, "router_child_table"),
     );
     const hasChildren = routerIdsWithChildren.has(node.id);
-    const isRouter = node.is_router || rloc16Text.endsWith("00") || toText(node.type).toLowerCase() === "router" || toText(node.role).toLowerCase() === "router";
-    const isBorderRouter = isRouter && (node.br === true || node.is_border_router === true) || toText(node.role).toLowerCase() === "border router" || toText(node.role).toLowerCase() === "border router";
+    const isRouter =
+      node.isRouter === true ||
+      node.is_router === true ||
+      rloc16Text.endsWith("00") ||
+      toText(node.type).toLowerCase() === "router" ||
+      toText(node.role).toLowerCase() === "router";
+    const isBorderRouter =
+      (isRouter && (node.br === true || node.isBorderRouter === true || node.is_border_router === true)) ||
+      toText(node.role).toLowerCase() === "border router";
     const unknown = isUnknownNodeName(displayName) && !isRouter && !isBorderRouter;
     const isChildFtd = !isRouter && modeDevice === "FTD";
     const isChildMtd = !isRouter && modeDevice === "MTD";
@@ -467,11 +477,17 @@ export function buildVisNodeData(
       ifouterrors_pct: node.ifouterrors_pct,
       iftotalerrors_totalpkts_ratio: node.iftotalerrors_totalpkts_ratio,
       iftotaldiscards_totalpkts_ratio: node.iftotaldiscards_totalpkts_ratio,
-      mode_device: node.mode_device,
+      modeDevice: node.modeDevice ?? node.mode_device,
+      mode_device: node.mode_device ?? node.modeDevice,
+      totalLink3: node.totalLink3 ?? node.total_link_3,
       total_link_3: node.total_link_3,
+      totalLink2: node.totalLink2 ?? node.total_link_2,
       total_link_2: node.total_link_2,
+      totalLink1: node.totalLink1 ?? node.total_link_1,
       total_link_1: node.total_link_1,
+      lq3Ratio: node.lq3Ratio ?? node.lq3_ratio,
       lq3_ratio: node.lq3_ratio,
+      lq1Ratio: node.lq1Ratio ?? node.lq1_ratio,
       lq1_ratio: node.lq1_ratio,
       has_child_lq_medium: node.has_child_lq_medium,
       has_child_lq_poor: node.has_child_lq_poor,

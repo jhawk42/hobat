@@ -170,8 +170,9 @@ def load_extaddr_device_label_map(path=EXTADDR_DEVICE_LABEL_MAP_FILENAME):
         return mapping
 
     for item in data:
-        extaddr = item.get("extaddr", "").lower()
-        device_label = item.get("device_label", "")
+        # Support both snake_case and camelCase field names
+        extaddr = normalize_extaddr(item.get("extaddr")) or normalize_extaddr(item.get("extAddress"))
+        device_label = item.get("device_label") or item.get("deviceLabel", "")
         if not extaddr:
             logging.warning(f"Skipping entry missing 'extaddr': {item!r}")
             continue
