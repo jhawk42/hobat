@@ -159,7 +159,7 @@ export const DATASET_REGISTRY = [
     files: ["td-otbr-cli-networkdiag-fetch-all.json"],
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
-    physicsProfile: "mesh-ring",
+    physicsProfile: "mesh-compact",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 600
@@ -178,7 +178,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
-    physicsProfile: "mesh-ring",
+    physicsProfile: "mesh-compact",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 720
@@ -198,7 +198,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
-    physicsProfile: "mesh-ring",
+    physicsProfile: "mesh-compact",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 900
@@ -307,7 +307,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
-    physicsProfile: "mesh-ring",
+    physicsProfile: "mesh-compact",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1206
@@ -376,7 +376,7 @@ export const DATASET_REGISTRY = [
     files: ["td-eve-topology.json"],
     mergeStrategy: "none",
     topologyMode: "eve_enhanced",
-    physicsProfile: "mesh-ring",
+    physicsProfile: "mesh-compact",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1
@@ -444,7 +444,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
-    physicsProfile: "mesh-ring",
+    physicsProfile: "mesh-compact",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1
@@ -466,7 +466,7 @@ export const DATASET_REGISTRY = [
     ],
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
-    physicsProfile: "mesh-ring",
+    physicsProfile: "mesh-compact",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 720
