@@ -876,7 +876,7 @@ export const PHYSICS_PROFILES = Object.freeze({
     stabilization: Object.freeze({ enabled: true, iterations: 2200, updateInterval: 25 }),
   }),
   [PHYSICS_PROFILE_MESH_BALANCED]: Object.freeze({
-    label: "Mesh Balanced",
+    label: "Hub Spoke",
     barnesHut: Object.freeze({
       gravitationalConstant: -10000,
       centralGravity: 0.14,
