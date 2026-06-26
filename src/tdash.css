@@ -745,6 +745,10 @@ button.active {
   height: 30px;
 }
 
+#btn-details-panel-toggle {
+  font-weight: 700;
+}
+
 .toggle-bar-separator {
   width: 1px;
   height: 20px;
@@ -792,6 +796,7 @@ button.active {
   grid-template-rows: auto auto auto 1fr;
   gap: 12px;
   align-items: start;
+  position: relative;
 }
 
 /* Keep the View legend button at the top of column 1 */
@@ -987,6 +992,21 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .node-details-panel .detail-toggle-all:hover {
   color: var(--fg, inherit);
   border-color: var(--muted);
+}
+
+.node-details-panel .detail-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+#panel-view.details-panel-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#panel-view.details-panel-collapsed #device-details {
+  display: none;
 }
 
 /* Complex value tree inside detail lists */

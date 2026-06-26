@@ -603,7 +603,26 @@ function _appendGrouped(entries, listEl) {
 // for the given panel element. Call once after the DOM is ready.
 export function initDetailPanelToggles(panelEl) {
   const headings = Array.from(panelEl.querySelectorAll("h2"));
+  const panelViewEl = panelEl.closest("#panel-view");
+  const panelToggleBtn = document.getElementById("btn-details-panel-toggle");
   let isAllCollapsed = false;
+  let isPanelCollapsed = false;
+
+  const syncPanelToggleButton = (btn, collapsed) => {
+    if (!btn) return;
+    const action = collapsed ? "Expand" : "Collapse";
+    btn.title = `${action} details panel`;
+    btn.setAttribute("aria-label", `${action} details panel`);
+    btn.setAttribute("aria-expanded", String(!collapsed));
+  };
+
+  syncPanelToggleButton(panelToggleBtn, false);
+  panelToggleBtn?.addEventListener("click", () => {
+    isPanelCollapsed = !isPanelCollapsed;
+    panelViewEl?.classList.toggle("details-panel-collapsed", isPanelCollapsed);
+    panelEl.classList.toggle("details-panel-collapsed", isPanelCollapsed);
+    syncPanelToggleButton(panelToggleBtn, isPanelCollapsed);
+  });
 
   headings.forEach((h2, idx) => {
     const listEl = h2.nextElementSibling;
@@ -637,8 +656,12 @@ export function initDetailPanelToggles(panelEl) {
 
     // First heading gets the global "Collapse All / Expand All" button
     if (idx === 0) {
+      const headerActions = document.createElement("span");
+      headerActions.className = "detail-header-actions";
+
       const allBtn = document.createElement("button");
       allBtn.className = "detail-toggle-all";
+      allBtn.type = "button";
       const allArrow = document.createElement("span");
       allArrow.className = "detail-section-arrow";
       allArrow.setAttribute("aria-hidden", "true");
@@ -670,7 +693,9 @@ export function initDetailPanelToggles(panelEl) {
           });
       });
 
-      h2.appendChild(allBtn);
+      headerActions.appendChild(allBtn);
+
+      h2.appendChild(headerActions);
     }
   });
 }
