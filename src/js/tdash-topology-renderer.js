@@ -358,14 +358,14 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
 
   const zoneXAnchors = {
     1: -2400,
-    2: -1200,
-    3: 0,
-    4: 600,
-    5: 2400,
+    2: -1800,
+    3: -1500,
+    4: -1200,
+    5: -480,
   };
   const zoneYSpacing = {
     1: 120,
-    2: 140,
+    2: 154,
     3: 72,
     4: 82,
     5: 110,
@@ -439,12 +439,38 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
         curr.y = clampY(cy);
       }
     }
+    for (let i = nodes.length - 2; i >= 0; i -= 1) {
+      const next = nodes[i + 1];
+      const curr = nodes[i];
+      const ny = Number(next.y) || 0;
+      let cy = Number(curr.y) || 0;
+      if (ny - cy < minGap) {
+        cy = ny - minGap;
+        curr.y = clampY(cy);
+      }
+    }
     nodes.forEach((node) => {
       node.y = Math.round(Number(node.y) || 0);
     });
   }
 
-  relaxSpecificNodeY(borderRouterIds, 280);
+  function centerSpecificNodeY(nodeIds) {
+    const nodes = nodeIds
+      .map((nodeId) => nodeById.get(nodeId))
+      .filter(Boolean);
+    if (nodes.length <= 1) return;
+    const ys = nodes.map((node) => Number(node.y) || 0);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const centerY = (minY + maxY) / 2;
+    const deltaY = -centerY;
+    nodes.forEach((node) => {
+      node.y = Math.round(clampY((Number(node.y) || 0) + deltaY));
+    });
+  }
+
+  relaxSpecificNodeY(borderRouterIds, 560);
+  centerSpecificNodeY(borderRouterIds);
   relaxSpecificNodeY(parentRouterIds, 158);
 
   // 2) Parent-affinity placement for zones 3 and 4 around the parent Y-axis.
@@ -558,7 +584,7 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
   }
 
   relaxZoneYSpacing(1, 108);
-  relaxZoneYSpacing(2, 120);
+  relaxZoneYSpacing(2, 132);
   // Keep child clusters compact in zones 3/4; larger global gaps can create tails.
   relaxZoneYSpacing(3, 24);
   relaxZoneYSpacing(4, 28);
@@ -585,14 +611,14 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
 
   const zoneYAnchors = {
     1: -2400,
-    2: -1200,
-    3: 0,
-    4: 600,
-    5: 2400,
+    2: -1800,
+    3: -1500,
+    4: -1200,
+    5: -480,
   };
   const zoneXSpacing = {
     1: 120,
-    2: 140,
+    2: 154,
     3: 72,
     4: 82,
     5: 110,
@@ -664,12 +690,38 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
         curr.x = clampX(cx);
       }
     }
+    for (let i = nodes.length - 2; i >= 0; i -= 1) {
+      const next = nodes[i + 1];
+      const curr = nodes[i];
+      const nx = Number(next.x) || 0;
+      let cx = Number(curr.x) || 0;
+      if (nx - cx < minGap) {
+        cx = nx - minGap;
+        curr.x = clampX(cx);
+      }
+    }
     nodes.forEach((node) => {
       node.x = Math.round(Number(node.x) || 0);
     });
   }
 
-  relaxSpecificNodeX(borderRouterIds, 280);
+  function centerSpecificNodeX(nodeIds) {
+    const nodes = nodeIds
+      .map((nodeId) => nodeById.get(nodeId))
+      .filter(Boolean);
+    if (nodes.length <= 1) return;
+    const xs = nodes.map((node) => Number(node.x) || 0);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const centerX = (minX + maxX) / 2;
+    const deltaX = -centerX;
+    nodes.forEach((node) => {
+      node.x = Math.round(clampX((Number(node.x) || 0) + deltaX));
+    });
+  }
+
+  relaxSpecificNodeX(borderRouterIds, 560);
+  centerSpecificNodeX(borderRouterIds);
   relaxSpecificNodeX(parentRouterIds, 158);
 
   // 2) Parent-affinity placement for zones 3 and 4 around the parent X-axis.
@@ -783,7 +835,7 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
   }
 
   relaxZoneXSpacing(1, 108);
-  relaxZoneXSpacing(2, 120);
+  relaxZoneXSpacing(2, 132);
   // Keep child clusters compact in zones 3/4; larger global gaps can create tails.
   relaxZoneXSpacing(3, 24);
   relaxZoneXSpacing(4, 28);
