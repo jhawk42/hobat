@@ -124,7 +124,7 @@ def fetch_network_diag_for_device(
     vendor_name = parse_vendor_name(output)
     vendor_model = parse_vendor_model(output)
     vendor_sw_version = parse_vendor_sw_version(output)
-    route_data = parse_route_data(output)
+    route = parse_route_data(output)
     children = parse_child_table(output, rloc16)
     mac_counters = parse_mac_counters(output)
     mle_counters = parse_mle_counters(output)
@@ -146,7 +146,7 @@ def fetch_network_diag_for_device(
         "vendor_name": vendor_name,
         "vendor_model": vendor_model,
         "vendor_sw_version": vendor_sw_version,
-        "route_data": route_data,
+        "route": route,
         "children": children,
         "mac_counters": mac_counters,
         "mle_counters": mle_counters,
@@ -492,7 +492,7 @@ def _enrich_device_route_data_with_router_info(
     router_table_by_router_id: dict | None,
 ) -> None:
     """
-    Enrich device record route_data [] of routes, enriching the items in the array by looking up their router_id in the router_table_data and adding the corresponding rloc16 to each route entry. 
+    Enrich device record route [] of routes, enriching the items in the array by looking up their router_id in the router_table_data and adding the corresponding rloc16 to each route entry. 
     This way we can have more complete information about the routes in the topology map, including the rloc16 of the next hops for each route, which can be useful for understanding the network topology and routing paths. 
 
     Enriches the route data in a device record with router information from the router table.
@@ -502,20 +502,20 @@ def _enrich_device_route_data_with_router_info(
     the record in place.
     
     Args:
-        record: Device record dict containing "route_data" field to enrich (mutated in place)
+        record: Device record dict containing "route" field to enrich (mutated in place)
         router_table_by_router_id: Optional dict of router entries keyed by "router_id", 
                                     each containing "rloc16". If None, no enrichment is performed.
     
     Side Effects:
-        Updates each route entry in record["route_data"]["route_data"] by adding an "rloc16" field 
+        Updates each route entry in record["route"]["route_data"] by adding an "rloc16" field 
         based on matching "router_id" from router_table_by_router_id
     """
     # Early return if no router table provided
     if not router_table_by_router_id:
         return
     
-    # route_data has structure: {"id_sequence": int, "route_data": [...]}
-    route_data_dict = record.get("route_data")
+    # route has structure: {"id_sequence": int, "route_data": [...]}
+    route_data_dict = record.get("route")
     if not route_data_dict or not isinstance(route_data_dict, dict):
         return
     
@@ -731,7 +731,7 @@ def fetch_network_diag_topology(
                     "omr_ipv6_addr": router.get("omr_ipv6_addr"),
                     "mode": router.get("mode"),
                     "ipv6_addrs": ipv6_addrs,
-                    "route_data": router.get("route_data", {}),
+                    "route": router.get("route", {}),
                     "children": router.get("children", []),
                 }
 
@@ -1144,7 +1144,7 @@ def save_topology_to_json_file(
             "vendor_name": data.get("vendor_name"),
             "vendor_model": data.get("vendor_model"),
             "vendor_sw_version": data.get("vendor_sw_version"),
-            "route_data": data.get("route_data", {}),
+            "route": data.get("route", {}),
             "children": data.get("children", []),
             "total_children": data.get("total_children", 0),
             "mac_counters": data.get("mac_counters", {}),

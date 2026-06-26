@@ -427,10 +427,10 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       routerIdsWithChildren.add(fromId);
     });
 
-    // Process route_data routes from networkdiag (multicast variant).
-    // route_data.route_data[] contains routing table entries with LQI metrics.
+    // Process route routes from networkdiag (multicast variant).
+    // route.routeData[] contains routing table entries with LQI metrics.
     // Each route has a direct rloc16 target (no ID conversion needed).
-    (Array.isArray(node.route_data?.route_data) ? node.route_data.route_data : []).forEach((route) => {
+    (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
       const toRloc16 = toText(route.rloc16);
       if (!toRloc16) return;
 
@@ -442,8 +442,8 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       );
 
       // Compute LQI-based edge style
-      const lqIn = toFiniteNumber(route.link_quality_in) || 0;
-      const lqOut = toFiniteNumber(route.link_quality_out) || 0;
+      const lqIn = toFiniteNumber(route.linkQualityIn) || 0;
+      const lqOut = toFiniteNumber(route.linkQualityOut) || 0;
       const avgLqi = Math.max(lqIn, lqOut); // Take max for conservative estimate
       const lqStyle = lqStyleFromAvgLqi(avgLqi, 3);
 

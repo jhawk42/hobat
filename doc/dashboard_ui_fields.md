@@ -63,7 +63,7 @@ Detailed diagnostics, counters, and vendor information:
 - `ver`, `version`, `thread_version`, `thread_stack_version`, `threadStackVersion` - Version info
 - `mleCounters.*` - MLE (Mesh Link Establishment) counters
 - `macCounters.*` - MAC layer counters
-- `route_data.route_data` - Routing table data
+- `route.route_data` - Routing table data
 - `scope`, `status` - Dataset-specific fields
 - Internal fields: `_source`, `_dataset_type`, `_merge_conflicts`
 

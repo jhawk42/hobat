@@ -109,6 +109,83 @@ export function normalizeFieldNames(row) {
   return result;
 }
 
+function _normalizeRouteEntries(routeEntries) {
+  if (!Array.isArray(routeEntries)) return [];
+  return routeEntries.map((entry) => {
+    if (!isPlainObject(entry)) return entry;
+    return normalizeFieldNames(entry);
+  });
+}
+
+/**
+ * Canonicalizes route containers to row.route.routeData shape.
+ *
+ * Supported input shapes:
+ * - row.route_data = { id_sequence, route_data: [...] }
+ * - row.route = { idSequence, routeData: [...] }
+ * - mixed snake_case / camelCase route entry fields
+ *
+ * @param {object} row
+ * @param {object} [options]
+ * @param {boolean} [options.canonicalizeRouteContainer=false]
+ * @param {boolean} [options.dropLegacyRouteData=false]
+ * @returns {object}
+ */
+export function normalizeRouteContainer(row, options = {}) {
+  if (!isPlainObject(row)) return row;
+
+  const canonicalizeRouteContainer =
+    options.canonicalizeRouteContainer === true;
+  const dropLegacyRouteData = options.dropLegacyRouteData === true;
+
+  if (!canonicalizeRouteContainer && !dropLegacyRouteData) return row;
+
+  const hasLegacyRouteContainer = isPlainObject(row.route_data);
+  const hasRouteContainer = isPlainObject(row.route);
+
+  if (!hasLegacyRouteContainer && !hasRouteContainer) {
+    if (!dropLegacyRouteData) return row;
+    if (!Object.prototype.hasOwnProperty.call(row, "route_data")) return row;
+    const cloned = { ...row };
+    delete cloned.route_data;
+    return cloned;
+  }
+
+  let result = { ...row };
+
+  if (canonicalizeRouteContainer) {
+    const routeSource = hasRouteContainer ? { ...row.route } : {};
+
+    if (hasLegacyRouteContainer) {
+      Object.entries(row.route_data).forEach(([key, value]) => {
+        if (!(key in routeSource)) routeSource[key] = value;
+      });
+    }
+
+    const routeDataSource =
+      _getOwnPropertyValueByAlias(routeSource, "routeData") ?? routeSource.route_data;
+    const routeData = _normalizeRouteEntries(routeDataSource);
+    const idSequence = _getOwnPropertyValueByAlias(routeSource, "idSequence");
+    const normalizedRoute = normalizeFieldNames(routeSource);
+
+    normalizedRoute.routeData = routeData;
+    if (idSequence !== undefined && !Object.prototype.hasOwnProperty.call(normalizedRoute, "idSequence")) {
+      normalizedRoute.idSequence = idSequence;
+    }
+
+    // Canonical container keeps routeData only.
+    delete normalizedRoute.route_data;
+
+    result.route = normalizedRoute;
+  }
+
+  if (dropLegacyRouteData) {
+    delete result.route_data;
+  }
+
+  return result;
+}
+
 /**
  * Normalizes field names for objects within an array (e.g., neighbor/child tables).
  * Applies normalizeFieldNames to each object and handles percentage field conversion.
@@ -250,19 +327,21 @@ export function normalizeRowMergeAliases(row, options = {}) {
       }
     }
   }
+  // Step 4: optional route container canonicalization (route_data -> route.routeData)
+  normalized = normalizeRouteContainer(normalized, options);
   return normalized;
 }
 
-export function normalizeDatasetPayload(value) {
+export function normalizeDatasetPayload(value, options = {}) {
   if (Array.isArray(value)) {
-    return value.map((item) => normalizeDatasetPayload(item));
+    return value.map((item) => normalizeDatasetPayload(item, options));
   }
   if (isPlainObject(value)) {
-    const normalized = normalizeRowMergeAliases(value);
+    const normalized = normalizeRowMergeAliases(value, options);
     Object.keys(normalized).forEach((key) => {
       const child = normalized[key];
       if (Array.isArray(child) || isPlainObject(child)) {
-        normalized[key] = normalizeDatasetPayload(child);
+        normalized[key] = normalizeDatasetPayload(child, options);
       }
     });
     return normalized;

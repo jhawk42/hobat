@@ -349,7 +349,7 @@ Different datasets encode link quality information in different formats. The ada
 
 #### networkdiag datasets (OTBR CLI `networkdiag topology`)
 
-**Source data:** `routeData.routeData[]` arrays with `linkQualityIn` and `linkQualityOut` numeric values (0–3 scale)
+**Source data:** `route.routeData[]` arrays with `linkQualityIn` and `linkQualityOut` numeric values (0–3 scale)
 
 **Processing:** Each route entry creates an edge with:
 - `linkCategories: [EDGE_CATEGORY_OTBR_ROUTE]`
@@ -359,7 +359,7 @@ Different datasets encode link quality information in different formats. The ada
   - `avgLqi < 2` → `lqLevel: 1` (low)
 - Visual style from `EDGE_LQ_STYLES` based on computed level
 
-**Example:** A route with `"link_quality_in": 3, "link_quality_out": 2` computes `max(3, 2) = 3` → `lqLevel: 3`, edge category `EDGE_CATEGORY_OTBR_ROUTE`.
+**Example:** A route with `"linkQualityIn": 3, "linkQualityOut": 2` computes `max(3, 2) = 3` → `lqLevel: 3`, edge category `EDGE_CATEGORY_OTBR_ROUTE`.
 
 #### Eve datasets (Eve Thread Network Layout)
 

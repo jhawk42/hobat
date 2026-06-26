@@ -98,8 +98,6 @@ PRIORITY_FIELDS = [
     "connectivity.sedDatagramCount",
     
     # Route Data Fields (Essential P0 for routing)
-    "routeData",              # CLI parent object
-    "routeData.idSequence",
     "route.idSequence",        # REST API alias (note: different parent name)
     "route",                   # REST API parent object
     
@@ -474,8 +472,7 @@ FIELD_ALIASES_BIDIRECTIONAL = {
     "device_label": ["name", "hostName"],
     "eui64": ["EUI64"],
     
-    # Parent object names (CRITICAL: different names for same data!)
-    "route_data": ["route"],
+    "route": ["route"],
     "leader_data": ["leaderData"],
     
     # Route data fields

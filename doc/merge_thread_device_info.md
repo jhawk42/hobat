@@ -57,7 +57,7 @@ Beyond simple extaddr matching, the merge system handles Thread-specific composi
 **Route Entry Matching:**
 - Composite identity: `(owner_rloc16, dest_route_id)`
 - Prevents duplicate routes from the same owner to the same destination
-- Handles parent object name differences: CLI uses `route_data`, REST API uses `route`
+- Handles parent object name: CLI uses `route`, REST API uses `route`
 
 **Children Array Matching:**
 - Composite identity: `(parent_rloc16, child_extaddr)`
@@ -97,7 +97,6 @@ Handles 160+ field alias mappings between different data sources:
 **Normalization Process:**
 - All fields normalized to canonical snake_case form
 - Bidirectional alias mapping preserves backward compatibility
-- Parent object aliases recognized (e.g., `route_data` ↔ `route`)
 
 **Example Aliases:**
 ```
@@ -410,7 +409,7 @@ jq '[.[] | select(.leader_data != null) | {extaddr, partition: .leader_data.part
 ```bash
 # Check for duplicate routes
 jq '.[] | select(.route_data != null or .route != null) | 
-   {extaddr, routes: (.route_data.route_data // .route.route // [])} | 
+   {extaddr, routes: (.route.route_data // .route.route // [])} | 
    .routes | group_by(.route_id) | map(select(length > 1))' \
   data/td-merged-topology-all.json
 
@@ -429,7 +428,7 @@ jq '.[] | select(.route_data != null) | {extaddr, seq: .route_data.id_sequence}'
 1. **Verify sequence numbers present:**
    ```bash
    # Check CLI source
-   jq '.[] | select(.route_data != null) | .route_data.id_sequence' \
+   jq '.[] | select(.route != null) | .route.id_sequence' \
      data/td-otbr-cli-networkdiag-fetch-all.json | head -5
    
    # Check REST API source
@@ -512,8 +511,8 @@ jq '{total: .multi_source_nodes_total + .single_source_nodes_total,
 **Diagnosis:**
 ```bash
 # Check for mixed field naming
-jq '.[] | {extaddr, extAddress, id_seq: .route_data.id_sequence, 
-          idSeq: .route_data.idSequence} | select(. != {})' \
+jq '.[] | {extaddr, extAddress, id_seq: .route.id_sequence, 
+          idSeq: .route.idSequence} | select(. != {})' \
   data/td-merged-topology-all.json | head -5
 
 # List all field names in merged output
@@ -734,7 +733,7 @@ The merged output (`td-merged-topology-all.json`) is a JSON array of device reco
     "extaddr": "0011223344556677",
     "rloc16": "0x1400",
     "deviceLlabel": "Living Room HomePod",
-    "routeData": {
+    "route": {
       "idSequence": 15,
       "routeData": [...]
     },

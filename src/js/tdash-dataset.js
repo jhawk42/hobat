@@ -5,6 +5,7 @@ import {
   isPlainObject,
   canonicalIdText,
   getCanonicalExtaddr,
+  normalizeRowMergeAliases,
   normalizeDatasetPayload,
 } from "./tdash-utils.js";
 import {
@@ -66,6 +67,16 @@ const _PROGRESSIVE_ROLLOUT_FILES = new Set([
   "td-mdns-scopes-hap.json",
   "td-mdns-scopes-matter.json",
 ]);
+
+const NORMALIZE_OPTIONS_MERGE_INTERNAL = Object.freeze({
+  canonicalizeRouteContainer: false,
+  dropLegacyRouteData: false,
+});
+
+const NORMALIZE_OPTIONS_CANONICAL_OUTPUT = Object.freeze({
+  canonicalizeRouteContainer: true,
+  dropLegacyRouteData: true,
+});
 
 function _isProgressiveFeatureEnabled() {
 
@@ -496,6 +507,15 @@ function _buildPartialDataset(entry, rawFiles, loadStartTime) {
     rows = rowSource !== null ? normalizeRows(rowSource, entry.files[firstLoadedIndex]) : [];
   }
 
+  const canonicalRows = rows.map((row) =>
+    normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
+  );
+  const canonicalRawFiles = rawFiles.map((file) =>
+    file === null
+      ? null
+      : normalizeDatasetPayload(file, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
+  );
+
   let oldestLastModifiedAt = null;
   for (const f of loadedFiles) {
     const cached = fileMaxAgeCache.get(f);
@@ -508,8 +528,8 @@ function _buildPartialDataset(entry, rawFiles, loadStartTime) {
 
   return {
     entry,
-    rawFiles: [...rawFiles],
-    rows,
+    rawFiles: canonicalRawFiles,
+    rows: canonicalRows,
     loadedFiles,
     fetchDurationMs: Date.now() - loadStartTime,
     fileLastModifiedAt: oldestLastModifiedAt,
@@ -594,7 +614,10 @@ export async function loadDataset(entryValue, options = {}) {
         const onCheckpointData = onFileReady !== null && progressiveEnabled
           ? (checkpointData) => {
               if (!_isFetchSessionActive(sessionId)) return;
-              rawFilesInProgress[fileIdx] = normalizeDatasetPayload(checkpointData);
+              rawFilesInProgress[fileIdx] = normalizeDatasetPayload(
+                checkpointData,
+                NORMALIZE_OPTIONS_MERGE_INTERNAL,
+              );
               const partialDataset = _buildPartialDataset(entry, rawFilesInProgress, loadStartTime);
               if (partialDataset !== null) {
                 currentDataset = partialDataset;
@@ -613,7 +636,10 @@ export async function loadDataset(entryValue, options = {}) {
               });
             }
             if (onFileReady !== null && progressiveEnabled && _isFetchSessionActive(sessionId)) {
-              rawFilesInProgress[fileIdx] = normalizeDatasetPayload(data);
+              rawFilesInProgress[fileIdx] = normalizeDatasetPayload(
+                data,
+                NORMALIZE_OPTIONS_MERGE_INTERNAL,
+              );
               const partialDataset = _buildPartialDataset(entry, rawFilesInProgress, loadStartTime);
               if (partialDataset !== null) {
                 currentDataset = partialDataset;
@@ -652,7 +678,9 @@ export async function loadDataset(entryValue, options = {}) {
 
   settled.forEach((result, i) => {
     if (result.status === "fulfilled") {
-      rawFiles.push(normalizeDatasetPayload(result.value));
+      rawFiles.push(
+        normalizeDatasetPayload(result.value, NORMALIZE_OPTIONS_MERGE_INTERNAL),
+      );
       loadedFiles.push(entry.files[i]);
     } else {
       rawFiles.push(null);
@@ -707,6 +735,15 @@ export async function loadDataset(entryValue, options = {}) {
   }
 
   const fetchDurationMs = Date.now() - loadStartTime;
+  const canonicalRows = rows.map((row) =>
+    normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
+  );
+  const canonicalRawFiles = rawFiles.map((file) =>
+    file === null
+      ? null
+      : normalizeDatasetPayload(file, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
+  );
+
   // Use the oldest lastModifiedAt across all loaded files (most stale piece of the dataset)
   let oldestLastModifiedAt = null;
   for (const f of loadedFiles) {
@@ -720,8 +757,8 @@ export async function loadDataset(entryValue, options = {}) {
 
   currentDataset = {
     entry,
-    rawFiles,
-    rows,
+    rawFiles: canonicalRawFiles,
+    rows: canonicalRows,
     loadedFiles,
     fetchDurationMs,
     fileLastModifiedAt: oldestLastModifiedAt,

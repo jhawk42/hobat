@@ -289,7 +289,7 @@ def enrich_topology_routers(
                 )
         # wrap route_data [] in a object with a route_data fields
         outer_route_data = {"route_data": inner_route_data}
-        enhanced_router["route_data"] = outer_route_data
+        enhanced_router["route"] = outer_route_data
 
         # children
         # Enrich: add children data for each router based on its children list

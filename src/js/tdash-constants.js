@@ -58,7 +58,7 @@ export const FIELD_ALIASES = Object.freeze({
   thread_version:       ["threadVersion"],
   eui64:                ["EUI64"],
   ipv6_addrs:           ["ipv6Addresses"],
-  route_data:           ["route", "routeData"],
+  route:                ["route"],
   leader_data:          ["leaderData"],
   route_id:             ["routeId"],
   route_cost:           ["routeCost"],

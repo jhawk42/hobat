@@ -885,7 +885,7 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
             "vendor_name": str,           # from TLV 25, hardware creator name
             "vendor_model": str,          # from TLV 26, product SKU identification
             "vendor_sw_version": str,     # from TLV 27, firmware version
-            "route_data": dict,           # from TLV 5, routing table with costs
+            "route": dict,           # from TLV 5, routing table with costs
             "responder_ipv6": str,        # IPv6 from DIAG_GET.rsp header
             "children": list,             # from TLV 16, parse_child_table()
             "total_children": int,        # count of children
@@ -951,7 +951,7 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
         vendor_name = parse_vendor_name(block)
         vendor_model = parse_vendor_model(block)
         vendor_sw_version = parse_vendor_sw_version(block)
-        route_data = parse_route_data(block)
+        route = parse_route_data(block)
         children = parse_child_table(block, rloc16)
         mac_counters = parse_mac_counters(block)
         mle_counters = parse_mle_counters(block)
@@ -971,7 +971,7 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
             "vendor_name": vendor_name,
             "vendor_model": vendor_model,
             "vendor_sw_version": vendor_sw_version,
-            "route_data": route_data,
+            "route": route,
             "responder_ipv6": responder_ipv6,
             "children": children,
             "total_children": len(children),

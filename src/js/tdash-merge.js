@@ -488,6 +488,13 @@ export function getPartitionId(row) {
  * @param {object} [ctx]          - Optional context: { ownerRloc16, partitionId }
  */
 export function deepMergeObjects(target, source, pathPrefix, conflictTarget, ctx = {}) {
+  const isRouteContainerPath = pathPrefix === "route" || pathPrefix === "route_data";
+  const parseSeqValue = (value) => {
+    if (value === undefined || value === null || value === "") return undefined;
+    const n = typeof value === "number" ? value : parseInt(value, 10);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
   Object.keys(source).forEach((key) => {
     if (key.startsWith("_")) return;
     // Guard against prototype-pollution keys
@@ -497,9 +504,40 @@ export function deepMergeObjects(target, source, pathPrefix, conflictTarget, ctx
     const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
 
     // Special-case known nested arrays with composite-identity merge
-    if (key === "route_data" && Array.isArray(sv)) {
+    if ((key === "route_data" || key === "routeData") && Array.isArray(sv)) {
       const ownerRloc16 = ctx.ownerRloc16 ?? getCanonicalRloc16(conflictTarget);
       target[key] = mergeRouteData(ownerRloc16, Array.isArray(tv) ? tv : [], sv, ctx);
+      return;
+    }
+
+    if (isRouteContainerPath && (key === "id_sequence" || key === "idSequence")) {
+      const existingSeq = parseSeqValue(tv);
+      const incomingSeq = parseSeqValue(sv);
+
+      if (existingSeq === undefined && incomingSeq !== undefined) {
+        target[key] = incomingSeq;
+      } else if (existingSeq !== undefined && incomingSeq !== undefined) {
+        if (isSequenceNewer(incomingSeq, existingSeq)) {
+          target[key] = incomingSeq;
+        }
+      } else if (isEmptyMergeValue(tv) && !isEmptyMergeValue(sv)) {
+        target[key] = sv;
+      } else if (
+        !isEmptyMergeValue(tv) &&
+        !isEmptyMergeValue(sv) &&
+        !areMergeValuesEquivalent(tv, sv)
+      ) {
+        appendRowConflict(conflictTarget, fieldPath, tv, sv);
+      }
+
+      // Keep both sequence aliases aligned when both exist on the route container.
+      const resolvedSeq = target[key];
+      if (key === "idSequence" && Object.prototype.hasOwnProperty.call(target, "id_sequence")) {
+        target.id_sequence = resolvedSeq;
+      }
+      if (key === "id_sequence" && Object.prototype.hasOwnProperty.call(target, "idSequence")) {
+        target.idSequence = resolvedSeq;
+      }
       return;
     }
     if ((key === "children" || key === "childTable") && Array.isArray(sv)) {

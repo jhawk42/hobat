@@ -177,7 +177,7 @@ def merge_device_record(existing: dict, new: dict) -> dict:
         - vendor_name: Keep existing if present, else take new
         - vendor_model: Keep existing if present, else take new
         - vendor_sw_version: Keep existing if present, else take new
-        - route_data: Take new if new is non-empty dict and existing is empty, else keep existing
+        - route: Take new if new is non-empty dict and existing is empty, else keep existing
     """
     # extaddr: keep existing (it's the key, should be identical)
     # (no update needed)
@@ -254,13 +254,13 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     if not existing.get("leader") and new.get("leader"):
         existing["leader"] = new["leader"]
 
-    # route_data: take new if new is non-empty dict even if existing is not empty, else keep existing
-    if new.get("route_data"):
-        existing["route_data"] = new["route_data"]
+    # route: take new if new is non-empty dict even if existing is not empty, else keep existing
+    if new.get("route"):
+        existing["route"] = new["route"]
 
     # route_data: take new if new is non-empty dict and existing is empty
-    if not existing.get("route_data") and new.get("route_data"):
-        existing["route_data"] = new["route_data"]
+    if not existing.get("route") and new.get("route"):
+        existing["route"] = new["route"]
 
     # children: take new if new is non-empty list even if existing is not empty, else keep existing
     if new.get("children"):
