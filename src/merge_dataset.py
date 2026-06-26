@@ -16,7 +16,7 @@ from extaddr_device_label_map import (
     EXTADDR_FIELD_ALIASES,
     load_extaddr_device_label_map_flexible,
 )
-from json_key_normalizer import convert_keys_to_camel_case
+from td_json_key_normalizer import convert_keys_to_camel_case
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
 from util_data import (
     load_optional_input,
@@ -30,16 +30,13 @@ from util_data import TDRequiredInputMissingError
 PRIORITY_FIELDS = [
     # === TIER 1: Primary Identity (Essential P0) ===
     # Ordered by stability: extaddr (immutable) > OMR IPv6 (stable) > rloc16 (changes rapidly)
-    "extaddr",
     "extAddress",              # REST API alias
-    "device_label",
+    "extaddr",
+    "deviceLabel",
     "name",
-    "omr_ipv6_addr",           # More stable than rloc16
-    "omrIpv6Address",          # REST API alias
-    "omrIpv6Addr",             # Phase 1 canonical camelCase
+    "omrIpv6Address",          # More stable than rloc16
     "rloc16",                  # May change rapidly, partition-scoped
     "routerId",                # REST API
-    "router_id",               # CLI snake_case
     "eui64",                   # Alternative to extaddr
     "id",                      # REST API UUID
     "ID",                      # Alias
@@ -48,19 +45,17 @@ PRIORITY_FIELDS = [
     "mlEidIid",                # ML-EID Interface ID
     "room",
     "Extended MAC",            # Eve format
-    "Next Hop",                # Eve format
-    "Path Cost",               # Eve format
-    "LQ In",                   # Eve format
-    "LQ Out",                  # Eve format
-    "Age",                     # Eve format / Child age
+    "nextHop",                # Eve format
+    "pathCost",               # Eve format
+    "linkQualityIn",                   # Eve format
+    "linkQualityOut",                  # Eve format
+    "age",                     # Eve format / Child age
     
     # === TIER 3: Device Role & Status (Important P1) ===
     "type",
     "role",
     "Role",                    # Eve format
-    "is_router",               # CLI - is router
     "isRouter",                # REST API alias
-    "is_border_router",         # CLI - is border router
     "isBorderRouter",          # REST API alias
     "br",                      # CLI - is border router
     "leader",                  # Leader status
@@ -71,56 +66,41 @@ PRIORITY_FIELDS = [
     "mode.deviceTypeFTD",      # FTD vs MTD indicator
     "ver",
     "version",
-    "thread_version",
-    "thread_stack_version",
+    "threadVersion",
     "threadStackVersion",      # REST API alias
     
     # === TIER 4: Topology & Connectivity (Important P1) ===
-    "total_children",
-    "has_children",
-    "total_links",
-    "total_link_3",
-    "total_link_2",
-    "total_link_1",
-    "router_neighbor_table_count",
-    "router_child_table_count",
+    "totalChildren",
+    "hasChildren",
+    "totalLinks",
+    "totalLink3",
+    "totalLink2",
+    "totalLink1",
+    "routerNeighborsCount",
+    "childTableCount",
     
     # Partition and Leader Data (Essential P0 for routing)
-    "leader_data.partition_id",
     "leaderData.partitionId",  # REST API alias
-    "leader_data.leader_router_id",
     "leaderData.leaderRouterId",  # REST API alias
-    "leader_data.data_version",
     "leaderData.dataVersion",  # REST API alias
-    "leader_data.stable_data_version",
     "leaderData.stableDataVersion",  # REST API alias
-    "leader_data.weighting",
     "leaderData.weighting",    # REST API alias
     
     # Connectivity Fields (Important P1)
-    "connectivity.id_sequence",
     "connectivity.idSequence",  # REST API alias
     "connectivity.activeRouters",
-    "connectivity.active_routers",
     "connectivity.linkQuality3",
-    "connectivity.link_quality_3",
     "connectivity.linkQuality2",
-    "connectivity.link_quality_2",
     "connectivity.linkQuality1",
-    "connectivity.link_quality_1",
     "connectivity.leaderCost",
-    "connectivity.leader_cost",
     "connectivity.parentPriority",
-    "connectivity.parent_priority",
     "connectivity.sedBufferSize",
-    "connectivity.sed_buffer_size",
     "connectivity.sedDatagramCount",
-    "connectivity.sed_datagram_count",
     
     # Route Data Fields (Essential P0 for routing)
-    "route_data.id_sequence",
+    "routeData",              # CLI parent object
+    "routeData.idSequence",
     "route.idSequence",        # REST API alias (note: different parent name)
-    "route_data",              # CLI parent object
     "route",                   # REST API parent object
     
     # === TIER 5: Advanced/Diagnostic (Optional P2) ===
@@ -128,38 +108,35 @@ PRIORITY_FIELDS = [
     "scope",                   # mDNS scope
     
     # Vendor Information
-    "vendor_name",
     "vendorName",
-    "vendor_model",
     "vendorModel",
-    "vendor_sw_version",
     "vendorSwVersion",
-    "tlv_values",              # CLI TLV values
+    "tlvValues",              # CLI TLV values
     
     # MAC Counters (CLI only)
-    "mac_counters.ifinerrors_pct",
-    "mac_counters.ifouterrors_pct",
-    "mac_counters.ifindiscards_pct",
-    "mac_counters.ifoutdiscards_pct",
-    "mac_counters.iftotalerrors_totalpkts_ratio",
-    "mac_counters.iftotaldiscards_totalpkts_ratio",
+    "macCounters.ifInErrorsPct",
+    "macCounters.ifOutErrorsPct",
+    "macCounters.ifInDiscardsPct",
+    "macCounters.ifOutDiscardsPct",
+    "macCounters.ifTotalErrorsTotalPktsRatio",
+    "macCounters.ifTotalDiscardsTotalPktsRatio",
     
     # MLE Counters (CLI only)
-    "mle_counters.partitionidchanges",
-    "mle_counters.betterpartitionattachattempts",
-    "mle_counters.totalparentpartitionchanges",
-    "mle_counters.parentchanges",
+    "mleCounters.partitionIdChanges",
+    "mleCounters.betterPartitionAttachAttempts",
+    "mleCounters.totalParentPartitionChanges",
+    "mleCounters.parentChanges",
     
     # Time Statistics (CLI only)
-    "time_statistics.router_pct",
-    "time_statistics.detached_disabled_pct",
-    "time_statistics",         # Parent object
+    "timeStatistics.routerPct",
+    "timeStatistics.detachedDisabledPct",
+    "timeStatistics",         # Parent object
     
     # mDNS Fields
-    "record_key",              # mDNS unique key
+    "recordKey",              # mDNS unique key
     "event",                   # mDNS event type
-    "captured_at_epoch",       # mDNS timestamp
-    "captured_at_iso",         # mDNS ISO timestamp
+    "capturedAtEpoch",       # mDNS timestamp
+    "capturedAtIso",         # mDNS ISO timestamp
     
     # REST API specific
     "created",                 # REST API creation timestamp
@@ -183,8 +160,8 @@ MATTER_IDENTITY_MERGE_MODES = {
 }
 
 MERGE_IDENTITY_FIELDS = {
-    "extaddr_aliases": ("extAddress", "Extended MAC"),
-    "omr_ipv6_addr_aliases": ("omrIpv6Address", "omrIpv6Addr"),
+    "extaddr_aliases": ("extAddress", "extaddr", "Extended MAC"),
+    "omr_ipv6_addr_aliases": ("omrIpv6Address","omrIpv6Address", "omrIpv6Addr"),
     "rloc16": "rloc16",
 }
 
@@ -281,7 +258,7 @@ def normalize_record_aliases(record: dict[str, Any]) -> dict[str, Any]:
     if extaddr:
         record["extAddress"] = extaddr
     if omr_addr:
-        record["omrIpv6Addr"] = omr_addr
+        record["omrIpv6Address"] = omr_addr
 
     return record
 
@@ -347,7 +324,7 @@ def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, 
                     break
 
     if omr_addr:
-        record["omrIpv6Addr"] = omr_addr
+        record["omrIpv6Address"] = omr_addr
 
     mode_device = derive_mode_device(record)
     if mode_device:
@@ -492,7 +469,7 @@ def merge_lists(left: list[Any], right: list[Any]) -> list[Any]:
 FIELD_ALIASES_BIDIRECTIONAL = {
     # Identity fields
     "extaddr": ["extAddress", "Extended MAC"],
-    "omr_ipv6_addr": ["omrIpv6Address", "omrIpv6Addr"],
+    "omrIpv6Address": ["omrIpv6Address", "omrIpv6Addr"],
     "router_id": ["routerId"],
     "device_label": ["name", "hostName"],
     "eui64": ["EUI64"],
@@ -836,7 +813,7 @@ def merge_router_neighbors(
         rloc16 = neighbor.get("rloc16")
         
         if extaddr:
-            identity = ("extaddr", normalize_identifier_text(extaddr))
+            identity = ("extAddress", normalize_identifier_text(extaddr))
         elif rloc16:
             identity = ("rloc16", normalize_identifier_text(rloc16))
         else:
@@ -1153,19 +1130,19 @@ def extract_mdns_merge_view(record: dict[str, Any]) -> dict[str, Any]:
         return {}
 
     mdns_fields = (
-        "record_key",
+        "recordKey",
         "event",
-        "captured_at_epoch",
-        "captured_at_iso",
+        "capturedAtEpoch",
+        "capturedAtIso",
         "scope",
         "name",
-        "extaddr",
-        "omr_ipv6_addr",
-        "is_border_router",
+        "extAddress",
+        "omrIpv6Addr",
+        "isBorderRouter",
         "role",
-        "service_info",
+        "serviceInfo",
         "server",
-        "server_key",
+        "serverKey",
     )
 
     out: dict[str, Any] = {}
@@ -1189,19 +1166,19 @@ def apply_mdns_merge_view(target: dict[str, Any], merged: dict[str, Any]) -> Non
         return
 
     for key in (
-        "record_key",
+        "recordKey",
         "event",
-        "captured_at_epoch",
-        "captured_at_iso",
+        "capturedAtEpoch",
+        "capturedAtIso",
         "scope",
         "name",
-        "extaddr",
-        "omr_ipv6_addr",
-        "is_border_router",
+        "extAddress",
+        "omrIpv6Addr",
+        "isBorderRouter",
         "role",
-        "service_info",
+        "serviceInfo",
         "server",
-        "server_key",
+        "serverKey",
     ):
         if key in merged:
             target[key] = deepcopy(merged[key])
@@ -1364,11 +1341,11 @@ def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
 
     extaddr = get_canonical_extaddr(record)
     if extaddr:
-        identities["extaddr"] = extaddr
+        identities["extAddress"] = extaddr
 
     omr = get_canonical_omr(record)
     if omr:
-        identities["omr_ipv6_addr"] = omr
+        identities["omrIpv6Address"] = omr
 
     rloc16 = normalize_identifier_text(
         record.get(MERGE_IDENTITY_FIELDS["rloc16"]))
@@ -1393,8 +1370,8 @@ def find_candidate_node_ids(
     candidate_ids: set[int] = set()
 
     rloc16 = identity_values.get("rloc16")
-    extaddr = identity_values.get("extaddr")
-    omr = identity_values.get("omr_ipv6_addr")
+    extaddr = identity_values.get("extAddress")
+    omr = identity_values.get("omrIpv6Address")
     matter_id = identity_values.get("matter_fabric_node")
 
     if isinstance(extaddr, str) and extaddr in by_extaddr:
@@ -1420,15 +1397,15 @@ def index_node_identity_values(
     identity_values = collect_merge_identity_values(node)
 
     rloc16 = identity_values.get("rloc16")
-    extaddr = identity_values.get("extaddr")
-    omr = identity_values.get("omr_ipv6_addr")
+    extaddr = identity_values.get("extAddress")
+    omr = identity_values.get("omrIpv6Address")
     matter_id = identity_values.get("matter_fabric_node")
 
     if isinstance(extaddr, str):
         node["extAddress"] = extaddr
         add_identifier(by_extaddr, extaddr, node_id)
     if isinstance(omr, str):
-        node["omrIpv6Addr"] = omr
+        node["omrIpv6Address"] = omr
         add_identifier(by_omr, omr, node_id)
     if isinstance(rloc16, str):
         node["rloc16"] = rloc16
@@ -1596,8 +1573,8 @@ def build_merged_records(
 
             identity_values = collect_merge_identity_values(record)
             rloc16 = identity_values.get("rloc16")
-            extaddr = identity_values.get("extaddr")
-            omr = identity_values.get("omr_ipv6_addr")
+            extaddr = identity_values.get("extAddress")
+            omr = identity_values.get("omrIpv6Address")
 
             candidate_ids = find_candidate_node_ids(
                 identity_values,
@@ -1640,8 +1617,8 @@ def build_merged_records(
                                 "source_file": filename,
                                 "candidate_node_ids": sorted(candidate_ids),
                                 "rloc16": rloc16,
-                                "extaddr": extaddr,
-                                "omrIpv6Addr": omr,
+                                "extAddress": extaddr,
+                                "omrIpv6Address": omr,
                             }
                         )
                 node_id = min(candidate_ids)
@@ -1672,7 +1649,7 @@ def build_merged_records(
                 by_omr,
                 by_matter_fabric_node,
             )
-            active_extaddr = active_identity_values.get("extaddr")
+            active_extaddr = active_identity_values.get("extAddress")
             if isinstance(active_extaddr, str):
                 mapped_label = device_label_map.get(active_extaddr)
                 if mapped_label and value_is_empty(active.get("deviceLabel")):
@@ -1687,12 +1664,12 @@ def build_merged_records(
         # Build _merge_identity_keys (mirrors JS mergeRowsByStrategy output).
         identity_key_parts: list[str] = []
         iv = collect_merge_identity_values(node)
-        if iv.get("extaddr"):
-            identity_key_parts.append(f"extAddress:{iv['extaddr']}")
+        if iv.get("extAddress"):
+            identity_key_parts.append(f"extAddress:{iv['extAddress']}")
         if iv.get("rloc16"):
             identity_key_parts.append(f"rloc16:{iv['rloc16']}")
-        if iv.get("omr_ipv6_addr"):
-            identity_key_parts.append(f"omrIpv6Addr:{iv['omr_ipv6_addr']}")
+        if iv.get("omrIpv6Address"):
+            identity_key_parts.append(f"omrIpv6Address:{iv['omrIpv6Address']}")
         if identity_key_parts:
             node["_merge_identity_keys"] = identity_key_parts
 

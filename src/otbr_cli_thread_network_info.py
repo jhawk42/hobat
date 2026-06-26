@@ -1,7 +1,7 @@
 import logging
 import json
 from typing import Sequence
-from json_key_normalizer import convert_keys_to_camel_case
+from td_json_key_normalizer import convert_keys_to_camel_case
 import util_network
 from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 

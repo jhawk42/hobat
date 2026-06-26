@@ -489,6 +489,12 @@ function anyRowsMatchDiagnosticFilter(rows, filterMode) {
   return rows.some((row) => isRowVisibleByDiagnosticFilter(row, filterMode));
 }
 
+function normalizeDiagnosticSourceValue(sourceValue) {
+  if (sourceValue === "mac_counters") return "macCounters";
+  if (sourceValue === "mle_counters") return "mlecounters";
+  return sourceValue;
+}
+
 // ── Populate diagnostic filter by source with capability checking ──────────────
 //
 // Populates the diagnostic-filter select based on the selected source and the
@@ -500,6 +506,7 @@ function anyRowsMatchDiagnosticFilter(rows, filterMode) {
 export function populateDiagnosticFilterBySourceWithCapabilities(sourceValue, capabilities, nodeData, view = "topology") {
   const el = document.getElementById("diagnostic-filter");
   el.innerHTML = "";
+  sourceValue = normalizeDiagnosticSourceValue(sourceValue);
 
   // Build capability mapping for diagnostic filters (same as in updateFilterOptionVisibility)
   const diagCapabilityByValue = {
@@ -586,6 +593,7 @@ export function populateDiagnosticFilterBySourceWithCapabilities(sourceValue, ca
 export function populateDiagnosticFilterBySource(sourceValue) {
   const el = document.getElementById("diagnostic-filter");
   el.innerHTML = "";
+  sourceValue = normalizeDiagnosticSourceValue(sourceValue);
 
   // Always add the "all" option first
   const allOpt = document.createElement("option");

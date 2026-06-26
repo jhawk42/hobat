@@ -12,7 +12,7 @@ from typing import Sequence
 import util_network
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
-from json_key_normalizer import convert_keys_to_camel_case
+from td_json_key_normalizer import convert_keys_to_camel_case
 from util_data import resolve_data_file_path, resolve_data_dir, save_json_atomic
 from td_const import TD_DATA_DIR_ARG_HELP
 
@@ -265,7 +265,7 @@ class MDNSDumpListener(ServiceListener):
         extaddr = service_info.get("properties", {}).get(
             "xa", {}).get("hex", None)
         if extaddr is not None:
-            retobj["extaddr"] = extaddr
+            retobj["extAddress"] = extaddr
             
         # promote BR role to top level for easier access
         decoded_mn = service_info.get("properties", {}).get("mn", {}).get("decoded", None)
@@ -276,7 +276,7 @@ class MDNSDumpListener(ServiceListener):
                 
         # Add omr_ipv6_addr if exists. promote to top level for easier access
         if omr_ipv6_addr is not None:
-            retobj["omr_ipv6_addr"] = omr_ipv6_addr
+            retobj["omrIpv6Address"] = omr_ipv6_addr
         retobj["service_info"] = service_info
 
         return retobj

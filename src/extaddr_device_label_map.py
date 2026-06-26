@@ -6,7 +6,7 @@ from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
 
 # Extaddr field name aliases used across different data sources
-EXTADDR_FIELD_ALIASES = ("extaddr", "extAddress", "Extended MAC")
+EXTADDR_FIELD_ALIASES = ("extAddress", "extaddr", "Extended MAC")
 
 
 def normalize_extaddr(value: Any) -> str:
@@ -170,11 +170,11 @@ def load_extaddr_device_label_map(path=EXTADDR_DEVICE_LABEL_MAP_FILENAME):
         return mapping
 
     for item in data:
-        # Support both snake_case and camelCase field names
-        extaddr = normalize_extaddr(item.get("extaddr")) or normalize_extaddr(item.get("extAddress"))
-        device_label = item.get("device_label") or item.get("deviceLabel", "")
+        # Support both camelCase and snake_case field names
+        extaddr = normalize_extaddr(normalize_extaddr(item.get("extAddress") or item.get("extaddr")))
+        device_label = item.get("deviceLabel", "") or item.get("device_label")
         if not extaddr:
-            logging.warning(f"Skipping entry missing 'extaddr': {item!r}")
+            logging.warning(f"Skipping entry missing 'extAddress': {item!r}")
             continue
         if not device_label:
             logging.warning(

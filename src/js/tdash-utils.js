@@ -37,7 +37,7 @@ export function getCanonicalExtaddr(row) {
 
 export function getCanonicalOmrIpv6Address(row) {
   if (!isPlainObject(row)) return "";
-  const value = _getOwnPropertyValueByAlias(row, "omrIpv6Addr");
+  const value = _getOwnPropertyValueByAlias(row, "omrIpv6Address");
   return canonicalIdText(value);
 }
 
@@ -490,8 +490,8 @@ function _createGroupNode(prefix, children) {
 
 function _normalizeMdnsDisplayKey(key) {
   if (typeof key !== "string") return key;
-  if (key.startsWith("service_info.properties.")) {
-    return key.slice("service_info.properties.".length);
+  if (key.startsWith("serviceInfo.properties.")) {
+    return key.slice("serviceInfo.properties.".length);
   }
   if (key.startsWith("properties.")) {
     return key.slice("properties.".length);
@@ -668,36 +668,28 @@ export function shouldExcludeDetailPath(_path, _context) {
 export function sortDetailsWithPriority(details) {
   const priorityKeys = [
     // === TIER 1: Primary Identity ===
-    "rloc16",
     "extAddress",
-    "extaddr",
+    "rloc16",
     "deviceLabel",
-    "device_label",
     "name",
     "routerId",
-    "router_id",
     "eui64",
     "id",
     "ID",
     
     // === TIER 2: Secondary Identity ===
-    "omrIpv6Addr",
     "omrIpv6Address",
-    "omr_ipv6_addr",
     "mlEidIid",
     "room",
-    "Extended MAC",
     
     // === TIER 3: Device Role & Status ===
     "type",
     "Role",
     "br",
     "isBorderRouter",
-    "is_border_router",
     "isRouter",
-    "is_router",
-    "leader",
     "isLeader",
+    "leader",
     "isPrimaryBBR",
     "status",
     "icon",
@@ -707,60 +699,40 @@ export function sortDetailsWithPriority(details) {
     "ver",
     "version",
     "threadVersion",
-    "thread_version",
     "threadStackVersion",
-    "thread_stack_version",
     "vendorName",
-    "vendor_name",
     "vendorModel",
-    "vendor_model",
     "vendorSwVersion",
-    "vendor_sw_version",
     
     // === TIER 4: Topology & Connectivity ===
     "totalChildren",
-    "total_children",
     "hasChildren",
-    "has_children",
     "totalLinks",
-    "total_links",
     "totalLink3",
-    "total_link_3",
     "totalLink2",
-    "total_link_2",
     "totalLink1",
-    "total_link_1",
     "routerNeighborsCount",
-    "router_neighbor_table_count",
     "childTableCount",
-    "router_child_table_count",
     "connectivity.activeRouters",
-    "connectivity.active_routers",
     "connectivity.linkQuality3",
-    "connectivity.link_quality_3",
     "connectivity.linkQuality2",
-    "connectivity.link_quality_2",
     "connectivity.linkQuality1",
-    "connectivity.link_quality_1",
     "leaderData.partitionId",
-    "leader_data.partition_id",
     "leaderData.leaderRouterId",
-    "leader_data.leader_router_id",
     
     // === TIER 5: Advanced/Diagnostic ===
     "tlvValues",
-    "tlv_values",
-    "mac_counters.ifinerrors_pct",
-    "mac_counters.ifouterrors_pct",
-    "mac_counters.ifindiscards_pct",
-    "mac_counters.ifoutdiscards_pct",
-    "mle_counters.partitionidchanges",
-    "mle_counters.betterpartitionattachattempts",
-    "mle_counters.parentchanges",
-    "mle_counters.totalparentpartitionchanges",
-    "mle_counters.attachattempts",
-    "mle_counters.detachedrole",
-    "mle_counters.disabledrole",
+    "macCounters.ifinerrors_pct",
+    "macCounters.ifouterrors_pct",
+    "macCounters.ifindiscards_pct",
+    "macCounters.ifoutdiscards_pct",
+    "mleCounters.partitionIdChanges",
+    "mleCounters.betterPartitionAttachAttempts",
+    "mleCounters.parentChanges",
+    "mleCounters.totalParentPartitionChanges",
+    "mleCounters.attachAttempts",
+    "mleCounters.detachedRole",
+    "mleCounters.disabledRole",
   ];
   const priorityIndex = new Map(priorityKeys.map((k, i) => [k, i]));
   return [...details].sort((a, b) => {

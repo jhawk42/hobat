@@ -34,20 +34,14 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   // === Identity & Addresses ===
   "rloc16",
   "extAddress",
-  "extaddr",
   "eui64",
   "deviceLabel",
   "name",
   "room",
-  "ID",
-  "Extended MAC",
+  "id",
   "routerId",
-  "router_id",
-  "omrIpv6Addr",
   "omrIpv6Address",
-  "omr_ipv6_addr",
   "rlocIpv6Address",
-  "rloc_ipv6_addr",
   "mlEidIid",
   
   // === Device Type & Role ===
@@ -55,31 +49,24 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   "role",
   "Role",
   "isRouter",
-  "is_router",
   "isBorderRouter",
-  "is_border_router",
   "br",
-  "leader",
   "isLeader",
   
   // === Versions ===
   "ver",
   "version",
   "threadVersion",
-  "thread_version",
   "threadStackVersion",
-  "thread_stack_version",
   
   // === Addresses & Network Info ===
   "ipv6Addresses",
-  "ipv6_addrs",
 
   // === Other ===
   "mode.device",
   "scope",
   "status",
   "vendorName",
-  "vendor_name"
 ]);
 
 // ── Query normalisation ────────────────────────────────────────────────────────

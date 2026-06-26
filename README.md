@@ -50,9 +50,9 @@ See [Dashboard Features](#dashboard-features)
 
 `td_webserver` hosts the dashboard UI and provides REST API endpoints used by the dashboard for cached data access and refresh operations. For longer actions, the webserver launches data collection workflows and serves results from the cache model used by tdash.
 
-### Extended MAC Address (extaddr) to device_label
+### Extended MAC Address (extAddress) to deviceLabel
 
-Thread device labeling uses a simple JSON lookup file that maps extaddr (Extended MAC Address) values to operator-friendly device labels. See [Device Labeling](#create-device-labeling-file) below for details.
+Thread device labeling uses a simple JSON lookup file that maps extAddress (Extended MAC Address) values to operator-friendly device labels. See [Device Labeling](#create-device-labeling-file) below for details.
 
 ## Dataset Sources
 
@@ -148,14 +148,14 @@ scp "Eve Thread Network Layout.evethreadlayout" user@hostname:/your/directory/he
 
 To enable device labeling via the lookup json file, add a file named `td-static-extaddr-device-label.json` with the format below into the data directory. Map this directory into the docker container via docker run. See below for example.
 
-The td_cli commands and dash dasboard will use the file if it exists to lookup extaddr (Extended MAC Address) to device_label mapping. The td_cli commands enhance the collect Thread device data with the device_label. The thread dashboard will use the extaddr device_label to lookup extaddr to device label mapping. 
+The td_cli commands and dash dasboard will use the file if it exists to lookup extaddress (Extended MAC Address) to deviceLabel mapping. The td_cli commands enhance the collect Thread device data with the deviceLabel. The thread dashboard will use the extAddress deviceLabel to lookup extAddress to device label mapping. 
 
 ```
 nano $PWD/data/td-static-extaddr-device-label.json
 ```
 Edit the td-static-extaddr-device-label.json as you discover thread devices in the thread network. 
-The extaddr is the thread device Extended MAC Address.
-The device_label is the name you assign to the thread device.
+The extAddress is the thread device Extended MAC Address.
+The deviceLabel is the name you assign to the thread device.
 
 Sources for device label names: 
 - Matching thread device identities like ipv6 addresses in  mDNS records (_meshcop._udp, _hap._udp)
@@ -169,16 +169,16 @@ Example format of the td-static-extaddr-device-label.json file.
 ```JSON
 [
     {
-        "extaddr": "eeeaffeaffeaffe1",
-        "device_label": "Device 1"
+        "extAddress": "eeeaffeaffeaffe1",
+        "deviceLabel": "Device 1"
     },
     {
-        "extaddr": "eeeaffeaffeaffe2",
-        "device_label": "Device 2"
+        "extAddress": "eeeaffeaffeaffe2",
+        "deviceLabel": "Device 2"
     },
     {
-        "extaddr": "eeeaffeaffeaffe3",
-        "device_label": "Device 3"
+        "extAddress": "eeeaffeaffeaffe3",
+        "deviceLabel": "Device 3"
     }
 ]
 ```
@@ -351,7 +351,7 @@ The dataset merge capability combines multiple Thread topology JSON files from d
 
 The merge system provides:
 
-- **Identity-Based Merging:** Nodes are matched by `extaddr` (Extended MAC Address), `omr_ipv6_addr` (Off-Mesh Routable IPv6 address),`rloc16` (Routing Locator 16-bit) ensuring correct device correlation across sources.
+- **Identity-Based Merging:** Nodes are matched by `extAddress` (Extended MAC Address), `omrIpv6Address` (Off-Mesh Routable IPv6 address),`rloc16` (Routing Locator 16-bit) ensuring correct device correlation across sources.
 - **Field Normalization:** Automatically handles both snake_case (CLI) and camelCase (REST API) field naming conventions
 - **Composite Identity Matching:** 
   - Routes merged by `(owner_rloc16, destination_route_id)` composite identity

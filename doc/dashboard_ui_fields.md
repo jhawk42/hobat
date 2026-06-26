@@ -13,16 +13,16 @@ Fields are organized into 5 priority tiers that determine their display order in
 ### TIER 1: Primary Identity
 Core device identifiers that appear first in the UI:
 - `rloc16` - Router/Child Location (16-bit identifier)
-- `extaddr`, `extAddress` - Extended MAC address (64-bit)
-- `device_label` - User-assigned device label
+- `extAddress`, `extaddr` - Extended MAC address (64-bit)
+- `deviceLabel` - User-assigned device label
 - `name` - Device name
-- `routerId`, `router_id` - Router ID (for router-capable devices)
+- `routerId`,  - Router ID (for router-capable devices)
 - `eui64` - EUI-64 identifier
 - `id`, `ID` - Generic device ID
 
 ### TIER 2: Secondary Identity
 Additional identification fields:
-- `omr_ipv6_addr`, `omrIpv6Address` - Off-Mesh Routable IPv6 address
+- `omrIpv6Address`, `omr_ipv6_addr`  - Off-Mesh Routable IPv6 address
 - `mlEidIid` - ML-EID Interface Identifier
 - `room` - Room assignment (from Eve topology)
 - `Extended MAC` - Extended MAC (alternative field name)
@@ -32,9 +32,9 @@ Additional identification fields:
 Device type, role, and operational mode:
 - `type` - Device type (e.g., router, child, border-router)
 - `Role` - Computed role field
-- `br`, `isBorderRouter` - Border router flag
-- `leader`, `isLeader` - Leader flag
-- `is_router` - Router capability flag
+- `isBorderRouter`, `br`  - Border router flag
+- `isLeader`, `leader`,  - Leader flag
+- `isRouter` - Router capability flag
 - `mode.*` - Device mode flags:
   - `mode.deviceTypeFTD` - Full Thread Device
   - `mode.rxOnWhenIdle` - Receiver always on
@@ -143,12 +143,12 @@ Different dataset types provide different sets of fields:
 ```json
 {
   "rloc16": "0x4400",
-  "extaddr": "1a7fbf0434e4f043",
-  "device_label": "Device 1",
+  "extAddress": "1a7fbf0434e4f043",
+  "deviceLabel": "Device 1",
   "type": "router",
-  "omr_ipv6_addr": "fd00:1234::1",
-  "thread_version": "4",
-  "total_children": 3,
+  "omrIpv6Address": "fd00:1234::1",
+  "threadVersion": "4",
+  "totalChildren": 3,
   "neighbors": ["0x4800", "0x4c00"]
 }
 ```

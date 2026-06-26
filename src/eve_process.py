@@ -4,7 +4,7 @@ import logging
 from typing import Sequence
 
 import util_network
-from json_key_normalizer import convert_keys_to_camel_case
+from td_json_key_normalizer import convert_keys_to_camel_case
 from util_convert import b64_to_extended_address
 from util_data import (
     TDRequiredInputMissingError,
@@ -73,9 +73,9 @@ def load_and_parse_eve_file(path, thread_network_info=None):
                 rloc16_decimal  # Preserve original decimal rloc16 for reference
             )
 
-        # Conform from 'ip_addresses' to "ipv6_addrs" for consistent naming and mapping
+        # Conform from 'ip_addresses' to "ipv6Addresses" for consistent naming and mapping
         ipv6_addrs = node.get("ip_addresses", [])
-        node["ipv6_addrs"] = ipv6_addrs
+        node["ipv6Addresses"] = ipv6_addrs
 
         # Enrich with rloc16 in hex from rloc16 ipv6 addresses if rloc16 field is missing
         if rloc16_decimal is None:
@@ -105,7 +105,7 @@ def load_and_parse_eve_file(path, thread_network_info=None):
 
         # Enrich node with OMR IPv6 address  using OMR prefix
         if omr_ipv6addr_prefix:
-            node["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
+            node["omrIpv6Address"] = util_network.find_omr_address_in_list(
                 ipv6_addrs, omr_ipv6addr_prefix
             )
 
@@ -132,7 +132,7 @@ def load_and_parse_eve_file(path, thread_network_info=None):
                 thread_networks[0]["extAddress_hex"] = ext_addr_hex
 
                 # Add extaddr in hex format for consistent mapping
-                thread_networks[0]["extaddr"] = ext_addr_hex
+                thread_networks[0]["extAddress"] = ext_addr_hex
           
         ## Index by rloc16. Preserve all fields from the node
         #if rloc16_hex is not None:

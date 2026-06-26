@@ -3,7 +3,7 @@
 The dashboard and Python merge pipeline support canonical identity matching across these fields:
 
 - `rloc16`
-- `extaddr`, `extAddress`, and `Extended MAC` as one canonical `extaddr` identity
+- `extAddress`,`extaddr`,  and `Extended MAC` as one canonical `extaddr` identity
 - `omr_ipv6_addr`
 
 ## Supported dashboard merge strategies:
@@ -617,7 +617,7 @@ jq '[.[] | select(._merge_conflicts != null) | ._merge_conflicts | length] | add
 
 # Show conflict details
 jq '.[] | select(._merge_conflicts != null) | 
-   {extaddr, device_label, conflicts: ._merge_conflicts}' \
+   {extAddress, deviceLabel, conflicts: ._merge_conflicts}' \
   data/td-merged-topology-all.json | head -20
 
 # Group conflicts by field
@@ -733,14 +733,14 @@ The merged output (`td-merged-topology-all.json`) is a JSON array of device reco
   {
     "extaddr": "0011223344556677",
     "rloc16": "0x1400",
-    "device_label": "Living Room HomePod",
-    "route_data": {
-      "id_sequence": 15,
-      "route_data": [...]
+    "deviceLlabel": "Living Room HomePod",
+    "routeData": {
+      "idSequence": 15,
+      "routeData": [...]
     },
     "children": [...],
-    "service_info": {
-      "decoded_properties": {
+    "serviceInfo": {
+      "decodedProperties": {
         "vn": "Apple",
         "mn": "BorderRouter",
         "tv": "1.3.0"
@@ -759,8 +759,8 @@ The merged output (`td-merged-topology-all.json`) is a JSON array of device reco
 ### Merge Behavior
 
 **Identity Matching:**
-- Primary identity: `extaddr` (immutable 64-bit EUI-64 address)
-- Secondary: `omr_ipv6_addr` (stable OMR IPv6 address)
+- Primary identity: `extAddress` (immutable 64-bit EUI-64 address)
+- Secondary: `omrIpv6Address` (stable OMR IPv6 address)
 - Tertiary: `rloc16` (partition-scoped, may change)
 
 **Route Data Merging:**

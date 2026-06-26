@@ -116,10 +116,10 @@ When the search is cleared (either by clicking the **Clear** button or manually 
 
 Nodes match search queries based on fields in their device record, including:
 
-- **Identity**: rloc16, extaddr, eui64, device_label, name
+- **Identity**: rloc16, extAddress, eui64, deviceLabel, name
 - **Role**: Type, Role, br (border router flag), leader
-- **Version**: thread_stack_version, thread_version
-- **Network**: omr_ipv6_addr, mlEidIid
+- **Version**: threadStackVersion, threadVersion
+- **Network**: omrIpv6Address, mlEidIid
 - **Other**: scope, status, vendor information
 
 For a complete list, see `SEARCH_TARGET_FIELDS` in [tdash-search.js](../src/js/tdash-search.js).

@@ -7,8 +7,8 @@ export const MERGE_STRATEGIES = Object.freeze({
 });
 
 export const MERGE_IDENTITY_FIELDS = Object.freeze({
-  extaddrAliases: ["extaddr", "extAddress", "Extended MAC"],
-  omr_ipv6_addr: "omr_ipv6_addr",
+  extaddrAliases: ["extAddress", "extaddr", "Extended MAC"],
+  omr_ipv6_addr: "omrIpv6Address",
   rloc16: "rloc16",
 });
 
@@ -100,8 +100,8 @@ export const FIELD_ALIASES = Object.freeze({
   rx_on:                ["rxOnWhenIdle"],
   device_type:          ["deviceTypeFTD"],
   network_data:         ["fullNetworkData"],
-  mac_counters:         ["macCounters"],
-  mle_counters:         ["mleCounters"],
+  macCounters:         ["macCounters"],
+  mlecounters:         ["mleCounters"],
   time_statistics:      ["timeStatistics"],
   partitionidchanges:   ["partIdChangesCount", "partitionIdChanges"],
   parentchanges:        ["newParentCount", "parentChanges"],
@@ -448,7 +448,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
   // ── Mac counters ──────────────────────────────────────────────────────
   // ── Mac total errors ratio ────────────────────────────────────────────
   {
-    source: "mac_counters",
+    source: "macCounters",
     value: "mac-total-errors-ratio-medium",
     label: "Mac Total Errors Ratio: Medium (>= 1.0)",
     group: "Mac Total Errors Ratio",
@@ -456,7 +456,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     tableRowField: "macCounters.ifTotalErrorsTotalPktsRatio",
   },
   {
-    source: "mac_counters",
+    source: "macCounters",
     value: "mac-total-errors-ratio-high",
     label: "Mac Total Errors Ratio: High (>= 5.0)",
     group: "Mac Total Errors Ratio",
@@ -465,7 +465,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
   },
   // ── Mac total discards ratio ──────────────────────────────────────────
   {
-    source: "mac_counters",
+    source: "macCounters",
     value: "mac-total-discards-ratio-medium",
     label: "Mac Total Discards Ratio: Medium (>= 2.0)",
     group: "Mac Total Discards Ratio",
@@ -473,7 +473,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     tableRowField: "macCounters.ifTotalDiscardsTotalPktsRatio",
   },
   {
-    source: "mac_counters",
+    source: "macCounters",
     value: "mac-total-discards-ratio-high",
     label: "Mac Total Discards Ratio: High (>= 8.0)",
     group: "Mac Total Discards Ratio",
@@ -483,7 +483,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
 
   // ── Mle counters ──────────────────────────────────────────────────────
   {
-    source: "mle_counters",
+    source: "mlecounters",
     value: "medium-partition-changes",
     label: "Partition Changes: Medium (>= 2)",
     group: "Mle Partition Changes",
@@ -491,7 +491,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     tableRowField: "mleCounters.partIdChangesCount",
   },
   {
-    source: "mle_counters",
+    source: "mlecounters",
     value: "high-partition-changes",
     label: "Partition Changes: High (>= 5)",
     group: "Mle Partition Changes",
@@ -499,7 +499,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     tableRowField: "mleCounters.partIdChangesCount",
   },
   {
-    source: "mle_counters",
+    source: "mlecounters",
     value: "medium-parent-changes",
     label: "Parent Changes: Medium (>= 2)",
     group: "MLE Parent Changes",
@@ -507,7 +507,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     tableRowField: "mleCounters.newParentCount",
   },
   {
-    source: "mle_counters",
+    source: "mlecounters",
     value: "high-parent-changes",
     label: "Parent Changes: High (>= 5)",
     group: "MLE Parent Changes",
@@ -517,7 +517,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
  
   // ── Mle better partition attach ───────────────────────────────────────
   {
-    source: "mle_counters",
+    source: "mlecounters",
     value: "mle-better-partition-medium",
     label: "Better Partition Attach: Medium (>= 2)",
     group: "Mle Better Partition Attach",
@@ -525,7 +525,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     tableRowField: "mleCounters.betterPartIdAttachAttemptsCount",
   },
   {
-    source: "mle_counters",
+    source: "mlecounters",
     value: "mle-better-partition-high",
     label: "Better Partition Attach: High (>= 5)",
     group: "Mle Better Partition Attach",
@@ -534,7 +534,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
   },
   // ── Mle total parent partition changes ────────────────────────────────
   {
-    source: "mle_counters",
+    source: "mlecounters",
     value: "mle-total-parent-partition-medium",
     label: "Total Parent Partition Changes: Medium (>= 3)",
     group: "Mle Total Parent Partition Changes",
@@ -542,7 +542,7 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     tableRowField: "mleCounters.totalParentPartitionChangesCount",
   },
   {
-    source: "mle_counters",
+    source: "mlecounters",
     value: "mle-total-parent-partition-high",
     label: "Total Parent Partition Changes: High (>= 8)",
     group: "Mle Total Parent Partition Changes",
@@ -1021,7 +1021,6 @@ export const TABLE_PRIORITY_COLUMNS = [
   // === TIER 1: Primary Identity ===
   "rloc16",
   "extAddress",
-  "extaddr",
   "deviceLabel",
   "name",
   "routerId",
@@ -1030,27 +1029,23 @@ export const TABLE_PRIORITY_COLUMNS = [
   "ID",
   
   // === TIER 2: Secondary Identity ===
-  "omrIpv6Addr",
   "omrIpv6Address",
   "mlEidIid",
   "room",
-  "Extended MAC",
-  "Next Hop",
-  "Path Cost",
-  "LQ In",
-  "LQ Out",
-  "Age",
+  "nextHop",
+  "pathCost",
+  "linkQualityIn",
+  "linkQualityOut",
+  "age",
   
   // === TIER 3: Device Role & Status ===
   "type",
   "Role",
   "br",
   "isRouter",
-  "is_router",
   "isBorderRouter",
-  "is_border_router",
-  "leader",
   "isLeader",
+  "leader",
   "isPrimaryBBR",
   "status",
   "mode.device",
@@ -1058,63 +1053,43 @@ export const TABLE_PRIORITY_COLUMNS = [
   "ver",
   "version",
   "threadVersion",
-  "thread_version",
   "threadStackVersion",
-  "thread_stack_version",
   "room",
   "icon",
   
   // === TIER 4: Topology & Connectivity ===
   "totalChildren",
-  "total_children",
   "hasChildren",
-  "has_children",
   "totalLinks",
-  "total_links",
   "totalLink3",
-  "total_link_3",
   "totalLink2",
-  "total_link_2",
   "totalLink1",
-  "total_link_1",
   "routerNeighborsCount",
-  "router_neighbor_table_count",
   "childTableCount",
-  "router_child_table_count",
   "connectivity.activeRouters",
-  "connectivity.active_routers",
   "connectivity.linkQuality3",
-  "connectivity.link_quality_3",
   "connectivity.linkQuality2",
-  "connectivity.link_quality_2",
   "connectivity.linkQuality1",
-  "connectivity.link_quality_1",
   "leaderData.partitionId",
-  "leader_data.partition_id",
   "leaderData.leaderRouterId",
-  "leader_data.leader_router_id",
   
   // === TIER 5: Advanced/Diagnostic ===
   "icon",
   "scope",
   "vendorName",
-  "vendor_name",
   "vendorModel",
-  "vendor_model",
   "vendorSwVersion",
-  "vendor_sw_version",
   "tlvValues",
-  "tlv_values",
-  "mac_counters.ifinerrors_pct",
-  "mac_counters.ifouterrors_pct",
-  "mac_counters.ifindiscards_pct",
-  "mac_counters.ifoutdiscards_pct",
-  "mle_counters.partitionidchanges",
-  "mle_counters.betterpartitionattachattempts",
-  "mle_counters.totalparentpartitionchanges",
-  "mle_counters.parentchanges",
-  "mac_counters.iftotalerrors_totalpkts_ratio",
-  "mac_counters.iftotaldiscards_totalpkts_ratio",
-  "time_statistics.router_pct",
-  "time_statistics.detached_disabled_pct",
+  "macCounters.ifInErrorsPct",
+  "macCounters.ifOutErrorsPct",
+  "macCounters.ifInDiscardsPct",
+  "macCounters.ifOutDiscardsPct",
+  "mlecounters.partitionIdChanges",
+  "mlecounters.betterPartitionAttachAttempts",
+  "mlecounters.totalParentPartitionChanges",
+  "mlecounters.parentChanges",
+  "macCounters.ifTotalErrorsTotalPktsRatio",
+  "macCounters.ifTotalDiscardsTotalPktsRatio",
+  "timeStatistics.routerPct",
+  "timeStatistics.detachedDisabledPct",
 ];

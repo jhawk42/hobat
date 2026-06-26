@@ -16,7 +16,7 @@ from otbr_restapi_util import (
     OTBRInvalidResponseError,
     OTBRRestApiClient,
 )
-from json_key_normalizer import convert_keys_to_camel_case
+from td_json_key_normalizer import convert_keys_to_camel_case
 import util_network
 
 _MEDIUM_DIAGNOSTIC_TLVS: list[str] = [

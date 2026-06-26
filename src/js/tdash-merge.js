@@ -344,26 +344,18 @@ function extractMdnsMergeView(row) {
   if (!isPlainObject(row)) return {};
   const fields = [
     "recordKey",
-    "record_key",
     "event",
     "capturedAtEpoch",
-    "captured_at_epoch",
     "capturedAtIso",
-    "captured_at_iso",
     "scope",
     "name",
     "extAddress",
-    "extaddr",
-    "omrIpv6Addr",
-    "omr_ipv6_addr",
+    "omrIpv6Address",
     "isBorderRouter",
-    "is_border_router",
     "role",
     "serviceInfo",
-    "service_info",
     "server",
     "serverKey",
-    "server_key",
   ];
   const out = {};
   fields.forEach((k) => {
@@ -387,26 +379,18 @@ function extractMdnsMergeView(row) {
 function applyMdnsMergeView(target, merged) {
   [
     "recordKey",
-    "record_key",
     "event",
     "capturedAtEpoch",
-    "captured_at_epoch",
     "capturedAtIso",
-    "captured_at_iso",
     "scope",
     "name",
     "extAddress",
-    "extaddr",
-    "omrIpv6Addr",
-    "omr_ipv6_addr",
+    "omrIpv6Address",
     "isBorderRouter",
-    "is_border_router",
     "role",
     "serviceInfo",
-    "service_info",
     "server",
     "serverKey",
-    "server_key",
   ].forEach((k) => {
     if (Object.prototype.hasOwnProperty.call(merged, k)) target[k] = merged[k];
   });
@@ -596,7 +580,7 @@ export function mergeRouteData(ownerRloc16, baseRoutes, incomingRoutes, ctx = {}
 
 /**
  * Merges two children arrays for a given parentRloc16.
- * Identity key: child.extaddr (lowercased) or child.rloc16.
+ * Identity key: child.extAddress (lowercased) or child.rloc16.
  *
  * @param {string} parentRloc16
  * @param {Array}  baseChildren
@@ -606,7 +590,7 @@ export function mergeRouteData(ownerRloc16, baseRoutes, incomingRoutes, ctx = {}
 export function mergeChildrenArray(parentRloc16, baseChildren, incomingChildren) {
   const index = new Map();
   const childKey = (child) => {
-    const ext = canonicalIdText(child.extaddr ?? child.extAddress);
+    const ext = canonicalIdText(child.extAddress ?? child.extaddr);
     if (ext) return `ext:${ext}`;
     const r = canonicalIdText(child.rloc16);
     if (r) return `rloc16:${r}`;
@@ -637,7 +621,7 @@ export function mergeChildrenArray(parentRloc16, baseChildren, incomingChildren)
 
 /**
  * Merges two router_neighbors arrays.
- * Identity key: neighbor.extaddr or neighbor.rloc16.
+ * Identity key: neighbor.extAddress (lowercased) or neighbor.rloc16.
  *
  * @param {Array} baseNeighbors
  * @param {Array} incomingNeighbors
@@ -646,7 +630,7 @@ export function mergeChildrenArray(parentRloc16, baseChildren, incomingChildren)
 export function mergeRouterNeighbors(baseNeighbors, incomingNeighbors) {
   const index = new Map();
   const neighborKey = (n) => {
-    const ext = canonicalIdText(n.extaddr ?? n.extAddress);
+    const ext = canonicalIdText(n.extAddress ?? n.extaddr);
     if (ext) return `ext:${ext}`;
     const r = canonicalIdText(n.rloc16);
     if (r) return `rloc16:${r}`;

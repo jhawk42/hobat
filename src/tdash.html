@@ -193,9 +193,9 @@
               <label for="diagnostic-source-filter" title="Filter diagnostics by source">Source</label>
               <select id="diagnostic-source-filter" title="Filter diagnostics by source">
                 <!-- populated by JS from DIAGNOSTIC_SOURCE_FILTER_OPTIONS -->
-                <option value="mac_counters" 
+                <option value="macCounters" 
                   title="MAC counters track physical/link-layer frame statistics (such as radio interference, retries, and dropped packets).">MAC Counters</option>
-                <option value="mle_counters" 
+                <option value="mlecounters" 
                   title="MLE (Mesh Link Establishment) counters track network-layer events (such as attachment attempts, parent changes, and routing state).">MLE Counters</option>
                 <option value="time_statistics"
                   title="Time statistics track various time-related metrics in the network.">Time Statistics</option>
@@ -256,7 +256,7 @@
                 Legend
               </button>
               <select id="physics-profile-select" title="Physics profile selector" aria-label="Physics profile">
-                <option value="auto">Auto (Mode)</option>
+                <option value="auto">Auto</option>
                 <option value="mesh-compact">Compact</option>
                 <option value="mesh-ring">Mesh Ring</option>
                 <option value="mesh-tree-horizontal">Tree Horiz</option>
@@ -317,23 +317,22 @@
         </ul>
         <h2>Keys:</h2>
         <ul id="identity-list" class="node-details-list"
-          data-fields="rloc16,extAddress,deviceLabel,name,routerId,eui64,mlEidIid,omrIpv6Addr,id,graph.unifiedId,ID">
+          data-fields="rloc16,extAddress,deviceLabel,name,routerId,eui64,mlEidIid,omrIpv6Address,id,graph.unifiedId,ID">
         </ul>
         <h2>Highlights:</h2>
         <ul id="highlights-list" class="node-details-list"
-          data-fields="type,Role,role,br,isBorderRouter,leader,isLeader,isRouter,isPrimaryBBR,status,mode.device,mode.deviceTypeFTD,mode.rxOnWhenIdle,mode.networkData,version,threadVersion,threadStackVersion,leaderData.partitionId,leaderData.leaderRouterId,vendorName,vendorModel,vendorSwVersion,server,room,icon,graph.graphLinkCount,graph.isRouter,graph.isBorderRouter,graph.hasChildren">
+          data-fields="type,Role,role,br,isBorderRouter,isLeader,isRouter,isPrimaryBBR,status,mode.device,mode.deviceTypeFTD,mode.rxOnWhenIdle,mode.networkData,version,threadVersion,threadStackVersion,leaderData.partitionId,leaderData.leaderRouterId,vendorName,vendorModel,vendorSwVersion,server,room,icon,graph.graphLinkCount,graph.isRouter,graph.isBorderRouter,graph.hasChildren">
         </ul>
         <h2>Network:</h2>
-        <ul id="network-list" class="node-details-list" data-fields="ipv6Addresses">
+        <ul id="network-list" class="node-details-list" data-fields="ipv6Addresses,serviceInfo.addressesParsed">
         </ul>
         <h2>Connections:</h2>
         <ul id="connections-list" class="node-details-list"
           data-fields="totalChildren,hasChildren,totalLinks,totalLink3,totalLink2,totalLink1,routerNeighborsCount,childTableCount,connectivity.activeRouters,connectivity.linkQuality3,connectivity.linkQuality2,connectivity.linkQuality1">
         </ul>
-
         <h2>MDNS:</h2>
         <ul id="mdns-list" class="node-details-list"
-          data-fields="scope,service_info.type,service_info.server,service_info.port,service_info.properties.mdns_scopes_thread,service_info.properties.mdns_scopes_br,service_info.properties.mdns_scopes_hap,service_info.properties.mdns_scopes_matter,service_info.properties.pt.full_name,service_info.properties.pt.int_value,service_info.properties.mn.full_name,service_info.properties.mn.decoded,service_info.properties.pv.full_name,service_info.properties.pv.decoded,service_info.properties.md.full_name,service_info.properties.md.decoded,service_info.properties.ci.full_name,service_info.properties.ci.category_name,service_info.properties.ci.decoded,service_info.properties.ci.hex,service_info.properties.id.full_name,service_info.properties.id.decoded,service_info.properties.xa.full_name,service_info.properties.xa.hex,service_info.properties.vn.full_name,service_info.properties.vn.decoded,service_info.properties.tv.full_name,service_info.properties.tv.decoded,service_info.properties.rv.full_name,service_info.properties.rv.decoded,service_info.properties.nn.full_name,service_info.properties.nn.decoded,service_info.properties.xp.full_name,service_info.properties.xp.hex,service_info.properties.bb.full_name,service_info.properties.bb.hex,service_info.properties.sb.full_name,service_info.properties.sb.hex,service_info.properties.sf.full_name,service_info.properties.sf.hex,service_info.properties.sh.full_name,service_info.properties.sh.hex,service_info.properties.s#.full_name,service_info.properties.s#.decoded,service_info.properties.s#.hex,service_info.properties.c#.full_name,service_info.properties.c#.decoded,service_info.properties.c#.hex,service_info.properties.ff.full_name,service_info.properties.ff.decoded,service_info.properties.ff.hex,service_info.properties.FabricID_compressed.full_name,service_info.properties.FabricID_compressed.decoded,service_info.decoded_properties.SAI,service_info.decoded_properties.SAT,service_info.decoded_properties.SII,service_info.properties.NodeID.full_name,service_info.properties.NodeID.decoded,service_info.properties.SAI.full_name,service_info.properties.SAI.milliseconds,service_info.properties.SAT.full_name,service_info.properties.SAT.milliseconds,service_info.properties.SII.full_name,service_info.properties.SII.milliseconds">
+          data-fields="scope,serviceInfo.type,serviceInfo.server,serviceInfo.port,serviceInfo.properties.mdns_scopes_thread,serviceInfo.properties.mdns_scopes_br,serviceInfo.properties.mdns_scopes_hap,serviceInfo.properties.mdns_scopes_matter,serviceInfo.properties.pt.fullName,serviceInfo.properties.pt.int_value,serviceInfo.properties.mn.fullName,serviceInfo.properties.mn.decoded,serviceInfo.properties.pv.fullName,serviceInfo.properties.pv.decoded,serviceInfo.properties.md.fullName,serviceInfo.properties.md.decoded,serviceInfo.properties.ci.fullName,serviceInfo.properties.ci.category_name,serviceInfo.properties.ci.decoded,serviceInfo.properties.ci.hex,serviceInfo.properties.id.fullName,serviceInfo.properties.id.decoded,serviceInfo.properties.xa.fullName,serviceInfo.properties.xa.hex,serviceInfo.properties.vn.fullName,serviceInfo.properties.vn.decoded,serviceInfo.properties.tv.fullName,serviceInfo.properties.tv.decoded,serviceInfo.properties.rv.fullName,serviceInfo.properties.rv.decoded,serviceInfo.properties.nn.fullName,serviceInfo.properties.nn.decoded,serviceInfo.properties.xp.fullName,serviceInfo.properties.xp.hex,serviceInfo.properties.bb.fullName,serviceInfo.properties.bb.hex,serviceInfo.properties.sb.fullName,serviceInfo.properties.sb.hex,serviceInfo.properties.sf.fullName,serviceInfo.properties.sf.hex,serviceInfo.properties.sh.fullName,serviceInfo.properties.sh.hex,serviceInfo.properties.s#.fullName,serviceInfo.properties.s#.decoded,serviceInfo.properties.s#.hex,serviceInfo.properties.c#.fullName,serviceInfo.properties.c#.decoded,serviceInfo.properties.c#.hex,serviceInfo.properties.ff.fullName,serviceInfo.properties.ff.decoded,serviceInfo.properties.ff.hex,serviceInfo.properties.FabricID_compressed.fullName,serviceInfo.properties.FabricID_compressed.decoded,serviceInfo.decoded_properties.SAI,serviceInfo.decoded_properties.SAT,serviceInfo.decoded_properties.SII,serviceInfo.properties.NodeID.fullName,serviceInfo.properties.NodeID.decoded,serviceInfo.properties.SAI.fullName,serviceInfo.properties.SAI.milliseconds,serviceInfo.properties.SAT.fullName,serviceInfo.properties.SAT.milliseconds,serviceInfo.properties.SII.fullName,serviceInfo.properties.SII.milliseconds">
         </ul>
 
         <h2>Routes & Links:</h2>

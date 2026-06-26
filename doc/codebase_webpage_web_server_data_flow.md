@@ -245,8 +245,8 @@ After all files settle:
 
 `mergeRowsByIdentity` uses three identity keys in priority order:
 1. `rloc16:<hex>` — canonical RLOC16
-2. `extaddr:<hex>` — canonical extended address (resolves aliases: `extaddr`, `extAddress`, `Extended MAC`)
-3. `omr_ipv6_addr:<addr>` — OMR IPv6 address
+2. `extAddress:<hex>` — canonical extended address (resolves aliases: `extAddress`, `extaddr`, `Extended MAC`)
+3. `omrIpv6Address:<addr>` — OMR IPv6 address
 
 When two rows share any key, they are merged: the first non-empty value wins; conflicts are recorded in `_merge_conflicts`; `_source_files` arrays are unioned.
 
@@ -266,7 +266,7 @@ Different data sources use inconsistent field naming conventions—OTBR CLI uses
 
 ### Static label enrichment
 
-`enrichRows(rows)` / `enrichRawFiles(rawFiles)` are called by `renderCurrentView()` when the **Enhance** toggle is on. They walk every node/row, look up `staticExtaddrLabelMap` by canonical extaddr, and inject `device_label` on a spread copy — the originals in `currentDataset` are never mutated.
+`enrichRows(rows)` / `enrichRawFiles(rawFiles)` are called by `renderCurrentView()` when the **Enhance** toggle is on. They walk every node/row, look up `staticExtaddrLabelMap` by canonical extaddr, and inject `deviceLabel` on a spread copy — the originals in `currentDataset` are never mutated.
 
 ---
 
@@ -278,7 +278,7 @@ Different data sources use inconsistent field naming conventions—OTBR CLI uses
 
 | topologyMode | Adaptor | Input |
 |---|---|---|
-| `meshdiag-networkdiag` | `adaptMeshdiagNetworkdiag` | meshdiag + networkdiag (with route_data links) + neighbor/child tables |
+| `meshdiag-networkdiag` | `adaptMeshdiagNetworkdiag` | meshdiag + networkdiag (with routeData links) + neighbor/child tables |
 | `merged-detailed` | `adaptMergedDetailed` | pre-merged topology-all file |
 | `otbr_restapi` | `adaptOtbrRestApi` | REST API devices + diagnostics |
 | `eve_enhanced` | `adaptEve` | td-eve-topology.json |
@@ -349,7 +349,7 @@ Different datasets encode link quality information in different formats. The ada
 
 #### networkdiag datasets (OTBR CLI `networkdiag topology`)
 
-**Source data:** `route_data.route_data[]` arrays with `link_quality_in` and `link_quality_out` numeric values (0–3 scale)
+**Source data:** `routeData.routeData[]` arrays with `linkQualityIn` and `linkQualityOut` numeric values (0–3 scale)
 
 **Processing:** Each route entry creates an edge with:
 - `linkCategories: [EDGE_CATEGORY_OTBR_ROUTE]`

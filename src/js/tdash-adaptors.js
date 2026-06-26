@@ -132,14 +132,32 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     const rawPartitionIdChanges = getRawMetric('mleCounters.partIdChangesCount');
     const rawParentChanges = getRawMetric('mleCounters.newParentCount');
     // Phase 1a: new fields
-    const mergedTotalLink3 = Number.isFinite(rawNode.links3) ? rawNode.links3
-      : (existing && Number.isFinite(existing.links3 ?? existing.total_link_3) ? (existing.links3 ?? existing.total_link_3) : undefined);
-    const mergedTotalLink2 = Number.isFinite(rawNode.links2) ? rawNode.links2
-      : (existing && Number.isFinite(existing.links2 ?? existing.total_link_2) ? (existing.links2 ?? existing.total_link_2) : undefined);
-    const mergedTotalLink1 = Number.isFinite(rawNode.links1) ? rawNode.links1
-      : (existing && Number.isFinite(existing.links1 ?? existing.total_link_1) ? (existing.links1 ?? existing.total_link_1) : undefined);
+    const mergedTotalLink3 = Number.isFinite(rawNode.totalLink3) ? rawNode.totalLink3
+      : (Number.isFinite(rawNode.total_link_3) ? rawNode.total_link_3
+        : (Array.isArray(rawNode.links3) ? rawNode.links3.length
+          : (Number.isFinite(rawNode.links3) ? rawNode.links3
+            : (existing && Number.isFinite(existing.totalLink3 ?? existing.total_link_3)
+              ? (existing.totalLink3 ?? existing.total_link_3)
+              : undefined))));
+    const mergedTotalLink2 = Number.isFinite(rawNode.totalLink2) ? rawNode.totalLink2
+      : (Number.isFinite(rawNode.total_link_2) ? rawNode.total_link_2
+        : (Array.isArray(rawNode.links2) ? rawNode.links2.length
+          : (Number.isFinite(rawNode.links2) ? rawNode.links2
+            : (existing && Number.isFinite(existing.totalLink2 ?? existing.total_link_2)
+              ? (existing.totalLink2 ?? existing.total_link_2)
+              : undefined))));
+    const mergedTotalLink1 = Number.isFinite(rawNode.totalLink1) ? rawNode.totalLink1
+      : (Number.isFinite(rawNode.total_link_1) ? rawNode.total_link_1
+        : (Array.isArray(rawNode.links1) ? rawNode.links1.length
+          : (Number.isFinite(rawNode.links1) ? rawNode.links1
+            : (existing && Number.isFinite(existing.totalLink1 ?? existing.total_link_1)
+              ? (existing.totalLink1 ?? existing.total_link_1)
+              : undefined))));
     const mergedTotalLinks = Number.isFinite(rawNode.totalLinks) ? rawNode.totalLinks
-      : (existing ? (existing.totalLinks ?? existing.total_links ?? 0) : 0);
+      : (Number.isFinite(rawNode.total_links) ? rawNode.total_links
+        : (Number.isFinite(mergedTotalLink3) && Number.isFinite(mergedTotalLink2) && Number.isFinite(mergedTotalLink1)
+          ? (mergedTotalLink3 + mergedTotalLink2 + mergedTotalLink1)
+          : (existing ? (existing.totalLinks ?? existing.total_links ?? 0) : 0)));
     const lq3Ratio = (Number.isFinite(mergedTotalLink3) && mergedTotalLinks > 0)
       ? mergedTotalLink3 / mergedTotalLinks : undefined;
     const lq1Ratio = (Number.isFinite(mergedTotalLink1) && mergedTotalLinks > 0)
@@ -817,14 +835,32 @@ export function adaptMergedDetailed(fileMap) {
   function upsertMergedNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
     const rawMergedChildren = Array.isArray(rawNode.children) ? rawNode.children : [];
-    const mergedTotalLink3 = Number.isFinite(rawNode.links3) ? rawNode.links3
-      : (existing && Number.isFinite(existing.links3 ?? existing.total_link_3) ? (existing.links3 ?? existing.total_link_3) : undefined);
-    const mergedTotalLink2 = Number.isFinite(rawNode.links2) ? rawNode.links2
-      : (existing && Number.isFinite(existing.links2 ?? existing.total_link_2) ? (existing.links2 ?? existing.total_link_2) : undefined);
-    const mergedTotalLink1 = Number.isFinite(rawNode.links1) ? rawNode.links1
-      : (existing && Number.isFinite(existing.links1 ?? existing.total_link_1) ? (existing.links1 ?? existing.total_link_1) : undefined);
+    const mergedTotalLink3 = Number.isFinite(rawNode.totalLink3) ? rawNode.totalLink3
+      : (Number.isFinite(rawNode.total_link_3) ? rawNode.total_link_3
+        : (Array.isArray(rawNode.links3) ? rawNode.links3.length
+          : (Number.isFinite(rawNode.links3) ? rawNode.links3
+            : (existing && Number.isFinite(existing.totalLink3 ?? existing.total_link_3)
+              ? (existing.totalLink3 ?? existing.total_link_3)
+              : undefined))));
+    const mergedTotalLink2 = Number.isFinite(rawNode.totalLink2) ? rawNode.totalLink2
+      : (Number.isFinite(rawNode.total_link_2) ? rawNode.total_link_2
+        : (Array.isArray(rawNode.links2) ? rawNode.links2.length
+          : (Number.isFinite(rawNode.links2) ? rawNode.links2
+            : (existing && Number.isFinite(existing.totalLink2 ?? existing.total_link_2)
+              ? (existing.totalLink2 ?? existing.total_link_2)
+              : undefined))));
+    const mergedTotalLink1 = Number.isFinite(rawNode.totalLink1) ? rawNode.totalLink1
+      : (Number.isFinite(rawNode.total_link_1) ? rawNode.total_link_1
+        : (Array.isArray(rawNode.links1) ? rawNode.links1.length
+          : (Number.isFinite(rawNode.links1) ? rawNode.links1
+            : (existing && Number.isFinite(existing.totalLink1 ?? existing.total_link_1)
+              ? (existing.totalLink1 ?? existing.total_link_1)
+              : undefined))));
     const mergedTotalLinks = Number.isFinite(rawNode.totalLinks) ? rawNode.totalLinks
-      : (existing ? (existing.totalLinks ?? existing.total_links ?? 0) : 0);
+      : (Number.isFinite(rawNode.total_links) ? rawNode.total_links
+        : (Number.isFinite(mergedTotalLink3) && Number.isFinite(mergedTotalLink2) && Number.isFinite(mergedTotalLink1)
+          ? (mergedTotalLink3 + mergedTotalLink2 + mergedTotalLink1)
+          : (existing ? (existing.totalLinks ?? existing.total_links ?? 0) : 0)));
     const lq3Ratio = (Number.isFinite(mergedTotalLink3) && mergedTotalLinks > 0)
       ? mergedTotalLink3 / mergedTotalLinks : undefined;
     const lq1Ratio = (Number.isFinite(mergedTotalLink1) && mergedTotalLinks > 0)
@@ -943,7 +979,7 @@ export function adaptMergedDetailed(fileMap) {
       });
     });
     (Array.isArray(node.router_neighbor_table) ? node.router_neighbor_table : []).forEach((neighbor) => {
-      const toId = ensureNodeForLink(neighbor, neighbor.rloc16 || neighbor.extaddr || neighbor.id);
+      const toId = ensureNodeForLink(neighbor, neighbor.rloc16 || neighbor.extAddress || neighbor.id);
       if (!toId) return;
       const toNodeEnriched = nodeMap.get(toId);
       addEdge(edgeMap, edgeData, fromId, toId, {
@@ -1082,12 +1118,12 @@ export function adaptRouterTable(fileMap) {
     if (!fromId) return;
 
     // "Next Hop" is a router ID integer → convert to rloc16
-    const nextHopId = toFiniteNumber(row['Next Hop']);
+    const nextHopId = toFiniteNumber(row['nextHop']);
     if (Number.isFinite(nextHopId)) {
       const toRloc16 = buildMainRouterRloc16(nextHopId);
       const toRow = byRloc16.get(toRloc16.toLowerCase());
       if (toRow && toRloc16 && toRloc16 !== fromId) {
-        const lqOut = toFiniteNumber(row['LQ Out']);
+        const lqOut = toFiniteNumber(row['linkQualityOut']);
         const edgeWidth = Number.isFinite(lqOut) ? (lqOut >= 3 ? 4 : lqOut >= 2 ? 2 : 1) : 1.5;
         addEdge(edgeMap, edgeData, fromId, toRloc16, {
           width: edgeWidth,
@@ -1262,7 +1298,7 @@ export function adaptOtbrRestApi(fileMap) {
     const modeDevice = rawNode.mode?.deviceTypeFTD === true ? 'FTD'
       : (rawNode.mode?.deviceTypeFTD === false ? 'MTD' : (existing ? existing.mode_device : ''));
     const rloc16Val = toText(rawNode.rloc16) || (existing ? existing.rloc16 : '');
-    const extaddrVal = toText(rawNode.extAddress || rawNode.extaddr).toLowerCase() || (existing ? existing.extaddr : '');
+    const extaddrVal = toText(rawNode.extAddress || rawNode.extaddr).toLowerCase() || (existing ? existing.extAddress : '');
     const merged = {
       id: nodeId,
       deviceLabel: toText(rawNode.hostName) || toText(rawNode.device_label) || (existing ? existing.deviceLabel || existing.device_label : ''),

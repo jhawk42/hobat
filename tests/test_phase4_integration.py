@@ -167,7 +167,7 @@ def test_input_ordering_independence():
     node_c = {
         "extAddress": "0011223344556677",
         "rloc16": "0x1400",
-        "omrIpv6Addr": "fd12:3456:7890::1",
+        "omrIpv6Address": "fd12:3456:7890::1",
     }
     
     # Order 1: A -> B -> C
@@ -189,7 +189,7 @@ def test_input_ordering_independence():
     
     # All should have omrIpv6Addr
     for result in [result1, result2, result3]:
-        assert result["omrIpv6Addr"] == "fd12:3456:7890::1"
+        assert result["omrIpv6Address"] == "fd12:3456:7890::1"
     
     print("✅ PASS: Merge results independent of input order")
 
@@ -243,14 +243,14 @@ def test_edge_case_missing_identity_fields():
     
     incoming = {
         "rloc16": "0x1400",
-        "omrIpv6Addr": "fd12:3456:7890::1",
+        "omrIpv6Address": "fd12:3456:7890::1",
     }
     
     result = deep_merge(base, incoming)
     
     # Both fields should be present
     assert result["deviceLabel"] == "Device A"
-    assert result["omrIpv6Addr"] == "fd12:3456:7890::1"
+    assert result["omrIpv6Address"] == "fd12:3456:7890::1"
     
     print("✅ PASS: Records without extAddress merged correctly")
 
@@ -492,7 +492,7 @@ def test_data_loss_verification_all_fields_preserved():
     
     incoming = {
         "extAddress": "0011223344556677",
-        "omrIpv6Addr": "fd12::1",
+        "omrIpv6Address": "fd12::1",
         "field_d": "value_d",
         "nested": {"key3": "val3"}
     }
@@ -508,7 +508,7 @@ def test_data_loss_verification_all_fields_preserved():
     assert result["field_c"] == True
     
     # All fields from incoming should be present
-    assert result["omrIpv6Addr"] == "fd12::1"
+    assert result["omrIpv6Address"] == "fd12::1"
     assert result["field_d"] == "value_d"
     
     # Nested fields should all be present
@@ -582,7 +582,7 @@ def test_conflict_tracking_source_files():
     
     node2 = {
         "extAddress": "0011223344556677",
-        "omrIpv6Addr": "fd12::1",
+        "omrIpv6Address": "fd12::1",
         "_source_files": ["td-otbr-restapi-diagnostics.json"]
     }
     
@@ -759,7 +759,7 @@ def test_production_flow_mdns_omr_dedup_aliases():
         "captured_at_epoch": 1000.0,
         "captured_at_iso": "2026-06-01T00:00:00Z",
         "name": "A._matter._tcp.local.",
-        "omrIpv6Addr": "fd00:abcd::1234",
+        "omrIpv6Address": "fd00:abcd::1234",
         "service_info": {
             "server": "56A2B29EC702D2D2.local.",
             "key": "56a2b29ec702d2d2.local.",
@@ -777,7 +777,7 @@ def test_production_flow_mdns_omr_dedup_aliases():
         "captured_at_epoch": 2000.0,
         "captured_at_iso": "2026-06-01T00:16:40Z",
         "name": "B._matter._tcp.local.",
-        "omrIpv6Addr": "fd00:abcd::1234",
+        "omrIpv6Address": "fd00:abcd::1234",
         "service_info": {
             "server": "56A2B29EC702D2D2-2.local.",
             "key": "56a2b29ec702d2d2-2.local.",
@@ -808,7 +808,7 @@ def test_production_flow_mdns_omr_dedup_aliases():
     # Newer mDNS row should drive active scalar fields.
     assert node.get("capturedAtEpoch") == 2000.0
     assert node.get("name") == "B._matter._tcp.local."
-    assert node.get("omrIpv6Addr") == "fd00:abcd::1234"
+    assert node.get("omrIpv6Address") == "fd00:abcd::1234"
 
     # Alias rollups should preserve both records' variants.
     aliases = node.get("_mdns_aliases", {})
@@ -847,7 +847,7 @@ def test_production_flow_strict_omr_preserves_distinct_matter_identities_in_alia
         "event": "add",
         "captured_at_epoch": 3000.0,
         "name": "A._matter._tcp.local.",
-        "omrIpv6Addr": "fd00:abcd::9999",
+        "omrIpv6Address": "fd00:abcd::9999",
         "service_info": {
             "properties": {
                 "FabricID_compressed": {"decoded": "AAAAAAAAAAAAAAAA"},
@@ -862,7 +862,7 @@ def test_production_flow_strict_omr_preserves_distinct_matter_identities_in_alia
         "event": "add",
         "captured_at_epoch": 3001.0,
         "name": "B._matter._tcp.local.",
-        "omrIpv6Addr": "fd00:abcd::9999",
+        "omrIpv6Address": "fd00:abcd::9999",
         "service_info": {
             "properties": {
                 "FabricID_compressed": {"decoded": "BBBBBBBBBBBBBBBB"},
@@ -906,7 +906,7 @@ def test_production_flow_composite_guard_prevents_false_omr_merge():
         "event": "add",
         "captured_at_epoch": 3000.0,
         "name": "A._matter._tcp.local.",
-        "omrIpv6Addr": "fd00:abcd::9999",
+        "omrIpv6Address": "fd00:abcd::9999",
         "service_info": {
             "properties": {
                 "FabricID_compressed": {"decoded": "AAAAAAAAAAAAAAAA"},
@@ -921,7 +921,7 @@ def test_production_flow_composite_guard_prevents_false_omr_merge():
         "event": "add",
         "captured_at_epoch": 3001.0,
         "name": "B._matter._tcp.local.",
-        "omrIpv6Addr": "fd00:abcd::9999",
+        "omrIpv6Address": "fd00:abcd::9999",
         "service_info": {
             "properties": {
                 "FabricID_compressed": {"decoded": "BBBBBBBBBBBBBBBB"},

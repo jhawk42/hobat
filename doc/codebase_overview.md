@@ -219,7 +219,7 @@ Interactive topology graph or sortable table in the browser
 ```
 python merge_dataset.py --datadir ./data
     │  loads multiple JSON files from Layer 1
-    │  normalize_identifiers() → canonical rloc16 / extaddr / omr_ipv6_addr
+    │  normalize_identifiers() → canonical rloc16 / extAddress / omrIpv6Address
     │  derive_mode_device()    → infer FTD/MTD from various field shapes
     │  build_merged_records()  → first-value-wins, conflict log
     ▼
@@ -227,7 +227,7 @@ Layer 1 — data/td-merged-topology-all.json
 
 python3 -m td_cli merge-extaddr --merge-input-file td-mdns-scopes-thread.json
     │  reads topology file + td-static-extaddr-device-label.json
-    │  adds missing extaddr entries (prefers device_label, falls back to name)
+    │  adds missing extAddress entries (prefers device_label, falls back to name)
     ▼
 Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 ```
@@ -269,8 +269,8 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 
 | File | ot-ctl Command | Output File | Purpose |
 |---|---|---|---|
-| `otbr_cli_router_table.py` | `router table` | `td-otbr-cli-router-table.json` | Parses the pipe-delimited router table into a list of router dicts with fields: ID, RLOC16, Next Hop, Path Cost, LQ In/Out, Age, Extended MAC, and Link. Adds `extaddr` and `device_label` from the static label map. |
-| `otbr_cli_meshdiag_topology.py` | `meshdiag topology ip6-addrs children` | `td-otbr-cli-meshdiag-topology.json` | Parses per-router blocks containing: RLOC16, extaddr, Thread version, BR flag, link-quality buckets (1/2/3-links with peer IDs), IPv6 address list, and children (RLOC16 + link quality + mode).  Also computes `total_children`, `total_links`, and `omr_ipv6_addr`. |
+| `otbr_cli_router_table.py` | `router table` | `td-otbr-cli-router-table.json` | Parses the pipe-delimited router table into a list of router dicts with fields: ID, RLOC16, Next Hop, Path Cost, LQ In/Out, Age, Extended MAC, and Link. Adds `extAddress` and `deviceLabel` from the static label map. |
+| `otbr_cli_meshdiag_topology.py` | `meshdiag topology ip6-addrs children` | `td-otbr-cli-meshdiag-topology.json` | Parses per-router blocks containing: RLOC16, extaddr, Thread version, BR flag, link-quality buckets (1/2/3-links with peer IDs), IPv6 address list, and children (RLOC16 + link quality + mode).  Also computes `total_children`, `total_links`, and `omrIpv6Address"`. |
 | `otbr_cli_meshdiag_childtable.py` | `meshdiag childtable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childtables.json` | For every router in the router table, collects per-child details: RLOC16, extaddr, Thread version, timeout, age, supervision interval, queued messages, rx-on flag, device type, full-net flag, RSS (avg/last/margin), frame/message error rates, connection time, and CSL parameters.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_meshdiag_childip6.py` | `meshdiag childip6 <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-childip6.json` | For every router in the router table, collects child IPv6 address lists grouped by child RLOC16 and records per-child IP address counts.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_meshdiag_routerneighbortable.py` | `meshdiag routerneighbortable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-neighbortables.json` | For every router in the router table, collects per-neighbour details: RLOC16, extaddr, Thread version, RSS (avg/last/margin), frame/message error rates, and connection time.  Handles `ResponseTimeout` gracefully. |
@@ -300,8 +300,8 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 
 | File | Purpose |
 |---|---|
-| `merge_dataset.py` | Reads multiple JSON data files (OTBR CLI, REST API, Eve) and merges all records into a single output file.  Supports three merge strategies: `none` (pass-through), `by-rloc16`, and `by-identity` (matches on RLOC16, canonical `extaddr`, or `omr_ipv6_addr`).  Tracks source provenance in `_source_files` and records conflicts without overwriting existing values.  Also provides `normalize_identifiers()` (canonicalises RLOC16, extaddr aliases, and OMR address) and `derive_mode_device()` (infers FTD/MTD from multiple field shapes). |
-| `merge_extaddr_device_label_map.py` | Admin utility that reads a topology JSON file (e.g. an mDNS or networkdiag output) and adds any previously unseen `extaddr` entries to `td-static-extaddr-device-label.json`.  Falls back from `device_label` to `name` for the label text.  Accepts `--merge_name_override` to overwrite existing `Unknown` labels with the topology name. |
+| `merge_dataset.py` | Reads multiple JSON data files (OTBR CLI, REST API, Eve) and merges all records into a single output file.  Supports three merge strategies: `none` (pass-through), `by-rloc16`, and `by-identity` (matches on RLOC16, canonical `extAddress`, or `omrIpv6Address"`).  Tracks source provenance in `_source_files` and records conflicts without overwriting existing values.  Also provides `normalize_identifiers()` (canonicalises RLOC16, extaddr aliases, and OMR address) and `derive_mode_device()` (infers FTD/MTD from multiple field shapes). |
+| `merge_extaddr_device_label_map.py` | Admin utility that reads a topology JSON file (e.g. an mDNS or networkdiag output) and adds any previously unseen `extAddress` entries to `td-static-extaddr-device-label.json`.  Falls back from `deviceLabel` to `name` for the label text.  Accepts `--merge_name_override` to overwrite existing `Unknown` labels with the topology name. |
 
 ### Utilities
 
@@ -337,12 +337,12 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | `tdash-dataset-registry.js` | Defines `DATASET_REGISTRY`: each entry names the JSON file(s) to fetch, the merge strategy, the topology adaptor mode, and the default link filter for that dataset. |
 | `tdash-dataset.js` | Dataset loading pipeline — fetches JSON file(s) from the server, applies the client-side merge, and enriches nodes with static device labels from the extaddr map. |
 | `tdash-filters.js` | Visibility filters — implements edge filtering by link-filter mode and node filtering by device type (FTD/MTD/BR/Router) and diagnostics thresholds. |
-| `tdash-merge.js` | Client-side row-merge engine — normalises identifiers and merges rows by `rloc16`, canonical `extaddr`, or `omr_ipv6_addr`, mirroring the Python `merge_dataset.py` logic. |
+| `tdash-merge.js` | Client-side row-merge engine — normalises identifiers and merges rows by `rloc16`, canonical `extAddress`, or `omrIpv6Address"`, mirroring the Python `merge_dataset.py` logic. |
 | `tdash-table-renderer.js` | Renders the current dataset as a sortable, column-filterable HTML table; discovers columns dynamically from loaded rows. |
 | `tdash-topology-renderer.js` | Drives the vis-network graph: creates nodes and edges via the active adaptor, applies node/edge filters, handles click-to-details-panel, and wires physics/animation/zoom toggles. |
 | `tdash-topology-utils.js` | Low-level helpers shared by adaptors and renderers: node-ID selection, label building, and directed-edge deduplication with per-category tracking. |
 | `tdash-ui.js` | Top-level UI wiring — binds dropdown and button event handlers, delegates dataset loads, and dispatches render calls to the topology or table renderer. |
-| `tdash-utils.js` | Primitive helpers for canonical-identity comparison (`rloc16`, `extaddr`, `omr_ipv6_addr`) and type guards used by the merge and filter modules. |
+| `tdash-utils.js` | Primitive helpers for canonical-identity comparison (`rloc16`, `extAddress`, `omrIpv6Address"`) and type guards used by the merge and filter modules. |
 
 ### Unified CLI Dispatcher
 
@@ -594,7 +594,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 | `tests/test_otbr_restapi_download.py` | Unit tests for `otbr_restapi_download.py`. |
 | `tests/test_otbr_restapi_client.py` | Unit tests for the flattened client: JSON:API flattening, HTTP error parsing, usage validation, CLI output and exit codes. |
 | `tests/test_otbr_restapi_raw_client.py` | Unit tests for the raw client: raw envelope pass-through, error handling. |
-| `tests/test_td_merge_identity.py` | Unit tests for `build_merged_records()` in `merge_dataset.py`: verifies that `extaddr`, `extAddress`, and `Extended MAC` aliases all resolve to the same canonical record under `by-identity` merge. |
+| `tests/test_td_merge_identity.py` | Unit tests for `build_merged_records()` in `merge_dataset.py`: verifies that `extAddress`, `extAddress`, and `Extended MAC` aliases all resolve to the same canonical record under `by-identity` merge. |
 | `tests/test_td_cli_argparse.py` | Unit tests for `td_cli.py`: covers `build_parser()`, `dispatch()`, and `main()` — argument parsing, subcommand routing, and exit codes. |
 | `tests/test_td_cli_datadir_forwarding.py` | Unit tests for `--datadir` forwarding: verifies the global `--datadir` argument is correctly parsed and forwarded to subcommand modules. |
 | `tests/test_td_webserver_concurrency.py` | Unit tests for web server concurrency: verifies that long-running background jobs are tracked correctly and that concurrent requests to the same file do not spawn duplicate subprocesses. |
@@ -637,7 +637,7 @@ The **Links** dropdown controls which edge types are drawn for the current topol
 ### Step-by-step
 
 1. **Collect**: Run individual `otbr_restapi_*`, `otbr_cli_*`, and `mdns_*` scripts directly, or via `python3 -m td_cli`.  Each saves data as a local JSON file (e.g. `td-otbr-restapi-devices.json`, `td-otbr-cli-router-table.json`, `td-eve-topology.json`).
-2. **Normalize**: Each collector normalises its data — RLOC16 values are hex strings (`0x5000`), extended addresses are lowercase hex (`1a7fbf0434e4f043`), field aliases are canonicalised (`extAddress` → `extaddr`).
+2. **Normalize**: Each collector normalises its data — RLOC16 values are hex strings (`0x5000`), extended addresses are lowercase hex (`1a7fbf0434e4f043`), field aliases are canonicalised (`extAddress` → `extAddress`).
 3. **Merge**: `merge_dataset.py` (or `python3 -m td_cli merge-dataset`) reads the JSON files and merges records using the configured strategy.  Non-empty values are never silently overwritten; conflicts are recorded.  The output JSON (`td-merged-topology-all.json`) retains a `_source_files` list per row.
 4. **Visualise**: Open `src/tdash.html` in a browser, select a dataset from the dropdown, and explore the interactive topology graph or table.  Alternatively, serve the `src/` directory with `python3 -m td_webserver` and open `http://localhost:9165/tdash.html`.
 
@@ -791,7 +791,7 @@ python3 -m td_cli otbr-restapi --host 127.0.0.1 --port 18081 node get
 |---|---|
 | `none` | Pass loaded JSON through without merging rows |
 | `by-rloc16` | Merge rows only when `rloc16` matches |
-| `by-identity` | Merge when any canonical identity matches (checked in order: `extaddr` → `omr_ipv6_addr` → `rloc16`) |
+| `by-identity` | Merge when any canonical identity matches (checked in order: `extAddress` → `omrIpv6Address"` → `rloc16`) |
 
 Identity matching is case-insensitive and ignores leading/trailing whitespace.  Empty identifiers are never used for matching.
 

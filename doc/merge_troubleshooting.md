@@ -261,7 +261,7 @@ jq '[.[] | keys[]] | unique | sort' data/td-merged-topology-all.json
    ```
 
 3. **Check source conventions:**
-   - CLI sources use snake_case: `id_sequence`, `route_data`, `omr_ipv6_addr`
+   - CLI sources use snake_case: `id_sequence`, `route_data`, `omrIpv6Address`
    - REST API uses camelCase: `idSequence`, `routeData`, `omrIpv6Address`
    - All normalized to snake_case in merged output
 
@@ -329,7 +329,7 @@ jq '[.[] | select(._merge_conflicts != null) | ._merge_conflicts | length] | add
 
 # Show conflict details
 jq '.[] | select(._merge_conflicts != null) | 
-   {extaddr, device_label, conflicts: ._merge_conflicts}' \
+   {extAddress, deviceLabel, conflicts: ._merge_conflicts}' \
   data/td-merged-topology-all.json | head -20
 
 # Group conflicts by field
@@ -385,7 +385,7 @@ jq '[.[] | select(._merge_conflicts != null) |
 **Diagnosis:**
 ```bash
 # Check which sources contributed to each node
-jq '.[] | {extaddr, sources: ._source_files}' \
+jq '.[] | {extAddress, sources: ._source_files}' \
   data/td-merged-topology-all.json | head -10
 
 # Check source precedence configuration

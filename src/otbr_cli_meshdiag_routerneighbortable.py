@@ -5,7 +5,7 @@ import logging
 from typing import Sequence
 
 from extaddr_device_label_map import load_extaddr_device_label_map
-from json_key_normalizer import convert_keys_to_camel_case
+from td_json_key_normalizer import convert_keys_to_camel_case
 from otbr_cli_router_table import fetch_and_parse_router_table
 from otbr_cli_util import (
     build_timeout_error_record,

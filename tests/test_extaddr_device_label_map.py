@@ -53,7 +53,7 @@ class TestGetExtaddrFromRecord:
     
     def test_extracts_from_extaddr_field(self):
         """Should extract from 'extaddr' field."""
-        record = {"extaddr": "AA11BB22CC33DD44"}
+        record = {"extAddress": "AA11BB22CC33DD44"}
         assert get_extaddr_from_record(record) == "aa11bb22cc33dd44"
     
     def test_extracts_from_extAddress_field(self):
@@ -69,8 +69,8 @@ class TestGetExtaddrFromRecord:
     def test_prioritizes_first_alias(self):
         """Should use first matching alias when multiple exist."""
         record = {
-            "extaddr": "AA11BB22CC33DD44",
             "extAddress": "BB22CC33DD44EE55",
+            "extAddress": "AA11BB22CC33DD44",
             "Extended MAC": "CC33DD44EE55FF66",
         }
         # First alias is 'extaddr' in EXTADDR_FIELD_ALIASES
@@ -87,7 +87,7 @@ class TestGetExtaddrFromRecord:
     
     def test_handles_non_string_values(self):
         """Should skip non-string extaddr values."""
-        record = {"extaddr": 12345}
+        record = {"extAddress": 12345}
         assert get_extaddr_from_record(record) == ""
     
     def test_custom_aliases(self):
@@ -104,8 +104,8 @@ class TestLoadExtaddrDeviceLabelMapFlexible:
         """Should load list format with 'extaddr' field."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             data = [
-                {"extaddr": "AA11BB22CC33DD44", "device_label": "Kitchen"},
-                {"extaddr": "BB22CC33DD44EE55", "device_label": "Bedroom"},
+                {"extAddress": "AA11BB22CC33DD44", "device_label": "Kitchen"},
+                {"extAddress": "BB22CC33DD44EE55", "device_label": "Bedroom"},
             ]
             json.dump(data, f)
             f.flush()
@@ -153,7 +153,7 @@ class TestLoadExtaddrDeviceLabelMapFlexible:
         """Should load dict format where values contain extaddr mappings."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             data = {
-                "device1": {"extaddr": "AA11BB22CC33DD44", "device_label": "Kitchen"},
+                "device1": {"extAddress": "AA11BB22CC33DD44", "device_label": "Kitchen"},
                 "device2": {"extAddress": "BB22CC33DD44EE55", "device_label": "Bedroom"},
             }
             json.dump(data, f)
@@ -172,7 +172,7 @@ class TestLoadExtaddrDeviceLabelMapFlexible:
         """Should strip whitespace from device labels."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             data = [
-                {"extaddr": "AA11BB22CC33DD44", "device_label": "  Kitchen  "},
+                {"extAddress": "AA11BB22CC33DD44", "device_label": "  Kitchen  "},
             ]
             json.dump(data, f)
             f.flush()
@@ -187,7 +187,7 @@ class TestLoadExtaddrDeviceLabelMapFlexible:
         """Should skip entries that don't have any extaddr field."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             data = [
-                {"extaddr": "AA11BB22CC33DD44", "device_label": "Kitchen"},
+                {"extAddress": "AA11BB22CC33DD44", "device_label": "Kitchen"},
                 {"device_label": "Bedroom"},  # Missing extaddr
             ]
             json.dump(data, f)
@@ -203,8 +203,8 @@ class TestLoadExtaddrDeviceLabelMapFlexible:
         """Should skip entries without device_label field."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             data = [
-                {"extaddr": "AA11BB22CC33DD44", "device_label": "Kitchen"},
-                {"extaddr": "BB22CC33DD44EE55"},  # Missing device_label
+                {"extAddress": "AA11BB22CC33DD44", "device_label": "Kitchen"},
+                {"extAddress": "BB22CC33DD44EE55"},  # Missing device_label
             ]
             json.dump(data, f)
             f.flush()
@@ -219,9 +219,9 @@ class TestLoadExtaddrDeviceLabelMapFlexible:
         """Should skip entries with empty or whitespace-only device_label."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             data = [
-                {"extaddr": "AA11BB22CC33DD44", "device_label": "Kitchen"},
-                {"extaddr": "BB22CC33DD44EE55", "device_label": ""},
-                {"extaddr": "CC33DD44EE55FF66", "device_label": "   "},
+                {"extAddress": "AA11BB22CC33DD44", "device_label": "Kitchen"},
+                {"extAddress": "BB22CC33DD44EE55", "device_label": ""},
+                {"extAddress": "CC33DD44EE55FF66", "device_label": "   "},
             ]
             json.dump(data, f)
             f.flush()
@@ -236,7 +236,7 @@ class TestLoadExtaddrDeviceLabelMapFlexible:
         """Should skip non-dict items in list format."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             data = [
-                {"extaddr": "AA11BB22CC33DD44", "device_label": "Kitchen"},
+                {"extAddress": "AA11BB22CC33DD44", "device_label": "Kitchen"},
                 "invalid",
                 123,
                 None,
@@ -254,7 +254,7 @@ class TestLoadExtaddrDeviceLabelMapFlexible:
         """Should skip non-dict values in dict format."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             data = {
-                "device1": {"extaddr": "AA11BB22CC33DD44", "device_label": "Kitchen"},
+                "device1": {"extAddress": "AA11BB22CC33DD44", "device_label": "Kitchen"},
                 "invalid": "string",
                 "invalid2": 123,
             }
@@ -300,7 +300,7 @@ class TestLoadExtaddrDeviceLabelMapFlexible:
         """Should handle mixed extaddr field names in same file."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             data = [
-                {"extaddr": "AA11BB22CC33DD44", "device_label": "Kitchen"},
+                {"extAddress": "AA11BB22CC33DD44", "device_label": "Kitchen"},
                 {"extAddress": "BB22CC33DD44EE55", "device_label": "Bedroom"},
                 {"Extended MAC": "CC33DD44EE55FF66", "device_label": "Garage"},
             ]

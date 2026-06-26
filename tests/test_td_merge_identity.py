@@ -53,12 +53,12 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.write_json(
                 base_dir,
                 "one.json",
-                [{"omrIpv6Addr": "FD00:ABCD::1234", "name": "node-a"}],
+                [{"omrIpv6Address": "FD00:ABCD::1234", "name": "node-a"}],
             )
             self.write_json(
                 base_dir,
                 "two.json",
-                [{"omrIpv6Addr": "fd00:abcd::1234", "deviceLabel": "Bedroom"}],
+                [{"omrIpv6Address": "fd00:abcd::1234", "deviceLabel": "Bedroom"}],
             )
 
             merged_records, report = build_merged_records(
@@ -70,7 +70,7 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
 
             self.assertEqual(len(merged_records), 1)
             record = merged_records[0]
-            self.assertEqual(str(record["omrIpv6Addr"]).lower(), "fd00:abcd::1234")
+            self.assertEqual(str(record["omrIpv6Address"]).lower(), "fd00:abcd::1234")
             self.assertEqual(record["name"], "node-a")
             self.assertEqual(record["deviceLabel"], "Bedroom")
             self.assertCountEqual(record["_source_files"], ["one.json", "two.json"])
@@ -84,7 +84,7 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.write_json(
                 base_dir,
                 "cli.json",
-                [{"omrIpv6Addr": "FD00:ABCD::1234", "name": "cli-node"}],
+                [{"omrIpv6Address": "FD00:ABCD::1234", "name": "cli-node"}],
             )
             # REST API source with camelCase
             self.write_json(
@@ -104,7 +104,7 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.assertEqual(len(merged_records), 1)
             record = merged_records[0]
             # Canonical field name should be set
-            self.assertEqual(str(record["omrIpv6Addr"]).lower(), "fd00:abcd::1234")
+            self.assertEqual(str(record["omrIpv6Address"]).lower(), "fd00:abcd::1234")
             # Both fields merged
             self.assertEqual(record["name"], "cli-node")
             self.assertEqual(record["deviceLabel"], "API Node")

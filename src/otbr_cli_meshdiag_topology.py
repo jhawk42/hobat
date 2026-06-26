@@ -8,7 +8,7 @@ from typing import Sequence
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 import util_ot_ctl
 import util_network
-from json_key_normalizer import convert_keys_to_camel_case
+from td_json_key_normalizer import convert_keys_to_camel_case
 from extaddr_device_label_map import load_extaddr_device_label_map
 from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
