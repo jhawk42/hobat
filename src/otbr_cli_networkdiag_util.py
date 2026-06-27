@@ -39,10 +39,43 @@ TLV_VALUES_MEDIUM = "0 1 2 8 16 9"
 TLV_VALUES_BASIC = "0 1 2 8"
 
 # CHILD TLVs (excludes TLV 16 Child Table and TLV 6 Leader Data)
-TLV_VALUES_CHILD_DETAILED = "0 1 2 23 8 4 24 25 26 27 28 5 9 34"
-TLV_VALUES_CHILD_MEDIUM_TV_MAC  = "0 1 2 8 24 9"
+TLV_VALUES_CHILD_DETAILED = "0 1 2 8 9 24 34" ##  "0 1 2 8 24 9 34" ##"0 1 2 23 8 4 24 25 26 27 28 5 9 34"
+TLV_VALUES_CHILD_MEDIUM_TV_MAC  = "0 1 2 8 9 34" ## "0 1 2 8 24 9"
 TLV_VALUES_CHILD_MEDIUM_MAC = "0 1 2 8 9"
 TLV_VALUES_CHILD_BASIC = "0 1 2 8"
+
+
+def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
+    """
+    Maps a detail level to the appropriate TLV values string for network diagnostics.
+
+    Args:
+        tlv_detail_level: Detail level (6=DETAILED, 5=MEDIUM, 4/3/2/1=SIMPLE, etc.)
+                         Levels 10-6 are for routers, 5-1 are for child devices.
+
+    Returns:
+        TLV values string (space-separated TLV numbers)
+    """
+    match tlv_detail_level:
+        # ROUTER TLV sets
+        case 10:
+            return TLV_VALUES_DETAILED
+        case 9:
+            return TLV_VALUES_MEDIUM
+        case 8:
+            return TLV_VALUES_BASIC
+        
+        # CHILD TLV sets
+        case 4:
+            return TLV_VALUES_CHILD_DETAILED
+        case 3:
+            return TLV_VALUES_CHILD_MEDIUM_TV_MAC        
+        case 2:
+            return TLV_VALUES_CHILD_MEDIUM_MAC
+        case 1:
+            return TLV_VALUES_CHILD_BASIC
+        case _:
+            return TLV_VALUES_BASIC
 
 
 def fetch_ipv6_addresses():
@@ -190,9 +223,17 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     if existing.get("device_label", "").startswith("Unknown-") and not new.get("device_label", "").startswith("Unknown-"):
         existing["device_label"] = new["device_label"]
 
+    # tlv_values: take new if new is non-empty dict and existing is not empty and len new > len existing, else keep existing
+    if new.get("tlv_values") and (not existing.get("tlv_values") or len(new.get("tlv_values", {})) > len(existing.get("tlv_values", {}))):
+        existing["tlv_values"] = new["tlv_values"]
+
     # tlv_values: take new if new is non-empty dict and existing is empty, else keep existing
     if not existing.get("tlv_values") and new.get("tlv_values"):
         existing["tlv_values"] = new["tlv_values"]
+
+    # thread_stack_version: take new if existing is not present or if len new > len existing, else keep existing
+    if new.get("thread_stack_version") and (not existing.get("thread_stack_version") or len(new.get("thread_stack_version", "")) > len(existing.get("thread_stack_version", ""))):
+        existing["thread_stack_version"] = new["thread_stack_version"]
 
     # thread_stack_version: keep existing if not "Unknown", else take new
     if existing.get("thread_stack_version") == "Unknown" and new.get("thread_stack_version") != "Unknown":
@@ -233,6 +274,11 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     if new.get("is_router") and not existing.get("is_router"):
         existing["is_router"] = new["is_router"]
         existing["role"] = "router"
+
+    # is_border_router: take new if new if True and existing is None or False of "Unknown", else keep existing
+    if new.get("is_border_router") and (not existing.get("is_border_router") or existing.get("is_border_router") is None) or (existing.get("is_border_router") == "Unknown"):
+        existing["is_border_router"] = new["is_border_router"]
+        existing["type"] = "border router"
 
     # is_border_router: take new if new is True and existing is not True, else keep existing
     if new.get("is_border_router") and not existing.get("is_border_router"):
@@ -310,38 +356,4 @@ def merge_device_record(existing: dict, new: dict) -> dict:
 
 
     return existing
-
-
-def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
-    """
-    Maps a detail level to the appropriate TLV values string for network diagnostics.
-
-    Args:
-        tlv_detail_level: Detail level (6=DETAILED, 5=MEDIUM, 4/3/2/1=SIMPLE, etc.)
-                         Levels 10-6 are for routers, 5-1 are for child devices.
-
-    Returns:
-        TLV values string (space-separated TLV numbers)
-    """
-    match tlv_detail_level:
-        # ROUTER TLV sets
-        case 10:
-            return TLV_VALUES_DETAILED
-        case 9:
-            return TLV_VALUES_MEDIUM
-        case 8:
-            return TLV_VALUES_BASIC
-        
-        # CHILD TLV sets
-        case 4:
-            return TLV_VALUES_CHILD_DETAILED
-        case 3:
-            return TLV_VALUES_CHILD_MEDIUM_TV_MAC        
-        case 2:
-            return TLV_VALUES_CHILD_MEDIUM_MAC
-        case 1:
-            return TLV_VALUES_CHILD_BASIC
-        case _:
-            return TLV_VALUES_BASIC
-
 
