@@ -976,7 +976,7 @@ def fetch_network_diag_topology(
                         # if True then only fetch BASIC TLV values for child nodes. This can help reduce runtime and network load when expanding children, especially in large networks with many child nodes. 
                         # If False then fetch DETAILED TLV values for child nodes, which can take longer and increase network load but will give us more complete data for each child node.
                         child_fetch_fast_mode = True  
-                        child_attempts_min = 3  # min number of attempts before giving up and adding with default values
+                        child_attempts_min = 5  # min number of attempts before giving up and adding with default values
                         child_attempts_max = 5  # max number of attempts
                         
                         child_delay_max = 2.0  # max delay between retries

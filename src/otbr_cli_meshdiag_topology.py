@@ -221,6 +221,7 @@ def enrich_topology_routers(
 
         # Enrich: Border Router role base on BR flag
         if router.get("br", False):
+            enhanced_router["is_router"] = True
             enhanced_router["is_border_router"] = router.get("br", False)
             enhanced_router["type"] = "border router"
             enhanced_router["role"] = "border router"
