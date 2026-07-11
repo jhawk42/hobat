@@ -13,7 +13,12 @@ import util_network
 
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 from td_json_key_normalizer import convert_keys_to_camel_case
-from util_data import resolve_data_file_path, resolve_data_dir, save_json_atomic
+from util_data import (
+    create_checkpoint_filename,
+    resolve_data_file_path,
+    resolve_data_dir,
+    save_json_atomic,
+)
 from td_const import TD_DATA_DIR_ARG_HELP
 
 from mdns_thread_util import VENDORS, FIELD_METADATA, _base_field_dict, get_vendor_from_oui
@@ -119,13 +124,20 @@ def _enrich_properties(properties: dict) -> dict:
 
 
 class MDNSDumpListener(ServiceListener):
-    def __init__(self, include_matter_tcp_supported: bool = False, omr_ipv6addr_prefix: str = None):
+    def __init__(
+        self,
+        include_matter_tcp_supported: bool = False,
+        omr_ipv6addr_prefix: str = None,
+        checkpoint_output_file=None,
+    ):
         self._last_update = time.time()
         self.idle_done = threading.Event()
         self._lock = threading.Lock()
         self._records_by_key = {}
         self._include_matter_tcp_supported = include_matter_tcp_supported
         self._omr_ipv6addr_prefix = omr_ipv6addr_prefix
+        self._checkpoint_output_file = checkpoint_output_file
+        self._checkpoint_write_lock = threading.Lock()
 
     def _update_last_event_time(self):
         """Record the time of the most recent service event."""
@@ -322,11 +334,29 @@ class MDNSDumpListener(ServiceListener):
         with self._lock:
             return sorted(self._records_by_key.values(), key=lambda r: r["record_key"])
 
+    def _write_checkpoint_snapshot(self) -> None:
+        """Persist the current record snapshot to the checkpoint file."""
+        if self._checkpoint_output_file is None:
+            return
+        with self._checkpoint_write_lock:
+            records = self.get_records()
+            save_json_atomic(
+                convert_keys_to_camel_case(records),
+                self._checkpoint_output_file,
+                indent=2,
+            )
+        logging.debug(
+            "Saved %d mDNS checkpoint record(s) to %s",
+            len(records),
+            self._checkpoint_output_file,
+        )
+
     def wait_for_idle(self, idle_timeout: float = 30.0, poll: float = 0.5):
         """Block until no service events have arrived for *idle_timeout* seconds,
         then set idle_done so callers can close Zeroconf cleanly."""
         while True:
             time.sleep(poll)
+            self._write_checkpoint_snapshot()
             if time.time() - self._last_update >= idle_timeout:
                 self.idle_done.set()
                 return
@@ -338,6 +368,7 @@ class MDNSDumpListener(ServiceListener):
             return
         self._upsert_record(self._build_record_from_service_info(
             type_, name, info, "update"))
+        self._write_checkpoint_snapshot()
 
     def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         self._update_last_event_time()
@@ -348,6 +379,7 @@ class MDNSDumpListener(ServiceListener):
                 return
         self._upsert_record(self._build_record_from_service_info(
             type_, name, None, "remove"))
+        self._write_checkpoint_snapshot()
         logging.info("Service Removed: %s", name)
 
     def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
@@ -357,6 +389,7 @@ class MDNSDumpListener(ServiceListener):
             return
         self._upsert_record(
             self._build_record_from_service_info(type_, name, info, "add"))
+        self._write_checkpoint_snapshot()
         logging.info("Service Added: %s (%s)", name, type_)
         if info:
             logging.debug("\n[ SCOPE: %s ]", type_)
@@ -508,6 +541,19 @@ options:
         args.browse_timeout if args.browse_timeout is not None else _default_timeout
     )
 
+    if args.scope is None:
+        scope_tag = "thread"
+    else:
+        scope_tag = args.scope.lower()
+
+    output_file = resolve_data_file_path(
+        f"td-mdns-scopes-{scope_tag}.json", td_data_dir
+    )
+    checkpoint_file = resolve_data_file_path(
+        create_checkpoint_filename(f"td-mdns-scopes-{scope_tag}.json"),
+        td_data_dir,
+    )
+
    # Main execution:
 
     # Get thread network info for reference in parsing and enriching mdns data
@@ -520,7 +566,10 @@ options:
 
     zeroconf = Zeroconf()
     listener = MDNSDumpListener(
-        include_matter_tcp_supported=args.mattertcpsupported, omr_ipv6addr_prefix=omr_ipv6addr_prefix)
+        include_matter_tcp_supported=args.mattertcpsupported,
+        omr_ipv6addr_prefix=omr_ipv6addr_prefix,
+        checkpoint_output_file=checkpoint_file,
+    )
 
     # Start browsers for each scope
     browsers = [ServiceBrowser(zeroconf, s, listener) for s in selected_scopes]
@@ -545,14 +594,7 @@ options:
         zeroconf.close()
 
         records = listener.get_records()
-        if args.scope is None:
-            scope_tag = "thread"
-        else:
-            scope_tag = args.scope.lower()
 
-        output_file = resolve_data_file_path(
-            f"td-mdns-scopes-{scope_tag}.json", td_data_dir
-        )
         save_json_atomic(convert_keys_to_camel_case(records), output_file, indent=2)
 
         logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")

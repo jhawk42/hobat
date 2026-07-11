@@ -96,6 +96,27 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
             td_webserver._CHECKPOINT_FILENAMES,
         )
 
+    async def test_all_mdns_scope_files_are_progressive_checkpoint_sources(self) -> None:
+        """All mdns scope datasets used by the dashboard must support checkpoint polling."""
+        expected_files = {
+            "td-mdns-scopes-thread.json",
+            "td-mdns-scopes-br.json",
+            "td-mdns-scopes-hap.json",
+            "td-mdns-scopes-matter.json",
+        }
+
+        for filename in expected_files:
+            self.assertIn(
+                filename,
+                td_webserver.FILE_ACTION_MAP,
+                f"Missing FILE_ACTION_MAP entry for {filename}",
+            )
+            self.assertIn(
+                filename.replace(".json", ".partial.json"),
+                td_webserver._CHECKPOINT_FILENAMES,
+                f"Missing checkpoint filename for {filename}",
+            )
+
     async def test_checkpoint_max_age_is_zero(self) -> None:
         """Checkpoint files must not be cached by the client."""
         self.assertEqual(td_webserver._CHECKPOINT_FILE_ACTION.max_age_s, 0)

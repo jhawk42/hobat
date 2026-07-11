@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+import mdns_thread_scopes as mdns
+
+
+class TestMDNSCheckpointSnapshots(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_add_service_writes_checkpoint_snapshot_immediately(self) -> None:
+        checkpoint_path = self.data_dir / "td-mdns-scopes-thread.partial.json"
+        listener = mdns.MDNSDumpListener(checkpoint_output_file=checkpoint_path)
+
+        info = SimpleNamespace(
+            addresses=[b"\x7f\x00\x00\x01"],
+            properties={b"xa": bytes.fromhex("0011223344556677")},
+            parsed_addresses=lambda: ["fd00::1"],
+            name="test.local.",
+            type="_meshcop._udp.local.",
+            server="test.local.",
+            port=1234,
+            priority=0,
+            weight=0,
+            interface_index=0,
+            host_ttl=120,
+            other_ttl=120,
+            key="test",
+            text=None,
+        )
+
+        zc = MagicMock()
+        zc.get_service_info.return_value = info
+
+        with patch.object(mdns, "print_meshcop_service_info") as print_mock, patch.object(
+            mdns, "save_json_atomic"
+        ) as save_mock:
+            listener.add_service(zc, "_meshcop._udp.local.", "test.local.")
+
+        print_mock.assert_called_once()
+        save_mock.assert_called_once()
+
+        written_payload, written_path = save_mock.call_args.args[:2]
+        self.assertEqual(written_path, checkpoint_path)
+        self.assertIsInstance(written_payload, list)
+        self.assertEqual(len(written_payload), 1)
+        self.assertEqual(written_payload[0]["recordKey"], "_meshcop._udp.local.|test.local.")
+        self.assertEqual(written_payload[0]["name"], "test.local.")
+        self.assertEqual(written_payload[0]["event"], "add")
+
+
+if __name__ == "__main__":
+    unittest.main()

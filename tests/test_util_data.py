@@ -168,6 +168,18 @@ class DataPathHelpersTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             util_data.resolve_data_file_path("   ", Path("/tmp/td-data"))
 
+    def test_create_checkpoint_filename_appends_partial_suffix(self) -> None:
+        self.assertEqual(
+            util_data.create_checkpoint_filename("td-mdns-scopes-thread.json"),
+            "td-mdns-scopes-thread.partial.json",
+        )
+
+    def test_create_checkpoint_filename_preserves_leaf_name_only(self) -> None:
+        self.assertEqual(
+            util_data.create_checkpoint_filename("example"),
+            "example.partial.json",
+        )
+
 
 class InputLoaderHelpersTests(unittest.TestCase):
     def test_require_existing_input_file_returns_path_when_present(self) -> None:
