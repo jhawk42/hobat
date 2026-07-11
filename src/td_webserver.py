@@ -121,12 +121,14 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s,
             action=["otbr-cli", "networkdiag", "multicast-network"],
             action_cost_s=16,  # ~16 seconds with timeout retries
+            force_async=True,
         ),
         # networkdiag multicast-neighbors — TLV request per router with retries; up to ~16 seconds on large networks.
         "td-otbr-cli-networkdiag-multicast-neighbors.json": FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-cli", "networkdiag", "multicast-neighbors"],
             action_cost_s=16,  # ~16 seconds with timeout retries
+            force_async=True,
         ),
 
         # otbr-restapi
@@ -144,7 +146,10 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s, action=["otbr-restapi", "devices", "list"], action_cost_s=1
         ),
         "td-otbr-restapi-devices-fetch.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "devices", "fetch"], action_cost_s=8
+            max_age_s=default_max_age_s,
+            action=["otbr-restapi", "devices", "fetch"],
+            action_cost_s=8,
+            force_async=True,
         ),
         "td-otbr-restapi-diagnostics-list.json": FileAction(
             max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "list"], action_cost_s=1

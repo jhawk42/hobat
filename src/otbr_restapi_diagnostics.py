@@ -4,6 +4,7 @@ import argparse
 import logging
 import sys
 import time
+from pathlib import Path
 from typing import Any, Sequence
 
 from otbr_restapi_util import (
@@ -17,6 +18,7 @@ from otbr_restapi_util import (
     OTBRRestApiClient,
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
+from util_data import create_checkpoint_filename, save_json_atomic
 import util_network
 
 _MEDIUM_DIAGNOSTIC_TLVS: list[str] = [
@@ -290,6 +292,7 @@ def fetch_all_with_fallback(
     poll_timeout: float,
     raw: object,
     on_progress=None,
+    on_checkpoint=None,
 ) -> list[Any]:
     results: list[Any] = []
     total = len(device_ids)
@@ -315,7 +318,34 @@ def fetch_all_with_fallback(
         elapsed = time.monotonic() - t_start
         if on_progress is not None:
             on_progress(idx, total, device_id, elapsed, status)
+        if on_checkpoint is not None:
+            on_checkpoint(results, idx, total, device_id, status)
     return results
+
+
+def _write_checkpoint_best_effort(
+    payload: Any,
+    checkpoint_path: Path,
+    command_name: str,
+    stage: str,
+) -> None:
+    try:
+        save_json_atomic(convert_keys_to_camel_case(payload), checkpoint_path)
+        logging.info(
+            "event=checkpoint_write command=%s checkpoint_file=%s records=%d stage=%s",
+            command_name,
+            checkpoint_path,
+            len(payload) if isinstance(payload, list) else 0,
+            stage,
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        logging.warning(
+            "event=checkpoint_write_failed command=%s checkpoint_file=%s error_type=%s error=%s action=continue_best_effort",
+            command_name,
+            checkpoint_path,
+            type(exc).__name__,
+            exc,
+        )
 
 
 def dispatch_diagnostics(
@@ -379,6 +409,25 @@ def dispatch_diagnostics(
         device_ids = getattr(args, "device_ids", None) or [
             d["id"] for d in devices if isinstance(d, dict) and d.get("id")
         ]
+
+        checkpoint_path = None
+        output_path = getattr(args, "resolved_output_path", None)
+        if output_path:
+            output_file = Path(output_path)
+            checkpoint_path = output_file.parent / create_checkpoint_filename(
+                output_file.name
+            )
+
+        def _on_checkpoint(results, _idx, _total, _device_id, _status):
+            if checkpoint_path is None:
+                return
+            _write_checkpoint_best_effort(
+                results,
+                checkpoint_path,
+                "otbr-restapi diagnostics fetch-all",
+                "device",
+            )
+
         progress_fn = make_progress_fn(len(device_ids), not getattr(args, "no_progress", False))
         diagnostics = fetch_all_with_fallback(
             client,
@@ -391,6 +440,7 @@ def dispatch_diagnostics(
             poll_timeout=args.poll_timeout,
             raw=raw_arg,
             on_progress=progress_fn,
+            on_checkpoint=_on_checkpoint,
         )
         if do_enrich:
             _apply_mac_enrichment(diagnostics)

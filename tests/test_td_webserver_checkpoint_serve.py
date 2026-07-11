@@ -141,6 +141,21 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
         # Restore to avoid polluting other tests.
         td_webserver._set_default_file_cache_max_age(td_webserver.TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT)
 
+    async def test_phase4_required_entries_are_force_async(self) -> None:
+        """Phase 4 regression: entries that rely on job polling must dispatch async."""
+        required_async = {
+            "td-otbr-cli-networkdiag-multicast-network.json",
+            "td-otbr-cli-networkdiag-multicast-neighbors.json",
+            "td-otbr-restapi-devices-fetch.json",
+        }
+
+        for filename in required_async:
+            self.assertIn(filename, td_webserver.FILE_ACTION_MAP)
+            self.assertTrue(
+                td_webserver.FILE_ACTION_MAP[filename].force_async,
+                f"Expected force_async=True for {filename}",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

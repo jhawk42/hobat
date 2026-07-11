@@ -213,6 +213,7 @@ def collect_per_router(
     collect_fn: Callable[[str, dict | None, dict | None], dict],
     extaddr_map: dict | None = None,
     collection_name: str = "data",
+    on_result: Callable[[list[dict], str, dict | None], None] | None = None,
 ) -> list[dict]:
     """Orchestrate per-router data collection with standardized logging.
     
@@ -283,6 +284,9 @@ def collect_per_router(
         # Call collector function
         result = collect_fn(rloc16, router, extaddr_map)
         results.append(result)
+
+        if on_result is not None:
+            on_result(results, rloc16, router)
     
     return results
 

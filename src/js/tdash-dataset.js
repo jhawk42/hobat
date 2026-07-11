@@ -59,7 +59,7 @@ const _PROGRESSIVE_ROLLOUT_FILES = new Set([
   "td-otbr-cli-meshdiag-router-childtables.json",
   "td-otbr-cli-networkdiag-fetch-all.json",
   "td-otbr-cli-networkdiag-multicast-network.json",
-  "td-otbr-restapi-devices-fetch-all.json",
+  "td-otbr-restapi-devices-fetch.json",
   "td-otbr-restapi-diagnostics-fetch-all.json",
   "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
   "td-mdns-scopes-thread.json",

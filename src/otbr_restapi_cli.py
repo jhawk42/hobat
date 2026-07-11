@@ -1426,6 +1426,7 @@ def run_cli(
         output_path = str(resolve_data_file_path(output_path, args.td_data_dir))
     else:
         output_path = _auto_output_path(args, args.td_data_dir)
+    args.resolved_output_path = output_path
 
     try:
         client = build_client_fn(args)

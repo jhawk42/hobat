@@ -1323,12 +1323,29 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
         extaddr_map, thread_network_info, router_table_by_router_id
     )
 
+    checkpoint_filename = create_checkpoint_filename(
+        NETWORKDIAG_MULTICAST_NETWORK_FILENAME
+    )
+    checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
+    save_topology_to_json_file(data, checkpoint_filepath)
+    logging.info(
+        "event=checkpoint_write command=otbr-cli networkdiag multicast-network checkpoint_file=%s records=%d stage=multicast",
+        checkpoint_filepath,
+        len(data) if isinstance(data, dict) else 0,
+    )
+
     # Print the topology in tree format to console
     print_network_diag_topology(data)
 
     # Save the topology as JSON to file
     save_json_filename = data_file_path(
         NETWORKDIAG_MULTICAST_NETWORK_FILENAME, td_data_dir
+    )
+    save_topology_to_json_file(data, checkpoint_filepath)
+    logging.info(
+        "event=checkpoint_write command=otbr-cli networkdiag multicast-network checkpoint_file=%s records=%d stage=final",
+        checkpoint_filepath,
+        len(data) if isinstance(data, dict) else 0,
     )
     save_topology_to_json_file(data, save_json_filename)
 
@@ -1378,6 +1395,17 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
         extaddr_map, thread_network_info, router_table_by_router_id
     )
 
+    checkpoint_filename = create_checkpoint_filename(
+        NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME
+    )
+    checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
+    save_topology_to_json_file(data, checkpoint_filepath)
+    logging.info(
+        "event=checkpoint_write command=otbr-cli networkdiag multicast-neighbors checkpoint_file=%s records=%d stage=multicast",
+        checkpoint_filepath,
+        len(data) if isinstance(data, dict) else 0,
+    )
+
     # Print the topology in tree format to console
     logging.debug("Final multicast neighbors topology data structure:\n%s", json.dumps(
         data, indent=4))
@@ -1386,6 +1414,12 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
     # Save the topology as JSON to file
     save_json_filename = data_file_path(
         NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME, td_data_dir
+    )
+    save_topology_to_json_file(data, checkpoint_filepath)
+    logging.info(
+        "event=checkpoint_write command=otbr-cli networkdiag multicast-neighbors checkpoint_file=%s records=%d stage=final",
+        checkpoint_filepath,
+        len(data) if isinstance(data, dict) else 0,
     )
     save_topology_to_json_file(data, save_json_filename)
 

@@ -33,3 +33,13 @@ def test_mdns_datasets_support_progressive_checkpoint_fetching() -> None:
     assert 'checkpoint_filename' in text
     assert 'checkpoint_last_modified' in text
     assert 'onCheckpointData' in text
+
+
+def test_phase4_progressive_rollout_file_names_are_aligned() -> None:
+    text = _read_text(DATASET_JS)
+
+    assert 'td-otbr-restapi-devices-fetch.json' in text
+    assert 'td-otbr-restapi-devices-fetch-all.json' not in text
+    assert 'td-otbr-cli-networkdiag-multicast-network.json' in text
+    assert 'td-otbr-restapi-diagnostics-fetch-all.json' in text
+    assert 'td-otbr-restapi-mesh-diagnostics-fetch-all.json' in text

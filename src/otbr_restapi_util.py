@@ -1158,6 +1158,7 @@ class OTBRRestApiClient:
         poll_timeout: float = MESH_DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
         skip_on_failure: bool = True,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
+        on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None = None,
         raw: object = _RAW_UNSET,
     ) -> list[Any]:
         """
@@ -1191,6 +1192,8 @@ class OTBRRestApiClient:
                     "Skipping device %s (mesh diagnostics): %s", device_id, exc
                 )
             finally:
+                if on_checkpoint is not None:
+                    on_checkpoint(results, idx, total, device_id, status)
                 if on_progress is not None:
                     on_progress(idx, total, device_id, time.monotonic() - t_start, status)
         return results

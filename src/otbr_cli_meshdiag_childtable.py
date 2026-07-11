@@ -2,6 +2,7 @@ import json
 import os
 import re
 import logging
+from pathlib import Path
 from typing import Sequence
 
 from extaddr_device_label_map import load_extaddr_device_label_map
@@ -19,7 +20,24 @@ from otbr_cli_util import (
 )
 import util_network
 from util_ot_ctl import exec_ot_ctl
-from util_data import parse_datadir_from_argv, save_json_atomic
+from util_data import create_checkpoint_filename, parse_datadir_from_argv, save_json_atomic
+
+
+def _write_checkpoint_best_effort(payload, checkpoint_path: Path) -> None:
+    try:
+        save_json_atomic(convert_keys_to_camel_case(payload), checkpoint_path)
+        logging.info(
+            "event=checkpoint_write command=otbr-cli meshdiag childtable checkpoint_file=%s records=%d stage=router",
+            checkpoint_path,
+            len(payload) if isinstance(payload, list) else 0,
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        logging.warning(
+            "event=checkpoint_write_failed command=otbr-cli meshdiag childtable checkpoint_file=%s error_type=%s error=%s action=continue_best_effort",
+            checkpoint_path,
+            type(exc).__name__,
+            exc,
+        )
 
 
 def _parse_yes_no_to_bool(value):
@@ -157,7 +175,7 @@ def fetch_meshdiag_child_table_for_device(parent_rloc16, router=None, extaddr_ma
     return router_child_table
 
 
-def fetch_all_meshdiag_child_tables(extaddr_map):
+def fetch_all_meshdiag_child_tables(extaddr_map, on_result=None):
     """Collect child tables for all active routers in the router table."""
 
     router_table_data = fetch_and_parse_router_table(extaddr_map)
@@ -167,6 +185,7 @@ def fetch_all_meshdiag_child_tables(extaddr_map):
         collect_fn=fetch_meshdiag_child_table_for_device,
         extaddr_map=extaddr_map,
         collection_name="meshdiag childtable",
+        on_result=on_result,
     )
 
 
@@ -185,7 +204,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     extaddr_map = load_extaddr_map_or_empty(runtime.extaddr_map_path)
 
     try:
-        router_child_tables = fetch_all_meshdiag_child_tables(extaddr_map)
+        checkpoint_path = runtime.td_data_dir / create_checkpoint_filename(
+            runtime.output_path.name
+        )
+
+        def _on_result(results, _rloc16, _router) -> None:
+            _write_checkpoint_best_effort(results, checkpoint_path)
+
+        router_child_tables = fetch_all_meshdiag_child_tables(
+            extaddr_map,
+            on_result=_on_result,
+        )
 
         save_json_atomic(
             convert_keys_to_camel_case(router_child_tables),

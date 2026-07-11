@@ -53,16 +53,16 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
             fields=None,
         )
 
-        self.assertIs(result, payload)
+        self.assertIsNot(result, payload)
         mac = result[0]["macCounters"]
-        self.assertEqual(mac["ifintotalpkts"], 3)
-        self.assertEqual(mac["ifouttotalpkts"], 7)
-        self.assertEqual(mac["iftotalpkts"], 10)
-        self.assertEqual(mac["iftotalerrors"], 2)
-        time_stats = result[0]["time_statistics"]
-        self.assertEqual(time_stats["tracked_time"], 10)
-        self.assertEqual(time_stats["router_pct"], 60.0)
-        self.assertEqual(time_stats["detached_disabled_pct"], 10.0)
+        self.assertEqual(mac["ifInTotalPkts"], 3)
+        self.assertEqual(mac["ifOutTotalPkts"], 7)
+        self.assertEqual(mac["ifTotalPkts"], 10)
+        self.assertEqual(mac["ifTotalErrors"], 2)
+        time_stats = result[0]["timeStatistics"]
+        self.assertEqual(time_stats["trackedTime"], 10)
+        self.assertEqual(time_stats["routerPct"], 60.0)
+        self.assertEqual(time_stats["detachedDisabledPct"], 10.0)
 
     def test_list_with_meta_enriches_items_and_preserves_meta(self) -> None:
         payload = {
@@ -88,10 +88,10 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
             fields=None,
         )
 
-        self.assertIs(result, payload)
+        self.assertIsNot(result, payload)
         self.assertEqual(result["meta"], {"collection": {"total": 1}})
-        self.assertEqual(result["items"][0]["macCounters"]["ifintotalpkts"], 10)
-        self.assertEqual(result["items"][0]["macCounters"]["ifouttotalpkts"], 5)
+        self.assertEqual(result["items"][0]["macCounters"]["ifInTotalPkts"], 10)
+        self.assertEqual(result["items"][0]["macCounters"]["ifOutTotalPkts"], 5)
 
     def test_list_no_enrich_flag_returns_raw_mac_counters(self) -> None:
         payload = [{"macCounters": {"ifInUcastPkts": 1}}]
@@ -155,7 +155,7 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
             fields=None,
         )
 
-        self.assertIs(result, payload)
+        self.assertIsNot(result, payload)
         self.assertEqual(result[0]["ipv6Addresses"], [None, 123, "fdde:ad00:beef::fc11"])
 
 
@@ -216,12 +216,12 @@ class DiagnosticsFetchAllEnrichmentTests(unittest.TestCase):
                 fields=None,
             )
 
-        self.assertIs(result, diagnostics_payload)
-        stats = result[0]["time_statistics"]
-        self.assertEqual(stats["tracked_time"], 20)
-        self.assertEqual(stats["detached_disabled_time"], 10)
-        self.assertEqual(stats["detached_disabled_pct"], 50.0)
-        self.assertEqual(stats["router_pct"], 25.0)
+        self.assertIsNot(result, diagnostics_payload)
+        stats = result[0]["timeStatistics"]
+        self.assertEqual(stats["trackedTime"], 20)
+        self.assertEqual(stats["detachedDisabledTime"], 10)
+        self.assertEqual(stats["detachedDisabledPct"], 50.0)
+        self.assertEqual(stats["routerPct"], 25.0)
 
 
 if __name__ == "__main__":
