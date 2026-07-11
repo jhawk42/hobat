@@ -344,7 +344,7 @@ def create_checkpoint_filename(filename: str) -> str:
     """Create a checkpoint filename from a base filename.
     
     Strips the extension from the input filename and appends the checkpoint suffix.
-    For example: 'td-fetch-all.json' becomes 'td-fetch-all.chkpt.json'
+    For example: 'td-fetch-all.json' becomes 'td-fetch-all.partial.json'
     
     Args:
         filename: The base filename to create a checkpoint filename from
