@@ -166,6 +166,7 @@ def fetch_network_diag_multicast(
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
     router_table_by_router_id: dict | None = None,
+    checkpoint_filepath: str | None = None,
 ) -> dict:
     """
     Queries network diagnostic data via multicast with retry and merge strategy.
@@ -179,6 +180,8 @@ def fetch_network_diag_multicast(
         multicast_addr: Multicast address to target ("ff03::1" or "ff02::1")
         extaddr_map: Optional dict mapping extended addresses to device labels
         thread_network_info: Optional dict with network info (contains OMR prefix)
+        router_table_by_router_id: Optional dict mapping router IDs to router info
+        checkpoint_filepath: Optional path to checkpoint file for saving intermediate results (default: None)
 
     Returns:
         Dict keyed by rloc16, with device records as values (same format as
@@ -252,6 +255,16 @@ def fetch_network_diag_multicast(
             _enrich_device_route_data_with_router_info(
                 device_record, router_table_by_router_id
             )
+
+            # Add OMR IPv6 address if prefix available
+            if omr_ipv6addr_prefix:
+                if device_record["omr_ipv6_addr"] == None:
+                    device_record["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
+                        device_record.get("ipv6_addrs", []), omr_ipv6addr_prefix
+                    )
+            else:
+                device_record["omr_ipv6_addr"] = None
+
             # Add TLV set info to record
             device_record["tlv_values"] = tlv_values
             if extaddr in consolidated:
@@ -264,6 +277,22 @@ def fetch_network_diag_multicast(
             f"{len(consolidated)} unique devices so far"
         )
 
+        # Save checkpoint if filepath provided
+        if checkpoint_filepath:
+            # Re-key by rloc16
+            checkpoint_result = {}
+            for record in consolidated.values():
+                rloc16 = record.get("rloc16", "Unknown")
+
+                # Store in result, keyed by rloc16
+                checkpoint_result[rloc16] = record
+            save_topology_to_json_file(checkpoint_result, checkpoint_filepath)
+            logging.info(
+                "event=checkpoint_write command=otbr-cli networkdiag multicast checkpoint_file=%s records=%d stage=multicast",
+                checkpoint_filepath,
+                len(checkpoint_result) if isinstance(checkpoint_result, dict) else 0,
+            )
+
         # Sleep before next retry (but not after the last retry)
         if attempt_idx < attempts_max - 1:
             # tlv_detail_level = max(1, tlv_detail_level - 1)  # Floor at 1
@@ -273,18 +302,10 @@ def fetch_network_diag_multicast(
 
     # Finalize the consolidated dict
 
-    # Re-key by rloc16 and add type/omr_ipv6_addr fields
+    # Re-key by rloc16
     result = {}
     for record in consolidated.values():
         rloc16 = record.get("rloc16", "Unknown")
-
-        # Add OMR IPv6 address if prefix available
-        if omr_ipv6addr_prefix:
-            record["omr_ipv6_addr"] = util_network.find_omr_address_in_list(
-                record.get("ipv6_addrs", []), omr_ipv6addr_prefix
-            )
-        else:
-            record["omr_ipv6_addr"] = None
 
         # Store in result, keyed by rloc16
         result[rloc16] = record
@@ -298,7 +319,8 @@ def fetch_network_diag_multicast(
 def fetch_network_diag_topology_multicast_network(
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
-    router_table_by_router_id: dict | None = None
+    router_table_by_router_id: dict | None = None,
+    checkpoint_filepath: str | None = None
 ) -> dict:
     """
     Queries network diagnostic data via multicast to all Thread devices in the mesh (ff03::1).
@@ -317,14 +339,16 @@ def fetch_network_diag_topology_multicast_network(
         multicast_addr=TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS_AND_MEDS,  # "ff03::1"
         extaddr_map=extaddr_map,
         thread_network_info=thread_network_info,
-        router_table_by_router_id=router_table_by_router_id
+        router_table_by_router_id=router_table_by_router_id,
+        checkpoint_filepath=checkpoint_filepath
     )
 
 
 def fetch_network_diag_topology_multicast_neighbors(
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
-    router_table_by_router_id: dict | None = None
+    router_table_by_router_id: dict | None = None,
+    checkpoint_filepath: str | None = None
 ) -> dict:
     """
     Queries network diagnostic data via multicast to immediate one-hop neighbors (ff02::1).
@@ -337,6 +361,7 @@ def fetch_network_diag_topology_multicast_neighbors(
         extaddr_map: Optional dict mapping extended addresses to device labels
         thread_network_info: Optional dict with network info (contains OMR prefix)
         router_table_by_router_id: Optional dict mapping router IDs to router table entries
+        checkpoint_filepath: Optional path to checkpoint file for saving intermediate results (default: None)
     Returns:
         Dict keyed by rloc16 with device records from immediate one-hop neighbors
     """
@@ -344,7 +369,8 @@ def fetch_network_diag_topology_multicast_neighbors(
         multicast_addr=TD_THREAD_MULTICAST_ADDRESSES_LINK_LOCAL_ALL_FTDS_AND_MEDS,  # "ff02::1"
         extaddr_map=extaddr_map,
         thread_network_info=thread_network_info,
-        router_table_by_router_id=router_table_by_router_id
+        router_table_by_router_id=router_table_by_router_id,
+        checkpoint_filepath=checkpoint_filepath
     )
 
 
@@ -1318,20 +1344,14 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
     router_table_by_router_id = {router.get(
         "router_id"): router for router in router_table_data if router.get("router_id") is not None}
 
-    # Get the multicast topology data
-    data = fetch_network_diag_topology_multicast_network(
-        extaddr_map, thread_network_info, router_table_by_router_id
-    )
-
     checkpoint_filename = create_checkpoint_filename(
         NETWORKDIAG_MULTICAST_NETWORK_FILENAME
     )
     checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
-    save_topology_to_json_file(data, checkpoint_filepath)
-    logging.info(
-        "event=checkpoint_write command=otbr-cli networkdiag multicast-network checkpoint_file=%s records=%d stage=multicast",
-        checkpoint_filepath,
-        len(data) if isinstance(data, dict) else 0,
+  
+    # Get the multicast topology data
+    data = fetch_network_diag_topology_multicast_network(
+        extaddr_map, thread_network_info, router_table_by_router_id, checkpoint_filepath
     )
 
     # Print the topology in tree format to console
@@ -1390,20 +1410,14 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
     router_table_by_router_id = {router.get(
         "router_id"): router for router in router_table_data if router.get("router_id") is not None}
 
-    # Get the multicast topology data
-    data = fetch_network_diag_topology_multicast_neighbors(
-        extaddr_map, thread_network_info, router_table_by_router_id
-    )
-
     checkpoint_filename = create_checkpoint_filename(
         NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME
     )
     checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
-    save_topology_to_json_file(data, checkpoint_filepath)
-    logging.info(
-        "event=checkpoint_write command=otbr-cli networkdiag multicast-neighbors checkpoint_file=%s records=%d stage=multicast",
-        checkpoint_filepath,
-        len(data) if isinstance(data, dict) else 0,
+  
+    # Get the multicast topology data
+    data = fetch_network_diag_topology_multicast_neighbors(
+        extaddr_map, thread_network_info, router_table_by_router_id, checkpoint_filepath
     )
 
     # Print the topology in tree format to console

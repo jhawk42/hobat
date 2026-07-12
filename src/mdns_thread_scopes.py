@@ -72,7 +72,7 @@ from mdns_matter import (
 
 TD_MDNS_BROWSE_TIMEOUT_ENV_NAME = "TD_MDNS_BROWSE_TIMEOUT"
 # seconds (default if env var not set)"
-TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE = 5
+TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE = 3
 
 # ---------------------------------------------------------------------------
 # Enricher dispatch table
