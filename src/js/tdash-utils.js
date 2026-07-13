@@ -294,6 +294,77 @@ export function getOmrIpv6FromIpv6Addrs(row, omrPrefix) {
   return "";
 }
 
+function getCanonicalRloc16FromMacAddr(row) {
+  const macAddr = row?.macAddr;
+  const macAddrNumber = toFiniteNumber(macAddr);
+  if (!Number.isFinite(macAddrNumber)) return "";
+  return `0x${Math.trunc(macAddrNumber).toString(16).padStart(4, "0")}`;
+}
+
+const THREAD_RLOC16_ADDRESS_PREFIX = ":0:ff:fe00:";
+const THREAD_BORDER_ROUTER_SERVICE_ANYCAST_SUFFIX_START = "fc10";
+const THREAD_BORDER_ROUTER_SERVICE_ANYCAST_SUFFIX_END = "fc1f";
+
+function isThreadBorderRouterServiceAnycastSuffix(suffix) {
+  return (
+    typeof suffix === "string" &&
+    suffix >= THREAD_BORDER_ROUTER_SERVICE_ANYCAST_SUFFIX_START &&
+    suffix <= THREAD_BORDER_ROUTER_SERVICE_ANYCAST_SUFFIX_END
+  );
+}
+
+/**
+ * Mirrors util_network.is_border_router_from_ipv6_addrs() in Python.
+ *
+ * Thread Border Routers advertise mesh-local Service Anycast addresses whose
+ * last hextet falls in the fc10-fc1f range. In the existing Python path, the
+ * BR heuristic also requires a mesh-local/RLOC16-style address pattern. For
+ * the browser path we mirror that existing heuristic using the same RLOC16
+ * address infix check that appears in current dataset snapshots.
+ */
+function isBorderRouterFromIpv6Addresses(ipv6Addresses) {
+  if (!Array.isArray(ipv6Addresses)) return false;
+  return ipv6Addresses.some((addr) => {
+    if (typeof addr !== "string") return false;
+    const lowered = addr.toLowerCase();
+    if (!lowered.includes(THREAD_RLOC16_ADDRESS_PREFIX)) return false;
+    const suffix = lowered.split(":").at(-1) || "";
+    return isThreadBorderRouterServiceAnycastSuffix(suffix);
+  });
+}
+
+function enrichRouterIdentityHints(row) {
+  if (!isPlainObject(row)) return row;
+
+  const rloc16 = toText(row.rloc16) || getCanonicalRloc16FromMacAddr(row);
+  if (rloc16 && !row.rloc16) row.rloc16 = rloc16;
+
+  const rloc16Text = toText(row.rloc16).toLowerCase();
+  const isRouter = rloc16Text.endsWith("00");
+  if (isRouter) {
+    row.isRouter = true;
+    row.is_router = true;
+    if (!toText(row.role)) row.role = "router";
+    if (!toText(row.type)) row.type = "router";
+  }
+
+  const ipv6Addresses = Array.isArray(row.ipv6Addresses)
+    ? row.ipv6Addresses
+    : (Array.isArray(row.ipv6_addrs) ? row.ipv6_addrs : []);
+  const isBorderRouter = isBorderRouterFromIpv6Addresses(ipv6Addresses);
+  if (isBorderRouter) {
+    row.isBorderRouter = true;
+    row.is_border_router = true;
+    row.br = true;
+    row.isRouter = true;
+    row.is_router = true;
+    row.role = "border router";
+    if (!toText(row.type)) row.type = "border router";
+  }
+
+  return row;
+}
+
 // ── Row normalisation helpers ─────────────────────────────────────────────────
 
 export function normalizeRowMergeAliases(row, options = {}) {
@@ -315,7 +386,9 @@ export function normalizeRowMergeAliases(row, options = {}) {
     if (!normalized.omrIpv6Address) normalized.omrIpv6Address = omrIpv6Addr;
     if (!normalized.omr_ipv6_addr) normalized.omr_ipv6_addr = omrIpv6Addr;
   }
-  // Step 3: derive mode.device (FTD/MTD) when not already set
+  // Step 3: enrich router/border-router hints from identity and IPv6 data
+  normalized = enrichRouterIdentityHints(normalized);
+  // Step 4: derive mode.device (FTD/MTD) when not already set
   const existingModeDevice = normalized?.mode?.device ?? normalized?.["mode.device"];
   if (!existingModeDevice) {
     const derived = deriveModeDevice(normalized);
@@ -327,7 +400,7 @@ export function normalizeRowMergeAliases(row, options = {}) {
       }
     }
   }
-  // Step 4: optional route container canonicalization (route_data -> route.routeData)
+  // Step 5: optional route container canonicalization (route_data -> route.routeData)
   normalized = normalizeRouteContainer(normalized, options);
   return normalized;
 }

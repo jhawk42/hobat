@@ -5,7 +5,8 @@
 export const DATASOURCE_REGISTRY = [
   { value: "otbr-cli", label: "otbr-cli" },
   { value: "otbr-restapi", label: "otbr-restapi" },
-  { value: "eve", label: "eve" },
+  { value: "eve", label: "eve app" },
+  { value: "thread-tools", label: "thread tools app" },
   { value: "mdns", label: "mdns" },
   { value: "merged", label: "multi-source" },
   { value: "system", label: "system" },
@@ -377,6 +378,20 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "eve_enhanced",
     physicsProfile: "mesh-compact",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 1
+  },
+
+  // ── Single-file simple datasets (thread group - thread tools app) ───
+  {
+    source: "thread-tools",
+    value: "thread_tools_native",
+    label: "Thread Tools (native)",
+    group: "Native",
+    files: ["diagnostics.json"],
+    mergeStrategy: "none",
+    topologyMode: "thread_tools_native",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1

@@ -2004,15 +2004,19 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
   function applySearchHighlight(searchQuery, advancedMode) {
     if (!_topologyNodeData || !_topologyRawRows) return;
 
+    const baseCounts = applyFilters(
+      nodeFilterEl.value,
+      linkFilterEl.value,
+      diagnosticFilterEl.value,
+    );
+    restoreOriginalNodeStyling();
+
     if (!searchQuery) {
-      // Restore all nodes to their original appearance using stored original styling
-      restoreOriginalNodeStyling();
-      // Clear search from status line
-      updateStatus(lastStatusCounts);
+      updateStatus(baseCounts);
       return;
     }
 
-    // Identify node IDs whose source row matches the query
+    // Identify node IDs whose source row matches the query.
     const matchingNodeIds = new Set();
     _topologyRawRows.forEach((row, nodeId) => {
       if (rowMatchesSearch(row, searchQuery, advancedMode)) {
@@ -2020,11 +2024,10 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
       }
     });
 
-    // Update status line with search counts
-    updateStatus(lastStatusCounts, searchQuery, matchingNodeIds.size, _topologyRawRows.size);
+    updateStatus(baseCounts, searchQuery, matchingNodeIds.size, _topologyRawRows.size);
 
-    // Update each node: highlight matches, dim non-matches
-    // Use stored original styling to preserve current node state
+    // Update each node: highlight matches, dim non-matches.
+    // Hidden state from applyFilters() is preserved because we only update style fields.
     nodesDataset.update(
       Array.from(_originalNodeStyling.entries()).map(([nodeId, originalStyle]) => {
         if (matchingNodeIds.has(nodeId)) {

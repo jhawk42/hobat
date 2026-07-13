@@ -218,6 +218,12 @@ function renderCurrentView() {
 
   // Refresh diagnostic filter to show only relevant options for this dataset
   refreshDiagnosticFilterForCurrentSource();
+
+  // Reapply the active search after a re-render so topology view keeps the
+  // same filtered state when switching views or reloading a dataset.
+  if (_currentSearchQuery) {
+    applySearch();
+  }
 }
 
 function getPhysicsProfileSelect() {
@@ -236,6 +242,7 @@ function getModeMappedPhysicsProfileName(entry) {
   if (topologyMode === "router-table") return PHYSICS_PROFILE_MESH_BALANCED;
   if (topologyMode === "eve_native") return PHYSICS_PROFILE_MESH_COMPACT;
   if (topologyMode === "eve_enhanced") return PHYSICS_PROFILE_MESH_RING;
+  if (topologyMode === "thread_tools_native") return PHYSICS_PROFILE_MESH_COMPACT;
   if (topologyMode === "raw-array") return PHYSICS_PROFILE_MESH_BALANCED;
   if (topologyMode === "otbr_restapi") return PHYSICS_PROFILE_MESH_COMPACT;
   return PHYSICS_PROFILE_MESH_BASELINE;

@@ -501,6 +501,8 @@ function _buildPartialDataset(entry, rawFiles, loadStartTime) {
     const rowSource =
       entry.topologyMode === "eve_native" && firstLoaded && Array.isArray(firstLoaded.nodes)
         ? firstLoaded.nodes
+        : entry.topologyMode === "thread_tools_native" && firstLoaded && Array.isArray(firstLoaded.diagnostics)
+          ? firstLoaded.diagnostics
         : entry.topologyMode === "otbr_restapi" && firstLoaded && Array.isArray(firstLoaded.data)
           ? firstLoaded.data
           : firstLoaded;
@@ -716,6 +718,7 @@ export async function loadDataset(entryValue, options = {}) {
     const firstLoaded = rawFiles.find((d) => d !== null);
     const firstLoadedIndex = rawFiles.findIndex((d) => d !== null);
     // For eve_native files the top-level shape is { version, nodes: [...] };
+    // For thread_tools_native files the top-level shape is { diagnostics: [...] };
     // For otbr_restapi files the top-level shape is { data: [...] };
     // extract the inner array so the table renderer shows one row per node.
     const rowSource =
@@ -723,6 +726,10 @@ export async function loadDataset(entryValue, options = {}) {
       firstLoaded &&
       Array.isArray(firstLoaded.nodes)
         ? firstLoaded.nodes
+        : entry.topologyMode === "thread_tools_native" &&
+            firstLoaded &&
+            Array.isArray(firstLoaded.diagnostics)
+          ? firstLoaded.diagnostics
         : entry.topologyMode === "otbr_restapi" &&
             firstLoaded &&
             Array.isArray(firstLoaded.data)

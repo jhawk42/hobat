@@ -164,12 +164,18 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "fetch-all"], action_cost_s=600, force_async=True
         ),
 
+        # Eve App
         # Eve topology exports — externally managed static files.
         "Eve Thread Network Layout.evethreadlayout": FileAction(
             max_age_s=default_max_age_s, action="STATIC", action_cost_s=1
         ),
         "td-eve-topology.json": FileAction(
             max_age_s=default_max_age_s, action=["process-eve"], action_cost_s=1
+        ),
+
+        # Thread Tools app — externally managed static file.
+        "diagnostics.json": FileAction(
+            max_age_s=default_max_age_s, action="STATIC", action_cost_s=1
         ),
 
         # Pre-merged output — produced by merge_dataset; treated as static here.
