@@ -22,7 +22,7 @@ from merge_dataset import (
     get_mdns_event_priority,
     merge_mdns_records,
     SOURCE_PRECEDENCE,
-    DEFAULT_INPUT_FILES,
+    DEFAULT_FULL_INPUT_FILES,
 )
 
 
@@ -32,7 +32,7 @@ def test_source_precedence_configuration():
     
     # Check that all default input files have precedence defined
     missing_precedence = []
-    for filename in DEFAULT_INPUT_FILES:
+    for filename in DEFAULT_FULL_INPUT_FILES:
         if filename not in SOURCE_PRECEDENCE:
             missing_precedence.append(filename)
     
@@ -45,13 +45,13 @@ def test_source_precedence_configuration():
     assert SOURCE_PRECEDENCE["td-eve-topology.json"] > SOURCE_PRECEDENCE["td-mdns-scopes-br.json"]
     
     # Check mDNS files added to defaults
-    assert "td-mdns-scopes-br.json" in DEFAULT_INPUT_FILES
-    assert "td-mdns-scopes-thread.json" in DEFAULT_INPUT_FILES
-    assert "td-mdns-scopes-hap.json" in DEFAULT_INPUT_FILES
-    assert "td-mdns-scopes-matter.json" in DEFAULT_INPUT_FILES
+    assert "td-mdns-scopes-br.json" in DEFAULT_FULL_INPUT_FILES
+    assert "td-mdns-scopes-thread.json" in DEFAULT_FULL_INPUT_FILES
+    assert "td-mdns-scopes-hap.json" in DEFAULT_FULL_INPUT_FILES
+    assert "td-mdns-scopes-matter.json" in DEFAULT_FULL_INPUT_FILES
     
     print(f"✅ PASS: Source precedence configured for {len(SOURCE_PRECEDENCE)} sources")
-    print(f"✅ PASS: All 4 mDNS files added to DEFAULT_INPUT_FILES")
+    print(f"✅ PASS: All 4 mDNS files added to DEFAULT_FULL_INPUT_FILES")
 
 
 def test_mdns_event_priority():
@@ -398,7 +398,7 @@ def run_all_tests():
     print("✅ ALL PHASE 3 TESTS PASSED!")
     print("=" * 70)
     print("\nPhase 3 Features Validated:")
-    print("  ✅ mDNS files added to DEFAULT_INPUT_FILES")
+    print("  ✅ mDNS files added to DEFAULT_FULL_INPUT_FILES")
     print("  ✅ Source precedence rules configured (P1 gap resolved)")
     print("  ✅ mDNS service_info merge with timestamp precedence")
     print("  ✅ mDNS event type priority (add > update > remove)")

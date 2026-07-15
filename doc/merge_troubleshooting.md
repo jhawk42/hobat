@@ -31,7 +31,7 @@ python3 -m td_cli merge-dataset --base-dir data/ 2>&1 | grep -i "processing\|fil
 **Common Causes:**
 - Input files not yet captured from Thread network
 - Files in wrong directory
-- Incorrect file naming (must match DEFAULT_INPUT_FILES patterns)
+- Incorrect file naming (must match DEFAULT_FULL_INPUT_FILES patterns)
 
 **Solutions:**
 
@@ -52,7 +52,7 @@ python3 -m td_cli merge-dataset --base-dir data/ 2>&1 | grep -i "processing\|fil
 2. **Verify file paths:**
    ```bash
    # Check data directory
-   python3 -c "from merge_dataset import DEFAULT_INPUT_FILES; print('\n'.join(DEFAULT_INPUT_FILES))"
+   python3 -c "from merge_dataset import DEFAULT_FULL_INPUT_FILES; print('\n'.join(DEFAULT_FULL_INPUT_FILES))"
    ```
 
 3. **Use custom file selection:**

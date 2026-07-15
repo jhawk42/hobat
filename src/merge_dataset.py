@@ -16,6 +16,7 @@ from extaddr_device_label_map import (
     EXTADDR_FIELD_ALIASES,
     load_extaddr_device_label_map_flexible,
 )
+from otbr_restapi_util import RECOMMENDED_DIAGNOSTIC_TLVS
 from td_json_key_normalizer import convert_keys_to_camel_case
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
 from util_data import (
@@ -191,28 +192,56 @@ SOURCE_PRECEDENCE = {
     "td-mdns-scopes-matter.json": 47,
 }
 
-DEFAULT_INPUT_FILES = [
-    ##"td-static-extaddr-device-label.json",
+
+SYSTEM_INPUT_FILES: list[str] = [
+    "td-static-extaddr-device-label.json",
+]
+
+OTBR_CLI_INPUT_FILES: list[str] = [
     "td-otbr-cli-router-table.json",
     "td-otbr-cli-meshdiag-topology.json",
     "td-otbr-cli-networkdiag-fetch-all.json",
     "td-otbr-cli-networkdiag-multicast-network.json",
     "td-otbr-cli-meshdiag-router-neighbortables.json",
     "td-otbr-cli-meshdiag-router-childtables.json",
-    "td-otbr-restapi-diagnostics-fetch-all.json",
-    "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
-    "td-otbr-restapi-diagnostics-list.json",
-    "td-otbr-restapi-diagnostics.json",
-    "td-otbr-restapi-devices-fetch.json",
-    "td-otbr-restapi-devices-list.json",
-    "td-otbr-restapi-devices.json",   
-    "td-mdns-scopes-thread.json",                # Phase 3: mDNS Thread devices
-    "td-mdns-scopes-br.json",                    # Phase 3: mDNS Border Router discovery
-    "td-mdns-scopes-hap.json",                   # Phase 3: mDNS HomeKit devices
-    "td-mdns-scopes-matter.json",                # Phase 3: mDNS Matter devices
+]
+
+OTBR_RESTAPI_INPUT_FILES: list[str] = [
+    "td-otbr-cli-router-table.json",
+    "td-otbr-cli-meshdiag-topology.json",
+    "td-otbr-cli-networkdiag-fetch-all.json",
+    "td-otbr-cli-networkdiag-multicast-network.json",
+    "td-otbr-cli-meshdiag-router-neighbortables.json",
+    "td-otbr-cli-meshdiag-router-childtables.json",
+]
+
+MDNS_INPUT_FILES: list[str] = [
+    ##"td-mdns-scopes-thread.json",                 # mDNS Thread devices
+    "td-mdns-scopes-br.json",                    # mDNS Border Router discovery
+    "td-mdns-scopes-hap.json",                   # mDNS HomeKit devices
+    ##"td-mdns-scopes-matter.json",                # mDNS Matter devices   
+]
+
+EVE_INPUT_FILES: list[str] = [
     "td-eve-topology.json",
 ]
 
+DEFAULT_FULL_INPUT_FILES: list[str] = (
+                                       ## SYSTEM_INPUT_FILES 
+                                       OTBR_CLI_INPUT_FILES 
+                                       + OTBR_RESTAPI_INPUT_FILES 
+                                       + MDNS_INPUT_FILES 
+                                       ##+ EVE_INPUT_FILES
+                                       + [])
+
+GROUP_TO_INPUT_FILES: dict[str, list[str]] = {
+    "system": SYSTEM_INPUT_FILES,
+    "otbr-cli": OTBR_CLI_INPUT_FILES,
+    "otbr-restapi": OTBR_RESTAPI_INPUT_FILES,
+    "mdns": MDNS_INPUT_FILES,
+    "eve": EVE_INPUT_FILES,
+    "full": DEFAULT_FULL_INPUT_FILES,
+}
 
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
@@ -1781,6 +1810,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="td-merged-topology-all.json",
         help="Output merged JSON file path.",
     )
+    # add --include-groups 
+    parser.add_argument(
+        "--include-groups",
+        nargs="*",
+        default="full",
+        help=(
+            "Extra JSON source groups to include. "
+            "Supports space-separated and/or comma-separated group names. "
+            "Available groups: " + ", ".join(GROUP_TO_INPUT_FILES.keys())
+        ),
+    )
+
     parser.add_argument(
         "--include-files",
         nargs="*",
@@ -1840,15 +1881,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
 
+    default_files = []
+
     args = parse_args(argv)
     td_data_dir = resolve_data_dir(data_dir=args.datadir)
     base_dir = td_data_dir if args.base_dir == "." else Path(args.base_dir)
+
+    # Process args.include_groups to expand GROUP_TO_INPUT_FILES into default_files
+    if args.include_groups:
+        if isinstance(args.include_groups, str):
+            args.include_groups = [g.strip() for g in args.include_groups.split(",") if g.strip()]
+
+        # Populate with files from specified groups
+        for group in args.include_groups:
+            default_files.extend(GROUP_TO_INPUT_FILES.get(group, []))
+        logging.info(f"Included groups: {args.include_groups}")    
+        logging.debug(f"Resolved files: {default_files}")    
+    
     include_files = parse_file_list_args(args.include_files)
     exclude_files = parse_file_list_args(args.exclude_files)
 
     try:
         input_files = resolve_input_files(
-            DEFAULT_INPUT_FILES, include_files, exclude_files)
+            default_files, include_files, exclude_files
+        )
 
         extaddr_map_path = base_dir / args.extaddr_map_file
         extaddr_map_result = load_optional_input(
