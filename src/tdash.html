@@ -319,46 +319,40 @@
         <ul id="summary-list" class="node-details-list">
           <li>Click a node or row to view its properties.</li>
         </ul>
+        <!-- section field contracts are populated by JS from DEVICE_DETAILS_SECTIONS -->
         <h2>Keys:</h2>
-        <ul id="identity-list" class="node-details-list"
-          data-fields="rloc16,extAddress,deviceLabel,name,routerId,eui64,mlEidIid,omrIpv6Address,id,graph.unifiedId,ID">
+        <ul id="identity-list" class="node-details-list">
         </ul>
         <h2>Highlights:</h2>
-        <ul id="highlights-list" class="node-details-list"
-          data-fields="type,Role,role,br,isBorderRouter,isLeader,isRouter,isPrimaryBBR,status,mode.device,mode.deviceTypeFTD,mode.rxOnWhenIdle,mode.networkData,version,threadVersion,threadStackVersion,leaderData.partitionId,leaderData.leaderRouterId,vendorName,vendorModel,vendorSwVersion,server,room,icon,graph.graphLinkCount,graph.isRouter,graph.isBorderRouter,graph.hasChildren">
+        <ul id="highlights-list" class="node-details-list">
         </ul>
         <h2>Network:</h2>
-        <ul id="network-list" class="node-details-list" data-fields="peerAddress,ipv6Addresses,serviceInfo.addressesParsed">
+        <ul id="network-list" class="node-details-list">
         </ul>
         <h2>Connections:</h2>
-        <ul id="connections-list" class="node-details-list"
-          data-fields="totalChildren,hasChildren,totalLinks,totalLink3,totalLink2,totalLink1,routerNeighborsCount,childTableCount,connectivity.activeRouters,connectivity.linkQuality3,connectivity.linkQuality2,connectivity.linkQuality1">
+        <ul id="connections-list" class="node-details-list">
         </ul>
         <h2>MDNS:</h2>
-        <ul id="mdns-list" class="node-details-list"
-          data-fields="scope,serviceInfo.type,serviceInfo.server,serviceInfo.port,serviceInfo.properties.mdns_scopes_thread,serviceInfo.properties.mdns_scopes_br,serviceInfo.properties.mdns_scopes_hap,serviceInfo.properties.mdns_scopes_matter,serviceInfo.properties.pt.fullName,serviceInfo.properties.pt.intValue,serviceInfo.properties.mn.fullName,serviceInfo.properties.mn.decoded,serviceInfo.properties.pv.fullName,serviceInfo.properties.pv.decoded,serviceInfo.properties.md.fullName,serviceInfo.properties.md.decoded,serviceInfo.properties.ci.fullName,serviceInfo.properties.ci.categoryName,serviceInfo.properties.ci.decoded,serviceInfo.properties.ci.hex,serviceInfo.properties.id.fullName,serviceInfo.properties.id.decoded,serviceInfo.properties.xa.fullName,serviceInfo.properties.xa.hex,serviceInfo.properties.vn.fullName,serviceInfo.properties.vn.decoded,serviceInfo.properties.tv.fullName,serviceInfo.properties.tv.decoded,serviceInfo.properties.rv.fullName,serviceInfo.properties.rv.decoded,serviceInfo.properties.nn.fullName,serviceInfo.properties.nn.decoded,serviceInfo.properties.xp.fullName,serviceInfo.properties.xp.hex,serviceInfo.properties.bb.fullName,serviceInfo.properties.bb.hex,serviceInfo.properties.sb.fullName,serviceInfo.properties.sb.hex,serviceInfo.properties.sf.fullName,serviceInfo.properties.sf.hex,serviceInfo.properties.sh.fullName,serviceInfo.properties.sh.hex,serviceInfo.properties.s#.fullName,serviceInfo.properties.s#.decoded,serviceInfo.properties.s#.hex,serviceInfo.properties.c#.fullName,serviceInfo.properties.c#.decoded,serviceInfo.properties.c#.hex,serviceInfo.properties.ff.fullName,serviceInfo.properties.ff.decoded,serviceInfo.properties.ff.hex,serviceInfo.properties.FabricID_compressed.fullName,serviceInfo.properties.FabricID_compressed.decoded,serviceInfo.decoded_properties.SAI,serviceInfo.decoded_properties.SAT,serviceInfo.decoded_properties.SII,serviceInfo.properties.NodeID.fullName,serviceInfo.properties.NodeID.decoded,serviceInfo.properties.SAI.fullName,serviceInfo.properties.SAI.milliseconds,serviceInfo.properties.SAT.fullName,serviceInfo.properties.SAT.milliseconds,serviceInfo.properties.SII.fullName,serviceInfo.properties.SII.milliseconds">
+        <ul id="mdns-list" class="node-details-list">
         </ul>
 
         <h2>Routes & Links:</h2>
-        <ul id="routes-links-list" class="node-details-list"
-          data-fields="routes,route,route.routeData,routeData,routeData.routeData,links3,links2,links1">
+        <ul id="routes-links-list" class="node-details-list">
         </ul>
 
         <h2>Neighbors:</h2>
-        <ul id="neighbors-list" class="node-details-list" data-fields="routerNeighbors">
+        <ul id="neighbors-list" class="node-details-list">
         </ul>
 
         <h2>Children:</h2>
-        <ul id="children-list" class="node-details-list"
-          data-fields="children,childTable,childIpv6Addresses">
+        <ul id="children-list" class="node-details-list">
         </ul>
 
         <h2>Counters:</h2>
-        <ul id="counters-list" class="node-details-list"
-          data-fields="macCounters.ifTotalPkts,macCounters.ifTotalDiscards,macCounters.ifTotalErrors,macCounters.ifTotalErrorsTotalPktsRatio,macCounters.ifTotalDiscardsTotalPktsRatio,macCounters.ifInBroadcastPkts,macCounters.ifInDiscards,macCounters.ifInErrors,macCounters.ifInUcastPkts,macCounters.ifInUnknownProtos,macCounters.ifOutBroadcastPkts,macCounters.ifOutDiscards,macCounters.ifOutErrors,macCounters.ifOutUcastPkts,mleCounters.leaderRoleCount,mleCounters.routerRoleCount,mleCounters.childRoleCount,mleCounters.partIdChangesCount,mleCounters.betterPartIdAttachAttemptsCount,mleCounters.newParentCount,mleCounters.totalParentPartitionChangesCount,mleCounters.attachAttemptsCount,mleCounters.detachedRoleCount,mleCounters.radioDisabledCount,mleCounters.childRoleTime,mleCounters.detachedRoleTime,mleCounters.leaderRoleTime,mleCounters.radioDisabledTime,mleCounters.routerRoleTime,mleCounters.totalTrackingTime,timeStatistics.leaderPct,timeStatistics.routerPct,timeStatistics.childPct,timeStatistics.detachedDisabledPct,timeStatistics.detachedPct,timeStatistics.disabledPct">
+        <ul id="counters-list" class="node-details-list">
         </ul>
         <h2>Details:</h2>
-        <ul id="details-list" class="node-details-list" data-fields="*">
+        <ul id="details-list" class="node-details-list">
         </ul>
       </div>
     </div>

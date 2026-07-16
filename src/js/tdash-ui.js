@@ -48,7 +48,15 @@ import {
   PHYSICS_PROFILES,
   getPhysicsProfileLabel,
 } from "./tdash-constants.js";
-import { initDetailPanelToggles, formatAgo, formatDuration, toFiniteNumber, getColumnValue, toText } from "./tdash-utils.js";
+import {
+  bindDeviceDetailsSectionFields,
+  initDetailPanelToggles,
+  formatAgo,
+  formatDuration,
+  toFiniteNumber,
+  getColumnValue,
+  toText,
+} from "./tdash-utils.js";
 import {
   populateFilterSelects,
   populateDiagnosticFilterBySource,
@@ -582,6 +590,7 @@ if (initialDatasetValue) {
 document.getElementById("view-status-line-content").textContent =
   `Showing: no dataset loaded. Select a dataset and click Fetch. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
 
+bindDeviceDetailsSectionFields();
 initDetailPanelToggles(document.getElementById("device-details"));
 
 // Cache checkbox helper: make checkboxes mutually exclusive

@@ -1,4 +1,8 @@
-import { MERGE_IDENTITY_FIELDS, FIELD_ALIASES } from "./tdash-constants.js";
+import {
+  MERGE_IDENTITY_FIELDS,
+  FIELD_ALIASES,
+  DEVICE_DETAILS_SECTIONS,
+} from "./tdash-constants.js";
 
 // ── Primitive type helpers ────────────────────────────────────────────────────
 
@@ -960,10 +964,34 @@ export function getColumnValue(row, columnName) {
 
 // ── Shared details-panel renderer ─────────────────────────────────────────────
 
+// Binds DEVICE_DETAILS_SECTIONS entries to DOM list elements by writing
+// each section's ordered field list into a comma-separated data-fields attr.
+// Missing section IDs are warned and skipped by design.
+export function bindDeviceDetailsSectionFields(listIdPrefix = "") {
+  DEVICE_DETAILS_SECTIONS.forEach((section) => {
+    const listId = `${listIdPrefix}${section.sectionId}`;
+    const listEl = document.getElementById(listId);
+    if (!listEl) {
+      console.warn(
+        `[tdash] DEVICE_DETAILS_SECTIONS skipped missing list element: #${listId}`,
+      );
+      return;
+    }
+    if (!Array.isArray(section.fields) || section.fields.length === 0) {
+      console.warn(
+        `[tdash] DEVICE_DETAILS_SECTIONS skipped empty fields for: #${listId}`,
+      );
+      return;
+    }
+    listEl.setAttribute("data-fields", section.fields.join(","));
+  });
+}
+
 // Populates the categorised node/row details lists in the given panel.
 // `listIdPrefix` distinguishes panels: "" for topology, "table-" for the table.
-// Each list element must carry a `data-fields` attribute (comma-separated field
-// paths, or "*" for the catch-all remainder list).
+// Each list element must have a runtime `data-fields` attribute (comma-separated
+// field paths, or "*" for the catch-all remainder list), bound from
+// DEVICE_DETAILS_SECTIONS via bindDeviceDetailsSectionFields().
 export function populateNodeDetailsLists(details, listIdPrefix = "") {
   const listIds = [
     `${listIdPrefix}identity-list`,

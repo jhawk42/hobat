@@ -431,7 +431,8 @@ applyFilters(nodeMode, linkMode, diagMode)   ← called here + on every filter c
     │
     ▼
 vis.Network click event → populateNodeDetailsLists()
-  - reads rawByIdForDetails to populate all <ul data-fields="..."> panels
+  - reads rawByIdForDetails and populates detail sections using runtime
+    data-fields bindings from DEVICE_DETAILS_SECTIONS
 ```
 
 #### Physics profile behavior (current)

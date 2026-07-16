@@ -545,6 +545,8 @@ Filters rows in the Table view to highlight nodes with health issues:
 
 Clicking a node in Topology view populates a scrollable side panel listing every field from the underlying data row — useful for inspecting raw diagnostic counters, IPv6 addresses, mode flags, and link quality values without opening the Table view.
 
+Field grouping contracts for the details sections are sourced from `DEVICE_DETAILS_SECTIONS` in `src/js/tdash-constants.js`; section headings remain defined in `src/tdash.html`.
+
 ---
 
 ## Topology Modes and Link Filters
