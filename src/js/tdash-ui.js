@@ -299,7 +299,7 @@ function setPhysicsProfile(profileName) {
 
   const statusEl = document.getElementById("view-status-line-content");
   if (statusEl && !currentDataset) {
-    statusEl.textContent = `Showing: no dataset loaded. Select a dataset and click Fetch. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
+    statusEl.textContent = `Showing: no dataset loaded. Select a dataset and click Sync. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
   }
 }
 
@@ -511,7 +511,7 @@ document
     if (_physicsProfileName === PHYSICS_PROFILE_AUTO && !currentDataset) {
       const statusEl = document.getElementById("view-status-line-content");
       if (statusEl) {
-        statusEl.textContent = `Showing: no dataset loaded. Select a dataset and click Fetch. Physics profile: ${getPhysicsProfileStatusLabel(selectedDataset)}.`;
+        statusEl.textContent = `Showing: no dataset loaded. Select a dataset and click Sync. Physics profile: ${getPhysicsProfileStatusLabel(selectedDataset)}.`;
       }
     }
   });
@@ -588,7 +588,7 @@ if (initialDatasetValue) {
 
 // do not auto-load on startup; prompt the user instead.
 document.getElementById("view-status-line-content").textContent =
-  `Showing: no dataset loaded. Select a dataset and click Fetch. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
+  `Showing: no dataset loaded. Select a dataset and click Sync. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
 
 bindDeviceDetailsSectionFields();
 initDetailPanelToggles(document.getElementById("device-details"));
@@ -903,7 +903,7 @@ document.getElementById("dataset-select").addEventListener("change", async () =>
 function applySearch() {
   if (!currentDataset) {
     document.getElementById("view-status-line-content").textContent =
-      "No dataset loaded. Select a dataset and click Fetch.";
+      "No dataset loaded. Select a dataset and click Sync.";
     return;
   }
 
@@ -945,12 +945,16 @@ document.getElementById("chk-auto-fetch").addEventListener("change", (e) => {
 document.getElementById("chk-force-fresh").addEventListener("change", (e) => {
   if (e.target.checked) {
     updateCacheCheckboxes(e.target);
+  } else {
+    setForceFresh(false);
   }
 });
 
 document.getElementById("chk-only-cache").addEventListener("change", (e) => {
   if (e.target.checked) {
     updateCacheCheckboxes(e.target);
+  } else {
+    setOnlyCache(false);
   }
 });
 

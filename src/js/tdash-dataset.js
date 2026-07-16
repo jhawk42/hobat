@@ -263,6 +263,15 @@ export function enrichRawFiles(rawFiles) {
 
 // ── Core fetch helper ─────────────────────────────────────────────────────────
 
+function _extractResponseCacheMetadata(response) {
+  const ccHeader = response.headers.get("Cache-Control") || "";
+  const maxAgeMatch = ccHeader.match(/max-age=(\d+)/);
+  const responseMaxAge = maxAgeMatch ? parseInt(maxAgeMatch[1], 10) : null;
+  const lastModifiedHeader = response.headers.get("Last-Modified");
+  const lastModifiedAt = lastModifiedHeader ? Date.parse(lastModifiedHeader) : null;
+  return { responseMaxAge, lastModifiedAt };
+}
+
 // accepts optional request headers; returns { data, responseMaxAge }.
 // handles HTTP 202 by delegating to pollJobUntilDone.
 async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpointData = null) {
@@ -287,7 +296,7 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpoin
     const job = await response.json();
     _trackJobForSession(sessionId, job.job_id);
     try {
-      const data = await pollJobUntilDone(
+      const { data, responseMaxAge, lastModifiedAt } = await pollJobUntilDone(
         job.job_id,
         job.filename,
         url,
@@ -295,18 +304,14 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpoin
         sessionId,
         onCheckpointData,
       );
-      return { data, responseMaxAge: null };
+      return { data, responseMaxAge, lastModifiedAt };
     } finally {
       _untrackJobForSession(sessionId, job.job_id);
     }
   }
   if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
   const data = await response.json();
-  const ccHeader = response.headers.get("Cache-Control") || "";
-  const maxAgeMatch = ccHeader.match(/max-age=(\d+)/);
-  const responseMaxAge = maxAgeMatch ? parseInt(maxAgeMatch[1], 10) : null;
-  const lastModifiedHeader = response.headers.get("Last-Modified");
-  const lastModifiedAt = lastModifiedHeader ? Date.parse(lastModifiedHeader) : null;
+  const { responseMaxAge, lastModifiedAt } = _extractResponseCacheMetadata(response);
   return { data, responseMaxAge, lastModifiedAt };
 }
 
@@ -428,7 +433,9 @@ async function pollJobUntilDone(
           `/api/data/${filename} returned HTTP ${finalResponse.status} after job done`,
         );
       }
-      return finalResponse.json();
+      const data = await finalResponse.json();
+      const { responseMaxAge, lastModifiedAt } = _extractResponseCacheMetadata(finalResponse);
+      return { data, responseMaxAge, lastModifiedAt };
     }
 
     if (pollBody.status === JOB_POLL_STATUS.CANCELLED) {
@@ -630,11 +637,12 @@ export async function loadDataset(entryValue, options = {}) {
           : null;
         return fetchJson(`/api/data/${f}`, reqHeaders, sessionId, onCheckpointData).then(
           ({ data, responseMaxAge, lastModifiedAt }) => {
-            if (responseMaxAge !== null) {
+            if (responseMaxAge !== null || lastModifiedAt != null) {
+              const prev = fileMaxAgeCache.get(f);
               fileMaxAgeCache.set(f, {
-                maxAge: responseMaxAge,
+                maxAge: responseMaxAge ?? prev?.maxAge ?? 0,
                 fetchedAt: Date.now(),
-                lastModifiedAt,
+                lastModifiedAt: lastModifiedAt ?? prev?.lastModifiedAt ?? null,
               });
             }
             if (onFileReady !== null && progressiveEnabled && _isFetchSessionActive(sessionId)) {

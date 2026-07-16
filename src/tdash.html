@@ -29,7 +29,7 @@
       <div id="fetch-status-line-panel">
         <div id="fetch-status-line-content" role="status" aria-live="polite">
           <div class="fetch-status-placeholder">
-            Select a dataset to load and press Fetch.
+            Select a dataset to load and press Sync.
           </div>
         </div>
       </div>
@@ -47,28 +47,28 @@
         <legend><button class="legend-toggle-btn" id="btn-toggle-devices" aria-expanded="true"><span
               class="legend-toggle-arrow">▶</span>Devices</button>
         </legend>
-        <label title="Fetched number of devices in the dataset">
+        <label title="Number of devices in the dataset">
           <span id="device-status-devices">⛬ Total: <span id="device-count">0</span></span>
         </label>
-        <label title="Fetched number of border routers in the dataset">
+        <label title="Number of border routers in the dataset">
           <span id="device-status-brs">■ TBR: <span id="br-count">0</span></span>
         </label>
-        <label title="Fetched number of routers in the dataset">
+        <label title="Number of routers in the dataset">
           <span id="device-status-routers">⬟ Router: <span id="router-count">0</span></span>
         </label>
-        <label title="Fetched number of child nodes in the dataset">
+        <label title="Number of child nodes in the dataset">
           <span id="device-status-children">● End Device: <span id="child-count">0</span></span>
         </label>
-        <label title="Fetched number of links in the dataset">
+        <label title="Number of links in the dataset">
           <span id="device-status-links"> 📶 Links: <span id="link-count">0</span></span>
         </label>
-        <label title="Fetched number of LQ3 links in the dataset">
+        <label title="Number of LQ3 links in the dataset">
           <span id="device-status-lq3">LQ3: <span id="lq3-count">0</span></span>
         </label>
-        <label title="Fetched number of LQ2 links in the dataset">
+        <label title="Number of LQ2 links in the dataset">
           <span id="device-status-lq2">LQ2: <span id="lq2-count">0</span></span>
         </label>
-        <label title="Fetched number of LQ1 links in the dataset">
+        <label title="Number of LQ1 links in the dataset">
           <span id="device-status-lq1">LQ1: <span id="lq1-count">0</span></span>
         </label>
       </fieldset>
@@ -102,9 +102,9 @@
 
           <!-- Fetch button -->
           <div>
-            <button id="btn-fetch" title="Fetch new dataset from the configured source">Fetch</button>
-            <button id="btn-fetch-cancel" title="Cancel pending fetch">✕</button>
-            <button id="btn-fetch-toggle-status-chk-cache" title="Toggle Fetch Status and Cache Options">⧨</button>
+            <button id="btn-fetch" title="Sync new dataset from the configured source">Sync</button>
+            <button id="btn-fetch-cancel" title="Cancel pending sync">✕</button>
+            <button id="btn-fetch-toggle-status-chk-cache" title="Sync Fetch Status and Cache Options">⧨</button>
           </div>
 
           <!-- Fetch status -->
@@ -117,8 +117,8 @@
             <!-- Status details -->
             <div class="status-row">
               <div class="timetaken-group">
-                <label title="Time taken to fetch or generate data for this dataset">
-                  <span id="fetch-timetaken-label">Time to fetch:</span>
+                <label title="Time taken to sync or generate data for this dataset">
+                  <span id="fetch-timetaken-label">Time to sync:</span>
                   <span id="fetch-timetaken-value">-</span>
                 </label>
                 <div class="progress-row">
@@ -137,14 +137,14 @@
             <legend><button class="legend-toggle-btn" id="btn-toggle-cache" aria-expanded="false"><span
                   class="legend-toggle-arrow">▶</span>Cache</button></legend>
             <div id="chk-cache-group">
-              <label title="Automatically uses cached data and re-fetches datadaset when cache is stale. Select the other options to manually control when to fetch new data.">
+              <label title="Automatically uses cached data and re-syncs dataset when cache is stale. Select the other options to manually control when to sync new data.">
                 <input type="checkbox" id="chk-auto-fetch" checked /> Auto
               </label>
-              <label title="Force the server to regenerate fresh data (bypass cache)">
-                <input type="checkbox" id="chk-force-fresh" /> Force Refresh
+              <label title="Direct call to the server to regenerate fresh data (bypass cache)">
+                <input type="checkbox" id="chk-force-fresh" /> Direct Refresh
               </label>
               <label title="Only use server cached data (skip server regeneration even if cache is stale or missing)">
-                <input type="checkbox" id="chk-only-cache" /> Only Cache
+                <input type="checkbox" id="chk-only-cache" /> Cache Only
               </label>
             </div>
           </fieldset>
