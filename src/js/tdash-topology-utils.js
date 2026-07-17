@@ -427,7 +427,7 @@ export function buildVisNodeData(
     let borderWidth = 1;
     let fontSize = 13;
     let size = 27;
-    let widthConstraint = { minimum: 70, maximum: 70 };
+    let widthConstraint = { minimum: 70, maximum: 200 };
     let heightConstraint = { minimum: 26, maximum: 26 };
     if (isBorderRouter) {
       borderWidth = 5;
