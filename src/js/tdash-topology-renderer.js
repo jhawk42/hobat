@@ -2,6 +2,7 @@ import {
   VIS_OPTIONS,
   getPhysicsProfile,
   getPhysicsProfileLabel,
+  PHYSICS_PROFILE_MESH_BALANCED,
   PHYSICS_PROFILE_MESH_RING,
   PHYSICS_PROFILE_MESH_COMPACT,
   PHYSICS_PROFILE_MESH_TREE_HORIZONTAL,
@@ -1706,6 +1707,31 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
         // to preserve explicit mesh-tree separation.
         applyMinEdgeLength(edge, 520);
       }
+    });
+  }
+
+  if (physicsProfileName === PHYSICS_PROFILE_MESH_BALANCED) {
+    const nodeById = new Map(nodeData.map((n) => [n.id, n]));
+    edgeData.forEach((edge) => {
+      if (edge.baseHidden === true) return;
+      const fromNode = nodeById.get(edge.from);
+      const toNode = nodeById.get(edge.to);
+      if (fromNode?.isRouter !== true || toNode?.isRouter !== true) return;
+
+      // Hub Spoke: keep border-router links longer so BRs do not collapse into
+      // the central router mass during stabilization.
+      const touchesBorderRouter =
+        fromNode?.isBorderRouter === true || toNode?.isBorderRouter === true;
+      if (!touchesBorderRouter) return;
+
+      const bothBorderRouters =
+        fromNode?.isBorderRouter === true && toNode?.isBorderRouter === true;
+
+      const minBorderRouterLength = bothBorderRouters ? 1345 : 1097;
+
+      edge.length = Number.isFinite(edge.length)
+        ? Math.max(edge.length, minBorderRouterLength)
+        : minBorderRouterLength;
     });
   }
 
