@@ -1299,10 +1299,13 @@ export function adaptMergedDetailed(fileMap) {
     (Array.isArray(node.router_neighbor_table) ? node.router_neighbor_table : []).forEach((neighbor) => {
       const toId = ensureNodeForLink(neighbor, neighbor.rloc16 || neighbor.extAddress || neighbor.id);
       if (!toId) return;
+      const linkMargin = toFiniteNumber(neighbor.rss_margin ?? neighbor.linkMargin);
+      const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
       const toNodeEnriched = nodeMap.get(toId);
       addEdge(edgeMap, edgeData, fromId, toId, {
         width: 1.5,
-        linkMargin: toFiniteNumber(neighbor.rss_margin),
+        ...lqStyle,
+        linkMargin,
         ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
         linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
         edgeKeySuffix: 'merged-router-neighbor'
@@ -1693,11 +1696,15 @@ export function adaptOtbrRestApi(fileMap) {
         upsertOtbrRestApiNode(toId, { rloc16: toRloc16, id: toId },
           { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
       }
-      const lqi = Math.max(toFiniteNumber(route.linkQualityOut) || 0, toFiniteNumber(route.linkQualityIn) || 0);
-      const edgeWidth = lqi >= 3 ? 3 : (lqi >= 2 ? 2 : 1.5);
+      const lqiIn = toFiniteNumber(route.linkQualityIn);
+      const lqiOut = toFiniteNumber(route.linkQualityOut);
+      const lqi = Math.max(lqiOut || 0, lqiIn || 0);
+      const lqStyle = lqStyleFromAvgLqi(lqi, 3);
       const toNodeEnriched = nodeMap.get(toId);
       addEdge(edgeMap, edgeData, fromId, toId, {
-        width: edgeWidth,
+        ...lqStyle,
+        lqiIn,
+        lqiOut,
         ...buildEdgeEndpointTitles(fromNode, toNodeEnriched, fromId, toId),
         linkCategories: [EDGE_CATEGORY_OTBR_ROUTE]
       });
