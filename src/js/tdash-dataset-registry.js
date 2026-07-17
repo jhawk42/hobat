@@ -3,8 +3,8 @@
 
 // Keep this list in sync with DATASET_REGISTRY source values.
 export const DATASOURCE_REGISTRY = [
-  { value: "otbr-cli", label: "otbr-cli" },
-  { value: "otbr-restapi", label: "otbr-restapi" },
+  { value: "otbr-cli", label: "otbr-cli", default_dataset_value: "merged_otbr_cli_meshdiag_networkdiag_multicast" },
+  { value: "otbr-restapi", label: "otbr-restapi", default_dataset_value: "restapi_devices_diagnostics_list" },
   { value: "eve", label: "eve app" },
   { value: "thread-tools", label: "thread tools app" },
   { value: "mdns", label: "mdns" },

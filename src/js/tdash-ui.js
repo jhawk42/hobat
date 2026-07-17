@@ -90,9 +90,13 @@ function populateDatasetSelect(sourceFilter = null) {
   const filteredRegistry = sourceFilter
     ? DATASET_REGISTRY.filter((entry) => entry.source === sourceFilter)
     : DATASET_REGISTRY;
+  const defaultDatasetValue = sourceFilter
+    ? DATASOURCE_REGISTRY.find((entry) => entry.value === sourceFilter)?.default_dataset_value
+    : null;
 
   let currentGroupLabel = undefined;
   let currentOptgroup = null;
+  let defaultOption = null;
 
   for (let i = 0; i < filteredRegistry.length; i++) {
     const entry = filteredRegistry[i];
@@ -113,9 +117,17 @@ function populateDatasetSelect(sourceFilter = null) {
     opt.value = entry.value;
     opt.textContent = entry.label;
     opt.title = entry.label; // Use the label as the tooltip content
+    if (entry.value === defaultDatasetValue) {
+      opt.selected = true;
+      defaultOption = opt;
+    }
 
     // Append to optgroup if one exists, otherwise to select element
     (currentOptgroup ?? sel).appendChild(opt);
+  }
+
+  if (!defaultOption) {
+    sel.selectedIndex = filteredRegistry.length > 0 ? 0 : -1;
   }
 }
 
