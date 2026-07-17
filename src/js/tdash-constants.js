@@ -230,7 +230,7 @@ export const NODE_SHAPES = Object.freeze({
 
 // ── Link Quality edge style constants ─────────────────────────────────────────
 export const EDGE_LQ_STYLES = Object.freeze({
-  high: { width: 16, color: PALETTE.lqHigh, dashes: false, lqLevel: 3 }, // LQ3 bold blue  (.lq-high)
+  high: { width: 12, color: PALETTE.lqHigh, dashes: false, lqLevel: 3 }, // LQ3 bold blue  (.lq-high)
   medium: { width: 8, color: PALETTE.lqMedium, dashes: true, lqLevel: 2 }, // LQ2 light blue (.lq-medium)
   low: { width: 4, color: PALETTE.lqLow, dashes: true, lqLevel: 1 }, // LQ1 red dashed (.lq-low)
   none: { width: 4, color: PALETTE.lqNone, dashes: false, lqLevel: 0 }, // fallback (no LQ data)
