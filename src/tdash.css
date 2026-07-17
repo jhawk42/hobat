@@ -1149,21 +1149,25 @@ td .td-array-idx {
   width: 30px;
   flex: 0 0 30px;
   border-top-style: solid;
-  border-top-color: currentColor;
   border-top-width: 4px;
   line-height: 0;
 }
 
 .lq-legend-line-high {
   border-top-width: var(--lq-style-width-high, 8px);
+  border-top-color: #008080;
+  border-top-style: solid;
 }
 
 .lq-legend-line-medium {
   border-top-width: var(--lq-style-width-medium, 6px);
+  border-top-color: #D55E00;
+  border-top-style: dashed;
 }
 
 .lq-legend-line-low {
   border-top-width: var(--lq-style-width-low, 4px);
+  border-top-color: #c62828;
   border-top-style: dashed;
 }
 
