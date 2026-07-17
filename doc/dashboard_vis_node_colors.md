@@ -18,7 +18,7 @@ The topology view represents Thread mesh network devices as nodes in a network g
 - **Border Width:** 5px
 - **Shape:** Rectangle
 - **Font Size:** 19.5px (monospace)
-- **Size:** 187×77 pixels
+- **Size:** 45
 - **Meaning:** A Thread border router that bridges the Thread mesh network to external networks (e.g., IP6, Matter, HAP, mDNS scopes)
 
 ### 2. **Router** — Blue with thick border
@@ -27,7 +27,7 @@ The topology view represents Thread mesh network devices as nodes in a network g
 - **Border Width:** 3px
 - **Shape:** Rectangle
 - **Font Size:** 19.5px (monospace)
-- **Size:** 187×77 pixels
+- **Size:** 45
 - **Meaning:** A Thread router node that routes packets within the mesh and can have child nodes
 
 ### 3. **Child Node** — Beige/tan with thin border
@@ -36,7 +36,7 @@ The topology view represents Thread mesh network devices as nodes in a network g
 - **Border Width:** 1px
 - **Shape:** Ellipse (oval)
 - **Font Size:** 13px (monospace)
-- **Size:** 109×41 pixels
+- **Size:** 27
 - **Meaning:** A Thread child device (sleepy end device, FTD, or non-router node) that connects to a router parent
 
 ### 4. **Eve Node** — Specific color for external topology data
@@ -95,9 +95,9 @@ When the search is cleared (either by clicking the **Clear** button or manually 
 
 | Node Type | Background | Border | Border Width | Shape | Size | Font Size |
 |---|---|---|---|---|---|---|
-| **Border Router** | Green | Green | 5px | Rectangle | 187×77px | 19.5px |
-| **Router** | Blue | Blue | 3px | Rectangle | 187×77px | 19.5px |
-| **Child Node** | Beige | Tan | 1px | Ellipse | 109×41px | 13px |
+| **Border Router** | Green | Green | 5px | Rectangle | 45 | 19.5px |
+| **Router** | Blue | Blue | 3px | Rectangle | 45 | 19.5px |
+| **Child Node** | Beige | Tan | 1px | Ellipse | 27 | 13px |
 | **Eve Node** | Eve color | Eve color | 1px | Varies | Varies | Varies |
 | **Unknown** | Light | Light | 1px | Ellipse | 109×41px | 13px |
 

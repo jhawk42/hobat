@@ -426,18 +426,17 @@ export function buildVisNodeData(
     
     let borderWidth = 1;
     let fontSize = 13;
-    let widthConstraint = { minimum: 109, maximum: 109 };
-    let heightConstraint = { minimum: 41, maximum: 41 };
+    let size = 27;
+    let widthConstraint = { minimum: 70, maximum: 70 };
+    let heightConstraint = { minimum: 26, maximum: 26 };
     if (isBorderRouter) {
       borderWidth = 5;
       fontSize = 19.5;
+      size = 45;
     } else if (isRouter) {
       borderWidth = 3;
       fontSize = 19.5;
-    }
-    if (isRouter) {
-      widthConstraint = { minimum: 187, maximum: 187 };
-      heightConstraint = { minimum: 77, maximum: 77 };
+      size = 45;
     }
     const font = {
       size: fontSize,
@@ -462,6 +461,7 @@ export function buildVisNodeData(
       id: node.id,
       label: labelFn(node),
       shape: effectiveShape,
+      size,
       color: effectiveColor ? { ...effectiveColor } : effectiveColor,
       font,
       heightConstraint,

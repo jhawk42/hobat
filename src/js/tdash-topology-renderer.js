@@ -1099,7 +1099,7 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
   }
 
   // After all children are placed, push overlapping non-router nodes apart.
-  // Node shape sizes (from buildVisNodeData): routers ~187×77, children ~109×41.
+  // Node shape sizes (from buildVisNodeData): border routers and routers size ~45, children ~27.
   // We use a conservative bounding circle radius per type to drive separation.
   const MIN_CHILD_SEP = 130; // px — desired minimum centre-to-centre gap for child nodes
   const MAX_ITERS = 80;
