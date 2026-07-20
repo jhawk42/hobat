@@ -131,15 +131,22 @@ def parse_child_table(output, parent_rloc16):
                 r"ChildId:\s*(0x[0-9a-fA-F]+|\d+)", line)
             child_id = child_id_match.group(1) if child_id_match else "Unknown"
 
-            # Child RLOC16 is derived from parent RLOC16 by replacing the last byte with the ChildId (0-255)
-            # For example, if parent RLOC16 is 0x0400 and ChildId is 0x0006, child RLOC16 would be 0x0406
+            # Child Rloc16: The 16-bit space is broken down exactly as follows:
+            # Bits 15–10 (6 bits): 
+            #   Router ID (The identifier of the parent router)
+            # Bits 9–0 (10 bits): 
+            #   Child ID (The unique index of the child under that parent)
+            #
+            # Parent Router ID is derived from parent RLOC16 by shifting right 10 bits (dividing by 1024)
+            # Child RLOC16 is derived from parent RouterID with: 
+            #   Child RLOC16 = (Parent Router ID * 1024) + Child ID
+
             try:
+                parent_router_id = parent_rloc16_int >> 10  # Get parent router ID (top 6 bits)
                 child_id_int = int(
                     child_id, 0
                 )  # Auto-detect base (handles both 0xNNNN and decimal)
-                child_rloc16_int = (parent_rloc16_int & 0xFF00) | (
-                    child_id_int & 0x00FF
-                )
+                child_rloc16_int = (parent_router_id << 10) + child_id_int
                 child_rloc16 = f"0x{child_rloc16_int:04x}"
             except ValueError:
                 child_rloc16 = f"Unknown-{child_id}"

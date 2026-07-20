@@ -170,6 +170,41 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_false",
         help="Do not expand child nodes in the topology map",
     )
+
+    networkdiag_child_fast_group = networkdiag_topology_p.add_mutually_exclusive_group()
+    networkdiag_child_fast_group.add_argument(
+        "-cff",
+        "--children-fetch-fast",
+        dest="child_fetch_fast_mode_default",
+        action="store_true",
+        default=True,
+        help="Enable fast child fetching with basic TLVs (default)",
+    )
+    networkdiag_child_fast_group.add_argument(
+        "-cffno",
+        "--children-fetch-fast-no",
+        dest="child_fetch_fast_mode_default",
+        action="store_false",
+        help="Disable fast child fetching with basic TLVs",
+    )
+
+    networkdiag_child_detail_group = networkdiag_topology_p.add_mutually_exclusive_group()
+    networkdiag_child_detail_group.add_argument(
+        "-cfd",
+        "--children-fetch-detail",
+        dest="child_fetch_detail_mode_default",
+        action="store_true",
+        default=False,
+        help="Enable detailed child fetching with higher TLV coverage",
+    )
+    networkdiag_child_detail_group.add_argument(
+        "-cfdno",
+        "--children-fetch-detail-no",
+        dest="child_fetch_detail_mode_default",
+        action="store_false",
+        help="Disable detailed child fetching",
+    )
+
     networkdiag_sub.add_parser(
         "multicast-network",
         help="Scan networkdiag topology via multicast to all Thread devices (ff03::1)",
@@ -666,9 +701,17 @@ def dispatch(
                     sub_parsers["otbr-cli"].print_help()
                 return 0
             if args.networkdiag_command == "fetch-all":
-                expand_children_argv = (
-                    [] if getattr(args, "expand_children", True) else ["-cno"]
-                )
+                expand_children_argv = []
+                if not getattr(args, "expand_children", True):
+                    expand_children_argv.append("-cno")
+                if getattr(args, "child_fetch_fast_mode_default", True):
+                    expand_children_argv.append("--children-fetch-fast")
+                else:
+                    expand_children_argv.append("--children-fetch-fast-no")
+                if getattr(args, "child_fetch_detail_mode_default", False):
+                    expand_children_argv.append("--children-fetch-detail")
+                else:
+                    expand_children_argv.append("--children-fetch-detail-no")
                 return _normalize_module_rc(
                     otbr_cli_networkdiag_topology.main(
                         _forward_with_datadir(expand_children_argv)

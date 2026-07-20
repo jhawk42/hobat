@@ -189,15 +189,18 @@ def enrich_eve_nodes(eve_data):
         # Check if need to patch parent-child relationships based on rloc16 hierarchy 
         rloc16_hex = original_node.get("rloc16_hex")
         if rloc16_hex is not None:
-            if rloc16_hex.endswith("00"): # Skip if a router
+            rloc16_decimal = int(rloc16_hex, 16)
+            # Skip if a router (lower 10 bits are 0)
+            if (rloc16_decimal & 0x3FF) == 0:
                 continue
             
             node_id = original_node.get("id")
 
-            # Find potential parent rloc16 by replacing the last 2 characters of the rloc16 with 0x00, which 
-            # is the parent node rloc16 in Thread networks. For example, if the rloc16 is 0x1234, the 
-            # parent rloc16 would be 0x1200,
-            parent_rloc16_hex = rloc16_hex[:4] + "00"
+            # Child Rloc16: Bits 15-10 (6 bits) = Router ID, Bits 9-0 (10 bits) = Child ID
+            # Parent RLOC16 = (Router ID << 10) which zeros out the child ID bits
+            router_id = rloc16_decimal >> 10
+            parent_rloc16_decimal = router_id << 10
+            parent_rloc16_hex = f"0x{parent_rloc16_decimal:04x}"
             parent_node_id = rloc16_hex_to_id.get(parent_rloc16_hex)
             parent_node = eve_data[parent_node_id] if parent_node_id else None
 

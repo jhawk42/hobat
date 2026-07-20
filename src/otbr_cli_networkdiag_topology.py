@@ -418,9 +418,9 @@ def _build_unknown_device_record(
 
     # Base record structure (common to both routers and children)
     record = {
-        "extaddr": f"Unknown-{rloc16}",
+        "extaddr": f"Offline-{rloc16}",
         "rloc16": rloc16,
-        "device_label": f"Unknown-{rloc16}",
+        "device_label": f"Offline-{rloc16}",
         "mode": {},
         "ipv6_addrs": ipv6_addrs,
         "omr_ipv6_addr": omr_ipv6_addr,
@@ -994,6 +994,8 @@ def fetch_network_diag_topology_expand_children(
     meshlocal_prefix: str | None,
     extaddr_to_rloc: dict,
     checkpoint_filepath: str | None,
+    child_fetch_fast_mode_default: bool = True,
+    child_fetch_detail_mode_default: bool = False,
 ) -> None:
     """Expands child-node diagnostics and merges child records into the topology map."""
     # 8. Expand child nodes in topology:
@@ -1010,12 +1012,8 @@ def fetch_network_diag_topology_expand_children(
 
         # Fetch fast mode is breadth first, using BASIC TLV values for child nodes, which can help reduce runtime and network load when expanding children, especially in large networks with many child nodes. This mode is useful for quickly getting a high-level view of the network topology without waiting for detailed information from each child node.
         # if True then only fetch BASIC TLV values for child nodes. This can help reduce runtime and network load when expanding children, especially in large networks with many child nodes.
-        child_fetch_fast_mode_default = True
-
         # Fetch detail mode is depth of data using DETAILED TLV values for child nodes, which can take longer and increase network load but will give us more complete data for each child node. This mode is useful for getting a more detailed view of the network topology, including all available information from each child node, but may result in longer runtime and higher network load.
         # If True then fetch DETAILED TLV values for child nodes, which can take longer and increase network load but will give us more complete data for each child node.
-        child_fetch_detail_mode_default = False
-
         # Defaults: Attempts
 
         # min number of attempts before giving up and adding with default values
@@ -1165,7 +1163,7 @@ def fetch_network_diag_topology_expand_children(
 
                         # Default to BASIC TLV for first attempt
                         child_tlv_detail_level = 1
-                        child_detail_level_name = ""
+                        child_detail_level_name = "BASIC"
 
                         for child_attempt_idx in range(child_attempts_max):
 
@@ -1200,11 +1198,11 @@ def fetch_network_diag_topology_expand_children(
                                         child_tlv_detail_level = 1
                                         child_detail_level_name = "BASIC"
                                     case 1:
-                                        child_tlv_detail_level = 1
-                                        child_detail_level_name = "BASIC"
-                                    case 2:
                                         child_tlv_detail_level = 2
                                         child_detail_level_name = "MEDIUM_MAC"
+                                    case 2:
+                                        child_tlv_detail_level = 3
+                                        child_detail_level_name = "MEDIUM_TV_MAC"
                                     case 3:
                                         child_tlv_detail_level = 3
                                         child_detail_level_name = "MEDIUM_TV_MAC"
@@ -1378,7 +1376,12 @@ def fetch_network_diag_topology_expand_children(
 
 
 def fetch_network_diag_topology(
-    extaddr_map=None, thread_network_info=None, expand_children=True, td_data_dir=None
+    extaddr_map=None,
+    thread_network_info=None,
+    expand_children=True,
+    td_data_dir=None,
+    child_fetch_fast_mode_default: bool = True,
+    child_fetch_detail_mode_default: bool = False,
 ):
     """Maps the full network topology and returns a Python dictionary."""
 
@@ -1472,6 +1475,8 @@ def fetch_network_diag_topology(
         meshlocal_prefix,
         extaddr_to_rloc,
         checkpoint_filepath,
+        child_fetch_fast_mode_default,
+        child_fetch_detail_mode_default,
     )
 
     logging.info(
@@ -1765,6 +1770,41 @@ def main_fetch_all(argv: Sequence[str] | None = None) -> int:
         action="store_false",
         help="Do not expand child nodes in the topology map",
     )
+
+    child_fast_group = parser.add_mutually_exclusive_group()
+    child_fast_group.add_argument(
+        "-cff",
+        "--children-fetch-fast",
+        dest="child_fetch_fast_mode_default",
+        action="store_true",
+        default=True,
+        help="Enable fast child fetching with basic TLVs (default)",
+    )
+    child_fast_group.add_argument(
+        "-cffno",
+        "--children-fetch-fast-no",
+        dest="child_fetch_fast_mode_default",
+        action="store_false",
+        help="Disable fast child fetching with basic TLVs",
+    )
+
+    child_detail_group = parser.add_mutually_exclusive_group()
+    child_detail_group.add_argument(
+        "-cfd",
+        "--children-fetch-detail",
+        dest="child_fetch_detail_mode_default",
+        action="store_true",
+        default=False,
+        help="Enable detailed child fetching with higher TLV coverage",
+    )
+    child_detail_group.add_argument(
+        "-cfdno",
+        "--children-fetch-detail-no",
+        dest="child_fetch_detail_mode_default",
+        action="store_false",
+        help="Disable detailed child fetching",
+    )
+
     args = parser.parse_args(argv)
     td_data_dir = resolve_data_dir(data_dir=args.datadir)
 
@@ -1787,7 +1827,12 @@ def main_fetch_all(argv: Sequence[str] | None = None) -> int:
 
         # Get the networkdiagnostic topology data
         networkdiagnostic_topology_data = fetch_network_diag_topology(
-            extaddr_map, thread_network_info, expand_children=expand_children, td_data_dir=td_data_dir
+            extaddr_map,
+            thread_network_info,
+            expand_children=expand_children,
+            td_data_dir=td_data_dir,
+            child_fetch_fast_mode_default=args.child_fetch_fast_mode_default,
+            child_fetch_detail_mode_default=args.child_fetch_detail_mode_default,
         )
 
         # print the topology in tree format to console
