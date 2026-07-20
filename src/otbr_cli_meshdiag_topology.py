@@ -295,8 +295,40 @@ def enrich_topology_routers(
         # children
         # Enrich: add children data for each router based on its children list
         # Each child will have rloc16, lq, mode
+
+        # Default to False, but set to True if we detect the bug in the child rloc16 upper two bytes not matching their parent router rloc16 upper two bytes, which is invalid. Patch the child rloc16 to match the parent router rloc16 upper two bytes, and keep the lower two bytes of the child rloc16
+        td_flag_meshdiag_topology_workaround_child_rloc16_upper_bytes_bug = False
+
         enriched_children = enhanced_router.get("children", [])
         for child in enriched_children:
+            if (td_flag_meshdiag_topology_workaround_child_rloc16_upper_bytes_bug := True):
+                # WORKAROUNG BUG IN: ot_ctl meshdiag topology children output may have child rloc16 upper two bytes not matching their parent router rloc16 upper two bytes, which is invalid. Patch the child rloc16 to match the parent router rloc16 upper two bytes, and keep the lower two bytes of the child rloc16
+                # Check if child_rloc16 upper two bytes match their parent router rloc16 upper two bytes, if not, log a warning
+                parent_rloc16 = enhanced_router.get("rloc16")
+                child_rloc16 = child.get("rloc16")
+                if parent_rloc16 and child_rloc16:
+                    if parent_rloc16[:4] != child_rloc16[:4]:
+                        logging.warning(
+                            "Child rloc16 %s does not match parent router rloc16 %s",
+                            child_rloc16,
+                            parent_rloc16,
+                        )
+                        # Check if child_loc16 upper two bytes is off by 1 from parent router rloc16 upper two bytes, if so, log a warning
+                        parent_rloc16_upper = int(parent_rloc16[:4], 16)
+                        child_rloc16_upper = int(child_rloc16[:4], 16)
+                        if abs(parent_rloc16_upper - child_rloc16_upper) == 1:
+                            logging.warning(
+                                "Child rloc16 %s is off by 1 from parent router rloc16 %s",
+                                child_rloc16,
+                                parent_rloc16,
+                            )
+                            # Patch the child rloc16 to match the parent router rloc16 upper two bytes, and keep the lower two bytes of the child rloc16
+                            child["rloc16"] = parent_rloc16[:4] + child_rloc16[4:]
+                            logging.warning(
+                                "Patched child rloc16 to %s to match parent router rloc16 upper two bytes",
+                                child["rloc16"],
+                            )
+
             child_rloc16 = child.get("rloc16")
             if child.get("device_label"):
                 child["device_label"] = child.get("device_label")

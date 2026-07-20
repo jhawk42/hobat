@@ -39,8 +39,8 @@ TLV_VALUES_MEDIUM = "0 1 2 8 16 9"
 TLV_VALUES_BASIC = "0 1 2 8"
 
 # CHILD TLVs (excludes TLV 16 Child Table and TLV 6 Leader Data)
-TLV_VALUES_CHILD_DETAILED = "0 1 2 8 9 24 34" ##  "0 1 2 8 24 9 34" ##"0 1 2 23 8 4 24 25 26 27 28 5 9 34"
-TLV_VALUES_CHILD_MEDIUM_TV_MAC  = "0 1 2 8 9 34" ## "0 1 2 8 24 9"
+TLV_VALUES_CHILD_DETAILED = "0 1 2 8 9 24 34"  # "0 1 2 8 24 9 34"
+TLV_VALUES_CHILD_MEDIUM_TV_MAC = "0 1 2 8 9 34"  # "0 1 2 8 24 9"
 TLV_VALUES_CHILD_MEDIUM_MAC = "0 1 2 8 9"
 TLV_VALUES_CHILD_BASIC = "0 1 2 8"
 
@@ -64,12 +64,12 @@ def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
             return TLV_VALUES_MEDIUM
         case 8:
             return TLV_VALUES_BASIC
-        
+
         # CHILD TLV sets
         case 4:
             return TLV_VALUES_CHILD_DETAILED
         case 3:
-            return TLV_VALUES_CHILD_MEDIUM_TV_MAC        
+            return TLV_VALUES_CHILD_MEDIUM_TV_MAC
         case 2:
             return TLV_VALUES_CHILD_MEDIUM_MAC
         case 1:
@@ -157,8 +157,6 @@ def parse_ipv6_address_list(output):
 
 # TLV 2: Mode TLV to get more detailed info about the node's capabilities and role (e.g., if it's a sleepy end device, router-eligible end device, or full router) which can help better understand the topology and identify potential issues with devices that are not behaving as expected. This will also help enrich the topology map with more detailed information about each node's role and capabilities in the network.
 
-
-
 def device_type_from_mode(mode):
     """Returns device classification from Thread mode flags."""
     if (
@@ -174,7 +172,6 @@ def device_type_from_mode(mode):
     ):
         return "MTD"
     return "Unknown"
-
 
 
 def merge_device_record(existing: dict, new: dict) -> dict:
@@ -222,6 +219,31 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     # device_label: keep existing if not starting with "Unknown-", else take new
     if existing.get("device_label", "").startswith("Unknown-") and not new.get("device_label", "").startswith("Unknown-"):
         existing["device_label"] = new["device_label"]
+
+    # Keep highest attempt/detail metadata, including 0 values from first-attempt success.
+    new_last_attempt_responded = new.get("last_attempt_responded")
+    existing_last_attempt_responded = existing.get("last_attempt_responded")
+    if (
+        new_last_attempt_responded is not None
+        and (
+            existing_last_attempt_responded is None
+            or new_last_attempt_responded > existing_last_attempt_responded
+        )
+    ):
+        existing["last_attempt_responded"] = new_last_attempt_responded
+
+    new_last_attempt_tlv_detail_level = new.get(
+        "last_attempt_tlv_detail_level")
+    existing_last_attempt_tlv_detail_level = existing.get(
+        "last_attempt_tlv_detail_level")
+    if (
+        new_last_attempt_tlv_detail_level is not None
+        and (
+            existing_last_attempt_tlv_detail_level is None
+            or new_last_attempt_tlv_detail_level > existing_last_attempt_tlv_detail_level
+        )
+    ):
+        existing["last_attempt_tlv_detail_level"] = new_last_attempt_tlv_detail_level
 
     # tlv_values: take new if new is non-empty dict and existing is not empty and len new > len existing, else keep existing
     if new.get("tlv_values") and (not existing.get("tlv_values") or len(new.get("tlv_values", {})) > len(existing.get("tlv_values", {}))):
@@ -295,7 +317,7 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     # "role": (take new if new is non-empty and existing is empty) or (take new if new is "border router" and existing is "router", else keep existing)
     if (not existing.get("role") and new.get("role")) or (existing.get("role") == "router" and new.get("role") == "border router"):
         existing["role"] = new["role"]
-    
+
     # "leader": take new if new is non-empty and existing is empty, else keep existing
     if not existing.get("leader") and new.get("leader"):
         existing["leader"] = new["leader"]
@@ -354,6 +376,4 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     if not existing.get("vendor_sw_version") and new.get("vendor_sw_version"):
         existing["vendor_sw_version"] = new["vendor_sw_version"]
 
-
     return existing
-
