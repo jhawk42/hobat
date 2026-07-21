@@ -39,8 +39,7 @@ def test_field_normalization():
     assert get_canonical_field_name("extaddr") == "extaddr"
     assert get_canonical_field_name("extAddress") == "extaddr"
     assert get_canonical_field_name("Extended MAC") == "extaddr"
-    assert get_canonical_field_name("route_data") == "route_data"
-    assert get_canonical_field_name("route") == "route_data"
+    assert get_canonical_field_name("route") == "route"
     assert get_canonical_field_name("id_sequence") == "id_sequence"
     assert get_canonical_field_name("idSequence") == "id_sequence"
     
@@ -53,7 +52,7 @@ def test_field_normalization():
     normalized = normalize_field_names_in_record(record)
     assert "extaddr" in normalized
     assert "router_id" in normalized
-    assert "omr_ipv6_addr" in normalized
+    assert "omrIpv6Address" in normalized  # camelCase is the canonical form for this field
     # Original keys preserved
     assert "extAddress" in normalized
     assert "routerId" in normalized

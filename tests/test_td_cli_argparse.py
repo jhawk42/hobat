@@ -256,7 +256,8 @@ class TestDispatchOtbrCli(unittest.TestCase):
             rc = self._dispatch(
                 ["otbr-cli", "networkdiag", "fetch-all", "--children-no"]
             )
-        m.assert_called_once_with(["-cno"])
+        # CLI now expands with explicit fetch mode flags
+        m.assert_called_once_with(["-cno", "--children-fetch-fast", "--children-fetch-detail-no"])
         self.assertEqual(rc, 0)
 
     def test_router_table_none_return_keeps_compat_success(self):

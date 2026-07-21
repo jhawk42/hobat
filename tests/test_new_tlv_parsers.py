@@ -235,7 +235,7 @@ def test_example_file_7c00(results):
     """Test parsing against test_tlvs_7c00.txt example file."""
     print("\n--- Testing test_tlvs_7c00.txt ---")
     
-    file_path = os.path.join(os.path.dirname(__file__), '..', 'tests', 'test_tlvs_7c00.txt')
+    file_path = os.path.join(os.path.dirname(__file__), 'logs', 'test_tlvs_7c00.txt')
     if not os.path.exists(file_path):
         print(f"Warning: {file_path} not found, skipping")
         return
@@ -273,7 +273,7 @@ def test_example_file_6000(results):
     """Test parsing against test_tlvs_6000.txt example file (empty vendor fields)."""
     print("\n--- Testing test_tlvs_6000.txt ---")
     
-    file_path = os.path.join(os.path.dirname(__file__), '..', 'tests', 'test_tlvs_6000.txt')
+    file_path = os.path.join(os.path.dirname(__file__), 'logs', 'test_tlvs_6000.txt')
     if not os.path.exists(file_path):
         print(f"Warning: {file_path} not found, skipping")
         return
@@ -303,7 +303,7 @@ def test_multicast_integration(results):
     """Test parse_multicast_diag_output integration with new TLV fields."""
     print("\n--- Testing multicast integration ---")
     
-    file_path = os.path.join(os.path.dirname(__file__), '..', 'tests', 'test_tlvs_7c00.txt')
+    file_path = os.path.join(os.path.dirname(__file__), 'logs', 'test_tlvs_7c00.txt')
     if not os.path.exists(file_path):
         print(f"Warning: {file_path} not found, skipping")
         return
@@ -327,7 +327,7 @@ def test_multicast_integration(results):
     results.assert_in("vendor_name", device, "multicast_has_vendor_name")
     results.assert_in("vendor_model", device, "multicast_has_vendor_model")
     results.assert_in("vendor_sw_version", device, "multicast_has_vendor_sw_version")
-    results.assert_in("route_data", device, "multicast_has_route_data")
+    results.assert_in("route", device, "multicast_has_route")
     
     # Verify field values
     results.assert_equal(device.get("eui64"), "f434f0fffe1e1774", "multicast_eui64_value")

@@ -13,10 +13,10 @@ from otbr_cli_networkdiag_topology import _enrich_device_route_data_with_router_
 def test_route_enrichment_with_valid_data():
     """Test route enrichment with matching router table data."""
     
-    # Sample device record with route_data (matches actual structure)
+    # Sample device record with route (matches actual structure)
     device_record = {
         "rloc16": "0x5800",
-        "route_data": {
+        "route": {
             "id_sequence": 215,
             "route_data": [
                 {
@@ -67,7 +67,7 @@ def test_route_enrichment_with_valid_data():
     _enrich_device_route_data_with_router_info(device_record, router_table_by_router_id)
     
     # Verify routes were enriched
-    routes = device_record["route_data"]["route_data"]
+    routes = device_record["route"]["route_data"]
     
     assert len(routes) == 3, f"Expected 3 routes, got {len(routes)}"
     
@@ -90,7 +90,7 @@ def test_route_enrichment_with_missing_router():
     """Test route enrichment when router_id not found in router table."""
     
     device_record = {
-        "route_data": {
+        "route": {
             "id_sequence": 100,
             "route_data": [
                 {
@@ -108,7 +108,7 @@ def test_route_enrichment_with_missing_router():
     
     _enrich_device_route_data_with_router_info(device_record, router_table_by_router_id)
     
-    routes = device_record["route_data"]["route_data"]
+    routes = device_record["route"]["route_data"]
     assert routes[0]["rloc16"] == "Unknown", f"Expected 'Unknown', got '{routes[0].get('rloc16')}'"
     
     print("✓ Route enrichment handles missing router correctly (sets 'Unknown')")
@@ -118,7 +118,7 @@ def test_route_enrichment_with_none_router_table():
     """Test route enrichment gracefully handles None router table."""
     
     device_record = {
-        "route_data": {
+        "route": {
             "id_sequence": 100,
             "route_data": [
                 {"route_id": "0x03", "link_quality_out": 3}
@@ -130,17 +130,17 @@ def test_route_enrichment_with_none_router_table():
     _enrich_device_route_data_with_router_info(device_record, None)
     
     # Route should not have rloc16 added
-    routes = device_record["route_data"]["route_data"]
+    routes = device_record["route"]["route_data"]
     assert "rloc16" not in routes[0], "rloc16 should not be added when router_table is None"
     
     print("✓ Route enrichment handles None router_table gracefully")
 
 
 def test_route_enrichment_with_empty_route_data():
-    """Test route enrichment handles empty route_data gracefully."""
+    """Test route enrichment handles empty route gracefully."""
     
     device_record = {
-        "route_data": {}
+        "route": {}
     }
     
     router_table = {"0x03": {"rloc16": "0x0c00"}}
@@ -152,11 +152,11 @@ def test_route_enrichment_with_empty_route_data():
 
 
 def test_route_enrichment_with_no_route_data():
-    """Test route enrichment handles missing route_data field gracefully."""
+    """Test route enrichment handles missing route field gracefully."""
     
     device_record = {
         "rloc16": "0x5800"
-        # No route_data field
+        # No route field
     }
     
     router_table = {"0x03": {"rloc16": "0x0c00"}}
@@ -164,14 +164,14 @@ def test_route_enrichment_with_no_route_data():
     # Should not raise exception
     _enrich_device_route_data_with_router_info(device_record, router_table)
     
-    print("✓ Route enrichment handles missing route_data field gracefully")
+    print("✓ Route enrichment handles missing route field gracefully")
 
 
 def test_route_enrichment_preserves_existing_fields():
     """Test that enrichment doesn't overwrite existing route fields."""
     
     device_record = {
-        "route_data": {
+        "route": {
             "id_sequence": 215,
             "route_data": [
                 {
@@ -190,7 +190,7 @@ def test_route_enrichment_preserves_existing_fields():
     
     _enrich_device_route_data_with_router_info(device_record, router_table)
     
-    route = device_record["route_data"]["route_data"][0]
+    route = device_record["route"]["route_data"][0]
     
     # Verify original fields preserved
     assert route["route_id"] == "0x03"

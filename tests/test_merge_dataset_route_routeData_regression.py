@@ -34,9 +34,12 @@ def test_deep_merge_uses_route_routeData_from_real_networkdiag_row() -> None:
     base = deepcopy(base_row)
 
     # Incoming update uses canonical shape and includes one duplicate routeId + one new routeId.
+    # Must include idSequence >= base sequence or merge will discard incoming routes.
     duplicate_route_id = base["route"]["routeData"][0]["routeId"]
+    base_sequence = base["route"].get("idSequence", 0)
     incoming = {
         "route": {
+            "idSequence": base_sequence,  # Match base to enable route-level merge
             "routeData": [
                 {
                     "routeId": duplicate_route_id,
@@ -78,10 +81,13 @@ def test_build_merged_records_keeps_route_routeData_shape() -> None:
         "route": deepcopy(base_row.get("route", {})),
         "deviceLabel": base_row.get("deviceLabel"),
     }
+    # row_b must have idSequence >= row_a's sequence to enable route merge
+    base_sequence = row_a["route"].get("idSequence", 0)
     row_b = {
         "extAddress": base_row.get("extAddress"),
         "rloc16": base_row.get("rloc16"),
         "route": {
+            "idSequence": base_sequence,  # Match to enable route-level merge
             "routeData": [
                 {
                     "routeId": "0xfd",

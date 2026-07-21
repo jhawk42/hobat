@@ -65,7 +65,11 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
             rc = td_cli.dispatch(args, extras, parser)
 
         self.assertEqual(rc, 0)
-        module_main.assert_called_once_with(["--datadir", "/tmp/td-data", "-cno"])
+        # CLI now expands with explicit fetch mode flags
+        module_main.assert_called_once_with([
+            "--datadir", "/tmp/td-data", "-cno", 
+            "--children-fetch-fast", "--children-fetch-detail-no"
+        ])
 
     def test_webserver_main_accepts_datadir(self) -> None:
         with patch.object(

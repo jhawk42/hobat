@@ -44,14 +44,15 @@ def test_source_precedence_configuration():
     assert SOURCE_PRECEDENCE["td-otbr-restapi-diagnostics.json"] > SOURCE_PRECEDENCE["td-eve-topology.json"]
     assert SOURCE_PRECEDENCE["td-eve-topology.json"] > SOURCE_PRECEDENCE["td-mdns-scopes-br.json"]
     
-    # Check mDNS files added to defaults
+    # Check mDNS files added to defaults (only br and hap are enabled by default)
     assert "td-mdns-scopes-br.json" in DEFAULT_FULL_INPUT_FILES
-    assert "td-mdns-scopes-thread.json" in DEFAULT_FULL_INPUT_FILES
     assert "td-mdns-scopes-hap.json" in DEFAULT_FULL_INPUT_FILES
-    assert "td-mdns-scopes-matter.json" in DEFAULT_FULL_INPUT_FILES
+    # Note: thread and matter scopes are commented out in merge_dataset.py
+    # assert "td-mdns-scopes-thread.json" in DEFAULT_FULL_INPUT_FILES
+    # assert "td-mdns-scopes-matter.json" in DEFAULT_FULL_INPUT_FILES
     
     print(f"✅ PASS: Source precedence configured for {len(SOURCE_PRECEDENCE)} sources")
-    print(f"✅ PASS: All 4 mDNS files added to DEFAULT_FULL_INPUT_FILES")
+    print(f"✅ PASS: Enabled mDNS files (br, hap) added to DEFAULT_FULL_INPUT_FILES")
 
 
 def test_mdns_event_priority():
