@@ -54,6 +54,23 @@ let _topologyDatasetCounts = null;  // Counts derived from last topology render
 let _originalNodeStyling = null;  // Map<nodeId, {color, borderWidth, font}> — original styling for search restore
 let _onPhysicsDisabledCallback = null;  // Callback invoked when physics is auto-disabled after stabilization
 
+const MESH_COMPACT_LAYOUT = Object.freeze({
+  ftdBandOffset: 130,
+  ftdParentDistance: 230,
+  ftdSpreadScale: 0.3,
+  mtdBandOffset: 360,
+  mtdParentDistance: 400,
+  mtdSpreadScale: 0.22,
+  childLayerDistance: 82,
+  childClearance: 172,
+  routerClearance: 220,
+  ftdMaxParentDistance: 450,
+  mtdMaxParentDistance: 720,
+  ftdMinEdgeLength: 280,
+  mtdMinEdgeLength: 450,
+  finalClearanceIterations: 120,
+});
+
 // ── Exported accessors / setters ──────────────────────────────────────────────
 
 export function getVisNetwork() {
@@ -98,6 +115,73 @@ if (typeof window !== 'undefined') {
   window.tdashDebug.getMeshTreeZoningContext = function(nodeData, edgeData) {
     return _buildMeshTreeZoningContext(nodeData || [], edgeData || []);
   };
+  window.tdashDebug.getCompactChildSpacing = function() {
+    return getCompactChildSpacingReport();
+  };
+}
+
+export function getCompactChildSpacingReport() {
+  if (!_visNetwork || !_topologyNodeData) return [];
+
+  const nodeById = new Map(_topologyNodeData.map((node) => [node.id, node]));
+  const positions = _visNetwork.getPositions();
+  const candidatesByChildId = new Map();
+
+  _topologyNodeData.forEach((node) => {
+    if (node?.isRouter === true) return;
+    candidatesByChildId.set(node.id, new Map());
+  });
+
+  _visNetwork.body.data.edges.get().forEach((edge) => {
+    const fromNode = nodeById.get(edge.from);
+    const toNode = nodeById.get(edge.to);
+    const fromIsRouter = fromNode?.isRouter === true;
+    const toIsRouter = toNode?.isRouter === true;
+    if (fromIsRouter === toIsRouter) return;
+
+    const parentId = fromIsRouter ? fromNode.id : toNode.id;
+    const childId = fromIsRouter ? toNode.id : fromNode.id;
+    const weight = edge.isParentChild === true ? 2 : 1;
+    const candidates = candidatesByChildId.get(childId);
+    if (!candidates) return;
+    candidates.set(parentId, (candidates.get(parentId) || 0) + weight);
+  });
+
+  return Array.from(candidatesByChildId.entries())
+    .flatMap(([childId, candidates]) => {
+      const childPosition = positions[childId];
+      if (!childPosition || candidates.size === 0) return [];
+      const [parentId] = Array.from(candidates.entries())
+        .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))[0];
+      const parentPosition = positions[parentId];
+      if (!parentPosition) return [];
+
+      let nearestNonParentDistance = Infinity;
+      Object.entries(positions).forEach(([nodeId, position]) => {
+        if (nodeId === String(childId) || nodeId === String(parentId)) return;
+        nearestNonParentDistance = Math.min(
+          nearestNonParentDistance,
+          Math.hypot(position.x - childPosition.x, position.y - childPosition.y),
+        );
+      });
+
+      const childNode = nodeById.get(childId);
+      return [{
+        parentId,
+        childId,
+        childType: _meshTreeUpperText(childNode?.mode_device) === "FTD" ? "ftd" : "mtd",
+        parentDistance: Math.round(Math.hypot(
+          childPosition.x - parentPosition.x,
+          childPosition.y - parentPosition.y,
+        )),
+        nearestNonParentDistance: Number.isFinite(nearestNonParentDistance)
+          ? Math.round(nearestNonParentDistance)
+          : null,
+        x: Math.round(childPosition.x),
+        y: Math.round(childPosition.y),
+      }];
+    })
+    .sort((a, b) => a.parentDistance - b.parentDistance || String(a.childId).localeCompare(String(b.childId)));
 }
 
 function _meshTreeUpperText(value) {
@@ -1399,7 +1483,9 @@ function applyMeshLabHybridSeedLayout(nodeData, edgeData) {
         ? 0
         : (-spread / 2) + (spread * (idx / (childCount - 1)));
       const theta = outwardTheta + offset + jitterFromId(`${parent.id}|${child.id}|theta`, jitterAngle);
-      const distFromParent = distanceFromParentBase + (layer * 66) + jitterFromId(`${parent.id}|${child.id}|r`, jitterRadius);
+      const distFromParent = distanceFromParentBase
+        + (layer * MESH_COMPACT_LAYOUT.childLayerDistance)
+        + jitterFromId(`${parent.id}|${child.id}|r`, jitterRadius);
       let x = (parent.x || 0) + (distFromParent * Math.cos(theta));
       let y = (parent.y || 0) + (distFromParent * Math.sin(theta));
 
@@ -1432,17 +1518,17 @@ function applyMeshLabHybridSeedLayout(nodeData, edgeData) {
     });
 
     placeChildrenAroundParent(parent, mtdChildren, {
-      bandMinRadius: outerRadius + 360,
-      distanceFromParentBase: 400,
-      spreadScale: 0.22,
+      bandMinRadius: outerRadius + MESH_COMPACT_LAYOUT.mtdBandOffset,
+      distanceFromParentBase: MESH_COMPACT_LAYOUT.mtdParentDistance,
+      spreadScale: MESH_COMPACT_LAYOUT.mtdSpreadScale,
       jitterAngle: Math.PI / 11,
       jitterRadius: 20,
       pinChildren: true,
     });
     placeChildrenAroundParent(parent, ftdChildren, {
-      bandMinRadius: outerRadius + 70,
-      distanceFromParentBase: 150,
-      spreadScale: 0.28,
+      bandMinRadius: outerRadius + MESH_COMPACT_LAYOUT.ftdBandOffset,
+      distanceFromParentBase: MESH_COMPACT_LAYOUT.ftdParentDistance,
+      spreadScale: MESH_COMPACT_LAYOUT.ftdSpreadScale,
       jitterAngle: Math.PI / 10,
       jitterRadius: 26,
       pinChildren: true,
@@ -1472,7 +1558,9 @@ function applyMeshLabHybridSeedLayout(nodeData, edgeData) {
         const b = seededMovable[j];
         const aIsRouter = a.isRouter === true;
         const bIsRouter = b.isRouter === true;
-        const minSep = aIsRouter || bIsRouter ? 205 : 138;
+        const minSep = aIsRouter || bIsRouter
+          ? MESH_COMPACT_LAYOUT.routerClearance
+          : MESH_COMPACT_LAYOUT.childClearance;
         const dx = (b.x || 0) - (a.x || 0);
         const dy = (b.y || 0) - (a.y || 0);
         const dist = Math.hypot(dx, dy) || 0.01;
@@ -1496,7 +1584,9 @@ function applyMeshLabHybridSeedLayout(nodeData, edgeData) {
       const dx = (child.x || 0) - (parent.x || 0);
       const dy = (child.y || 0) - (parent.y || 0);
       const dist = Math.hypot(dx, dy) || 0.01;
-      const maxParentDist = 380;
+      const maxParentDist = childTypeById.get(childId) === "ftd"
+        ? MESH_COMPACT_LAYOUT.ftdMaxParentDistance
+        : MESH_COMPACT_LAYOUT.mtdMaxParentDistance;
       if (dist > maxParentDist) {
         const scale = maxParentDist / dist;
         child.x = Math.round((parent.x || 0) + dx * scale);
@@ -1505,7 +1595,9 @@ function applyMeshLabHybridSeedLayout(nodeData, edgeData) {
       }
 
       const childType = childTypeById.get(childId);
-      const minBandRadius = childType === "ftd" ? outerRadius + 60 : outerRadius + 340;
+      const minBandRadius = childType === "ftd"
+        ? outerRadius + MESH_COMPACT_LAYOUT.ftdBandOffset
+        : outerRadius + MESH_COMPACT_LAYOUT.mtdBandOffset;
       const childRadius = Math.hypot(child.x || 0, child.y || 0) || 0;
       if (childRadius < minBandRadius) {
         const scale = minBandRadius / Math.max(1, childRadius);
@@ -1515,6 +1607,33 @@ function applyMeshLabHybridSeedLayout(nodeData, edgeData) {
       }
     });
 
+    if (!moved) break;
+  }
+
+  // The parent-distance and radial-band clamps above can reduce the separation
+  // established in the first pass. Finish with child-only clearance so labels
+  // remain readable without moving the pinned router anchors.
+  const seededChildren = seededMovable.filter((node) => node.isRouter !== true);
+  for (let iter = 0; iter < MESH_COMPACT_LAYOUT.finalClearanceIterations; iter += 1) {
+    let moved = false;
+    for (let i = 0; i < seededChildren.length; i += 1) {
+      const a = seededChildren[i];
+      for (let j = i + 1; j < seededChildren.length; j += 1) {
+        const b = seededChildren[j];
+        const dx = (b.x || 0) - (a.x || 0);
+        const dy = (b.y || 0) - (a.y || 0);
+        const dist = Math.hypot(dx, dy) || 0.01;
+        if (dist >= MESH_COMPACT_LAYOUT.childClearance) continue;
+        const overlap = (MESH_COMPACT_LAYOUT.childClearance - dist) * 0.62;
+        const nx = dx / dist;
+        const ny = dy / dist;
+        a.x = Math.round((a.x || 0) - nx * overlap * 0.5);
+        a.y = Math.round((a.y || 0) - ny * overlap * 0.5);
+        b.x = Math.round((b.x || 0) + nx * overlap * 0.5);
+        b.y = Math.round((b.y || 0) + ny * overlap * 0.5);
+        moved = true;
+      }
+    }
     if (!moved) break;
   }
 
@@ -1680,9 +1799,16 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
 
       if (edge.isParentChild === true) {
         const childNode = fromIsRouter ? toNode : fromNode;
-        const childBandLength = isMeshTreeProfile
-          ? (isFtdChildNode(childNode) ? 170 : 250)
-          : (isFtdChildNode(childNode) ? 200 : 430);
+        let childBandLength;
+        if (isMeshTreeProfile) {
+          childBandLength = isFtdChildNode(childNode) ? 170 : 250;
+        } else if (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT) {
+          childBandLength = isFtdChildNode(childNode)
+            ? MESH_COMPACT_LAYOUT.ftdMinEdgeLength
+            : MESH_COMPACT_LAYOUT.mtdMinEdgeLength;
+        } else {
+          childBandLength = isFtdChildNode(childNode) ? 200 : 430;
+        }
         applyMinEdgeLength(edge, childBandLength);
         edge.physics = true;
         // Alternate curve direction to separate sibling parent-child edges.
