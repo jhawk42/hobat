@@ -97,6 +97,14 @@ const MESH_RING_LAYOUT = Object.freeze({
   routeEdgeOpacity: 0.16,
 });
 
+const MESH_HUB_SPOKE_LAYOUT = Object.freeze({
+  ftdMinEdgeLength: 300,
+  mtdMinEdgeLength: 460,
+  routerMinEdgeLength: 680,
+  routeEdgeWidth: 0.45,
+  routeEdgeOpacity: 0.16,
+});
+
 // ── Exported accessors / setters ──────────────────────────────────────────────
 
 export function getVisNetwork() {
@@ -1080,19 +1088,40 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
   // Build LQ3 router affinity graph.
   const lq3NeighborByRouter = new Map();
   routers.forEach((r) => lq3NeighborByRouter.set(r.id, new Set()));
+  const explicitChildCountByRouter = new Map(routers.map((r) => [r.id, 0]));
   visibleEdges.forEach((edge) => {
     const a = nodeById.get(edge.from);
     const b = nodeById.get(edge.to);
     if (!a || !b) return;
-    if (!routerIdSet.has(a.id) || !routerIdSet.has(b.id)) return;
-    if (edge.lqLevel !== 3) return;
+    const aIsRouter = routerIdSet.has(a.id);
+    const bIsRouter = routerIdSet.has(b.id);
+    if (aIsRouter !== bIsRouter) {
+      const categories = getEdgeCategories(edge);
+      const isExplicitChild =
+        edge.isParentChild === true ||
+        categories.includes(EDGE_CATEGORY_DEFAULT_CHILDREN) ||
+        categories.includes(EDGE_CATEGORY_OTBR_CHILD) ||
+        categories.includes(EDGE_CATEGORY_EVE_CHILD) ||
+        categories.includes(EDGE_CATEGORY_EVE_NATIVE_CHILD);
+      if (isExplicitChild) {
+        const routerId = aIsRouter ? a.id : b.id;
+        explicitChildCountByRouter.set(
+          routerId,
+          (explicitChildCountByRouter.get(routerId) || 0) + 1,
+        );
+      }
+      return;
+    }
+    if (!aIsRouter || edge.lqLevel !== 3) return;
     lq3NeighborByRouter.get(a.id).add(b.id);
     lq3NeighborByRouter.get(b.id).add(a.id);
   });
 
-  // Ring 1 order: greedy walk favoring LQ3-connected routers.
-  const unvisited = new Set(routers.map((r) => r.id));
-  const orderedRouterIds = [];
+  // Temporary layout experiment: use stable router ID order instead of LQ3 affinity.
+  // const unvisited = new Set(routers.map((r) => r.id));
+  // const orderedRouterIds = [];
+  const orderedRouterIds = routers.map((router) => router.id);
+  /*
   function degreeOf(routerId) {
     return lq3NeighborByRouter.get(routerId)?.size || 0;
   }
@@ -1121,6 +1150,29 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
       current = next;
     }
   }
+  */
+
+  const affinityOrderIndex = new Map(orderedRouterIds.map((routerId, index) => [routerId, index]));
+  const routersByChildCount = orderedRouterIds
+    .slice()
+    .sort((a, b) => {
+      const childCountDiff = (explicitChildCountByRouter.get(b) || 0)
+        - (explicitChildCountByRouter.get(a) || 0);
+      if (childCountDiff !== 0) return childCountDiff;
+      return affinityOrderIndex.get(a) - affinityOrderIndex.get(b);
+    });
+  const interleavedRouterIds = [];
+  let highIndex = 0;
+  let lowIndex = routersByChildCount.length - 1;
+  while (highIndex <= lowIndex) {
+    interleavedRouterIds.push(routersByChildCount[highIndex]);
+    highIndex += 1;
+    if (highIndex <= lowIndex) {
+      interleavedRouterIds.push(routersByChildCount[lowIndex]);
+      lowIndex -= 1;
+    }
+  }
+  orderedRouterIds.splice(0, orderedRouterIds.length, ...interleavedRouterIds);
 
   // Use variable angular gaps: LQ3-adjacent routers get tighter spacing,
   // but keep a modest minimum gap so dense clusters stay readable.
@@ -1580,7 +1632,28 @@ function applyMeshLabHybridSeedLayout(nodeData, edgeData) {
     return ordered;
   }
 
-  const orderedOuterRouterIds = orderRoutersByGreedyAffinity(routersWithChildren.length > 0 ? routersWithChildren : routers);
+  const outerRouters = routersWithChildren.length > 0 ? routersWithChildren : routers;
+  // Temporary layout experiment: use stable router ID order instead of LQ3 affinity.
+  // const orderedOuterRouterIds = orderRoutersByGreedyAffinity(outerRouters);
+  const outerRoutersByChildCount = outerRouters
+    .slice()
+    .sort((a, b) => {
+      const childCountDiff = (parentToChildren.get(b.id)?.length || 0)
+        - (parentToChildren.get(a.id)?.length || 0);
+      if (childCountDiff !== 0) return childCountDiff;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  const orderedOuterRouterIds = [];
+  let highIndex = 0;
+  let lowIndex = outerRoutersByChildCount.length - 1;
+  while (highIndex <= lowIndex) {
+    orderedOuterRouterIds.push(outerRoutersByChildCount[highIndex].id);
+    highIndex += 1;
+    if (highIndex <= lowIndex) {
+      orderedOuterRouterIds.push(outerRoutersByChildCount[lowIndex].id);
+      lowIndex -= 1;
+    }
+  }
   const outerCount = orderedOuterRouterIds.length;
   const innerCount = routersWithoutChildren.length;
   const outerRadius = Math.max(560, outerCount * 68);
@@ -2016,26 +2089,60 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
 
   if (physicsProfileName === PHYSICS_PROFILE_MESH_BALANCED) {
     const nodeById = new Map(nodeData.map((n) => [n.id, n]));
+    const isFtdChildNode = (node) => toText(node?.mode_device).toUpperCase() === "FTD";
     edgeData.forEach((edge) => {
       if (edge.baseHidden === true) return;
       const fromNode = nodeById.get(edge.from);
       const toNode = nodeById.get(edge.to);
-      if (fromNode?.isRouter !== true || toNode?.isRouter !== true) return;
+      const fromIsRouter = fromNode?.isRouter === true;
+      const toIsRouter = toNode?.isRouter === true;
+      const routerToChildLike = (fromIsRouter && !toIsRouter) || (!fromIsRouter && toIsRouter);
+      const applyMinEdgeLength = (minLength) => {
+        edge.length = Number.isFinite(edge.length)
+          ? Math.max(edge.length, minLength)
+          : minLength;
+      };
+
+      if (edge.isParentChild === true && routerToChildLike) {
+        const childNode = fromIsRouter ? toNode : fromNode;
+        applyMinEdgeLength(
+          isFtdChildNode(childNode)
+            ? MESH_HUB_SPOKE_LAYOUT.ftdMinEdgeLength
+            : MESH_HUB_SPOKE_LAYOUT.mtdMinEdgeLength,
+        );
+        edge.physics = true;
+        return;
+      }
+
+      if (routerToChildLike) {
+        const categories = normalizeLinkCategories(edge.linkCategories);
+        if (categories.includes(EDGE_CATEGORY_OTBR_ROUTE)) {
+          const color = typeof edge.color === "string" ? edge.color : undefined;
+          edge.color = { color, opacity: MESH_HUB_SPOKE_LAYOUT.routeEdgeOpacity };
+          edge.width = Math.min(Number(edge.width) || 1.5, MESH_HUB_SPOKE_LAYOUT.routeEdgeWidth);
+          edge.dashes = [2, 8];
+        }
+        edge.physics = false;
+        return;
+      }
+
+      if (!fromIsRouter || !toIsRouter) return;
 
       // Hub Spoke: keep border-router links longer so BRs do not collapse into
       // the central router mass during stabilization.
       const touchesBorderRouter =
         fromNode?.isBorderRouter === true || toNode?.isBorderRouter === true;
-      if (!touchesBorderRouter) return;
+      if (!touchesBorderRouter) {
+        applyMinEdgeLength(MESH_HUB_SPOKE_LAYOUT.routerMinEdgeLength);
+        return;
+      }
 
       const bothBorderRouters =
         fromNode?.isBorderRouter === true && toNode?.isBorderRouter === true;
 
       const minBorderRouterLength = bothBorderRouters ? 1345 : 1097;
 
-      edge.length = Number.isFinite(edge.length)
-        ? Math.max(edge.length, minBorderRouterLength)
-        : minBorderRouterLength;
+      applyMinEdgeLength(minBorderRouterLength);
     });
   }
 

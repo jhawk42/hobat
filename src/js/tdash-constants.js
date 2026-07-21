@@ -1098,7 +1098,7 @@ export const PHYSICS_PROFILES = Object.freeze({
       springLength: 360,
       springConstant: 0.011,
       damping: 0.25,
-      avoidOverlap: 1.5,
+      avoidOverlap: 1.7,
     }),
     stabilization: Object.freeze({ enabled: true, iterations: 1700, updateInterval: 25 }),
   }),
