@@ -678,7 +678,7 @@ function _appendGrouped(entries, listEl) {
 
 // Sets up collapsible section headings and a global collapse/expand-all control
 // for the given panel element. Call once after the DOM is ready.
-export function initDetailPanelToggles(panelEl) {
+export function initDetailPanelToggles(panelEl, onPanelVisibilityChanged) {
   const headings = Array.from(panelEl.querySelectorAll("h2"));
   const panelViewEl = panelEl.closest("#panel-view");
   const panelToggleBtn = document.getElementById("btn-details-panel-toggle");
@@ -700,6 +700,7 @@ export function initDetailPanelToggles(panelEl) {
     panelViewEl?.classList.toggle("details-panel-collapsed", isPanelCollapsed);
     panelEl.classList.toggle("details-panel-collapsed", isPanelCollapsed);
     syncPanelToggleButton(panelToggleBtn, isPanelCollapsed);
+    onPanelVisibilityChanged?.(isPanelCollapsed);
   });
 
   headings.forEach((h2, idx) => {

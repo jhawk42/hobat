@@ -603,7 +603,11 @@ document.getElementById("view-status-line-content").textContent =
   `Showing: no dataset loaded. Select a dataset and click Sync. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
 
 bindDeviceDetailsSectionFields();
-initDetailPanelToggles(document.getElementById("device-details"));
+initDetailPanelToggles(document.getElementById("device-details"), () => {
+  requestAnimationFrame(() => {
+    getVisNetwork()?.fit({ animation: { duration: 220, easingFunction: "easeInOutQuad" } });
+  });
+});
 
 // Cache checkbox helper: make checkboxes mutually exclusive
 function updateCacheCheckboxes(changedCheckbox) {

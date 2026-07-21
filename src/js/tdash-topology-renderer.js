@@ -10,6 +10,7 @@ import {
   EDGE_CATEGORY_ROUTER_NEIGHBOR,
   EDGE_CATEGORY_DEFAULT_CHILDREN,
   EDGE_CATEGORY_OTBR_CHILD,
+  EDGE_CATEGORY_OTBR_ROUTE,
   EDGE_CATEGORY_EVE_CHILD,
   EDGE_CATEGORY_EVE_NATIVE_CHILD,
 } from "./tdash-constants.js";
@@ -54,6 +55,17 @@ let _topologyDatasetCounts = null;  // Counts derived from last topology render
 let _originalNodeStyling = null;  // Map<nodeId, {color, borderWidth, font}> — original styling for search restore
 let _onPhysicsDisabledCallback = null;  // Callback invoked when physics is auto-disabled after stabilization
 
+const TREE_ZONE = Object.freeze({
+  borderRouterChildren: 40,
+  borderRouterFtds: 30,
+  borderRouters: 10,
+  buffer: 0,
+  nonBorderRouters: -20,
+  nonBorderRouterFtds: -30,
+  nonBorderRouterChildren: -40,
+  fallback: -50,
+});
+
 const MESH_COMPACT_LAYOUT = Object.freeze({
   ftdBandOffset: 130,
   ftdParentDistance: 230,
@@ -69,6 +81,20 @@ const MESH_COMPACT_LAYOUT = Object.freeze({
   ftdMinEdgeLength: 280,
   mtdMinEdgeLength: 450,
   finalClearanceIterations: 120,
+});
+
+const MESH_RING_LAYOUT = Object.freeze({
+  ftdBandOffset: 220,
+  mtdBandOffset: 360,
+  ftdParentDistance: 240,
+  mtdParentDistance: 330,
+  childLayerDistance: 82,
+  childClearance: 172,
+  ftdParentClearance: 220,
+  mtdParentClearance: 290,
+  clearanceIterations: 120,
+  routeEdgeWidth: 0.45,
+  routeEdgeOpacity: 0.16,
 });
 
 // ── Exported accessors / setters ──────────────────────────────────────────────
@@ -359,13 +385,9 @@ function _buildMeshTreeZoningContext(nodeData, edgeData) {
   }
 
   const zoneByNodeId = new Map();
-  const zoneNodeIds = new Map([
-    [1, []],
-    [2, []],
-    [3, []],
-    [4, []],
-    [5, []],
-  ]);
+  const zoneNodeIds = new Map(
+    Object.values(TREE_ZONE).map((zone) => [zone, []]),
+  );
 
   nodeById.forEach((node, nodeId) => {
     const isBorderRouter = node.isBorderRouter === true;
@@ -373,18 +395,22 @@ function _buildMeshTreeZoningContext(nodeData, edgeData) {
     const isFtd = isFtdChildNode(node);
     const childCandidate = isChildRoleCandidate(node, nodeId);
     const hasParentChildLink = childHasParentChildLink.has(nodeId);
+    const parentNode = nodeById.get(parentByChild.get(nodeId));
+    const parentIsBorderRouter = parentNode?.isBorderRouter === true;
 
-    let zone = 5;
+    let zone = TREE_ZONE.fallback;
     if (isBorderRouter) {
-      zone = 1;
+      zone = TREE_ZONE.borderRouters;
     } else if (isRouter) {
-      zone = 2;
-    } else if (isFtd && childCandidate) {
-      zone = 3;
-    } else if (childCandidate && !isBorderRouter && !isRouter && !isFtd && hasParentChildLink) {
-      zone = 4;
-    } else if (childCandidate && !isBorderRouter && !isRouter && !isFtd && !hasParentChildLink) {
-      zone = 5;
+      zone = TREE_ZONE.nonBorderRouters;
+    } else if (isFtd && childCandidate && parentNode) {
+      zone = parentIsBorderRouter
+        ? TREE_ZONE.borderRouterFtds
+        : TREE_ZONE.nonBorderRouterFtds;
+    } else if (childCandidate && !isFtd && hasParentChildLink && parentNode) {
+      zone = parentIsBorderRouter
+        ? TREE_ZONE.borderRouterChildren
+        : TREE_ZONE.nonBorderRouterChildren;
     }
 
     zoneByNodeId.set(nodeId, zone);
@@ -393,11 +419,14 @@ function _buildMeshTreeZoningContext(nodeData, edgeData) {
 
   const zoneJitterByNodeId = new Map();
   const zones = Object.freeze({
-    zone1: _meshTreeSortedIds(zoneNodeIds.get(1)),
-    zone2: _meshTreeSortedIds(zoneNodeIds.get(2)),
-    zone3: _meshTreeSortedIds(zoneNodeIds.get(3)),
-    zone4: _meshTreeSortedIds(zoneNodeIds.get(4)),
-    zone5: _meshTreeSortedIds(zoneNodeIds.get(5)),
+    zone40: _meshTreeSortedIds(zoneNodeIds.get(TREE_ZONE.borderRouterChildren)),
+    zone30: _meshTreeSortedIds(zoneNodeIds.get(TREE_ZONE.borderRouterFtds)),
+    zone10: _meshTreeSortedIds(zoneNodeIds.get(TREE_ZONE.borderRouters)),
+    zone0: _meshTreeSortedIds(zoneNodeIds.get(TREE_ZONE.buffer)),
+    zoneMinus20: _meshTreeSortedIds(zoneNodeIds.get(TREE_ZONE.nonBorderRouters)),
+    zoneMinus30: _meshTreeSortedIds(zoneNodeIds.get(TREE_ZONE.nonBorderRouterFtds)),
+    zoneMinus40: _meshTreeSortedIds(zoneNodeIds.get(TREE_ZONE.nonBorderRouterChildren)),
+    zoneMinus50: _meshTreeSortedIds(zoneNodeIds.get(TREE_ZONE.fallback)),
   });
 
   Object.values(zones).forEach((zoneIds) => {
@@ -428,13 +457,25 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
   if (!zoning || zoning.totalNodesClassified === 0) return;
 
   const { nodeById, zones, parentByChild, childrenByParent, zoneByNodeId } = zoning;
-  const zoneOrder = [1, 2, 3, 4, 5];
+  const zoneOrder = [
+    TREE_ZONE.borderRouterChildren,
+    TREE_ZONE.borderRouterFtds,
+    TREE_ZONE.borderRouters,
+    TREE_ZONE.buffer,
+    TREE_ZONE.nonBorderRouters,
+    TREE_ZONE.nonBorderRouterFtds,
+    TREE_ZONE.nonBorderRouterChildren,
+    TREE_ZONE.fallback,
+  ];
   const zoneIdsByIndex = {
-    1: zones.zone1,
-    2: zones.zone2,
-    3: zones.zone3,
-    4: zones.zone4,
-    5: zones.zone5,
+    [TREE_ZONE.borderRouterChildren]: zones.zone40,
+    [TREE_ZONE.borderRouterFtds]: zones.zone30,
+    [TREE_ZONE.borderRouters]: zones.zone10,
+    [TREE_ZONE.buffer]: zones.zone0,
+    [TREE_ZONE.nonBorderRouters]: zones.zoneMinus20,
+    [TREE_ZONE.nonBorderRouterFtds]: zones.zoneMinus30,
+    [TREE_ZONE.nonBorderRouterChildren]: zones.zoneMinus40,
+    [TREE_ZONE.fallback]: zones.zoneMinus50,
   };
 
   const allZoneIds = zoneOrder.flatMap((z) => zoneIdsByIndex[z]);
@@ -442,18 +483,23 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
   const baseHalfSpanY = Math.max(780, Math.round(maxZoneCount * 86));
 
   const zoneXAnchors = {
-    1: -2400,
-    2: -1800,
-    3: -1500,
-    4: -1200,
-    5: -480,
+    [TREE_ZONE.borderRouterChildren]: -1125,
+    [TREE_ZONE.borderRouterFtds]: -900,
+    [TREE_ZONE.borderRouters]: -450,
+    [TREE_ZONE.buffer]: 0,
+    [TREE_ZONE.nonBorderRouters]: 150,
+    [TREE_ZONE.nonBorderRouterFtds]: 600,
+    [TREE_ZONE.nonBorderRouterChildren]: 825,
+    [TREE_ZONE.fallback]: 1750,
   };
   const zoneYSpacing = {
-    1: 120,
-    2: 154,
-    3: 72,
-    4: 82,
-    5: 110,
+    [TREE_ZONE.borderRouterChildren]: 82,
+    [TREE_ZONE.borderRouterFtds]: 72,
+    [TREE_ZONE.borderRouters]: 120,
+    [TREE_ZONE.nonBorderRouters]: 154,
+    [TREE_ZONE.nonBorderRouterFtds]: 72,
+    [TREE_ZONE.nonBorderRouterChildren]: 82,
+    [TREE_ZONE.fallback]: 110,
   };
 
   function placeNode(node, x, y, policy) {
@@ -480,30 +526,38 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
     sortedIds.forEach((nodeId, idx) => {
       const node = nodeById.get(nodeId);
       const jitter = _meshTreeJitterById(nodeId, 1);
-      const yJitter = zoneNum === 1 || zoneNum === 2 ? 10 : 14;
+      const isRouterZone =
+        zoneNum === TREE_ZONE.borderRouters || zoneNum === TREE_ZONE.nonBorderRouters;
+      const yJitter = isRouterZone ? 10 : 14;
       const y = clampY((idx - center) * ySpacing + jitter * yJitter);
       const x = xAnchor + jitter * 18;
-      const isZone3or4 = zoneNum === 3 || zoneNum === 4;
+      const isChildZone =
+        zoneNum === TREE_ZONE.borderRouterChildren ||
+        zoneNum === TREE_ZONE.borderRouterFtds ||
+        zoneNum === TREE_ZONE.nonBorderRouterFtds ||
+        zoneNum === TREE_ZONE.nonBorderRouterChildren;
       placeNode(node, x, y, {
         fixX: true,
-        fixY: !isZone3or4,
-        physics: isZone3or4,
+        fixY: !isChildZone,
+        physics: isChildZone,
       });
     });
   }
 
-  // 1) Strict band placement for zones 1, 2, 5.
-  distributeByIndex(zoneIdsByIndex[1], 1);
-  distributeByIndex(zoneIdsByIndex[2], 2);
-  distributeByIndex(zoneIdsByIndex[5], 5);
+  // 1) Strict band placement for router and fallback zones.
+  distributeByIndex(zoneIdsByIndex[TREE_ZONE.borderRouters], TREE_ZONE.borderRouters);
+  distributeByIndex(zoneIdsByIndex[TREE_ZONE.nonBorderRouters], TREE_ZONE.nonBorderRouters);
+  distributeByIndex(zoneIdsByIndex[TREE_ZONE.fallback], TREE_ZONE.fallback);
 
   // Enforce extra spacing for border routers and parent routers so child clusters
   // inherit cleaner separation around their anchors.
-  const borderRouterIds = _meshTreeSortedIds(new Set(zoneIdsByIndex[1]));
+  const borderRouterIds = _meshTreeSortedIds(
+    new Set(zoneIdsByIndex[TREE_ZONE.borderRouters]),
+  );
   const parentRouterIds = _meshTreeSortedIds(
     new Set(
       Array.from(childrenByParent.keys()).filter(
-        (nodeId) => zoneByNodeId.get(nodeId) === 2,
+        (nodeId) => zoneByNodeId.get(nodeId) === TREE_ZONE.nonBorderRouters,
       ),
     ),
   );
@@ -558,7 +612,7 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
   centerSpecificNodeY(borderRouterIds);
   relaxSpecificNodeY(parentRouterIds, 158);
 
-  // 2) Parent-affinity placement for zones 3 and 4 around the parent Y-axis.
+  // 2) Parent-affinity placement for child bands around the parent Y-axis.
   function placeChildZoneWithParentAffinity(zoneNum) {
     const zoneIds = zoneIdsByIndex[zoneNum];
     const xAnchor = zoneXAnchors[zoneNum];
@@ -588,7 +642,10 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
       const parentY = Number(parentNode?.y) || 0;
       const childIds = _meshTreeSortedIds(parentToChildren.get(parentId) || []);
       const center = (childIds.length - 1) / 2;
-      const localSpacing = zoneNum === 3 ? 66 : 76;
+      const localSpacing =
+        zoneNum === TREE_ZONE.borderRouterFtds || zoneNum === TREE_ZONE.nonBorderRouterFtds
+          ? 66
+          : 76;
       childIds.forEach((childId, idx) => {
         const childNode = nodeById.get(childId);
         const jitter = _meshTreeJitterById(`${parentId}|${childId}`, 1);
@@ -610,8 +667,10 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
     });
   }
 
-  placeChildZoneWithParentAffinity(3);
-  placeChildZoneWithParentAffinity(4);
+  placeChildZoneWithParentAffinity(TREE_ZONE.borderRouterChildren);
+  placeChildZoneWithParentAffinity(TREE_ZONE.borderRouterFtds);
+  placeChildZoneWithParentAffinity(TREE_ZONE.nonBorderRouterFtds);
+  placeChildZoneWithParentAffinity(TREE_ZONE.nonBorderRouterChildren);
 
   // 3) Per-zone monotonic spacing pass to reduce immediate overlaps while
   // preserving clear x-band separation and parent-relative ordering.
@@ -647,8 +706,13 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
       }
     }
 
-    // Prevent single child-node tails in zones 3/4 from drifting too far.
-    if (zoneNum === 3 || zoneNum === 4) {
+    // Prevent single child-node tails from drifting too far within their band.
+    if (
+      zoneNum === TREE_ZONE.borderRouterChildren ||
+      zoneNum === TREE_ZONE.borderRouterFtds ||
+      zoneNum === TREE_ZONE.nonBorderRouterFtds ||
+      zoneNum === TREE_ZONE.nonBorderRouterChildren
+    ) {
       const sortedY = nodes
         .map((node) => Number(node.y) || 0)
         .sort((a, b) => a - b);
@@ -668,12 +732,13 @@ function applyMeshTreeHorizontalSeedLayout(nodeData, edgeData) {
     });
   }
 
-  relaxZoneYSpacing(1, 108);
-  relaxZoneYSpacing(2, 132);
-  // Keep child clusters compact in zones 3/4; larger global gaps can create tails.
-  relaxZoneYSpacing(3, 24);
-  relaxZoneYSpacing(4, 28);
-  relaxZoneYSpacing(5, 88);
+  relaxZoneYSpacing(TREE_ZONE.borderRouters, 108);
+  relaxZoneYSpacing(TREE_ZONE.nonBorderRouters, 132);
+  relaxZoneYSpacing(TREE_ZONE.borderRouterChildren, 28);
+  relaxZoneYSpacing(TREE_ZONE.borderRouterFtds, 24);
+  relaxZoneYSpacing(TREE_ZONE.nonBorderRouterFtds, 24);
+  relaxZoneYSpacing(TREE_ZONE.nonBorderRouterChildren, 28);
+  relaxZoneYSpacing(TREE_ZONE.fallback, 88);
 }
 
 function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
@@ -681,13 +746,25 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
   if (!zoning || zoning.totalNodesClassified === 0) return;
 
   const { nodeById, zones, parentByChild, childrenByParent, zoneByNodeId } = zoning;
-  const zoneOrder = [1, 2, 3, 4, 5];
+  const zoneOrder = [
+    TREE_ZONE.borderRouterChildren,
+    TREE_ZONE.borderRouterFtds,
+    TREE_ZONE.borderRouters,
+    TREE_ZONE.buffer,
+    TREE_ZONE.nonBorderRouters,
+    TREE_ZONE.nonBorderRouterFtds,
+    TREE_ZONE.nonBorderRouterChildren,
+    TREE_ZONE.fallback,
+  ];
   const zoneIdsByIndex = {
-    1: zones.zone1,
-    2: zones.zone2,
-    3: zones.zone3,
-    4: zones.zone4,
-    5: zones.zone5,
+    [TREE_ZONE.borderRouterChildren]: zones.zone40,
+    [TREE_ZONE.borderRouterFtds]: zones.zone30,
+    [TREE_ZONE.borderRouters]: zones.zone10,
+    [TREE_ZONE.buffer]: zones.zone0,
+    [TREE_ZONE.nonBorderRouters]: zones.zoneMinus20,
+    [TREE_ZONE.nonBorderRouterFtds]: zones.zoneMinus30,
+    [TREE_ZONE.nonBorderRouterChildren]: zones.zoneMinus40,
+    [TREE_ZONE.fallback]: zones.zoneMinus50,
   };
 
   const allZoneIds = zoneOrder.flatMap((z) => zoneIdsByIndex[z]);
@@ -695,18 +772,23 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
   const baseHalfSpanX = Math.max(780, Math.round(maxZoneCount * 86));
 
   const zoneYAnchors = {
-    1: -2400,
-    2: -1800,
-    3: -1500,
-    4: -1200,
-    5: -480,
+    [TREE_ZONE.borderRouterChildren]: -1125,
+    [TREE_ZONE.borderRouterFtds]: -900,
+    [TREE_ZONE.borderRouters]: -450,
+    [TREE_ZONE.buffer]: 0,
+    [TREE_ZONE.nonBorderRouters]: 150,
+    [TREE_ZONE.nonBorderRouterFtds]: 600,
+    [TREE_ZONE.nonBorderRouterChildren]: 825,
+    [TREE_ZONE.fallback]: 1750,
   };
   const zoneXSpacing = {
-    1: 120,
-    2: 154,
-    3: 72,
-    4: 82,
-    5: 110,
+    [TREE_ZONE.borderRouterChildren]: 82,
+    [TREE_ZONE.borderRouterFtds]: 72,
+    [TREE_ZONE.borderRouters]: 120,
+    [TREE_ZONE.nonBorderRouters]: 154,
+    [TREE_ZONE.nonBorderRouterFtds]: 72,
+    [TREE_ZONE.nonBorderRouterChildren]: 82,
+    [TREE_ZONE.fallback]: 110,
   };
 
   function placeNode(node, x, y, policy) {
@@ -733,28 +815,36 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
     sortedIds.forEach((nodeId, idx) => {
       const node = nodeById.get(nodeId);
       const jitter = _meshTreeJitterById(nodeId, 1);
-      const xJitter = zoneNum === 1 || zoneNum === 2 ? 10 : 14;
+      const isRouterZone =
+        zoneNum === TREE_ZONE.borderRouters || zoneNum === TREE_ZONE.nonBorderRouters;
+      const xJitter = isRouterZone ? 10 : 14;
       const x = clampX((idx - center) * xSpacing + jitter * xJitter);
       const y = yAnchor + jitter * 18;
-      const isZone3or4 = zoneNum === 3 || zoneNum === 4;
+      const isChildZone =
+        zoneNum === TREE_ZONE.borderRouterChildren ||
+        zoneNum === TREE_ZONE.borderRouterFtds ||
+        zoneNum === TREE_ZONE.nonBorderRouterFtds ||
+        zoneNum === TREE_ZONE.nonBorderRouterChildren;
       placeNode(node, x, y, {
-        fixX: !isZone3or4,
+        fixX: !isChildZone,
         fixY: true,
-        physics: isZone3or4,
+        physics: isChildZone,
       });
     });
   }
 
-  // 1) Strict band placement for zones 1, 2, 5.
-  distributeByIndex(zoneIdsByIndex[1], 1);
-  distributeByIndex(zoneIdsByIndex[2], 2);
-  distributeByIndex(zoneIdsByIndex[5], 5);
+  // 1) Strict band placement for router and fallback zones.
+  distributeByIndex(zoneIdsByIndex[TREE_ZONE.borderRouters], TREE_ZONE.borderRouters);
+  distributeByIndex(zoneIdsByIndex[TREE_ZONE.nonBorderRouters], TREE_ZONE.nonBorderRouters);
+  distributeByIndex(zoneIdsByIndex[TREE_ZONE.fallback], TREE_ZONE.fallback);
 
-  const borderRouterIds = _meshTreeSortedIds(new Set(zoneIdsByIndex[1]));
+  const borderRouterIds = _meshTreeSortedIds(
+    new Set(zoneIdsByIndex[TREE_ZONE.borderRouters]),
+  );
   const parentRouterIds = _meshTreeSortedIds(
     new Set(
       Array.from(childrenByParent.keys()).filter(
-        (nodeId) => zoneByNodeId.get(nodeId) === 2,
+        (nodeId) => zoneByNodeId.get(nodeId) === TREE_ZONE.nonBorderRouters,
       ),
     ),
   );
@@ -809,7 +899,7 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
   centerSpecificNodeX(borderRouterIds);
   relaxSpecificNodeX(parentRouterIds, 158);
 
-  // 2) Parent-affinity placement for zones 3 and 4 around the parent X-axis.
+  // 2) Parent-affinity placement for child bands around the parent X-axis.
   function placeChildZoneWithParentAffinity(zoneNum) {
     const zoneIds = zoneIdsByIndex[zoneNum];
     const yAnchor = zoneYAnchors[zoneNum];
@@ -839,7 +929,10 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
       const parentX = Number(parentNode?.x) || 0;
       const childIds = _meshTreeSortedIds(parentToChildren.get(parentId) || []);
       const center = (childIds.length - 1) / 2;
-      const localSpacing = zoneNum === 3 ? 66 : 76;
+      const localSpacing =
+        zoneNum === TREE_ZONE.borderRouterFtds || zoneNum === TREE_ZONE.nonBorderRouterFtds
+          ? 66
+          : 76;
       childIds.forEach((childId, idx) => {
         const childNode = nodeById.get(childId);
         const jitter = _meshTreeJitterById(`${parentId}|${childId}`, 1);
@@ -861,8 +954,10 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
     });
   }
 
-  placeChildZoneWithParentAffinity(3);
-  placeChildZoneWithParentAffinity(4);
+  placeChildZoneWithParentAffinity(TREE_ZONE.borderRouterChildren);
+  placeChildZoneWithParentAffinity(TREE_ZONE.borderRouterFtds);
+  placeChildZoneWithParentAffinity(TREE_ZONE.nonBorderRouterFtds);
+  placeChildZoneWithParentAffinity(TREE_ZONE.nonBorderRouterChildren);
 
   // 3) Per-zone monotonic spacing pass to reduce immediate overlaps while
   // preserving clear y-band separation and parent-relative ordering.
@@ -898,8 +993,13 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
       }
     }
 
-    // Prevent single child-node tails in zones 3/4 from drifting too far.
-    if (zoneNum === 3 || zoneNum === 4) {
+    // Prevent single child-node tails from drifting too far within their band.
+    if (
+      zoneNum === TREE_ZONE.borderRouterChildren ||
+      zoneNum === TREE_ZONE.borderRouterFtds ||
+      zoneNum === TREE_ZONE.nonBorderRouterFtds ||
+      zoneNum === TREE_ZONE.nonBorderRouterChildren
+    ) {
       const sortedX = nodes
         .map((node) => Number(node.x) || 0)
         .sort((a, b) => a - b);
@@ -919,12 +1019,13 @@ function applyMeshTreeVerticalSeedLayout(nodeData, edgeData) {
     });
   }
 
-  relaxZoneXSpacing(1, 108);
-  relaxZoneXSpacing(2, 132);
-  // Keep child clusters compact in zones 3/4; larger global gaps can create tails.
-  relaxZoneXSpacing(3, 24);
-  relaxZoneXSpacing(4, 28);
-  relaxZoneXSpacing(5, 88);
+  relaxZoneXSpacing(TREE_ZONE.borderRouters, 108);
+  relaxZoneXSpacing(TREE_ZONE.nonBorderRouters, 132);
+  relaxZoneXSpacing(TREE_ZONE.borderRouterChildren, 28);
+  relaxZoneXSpacing(TREE_ZONE.borderRouterFtds, 24);
+  relaxZoneXSpacing(TREE_ZONE.nonBorderRouterFtds, 24);
+  relaxZoneXSpacing(TREE_ZONE.nonBorderRouterChildren, 28);
+  relaxZoneXSpacing(TREE_ZONE.fallback, 88);
 }
 
 function applyRingStarSeedLayout(nodeData, edgeData) {
@@ -972,8 +1073,8 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
   const routerById = new Map(routers.map((r) => [r.id, r]));
 
   // Four explicit rings from center.
-  const ring2MinRadius = routerRingRadius + 170;  // FTD children (pushed farther from parents)
-  const ring3MinRadius = routerRingRadius + 300;  // non-FTD children linked to routers
+  const ring2MinRadius = routerRingRadius + MESH_RING_LAYOUT.ftdBandOffset;
+  const ring3MinRadius = routerRingRadius + MESH_RING_LAYOUT.mtdBandOffset;
   const ring4Radius = routerRingRadius + 570;     // unconnected nodes (pushed farther out)
 
   // Build LQ3 router affinity graph.
@@ -1144,7 +1245,9 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
         : (-spread / 2) + (spread * (idx / (childCount - 1)));
       const layer = Math.floor(idx / 3);
       const theta = parentAngle + localOffset + jitterFromId(`${parent.id}|${childId}|theta`, Math.PI / 9);
-      const parentDist = distanceFromParentBase + (layer * 56) + jitterFromId(`${parent.id}|${childId}|radius`, 34);
+      const parentDist = distanceFromParentBase
+        + (layer * MESH_RING_LAYOUT.childLayerDistance)
+        + jitterFromId(`${parent.id}|${childId}|radius`, 34);
 
       let x = parent.x + (parentDist * Math.cos(theta));
       let y = parent.y + (parentDist * Math.sin(theta));
@@ -1179,15 +1282,29 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
     });
     const otherChildren = childIds.filter((childId) => !ftdChildren.includes(childId));
 
-    placeBandChildren(parent, parentAngle, ftdChildren, ring2MinRadius, 180, 0.24);
-    placeBandChildren(parent, parentAngle, otherChildren, ring3MinRadius, 255, 0.30);
+    placeBandChildren(
+      parent,
+      parentAngle,
+      ftdChildren,
+      ring2MinRadius,
+      MESH_RING_LAYOUT.ftdParentDistance,
+      0.28,
+    );
+    placeBandChildren(
+      parent,
+      parentAngle,
+      otherChildren,
+      ring3MinRadius,
+      MESH_RING_LAYOUT.mtdParentDistance,
+      0.34,
+    );
   }
 
   // After all children are placed, push overlapping non-router nodes apart.
   // Node shape sizes (from buildVisNodeData): border routers and routers size ~45, children ~27.
   // We use a conservative bounding circle radius per type to drive separation.
-  const MIN_CHILD_SEP = 130; // px — desired minimum centre-to-centre gap for child nodes
-  const MAX_ITERS = 80;
+  const MIN_CHILD_SEP = MESH_RING_LAYOUT.childClearance;
+  const MAX_ITERS = MESH_RING_LAYOUT.clearanceIterations;
   const DAMPING = 0.55;
   const childNodes = nodeData.filter((n) => n.isRouter !== true && placed.has(n.id));
   for (let iter = 0; iter < MAX_ITERS; iter += 1) {
@@ -1211,6 +1328,59 @@ function applyRingStarSeedLayout(nodeData, edgeData) {
         moved = true;
       }
     }
+    if (!moved) break;
+  }
+
+  const parentByChild = new Map();
+  parentToChildren.forEach((childIds, parentId) => {
+    childIds.forEach((childId) => {
+      if (!parentByChild.has(childId)) parentByChild.set(childId, parentId);
+    });
+  });
+
+  // Radial clamping and sibling repulsion can both shorten a child-parent
+  // distance. Converge both constraints together before the nodes are pinned.
+  for (let iter = 0; iter < MESH_RING_LAYOUT.clearanceIterations; iter += 1) {
+    let moved = false;
+    parentByChild.forEach((parentId, childId) => {
+      const parent = nodeById.get(parentId);
+      const child = nodeById.get(childId);
+      if (!parent || !child) return;
+      const dx = (child.x || 0) - (parent.x || 0);
+      const dy = (child.y || 0) - (parent.y || 0);
+      const distance = Math.hypot(dx, dy) || 0.01;
+      const minimumDistance = isFtdChildNode(child)
+        ? MESH_RING_LAYOUT.ftdParentClearance
+        : MESH_RING_LAYOUT.mtdParentClearance;
+      if (distance >= minimumDistance) return;
+
+      const outwardTheta = Math.atan2(parent.y || 0, parent.x || 0);
+      const unitX = distance > 0.01 ? dx / distance : Math.cos(outwardTheta);
+      const unitY = distance > 0.01 ? dy / distance : Math.sin(outwardTheta);
+      child.x = Math.round((parent.x || 0) + unitX * minimumDistance);
+      child.y = Math.round((parent.y || 0) + unitY * minimumDistance);
+      moved = true;
+    });
+
+    for (let i = 0; i < childNodes.length; i += 1) {
+      const a = childNodes[i];
+      for (let j = i + 1; j < childNodes.length; j += 1) {
+        const b = childNodes[j];
+        const dx = (b.x || 0) - (a.x || 0);
+        const dy = (b.y || 0) - (a.y || 0);
+        const distance = Math.hypot(dx, dy) || 0.01;
+        if (distance >= MIN_CHILD_SEP) continue;
+        const overlap = (MIN_CHILD_SEP - distance) * DAMPING;
+        const unitX = dx / distance;
+        const unitY = dy / distance;
+        a.x = Math.round((a.x || 0) - unitX * overlap * 0.5);
+        a.y = Math.round((a.y || 0) - unitY * overlap * 0.5);
+        b.x = Math.round((b.x || 0) + unitX * overlap * 0.5);
+        b.y = Math.round((b.y || 0) + unitY * overlap * 0.5);
+        moved = true;
+      }
+    }
+
     if (!moved) break;
   }
 
@@ -1819,6 +1989,14 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
           type: curveType,
           roundness: isMeshTreeProfile ? 0.34 : 0.3,
         };
+      } else if (physicsProfileName === PHYSICS_PROFILE_MESH_RING && routerToChildLike) {
+        const categories = normalizeLinkCategories(edge.linkCategories);
+        if (categories.includes(EDGE_CATEGORY_OTBR_ROUTE)) {
+          const color = typeof edge.color === "string" ? edge.color : undefined;
+          edge.color = { color, opacity: MESH_RING_LAYOUT.routeEdgeOpacity };
+          edge.width = Math.min(Number(edge.width) || 1.5, MESH_RING_LAYOUT.routeEdgeWidth);
+          edge.dashes = [2, 8];
+        }
       } else if (
         (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT || isMeshTreeProfile) &&
         routerToChildLike
