@@ -691,6 +691,7 @@ export function initDetailPanelToggles(panelEl) {
     btn.title = `${action} details panel`;
     btn.setAttribute("aria-label", `${action} details panel`);
     btn.setAttribute("aria-expanded", String(!collapsed));
+    btn.textContent = collapsed ? "▶" : "▼";
   };
 
   syncPanelToggleButton(panelToggleBtn, false);
