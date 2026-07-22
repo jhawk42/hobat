@@ -67,7 +67,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 16
+    estimateActionCostSecs: 15
   },
 
   // ── Multi-file merged (otbr-cli) ──
@@ -275,7 +275,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 6
+    estimateActionCostSecs: 15
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────
@@ -292,7 +292,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 606
+    estimateActionCostSecs: 615
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────
@@ -311,7 +311,7 @@ export const DATASET_REGISTRY = [
     physicsProfile: "mesh-compact",
     defaultView: "topology",
     defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 1206
+    estimateActionCostSecs: 1200
   },
 
   // ── Single-file simple datasets ───
