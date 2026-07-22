@@ -27,6 +27,9 @@ TD_WEB_HOST_ADDR = ""
 TD_WEB_HOST_PORT = 9165
 
 # Default max-age for data files in seconds; can be overridden per-file in FILE_ACTION_MAP.
+TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT_DEV = 3600  # 1 hour in seconds
+TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT_OPS = 86400  # 1 day in seconds
+
 TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT = 86400  # 1 day in seconds
 TD_FILE_CACHE_MAX_AGE_ENV_NAME = "TD_FILE_CACHE_MAX_AGE"
 
