@@ -22,7 +22,7 @@ from otbr_cli_networkdiag_util import (
     TLV_VALUES_MEDIUM,
     TLV_VALUES_BASIC,
     TLV_VALUES_CHILD_DETAILED,
-    TLV_VALUES_CHILD_MEDIUM_TV_MAC,
+    TLV_VALUES_CHILD_MEDIUM_MAC_MLE,
     TLV_VALUES_CHILD_MEDIUM_MAC,
     TLV_VALUES_CHILD_BASIC,
     fetch_ipv6_addresses,

@@ -19,18 +19,24 @@ import util_ot_ctl
 # TLV 0 = Ext Address (MAC Extended Address)
 # TLV 1 = RLOC16 (Address16)
 # TLV 2 = Mode (Capabilities)
+# TLV 3 = Timeout (Timeout value for sleepy end devices)
 # TLV 4 = Connectivity (Physical state, link quality, parent metrics, routing costs)
 # TLV 5 = Route64 (ID sequence tracking paths and routing costs to all Router IDs)
 # TLV 6 = Leader Data (Partition ID, Weighting, Leader node address)
+# TLV 7 = Network Data (Network configuration, service data, and routing information)
 # TLV 8 = IPv6 Address List
 # TLV 9 = MAC Counters
+# TLV 14 = Battery Level
+# TLV 15 = Supply Voltage
 # TLV 16 = Child Table
+# TLV 17 = Channel Pages
+# TLV 19 = Max Child Timeout
 # TLV 23 = EUI64 (Factory-assigned 8-byte global identifier)
 # TLV 24 = Thread Version (Protocol runtime version)
 # TLV 25 = Vendor Name (Hardware creator name)
 # TLV 26 = Vendor Model (Product SKU hardware identification)
 # TLV 27 = Vendor SW Version (Running firmware version)
-# TLV 28 = Vendor App URL (Developer/device-specific support URL, labeled as Thread Stack Version)
+# TLV 28 = Thread Stack Version
 # TLV 34 = MLE Counters
 
 # ROUTER TLVs - includes childtable
@@ -39,8 +45,8 @@ TLV_VALUES_MEDIUM = "0 1 2 8 16 9"
 TLV_VALUES_BASIC = "0 1 2 8"
 
 # CHILD TLVs (excludes TLV 16 Child Table and TLV 6 Leader Data)
-TLV_VALUES_CHILD_DETAILED = "0 1 2 8 9 24 25 26 34"  # "0 1 2 8 24 9 34"
-TLV_VALUES_CHILD_MEDIUM_TV_MAC = "0 1 2 8 9 34"  # "0 1 2 8 24 9"
+TLV_VALUES_CHILD_DETAILED = "0 1 2 8 9 28 34"
+TLV_VALUES_CHILD_MEDIUM_MAC_MLE = "0 1 2 8 9 34"
 TLV_VALUES_CHILD_MEDIUM_MAC = "0 1 2 8 9"
 TLV_VALUES_CHILD_BASIC = "0 1 2 8"
 
@@ -69,7 +75,7 @@ def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
         case 4:
             return TLV_VALUES_CHILD_DETAILED
         case 3:
-            return TLV_VALUES_CHILD_MEDIUM_TV_MAC
+            return TLV_VALUES_CHILD_MEDIUM_MAC_MLE
         case 2:
             return TLV_VALUES_CHILD_MEDIUM_MAC
         case 1:
