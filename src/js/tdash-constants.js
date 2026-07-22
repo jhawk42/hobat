@@ -141,6 +141,8 @@ export const LINK_FILTER_EVE_ENHANCED = "eve_enhanced_routes_children";
 export const LINK_FILTER_DEFAULT = "default_links";
 export const LINK_FILTER_DEFAULT_PLUS_NEIGHBORS = "default_plus_router_neighbors";
 export const LINK_FILTER_ROUTES = "otbr_routes";
+export const LINK_FILTER_ROUTES_ROUTERS = "otbr_routes_routers";
+export const LINK_FILTER_ROUTES_FTD_CHILD = "otbr_routes_ftd_child";
 export const LINK_FILTER_PARENT_CHILD = "lq_parent_child";
 export const LINK_FILTER_ROUTER_NEIGHBOR = "lq_otbr_neighbor";
 export const LINK_FILTER_LQ_HIGH = "lq_high";
@@ -156,6 +158,8 @@ export const EDGE_CATEGORY_DEFAULT_2 = "default_2_links";
 export const EDGE_CATEGORY_DEFAULT_3 = "default_3_links";
 export const EDGE_CATEGORY_ROUTER_NEIGHBOR = "router_neighbor";
 export const EDGE_CATEGORY_OTBR_ROUTE = "otbr_route";
+export const EDGE_CATEGORY_OTBR_ROUTE_ROUTER = "otbr_route_router";
+export const EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD = "otbr_route_ftd_child";
 export const EDGE_CATEGORY_OTBR_CHILD = "otbr_child";
 export const EDGE_CATEGORY_EVE_ROUTE = "eve_route";
 export const EDGE_CATEGORY_EVE_CHILD = "eve_child";
@@ -170,6 +174,8 @@ export const EDGE_CATEGORY_LABELS = Object.freeze({
   default_3_links: "Route",
   router_neighbor: "Router-Neighbor",
   otbr_route: "Route",
+  otbr_route_router: "Route: Router",
+  otbr_route_ftd_child: "Route: FTD Child",
   otbr_child: "Parent-child",
   eve_route: "Route",
   eve_child: "Parent-child",
@@ -381,7 +387,7 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
   },
   {
     value: LINK_FILTER_ROUTES,
-    label: "Routes",
+    label: "Routes: All",
     title: "Shows Routes",
     group: "Link Types",
     requiredEdgeCategories: [
@@ -391,6 +397,25 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
       EDGE_CATEGORY_DEFAULT_3,
     ],
   },  
+  {
+    value: LINK_FILTER_ROUTES_ROUTERS,
+    label: "Routes: Routers",
+    title: "Shows routes reported by routers and border routers",
+    group: "Link Types",
+    requiredEdgeCategories: [
+      EDGE_CATEGORY_DEFAULT_1,
+      EDGE_CATEGORY_DEFAULT_2,
+      EDGE_CATEGORY_DEFAULT_3,
+      EDGE_CATEGORY_OTBR_ROUTE_ROUTER,
+    ],
+  },
+  {
+    value: LINK_FILTER_ROUTES_FTD_CHILD,
+    label: "Routes: FTD Children",
+    title: "Shows routes reported by child Full Thread Devices",
+    group: "Link Types",
+    requiredEdgeCategories: [EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD],
+  },
   {
     value: LINK_FILTER_ROUTER_NEIGHBOR,
     label: "Router Neighbors",

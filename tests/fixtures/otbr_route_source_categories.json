@@ -1,0 +1,108 @@
+{
+  "networkdiag": [
+    {
+      "name": "router flag",
+      "row": {
+        "rloc16": "0x0400",
+        "isRouter": true,
+        "mode": { "device": "FTD" },
+        "route": { "routeData": [{ "rloc16": "0x0800" }] }
+      },
+      "expectedCategory": "otbr_route_router"
+    },
+    {
+      "name": "border router role",
+      "row": {
+        "rloc16": "0x0800",
+        "role": "Border Router",
+        "mode": { "device": "FTD" },
+        "route": { "routeData": [{ "rloc16": "0x0400" }] }
+      },
+      "expectedCategory": "otbr_route_router"
+    },
+    {
+      "name": "FTD child",
+      "row": {
+        "rloc16": "0x0401",
+        "role": "child",
+        "mode": { "device": "FTD" },
+        "route": { "routeData": [{ "rloc16": "0x0800" }] }
+      },
+      "expectedCategory": "otbr_route_ftd_child"
+    }
+  ],
+  "restApi": [
+    {
+      "name": "router role",
+      "row": {
+        "rloc16": "0x0c00",
+        "role": "router",
+        "mode": { "device": "FTD" },
+        "route": { "routeData": [{ "routeId": 4 }] }
+      },
+      "expectedCategory": "otbr_route_router"
+    },
+    {
+      "name": "FTD child",
+      "row": {
+        "rloc16": "0x0c41",
+        "role": "child",
+        "mode": { "device": "FTD" },
+        "route": { "routeData": [{ "routeId": 3 }] }
+      },
+      "expectedCategory": "otbr_route_ftd_child"
+    }
+  ],
+  "mergedDetailed": [
+    {
+      "name": "normalized router",
+      "row": {
+        "rloc16": "0x1000",
+        "role": "router",
+        "mode.device": "FTD",
+        "route": { "routeData": [{ "routeId": 5 }] }
+      },
+      "expectedCategory": "otbr_route_router"
+    },
+    {
+      "name": "normalized FTD child",
+      "row": {
+        "rloc16": "0x1041",
+        "role": "child",
+        "modeDevice": "FTD",
+        "route": { "routeData": [{ "routeId": 4 }] }
+      },
+      "expectedCategory": "otbr_route_ftd_child"
+    }
+  ],
+  "skipped": [
+    {
+      "name": "MTD child",
+      "row": {
+        "rloc16": "0x1401",
+        "role": "child",
+        "mode": { "device": "MTD" },
+        "route": { "routeData": [{ "routeId": 5 }] }
+      }
+    },
+    {
+      "name": "unclassified source",
+      "row": {
+        "rloc16": "0x1801",
+        "role": "detached",
+        "mode": { "device": "FTD" },
+        "route": { "routeData": [{ "routeId": 6 }] }
+      }
+    },
+    {
+      "name": "contradictory child router",
+      "row": {
+        "rloc16": "0x1c41",
+        "role": "child",
+        "isRouter": true,
+        "mode": { "device": "FTD" },
+        "route": { "routeData": [{ "routeId": 7 }] }
+      }
+    }
+  ]
+}

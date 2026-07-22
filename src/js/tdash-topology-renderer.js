@@ -11,6 +11,7 @@ import {
   EDGE_CATEGORY_DEFAULT_CHILDREN,
   EDGE_CATEGORY_OTBR_CHILD,
   EDGE_CATEGORY_OTBR_ROUTE,
+  EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD,
   EDGE_CATEGORY_EVE_CHILD,
   EDGE_CATEGORY_EVE_NATIVE_CHILD,
 } from "./tdash-constants.js";
@@ -2064,7 +2065,10 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
         };
       } else if (physicsProfileName === PHYSICS_PROFILE_MESH_RING && routerToChildLike) {
         const categories = normalizeLinkCategories(edge.linkCategories);
-        if (categories.includes(EDGE_CATEGORY_OTBR_ROUTE)) {
+        if (
+          categories.includes(EDGE_CATEGORY_OTBR_ROUTE) &&
+          !categories.includes(EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD)
+        ) {
           const color = typeof edge.color === "string" ? edge.color : undefined;
           edge.color = { color, opacity: MESH_RING_LAYOUT.routeEdgeOpacity };
           edge.width = Math.min(Number(edge.width) || 1.5, MESH_RING_LAYOUT.routeEdgeWidth);
@@ -2116,7 +2120,10 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
 
       if (routerToChildLike) {
         const categories = normalizeLinkCategories(edge.linkCategories);
-        if (categories.includes(EDGE_CATEGORY_OTBR_ROUTE)) {
+        if (
+          categories.includes(EDGE_CATEGORY_OTBR_ROUTE) &&
+          !categories.includes(EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD)
+        ) {
           const color = typeof edge.color === "string" ? edge.color : undefined;
           edge.color = { color, opacity: MESH_HUB_SPOKE_LAYOUT.routeEdgeOpacity };
           edge.width = Math.min(Number(edge.width) || 1.5, MESH_HUB_SPOKE_LAYOUT.routeEdgeWidth);
