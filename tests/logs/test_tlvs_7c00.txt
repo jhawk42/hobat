@@ -1,0 +1,183 @@
+DIAG_GET.rsp/ans from fd3b:a255:4aa6:5483:0:ff:fe00:7c00: 00088e3b369df65e949601027c0002010f1708f434f0fffe1e17740840fd3ba2554aa65483000000fffe007c00fd6e44f0ad9300012201fa88be403f6dfd3ba2554aa65483772198f41fdf97d9fe800000000000008c3b369df65e9496040a000d030301b4150500010608533966c444718c341802000419054170706c651a0744656661756c741b0744656661756c741c2f4f50454e5448524541442f302e30312e30303b20504f5349583b2041707220323320323032362032303a31363a3531051eb41884128b34690d80a2f1f1f1a2f1f1f1420192f1f1f1f192f1f192f1e2100f66100f661104661204660c0f660a0f0924000000000000000000000001000002160000024f00000007000000780000007400000001224200000000000000000000000000000000000000000000000c05e700000000000000000000000000000000000000000000000000000000000c05e70000000000000000
+Ext Address: 8e3b369df65e9496
+Rloc16: 0x7c00
+Mode:
+    RxOnWhenIdle: 1
+    DeviceType: 1
+    NetworkData: 1
+EUI64: f434f0fffe1e1774
+IP6 Address List:
+    - fd3b:a255:4aa6:5483:0:ff:fe00:7c00
+    - fd6e:44f0:ad93:1:2201:fa88:be40:3f6d
+    - fd3b:a255:4aa6:5483:7721:98f4:1fdf:97d9
+    - fe80:0:0:0:8c3b:369d:f65e:9496
+Connectivity:
+    ParentPriority: 0
+    LinkQuality3: 13
+    LinkQuality2: 3
+    LinkQuality1: 3
+    LeaderCost: 1
+    IdSequence: 180
+    ActiveRouters: 21
+    SedBufferSize: 1280
+    SedDatagramCount: 1
+Leader Data:
+    PartitionId: 0x533966c4
+    Weighting: 68
+    DataVersion: 113
+    StableDataVersion: 140
+    LeaderRouterId: 0x34
+Vendor Name: Apple
+Vendor Model: Default
+Vendor SW Version: Default
+Thread Stack Version: OPENTHREAD/0.01.00; POSIX; Apr 23 2026 20:16:51
+Route:
+    IdSequence: 180
+    RouteData:
+        - RouteId: 0x03
+          LinkQualityOut: 2
+          LinkQualityIn: 2
+          RouteCost: 2
+        - RouteId: 0x04
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x08
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x0d
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x13
+          LinkQualityOut: 2
+          LinkQualityIn: 2
+          RouteCost: 2
+        - RouteId: 0x16
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x18
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x1c
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x1e
+          LinkQualityOut: 1
+          LinkQualityIn: 0
+          RouteCost: 2
+        - RouteId: 0x1f
+          LinkQualityOut: 0
+          LinkQualityIn: 0
+          RouteCost: 1
+        - RouteId: 0x22
+          LinkQualityOut: 2
+          LinkQualityIn: 1
+          RouteCost: 2
+        - RouteId: 0x23
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x25
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x29
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x2a
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x2c
+          LinkQualityOut: 2
+          LinkQualityIn: 1
+          RouteCost: 2
+        - RouteId: 0x2f
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x34
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x35
+          LinkQualityOut: 2
+          LinkQualityIn: 1
+          RouteCost: 2
+        - RouteId: 0x37
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x38
+          LinkQualityOut: 3
+          LinkQualityIn: 2
+          RouteCost: 2
+Child Table:
+    - ChildId: 0x0010
+      Timeout: 12
+      Link Quality: 3
+      Mode:
+          RxOnWhenIdle: 1
+          DeviceType: 1
+          NetworkData: 1
+    - ChildId: 0x0011
+      Timeout: 12
+      Link Quality: 3
+      Mode:
+          RxOnWhenIdle: 0
+          DeviceType: 0
+          NetworkData: 0
+    - ChildId: 0x0012
+      Timeout: 12
+      Link Quality: 3
+      Mode:
+          RxOnWhenIdle: 0
+          DeviceType: 0
+          NetworkData: 0
+    - ChildId: 0x000c
+      Timeout: 12
+      Link Quality: 3
+      Mode:
+          RxOnWhenIdle: 1
+          DeviceType: 1
+          NetworkData: 1
+    - ChildId: 0x000a
+      Timeout: 12
+      Link Quality: 3
+      Mode:
+          RxOnWhenIdle: 1
+          DeviceType: 1
+          NetworkData: 1
+MAC Counters:
+    IfInUnknownProtos: 0
+    IfInErrors: 0
+    IfOutErrors: 1
+    IfInUcastPkts: 534
+    IfInBroadcastPkts: 591
+    IfInDiscards: 7
+    IfOutUcastPkts: 120
+    IfOutBroadcastPkts: 116
+    IfOutDiscards: 1
+MLE Counters:
+    DisabledRole: 0
+    DetachedRole: 0
+    ChildRole: 0
+    RouterRole: 0
+    LeaderRole: 0
+    AttachAttempts: 0
+    PartitionIdChanges: 0
+    BetterPartitionAttachAttempts: 0
+    ParentChanges: 0
+TrackedTime: 787943
+DisabledTime: 0
+DetachedTime: 0
+ChildTime: 0
+RouterTime: 787943
+LeaderTime: 0
+Done

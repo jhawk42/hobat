@@ -1,0 +1,155 @@
+DIAG_GET.rsp/ans from fd3b:a255:4aa6:5483:0:ff:fe00:6000: 0008d2c6b32c00c8149e0102600002010f1708f4ce36a9111c02c10840fd3ba2554aa65483000000fffe006000fd6e44f0ad930001d03e367359238220fd3ba2554aa654839b868efbf180c41efe80000000000000d0c6b32c00c8149e040a0006030702b7150500010608533966c444718c341802000419001a001b001c324f50454e5448524541442f6239646364626361343b205a65706879723b204d617220203620323032342031353a33393a3036051eb71884128b34690d80a2a2f152526201a202f152f112f1f192f10252620210036602040924000000000000ce8a0000007b0001d45c00079cc5006c139b0000c02000006ad2000000022242000000020002000200000001000200020001000000001e31411500000000000000b3000000000000350f0000000000000c8e000000001e30fec50000000000000000
+Ext Address: d2c6b32c00c8149e
+Rloc16: 0x6000
+Mode:
+    RxOnWhenIdle: 1
+    DeviceType: 1
+    NetworkData: 1
+EUI64: f4ce36a9111c02c1
+IP6 Address List:
+    - fd3b:a255:4aa6:5483:0:ff:fe00:6000
+    - fd6e:44f0:ad93:1:d03e:3673:5923:8220
+    - fd3b:a255:4aa6:5483:9b86:8efb:f180:c41e
+    - fe80:0:0:0:d0c6:b32c:c8:149e
+Connectivity:
+    ParentPriority: 0
+    LinkQuality3: 6
+    LinkQuality2: 3
+    LinkQuality1: 7
+    LeaderCost: 2
+    IdSequence: 183
+    ActiveRouters: 21
+    SedBufferSize: 1280
+    SedDatagramCount: 1
+Leader Data:
+    PartitionId: 0x533966c4
+    Weighting: 68
+    DataVersion: 113
+    StableDataVersion: 140
+    LeaderRouterId: 0x34
+Vendor Name: 
+Vendor Model: 
+Vendor SW Version: 
+Thread Stack Version: OPENTHREAD/b9dcdbca4; Zephyr; Mar  6 2024 15:39:06
+Route:
+    IdSequence: 183
+    RouteData:
+        - RouteId: 0x03
+          LinkQualityOut: 2
+          LinkQualityIn: 2
+          RouteCost: 2
+        - RouteId: 0x04
+          LinkQualityOut: 2
+          LinkQualityIn: 2
+          RouteCost: 2
+        - RouteId: 0x08
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x0d
+          LinkQualityOut: 1
+          LinkQualityIn: 1
+          RouteCost: 2
+        - RouteId: 0x13
+          LinkQualityOut: 1
+          LinkQualityIn: 1
+          RouteCost: 2
+        - RouteId: 0x16
+          LinkQualityOut: 1
+          LinkQualityIn: 2
+          RouteCost: 2
+        - RouteId: 0x18
+          LinkQualityOut: 0
+          LinkQualityIn: 0
+          RouteCost: 1
+        - RouteId: 0x1c
+          LinkQualityOut: 2
+          LinkQualityIn: 2
+          RouteCost: 2
+        - RouteId: 0x1e
+          LinkQualityOut: 0
+          LinkQualityIn: 0
+          RouteCost: 2
+        - RouteId: 0x1f
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x22
+          LinkQualityOut: 1
+          LinkQualityIn: 1
+          RouteCost: 2
+        - RouteId: 0x23
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x25
+          LinkQualityOut: 0
+          LinkQualityIn: 1
+          RouteCost: 2
+        - RouteId: 0x29
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x2a
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x2c
+          LinkQualityOut: 2
+          LinkQualityIn: 1
+          RouteCost: 2
+        - RouteId: 0x2f
+          LinkQualityOut: 3
+          LinkQualityIn: 3
+          RouteCost: 1
+        - RouteId: 0x34
+          LinkQualityOut: 0
+          LinkQualityIn: 0
+          RouteCost: 2
+        - RouteId: 0x35
+          LinkQualityOut: 1
+          LinkQualityIn: 1
+          RouteCost: 2
+        - RouteId: 0x37
+          LinkQualityOut: 1
+          LinkQualityIn: 2
+          RouteCost: 2
+        - RouteId: 0x38
+          LinkQualityOut: 0
+          LinkQualityIn: 0
+          RouteCost: 2
+Child Table:
+    - ChildId: 0x0002
+      Timeout: 12
+      Link Quality: 3
+      Mode:
+          RxOnWhenIdle: 0
+          DeviceType: 0
+          NetworkData: 0
+MAC Counters:
+    IfInUnknownProtos: 0
+    IfInErrors: 52874
+    IfOutErrors: 123
+    IfInUcastPkts: 119900
+    IfInBroadcastPkts: 498885
+    IfInDiscards: 7082907
+    IfOutUcastPkts: 49184
+    IfOutBroadcastPkts: 27346
+    IfOutDiscards: 2
+MLE Counters:
+    DisabledRole: 0
+    DetachedRole: 2
+    ChildRole: 2
+    RouterRole: 2
+    LeaderRole: 0
+    AttachAttempts: 1
+    PartitionIdChanges: 2
+    BetterPartitionAttachAttempts: 2
+    ParentChanges: 1
+TrackedTime: 506544405
+DisabledTime: 179
+DetachedTime: 13583
+ChildTime: 3214
+RouterTime: 506527429
+LeaderTime: 0
+Done
