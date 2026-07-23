@@ -259,8 +259,8 @@ function getModeMappedPhysicsProfileName(entry) {
   const topologyMode = entry?.topologyMode;
   if (topologyMode === "meshdiag-networkdiag") return PHYSICS_PROFILE_MESH_COMPACT;
   if (topologyMode === "merged-detailed") return PHYSICS_PROFILE_MESH_RING;
-  if (topologyMode === "router-table") return PHYSICS_PROFILE_MESH_BALANCED;
-  if (topologyMode === "eve_native") return PHYSICS_PROFILE_MESH_COMPACT;
+  if (topologyMode === "router-table") return PHYSICS_PROFILE_MESH_RING;
+  if (topologyMode === "eve_native") return PHYSICS_PROFILE_MESH_RING;
   if (topologyMode === "eve_enhanced") return PHYSICS_PROFILE_MESH_RING;
   if (topologyMode === "thread_tools_native") return PHYSICS_PROFILE_MESH_COMPACT;
   if (topologyMode === "raw-array") return PHYSICS_PROFILE_MESH_BALANCED;
