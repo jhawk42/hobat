@@ -52,7 +52,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 6
   },
 
@@ -66,7 +66,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 15
   },
 
@@ -83,7 +83,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 30
   },
 
@@ -101,7 +101,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 80
   },
 
@@ -120,7 +120,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 270
   },  
 
@@ -133,7 +133,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "merged-detailed",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 90
   },
   {
@@ -146,7 +146,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "merged-detailed",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 90
   },
 
@@ -162,7 +162,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "meshdiag-networkdiag",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 600
   }, 
 
@@ -181,7 +181,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "meshdiag-networkdiag",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 720
   },
 
@@ -201,7 +201,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "meshdiag-networkdiag",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 900
   },
 
@@ -215,7 +215,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "router-table",
     defaultView: "table",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1
   },
 
@@ -233,7 +233,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 2
   },  
   // ── Single-file simple datasets ───
@@ -246,7 +246,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1
   },
 
@@ -260,7 +260,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1
   },
   
@@ -274,7 +274,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 15
   },
 
@@ -291,7 +291,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 615
   },
 
@@ -310,7 +310,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1200
   },
 
@@ -324,7 +324,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 600
   },
 
@@ -338,7 +338,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 600
   },
   // ── Single-file simple datasets ───
@@ -351,7 +351,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "raw-array",
     defaultView: "table",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1
   },
 
@@ -365,7 +365,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "eve_native",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1
   },
   // ── Single-file simple dataset ───
@@ -379,7 +379,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "eve_enhanced",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1
   },
 
@@ -393,7 +393,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "thread_tools_native",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1
   },
 
@@ -406,7 +406,7 @@ export const DATASET_REGISTRY = [
     files: ["td-mdns-scopes-br.json"],
     mergeStrategy: "none",
     topologyMode: "raw-array",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     defaultView: "table",
     estimateActionCostSecs: 60
   },
@@ -418,7 +418,7 @@ export const DATASET_REGISTRY = [
     files: ["td-mdns-scopes-hap.json"],
     mergeStrategy: "none",
     topologyMode: "raw-array",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     defaultView: "table",
     estimateActionCostSecs: 60
   },
@@ -430,7 +430,7 @@ export const DATASET_REGISTRY = [
     files: ["td-mdns-scopes-matter.json"],
     mergeStrategy: "none",
     topologyMode: "raw-array",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     defaultView: "table",
     estimateActionCostSecs: 60
   },
@@ -443,7 +443,7 @@ export const DATASET_REGISTRY = [
     files: ["td-mdns-scopes-thread.json"],
     mergeStrategy: "none",
     topologyMode: "raw-array",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     defaultView: "table",
     estimateActionCostSecs: 60
   },
@@ -461,7 +461,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "merged-detailed",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1
   },
 
@@ -483,7 +483,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "meshdiag-networkdiag",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     estimateActionCostSecs: 720
   },
 
@@ -496,7 +496,7 @@ export const DATASET_REGISTRY = [
     files: ["td-static-extaddr-device-label.json"],
     mergeStrategy: "none",
     topologyMode: "raw-array",
-    defaultLinkFilter: "all_links",
+    defaultLinkFilter: "default_links",
     defaultView: "table",
     estimateActionCostSecs: 1
   }

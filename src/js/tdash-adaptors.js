@@ -217,6 +217,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
       sourceId: toText(rawNode.id) || (existing ? existing.sourceId || existing.source_id : ''),
       extAddress: toText(rawNode.extaddr) || (existing ? existing.extAddress || existing.extaddr : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
+      role: toText(rawNode.role).trim().toLowerCase() || (existing ? existing.role : ''),
       threadVersion: toText(rawNode.thread_version) || (existing ? existing.threadVersion || existing.thread_version : ''),
       threadStackVersion: toText(rawNode.thread_stack_version) || (existing ? existing.threadStackVersion || existing.thread_stack_version : ''),
       ipv6Addresses: mergedIpv6,
@@ -614,6 +615,7 @@ export function adaptEve(fileMap) {
       sourceId: toText(rawNode.id) || (existing ? existing.sourceId || existing.source_id : ''),
       extAddress: toText(rawNode.extaddr) || (existing ? existing.extAddress || existing.extaddr : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
+      role: toText(rawNode.role).trim().toLowerCase() || (existing ? existing.role : ''),
       threadVersion: toText(rawNode.thread_version) || (existing ? existing.threadVersion || existing.thread_version : ''),
       threadStackVersion: toText(rawNode.thread_stack_version) || (existing ? existing.threadStackVersion || existing.thread_stack_version : ''),
       totalChildren: Number.isFinite(rawNode.totalChildren) ? rawNode.totalChildren : (existing ? existing.totalChildren || existing.total_children : 0),
@@ -749,6 +751,7 @@ export function adaptEveNative(fileMap) {
       source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
       extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
+      role: toText(rawNode.role).trim().toLowerCase() || (existing ? existing.role : ''),
       room: toText(rawNode.room) || (existing ? existing.room : ''),
       ip_addresses: Array.isArray(rawNode.ip_addresses) ? rawNode.ip_addresses
         : (existing ? existing.ip_addresses : []),
@@ -912,6 +915,7 @@ export function adaptThreadToolsNative(fileMap) {
       extAddress: extaddrVal,
       peerAddress: toText(rawNode.peerAddress) || (existing ? toText(existing.peerAddress) : ''),
       type: toText(rawNode.type) || inferredType || (existing ? toText(existing.type) : ''),
+      role: toText(rawNode.role).trim().toLowerCase() || (existing ? existing.role : ''),
       version: toText(rawNode.version) || (existing ? toText(existing.version) : ''),
       threadStackVersion: toText(rawNode.threadStackVersion)
         || (existing ? toText(existing.threadStackVersion || existing.thread_stack_version) : ''),
@@ -1238,6 +1242,7 @@ export function adaptMergedDetailed(fileMap) {
       sourceId: toText(rawNode.id) || (existing ? existing.sourceId || existing.source_id : ''),
       extAddress: toText(rawNode.extaddr) || (existing ? existing.extAddress || existing.extaddr : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
+      role: toText(rawNode.role).trim().toLowerCase() || (existing ? existing.role : ''),
       threadVersion: toText(rawNode.thread_version) || (existing ? existing.threadVersion || existing.thread_version : ''),
       threadStackVersion: toText(rawNode.thread_stack_version) || (existing ? existing.threadStackVersion || existing.thread_stack_version : ''),
       totalChildren: Number.isFinite(rawNode.total_children) ? rawNode.total_children : (existing ? existing.totalChildren || existing.total_children : 0),
@@ -1525,6 +1530,7 @@ export function adaptRawArray(fileMap) {
       rloc16: toText(row.rloc16),
       extaddr: getCanonicalExtaddr(row),
       type: toText(row.type),
+      role: toText(row.role).trim().toLowerCase(),
       mode_device: toText(row.mode?.device) || (row.type === 'router' ? 'FTD' : (isChildLike ? 'MTD' : '')),
       ifindiscards_pct: row.mac_counters?.ifindiscards_pct,
       iftotalerrors_pct: row.mac_counters?.iftotalerrors_pct,
@@ -1666,6 +1672,7 @@ export function adaptOtbrRestApi(fileMap) {
       rloc16: rloc16Val,
       extAddress: extaddrVal,
       type: roleText || toText(rawNode.type) || (existing ? existing.type : ''),
+      role: roleText || (existing ? existing.role : ''),
       modeDevice: modeDevice || (existing ? existing.modeDevice || existing.mode_device : ''),
       omrIpv6Addr: toText(rawNode.omr_ipv6_addr) || (existing ? existing.omrIpv6Addr || existing.omr_ipv6_addr : ''),
       ifTotalErrorsTotalPktsRatio: getRawMetric('macCounters.ifTotalErrorsTotalPktsRatio')
@@ -1789,7 +1796,6 @@ export function adaptOtbrRestApi(fileMap) {
           id: childId,
           rloc16: childRloc16,
           extAddress: childExtaddr,
-          role: child.deviceTypeFTD === true ? 'router' : 'child',
           mode: { deviceTypeFTD: child.deviceTypeFTD },
         }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
       }

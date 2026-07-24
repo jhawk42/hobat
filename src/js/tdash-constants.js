@@ -138,7 +138,7 @@ export const FIELD_ALIASES = Object.freeze({
 export const LINK_FILTER_ALL = "all_links";
 export const LINK_FILTER_EVE_NATIVE = "eve_native_routes_children";
 export const LINK_FILTER_EVE_ENHANCED = "eve_enhanced_routes_children";
-export const LINK_FILTER_DEFAULT = "default_links";
+export const LINK_FILTER_ROUTES_ROUTERS_PARENT_CHILD = "default_links";
 export const LINK_FILTER_DEFAULT_PLUS_NEIGHBORS = "default_plus_router_neighbors";
 export const LINK_FILTER_ROUTES = "otbr_routes";
 export const LINK_FILTER_ROUTES_ROUTERS = "otbr_routes_routers";
@@ -320,6 +320,15 @@ export const NODE_FILTER_OPTIONS = Object.freeze([
     tableRowValue: "FTD",
   },
   {
+    value: "reed-devices",
+    label: "Router Eligible End Devices (REEDs)",
+    group: null,
+    topoNodeField: "role",
+    topoNodeValue: "child",
+    tableRowField: "role",
+    tableRowValue: "child",
+  },
+  {
     value: "mtd-devices",
     label: "Sleepy End Devices",
     group: null,
@@ -355,24 +364,8 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
     group: null,
     requiredEdgeCategories: [EDGE_CATEGORY_EVE_ROUTE, EDGE_CATEGORY_EVE_CHILD],
   },
-  {
-    value: LINK_FILTER_DEFAULT,
-    label: "Routes & Parent\u2013Child",
-    title: "Shows parent-child relationships and routes w/link quality indicators",
-    group: null,
-    requiredEdgeCategories: [
-      EDGE_CATEGORY_DEFAULT_CHILDREN,
-      EDGE_CATEGORY_OTBR_CHILD,      
-      EDGE_CATEGORY_EVE_CHILD,
-      EDGE_CATEGORY_EVE_NATIVE_CHILD,
-      EDGE_CATEGORY_DEFAULT_1,
-      EDGE_CATEGORY_DEFAULT_2,
-      EDGE_CATEGORY_DEFAULT_3,
-      EDGE_CATEGORY_OTBR_ROUTE,
-    ],
-  },
   */
-
+  
   // ── Link Type filters ─────────────────────────────────────────────────
    {
     value: LINK_FILTER_PARENT_CHILD,
@@ -385,6 +378,26 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
       EDGE_CATEGORY_EVE_NATIVE_CHILD,
     ],
   },
+
+  {
+    //value: LINK_FILTER_ROUTES_ROUTERS_AND_PARENT_CHILD,
+    value: LINK_FILTER_ROUTES_ROUTERS_PARENT_CHILD,
+    label: "Routes: Routers & Parent\u2013Child",
+    title: "Shows routers' routes and parent-child relationships",
+    group: "Link Types",
+    requiredEdgeCategories: [
+      EDGE_CATEGORY_DEFAULT_1,
+      EDGE_CATEGORY_DEFAULT_2,
+      EDGE_CATEGORY_DEFAULT_3,
+      EDGE_CATEGORY_OTBR_ROUTE_ROUTER,
+
+      EDGE_CATEGORY_DEFAULT_CHILDREN,
+      EDGE_CATEGORY_OTBR_CHILD,
+      EDGE_CATEGORY_EVE_CHILD,
+      EDGE_CATEGORY_EVE_NATIVE_CHILD,
+    ],
+  },  
+
   {
     value: LINK_FILTER_ROUTES,
     label: "Routes: All",
@@ -411,8 +424,8 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
   },
   {
     value: LINK_FILTER_ROUTES_FTD_CHILD,
-    label: "Routes: FTD Children",
-    title: "Shows routes reported by child Full Thread Devices",
+    label: "Routes: REEDs",
+    title: "Shows routes reported by child REEDs",
     group: "Link Types",
     requiredEdgeCategories: [EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD],
   },

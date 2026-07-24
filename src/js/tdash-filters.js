@@ -2,7 +2,7 @@ import {
   LINK_FILTER_ALL,
   LINK_FILTER_EVE_NATIVE,
   LINK_FILTER_EVE_ENHANCED,
-  LINK_FILTER_DEFAULT,
+  LINK_FILTER_ROUTES_ROUTERS_PARENT_CHILD,
   LINK_FILTER_DEFAULT_PLUS_NEIGHBORS,
   LINK_FILTER_ROUTES,
   LINK_FILTER_ROUTES_ROUTERS,
@@ -67,16 +67,17 @@ export function edgeMatchesLinkFilter(edge, mode) {
       EDGE_CATEGORY_EVE_CHILD,
       EDGE_CATEGORY_EVE_NATIVE_CHILD,  
   */  
-  if (mode === LINK_FILTER_DEFAULT) {
+  if (mode === LINK_FILTER_ROUTES_ROUTERS_PARENT_CHILD) {
     return hasAny(
-      EDGE_CATEGORY_DEFAULT_CHILDREN,
-      EDGE_CATEGORY_OTBR_CHILD,      
-      EDGE_CATEGORY_EVE_CHILD,
-      EDGE_CATEGORY_EVE_NATIVE_CHILD,
       EDGE_CATEGORY_DEFAULT_1,
       EDGE_CATEGORY_DEFAULT_2,
       EDGE_CATEGORY_DEFAULT_3,
-      EDGE_CATEGORY_OTBR_ROUTE,
+      EDGE_CATEGORY_OTBR_ROUTE_ROUTER,
+
+      EDGE_CATEGORY_DEFAULT_CHILDREN,
+      EDGE_CATEGORY_OTBR_CHILD,
+      EDGE_CATEGORY_EVE_CHILD,
+      EDGE_CATEGORY_EVE_NATIVE_CHILD,      
     );
   }
   if (mode === LINK_FILTER_DEFAULT_PLUS_NEIGHBORS) {
@@ -128,7 +129,7 @@ export function edgeMatchesLinkFilter(edge, mode) {
 //
 // Both functions return the same DatasetCapabilities shape:
 //   {
-//     hasFtdNodes, hasMtdNodes, hasRouters, hasBorderRouters,
+//     hasFtdNodes, hasMtdNodes, hasReedNodes, hasRouters, hasBorderRouters,
 //     hasRoutersWithChildren, hasRoutersWithoutChildren,
 //     edgeCategories : Set<string>,   (empty in table view)
 //     hasFieldMacTotalErrorsPct, hasFieldMacDiscardPct,
@@ -142,11 +143,19 @@ export function edgeMatchesLinkFilter(edge, mode) {
 //     hasFieldRouterPct, hasFieldDetachedDisabledPct
 //   }
 
+function isReedDevice(modeDevice, role, isRouter, isBorderRouter) {
+  if (toText(modeDevice).toUpperCase() !== "FTD") return false;
+  const normalizedRole = toText(role).trim().toLowerCase();
+  if (normalizedRole) return normalizedRole === "child";
+  return isRouter !== true && isBorderRouter !== true;
+}
+
 // Called after runAdaptor() in renderTopologyForDataset.
 // Scans vis-node objects and edge linkCategories.
 export function computeTopologyCapabilities(nodeData, edgeData) {
   let hasFtdNodes = false;
   let hasMtdNodes = false;
+  let hasReedNodes = false;
   let hasRouters = false;
   let hasBorderRouters = false;
   let hasRoutersWithChildren = false;
@@ -176,6 +185,8 @@ export function computeTopologyCapabilities(nodeData, edgeData) {
     const md = toText(node.mode_device).toUpperCase();
     if (md === "FTD") hasFtdNodes = true;
     if (md === "MTD") hasMtdNodes = true;
+    if (isReedDevice(md, node.role, node.isRouter, node.isBorderRouter))
+      hasReedNodes = true;
     if (node.isRouter === true) hasRouters = true;
     if (node.isBorderRouter === true) hasBorderRouters = true;
     if (node.isRouter === true && node.hasChildren === true)
@@ -239,6 +250,7 @@ export function computeTopologyCapabilities(nodeData, edgeData) {
   return {
     hasFtdNodes,
     hasMtdNodes,
+    hasReedNodes,
     hasRouters,
     hasBorderRouters,
     hasRoutersWithChildren,
@@ -273,6 +285,7 @@ export function computeTopologyCapabilities(nodeData, edgeData) {
 export function computeTableCapabilities(rows) {
   let hasFtdNodes = false;
   let hasMtdNodes = false;
+  let hasReedNodes = false;
   let hasRouters = false;
   let hasBorderRouters = false;
   let hasRoutersWithChildren = false;
@@ -309,12 +322,12 @@ export function computeTableCapabilities(rows) {
     if (isRouter) hasRouters = true;
 
     const brValue = getColumnValue(row, "br");
-    if (
+    const isBorderRouter =
       isRouter &&
-      (brValue === true || toText(brValue).toLowerCase() === "true")
-    ) {
-      hasBorderRouters = true;
-    }
+      (brValue === true || toText(brValue).toLowerCase() === "true");
+    if (isBorderRouter) hasBorderRouters = true;
+    if (isReedDevice(md, getColumnValue(row, "role"), isRouter, isBorderRouter))
+      hasReedNodes = true;
 
     const totalChildren = toFiniteNumber(getColumnValue(row, "total_children"));
     const childrenValue = getColumnValue(row, "children");
@@ -411,6 +424,7 @@ export function computeTableCapabilities(rows) {
   return {
     hasFtdNodes,
     hasMtdNodes,
+    hasReedNodes,
     hasRouters,
     hasBorderRouters,
     hasRoutersWithChildren,
@@ -644,6 +658,7 @@ export function updateFilterOptionVisibility(capabilities, view) {
   const nodeCapabilityByValue = {
     "ftd-devices": capabilities.hasFtdNodes,
     "mtd-devices": capabilities.hasMtdNodes,
+    "reed-devices": capabilities.hasReedNodes,
     "main-routers": capabilities.hasRouters,
     "border-routers": capabilities.hasBorderRouters,
     "routers-with-children": capabilities.hasRoutersWithChildren,
@@ -761,6 +776,13 @@ export function isNodeVisibleByFilter(node, filterMode) {
     return toText(node.mode_device).toUpperCase() === "FTD";
   if (filterMode === "mtd-devices")
     return toText(node.mode_device).toUpperCase() === "MTD";
+  if (filterMode === "reed-devices")
+    return isReedDevice(
+      node.mode_device,
+      node.role,
+      node.isRouter,
+      node.isBorderRouter,
+    );
   if (filterMode === "main-routers") return node.isRouter === true;
   if (filterMode === "border-routers") return node.isBorderRouter === true;
   if (filterMode === "routers-with-children")
@@ -1047,9 +1069,16 @@ export function isRowVisibleByNodeFilter(row, filterMode) {
   const modeDevice = toText(getColumnValue(row, "mode.device")).toUpperCase();
   const rloc16Text = toText(getColumnValue(row, "rloc16")).toLowerCase();
   const isRouter = rloc16Text.endsWith("00");
+  const isReedRouter =
+    rloc16Text.startsWith("0x") &&
+    rloc16Text.endsWith("00") &&
+    rloc16Text.length === 6;
   const brValue = getColumnValue(row, "br");
   const isBorderRouter =
     isRouter &&
+    (brValue === true || toText(brValue).toLowerCase() === "true");
+  const isReedBorderRouter =
+    isReedRouter &&
     (brValue === true || toText(brValue).toLowerCase() === "true");
   const totalChildren = toFiniteNumber(getColumnValue(row, "total_children"));
   const childrenValue = getColumnValue(row, "children");
@@ -1062,6 +1091,13 @@ export function isRowVisibleByNodeFilter(row, filterMode) {
  
   if (filterMode === "ftd-devices") return modeDevice === "FTD";
   if (filterMode === "mtd-devices") return modeDevice === "MTD";
+  if (filterMode === "reed-devices")
+    return isReedDevice(
+      modeDevice,
+      getColumnValue(row, "role"),
+      isReedRouter,
+      isReedBorderRouter,
+    );
   if (filterMode === "main-routers") return isRouter;
   if (filterMode === "border-routers") return isBorderRouter;
   if (filterMode === "routers-with-children") return isRouter && hasChildren;
