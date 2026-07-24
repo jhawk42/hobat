@@ -215,7 +215,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "router-table",
     defaultView: "table",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1
   },
 
@@ -365,7 +365,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "eve_native",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1
   },
   // ── Single-file simple dataset ───
@@ -379,7 +379,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "eve_enhanced",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1
   },
 
@@ -393,7 +393,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "thread_tools_native",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1
   },
 

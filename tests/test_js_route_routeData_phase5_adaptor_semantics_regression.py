@@ -37,6 +37,15 @@ def test_route_edges_classify_otbr_route_sources_across_scoped_adaptors() -> Non
     assert text.count("linkCategories: routeCategories") >= 3
 
 
+def test_rest_api_route_data_uses_source_categories() -> None:
+    text = _read_text(ADAPTORS_JS)
+    rest_api_adaptor = text.split("export function adaptOtbrRestApi(fileMap) {")[1]
+
+    assert "const routeCategories = getOtbrRouteCategories(node);" in rest_api_adaptor
+    assert "if (routeCategories.length === 0) return;" in rest_api_adaptor
+    assert "linkCategories: routeCategories" in rest_api_adaptor
+
+
 def test_routes_subfilters_have_their_approved_category_membership() -> None:
     constants = _read_text(CONSTANTS_JS)
     filters = _read_text(FILTERS_JS)
@@ -46,7 +55,7 @@ def test_routes_subfilters_have_their_approved_category_membership() -> None:
     assert 'export const EDGE_CATEGORY_OTBR_ROUTE_ROUTER = "otbr_route_router";' in constants
     assert 'export const EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD = "otbr_route_ftd_child";' in constants
     assert 'label: "Routes: Routers"' in constants
-    assert 'label: "Routes: Ftd Child"' in constants
+    assert 'label: "Routes: REEDs"' in constants
     assert "if (mode === LINK_FILTER_ROUTES_ROUTERS)" in filters
     assert "if (mode === LINK_FILTER_ROUTES_FTD_CHILD)" in filters
 

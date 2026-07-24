@@ -1733,8 +1733,10 @@ export function adaptOtbrRestApi(fileMap) {
     const fromId = toText(node.extAddress || node.extaddr).toLowerCase() || toText(node.id);
     if (!fromId || !nodeMap.has(fromId)) return;
     const fromNode = nodeMap.get(fromId);
+    const routeCategories = getOtbrRouteCategories(node);
 
     (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
+      if (routeCategories.length === 0) return;
       const toRloc16 = buildMainRouterRloc16(route.routeId);
       if (!toRloc16) return;
       let toId = rloc16ToNodeId.get(toRloc16.toLowerCase()) || toRloc16;
@@ -1752,7 +1754,7 @@ export function adaptOtbrRestApi(fileMap) {
         lqiIn,
         lqiOut,
         ...buildEdgeEndpointTitles(fromNode, toNodeEnriched, fromId, toId),
-        linkCategories: [EDGE_CATEGORY_OTBR_ROUTE]
+        linkCategories: routeCategories
       });
     });
 
