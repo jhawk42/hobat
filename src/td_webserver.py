@@ -58,7 +58,7 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
         # System
         # Fetches extaddr to device_label mapping file.
         "td-static-extaddr-device-label.json": FileAction(
-            max_age_s=default_max_age_s, action=["merge-extaddr","--merge-mdns-br"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["merge-extaddr","--merge-mdns-br"], action_cost_s=2
         ),
 
         # mdns
@@ -83,10 +83,10 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
         # otbr-cli
         # Single ot-ctl commands — near-instant.
         "td-otbr-cli-thread-network-info.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-cli", "thread-network-info"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["otbr-cli", "thread-network-info"], action_cost_s=2
         ),
         "td-otbr-cli-router-table.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-cli", "router-table"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["otbr-cli", "router-table"], action_cost_s=2
         ),
         # meshdiag topology — single command, a few seconds.
         "td-otbr-cli-meshdiag-topology.json": FileAction(
@@ -137,53 +137,62 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
         # otbr-restapi
         # REST API downloads — single HTTP call, near-instant.
         "td-otbr-restapi-dataset-active.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2
         ),
         "td-otbr-restapi-devices.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2
         ),
         "td-otbr-restapi-diagnostics.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2
         ),
         "td-otbr-restapi-devices-list.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "devices", "list"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["otbr-restapi", "devices", "list"], action_cost_s=2
         ),
         "td-otbr-restapi-devices-fetch.json": FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-restapi", "devices", "fetch"],
-            action_cost_s=8,
+            action_cost_s=40,
             force_async=True,
         ),
         "td-otbr-restapi-diagnostics-list.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "list"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "list"], action_cost_s=2
         ),
         "td-otbr-restapi-actions-list.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "actions", "list"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["otbr-restapi", "actions", "list"], action_cost_s=2
         ),
         "td-otbr-restapi-mesh-diagnostics-fetch-all.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "mesh-diagnostics", "fetch-all"], action_cost_s=600, force_async=True
+            max_age_s=default_max_age_s,
+            action=[
+                "otbr-restapi", "mesh-diagnostics", "fetch-all",
+                "--routers-only", "--items-only",
+            ],
+            action_cost_s=1200,
+            force_async=True,
         ),
         "td-otbr-restapi-diagnostics-fetch-all.json": FileAction(
-            max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "fetch-all"], action_cost_s=600, force_async=True
+            max_age_s=default_max_age_s,
+            action=["otbr-restapi", "diagnostics", "fetch-all", "--items-only"],
+            action_cost_s=1200,
+            force_async=True,
         ),
 
         # Eve App
         # Eve topology exports — externally managed static files.
         "Eve Thread Network Layout.evethreadlayout": FileAction(
-            max_age_s=default_max_age_s, action="STATIC", action_cost_s=1
+            max_age_s=default_max_age_s, action="STATIC", action_cost_s=2
         ),
         "td-eve-topology.json": FileAction(
-            max_age_s=default_max_age_s, action=["process-eve"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["process-eve"], action_cost_s=2
         ),
 
         # Thread Tools app — externally managed static file.
         "diagnostics.json": FileAction(
-            max_age_s=default_max_age_s, action="STATIC", action_cost_s=1
+            max_age_s=default_max_age_s, action="STATIC", action_cost_s=2
         ),
 
         # Pre-merged output — produced by merge_dataset; treated as static here.
         "td-merged-topology-all.json": FileAction(
-            max_age_s=default_max_age_s, action=["merge-dataset"], action_cost_s=1
+            max_age_s=default_max_age_s, action=["merge-dataset"], action_cost_s=2
         ),
     }
 

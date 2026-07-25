@@ -5,6 +5,7 @@ from typing import Any, Sequence
 
 from otbr_restapi_diagnostics import resolve_types
 from otbr_restapi_util import (
+    DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
     OTBRRestApiClient,
     OTBRUsageError,
     extract_action_result_id,
@@ -46,18 +47,24 @@ def dispatch_actions(
             resolved_types = resolve_types(args)
             if not resolved_types:
                 raise OTBRUsageError("Provide --types or --preset for get-network-diagnostic")
-            enqueued = client.enqueue_get_network_diagnostic_task(
-                destination=args.destination,
-                types=resolved_types,
-                timeout=args.timeout,
-                destination_type=args.destination_type,
-                raw=raw_arg,
-            )
             if not getattr(args, "wait", False):
-                return enqueued
-            action_id = enqueued["data"][0]["id"] if effective_raw else enqueued[0]["id"]
-            action = client.wait_for_action(
-                action_id,
+                return client.enqueue_get_network_diagnostic_task(
+                    destination=args.destination,
+                    types=resolved_types,
+                    timeout=args.timeout,
+                    destination_type=args.destination_type,
+                    raw=raw_arg,
+                )
+            task_timeout = args.timeout or DIAGNOSTICS_DEFAULT_TASK_TIMEOUT
+            action = client.run_action(
+                lambda: client.enqueue_get_network_diagnostic_task(
+                    destination=args.destination,
+                    types=resolved_types,
+                    timeout=task_timeout,
+                    destination_type=args.destination_type,
+                    raw=False,
+                ),
+                task_timeout=task_timeout,
                 poll_interval=args.poll_interval,
                 poll_timeout=args.poll_timeout,
                 raise_on_stopped=True,

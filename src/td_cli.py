@@ -275,6 +275,10 @@ def _add_otbr_restapi_commands(subparsers: argparse._SubParsersAction) -> None:
         help="HTTP request timeout in seconds (forwarded)")
     restapi_p.add_argument("--accept", default=None, metavar="MIME",
         help="Default Accept header (forwarded)")
+    restapi_p.add_argument("--output", "-o", default=argparse.SUPPRESS, metavar="FILE",
+        help="Write command output to FILE (forwarded)")
+    restapi_p.add_argument("--datadir", default=argparse.SUPPRESS, metavar="DIR",
+        help=TD_DATA_DIR_ARG_HELP)
     restapi_p.add_argument("--raw", action="store_true", default=False,
         help="Return raw API envelopes instead of flattened output (forwarded)")
     restapi_p.add_argument("--poll-interval", type=float, default=None, metavar="FLOAT",
@@ -285,6 +289,8 @@ def _add_otbr_restapi_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Suppress per-device progress output (forwarded)")
     restapi_p.add_argument("--no-auto-output", action="store_true", default=False,
         help="Disable automatic output file naming (forwarded)")
+    restapi_p.add_argument("--debug", "-d", action="store_true", default=argparse.SUPPRESS,
+        help="Enable OTBR REST API debug logging (forwarded)")
     restapi_p.add_argument(
         "--lab",
         action="store_true",
@@ -782,14 +788,16 @@ def dispatch(
                 fwd += ["--accept", args.accept]
             if getattr(args, "raw", False):
                 fwd += ["--raw"]
-            if getattr(args, "poll-interval", None) is not None:
+            if getattr(args, "poll_interval", None) is not None:
                 fwd += ["--poll-interval", str(args.poll_interval)]
-            if getattr(args, "poll-timeout", None) is not None:
+            if getattr(args, "poll_timeout", None) is not None:
                 fwd += ["--poll-timeout", str(args.poll_timeout)]
-            if getattr(args, "no-progress", False):
+            if getattr(args, "no_progress", False):
                 fwd += ["--no-progress"]
-            if getattr(args, "no-auto-output", False):
+            if getattr(args, "no_auto_output", False):
                 fwd += ["--no-auto-output"]
+            if getattr(args, "debug", False):
+                fwd += ["--debug"]
             if getattr(args, "lab", False):
                 fwd += ["--lab"]
             return fwd

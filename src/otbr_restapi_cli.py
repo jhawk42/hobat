@@ -63,19 +63,14 @@ EXIT_INVALID_RESPONSE = 5
 
 # CLI default timing/task values
 CLI_POLL_INTERVAL_DEFAULT = 2.0
-CLI_POLL_TIMEOUT_DEFAULT = 8.0
+CLI_POLL_TIMEOUT_DEFAULT = None
 CLI_DEVICE_COUNT_DEFAULT = 255
 CLI_MAX_AGE_DEFAULT = 60
 CLI_MAX_RETRIES_DEFAULT = 2
-CLI_DEVICE_TASK_TIMEOUT_DEFAULT = 8
-CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT = 8
-CLI_MESH_TASK_TIMEOUT_DEFAULT = 8
-CLI_UPDATE_DEVICE_COLLECTION_TIMEOUT_DEFAULT = 8
-
-# Topology fallback defaults when argument aliases are absent
-CLI_TOPOLOGY_TASK_TIMEOUT_FALLBACK = CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT
-CLI_TOPOLOGY_POLL_INTERVAL_FALLBACK = CLI_POLL_INTERVAL_DEFAULT
-CLI_TOPOLOGY_POLL_TIMEOUT_FALLBACK = CLI_POLL_TIMEOUT_DEFAULT
+CLI_DEVICE_TASK_TIMEOUT_DEFAULT = 30
+CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT = 15
+CLI_MESH_TASK_TIMEOUT_DEFAULT = 15
+CLI_UPDATE_DEVICE_COLLECTION_TIMEOUT_DEFAULT = 30
 
 # Router-only selection mask/value
 ROUTER_RLOC16_MASK = 0x03FF
@@ -106,7 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=CLI_POLL_TIMEOUT_DEFAULT,
         metavar="FLOAT",
-        help=f"Max wall-clock seconds to wait for an action to complete (default: {CLI_POLL_TIMEOUT_DEFAULT})",
+        help="Max wall-clock seconds to wait for an action (default: derived).",
     )
     parser.add_argument(
         "--no-progress",
@@ -251,6 +246,17 @@ def _add_devices_commands(
         "--max-retries", type=int, default=CLI_MAX_RETRIES_DEFAULT,
         help=f"Max retries per device (default: {CLI_MAX_RETRIES_DEFAULT})",
     )
+    devices_fetch.add_argument(
+        "--whole-action-attempts",
+        type=int,
+        default=1,
+        help="Whole discovery action attempts; retries only known terminal failures (default: 1)",
+    )
+    devices_fetch.add_argument(
+        "--structured-outcome",
+        action="store_true",
+        help="Return workflow metadata instead of only the device array",
+    )
 
 
 def _add_diagnostics_commands(
@@ -373,8 +379,18 @@ def _add_diagnostics_commands(
     diagnostics_fetch_all.add_argument(
         "--fallback-preset",
         choices=["medium", "minimal", "basic"],
-        default="minimal",
-        help="TLV preset to retry with on device failure (default: minimal)",
+        default=None,
+        help="Opt in to one terminal-action retry with a smaller TLV preset",
+    )
+    diagnostics_fetch_all.add_argument(
+        "--preserve-diagnostics",
+        action="store_true",
+        help="Do not clear the diagnostic collection before this full sweep",
+    )
+    diagnostics_fetch_all.add_argument(
+        "--items-only",
+        action="store_true",
+        help="Return only diagnostic items instead of the structured sweep outcome",
     )
     diagnostics_fetch_all.add_argument(
         "--no-enrich-mac-counters",
@@ -528,9 +544,9 @@ def _add_mesh_diagnostics_commands(
             help=f"Server-side task timeout in seconds (default: {task_timeout})",
         )
         p.add_argument(
-            "--poll-timeout", type=float, default=CLI_POLL_TIMEOUT_DEFAULT, metavar="FLOAT",
+            "--poll-timeout", type=float, default=argparse.SUPPRESS, metavar="FLOAT",
             help=(
-                f"Max wall-clock seconds to wait for the action (default: {CLI_POLL_TIMEOUT_DEFAULT}). "
+                "Max wall-clock seconds to wait for the action (default: derived). "
                 "Mesh-diagnostic queries require an additional otMeshDiag round-trip."
             ),
         )
@@ -609,8 +625,8 @@ def _add_mesh_diagnostics_commands(
         help=f"Server-side task timeout per device in seconds (default: {CLI_MESH_TASK_TIMEOUT_DEFAULT})",
     )
     mesh_fetch_all_p.add_argument(
-        "--poll-timeout", type=float, default=CLI_POLL_TIMEOUT_DEFAULT, metavar="FLOAT",
-        help=f"Max wall-clock seconds per device action (default: {CLI_POLL_TIMEOUT_DEFAULT})",
+        "--poll-timeout", type=float, default=argparse.SUPPRESS, metavar="FLOAT",
+        help="Max wall-clock seconds per device action (default: derived)",
     )
     mesh_fetch_all_p.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
@@ -634,6 +650,16 @@ def _add_mesh_diagnostics_commands(
             "Avoids wasting task slots on child devices for mesh-diagnostic TLVs"
         ),
     )
+    mesh_fetch_all_p.add_argument(
+        "--preserve-diagnostics",
+        action="store_true",
+        help="Do not clear the diagnostic collection before this full sweep",
+    )
+    mesh_fetch_all_p.add_argument(
+        "--items-only",
+        action="store_true",
+        help="Return only diagnostic items instead of the structured sweep outcome",
+    )
 
 
 def _add_topology_commands(
@@ -653,6 +679,18 @@ def _add_topology_commands(
         choices=["recommended", "full", "minimal", "basic"],
         default="recommended",
         help="TLV preset for the diagnostics step (default: recommended)",
+    )
+    topo_p.add_argument(
+        "--task-timeout",
+        type=int,
+        default=CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT,
+        help=f"Server-side timeout for diagnostic actions (default: {CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT})",
+    )
+    topo_p.add_argument(
+        "--no-progress",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Disable per-device progress output",
     )
     topo_p.add_argument(
         "--skip-devices",
@@ -690,8 +728,13 @@ def _add_topology_commands(
     topo_p.add_argument(
         "--fallback-preset",
         choices=["medium", "minimal", "basic"],
-        default="minimal",
-        help="TLV preset to retry with on per-device failure (default: minimal)",
+        default=None,
+        help="Opt in to one terminal-action retry with a smaller TLV preset",
+    )
+    topo_p.add_argument(
+        "--preserve-diagnostics",
+        action="store_true",
+        help="Do not clear diagnostics before the topology diagnostic sweep",
     )
 
 
@@ -1185,107 +1228,6 @@ def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:
     raise ValueError("Unsupported CLI command")
 
 
-def _dispatch_topology(
-    client: OTBRRestApiClient,
-    args: argparse.Namespace,
-    raw_arg: object,
-) -> None:
-    """Execute the full topology sweep and write all three output files."""
-    data_dir: Path = args.td_data_dir
-    do_update = not getattr(args, "no_update_devices", False)
-    do_enrich = not getattr(args, "no_enrich_mac_counters", False)
-    fallback_types = _resolve_fallback_types(args)
-    primary_types = _resolve_types(args)
-    progress_enabled = not getattr(args, "no_progress", False)
-    wall_start = time.monotonic()
-
-    # ------------------------------------------------------------------
-    # Step 1: Device refresh
-    # ------------------------------------------------------------------
-    devices: list[Any] = []
-    if not getattr(args, "skip_devices", False):
-        logging.info("topology step 1: devices fetch ...")
-        devices = client.fetch_device_collection()
-        path = data_dir / "td-otbr-restapi-devices-fetch.json"
-        emit_rest_payload_output(devices, path, logging.getLogger(__name__))
-        logging.info("topology step 1 done: %d device(s) → %s", len(devices), path)
-    else:
-        logging.info("topology step 1 skipped (--skip-devices); fetching device list quietly")
-        devices = client.list_devices(raw=False)
-
-    device_ids = [d["id"] for d in devices if isinstance(d, dict) and d.get("id")]
-
-    # ------------------------------------------------------------------
-    # Step 2: Network diagnostics fetch-all
-    # ------------------------------------------------------------------
-    if not getattr(args, "skip_diagnostics", False):
-        logging.info("topology step 2: diagnostics fetch-all --preset %s ...", args.preset)
-        step_start = time.monotonic()
-        if do_update and not getattr(args, "skip_devices", False):
-            # Device list already refreshed in step 1; avoid a second refresh
-            diag_device_ids = device_ids
-        elif do_update:
-            diag_devices = client.fetch_device_collection()
-            diag_device_ids = [
-                d["id"] for d in diag_devices if isinstance(d, dict) and d.get("id")
-            ]
-        else:
-            diag_device_ids = device_ids
-
-        progress_fn = _make_progress_fn(len(diag_device_ids), progress_enabled)
-        diagnostics = _fetch_all_with_fallback(
-            client, diag_device_ids, primary_types, fallback_types,
-            destination_type=args.destination_type if hasattr(args, "destination-type")
-            else DestinationType.EXTENDED,
-            task_timeout=args.task_timeout if hasattr(args, "task-timeout") else CLI_TOPOLOGY_TASK_TIMEOUT_FALLBACK,
-            poll_interval=args.poll_interval if hasattr(args, "poll-interval") else CLI_TOPOLOGY_POLL_INTERVAL_FALLBACK,
-            poll_timeout=args.poll_timeout if hasattr(args, "poll-timeout") else CLI_TOPOLOGY_POLL_TIMEOUT_FALLBACK,
-            raw=raw_arg,
-            on_progress=progress_fn,
-        )
-        if do_enrich:
-            _apply_mac_enrichment(diagnostics)
-        path = data_dir / "td-otbr-restapi-diagnostics-fetch-all.json"
-        emit_rest_payload_output(diagnostics, path, logging.getLogger(__name__))
-        elapsed = time.monotonic() - step_start
-        logging.info(
-            "topology step 2 done: %d device(s), %d diagnostic(s) in %.1fs → %s",
-            len(diag_device_ids), len(diagnostics), elapsed, path,
-        )
-    else:
-        logging.info("topology step 2 skipped (--skip-diagnostics)")
-
-    # ------------------------------------------------------------------
-    # Step 3: Mesh diagnostics fetch-all --routers-only
-    # ------------------------------------------------------------------
-    if not getattr(args, "skip_mesh_diagnostics", False):
-        logging.info("topology step 3: mesh-diagnostics fetch-all --routers-only ...")
-        step_start = time.monotonic()
-        router_ids = _filter_router_device_ids(devices, device_ids)
-        logging.info(
-            "topology step 3: %d router device(s) selected", len(router_ids)
-        )
-        mesh_progress_fn = _make_progress_fn(len(router_ids), progress_enabled)
-        mesh_results = client.fetch_mesh_diagnostics_all_devices(
-            router_ids,
-            types=list(MESH_DIAGNOSTIC_TLVS),
-            on_progress=mesh_progress_fn,
-        )
-        path = data_dir / "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
-        emit_rest_payload_output(mesh_results, path, logging.getLogger(__name__))
-        elapsed = time.monotonic() - step_start
-        logging.info(
-            "topology step 3 done: %d mesh diagnostic(s) in %.1fs → %s",
-            len(mesh_results), elapsed, path,
-        )
-    else:
-        logging.info("topology step 3 skipped (--skip-mesh-diagnostics)")
-
-    total_elapsed = time.monotonic() - wall_start
-    logging.info("Topology sweep complete in %.1fs", total_elapsed)
-    return None  # emit_output handles None by writing nothing
-
-
 def _resolve_types(args: argparse.Namespace) -> list[str | int]:
     """Resolve TLV type list from --preset or --types args. Returns RECOMMENDED_DIAGNOSTIC_TLVS if neither given."""
     preset = getattr(args, "preset", None)
@@ -1432,7 +1374,13 @@ def run_cli(
         client = build_client_fn(args)
         result = dispatch_fn(client, args)
         emit_output(result, output_path)
-        print(f"Saved {len(result) if result is not None else 0} records to {output_path}" if output_path else "Output written to stdout")
+        if isinstance(result, dict) and isinstance(result.get("items"), list):
+            record_count = len(result["items"])
+        elif result is not None and hasattr(result, "__len__"):
+            record_count = len(result)
+        else:
+            record_count = 0
+        print(f"Saved {record_count} records to {output_path}" if output_path else "Output written to stdout")
 
         return EXIT_SUCCESS
     except OTBRClientError as exc:

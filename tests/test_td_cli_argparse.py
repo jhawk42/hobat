@@ -491,6 +491,70 @@ class TestDispatchOtherCommands(unittest.TestCase):
         self.assertLess(forwarded.index("--raw"), forwarded.index("devices"))
         self.assertEqual(rc, 0)
 
+    def test_restapi_all_global_options_forwarded_before_resource(self):
+        argv = [
+            "otbr-restapi",
+            "--host", "192.168.1.2",
+            "--port", "9090",
+            "--base-url", "http://otbr.test:8081",
+            "--timeout", "12",
+            "--accept", "application/json",
+            "--output", "result.json",
+            "--datadir", "/tmp/td-rest",
+            "--raw",
+            "--poll-interval", "0.5",
+            "--poll-timeout", "40",
+            "--no-progress",
+            "--no-auto-output",
+            "--debug",
+            "--lab",
+            "devices", "list",
+        ]
+        with patch.object(td_cli.otbr_restapi_cli, "main", return_value=0) as mocked_main:
+            rc = self._dispatch(argv)
+
+        forwarded = mocked_main.call_args.args[0]
+        resource_index = forwarded.index("devices")
+        for option in (
+            "--host",
+            "--port",
+            "--base-url",
+            "--timeout",
+            "--accept",
+            "--output",
+            "--datadir",
+            "--raw",
+            "--poll-interval",
+            "--poll-timeout",
+            "--no-progress",
+            "--no-auto-output",
+            "--debug",
+            "--lab",
+        ):
+            self.assertIn(option, forwarded)
+            self.assertLess(forwarded.index(option), resource_index)
+        self.assertEqual(rc, 0)
+
+    def test_restapi_frontend_exposes_all_subordinate_global_options(self):
+        frontend_parser = td_cli._find_child_subparser(
+            td_cli.build_parser(), "otbr-restapi"
+        )
+        self.assertIsNotNone(frontend_parser)
+        subordinate_parser = td_cli.otbr_restapi_cli.build_parser()
+
+        frontend_options = {
+            option
+            for action in frontend_parser._actions
+            for option in action.option_strings
+        }
+        subordinate_options = {
+            option
+            for action in subordinate_parser._actions
+            for option in action.option_strings
+        }
+
+        self.assertEqual(subordinate_options - frontend_options, set())
+
     def test_process_eve_forwards_extras(self):
         argv = ["process-eve", "--input", "layout.evethreadlayout"]
         with patch.object(td_cli.eve_process, "main", return_value=0) as m:

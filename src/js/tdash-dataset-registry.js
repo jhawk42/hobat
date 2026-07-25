@@ -275,7 +275,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "default_links",
-    estimateActionCostSecs: 15
+    estimateActionCostSecs: 30
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────
@@ -292,7 +292,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "default_links",
-    estimateActionCostSecs: 615
+    estimateActionCostSecs: 1260
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────
@@ -311,7 +311,7 @@ export const DATASET_REGISTRY = [
     physicsProfile: "mesh-compact",
     defaultView: "topology",
     defaultLinkFilter: "default_links",
-    estimateActionCostSecs: 1200
+    estimateActionCostSecs: 2450
   },
 
   // ── Single-file simple datasets ───
@@ -325,7 +325,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     defaultView: "topology",
     defaultLinkFilter: "default_links",
-    estimateActionCostSecs: 600
+    estimateActionCostSecs: 1200
   },
 
   // ── Multi-file topology datasets (otbr-restapi) ────────────

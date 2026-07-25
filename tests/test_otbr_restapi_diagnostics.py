@@ -202,19 +202,20 @@ class DiagnosticsFetchAllEnrichmentTests(unittest.TestCase):
             no_fallback=True,
             preset="recommended",
             types=None,
+            items_only=True,
         )
+        client.fetch_all_devices_diagnostics.return_value = {
+            "items": diagnostics_payload,
+            "deviceResults": [{"deviceId": "dev-1", "status": "completed"}],
+            "partial": False,
+        }
 
-        with unittest.mock.patch.object(
-            diagnostics_module,
-            "fetch_all_with_fallback",
-            return_value=diagnostics_payload,
-        ):
-            result = diagnostics_module.dispatch_diagnostics(
-                client,
-                args,
-                _RAW_UNSET,
-                fields=None,
-            )
+        result = diagnostics_module.dispatch_diagnostics(
+            client,
+            args,
+            _RAW_UNSET,
+            fields=None,
+        )
 
         self.assertIsNot(result, diagnostics_payload)
         stats = result[0]["timeStatistics"]

@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
+import re
 import time
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
@@ -34,27 +38,41 @@ ACTION_POLL_TIMEOUT_DEFAULT = 120.0
 DEVICE_COLLECTION_DEFAULT_DEVICE_COUNT = 255
 DEVICE_COLLECTION_DEFAULT_MAX_AGE = 60
 DEVICE_COLLECTION_DEFAULT_MAX_RETRIES = 2
-DEVICE_COLLECTION_DEFAULT_TASK_TIMEOUT = 6
+DEVICE_COLLECTION_DEFAULT_TASK_TIMEOUT = 30
 DEVICE_COLLECTION_DEFAULT_POLL_INTERVAL = 2.0
-DEVICE_COLLECTION_DEFAULT_POLL_TIMEOUT = 6.0
+DEVICE_COLLECTION_DEFAULT_POLL_TIMEOUT = 36.0
 
 # Diagnostics workflow defaults
 DIAGNOSTICS_DEFAULT_DEVICE_COUNT = 255
-DIAGNOSTICS_DEFAULT_TASK_TIMEOUT = 6
+DIAGNOSTICS_DEFAULT_TASK_TIMEOUT = 15
 DIAGNOSTICS_DEFAULT_POLL_INTERVAL = 2.0
-DIAGNOSTICS_DEFAULT_POLL_TIMEOUT = 6.0
+DIAGNOSTICS_DEFAULT_POLL_TIMEOUT = 20.0
 
 # Mesh diagnostics workflow defaults
-MESH_DIAGNOSTICS_DEFAULT_TASK_TIMEOUT = 6
+MESH_DIAGNOSTICS_DEFAULT_TASK_TIMEOUT = 15
 MESH_DIAGNOSTICS_DEFAULT_POLL_INTERVAL = 2.0
-MESH_DIAGNOSTICS_DEFAULT_POLL_TIMEOUT = 6.0
+MESH_DIAGNOSTICS_DEFAULT_POLL_TIMEOUT = 20.0
 
 # Energy-scan workflow defaults
 ENERGY_SCAN_DEFAULT_POLL_INTERVAL = 2.0
-ENERGY_SCAN_DEFAULT_POLL_TIMEOUT = 6.0
+ENERGY_SCAN_DEFAULT_POLL_TIMEOUT = 20.0
 
 # HTTP retry backoff defaults
 RETRY_BACKOFF_BASE = 2
+RETRY_BACKOFF_MAX = 8.0
+RETRY_JITTER_DEFAULT = 0.0
+RETRYABLE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
+RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+SENSITIVE_BODY_KEY_MARKERS = (
+    "credential",
+    "networkkey",
+    "passphrase",
+    "password",
+    "pskc",
+    "pskd",
+    "secret",
+    "token",
+)
 JSON_CONTENT_TYPES = {
     "application/json",
     "application/vnd.api+json",
@@ -164,6 +182,55 @@ class OTBRActionTimeoutError(OTBRActionError):
     """Raised when wait_for_action() exceeds its wall-clock timeout."""
 
 
+class OTBRActionDisappearedError(OTBRActionError):
+    """Raised when an enqueued action is no longer available from OTBR."""
+
+
+class OTBRIndeterminateEnqueueError(OTBRClientError):
+    """Raised when OTBR may have accepted an action but returned no usable response."""
+
+    def __init__(self, message: str, cause: OTBRClientError) -> None:
+        self.cause = cause
+        super().__init__(message)
+
+
+@dataclass(frozen=True)
+class ActionTimingPolicy:
+    task_timeout: int
+    poll_interval: float
+    poll_timeout: float
+
+    @staticmethod
+    def minimum_poll_timeout(task_timeout: int, poll_interval: float) -> float:
+        return task_timeout + max(5.0, 0.2 * task_timeout, 2.0 * poll_interval)
+
+    @classmethod
+    def resolve(
+        cls,
+        *,
+        task_timeout: int,
+        poll_interval: float,
+        poll_timeout: float | None,
+    ) -> "ActionTimingPolicy":
+        if task_timeout <= 0:
+            raise OTBRUsageError("task_timeout must be greater than zero")
+        if poll_interval <= 0:
+            raise OTBRUsageError("poll_interval must be greater than zero")
+        minimum = cls.minimum_poll_timeout(task_timeout, poll_interval)
+        resolved_timeout = minimum if poll_timeout is None else poll_timeout
+        if resolved_timeout < minimum:
+            raise OTBRUsageError(
+                f"poll_timeout must be at least {minimum:g}s for "
+                f"task_timeout={task_timeout}s and poll_interval={poll_interval:g}s"
+            )
+        return cls(task_timeout, poll_interval, resolved_timeout)
+
+
+DISCOVERY_TIMING_POLICY = ActionTimingPolicy(30, 2.0, 36.0)
+ROUTER_DIAGNOSTIC_TIMING_POLICY = ActionTimingPolicy(15, 2.0, 20.0)
+CHILD_DIAGNOSTIC_TIMING_POLICY = ActionTimingPolicy(30, 2.0, 36.0)
+
+
 # ---------------------------------------------------------------------------
 # TLV Catalog & Protocol Constants
 # ---------------------------------------------------------------------------
@@ -270,6 +337,7 @@ class ActionStatus:
     COMPLETED = "completed"
     STOPPED = "stopped"
     FAILED = "failed"
+    ALL = frozenset({PENDING, ACTIVE, COMPLETED, STOPPED, FAILED})
     # addThreadDeviceTask-specific
     UNDISCOVERED = "undiscovered"
     ATTEMPTED = "attempted"
@@ -320,6 +388,8 @@ class OTBRRestApiClient:
         accept: str = DEFAULT_ACCEPT,
         user_agent: str = "td-otbr-restapi-client/1.0",
         default_raw: bool = False,
+        retry_backoff_max: float = RETRY_BACKOFF_MAX,
+        retry_jitter: float = RETRY_JITTER_DEFAULT,
     ) -> None:
         resolved_host = resolve_default_rest_host() if host is None else host
         resolved_port = resolve_default_rest_port() if port is None else port
@@ -329,6 +399,8 @@ class OTBRRestApiClient:
         self.accept = accept
         self.user_agent = user_agent
         self._default_raw = default_raw
+        self.retry_backoff_max = max(0.0, retry_backoff_max)
+        self.retry_jitter = max(0.0, retry_jitter)
 
     def _resolve_raw(self, raw: object) -> bool:
         """Resolve the raw parameter: if _RAW_UNSET, use the instance default_raw."""
@@ -507,12 +579,14 @@ class OTBRRestApiClient:
         fields: Mapping[str, str | Sequence[str] | None] | None = None,
         *,
         raw: object = _RAW_UNSET,
+        deadline: float | None = None,
     ) -> Any:
         raw = self._resolve_raw(raw)
         return self._request(
             f"/api/actions/{action_id}",
             query=self._build_fields_query(fields),
             raw=raw,
+            deadline=deadline,
         )
 
     # -----------------------------------------------------------------------
@@ -521,6 +595,10 @@ class OTBRRestApiClient:
 
     def delete_all_actions(self) -> None:
         self._request("/api/actions", method="DELETE", raw=True)
+
+    def delete_action(self, action_id: str) -> None:
+        self._validate_non_empty_string(action_id, "action_id")
+        self._request(f"/api/actions/{action_id}", method="DELETE", raw=True)
 
     def delete_all_devices(self) -> None:
         self._request("/api/devices", method="DELETE", raw=True)
@@ -746,9 +824,30 @@ class OTBRRestApiClient:
         """
         raw = self._resolve_raw(raw)
         deadline = time.monotonic() + poll_timeout
+        last_action: Any = None
+        last_status = "unknown"
 
         while True:
-            action = self.get_action(action_id, raw=raw)
+            try:
+                action = self.get_action(action_id, raw=raw, deadline=deadline)
+            except OTBRHTTPError as exc:
+                if exc.status_code == 404:
+                    raise OTBRActionDisappearedError(
+                        f"Action {action_id} disappeared before reaching a terminal state",
+                        action_id=action_id,
+                        status=last_status,
+                        action=last_action,
+                    ) from exc
+                raise
+            except OTBRConnectionError as exc:
+                if time.monotonic() >= deadline:
+                    raise OTBRActionTimeoutError(
+                        f"Action {action_id} did not complete within {poll_timeout}s",
+                        action_id=action_id,
+                        status=last_status,
+                        action=last_action,
+                    ) from exc
+                raise
 
             if raw:
                 data_node = action.get("data") if isinstance(
@@ -760,10 +859,18 @@ class OTBRRestApiClient:
                 status = action.get("status") if isinstance(
                     action, dict) else None
 
+            last_action = action
+            last_status = status or "unknown"
+
             if status is None:
                 raise OTBRInvalidResponseError(
                     f"Action {action_id} response has no 'status' field; "
                     "server response may be malformed or missing attributes"
+                )
+
+            if status not in ActionStatus.ALL:
+                raise OTBRInvalidResponseError(
+                    f"Action {action_id} returned unknown status {status!r}: {action!r}"
                 )
 
             if status in ActionStatus.TERMINAL:
@@ -787,6 +894,73 @@ class OTBRRestApiClient:
 
             time.sleep(min(poll_interval, remaining))
 
+    def run_action(
+        self,
+        enqueue: Callable[[], Any],
+        *,
+        task_timeout: int,
+        poll_interval: float,
+        poll_timeout: float | None = None,
+        raise_on_stopped: bool = True,
+        cleanup_on_timeout: bool = False,
+        raw: object = _RAW_UNSET,
+    ) -> Any:
+        timing = ActionTimingPolicy.resolve(
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+        )
+        started = time.monotonic()
+        try:
+            enqueued = enqueue()
+        except (OTBRHTTPError, OTBRConnectionError) as exc:
+            raise OTBRIndeterminateEnqueueError(
+                "Action enqueue outcome is indeterminate; the request will not be replayed",
+                exc,
+            ) from exc
+        action_id = self._extract_enqueued_action_id(enqueued)
+        try:
+            return self.wait_for_action(
+                action_id,
+                poll_interval=timing.poll_interval,
+                poll_timeout=timing.poll_timeout,
+                raise_on_stopped=raise_on_stopped,
+                raw=raw,
+            )
+        except OTBRActionTimeoutError:
+            if cleanup_on_timeout:
+                try:
+                    self.delete_action(action_id)
+                except OTBRClientError as cleanup_error:
+                    logging.warning(
+                        "Failed to delete timed-out action %s: %s",
+                        action_id,
+                        cleanup_error,
+                    )
+            raise
+        finally:
+            logging.debug(
+                "Action %s lifecycle elapsed=%.3fs taskTimeout=%ds pollTimeout=%.3fs",
+                action_id,
+                time.monotonic() - started,
+                timing.task_timeout,
+                timing.poll_timeout,
+            )
+
+    @staticmethod
+    def _extract_enqueued_action_id(enqueued: Any) -> str:
+        if not isinstance(enqueued, list) or len(enqueued) != 1:
+            raise OTBRInvalidResponseError(
+                "Action enqueue response must contain exactly one action"
+            )
+        item = enqueued[0]
+        action_id = item.get("id") if isinstance(item, dict) else None
+        if not isinstance(action_id, str) or not action_id.strip():
+            raise OTBRInvalidResponseError(
+                "Action enqueue response has no valid action ID"
+            )
+        return action_id
+
     # -----------------------------------------------------------------------
     # Device Collection Workflow Methods
     # -----------------------------------------------------------------------
@@ -799,7 +973,7 @@ class OTBRRestApiClient:
         max_retries: int = DEVICE_COLLECTION_DEFAULT_MAX_RETRIES,
         task_timeout: int = DEVICE_COLLECTION_DEFAULT_TASK_TIMEOUT,
         poll_interval: float = DEVICE_COLLECTION_DEFAULT_POLL_INTERVAL,
-        poll_timeout: float = DEVICE_COLLECTION_DEFAULT_POLL_TIMEOUT,
+        poll_timeout: float | None = None,
         raise_on_stopped: bool = False,
         raw: object = _RAW_UNSET,
     ) -> Any:
@@ -822,18 +996,15 @@ class OTBRRestApiClient:
             raw: Return raw action item.
         """
         raw = self._resolve_raw(raw)
-        enqueued = self.enqueue_update_device_collection_task(
-            max_age=max_age,
-            max_retries=max_retries,
-            device_count=device_count,
-            timeout=task_timeout,
-            raw=False,
-        )
-        # enqueued is a list of flattened action items
-        action_id: str = enqueued[0]["id"]
-
-        return self.wait_for_action(
-            action_id,
+        return self.run_action(
+            lambda: self.enqueue_update_device_collection_task(
+                max_age=max_age,
+                max_retries=max_retries,
+                device_count=device_count,
+                timeout=task_timeout,
+                raw=False,
+            ),
+            task_timeout=task_timeout,
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             raise_on_stopped=raise_on_stopped,
@@ -848,9 +1019,11 @@ class OTBRRestApiClient:
         max_retries: int = DEVICE_COLLECTION_DEFAULT_MAX_RETRIES,
         task_timeout: int = DEVICE_COLLECTION_DEFAULT_TASK_TIMEOUT,
         poll_interval: float = DEVICE_COLLECTION_DEFAULT_POLL_INTERVAL,
-        poll_timeout: float = DEVICE_COLLECTION_DEFAULT_POLL_TIMEOUT,
+        poll_timeout: float | None = None,
         fields: Mapping[str, str | Sequence[str] | None] | None = None,
         with_meta: bool = False,
+        items_only: bool = False,
+        whole_action_attempts: int = 1,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -862,37 +1035,117 @@ class OTBRRestApiClient:
             list_devices(fields=fields, with_meta=with_meta, raw=raw)
         """
         raw = self._resolve_raw(raw)
-        try:
+        if whole_action_attempts < 1:
+            raise OTBRUsageError("whole_action_attempts must be at least 1")
+        if not 1 <= device_count <= 255:
+            raise OTBRUsageError("device_count must be between 1 and 255")
+        if max_age < 0:
+            raise OTBRUsageError("max_age must be non-negative")
+        if not 0 <= max_retries <= 255:
+            raise OTBRUsageError("max_retries must be between 0 and 255")
+
+        workflow_started = time.monotonic()
+        action: Any = None
+        error: OTBRClientError | None = None
+        attempts = 0
+        for attempts in range(1, whole_action_attempts + 1):
             logging.info(
                 "Sent updateDeviceCollectionTask action"
-                " (deviceCount=%d, maxAge=%ds, maxRetries=%d, taskTimeout=%ds);",
-                device_count, max_age, max_retries, task_timeout
+                " (attempt=%d/%d, deviceCount=%d, maxAge=%ds, "
+                "maxRetries=%d, taskTimeout=%ds)",
+                attempts,
+                whole_action_attempts,
+                device_count,
+                max_age,
+                max_retries,
+                task_timeout,
             )
-            action = self.trigger_and_wait_device_collection(
-                device_count=device_count,
-                max_age=max_age,
-                max_retries=max_retries,
-                task_timeout=task_timeout,
-                poll_interval=poll_interval,
-                poll_timeout=poll_timeout,
-                raise_on_stopped=False,
-                raw=False,
-            )
-            status = action.get("status") if isinstance(action, dict) else None
-            if status in (ActionStatus.STOPPED, ActionStatus.FAILED):
-                logging.warning(
-                    "updateDeviceCollectionTask ended with status '%s'; "
-                    "returning partial device list",
-                    status,
+            try:
+                action = self.trigger_and_wait_device_collection(
+                    device_count=device_count,
+                    max_age=max_age,
+                    max_retries=max_retries,
+                    task_timeout=task_timeout,
+                    poll_interval=poll_interval,
+                    poll_timeout=poll_timeout,
+                    raise_on_stopped=False,
+                    raw=False,
                 )
-        except OTBRActionTimeoutError as exc:
+            except (
+                OTBRActionTimeoutError,
+                OTBRActionDisappearedError,
+                OTBRIndeterminateEnqueueError,
+            ) as exc:
+                error = exc
+                action = getattr(exc, "action", None)
+                break
+
+            status = action.get("status") if isinstance(action, dict) else None
+            if status == ActionStatus.COMPLETED:
+                break
+            if status not in (ActionStatus.STOPPED, ActionStatus.FAILED):
+                error = OTBRInvalidResponseError(
+                    f"Discovery action returned non-terminal status {status!r}"
+                )
+                break
+            if attempts < whole_action_attempts:
+                logging.warning(
+                    "Discovery action %s ended with status '%s'; retrying "
+                    "because whole_action_attempts=%d",
+                    action.get("id", "unknown"),
+                    status,
+                    whole_action_attempts,
+                )
+
+        status = (
+            action.get("status")
+            if isinstance(action, dict)
+            else (
+                "indeterminate_enqueue"
+                if isinstance(error, OTBRIndeterminateEnqueueError)
+                else getattr(error, "status", "unknown")
+            )
+        )
+        partial = status != ActionStatus.COMPLETED
+        if partial:
             logging.warning(
-                "updateDeviceCollectionTask timed out (%s); "
-                "returning partial device list",
-                exc,
+                "Discovery incomplete; returning partial device collection "
+                "status=%s action=%s error=%s",
+                status,
+                action.get("id") if isinstance(action, dict) else None,
+                error,
             )
 
-        return self.list_devices(fields=fields, with_meta=with_meta, raw=raw)
+        collection = self.list_devices(fields=fields, with_meta=with_meta, raw=raw)
+        if with_meta and isinstance(collection, dict) and "items" in collection:
+            items = collection["items"]
+            collection_meta = collection.get("meta")
+        else:
+            items = collection
+            collection_meta = None
+        if items_only:
+            return items
+
+        return {
+            "items": items,
+            "partial": partial,
+            "status": status,
+            "action": action,
+            "error": (
+                {"type": type(error).__name__, "message": str(error)}
+                if error is not None
+                else None
+            ),
+            "freshness": {
+                "maxAge": max_age,
+                "fetchedAt": datetime.now(timezone.utc).isoformat(),
+                "collectionMeta": collection_meta,
+                "stalePossible": partial,
+            },
+            "attempts": attempts,
+            "elapsed": time.monotonic() - workflow_started,
+            "deviceCountTarget": device_count,
+        }
 
     # -----------------------------------------------------------------------
     # Network Diagnostics Workflow Methods
@@ -906,7 +1159,8 @@ class OTBRRestApiClient:
         destination_type: str = DestinationType.EXTENDED,
         task_timeout: int = DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
         poll_interval: float = DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
-        poll_timeout: float = DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
+        poll_timeout: float | None = None,
+        return_context: bool = False,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -934,21 +1188,20 @@ class OTBRRestApiClient:
             OTBRConnectionError: Server unreachable.
         """
         raw = self._resolve_raw(raw)
-        enqueued = self.enqueue_get_network_diagnostic_task(
-            destination=device_id,
-            types=list(types),
-            timeout=task_timeout,
-            destination_type=destination_type,
-            raw=False,
-        )
-        action_id: str = enqueued[0]["id"]
-
-        action = self.wait_for_action(
-            action_id,
+        action = self.run_action(
+            lambda: self.enqueue_get_network_diagnostic_task(
+                destination=device_id,
+                types=list(types),
+                timeout=task_timeout,
+                destination_type=destination_type,
+                raw=False,
+            ),
+            task_timeout=task_timeout,
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             raise_on_stopped=True,
         )
+        action_id = action.get("id", "unknown") if isinstance(action, dict) else "unknown"
 
         result_id = extract_action_result_id(action)
         if not result_id:
@@ -962,21 +1215,34 @@ class OTBRRestApiClient:
                 )
             raise OTBRInvalidResponseError(msg)
 
-        return self.get_diagnostic(result_id, raw=raw)
+        diagnostic = self.get_diagnostic(result_id, raw=raw)
+        if return_context:
+            return {
+                "item": diagnostic,
+                "action": action,
+                "diagnosticId": result_id,
+            }
+        return diagnostic
 
     def fetch_all_devices_diagnostics(
         self,
-        device_ids: Sequence[str],
+        device_ids: Sequence[str | Mapping[str, Any]],
         *,
         types: Sequence[str | int] = RECOMMENDED_DIAGNOSTIC_TLVS,
         destination_type: str = DestinationType.EXTENDED,
         task_timeout: int = DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
         poll_interval: float = DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
-        poll_timeout: float = DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
+        poll_timeout: float | None = None,
         skip_on_failure: bool = True,
+        child_task_timeout: int = CHILD_DIAGNOSTIC_TIMING_POLICY.task_timeout,
+        child_poll_timeout: float | None = None,
+        clear_diagnostics: bool = False,
+        items_only: bool = False,
+        fallback_types: Sequence[str | int] | None = None,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
+        on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None = None,
         raw: object = _RAW_UNSET,
-    ) -> list[Any]:
+    ) -> Any:
         """
         Fetch diagnostics for a list of device IDs, one device at a time.
 
@@ -996,34 +1262,143 @@ class OTBRRestApiClient:
             Failed devices are omitted when skip_on_failure=True.
         """
         raw = self._resolve_raw(raw)
+        started_at = datetime.now(timezone.utc).isoformat()
         results: list[Any] = []
-        total = len(device_ids)
-        for idx, device_id in enumerate(device_ids, start=1):
+        device_results: list[dict[str, Any]] = []
+        normalized_devices: list[tuple[str, str | None]] = []
+        seen_ids: set[str] = set()
+
+        for device in device_ids:
+            if isinstance(device, Mapping):
+                device_id = device.get("id") or device.get("extAddress")
+                role = device.get("role")
+            else:
+                device_id = device
+                role = None
+            if not isinstance(device_id, str) or not re.fullmatch(
+                r"[0-9a-fA-F]{16}", device_id
+            ):
+                device_results.append(
+                    {
+                        "deviceId": device_id,
+                        "role": role,
+                        "status": "malformed",
+                        "error": "device ID must be a 16-character hexadecimal extAddress",
+                    }
+                )
+                continue
+            normalized_id = device_id.lower()
+            if normalized_id in seen_ids:
+                device_results.append(
+                    {
+                        "deviceId": device_id,
+                        "role": role,
+                        "status": "skipped",
+                        "error": "duplicate device ID",
+                    }
+                )
+                continue
+            seen_ids.add(normalized_id)
+            normalized_devices.append((device_id, str(role).lower() if role else None))
+
+        if clear_diagnostics:
+            self.delete_all_diagnostics()
+
+        total = len(normalized_devices)
+        for idx, (device_id, role) in enumerate(normalized_devices, start=1):
             t_start = time.monotonic()
             status = "completed"
+            action_attempts = 1
             try:
                 logging.debug("Fetching diagnostics for device %s (%d/%d) types: %s", device_id, idx, total, " ".join(map(str, types)))
-                diag = self.fetch_device_diagnostics(
-                    device_id,
-                    types=types,
-                    destination_type=destination_type,
-                    task_timeout=task_timeout,
-                    poll_interval=poll_interval,
-                    poll_timeout=poll_timeout,
-                    raw=raw,
+                is_child = role == "child"
+                selected_task_timeout = child_task_timeout if is_child else task_timeout
+                selected_poll_timeout = child_poll_timeout if is_child else poll_timeout
+                try:
+                    context = self.fetch_device_diagnostics(
+                        device_id,
+                        types=types,
+                        destination_type=destination_type,
+                        task_timeout=selected_task_timeout,
+                        poll_interval=poll_interval,
+                        poll_timeout=selected_poll_timeout,
+                        return_context=True,
+                        raw=raw,
+                    )
+                except OTBRActionFailedError:
+                    if not fallback_types:
+                        raise
+                    action_attempts = 2
+                    logging.warning(
+                        "Device %s terminal diagnostic attempt failed; "
+                        "retrying with explicitly configured fallback TLVs",
+                        device_id,
+                    )
+                    context = self.fetch_device_diagnostics(
+                        device_id,
+                        types=fallback_types,
+                        destination_type=destination_type,
+                        task_timeout=selected_task_timeout,
+                        poll_interval=poll_interval,
+                        poll_timeout=selected_poll_timeout,
+                        return_context=True,
+                        raw=raw,
+                    )
+                diagnostic = context["item"]
+                results.append(diagnostic)
+                device_results.append(
+                    {
+                        "deviceId": device_id,
+                        "role": role,
+                        "status": status,
+                        "diagnosticId": context["diagnosticId"],
+                        "action": context["action"],
+                        "attempts": action_attempts,
+                        "created": (
+                            diagnostic.get("created")
+                            if isinstance(diagnostic, dict)
+                            else None
+                        ),
+                        "elapsed": time.monotonic() - t_start,
+                    }
                 )
-                results.append(diag)
-            except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
-                status = "skipped"
+            except OTBRClientError as exc:
+                status = "failed"
+                device_results.append(
+                    {
+                        "deviceId": device_id,
+                        "role": role,
+                        "status": status,
+                        "error": {
+                            "type": type(exc).__name__,
+                            "message": str(exc),
+                            "actionId": getattr(exc, "action_id", None),
+                            "actionStatus": getattr(exc, "status", None),
+                        },
+                        "attempts": action_attempts,
+                        "elapsed": time.monotonic() - t_start,
+                    }
+                )
                 if not skip_on_failure:
                     raise
-                logging.warning(
-                    "Skipping device %s: %s", device_id, exc
-                )
+                logging.warning("Skipping device %s: %s", device_id, exc)
             finally:
                 if on_progress is not None:
                     on_progress(idx, total, device_id, time.monotonic() - t_start, status)
-        return results
+                if on_checkpoint is not None:
+                    on_checkpoint(results, idx, total, device_id, status)
+        if items_only:
+            return results
+        return {
+            "items": results,
+            "deviceResults": device_results,
+            "partial": any(item["status"] != "completed" for item in device_results),
+            "clearedDiagnostics": clear_diagnostics,
+            "startedAt": started_at,
+            "completedAt": datetime.now(timezone.utc).isoformat(),
+            "inputCount": len(device_ids),
+            "queriedCount": len(normalized_devices),
+        }
 
     def fetch_network_diagnostics_all_devices(
         self,
@@ -1034,10 +1409,12 @@ class OTBRRestApiClient:
         destination_type: str = DestinationType.EXTENDED,
         task_timeout: int = DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
         poll_interval: float = DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
-        poll_timeout: float = DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
+        poll_timeout: float | None = None,
         skip_on_failure: bool = True,
+        clear_diagnostics: bool = True,
+        items_only: bool = False,
         raw: object = _RAW_UNSET,
-    ) -> tuple[list[Any], list[Any]]:
+    ) -> Any:
         """
         Full workflow:
         1. Optionally trigger updateDeviceCollectionTask and wait for it.
@@ -1051,26 +1428,38 @@ class OTBRRestApiClient:
         """
         raw = self._resolve_raw(raw)
         if update_devices:
-            devices = self.fetch_device_collection(
-                device_count=device_count, raw=False)
+            device_outcome = self.fetch_device_collection(
+                device_count=device_count, raw=False
+            )
+            devices = device_outcome["items"]
         else:
             devices = self.list_devices(raw=False)
+            device_outcome = {
+                "items": devices,
+                "partial": False,
+                "status": "not-refreshed",
+                "action": None,
+            }
 
-        device_ids = [d["id"]
-                      for d in devices if isinstance(d, dict) and d.get("id")]
-
-        diagnostics = self.fetch_all_devices_diagnostics(
-            device_ids,
+        diagnostic_outcome = self.fetch_all_devices_diagnostics(
+            devices,
             types=types,
             destination_type=destination_type,
             task_timeout=task_timeout,
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             skip_on_failure=skip_on_failure,
+            clear_diagnostics=clear_diagnostics,
             raw=raw,
         )
 
-        return devices, diagnostics
+        if items_only:
+            return devices, diagnostic_outcome["items"]
+        return {
+            "devices": device_outcome,
+            "diagnostics": diagnostic_outcome,
+            "partial": device_outcome["partial"] or diagnostic_outcome["partial"],
+        }
 
     # -----------------------------------------------------------------------
     # Mesh Diagnostics Method
@@ -1088,7 +1477,7 @@ class OTBRRestApiClient:
         destination_type: str = DestinationType.EXTENDED,
         task_timeout: int = MESH_DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
         poll_interval: float = MESH_DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
-        poll_timeout: float = MESH_DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
+        poll_timeout: float | None = None,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -1145,7 +1534,7 @@ class OTBRRestApiClient:
 
     def fetch_mesh_diagnostics_all_devices(
         self,
-        device_ids: Sequence[str],
+        device_ids: Sequence[str | Mapping[str, Any]],
         *,
         types: Sequence[str] = (
             DIAG_TLV_CHILDREN,
@@ -1155,48 +1544,40 @@ class OTBRRestApiClient:
         destination_type: str = DestinationType.EXTENDED,
         task_timeout: int = MESH_DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
         poll_interval: float = MESH_DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
-        poll_timeout: float = MESH_DIAGNOSTICS_DEFAULT_POLL_TIMEOUT,
+        poll_timeout: float | None = None,
         skip_on_failure: bool = True,
+        clear_diagnostics: bool = False,
+        items_only: bool = False,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
         on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None = None,
         raw: object = _RAW_UNSET,
-    ) -> list[Any]:
+    ) -> Any:
         """
         Fetch mesh diagnostics for a list of device IDs, one device at a time.
 
         Thin wrapper: iterates device_ids and calls fetch_mesh_diagnostics() for each.
         Same skip_on_failure semantics as fetch_all_devices_diagnostics().
         """
-        raw = self._resolve_raw(raw)
-        results: list[Any] = []
-        total = len(device_ids)
-        for idx, device_id in enumerate(device_ids, start=1):
-            t_start = time.monotonic()
-            status = "completed"
-            try:
-                diag = self.fetch_mesh_diagnostics(
-                    device_id,
-                    types=types,
-                    destination_type=destination_type,
-                    task_timeout=task_timeout,
-                    poll_interval=poll_interval,
-                    poll_timeout=poll_timeout,
-                    raw=raw,
-                )
-                results.append(diag)
-            except (OTBRActionFailedError, OTBRActionTimeoutError, OTBRInvalidResponseError) as exc:
-                status = "skipped"
-                if not skip_on_failure:
-                    raise
-                logging.warning(
-                    "Skipping device %s (mesh diagnostics): %s", device_id, exc
-                )
-            finally:
-                if on_checkpoint is not None:
-                    on_checkpoint(results, idx, total, device_id, status)
-                if on_progress is not None:
-                    on_progress(idx, total, device_id, time.monotonic() - t_start, status)
-        return results
+        invalid = [diagnostic_type for diagnostic_type in types if diagnostic_type not in MESH_DIAGNOSTIC_TLVS]
+        if invalid or not types:
+            raise OTBRUsageError(
+                f"Invalid mesh-diagnostic TLV(s): {invalid!r}. "
+                f"Allowed: {sorted(MESH_DIAGNOSTIC_TLVS)!r}"
+            )
+        return self.fetch_all_devices_diagnostics(
+            device_ids,
+            types=types,
+            destination_type=destination_type,
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            skip_on_failure=skip_on_failure,
+            clear_diagnostics=clear_diagnostics,
+            items_only=items_only,
+            on_progress=on_progress,
+            on_checkpoint=on_checkpoint,
+            raw=raw,
+        )
 
     # -----------------------------------------------------------------------
     # Energy Scan Workflow Method
@@ -1213,7 +1594,7 @@ class OTBRRestApiClient:
         destination_type: str | None = None,
         task_timeout: int | None = None,
         poll_interval: float = ENERGY_SCAN_DEFAULT_POLL_INTERVAL,
-        poll_timeout: float = ENERGY_SCAN_DEFAULT_POLL_TIMEOUT,
+        poll_timeout: float | None = None,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -1229,8 +1610,8 @@ class OTBRRestApiClient:
             destination_type: Addressing mode (default: server auto-detects).
             task_timeout: Server-side task timeout in seconds (default: server-defined).
             poll_interval: Seconds between action status polls.
-            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError
-                          (default ENERGY_SCAN_DEFAULT_POLL_TIMEOUT).
+            poll_timeout: Wall-clock seconds before OTBRActionTimeoutError.
+                          Defaults to the derived action timing deadline.
             raw: If True, return raw JSON:API envelope for the diagnostic item.
 
         Returns:
@@ -1242,24 +1623,24 @@ class OTBRRestApiClient:
             OTBRInvalidResponseError: Completed action has no result relationship.
         """
         raw = self._resolve_raw(raw)
-        enqueued = self.enqueue_get_energy_scan_task(
-            destination=destination,
-            channel_mask=channel_mask,
-            count=count,
-            period=period,
-            scan_duration=scan_duration,
-            timeout=task_timeout,
-            destination_type=destination_type,
-            raw=False,
-        )
-        action_id: str = enqueued[0]["id"]
-
-        action = self.wait_for_action(
-            action_id,
+        resolved_task_timeout = task_timeout or DIAGNOSTICS_DEFAULT_TASK_TIMEOUT
+        action = self.run_action(
+            lambda: self.enqueue_get_energy_scan_task(
+                destination=destination,
+                channel_mask=channel_mask,
+                count=count,
+                period=period,
+                scan_duration=scan_duration,
+                timeout=resolved_task_timeout,
+                destination_type=destination_type,
+                raw=False,
+            ),
+            task_timeout=resolved_task_timeout,
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             raise_on_stopped=True,
         )
+        action_id = action.get("id", "unknown") if isinstance(action, dict) else "unknown"
 
         result_id = extract_action_result_id(action)
         if not result_id:
@@ -1295,6 +1676,8 @@ class OTBRRestApiClient:
         with_meta: bool = False,
         timeout: int | None = None,
         retries: int | None = None,
+        retryable: bool | None = None,
+        deadline: float | None = None,
     ) -> Any:
         url = self._build_url(path, query)
         body = self._encode_body(data, content_type)
@@ -1305,8 +1688,7 @@ class OTBRRestApiClient:
                 accept=accept, content_type=content_type),
             method=method,
         )
-        
-        # Log request details for debugging
+
         logging.debug(
             "HTTP Request: method=%s, url=%s, headers=%s, body_len=%s",
             method,
@@ -1315,15 +1697,22 @@ class OTBRRestApiClient:
             len(body) if body else 0,
         )
         if body:
-            logging.debug("HTTP Request body: %s", body.decode("utf-8", errors="replace"))
-        
-        effective_retries = retries if retries is not None else self.retries
+            logging.debug(
+                "HTTP Request body: %s",
+                self._redact_request_body(body, content_type),
+            )
+
+        method_is_retryable = method.upper() in RETRYABLE_METHODS
+        operation_is_retryable = method_is_retryable if retryable is None else retryable
+        configured_attempts = retries if retries is not None else self.retries
+        effective_attempts = max(1, configured_attempts) if operation_is_retryable else 1
         last_exc: Exception | None = None
         last_exc_body: bytes = b""
 
-        for attempt in range(max(1, effective_retries)):
+        for attempt in range(effective_attempts):
             try:
-                with urlopen(request, timeout=timeout or self.timeout) as response:
+                request_timeout = self._request_timeout(timeout, deadline)
+                with urlopen(request, timeout=request_timeout) as response:
                     response_body = response.read()
                     media_type = self._parse_media_type(
                         response.headers.get("Content-Type")
@@ -1353,98 +1742,148 @@ class OTBRRestApiClient:
                     payload, media_type, with_meta=with_meta
                 )
             except HTTPError as exc:
-                if exc.code < 500:
-                    # 4xx errors are not retried — re-raise immediately
-                    error_body = exc.read()
-                    media_type = self._parse_media_type(
-                        exc.headers.get("Content-Type")
-                    )
-                    
-                    # Log error response details for debugging
-                    logging.debug(
-                        "HTTP Error Response: status=%s, headers=%s, body_len=%s",
-                        exc.code,
-                        dict(exc.headers),
-                        len(error_body),
-                    )
-                    if error_body:
-                        logging.debug(
-                            "HTTP Error Response body: %s",
-                            error_body.decode("utf-8", errors="replace"),
-                        )
-                    
-                    payload = None
-                    body_text = None
-                    if error_body:
-                        body_text = error_body.decode(
-                            "utf-8", errors="replace")
-                        payload = self._parse_payload_from_text(
-                            body_text, media_type)
-                    raise OTBRHTTPError(
-                        status_code=exc.code,
-                        reason=exc.reason,
-                        url=url,
-                        errors=self._parse_error_details(
-                            payload, exc.code, exc.reason
-                        ),
-                        payload=payload,
-                        body=body_text,
-                    ) from exc
                 last_exc = exc
                 last_exc_body = exc.read()
+                can_retry = (
+                    operation_is_retryable
+                    and exc.code in RETRYABLE_STATUS_CODES
+                    and attempt < effective_attempts - 1
+                )
                 logging.debug(
-                    "HTTP Error Response: status=%s, headers=%s, body_len=%s (will retry)",
+                    "HTTP Error Response: status=%s, headers=%s, body_len=%s, retry=%s",
                     exc.code,
                     dict(exc.headers),
                     len(last_exc_body),
+                    can_retry,
                 )
                 if last_exc_body:
                     logging.debug(
                         "HTTP Error Response body: %s",
                         last_exc_body.decode("utf-8", errors="replace"),
                     )
+                if not can_retry:
+                    raise self._build_http_error(exc, url, last_exc_body) from exc
                 logging.warning(
-                    "HTTP %d on attempt %d/%d for %s",
-                    exc.code,
-                    attempt + 1,
-                    effective_retries,
-                    url,
+                    "HTTP %d on attempt %d/%d for %s; retrying",
+                    exc.code, attempt + 1, effective_attempts, url,
                 )
             except URLError as exc:
                 last_exc = exc
+                can_retry = operation_is_retryable and attempt < effective_attempts - 1
                 logging.warning(
-                    "URLError on attempt %d/%d for %s: %s",
+                    "URLError on attempt %d/%d for %s: %s; retry=%s",
                     attempt + 1,
-                    effective_retries,
+                    effective_attempts,
                     url,
                     exc.reason,
+                    can_retry,
                 )
+                if not can_retry:
+                    break
 
-            if attempt < effective_retries - 1:
-                time.sleep(RETRY_BACKOFF_BASE ** attempt)
+            retry_after = (
+                last_exc.headers.get("Retry-After")
+                if isinstance(last_exc, HTTPError) and last_exc.headers
+                else None
+            )
+            delay = self._retry_delay(attempt, retry_after)
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                delay = min(delay, remaining)
+            if delay > 0:
+                time.sleep(delay)
 
         if isinstance(last_exc, HTTPError):
-            exc = last_exc
-            error_body = last_exc_body  # body was cached during retry loop
-            media_type = self._parse_media_type(
-                exc.headers.get("Content-Type"))
-            payload = None
-            body_text = None
-            if error_body:
-                body_text = error_body.decode("utf-8", errors="replace")
-                payload = self._parse_payload_from_text(body_text, media_type)
-            raise OTBRHTTPError(
-                status_code=exc.code,
-                reason=exc.reason,
-                url=url,
-                errors=self._parse_error_details(
-                    payload, exc.code, exc.reason),
-                payload=payload,
-                body=body_text,
-            ) from last_exc
+            raise self._build_http_error(last_exc, url, last_exc_body) from last_exc
         raise OTBRConnectionError(
             f"Failed to reach OTBR API at {url}: {last_exc}"
         ) from last_exc
+
+    def _request_timeout(
+        self, timeout: int | None, deadline: float | None
+    ) -> float:
+        request_timeout = float(self.timeout if timeout is None else timeout)
+        if deadline is None:
+            return request_timeout
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise OTBRConnectionError("HTTP workflow deadline expired before request")
+        return min(request_timeout, remaining)
+
+    def _retry_delay(self, attempt: int, retry_after: str | None) -> float:
+        delay = min(float(RETRY_BACKOFF_BASE ** attempt), self.retry_backoff_max)
+        if retry_after:
+            parsed_delay = self._parse_retry_after(retry_after)
+            if parsed_delay is not None:
+                delay = min(parsed_delay, self.retry_backoff_max)
+        if self.retry_jitter:
+            delay = min(
+                delay + random.uniform(0.0, self.retry_jitter),
+                self.retry_backoff_max,
+            )
+        return delay
+
+    @staticmethod
+    def _parse_retry_after(value: str) -> float | None:
+        try:
+            return max(0.0, float(value.strip()))
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(value)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+
+    def _build_http_error(
+        self, exc: HTTPError, url: str, error_body: bytes
+    ) -> OTBRHTTPError:
+        media_type = self._parse_media_type(exc.headers.get("Content-Type"))
+        body_text = error_body.decode("utf-8", errors="replace") if error_body else None
+        payload = (
+            self._parse_payload_from_text(body_text, media_type)
+            if body_text is not None
+            else None
+        )
+        return OTBRHTTPError(
+            status_code=exc.code,
+            reason=exc.reason,
+            url=url,
+            errors=self._parse_error_details(payload, exc.code, exc.reason),
+            payload=payload,
+            body=body_text,
+        )
+
+    @staticmethod
+    def _redact_request_body(body: bytes, content_type: str | None) -> str:
+        if content_type == "text/plain":
+            return "<redacted text/plain body>"
+        if content_type not in JSON_CONTENT_TYPES:
+            return body.decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return "<unparseable JSON body>"
+
+        def redact(value: Any) -> Any:
+            if isinstance(value, dict):
+                redacted = {}
+                for key, item in value.items():
+                    normalized_key = str(key).replace("_", "").replace("-", "").lower()
+                    redacted[key] = (
+                        "<redacted>"
+                        if any(marker in normalized_key for marker in SENSITIVE_BODY_KEY_MARKERS)
+                        else redact(item)
+                    )
+                return redacted
+            if isinstance(value, list):
+                return [redact(item) for item in value]
+            return value
+
+        return json.dumps(redact(payload), sort_keys=True)
 
     def _build_url(self, path: str, query: Mapping[str, str] | None = None) -> str:
         url = f"{self.base_url}{path}"

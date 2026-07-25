@@ -232,7 +232,9 @@ def resolve_types(args: argparse.Namespace) -> list[str | int]:
 def resolve_fallback_types(args: argparse.Namespace) -> list[str | int] | None:
     if getattr(args, "no_fallback", False):
         return None
-    preset = getattr(args, "fallback_preset", "minimal")
+    preset = getattr(args, "fallback_preset", None)
+    if preset is None:
+        return None
     if preset == "medium":
         return list(_MEDIUM_DIAGNOSTIC_TLVS)
     if preset == "basic":
@@ -402,13 +404,14 @@ def dispatch_diagnostics(
         do_update = not getattr(args, "no_update_devices", False)
 
         if do_update:
-            devices = client.fetch_device_collection(device_count=getattr(args, "device_count", 255))
+            devices = client.fetch_device_collection(
+                device_count=getattr(args, "device_count", 255),
+                items_only=True,
+            )
         else:
             devices = client.list_devices(raw=False)
 
-        device_ids = getattr(args, "device_ids", None) or [
-            d["id"] for d in devices if isinstance(d, dict) and d.get("id")
-        ]
+        selected_devices = getattr(args, "device_ids", None) or devices
 
         checkpoint_path = None
         output_path = getattr(args, "resolved_output_path", None)
@@ -428,24 +431,27 @@ def dispatch_diagnostics(
                 "device",
             )
 
-        progress_fn = make_progress_fn(len(device_ids), not getattr(args, "no_progress", False))
-        diagnostics = fetch_all_with_fallback(
-            client,
-            device_ids,
-            resolved_types,
-            fallback_types,
+        progress_fn = make_progress_fn(len(selected_devices), not getattr(args, "no_progress", False))
+        outcome = client.fetch_all_devices_diagnostics(
+            selected_devices,
+            types=resolved_types,
             destination_type=args.destination_type,
             task_timeout=args.task_timeout,
             poll_interval=args.poll_interval,
             poll_timeout=args.poll_timeout,
+            clear_diagnostics=not getattr(args, "preserve_diagnostics", False),
+            fallback_types=fallback_types,
             raw=raw_arg,
             on_progress=progress_fn,
             on_checkpoint=_on_checkpoint,
         )
+        diagnostics = outcome["items"]
         if do_enrich:
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
             _apply_border_router_enrichment(diagnostics)
-        return convert_keys_to_camel_case(diagnostics)
+        if getattr(args, "items_only", False):
+            return convert_keys_to_camel_case(diagnostics)
+        return convert_keys_to_camel_case(outcome)
 
     raise ValueError("Unsupported diagnostics command")

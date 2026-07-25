@@ -18,7 +18,7 @@ from otbr_restapi_util import (
     OTBRUsageError,
 )
 
-CLI_MESH_TASK_TIMEOUT_DEFAULT = 8
+CLI_MESH_TASK_TIMEOUT_DEFAULT = 15
 ROUTER_RLOC16_MASK = 0x03FF
 ROUTER_RLOC16_VALUE = 0
 
@@ -79,10 +79,10 @@ def dispatch_mesh_diagnostics(
     raw_arg: object,
 ) -> Any:
     cmd = args.mesh_diag_command
-    poll_timeout = getattr(args, "poll-timeout", args.poll_timeout)
-    poll_interval = getattr(args, "poll-interval", args.poll_interval)
-    dest_type = getattr(args, "destination-type", DestinationType.EXTENDED)
-    task_timeout = getattr(args, "task-timeout", CLI_MESH_TASK_TIMEOUT_DEFAULT)
+    poll_timeout = args.poll_timeout
+    poll_interval = args.poll_interval
+    dest_type = args.destination_type
+    task_timeout = args.task_timeout
 
     if cmd == "children":
         return client.fetch_mesh_diagnostics(
@@ -131,7 +131,7 @@ def dispatch_mesh_diagnostics(
         routers_only = getattr(args, "routers_only", False)
 
         if do_update:
-            devices = client.fetch_device_collection()
+            devices = client.fetch_device_collection(items_only=True)
         else:
             devices = client.list_devices(raw=False)
 
@@ -159,16 +159,20 @@ def dispatch_mesh_diagnostics(
             _write_checkpoint_best_effort(results, checkpoint_path)
 
         progress_fn = make_progress_fn(len(device_ids), not getattr(args, "no_progress", False))
-        return client.fetch_mesh_diagnostics_all_devices(
+        outcome = client.fetch_mesh_diagnostics_all_devices(
             device_ids,
             types=types,
             destination_type=dest_type,
             task_timeout=task_timeout,
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
+            clear_diagnostics=not getattr(args, "preserve_diagnostics", False),
             on_progress=progress_fn,
             on_checkpoint=_on_checkpoint,
             raw=raw_arg,
         )
+        if getattr(args, "items_only", False):
+            return outcome["items"]
+        return outcome
 
     raise ValueError("Unsupported mesh-diagnostics command")

@@ -156,6 +156,35 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
                 f"Expected force_async=True for {filename}",
             )
 
+    async def test_restapi_actions_match_workflow_contracts(self) -> None:
+        devices = td_webserver.FILE_ACTION_MAP[
+            "td-otbr-restapi-devices-fetch.json"
+        ]
+        diagnostics = td_webserver.FILE_ACTION_MAP[
+            "td-otbr-restapi-diagnostics-fetch-all.json"
+        ]
+        mesh = td_webserver.FILE_ACTION_MAP[
+            "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
+        ]
+
+        self.assertGreaterEqual(devices.action_cost_s, 40)
+        self.assertEqual(
+            diagnostics.action,
+            ["otbr-restapi", "diagnostics", "fetch-all", "--items-only"],
+        )
+        self.assertEqual(
+            mesh.action,
+            [
+                "otbr-restapi",
+                "mesh-diagnostics",
+                "fetch-all",
+                "--routers-only",
+                "--items-only",
+            ],
+        )
+        self.assertGreaterEqual(diagnostics.action_cost_s, 1200)
+        self.assertGreaterEqual(mesh.action_cost_s, 1200)
+
 
 if __name__ == "__main__":
     unittest.main()

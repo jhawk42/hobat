@@ -45,6 +45,8 @@ def dispatch_devices(
             task_timeout=args.task_timeout,
             poll_interval=args.poll_interval,
             poll_timeout=args.poll_timeout,
+            items_only=not getattr(args, "structured_outcome", False),
+            whole_action_attempts=getattr(args, "whole_action_attempts", 1),
             raw=raw_arg,
         )
         output_path = getattr(args, "resolved_output_path", None)

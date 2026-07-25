@@ -51,17 +51,22 @@ def test_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_r
         preset="recommended",
         types=None,
         resolved_output_path="/tmp/td-otbr-restapi-diagnostics-fetch-all.json",
+        items_only=True,
     )
 
-    def _fake_fetch_all_with_fallback(*_args, **kwargs):
+    def _fake_fetch_all_devices_diagnostics(*_args, **kwargs):
         on_checkpoint = kwargs.get("on_checkpoint")
         assert on_checkpoint is not None
         on_checkpoint([{"id": "diag-1"}], 1, 1, "dev-1", "completed")
-        return [{"id": "diag-1"}]
+        return {
+            "items": [{"id": "diag-1"}],
+            "deviceResults": [{"deviceId": "dev-1", "status": "completed"}],
+            "partial": False,
+        }
 
-    with patch.object(diagnostics_module, "fetch_all_with_fallback", side_effect=_fake_fetch_all_with_fallback):
-        with patch.object(diagnostics_module, "_write_checkpoint_best_effort") as checkpoint_write:
-            result = diagnostics_module.dispatch_diagnostics(client, args, raw_arg=False, fields=None)
+    client.fetch_all_devices_diagnostics.side_effect = _fake_fetch_all_devices_diagnostics
+    with patch.object(diagnostics_module, "_write_checkpoint_best_effort") as checkpoint_write:
+        result = diagnostics_module.dispatch_diagnostics(client, args, raw_arg=False, fields=None)
 
     assert isinstance(result, list)
     checkpoint_write.assert_called_once()
@@ -87,6 +92,7 @@ def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path
         routers_only=False,
         device_ids=None,
         no_progress=True,
+        items_only=True,
         resolved_output_path="/tmp/td-otbr-restapi-mesh-diagnostics-fetch-all.json",
     )
 
@@ -94,7 +100,11 @@ def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path
         on_checkpoint = kwargs.get("on_checkpoint")
         assert on_checkpoint is not None
         on_checkpoint([{"id": "mesh-1"}], 1, 1, "dev-1", "completed")
-        return [{"id": "mesh-1"}]
+        return {
+            "items": [{"id": "mesh-1"}],
+            "deviceResults": [{"deviceId": "dev-1", "status": "completed"}],
+            "partial": False,
+        }
 
     client.fetch_mesh_diagnostics_all_devices.side_effect = _fake_fetch_mesh_all
 

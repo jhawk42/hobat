@@ -67,7 +67,7 @@ Note: Also supports calling otbr on the host.
 
 ### otbr-restapi
 
-The otbr-restapi datset source fetches Thread device data from the OpenThread Border Router (OTBR) REST API web-server endpoint.
+The otbr-restapi dataset source fetches Thread device data from the OpenThread Border Router (OTBR) REST API endpoint.
 
 - node: 	     get, state get, state set, dataset active get, dataset active set	Read/mutate local OTBR node and active dataset
 - devices:	 list, get, fetch	List, read, or refresh device collection
@@ -82,10 +82,9 @@ The same environment varables that the OTBR docker container uses can also be us
 
 See [env vars](./doc/help_env_vars.md) for details.
 
-**Note**: According to Google Gemini the tbr-agent hosts the devices collection in memory. At times have observed the OTBR REST API's web-server cache only has the OTBR device entry i.e no other devices until the cache is rebuilt. It appears the data in the devices collection remains cached until one of three events occurs:
-  - A manual refresh request: Issuing an action enqueue update-device-collection command wipes the old snapshot and builds a fresh one.
-  - Service restarts: Because the REST API caches this topology snapshot in the host's volatile memory runtime (otbr-agent), restarting the OTBR system or docker container completely clears the cache.
-  - Queue Eviction: The OTBR REST server manages action tasks using a fixed-size queue. If the queue fills up, the oldest historical task states (and their associated cached result payloads) are systematically evicted to free up space. [2, 3] 
+The OTBR device collection is populated asynchronously by `updateDeviceCollectionTask`. Use `devices fetch` rather than assuming a prior `devices list` is complete. Full diagnostic sweeps return structured per-device outcomes and clear the diagnostics collection once by default; use `--preserve-diagnostics` when sharing OTBR with another client. Action POSTs are never retried after an ambiguous response because OTBR does not expose an idempotency key.
+
+See [OTBR REST API CLI](doc/help_td_restapi_cli.md) for timing and output controls and [OTBR REST API validation](doc/otbr_restapi_validation.md) for tested compatibility and the hardware lab procedure.
 
 ### mdns
 The mdns dataset source fetches thread-related mdns scope records: _meshcop, _hap, _matter for Thread device data.

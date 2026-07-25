@@ -33,7 +33,7 @@ These options apply to every command and must be placed **before** the subcomman
 | `--output FILE` | — | Write JSON result to a file instead of stdout |
 | `--datadir DIR` | auto | Data directory for file reads/writes (takes precedence over `$TD_DATA_DIR`; if omitted: `$TD_DATA_DIR`, then `/data`, then `./data`) |
 | `--poll-interval FLOAT` | `2.0` | Seconds between action status polls |
-| `--poll-timeout FLOAT` | `8.0` | Max wall-clock seconds to wait for an action to complete |
+| `--poll-timeout FLOAT` | derived | Max wall-clock seconds to wait for an action. The default is `task_timeout + max(5, 20% of task_timeout, 2 * poll_interval)` |
 | `--no-progress` | off | Suppress per-device `[N/T] id → status (Xs)` progress lines printed to stderr on `fetch-all` commands |
 | `--no-auto-output` | off | Disable automatic output file naming; send JSON to stdout instead of `<datadir>/td-otbr-restapi-<resource>-<command>.json` |
 | `--lab` | off | Allow currently experimental mutating commands (`node state set`, `node dataset active set`, `actions enqueue add-thread-device`, `actions enqueue reset-network-diag-counter`) |
@@ -266,15 +266,21 @@ PYTHONPATH=src python3 -m td_cli otbr-restapi \
 Trigger `updateDeviceCollectionTask`, wait for completion, then return the populated device list. Combines enqueue + poll + list in one call.
 
 ```
-devices fetch [--device-count N] [--task-timeout SECS] [--max-age SECS] [--max-retries N]
+devices fetch [--device-count N] [--task-timeout SECS] [--max-age SECS]
+              [--max-retries N] [--whole-action-attempts N]
+              [--structured-outcome]
 ```
 
 | Option | Default | Description |
 |---|---|---|
 | `--device-count` | `255` | Max devices to discover |
-| `--task-timeout` | `8` | Server-side task timeout in seconds |
+| `--task-timeout` | `30` | Server-side task timeout in seconds; the derived client deadline is 36 seconds with the default poll interval |
 | `--max-age` | `60` | Max age of cached device entries in seconds |
 | `--max-retries` | `2` | Max retries per device |
+| `--whole-action-attempts` | `1` | Whole discovery attempts; repeats only after a known stopped/failed action, never after an ambiguous enqueue or client deadline |
+| `--structured-outcome` | off | Include action, partial-result, freshness, attempt, and timing metadata instead of only the compatibility device array |
+
+`deviceCount` is a discovery target, not a cap applied to the returned collection. The default `255` lets OTBR exhaust discovery without requiring the caller to know the network size.
 
 **Examples:**
 
@@ -356,13 +362,13 @@ diagnostics fetch --device-id DEVICE_ID
 | `--device-id` | required | Device extAddress (16-char hex) |
 | `--types` | recommended set | Space-separated diagnostic TLV names |
 | `--preset` | — | `recommended`, `full`, `minimal`, or `basic`; overrides `--types` |
-| `--task-timeout` | `8` | Server-side task timeout in seconds |
+| `--task-timeout` | `15` | Server-side task timeout in seconds; the default derived client deadline is 20 seconds |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 | `--no-fallback` | off | Disable TLV fallback retry; skip the device immediately on failure |
 | `--fallback-preset` | `minimal` | TLV preset to retry with when the primary request fails: `medium`, `minimal`, or `basic` |
 | `--no-enrich-mac-counters` | off | Return raw `macCounters` values only; skip computed totals and ratios |
 
-By default, if a device fails to respond to the primary TLV set the command automatically retries with the `--fallback-preset` TLV set. Pass `--no-fallback` to disable this.
+Single-device fetch retries with the `minimal` TLV preset by default after a known terminal action failure. Pass `--no-fallback` to disable this. Timeouts, ambiguous enqueue outcomes, invalid responses, and transport failures are never retried as replacement actions.
 
 **Examples:**
 
@@ -394,6 +400,8 @@ diagnostics fetch-all [--device-ids ID ...]
                       [--no-update-devices]
                       [--no-fallback]
                       [--fallback-preset {medium,minimal,basic}]
+                      [--preserve-diagnostics]
+                      [--items-only]
                       [--no-enrich-mac-counters]
 ```
 
@@ -402,16 +410,18 @@ diagnostics fetch-all [--device-ids ID ...]
 | `--device-ids` | all devices | Space-separated extAddress IDs to query |
 | `--types` | recommended set | Diagnostic TLV names |
 | `--preset` | — | `recommended`, `full`, `minimal`, or `basic`; overrides `--types` |
-| `--task-timeout` | `8` | Server-side task timeout per device in seconds |
+| `--task-timeout` | `15` | Server-side task timeout for router/REED devices; child devices use 30 seconds |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 | `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list |
-| `--no-fallback` | off | Disable per-device TLV fallback retry on failure |
-| `--fallback-preset` | `minimal` | TLV preset to retry with on device failure: `medium`, `minimal`, or `basic` |
+| `--no-fallback` | off | Compatibility switch; full sweeps already have fallback disabled unless `--fallback-preset` is supplied |
+| `--fallback-preset` | off | Opt in to one retry with `medium`, `minimal`, or `basic` after a known terminal action failure |
+| `--preserve-diagnostics` | off | Keep the existing diagnostics collection. By default a full sweep clears it once after checking for active diagnostic work |
+| `--items-only` | off | Return only successful diagnostic items instead of the structured sweep outcome |
 | `--no-enrich-mac-counters` | off | Return raw `macCounters` without computed totals and ratios |
 
 > **Note:** `--update-devices` has been replaced by `--no-update-devices`. Device list refresh now runs by default; pass `--no-update-devices` to opt out.
 
-Results are automatically written to `<datadir>/td-otbr-restapi-diagnostics-fetch-all.json` unless `--no-auto-output` or `--output` is specified.
+The default result is a structured outcome containing `items`, `deviceResults`, `partial`, clearing state, counts, and timestamps. Results are automatically written to `<datadir>/td-otbr-restapi-diagnostics-fetch-all.json` unless `--no-auto-output` or `--output` is specified.
 
 **Examples:**
 
@@ -726,8 +736,8 @@ Common per-device options for `children`, `child-ipv6`, `router-neighbors`, and 
 | Option | Default | Description |
 |---|---|---|
 | `--device-id` | required | Device extAddress (16-char hex) |
-| `--task-timeout` | `8` | Server-side task timeout in seconds |
-| `--poll-timeout` | `8.0` | Max wall-clock seconds to wait |
+| `--task-timeout` | `15` | Server-side task timeout in seconds |
+| `--poll-timeout` | derived | Client deadline derived from task timeout and poll interval; 20 seconds by default |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 
 ---
@@ -837,17 +847,21 @@ mesh-diagnostics fetch-all [--device-ids ID ...]
     [--destination-type TYPE]
     [--no-update-devices]
     [--routers-only]
+    [--preserve-diagnostics]
+    [--items-only]
 ```
 
 | Option | Default | Description |
 |---|---|---|
 | `--device-ids` | all devices | Space-separated extAddress IDs to query |
 | `--types` | all three | `children`, `childIpv6Addresses`, `routerNeighbors` |
-| `--task-timeout` | `8` | Server-side task timeout per device in seconds |
-| `--poll-timeout` | `8.0` | Max wall-clock seconds per device action |
+| `--task-timeout` | `15` | Server-side task timeout per device in seconds |
+| `--poll-timeout` | derived | Client deadline derived from task timeout and poll interval; 20 seconds by default |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 | `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list |
 | `--routers-only` | off | Filter to router devices only (RLOC16 lower 10 bits == 0); skips child devices that return empty mesh-diag records |
+| `--preserve-diagnostics` | off | Keep the existing diagnostics collection instead of clearing once for this full sweep |
+| `--items-only` | off | Return only successful diagnostic items instead of the structured sweep outcome |
 
 > **Note:** `--update-devices` has been replaced by `--no-update-devices`. Device list refresh now runs by default.
 
@@ -892,6 +906,7 @@ topology [--preset {recommended,full,minimal,basic}]
          [--no-enrich-mac-counters]
          [--no-fallback]
          [--fallback-preset {medium,minimal,basic}]
+         [--preserve-diagnostics]
 ```
 
 | Option | Default | Description |
@@ -903,9 +918,10 @@ topology [--preset {recommended,full,minimal,basic}]
 | `--no-update-devices` | off | When `--skip-devices` is set, also skip `updateDeviceCollectionTask` in Steps 2 and 3 |
 | `--no-enrich-mac-counters` | off | Disable MAC counter enrichment on the diagnostics result |
 | `--no-fallback` | off | Disable per-device TLV fallback retry in the diagnostics step |
-| `--fallback-preset` | `minimal` | Fallback TLV preset for Step 2: `medium`, `minimal`, or `basic` |
+| `--fallback-preset` | off | Opt in to one terminal-failure retry for Step 2 with `medium`, `minimal`, or `basic` |
+| `--preserve-diagnostics` | off | Keep existing diagnostics instead of the default one-time clear before Step 2 |
 
-Progress for each step and each device is printed to stderr. Pass `--no-progress` (global flag) to suppress. The command returns `None`; all data is written to files rather than printed to stdout.
+Progress for each step and each device is printed to stderr. Pass `--no-progress` (global flag) to suppress. Compatibility arrays remain in the three primary files. The diagnostic and mesh steps also write `.outcome.json` sidecars with partial/per-device metadata.
 
 **Examples:**
 
@@ -960,6 +976,10 @@ When `--no-auto-output` is not set and `--output` is not specified, fetch/list c
 | `topology` (step 1 — devices) | `td-otbr-restapi-devices-fetch.json` |
 | `topology` (step 2 — diagnostics) | `td-otbr-restapi-diagnostics-fetch-all.json` |
 | `topology` (step 3 — mesh-diagnostics) | `td-otbr-restapi-mesh-diagnostics-fetch-all.json` |
+
+Topology also writes `td-otbr-restapi-diagnostics-fetch-all.outcome.json` and `td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json`. These sidecars distinguish complete and partial sweeps without changing the array shape consumed by existing dashboard code.
+
+Action POST requests are single-attempt because the OTBR action API has no idempotency key. A lost POST response is reported as `indeterminate_enqueue`; the client does not blindly create a replacement action. Idempotent reads may use bounded transport retries.
 
 > **Note:** The `topology` command always writes its three files regardless of `--no-auto-output` because all output is file-based (the command returns nothing to stdout).
 
