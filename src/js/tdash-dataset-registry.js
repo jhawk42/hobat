@@ -338,7 +338,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 600
   },
   // ── Single-file simple datasets ───
