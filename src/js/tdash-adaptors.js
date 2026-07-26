@@ -119,9 +119,43 @@ function getOtbrRouteCategories(sourceNode) {
   return category ? [EDGE_CATEGORY_OTBR_ROUTE, category] : [];
 }
 
+function applyMergedRowLabels(nodeMap, mergedRows) {
+  if (!Array.isArray(mergedRows) || mergedRows.length === 0) return;
+
+  const nodeIdByRloc16 = new Map();
+  const nodeIdByExtaddr = new Map();
+  const nodeIdByOmr = new Map();
+  nodeMap.forEach((node, nodeId) => {
+    const rloc16 = getCanonicalRloc16(node);
+    const extaddr = getCanonicalExtaddr(node);
+    const omr = getCanonicalOmrIpv6Address(node);
+    if (rloc16) nodeIdByRloc16.set(rloc16, nodeId);
+    if (extaddr) nodeIdByExtaddr.set(extaddr, nodeId);
+    if (omr) nodeIdByOmr.set(omr, nodeId);
+  });
+
+  mergedRows.forEach((row) => {
+    if (!isPlainObject(row)) return;
+    const rloc16 = getCanonicalRloc16(row);
+    const extaddr = getCanonicalExtaddr(row);
+    const omr = getCanonicalOmrIpv6Address(row);
+    const nodeId =
+      (extaddr && nodeIdByExtaddr.get(extaddr))
+      || (omr && nodeIdByOmr.get(omr))
+      || (rloc16 && nodeIdByRloc16.get(rloc16));
+    if (!nodeId) return;
+
+    const deviceLabel =
+      toText(row.deviceLabel) || toText(row.device_label) || toText(row.name);
+    if (!deviceLabel) return;
+    const node = nodeMap.get(nodeId);
+    if (node) nodeMap.set(nodeId, { ...node, deviceLabel });
+  });
+}
+
 // ── Adaptor 1: meshdiag + networkdiag + routerNeighbors + restApi ─────────────
 
-export function adaptMeshdiagNetworkdiag(fileMap) {
+export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
   const meshdiag = asArray(fileMap.get(FILE_MESHDIAG));
   const networkDiag = asArray(
     fileMap.get(FILE_NETWORKDIAG_FETCH_ALL) ?? fileMap.get(FILE_NETWORKDIAG_MULTICAST)
@@ -536,6 +570,7 @@ export function adaptMeshdiagNetworkdiag(fileMap) {
     });
   });
 
+  applyMergedRowLabels(nodeMap, mergedRows);
   const nodeData = buildVisNodeData(nodeMap, routerIdsWithChildren, routerNeighborByRloc16, buildLabel, routerChildByRloc16);
 
   const rawByIdForDetails = new Map();
@@ -1902,10 +1937,10 @@ export function adaptOtbrRestApi(fileMap) {
 // ── Dispatch: pick adaptor based on topologyMode ──────────────────────────────
 
 export function runAdaptor(dataset) {
-  const { entry, rawFiles } = dataset;
+  const { entry, rawFiles, rows } = dataset;
   const fileMap = buildFileMap(entry.files || [], rawFiles);
   switch (entry.topologyMode) {
-    case 'meshdiag-networkdiag': return adaptMeshdiagNetworkdiag(fileMap);
+    case 'meshdiag-networkdiag': return adaptMeshdiagNetworkdiag(fileMap, rows);
     case 'merged-detailed': return adaptMergedDetailed(fileMap);
     case 'eve_enhanced': return adaptEve(fileMap);
     case 'eve_native': return adaptEveNative(fileMap);
