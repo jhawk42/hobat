@@ -308,41 +308,60 @@
         <ul id="summary-list" class="node-details-list">
           <li>Click a node or row to view its properties.</li>
         </ul>
-        <!-- section field contracts are populated by JS from DEVICE_DETAILS_SECTIONS -->
-        <h2>Keys:</h2>
-        <ul id="identity-list" class="node-details-list">
-        </ul>
-        <h2>Highlights:</h2>
-        <ul id="highlights-list" class="node-details-list">
-        </ul>
-        <h2>Network:</h2>
-        <ul id="network-list" class="node-details-list">
-        </ul>
-        <h2>Connections:</h2>
-        <ul id="connections-list" class="node-details-list">
-        </ul>
-        <h2>MDNS:</h2>
-        <ul id="mdns-list" class="node-details-list">
-        </ul>
+        <div id="device-details-nav-bar">
+          <span id="device-details-nav-bar-left">
+            <button id="btn-device-details-properties" title="Show device properties">🔭</button>
+            <button id="btn-device-details-insights" title="Show device insights">📊</button>
+            <button id="btn-device-details-settings" title="Show device settings">⛭</button>
+          </span>
+          <span id="device-details-nav-bar-right">
+           <button id="btn-device-details-close" title="Close details panel">✕</button>
+         </span>
+        </div>
 
-        <h2>Routes & Links:</h2>
-        <ul id="routes-links-list" class="node-details-list">
-        </ul>
-
-        <h2>Neighbors:</h2>
-        <ul id="neighbors-list" class="node-details-list">
-        </ul>
-
-        <h2>Children:</h2>
-        <ul id="children-list" class="node-details-list">
-        </ul>
-
-        <h2>Counters:</h2>
-        <ul id="counters-list" class="node-details-list">
-        </ul>
-        <h2>Details:</h2>
-        <ul id="details-list" class="node-details-list">
-        </ul>
+        <div id="device-properties-panel">
+          <!-- section field contracts are populated by JS from DEVICE_DETAILS_SECTIONS -->
+          <h2>Keys:</h2>
+          <ul id="identity-list" class="node-details-list">
+          </ul>
+          <h2>Highlights:</h2>
+          <ul id="highlights-list" class="node-details-list">
+          </ul>
+          <h2>Network:</h2>
+          <ul id="network-list" class="node-details-list">
+          </ul>
+          <h2>Connections:</h2>
+          <ul id="connections-list" class="node-details-list">
+          </ul>
+          <h2>MDNS:</h2>
+          <ul id="mdns-list" class="node-details-list">
+          </ul>
+        
+          <h2>Routes & Links:</h2>
+          <ul id="routes-links-list" class="node-details-list">
+          </ul>
+        
+          <h2>Neighbors:</h2>
+          <ul id="neighbors-list" class="node-details-list">
+          </ul>
+        
+          <h2>Children:</h2>
+          <ul id="children-list" class="node-details-list">
+          </ul>
+        
+          <h2>Counters:</h2>
+          <ul id="counters-list" class="node-details-list">
+          </ul>
+          <h2>Details:</h2>
+          <ul id="details-list" class="node-details-list">
+          </ul>
+        </div>
+        <div id="device-insights-panel">
+          <span id="device-insights-panel-content">Device insights panel content goes here.</span>
+        </div>
+        <div id="device-settings-panel">
+            <span id="device-settings-panel-content">Device settings panel content goes here.</span>
+        </div>
       </div>
     </div>
   </div>

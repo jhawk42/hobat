@@ -450,6 +450,101 @@ function resetNodeDetailsLists() {
     });
 }
 
+const DEVICE_DETAILS_PANEL_TABS = [
+  {
+    buttonId: "btn-device-details-properties",
+    panelId: "device-properties-panel",
+  },
+  {
+    buttonId: "btn-device-details-insights",
+    panelId: "device-insights-panel",
+  },
+  {
+    buttonId: "btn-device-details-settings",
+    panelId: "device-settings-panel",
+  },
+];
+
+function setActiveDeviceDetailsPanel(activePanelId) {
+  DEVICE_DETAILS_PANEL_TABS.forEach(({ buttonId, panelId }) => {
+    const buttonEl = document.getElementById(buttonId);
+    const panelEl = document.getElementById(panelId);
+    const isActive = panelId === activePanelId;
+
+    if (panelEl) {
+      panelEl.hidden = !isActive;
+      panelEl.setAttribute("aria-hidden", String(!isActive));
+    }
+
+    if (buttonEl) {
+      buttonEl.classList.toggle("active", isActive);
+      buttonEl.setAttribute("aria-pressed", String(isActive));
+      buttonEl.setAttribute("aria-selected", String(isActive));
+      buttonEl.tabIndex = isActive ? 0 : -1;
+    }
+  });
+}
+
+function initDeviceDetailsPanelTabs() {
+  const defaultPanelId = "device-properties-panel";
+  setActiveDeviceDetailsPanel(defaultPanelId);
+
+  const tablistEl = document.getElementById("device-details-nav-bar-left");
+  if (tablistEl) {
+    tablistEl.setAttribute("role", "tablist");
+    tablistEl.setAttribute("aria-label", "Device details sections");
+  }
+
+  DEVICE_DETAILS_PANEL_TABS.forEach(({ buttonId, panelId }) => {
+    const buttonEl = document.getElementById(buttonId);
+    if (!buttonEl) return;
+
+    buttonEl.setAttribute("role", "tab");
+    buttonEl.setAttribute("aria-controls", panelId);
+
+    buttonEl.addEventListener("click", () => {
+      setActiveDeviceDetailsPanel(panelId);
+    });
+
+    buttonEl.addEventListener("keydown", (event) => {
+      const navKeys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+      if (!navKeys.includes(event.key)) return;
+
+      const tabs = DEVICE_DETAILS_PANEL_TABS
+        .map(({ buttonId: id, panelId: targetPanelId }) => {
+          const el = document.getElementById(id);
+          return el ? { el, targetPanelId } : null;
+        })
+        .filter(Boolean);
+      if (!tabs.length) return;
+
+      const currentIndex = tabs.findIndex(({ el }) => el === event.currentTarget);
+      if (currentIndex < 0) return;
+
+      event.preventDefault();
+
+      let nextIndex = currentIndex;
+      if (event.key === "ArrowLeft") {
+        nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      } else if (event.key === "ArrowRight") {
+        nextIndex = (currentIndex + 1) % tabs.length;
+      } else if (event.key === "Home") {
+        nextIndex = 0;
+      } else if (event.key === "End") {
+        nextIndex = tabs.length - 1;
+      }
+
+      const nextTab = tabs[nextIndex];
+      nextTab.el.focus();
+      setActiveDeviceDetailsPanel(nextTab.targetPanelId);
+    });
+  });
+}
+
+function resetDeviceDetailsPanelTabsToDefault() {
+  setActiveDeviceDetailsPanel("device-properties-panel");
+}
+
 // Common topology select-change path: reapply filters first,
 // then restore canonical node styling to preserve node type colors.
 function refreshTopologyFiltersWithRestoredStyling() {
@@ -603,6 +698,7 @@ document.getElementById("view-status-line-content").textContent =
   `Showing: no dataset loaded. Select a dataset and click Sync. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
 
 bindDeviceDetailsSectionFields();
+initDeviceDetailsPanelTabs();
 initDetailPanelToggles(document.getElementById("device-details"), () => {
   requestAnimationFrame(() => {
     getVisNetwork()?.fit({ animation: { duration: 220, easingFunction: "easeInOutQuad" } });
@@ -868,6 +964,7 @@ async function doFetchDataset() {
   if (_srchInput) _srchInput.value = "";
 
   // Final reconciliation render: all files settled, isPartial is false.
+  resetDeviceDetailsPanelTabsToDefault();
   renderCurrentView();
   updateFetchStatusBar(_lastFetchStartedAt);
   if (currentDataset?.fetchMetrics) {
