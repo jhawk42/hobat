@@ -18,10 +18,17 @@ import aiohttp_cors
 
 from util_data import (
     create_checkpoint_filename,
+    data_file_path,
     format_data_dir_log_message,
     resolve_data_dir_with_source,
 )
-from td_const import TD_DATA_DIR_ARG_HELP
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
+from merge_extaddr_device_label_map import (
+    ExtaddrNotFoundError,
+    normalize_valid_device_label,
+    normalize_valid_extaddr,
+    read_device_label,
+)
 
 TD_WEB_HOST_ADDR = ""
 TD_WEB_HOST_PORT = 9165
@@ -882,6 +889,98 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     return _build_file_response(file_path, file_action, request)
 
 
+def _validate_device_extaddr(raw_extaddr: object) -> str:
+    """Validate and normalize a device resource path identifier."""
+    try:
+        return normalize_valid_extaddr(raw_extaddr)
+    except ValueError as exc:
+        raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
+
+
+def _read_device_label_for_api(data_dir: Path, extaddr: str) -> dict[str, str]:
+    """Read one label and translate map failures into HTTP responses."""
+    map_path = data_file_path(EXTADDR_DEVICE_LABEL_MAP_FILENAME, data_dir)
+    try:
+        return read_device_label(map_path, extaddr)
+    except (FileNotFoundError, ExtaddrNotFoundError) as exc:
+        raise aiohttp.web.HTTPNotFound(reason="device label not found") from exc
+    except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+        logging.error("Failed to read static device-label map: %s", exc)
+        raise aiohttp.web.HTTPInternalServerError(
+            reason="invalid static device-label map"
+        ) from exc
+
+
+def _device_json_response(payload: dict[str, str], *, status: int = 200) -> aiohttp.web.Response:
+    return aiohttp.web.json_response(
+        payload,
+        status=status,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def handle_device_get_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """GET /api/device/{extAddress} — return the current static device label."""
+    extaddr = _validate_device_extaddr(request.match_info.get("extAddress"))
+    data_dir: Path = request.app["td_data_dir"]
+    return _device_json_response(_read_device_label_for_api(data_dir, extaddr))
+
+
+async def handle_device_patch_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """PATCH /api/device/{extAddress} — update or insert one device label."""
+    extaddr = _validate_device_extaddr(request.match_info.get("extAddress"))
+    data_dir: Path = request.app["td_data_dir"]
+
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise aiohttp.web.HTTPBadRequest(reason="malformed JSON body") from exc
+    if not isinstance(payload, dict):
+        raise aiohttp.web.HTTPBadRequest(reason="JSON body must be an object")
+    if set(payload) != {"deviceLabel"}:
+        raise aiohttp.web.HTTPBadRequest(
+            reason="JSON body must contain only deviceLabel"
+        )
+    try:
+        device_label = normalize_valid_device_label(payload["deviceLabel"])
+    except ValueError as exc:
+        raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
+
+    async with _get_source_lock("merge-extaddr"):
+        try:
+            _read_device_label_for_api(data_dir, extaddr)
+            inserted = False
+        except aiohttp.web.HTTPNotFound:
+            inserted = True
+
+        action_args = [
+            "merge-extaddr",
+            "--update-extaddr",
+            extaddr,
+            "--device-label",
+            device_label,
+        ]
+        try:
+            exit_code = await run_td_cli(action_args, data_dir, timeout_s=30)
+        except asyncio.TimeoutError as exc:
+            raise aiohttp.web.HTTPBadGateway(
+                reason="device label update timed out"
+            ) from exc
+        if exit_code != 0:
+            raise aiohttp.web.HTTPBadGateway(
+                reason=f"td_cli device label update failed (exit {exit_code})"
+            )
+
+        try:
+            result = _read_device_label_for_api(data_dir, extaddr)
+        except aiohttp.web.HTTPNotFound as exc:
+            raise aiohttp.web.HTTPInternalServerError(
+                reason="updated device label could not be read back"
+            ) from exc
+
+    return _device_json_response(result, status=201 if inserted else 200)
+
+
 # ---------------------------------------------------------------------------
 # R1c — pure file-read / response builder (no asyncio, no shared state)
 # ---------------------------------------------------------------------------
@@ -1240,6 +1339,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     cors.add(app.router.add_get("/api/data/{filename}", handle_data_api))
     cors.add(app.router.add_get("/api/job/{job_id}", handle_job_api))
     cors.add(app.router.add_delete("/api/job/{job_id}", handle_job_cancel_api))
+    cors.add(app.router.add_get("/api/device/{extAddress}", handle_device_get_api))
+    cors.add(app.router.add_patch("/api/device/{extAddress}", handle_device_patch_api))
     # Serve all static assets (HTML, JS, CSS, …) from the src/ directory.
     app.router.add_static(
         "/", static_root, show_index=False, follow_symlinks=False)

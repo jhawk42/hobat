@@ -54,6 +54,9 @@ See [Dashboard Features](#dashboard-features)
 
 Thread device labeling uses a simple JSON lookup file that maps extAddress (Extended MAC Address) values to operator-friendly device labels. See [Device Labeling](#create-device-labeling-file) below for details.
 
+Labels can also be edited from the dashboard: select a device in topology or
+table view, open Device Settings, edit `deviceLabel`, and apply the change.
+
 ## Dataset Sources
 
 ### otbr-cli
@@ -145,14 +148,19 @@ scp "Eve Thread Network Layout.evethreadlayout" user@hostname:/your/directory/he
 
 ### Create Device Labeling file
 
-To enable device labeling via the lookup json file, add a file named `td-static-extaddr-device-label.json` with the format below into the data directory. Map this directory into the docker container via docker run. See below for example.
+To create the lookup file manually, add `td-static-extaddr-device-label.json`
+with the format below to the data directory. The dashboard can also create this
+file on the first label save. Map the data directory into the Docker container
+when running tdash in Docker.
 
-The td_cli commands and dash dasboard will use the file if it exists to lookup extaddress (Extended MAC Address) to deviceLabel mapping. The td_cli commands enhance the collect Thread device data with the deviceLabel. The thread dashboard will use the extAddress deviceLabel to lookup extAddress to device label mapping. 
+The td_cli commands and dashboard use the file to map extAddress (Extended MAC
+Address) values to deviceLabel values. Collection commands and the dashboard
+use these mappings to enrich Thread device data.
 
 ```
 nano $PWD/data/td-static-extaddr-device-label.json
 ```
-Edit the td-static-extaddr-device-label.json as you discover thread devices in the thread network. 
+Edit the td-static-extaddr-device-label.json as you discover thread devices in the thread network, or use the dashboard workflow below.
 The extAddress is the thread device Extended MAC Address.
 The deviceLabel is the name you assign to the thread device.
 
@@ -181,6 +189,29 @@ Example format of the td-static-extaddr-device-label.json file.
     }
 ]
 ```
+
+#### Edit a device label in the dashboard
+
+1. Load a dataset and select a device in topology or table view.
+2. Open the Device Settings tab in the device details panel.
+3. Edit `deviceLabel` and select **Apply Changes**. **Cancel** restores the
+  last value loaded from the server without writing.
+
+The selected device must have an extAddress containing exactly 16 hexadecimal
+characters. Labels may contain Unicode display text; surrounding whitespace is
+trimmed. Labels must be 1–128 characters and cannot contain control characters.
+
+The dashboard stores labels in `td-static-extaddr-device-label.json` beneath
+the web server's configured data directory (`--datadir`, `TD_DATA_DIR`, or the
+resolved default). Saving updates an existing extAddress or inserts a missing
+one; the first save creates the map when it does not exist. Writes atomically
+replace the JSON file, preserve unrelated record fields, and refresh the active
+topology/table view without a page reload.
+
+Device-label saves use last-write-wins semantics. The web server serializes its
+own label updates, but another process editing the same file does not share that
+lock. Atomic replacement prevents partial JSON, not conflicts between separate
+writers.
 
 ### Start the tdash docker container
 
@@ -245,6 +276,7 @@ The tdash web dashboard provides comprehensive visualization and querying capabi
 - **Search:** Search devices by rloc16, extAddress, deviceLabel, routerId, and a number other identity fields
 - **Filtering:** Filter by device type (border router, router, FTD, MTD), link quality (LQ3/LQ2/LQ1), and diagnostic criteria
 - **Detail Panels:** Click any device to view comprehensive details organized into sections (Keys, Highlights, Connections, Routes & Links)
+- **Device Labels:** Edit the selected device's label from Device Settings; changes are persisted to the configured data directory and reflected in both views
 - **Device Fields:** Supports detailed device information including:
   - Identity: rloc16, extAddress, deviceLabel, omrIpv6Addr
   - Role & Status: type, mode flags, leaderData, border router/leader indicators

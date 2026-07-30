@@ -360,7 +360,17 @@
           <span id="device-insights-panel-content">Device insights panel content goes here.</span>
         </div>
         <div id="device-settings-panel">
-            <span id="device-settings-panel-content">Device settings panel content goes here.</span>
+            <ul id="device-settings-list" class="node-details-list">
+              <li class="detail-kv-row"><span class="detail-kv-key">rloc16:</span><span id="device-rloc16" class="detail-kv-value"></span></li>
+              <li class="detail-kv-row"><span class="detail-kv-key">extAddress:</span><span id="device-extaddress" class="detail-kv-value"></span></li>
+              <li class="detail-kv-row device-label-row"><label class="detail-kv-key" for="device-label">deviceLabel:</label><input type="text" id="device-label" name="device-label" maxlength="128" placeholder="Enter device label" aria-describedby="device-settings-status" disabled></li>
+              <li id="device-name-row" class="detail-kv-row" hidden><span class="detail-kv-key">name:</span><span id="device-name" class="detail-kv-value"></span></li>
+            </ul>
+            <p id="device-settings-status" class="device-settings-status" role="status" aria-live="polite"></p>
+            <div class="device-settings-actions">
+              <button id="btn-device-settings-cancel" title="Cancel device settings changes" disabled>Cancel</button>
+              <button id="btn-device-settings-save" title="Save device settings" disabled>Apply Changes</button>
+            </div>
         </div>
       </div>
     </div>

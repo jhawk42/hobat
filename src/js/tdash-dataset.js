@@ -213,10 +213,9 @@ export function setOnlyCache(enabled) {
 // ── Enrichment helpers (used by Enrich toggle) ───────────────────────────────
 
 // Returns an enriched copy of a single node/row; original is not mutated.
-// Eligible when: no device_label AND no name AND extaddr is present in map.
+// A static mapping is authoritative when the node has a usable extAddress.
 function enrichNodeWithStaticLabel(node) {
   if (!isPlainObject(node)) return node;
-  if (toText(node.deviceLabel) || toText(node.device_label) || toText(node.name)) return node;
   // Restapi rows have shape { id, type, attributes: { extAddress, ... } };
   // extAddress lives in attributes, not at the top level.
   let extaddr = getCanonicalExtaddr(node);
@@ -476,6 +475,14 @@ export async function loadStaticLabelMap() {
       err,
     );
   }
+}
+
+export function setStaticDeviceLabel(extaddr, deviceLabel) {
+  const key = canonicalIdText(extaddr);
+  const label = toText(deviceLabel);
+  if (!key || !label) return false;
+  staticExtaddrLabelMap.set(key, label);
+  return true;
 }
 
 // ── Dataset load entry-point ──────────────────────────────────────────────────

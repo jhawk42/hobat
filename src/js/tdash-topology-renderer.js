@@ -25,6 +25,7 @@ import {
   formatValue,
   areNodeIdsEquivalent,
   populateNodeDetailsLists,
+  publishDeviceSelection,
 } from "./tdash-utils.js";
 import {
   computeTopologyCapabilities,
@@ -2557,6 +2558,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
 
   _visNetwork.on("click", (params) => {
     if (params.nodes.length === 0) {
+      publishDeviceSelection(null);
       document.getElementById("summary-list").innerHTML =
         "<li>Click a node or row to view its properties.</li>";
       document
@@ -2586,6 +2588,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
     const _hide = () => document.querySelectorAll(_QL).forEach((l) => l.classList.add("hidden"));
     const node = nodeMap.get(selectedId);
     if (!node) {
+      publishDeviceSelection(null);
       document.getElementById("summary-list").innerHTML =
         "<li>No details available for selected node.</li>";
       _hide();
@@ -2618,12 +2621,14 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
       },
     };
     const mergedDetails = mergeForDisplay(rawSource, graphDetails);
+    publishDeviceSelection(mergedDetails);
     const details = sortDetailsWithPriority(
       flattenObjectEntries(mergedDetails).filter(
         ([key]) => !shouldExcludeDetailPath(key),
       ),
     );
     if (details.length === 0) {
+      publishDeviceSelection(null);
       document.getElementById("summary-list").innerHTML =
         "<li>No details available for selected node.</li>";
       _hide();

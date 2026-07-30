@@ -114,7 +114,7 @@ def load_extaddr_device_label_map_flexible(
                 continue
             
             extaddr = get_extaddr_from_record(item, extaddr_aliases)
-            label = item.get("device_label")
+            label = item.get("deviceLabel") or item.get("device_label")
             
             if extaddr and isinstance(label, str) and label.strip():
                 mapping[extaddr] = label.strip()
@@ -128,7 +128,7 @@ def load_extaddr_device_label_map_flexible(
                 continue
             
             extaddr = get_extaddr_from_record(item, extaddr_aliases)
-            label = item.get("device_label")
+            label = item.get("deviceLabel") or item.get("device_label")
             
             if extaddr and isinstance(label, str) and label.strip():
                 mapping[extaddr] = label.strip()

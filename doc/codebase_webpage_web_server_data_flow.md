@@ -30,6 +30,7 @@ _Covers `td_webserver.py`, `tdash.html`, and all `js/*.js` modules._
                         /api/data/{filename}
                         /api/job/{job_id}
                         DELETE /api/job/{job_id}
+                        GET/PATCH /api/device/{extAddress}
                         /tdash.html, /js/*, /tdash.css
 ┌──────────────────────────────────┴──────────────────────────────────┐
 │  td_webserver.py  (aiohttp)                                         │
@@ -69,7 +70,45 @@ There are four distinct layers:
 | `GET /api/data/{filename}` | `handle_data_api` | Serve or regenerate a data file |
 | `GET /api/job/{job_id}` | `handle_job_api` | Poll a long-running background job |
 | `DELETE /api/job/{job_id}` | `handle_job_cancel_api` | Request cancellation of a running long-cost job |
+| `GET /api/device/{extAddress}` | `handle_device_get_api` | Read one authoritative static device label |
+| `PATCH /api/device/{extAddress}` | `handle_device_patch_api` | Atomically update or insert one static device label |
 | `GET /**` | static file server | All other paths served from `src/` directory |
+
+### Device-label resource
+
+`GET /api/device/{extAddress}` reads
+`td-static-extaddr-device-label.json` directly from `app["td_data_dir"]` and
+returns `200` with `{ "extAddress", "deviceLabel" }`. A missing map or unknown
+address returns `404`.
+
+`PATCH /api/device/{extAddress}` accepts exactly:
+
+```json
+{"deviceLabel": "Office Sensor"}
+```
+
+The handler validates the request, acquires the existing `merge-extaddr`
+source lock, and invokes:
+
+```text
+td_cli --datadir DATA_DIR merge-extaddr --update-extaddr EXTADDR --device-label LABEL
+```
+
+It reads the persisted value back before responding. Updating an existing
+record returns `200`; inserting a missing record returns `201`. Device API
+responses use `Cache-Control: no-store`.
+
+| Condition | Status |
+|---|---|
+| Invalid extAddress, body shape, or label | `400 Bad Request` |
+| Missing map or unknown extAddress on GET | `404 Not Found` |
+| CLI failure or timeout | `502 Bad Gateway` |
+| Persisted value cannot be read back or map is invalid | `500 Internal Server Error` |
+
+PATCH requests in one server process are serialized with other
+`merge-extaddr` work. Atomic replacement prevents partial JSON. A writer in a
+different process is not coordinated by this lock, so concurrent external
+writes remain last-write-wins.
 
 ### Phase 1 contract: cancellation state model
 
@@ -203,6 +242,7 @@ Data files get `Cache-Control: max-age=<n>` plus `Last-Modified` and an ETag der
 |---|---|
 | `currentDataset` | Exported live binding; holds final or partial dataset state (`isPartial` flag) and fetch metrics |
 | `staticExtaddrLabelMap` | `Map<lowercase-extaddr, device_label>` pre-loaded at startup |
+| `setStaticDeviceLabel(extaddr, label)` | Updates one authoritative in-memory label after PATCH succeeds |
 | `fileMaxAgeCache` | `Map<filename, { maxAge, fetchedAt, lastModifiedAt }>` — per-file cache |
 | `_forceFresh` / `_onlyCache` | Toggle flags set by the Force Refresh / Only Cache checkboxes |
 | `_activeFetchSession` | Current fetch session state: `id`, `cancelRequested`, `AbortController`, and tracked active `job_id`s |
@@ -266,7 +306,7 @@ Different data sources use inconsistent field naming conventions—OTBR CLI uses
 
 ### Static label enrichment
 
-`enrichRows(rows)` / `enrichRawFiles(rawFiles)` are called by `renderCurrentView()` when the **Enhance** toggle is on. They walk every node/row, look up `staticExtaddrLabelMap` by canonical extaddr, and inject `deviceLabel` on a spread copy — the originals in `currentDataset` are never mutated.
+`enrichRows(rows)` / `enrichRawFiles(rawFiles)` are called by `renderCurrentView()` when the **Enhance** toggle is on. They walk every node/row, look up `staticExtaddrLabelMap` by canonical extaddr, and inject the authoritative `deviceLabel` on a spread copy — the originals in `currentDataset` are never mutated. A static mapping overrides stale raw label fields for that extAddress.
 
 ---
 
@@ -529,6 +569,41 @@ updateDeviceStatusBar(counts)
 refreshDiagnosticFilterForCurrentSource()
   console.info("[tdash] fetch metrics", ...)
 ```
+
+### Selected-device settings flow
+
+Topology clicks, table row clicks, and automatic single-search-result
+selection publish `tdash:device-selected`. `tdash-ui.js` owns the selected
+record and projects `rloc16`, extAddress aliases, `deviceLabel` aliases, and
+non-empty `name` into `#device-settings-panel`. Clearing, filtering out, or
+selecting a record without a valid extAddress clears and disables the form.
+
+When Settings opens for a valid selection:
+
+```text
+selected record
+  │
+  ▼
+GET /api/device/{extAddress}
+  ├─ 200: input uses authoritative static-map label
+  └─ 404: input uses selected record label, or blank (Save will insert)
+  │
+  ▼
+operator edits
+  ├─ Cancel/Escape: restore last loaded value without a request
+  └─ Save/Enter: PATCH { deviceLabel }
+            │
+            ▼
+        setStaticDeviceLabel()
+            │
+            ▼
+        renderCurrentView()
+```
+
+Selection/request version checks discard late GET or PATCH responses after the
+user selects another device. The input and actions are disabled while pending;
+failed saves keep the unsaved edit and announce a safe inline error. HTTP `201`
+is displayed as an added label and `200` as a saved label.
 
 ### Fetch cancel flow (triggered by Cancel button)
 

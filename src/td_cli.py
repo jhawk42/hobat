@@ -898,9 +898,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # banner
-    print("Thread Network Topology CLI")
-    print("")
+    single_record_json_output = args.command == "merge-extaddr" and any(
+        option in extras for option in ("--read-extaddr", "--update-extaddr")
+    )
+
+    if not single_record_json_output:
+        print("Thread Network Topology CLI")
+        print("")
     # log args at debug level
     logging.debug("Parsed arguments: %s", args)
     # Build a flattened sub-command string from parsed namespace fields so
@@ -918,9 +922,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     subcommand_text = " ".join(subcommand_parts) if subcommand_parts else ""
 
     # log command, sub-command path, and extras[]
-    print(
-        f"Command: {getattr(args, 'command', None)}, sub-command: {subcommand_text}"
-    )
+    if not single_record_json_output:
+        print(
+            f"Command: {getattr(args, 'command', None)}, sub-command: {subcommand_text}"
+        )
     # dispatch command
     try:
         rc = dispatch(args, extras, parser)

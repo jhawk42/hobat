@@ -31,7 +31,7 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 | `mdns` | Scan Thread-related mDNS scopes |
 | `process-eve` | Parse and enhance an Eve Thread layout file |
 | `merge-dataset` | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file |
-| `merge-extaddr` | Merge missing extaddr entries from a topology or mdns input file into the static extaddr map |
+| `merge-extaddr` | Read or upsert one device label, or bulk-merge missing extaddr entries into the static map |
 
 ---
 
@@ -70,8 +70,56 @@ td_cli merge-dataset ...
 ### `merge-extaddr`
 
 ```text
-td_cli merge-extaddr ...
+td_cli merge-extaddr [--read-extaddr EXTADDR | --update-extaddr EXTADDR]
+                        [--device-label DEVICE_LABEL] [bulk-merge-options]
 ```
+
+Single-record operations use the configured data directory's
+`td-static-extaddr-device-label.json`:
+
+```bash
+# Read one mapping without writing.
+PYTHONPATH=src python3 -m td_cli --datadir ./data \
+  merge-extaddr --read-extaddr 4e866ce96501b9ed
+
+# Update an existing mapping or insert it when absent.
+PYTHONPATH=src python3 -m td_cli --datadir ./data \
+  merge-extaddr --update-extaddr 4e866ce96501b9ed \
+  --device-label "Office Sensor"
+```
+
+Read success writes one JSON object to stdout:
+
+```json
+{"deviceLabel": "Office Sensor", "extAddress": "4e866ce96501b9ed"}
+```
+
+Upsert success adds an `operation` field:
+
+```json
+{"deviceLabel": "Office Sensor", "extAddress": "4e866ce96501b9ed", "operation": "updated"}
+```
+
+`operation` is `inserted` for a new mapping and `updated` for an existing one.
+It is response metadata and is not persisted. ExtAddresses are normalized to
+lowercase. Upsert preserves unrelated records and fields, sorts the map, and
+atomically replaces the file. If the map is missing, upsert creates it;
+single-record read returns exit code `4` instead.
+
+Single-record exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | Read or upsert succeeded |
+| `2` | Invalid option combination or missing required option |
+| `3` | File access or atomic-write failure |
+| `4` | Static map is missing during read |
+| `5` | Invalid extAddress, label, JSON shape, map record, or duplicate normalized extAddress |
+| `6` | Valid extAddress is not present during read |
+
+Labels allow Unicode, are trimmed, must contain 1–128 characters, and cannot
+contain control characters. ExtAddress must contain exactly 16 hexadecimal
+characters. Blank labels do not delete mappings.
 
 ---
 
@@ -129,7 +177,7 @@ When `TD_DATA_DIR` points at an empty or partially populated directory, command 
 | `otbr-cli` | none | `td-static-extaddr-device-label.json` | Continue with no enrichment and log a warning |
 | `mdns` | none | none | Continue unless the runtime browse/discovery itself fails |
 | `process-eve` | `Eve Thread Network Layout.evethreadlayout` | none | Return `4` when the file is missing |
-| `merge-extaddr` | `td-static-extaddr-device-label.json` and merge input file | none | Return `4` when a required file is missing |
+| `merge-extaddr` | Bulk merge: static map and merge input. Single read: static map. Single upsert: none. | none | Bulk/read return `4` for a missing required map; upsert creates a missing map atomically. |
 | `merge-dataset` | `td-otbr-cli-thread-network-info.json` | `td-static-extaddr-device-label.json` and the merge source files listed in the plan | Return `4` when the seed is missing or no viable optional source loads |
 | `otbr-restapi` | none, unless an explicit file argument is used by a mutating set command | command-dependent | Preserve OTBR REST API exit-code semantics |
 
@@ -425,8 +473,10 @@ usage: td_cli merge-dataset [-h]
 
 ```
 usage: td_cli merge-extaddr [-h] [--merge-mdns-br | --merge-topology-all]
+                             [--read-extaddr EXTADDR | --update-extaddr EXTADDR]
+                             [--device-label DEVICE_LABEL]
                              [--merge-input-file MERGE_INPUT_FILE]
-                             [--merge_name_override]
+                             [--merge_name_override] [--datadir DATADIR]
 
 options:
   -h, --help            show this help message and exit
@@ -434,10 +484,19 @@ options:
                         merge input file
   --merge-topology-all  Use td-merged-topology-all.json instead of the
                         default merge input file
+  --read-extaddr EXTADDR
+                        Read one deviceLabel by 16-digit extAddress as JSON
+  --update-extaddr EXTADDR
+                        Update or insert one deviceLabel by 16-digit
+                        extAddress
+  --device-label DEVICE_LABEL
+                        Device label for --update-extaddr
   --merge-input-file MERGE_INPUT_FILE
                         Merge input file name (default:
                         td-otbr-cli-networkdiag-fetch-all.json)
   --merge_name_override
                         If set, replace static Unknown device_label values
                         with merge input name for matching extaddr entries
+  --datadir DATADIR     Data directory for JSON reads/writes (takes precedence
+                        over TD_DATA_DIR)
 ```

@@ -9,6 +9,7 @@ import pytest
 from extaddr_device_label_map import (
     EXTADDR_FIELD_ALIASES,
     get_extaddr_from_record,
+    load_extaddr_device_label_map,
     load_extaddr_device_label_map_flexible,
     normalize_extaddr,
 )
@@ -334,3 +335,30 @@ class TestLoadExtaddrDeviceLabelMapFlexible:
             assert mapping == {"aa11bb22cc33dd44": "Kitchen"}
             
             Path(f.name).unlink()
+
+    def test_loaders_ignore_operation_metadata(self, tmp_path):
+        path = tmp_path / "td-static-extaddr-device-label.json"
+        path.write_text(
+            json.dumps(
+                [
+                    {
+                        "extaddr": "AA11BB22CC33DD44",
+                        "device_label": "Kitchen",
+                        "operation": "inserted",
+                    },
+                    {
+                        "extAddress": "BB22CC33DD44EE55",
+                        "deviceLabel": "Bedroom",
+                        "operation": "updated",
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        expected = {
+            "aa11bb22cc33dd44": "Kitchen",
+            "bb22cc33dd44ee55": "Bedroom",
+        }
+        assert load_extaddr_device_label_map_flexible(path) == expected
+        assert load_extaddr_device_label_map(path) == expected

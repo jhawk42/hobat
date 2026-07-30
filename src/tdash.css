@@ -1042,6 +1042,65 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   color: var(--fg, inherit);
 }
 
+#device-settings-panel {
+  min-width: 0;
+}
+
+#device-settings-list {
+  display: grid;
+  gap: 7px;
+}
+
+#device-settings-list .detail-kv-row {
+  align-items: center;
+  min-width: 0;
+}
+
+#device-settings-list .device-label-row {
+  flex-wrap: wrap;
+}
+
+#device-label {
+  flex: 1 1 180px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+}
+
+#device-label:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+.device-settings-status {
+  min-height: 21px;
+  margin: 9px 0 5px;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.device-settings-status.error {
+  color: var(--lq-low);
+}
+
+.device-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.device-settings-actions button {
+  min-height: 32px;
+}
+
 .node-details-list .detail-value-collapsible > summary {
   cursor: pointer;
   font-weight: 600;

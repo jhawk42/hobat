@@ -14,6 +14,8 @@ import sys
 import argparse
 import json
 import logging
+import re
+import unicodedata
 from pathlib import Path
 
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
@@ -29,6 +31,133 @@ from extaddr_device_label_map import load_extaddr_device_label_map
 OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME = 'td-otbr-cli-networkdiag-fetch-all.json'
 MDNS_SCOPES_BR_FILENAME = "td-mdns-scopes-br.json"
 MERGED_TOPOLOGY_ALL_FILENAME = "td-merged-topology-all.json"
+EXTADDR_PATTERN = re.compile(r"^[0-9a-fA-F]{16}$")
+DEVICE_LABEL_MAX_LENGTH = 128
+
+
+class ExtaddrNotFoundError(LookupError):
+    """Raised when a requested extAddress is not present in the static map."""
+
+
+def normalize_valid_extaddr(value):
+    """Return a validated 16-digit Thread Extended Address in lowercase."""
+    if not isinstance(value, str):
+        raise ValueError("extAddress must be a string")
+    normalized = value.strip().lower()
+    if not EXTADDR_PATTERN.fullmatch(normalized):
+        raise ValueError("extAddress must be exactly 16 hexadecimal characters")
+    return normalized
+
+
+def normalize_valid_device_label(value):
+    """Return a trimmed label after applying the device-label contract."""
+    if not isinstance(value, str):
+        raise ValueError("deviceLabel must be a string")
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("deviceLabel must not be blank")
+    if len(normalized) > DEVICE_LABEL_MAX_LENGTH:
+        raise ValueError(
+            f"deviceLabel must be at most {DEVICE_LABEL_MAX_LENGTH} characters"
+        )
+    if any(unicodedata.category(char) == "Cc" for char in normalized):
+        raise ValueError("deviceLabel must not contain control characters")
+    return normalized
+
+
+def _load_static_records_strict(extaddr_json_path, *, allow_missing=False):
+    """Load map records without dropping fields or accepting ambiguous keys."""
+    path = Path(extaddr_json_path)
+    if not path.is_file():
+        if allow_missing:
+            return []
+        raise FileNotFoundError(path)
+
+    with path.open(encoding="utf-8") as file_handle:
+        records = json.load(file_handle)
+    if not isinstance(records, list):
+        raise ValueError("static extAddress map must contain a JSON list")
+
+    seen_extaddrs = set()
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise ValueError(f"static map entry {index} must be a JSON object")
+        raw_extaddr = (
+            record.get("extAddress")
+            or record.get("extaddr")
+            or record.get("Extended MAC")
+        )
+        extaddr = normalize_valid_extaddr(raw_extaddr)
+        if extaddr in seen_extaddrs:
+            raise ValueError(f"duplicate extAddress in static map: {extaddr}")
+        seen_extaddrs.add(extaddr)
+
+        raw_label = record.get("deviceLabel") or record.get("device_label")
+        normalize_valid_device_label(raw_label)
+
+    return records
+
+
+def read_device_label(extaddr_json_path, extaddr):
+    """Read one device label from the static map without mutating it."""
+    normalized_extaddr = normalize_valid_extaddr(extaddr)
+    records = _load_static_records_strict(extaddr_json_path)
+    for record in records:
+        record_extaddr = normalize_valid_extaddr(
+            record.get("extAddress")
+            or record.get("extaddr")
+            or record.get("Extended MAC")
+        )
+        if record_extaddr == normalized_extaddr:
+            device_label = normalize_valid_device_label(
+                record.get("deviceLabel") or record.get("device_label")
+            )
+            return {
+                "extAddress": normalized_extaddr,
+                "deviceLabel": device_label,
+            }
+    raise ExtaddrNotFoundError(normalized_extaddr)
+
+
+def upsert_device_label(extaddr_json_path, extaddr, device_label):
+    """Insert or update one label and atomically persist the static map."""
+    normalized_extaddr = normalize_valid_extaddr(extaddr)
+    normalized_label = normalize_valid_device_label(device_label)
+    records = _load_static_records_strict(extaddr_json_path, allow_missing=True)
+
+    operation = "inserted"
+    for record in records:
+        record_extaddr = normalize_valid_extaddr(
+            record.get("extAddress")
+            or record.get("extaddr")
+            or record.get("Extended MAC")
+        )
+        if record_extaddr != normalized_extaddr:
+            continue
+        if "deviceLabel" in record and "device_label" not in record:
+            record["deviceLabel"] = normalized_label
+        else:
+            record["device_label"] = normalized_label
+        operation = "updated"
+        break
+    else:
+        records.append(
+            {"extaddr": normalized_extaddr, "device_label": normalized_label}
+        )
+
+    records.sort(
+        key=lambda record: normalize_valid_extaddr(
+            record.get("extAddress")
+            or record.get("extaddr")
+            or record.get("Extended MAC")
+        )
+    )
+    save_json_atomic(records, extaddr_json_path)
+    return {
+        "extAddress": normalized_extaddr,
+        "deviceLabel": normalized_label,
+        "operation": operation,
+    }
 
 def _is_valid_label(value):
     return isinstance(value, str) and bool(value.strip())
@@ -209,6 +338,21 @@ def main(argv=None):
         action='store_true',
         help=f'Use {MERGED_TOPOLOGY_ALL_FILENAME} instead of the default merge input file',
     )
+    operation_group = parser.add_mutually_exclusive_group()
+    operation_group.add_argument(
+        '--read-extaddr',
+        metavar='EXTADDR',
+        help='Read one deviceLabel by 16-digit extAddress as JSON',
+    )
+    operation_group.add_argument(
+        '--update-extaddr',
+        metavar='EXTADDR',
+        help='Update or insert one deviceLabel by 16-digit extAddress',
+    )
+    parser.add_argument(
+        '--device-label',
+        help='Device label for --update-extaddr',
+    )
     parser.add_argument(
         '--merge-input-file',
         default=OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
@@ -224,6 +368,22 @@ def main(argv=None):
     )
     parser.add_argument('--datadir', default=None, help=TD_DATA_DIR_ARG_HELP)
     args = parser.parse_args(argv)
+
+    single_record_operation = args.read_extaddr is not None or args.update_extaddr is not None
+    bulk_options_used = (
+        args.merge_mdns_br
+        or args.merge_topology_all
+        or args.merge_input_file != OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+        or args.merge_name_override
+    )
+    if single_record_operation and bulk_options_used:
+        parser.error('single-record operations cannot be combined with bulk merge options')
+    if args.read_extaddr is not None and args.device_label is not None:
+        parser.error('--device-label is only valid with --update-extaddr')
+    if args.update_extaddr is not None and args.device_label is None:
+        parser.error('--update-extaddr requires --device-label')
+    if args.device_label is not None and args.update_extaddr is None:
+        parser.error('--device-label requires --update-extaddr')
     
     # Use datadir
     td_data_dir = resolve_data_dir(data_dir=args.datadir)
@@ -231,6 +391,31 @@ def main(argv=None):
     extaddr_json_filename = data_file_path(
         EXTADDR_DEVICE_LABEL_MAP_FILENAME, td_data_dir
     )
+
+    if single_record_operation:
+        try:
+            if args.read_extaddr is not None:
+                result = read_device_label(extaddr_json_filename, args.read_extaddr)
+            else:
+                result = upsert_device_label(
+                    extaddr_json_filename,
+                    args.update_extaddr,
+                    args.device_label,
+                )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
+        except FileNotFoundError as exc:
+            print(f"Static extAddress map not found: {exc}", file=sys.stderr)
+            return 4
+        except ExtaddrNotFoundError as exc:
+            print(f"extAddress not found: {exc}", file=sys.stderr)
+            return 6
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            print(f"Invalid static extAddress map or argument: {exc}", file=sys.stderr)
+            return 5
+        except OSError as exc:
+            print(f"Failed to access static extAddress map: {exc}", file=sys.stderr)
+            return 3
 
     # Determine file paths relative to this script
     script_dir = Path(__file__).parent

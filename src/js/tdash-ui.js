@@ -8,6 +8,7 @@ import {
   currentDataset,
   loadDataset,
   loadStaticLabelMap,
+  setStaticDeviceLabel,
   enrichRows,
   enrichRawFiles,
   setForceFresh,
@@ -56,6 +57,8 @@ import {
   toFiniteNumber,
   getColumnValue,
   toText,
+  DEVICE_SELECTION_EVENT,
+  publishDeviceSelection,
 } from "./tdash-utils.js";
 import {
   populateFilterSelects,
@@ -448,6 +451,220 @@ function resetNodeDetailsLists() {
       list.innerHTML = "";
       list.classList.add("hidden");
     });
+  publishDeviceSelection(null);
+}
+
+const DEVICE_EXTADDRESS_PATTERN = /^[0-9a-f]{16}$/;
+const DEVICE_LABEL_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
+const DEVICE_LABEL_MAX_LENGTH = 128;
+const deviceSettingsState = {
+  record: null,
+  projection: null,
+  loadedLabel: "",
+  requestVersion: 0,
+  loading: false,
+  saving: false,
+};
+
+function getSelectedValue(record, paths) {
+  for (const path of paths) {
+    const value = getColumnValue(record, path);
+    if (value !== undefined && value !== null && toText(value)) return toText(value);
+  }
+  return "";
+}
+
+function projectSelectedDevice(record) {
+  if (!record || typeof record !== "object") return null;
+  const extAddress = getSelectedValue(record, [
+    "extAddress", "extaddr", "Extended MAC",
+    "attributes.extAddress", "attributes.extaddr",
+  ]).trim().toLowerCase();
+  return {
+    rloc16: getSelectedValue(record, ["rloc16", "attributes.rloc16"]),
+    extAddress,
+    deviceLabel: getSelectedValue(record, [
+      "deviceLabel", "device_label",
+      "attributes.deviceLabel", "attributes.device_label",
+    ]).trim(),
+    name: getSelectedValue(record, ["name", "attributes.name"]),
+    hasValidExtAddress: DEVICE_EXTADDRESS_PATTERN.test(extAddress),
+  };
+}
+
+function getDeviceLabelValidationError(value) {
+  const label = value.trim();
+  if (!label) return "Device label is required.";
+  if (label.length > DEVICE_LABEL_MAX_LENGTH) {
+    return `Device label must be ${DEVICE_LABEL_MAX_LENGTH} characters or fewer.`;
+  }
+  if (DEVICE_LABEL_CONTROL_PATTERN.test(label)) {
+    return "Device label cannot contain control characters.";
+  }
+  return "";
+}
+
+function setDeviceSettingsStatus(message = "", isError = false) {
+  const statusEl = document.getElementById("device-settings-status");
+  if (!statusEl) return;
+  statusEl.textContent = message;
+  statusEl.classList.toggle("error", isError);
+}
+
+function updateDeviceSettingsControls() {
+  const inputEl = document.getElementById("device-label");
+  const saveEl = document.getElementById("btn-device-settings-save");
+  const cancelEl = document.getElementById("btn-device-settings-cancel");
+  if (!inputEl || !saveEl || !cancelEl) return;
+
+  const hasDevice = deviceSettingsState.projection?.hasValidExtAddress === true;
+  const pending = deviceSettingsState.loading || deviceSettingsState.saving;
+  const currentLabel = inputEl.value.trim();
+  const changed = currentLabel !== deviceSettingsState.loadedLabel;
+  inputEl.disabled = !hasDevice || pending;
+  saveEl.disabled = !hasDevice || pending || !changed || Boolean(getDeviceLabelValidationError(inputEl.value));
+  cancelEl.disabled = !hasDevice || pending || !changed;
+}
+
+function displaySelectedDevice(record, loadedLabel = null) {
+  deviceSettingsState.requestVersion += 1;
+  const candidateProjection = projectSelectedDevice(record);
+  const hasValidSelection = candidateProjection?.hasValidExtAddress === true;
+  deviceSettingsState.record = hasValidSelection ? record : null;
+  deviceSettingsState.projection = hasValidSelection ? candidateProjection : null;
+  deviceSettingsState.loading = false;
+  deviceSettingsState.saving = false;
+
+  const projection = deviceSettingsState.projection;
+  const fallbackLabel = projection?.deviceLabel ?? "";
+  deviceSettingsState.loadedLabel = loadedLabel ?? fallbackLabel;
+  document.getElementById("device-rloc16").textContent = projection?.rloc16 ?? "";
+  document.getElementById("device-extaddress").textContent = projection?.extAddress ?? "";
+  document.getElementById("device-label").value = deviceSettingsState.loadedLabel;
+  document.getElementById("device-name").textContent = projection?.name ?? "";
+  document.getElementById("device-name-row").hidden = !projection?.name;
+  setDeviceSettingsStatus();
+  updateDeviceSettingsControls();
+}
+
+async function loadSelectedDeviceLabel() {
+  const projection = deviceSettingsState.projection;
+  if (!projection?.hasValidExtAddress) return;
+
+  const extAddress = projection.extAddress;
+  const requestVersion = ++deviceSettingsState.requestVersion;
+  deviceSettingsState.loading = true;
+  setDeviceSettingsStatus("Loading device label...");
+  updateDeviceSettingsControls();
+
+  try {
+    const response = await fetch(`/api/device/${encodeURIComponent(extAddress)}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (requestVersion !== deviceSettingsState.requestVersion ||
+        extAddress !== deviceSettingsState.projection?.extAddress) return;
+
+    if (response.status === 404) {
+      deviceSettingsState.loadedLabel = projection.deviceLabel;
+    } else if (response.ok) {
+      const payload = await response.json();
+      deviceSettingsState.loadedLabel = toText(payload.deviceLabel).trim();
+    } else {
+      throw new Error(`Unable to load device label (HTTP ${response.status}).`);
+    }
+    document.getElementById("device-label").value = deviceSettingsState.loadedLabel;
+    setDeviceSettingsStatus();
+  } catch (error) {
+    if (requestVersion !== deviceSettingsState.requestVersion) return;
+    setDeviceSettingsStatus(error.message || "Unable to load device label.", true);
+  } finally {
+    if (requestVersion === deviceSettingsState.requestVersion) {
+      deviceSettingsState.loading = false;
+      updateDeviceSettingsControls();
+    }
+  }
+}
+
+async function saveSelectedDeviceLabel() {
+  const projection = deviceSettingsState.projection;
+  const inputEl = document.getElementById("device-label");
+  if (!projection?.hasValidExtAddress || deviceSettingsState.saving) return;
+
+  const deviceLabel = inputEl.value.trim();
+  const validationError = getDeviceLabelValidationError(inputEl.value);
+  if (validationError) {
+    setDeviceSettingsStatus(validationError, true);
+    updateDeviceSettingsControls();
+    return;
+  }
+
+  const extAddress = projection.extAddress;
+  const selectedRecord = deviceSettingsState.record;
+  const requestVersion = ++deviceSettingsState.requestVersion;
+  deviceSettingsState.saving = true;
+  setDeviceSettingsStatus("Saving device label...");
+  updateDeviceSettingsControls();
+
+  try {
+    const response = await fetch(`/api/device/${encodeURIComponent(extAddress)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ deviceLabel }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (requestVersion !== deviceSettingsState.requestVersion ||
+        extAddress !== deviceSettingsState.projection?.extAddress) return;
+    if (!response.ok) {
+      throw new Error(payload.error || `Unable to save device label (HTTP ${response.status}).`);
+    }
+
+    const savedLabel = toText(payload.deviceLabel).trim() || deviceLabel;
+    setStaticDeviceLabel(extAddress, savedLabel);
+    renderCurrentView();
+    displaySelectedDevice(selectedRecord, savedLabel);
+    setDeviceSettingsStatus(response.status === 201 ? "Device label added." : "Device label saved.");
+  } catch (error) {
+    if (requestVersion !== deviceSettingsState.requestVersion) return;
+    setDeviceSettingsStatus(error.message || "Unable to save device label.", true);
+  } finally {
+    if (requestVersion === deviceSettingsState.requestVersion) {
+      deviceSettingsState.saving = false;
+      updateDeviceSettingsControls();
+    }
+  }
+}
+
+function initDeviceSettings() {
+  displaySelectedDevice(null);
+  document.addEventListener(DEVICE_SELECTION_EVENT, (event) => {
+    displaySelectedDevice(event.detail?.record ?? null);
+    if (!document.getElementById("device-settings-panel").hidden) {
+      void loadSelectedDeviceLabel();
+    }
+  });
+
+  const inputEl = document.getElementById("device-label");
+  inputEl.addEventListener("input", updateDeviceSettingsControls);
+  inputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void saveSelectedDeviceLabel();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      inputEl.value = deviceSettingsState.loadedLabel;
+      setDeviceSettingsStatus();
+      updateDeviceSettingsControls();
+    }
+  });
+  document.getElementById("btn-device-settings-cancel").addEventListener("click", () => {
+    inputEl.value = deviceSettingsState.loadedLabel;
+    setDeviceSettingsStatus();
+    updateDeviceSettingsControls();
+  });
+  document.getElementById("btn-device-settings-save").addEventListener("click", () => {
+    void saveSelectedDeviceLabel();
+  });
 }
 
 const DEVICE_DETAILS_PANEL_TABS = [
@@ -483,6 +700,9 @@ function setActiveDeviceDetailsPanel(activePanelId) {
       buttonEl.tabIndex = isActive ? 0 : -1;
     }
   });
+  if (activePanelId === "device-settings-panel") {
+    void loadSelectedDeviceLabel();
+  }
 }
 
 function initDeviceDetailsPanelTabs() {
@@ -698,6 +918,7 @@ document.getElementById("view-status-line-content").textContent =
   `Showing: no dataset loaded. Select a dataset and click Sync. Physics profile: ${getPhysicsProfileStatusLabel()}.`;
 
 bindDeviceDetailsSectionFields();
+initDeviceSettings();
 initDeviceDetailsPanelTabs();
 initDetailPanelToggles(document.getElementById("device-details"), () => {
   requestAnimationFrame(() => {

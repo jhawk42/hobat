@@ -9,6 +9,7 @@ import {
   shouldExcludeDetailPath,
   sortDetailsWithPriority,
   populateNodeDetailsLists,
+  publishDeviceSelection,
 } from "./tdash-utils.js";
 import {
   computeTableCapabilities,
@@ -287,6 +288,7 @@ function renderTableRows(rows, columns, isSearchActive = false) {
       tr.classList.add("selected-row");
       const summaryListEl = document.getElementById("summary-list");
       const rawRow = _lastFilteredRows[idx] ?? row;
+      publishDeviceSelection(rawRow);
       const details = sortDetailsWithPriority(
         flattenObjectEntries(rawRow).filter(
           ([key]) => !shouldExcludeDetailPath(key, "table"),
@@ -355,6 +357,7 @@ export function applyTableFilters() {
   const summaryListEl = document.getElementById("summary-list");
   if (summaryListEl)
     summaryListEl.innerHTML = "<li>Click a node or row to view its properties.</li>";
+  publishDeviceSelection(null);
   renderTableRows(matchingRows, activeColumns, searchQuery !== "");
   updateTableStatus(matchingRows.length, activeColumns.length, filtered.length, searchQuery);
 
@@ -365,6 +368,7 @@ export function applyTableFilters() {
     if (firstRow) {
       firstRow.classList.add("selected-row");
       const rawRow = _lastFilteredRows[0];
+      publishDeviceSelection(rawRow);
       const details = sortDetailsWithPriority(
         flattenObjectEntries(rawRow).filter(
           ([key]) => !shouldExcludeDetailPath(key, "table"),
