@@ -2,7 +2,7 @@
 
 tdash is a Thread mesh dashboard and toolkit for visualizing topology, diagnosing device health, and managing multi-source network data with low mesh impact. It collects data from OTBR CLI, OTBR REST API, mDNS scopes, and optional Eve exports, then serves an interactive topology and table experience from local cache snapshots. This cache-first approach improves troubleshooting speed while reducing live query load on constrained Thread devices.
 
-Environment: tdash runs on Debian-based Linux in a Docker container or directly on a host. The dashboard is browser-based and works well from desktops and phones. See [tdash backstory](https://github.com/jhawk42/smarthome/blob/main/tdash/tdash_backstory.md) for details.
+Environment: tdash runs on Debian-based Linux in a Docker container or directly on a host. The dashboard is browser-based and works well on desktops and phones. See [tdash backstory](https://github.com/jhawk42/smarthome/blob/main/tdash/tdash_backstory.md) for details.
 
 
 <a href="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash1.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash1.jpg?raw=true" alt="tdash1" width="200px" >
@@ -23,7 +23,46 @@ This model reduces repeated network queries, lowers load on constrained Thread d
 
 Tip: Run a crontab task to run td_cli.py commands early in the morning during off peak time e.g. 5:15am.
 
-The tdash dashboard and tools provide:
+## Capabilities
+
+**Major capabilities**
+1. Multi-source topology visibility in one place.
+Operators can correlate OTBR CLI, OTBR REST, mDNS, and Eve layout data to understand real mesh state faster.
+2. Diagnostics-first troubleshooting workflow.
+Link quality, MAC counters, MLE counters, and neighbor/child context help isolate unstable nodes before they degrade the network.
+3. Cache-first operating model.
+Most analysis runs on local snapshots, reducing Thread traffic and helping protect battery-powered sleepy devices.
+
+**Medium capabilities**
+1. Powerful search and filtering across node identity and health fields.
+Faster isolation of problem cohorts (for example low LQ links, high error devices, router/child patterns).
+2. Dual views: topology graph and sortable table.
+Graph supports spatial/relationship debugging; table supports precise, sortable inspection.
+3. Identity-aware merge engine across datasets.
+Better device completeness and less ambiguity across mixed source data.
+4. Human-readable extaddr-to-label mapping.
+Easier operations, handoff, and reporting than raw addresses alone.
+5. On-demand and scheduled collection options.
+Operators can run low-impact periodic refreshes and still force fresh data when needed.
+
+**Minor capabilities**
+1. mDNS scope discovery for meshcop, HAP, and Matter.
+Complements topology data with service-layer visibility.
+2. Eve layout import and enhancement.
+Adds operator context and cross-checks against OTBR-derived data.
+3. Web API for file fetch and long job polling.
+Supports UI responsiveness during longer diagnostic jobs.
+4. Background async job handling for expensive operations.
+Avoids blocking interactions while long scans run.
+5. Flexible data directory resolution.
+Easier deployment across Docker and host environments.
+6. Docker-oriented OTBR CLI execution path with local fallback.
+Works in containerized and direct-host operating modes.
+7. Atomic JSON writes.
+Reduces risk of partial/corrupted cache reads during interruptions.
+8. Source-level concurrency controls.
+Prevents conflicting same-source collection calls.
+
 
 ### CLI toolkit
 
