@@ -481,6 +481,51 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
   },
 ]);
 
+const DIAGNOSTIC_DISPLAY_METADATA = Object.freeze({
+  "mac-total-errors-ratio-medium": { severity: "medium", threshold: 1, comparison: ">=", unit: "percent" },
+  "mac-total-errors-ratio-high": { severity: "high", threshold: 5, comparison: ">=", unit: "percent" },
+  "mac-total-discards-ratio-medium": { severity: "medium", threshold: 2, comparison: ">=", unit: "percent" },
+  "mac-total-discards-ratio-high": { severity: "high", threshold: 8, comparison: ">=", unit: "percent" },
+  "medium-partition-changes": { severity: "medium", threshold: 2, comparison: ">=", unit: "count" },
+  "high-partition-changes": { severity: "high", threshold: 5, comparison: ">=", unit: "count" },
+  "medium-parent-changes": { severity: "medium", threshold: 2, comparison: ">=", unit: "count" },
+  "high-parent-changes": { severity: "high", threshold: 5, comparison: ">=", unit: "count" },
+  "mle-better-partition-medium": { severity: "medium", threshold: 2, comparison: ">=", unit: "count" },
+  "mle-better-partition-high": { severity: "high", threshold: 5, comparison: ">=", unit: "count" },
+  "mle-total-parent-partition-medium": { severity: "medium", threshold: 3, comparison: ">=", unit: "count" },
+  "mle-total-parent-partition-high": { severity: "high", threshold: 8, comparison: ">=", unit: "count" },
+  "router-neighbor-err-rate-frame-low": { severity: "low", threshold: 2, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-frame-medium": { severity: "medium", threshold: 5, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-frame-high": { severity: "high", threshold: 10, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-frame-critical": { severity: "critical", threshold: 30, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-msg-low": { severity: "low", threshold: 2, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-msg-medium": { severity: "medium", threshold: 5, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-msg-high": { severity: "high", threshold: 10, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-msg-critical": { severity: "critical", threshold: 30, comparison: ">=", unit: "percent" },
+  "router-neighbor-rss-very-low": { severity: "critical", threshold: -80, comparison: "<", unit: "dBm" },
+  "router-neighbor-rss-low": { severity: "medium", threshold: [-80, -70], comparison: "range", unit: "dBm" },
+  "router-neighbor-rss-medium": { severity: "low", threshold: [-70, -60], comparison: "range", unit: "dBm" },
+  "router-neighbor-rss-high": { severity: "info", threshold: -60, comparison: ">", unit: "dBm" },
+  "low-lq3-ratio-medium": { severity: "medium", threshold: 0.6, comparison: "<", unit: "ratio" },
+  "low-lq3-ratio-high": { severity: "high", threshold: 0.35, comparison: "<", unit: "ratio" },
+  "high-lq1-ratio-medium": { severity: "medium", threshold: 0.2, comparison: ">=", unit: "ratio" },
+  "high-lq1-ratio-high": { severity: "high", threshold: 0.35, comparison: ">=", unit: "ratio" },
+  "child-lq-medium": { severity: "medium", threshold: 2, comparison: "<=", unit: "linkQuality" },
+  "child-lq-poor": { severity: "high", threshold: 1, comparison: "=", unit: "linkQuality" },
+  "router-child-err-rate-frame-medium": { severity: "medium", threshold: 10, comparison: ">=", unit: "percent" },
+  "router-child-err-rate-frame-high": { severity: "high", threshold: 25, comparison: ">=", unit: "percent" },
+  "router-child-err-rate-msg-low": { severity: "low", threshold: 1, comparison: ">=", unit: "percent" },
+  "router-child-err-rate-msg-high": { severity: "high", threshold: 5, comparison: ">=", unit: "percent" },
+  "router-child-rss-very-low": { severity: "critical", threshold: -80, comparison: "<", unit: "dBm" },
+  "router-child-rss-low": { severity: "medium", threshold: [-80, -70], comparison: "range", unit: "dBm" },
+  "router-child-rss-margin-low": { severity: "medium", threshold: 20, comparison: "<", unit: "dB" },
+  "router-child-has-queued-msgs": { severity: "medium", threshold: 0, comparison: ">", unit: "count" },
+  "ftd-router-pct-low": { severity: "medium", threshold: 80, comparison: "<", unit: "percent" },
+  "ftd-router-pct-very-low": { severity: "high", threshold: 50, comparison: "<", unit: "percent" },
+  "detached-disabled-pct-medium": { severity: "medium", threshold: 1, comparison: ">=", unit: "percent" },
+  "detached-disabled-pct-high": { severity: "high", threshold: 5, comparison: ">=", unit: "percent" },
+});
+
 export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
   { value: "all", label: "All Rows", alwaysShow: true, group: null },
   // ── Mac counters ──────────────────────────────────────────────────────
@@ -622,13 +667,6 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     topoNodeField: "router_neighbor_max_err_rate_frame_pct",
     tableNeighborField: "frameErrorRate",
   },
-  {
-    value: "router-neighbor-err-rate-frame-critical",
-    label: "Critical (>= 30%)",
-    group: "Router Neighbor Err Rate Frame",
-    topoNodeField: "router_neighbor_max_err_rate_frame_pct",
-    tableNeighborField: "frameErrorRate",
-  },
   // ── Router-neighbor: message error rate ───────────────────────────────
   {
     source: "link_quality",
@@ -658,13 +696,6 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     source: "link_quality",
     value: "router-neighbor-err-rate-msg-critical",
     label: "Router Neighbor Err Rate Msg: Critical (>= 30%)",
-    group: "Router Neighbor Err Rate Msg",
-    topoNodeField: "router_neighbor_max_err_rate_msg_pct",
-    tableNeighborField: "messageErrorRate",
-  },
-  {
-    value: "router-neighbor-err-rate-msg-critical",
-    label: "Critical (>= 30%)",
     group: "Router Neighbor Err Rate Msg",
     topoNodeField: "router_neighbor_max_err_rate_msg_pct",
     tableNeighborField: "messageErrorRate",
@@ -850,7 +881,10 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     topoNodeField: "detachedDisabledPct",
     tableRowField: "timeStatistics.detachedDisabledPct",
   },
-]);
+].map((option) => Object.freeze({
+  ...option,
+  ...(DIAGNOSTIC_DISPLAY_METADATA[option.value] ?? {}),
+})));
 
 // ── Device details section field registry ───────────────────────────────────
 //

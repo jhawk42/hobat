@@ -1042,6 +1042,60 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   color: var(--fg, inherit);
 }
 
+#device-insights-panel {
+  min-width: 0;
+}
+
+.device-insights-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.device-insights-source {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.device-insights-source h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.device-insights-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.device-insight-item {
+  border-left: 3px solid var(--line);
+  padding-left: 7px;
+  word-break: break-word;
+}
+
+.device-insight-item.is-observed {
+  color: var(--muted);
+}
+
+.device-insight-item.severity-low { border-left-color: #008080; }
+.device-insight-item.severity-medium { border-left-color: #d55e00; }
+.device-insight-item.severity-high { border-left-color: #c62828; }
+.device-insight-item.severity-critical { border-left-color: #8b0000; }
+.device-insight-item.severity-info { border-left-color: #1565c0; }
+
+.device-insights-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
 #device-settings-panel {
   min-width: 0;
 }

@@ -808,7 +808,7 @@ function getRowDiagnosticMetric(row, filterMode) {
   return toFiniteNumber(getColumnValue(row, option.tableRowField));
 }
 
-export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
+function isNodeVisibleByDiagnosticFilterLegacy(node, filterMode) {
   if (filterMode === "medium-partition-changes")
     return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
       getNodeDiagnosticMetric(node, filterMode) >= 2;
@@ -1106,7 +1106,7 @@ export function isRowVisibleByNodeFilter(row, filterMode) {
   return true;
 }
 
-export function isRowVisibleByDiagnosticFilter(row, filterMode) {
+function isRowVisibleByDiagnosticFilterLegacy(row, filterMode) {
   if (filterMode === "all") return true;
   const getMetric = () => getRowDiagnosticMetric(row, filterMode);
   if (filterMode === "medium-partition-changes") {
@@ -1328,4 +1328,158 @@ export function isRowVisibleByDiagnosticFilter(row, filterMode) {
   }
 
   return true;
+}
+
+// ── Per-record diagnostic evaluation ─────────────────────────────────────────
+
+function getDiagnosticArrayRows(record, option) {
+  if (option.tableNeighborField) {
+    const rows = getColumnValue(record, "routerNeighbors");
+    return Array.isArray(rows) ? rows : [];
+  }
+  if (option.tableChildField) {
+    const rows = getColumnValue(record, "childTable");
+    return Array.isArray(rows) ? rows : [];
+  }
+  if (option.value === "child-lq-medium" || option.value === "child-lq-poor") {
+    const rows = getColumnValue(record, "children");
+    return Array.isArray(rows) ? rows : [];
+  }
+  return [];
+}
+
+function getDiagnosticArrayMetric(row, option) {
+  if (option.tableNeighborField || option.tableChildField) {
+    return toFiniteNumber(row?.[option.tableNeighborField ?? option.tableChildField]);
+  }
+  const lqRaw = row?.lq !== undefined ? row.lq : row?.link_quality;
+  return Number.parseInt(lqRaw, 10);
+}
+
+function getDiagnosticMetric(record, view, option) {
+  if (view === "topology") {
+    const value = record?.[option.topoNodeField];
+    if (typeof value === "boolean") return undefined;
+    return Number.isFinite(toFiniteNumber(value)) ? toFiniteNumber(value) : undefined;
+  }
+
+  if (option.tableRowField) {
+    const value = toFiniteNumber(getColumnValue(record, option.tableRowField));
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (option.value === "low-lq3-ratio-medium" || option.value === "low-lq3-ratio-high" ||
+      option.value === "high-lq1-ratio-medium" || option.value === "high-lq1-ratio-high") {
+    const totalLinks = toFiniteNumber(getColumnValue(record, "totalLinks"));
+    const links = toFiniteNumber(getColumnValue(
+      record,
+      option.value.startsWith("low-lq3") ? "links3" : "links1",
+    ));
+    return Number.isFinite(totalLinks) && totalLinks > 0 && Number.isFinite(links)
+      ? links / totalLinks
+      : undefined;
+  }
+
+  const metrics = getDiagnosticArrayRows(record, option)
+    .map((row) => getDiagnosticArrayMetric(row, option))
+    .filter(Number.isFinite);
+  if (metrics.length === 0) return undefined;
+  return option.comparison === "<" || option.comparison === "range"
+    ? Math.min(...metrics)
+    : Math.max(...metrics);
+}
+
+function formatDiagnosticMetric(value, unit) {
+  if (!Number.isFinite(value)) return undefined;
+  if (unit === "percent") return `${value.toFixed(1)}%`;
+  if (unit === "ratio") return `${(value * 100).toFixed(1)}%`;
+  if (unit === "dBm") return `${value} dBm`;
+  if (unit === "dB") return `${value} dB`;
+  if (unit === "linkQuality") return `LQ ${value}`;
+  return String(value);
+}
+
+function formatDiagnosticThreshold(option) {
+  if (option.comparison === "range") {
+    const [lowerBound, upperBound] = option.threshold;
+    return `${lowerBound} to ${upperBound} ${option.unit}`;
+  }
+  const value = formatDiagnosticMetric(option.threshold, option.unit);
+  return `${option.comparison} ${value}`;
+}
+
+const DIAGNOSTIC_SEVERITY_RANK = Object.freeze({
+  info: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  critical: 4,
+});
+
+export function selectHighestQualifyingDiagnosticEvaluations(evaluations) {
+  const highestRankByGroup = new Map();
+  evaluations.forEach((evaluation) => {
+    if (!evaluation.triggered) return;
+    const groupKey = `${evaluation.option.source}\u0000${evaluation.option.group}`;
+    const rank = DIAGNOSTIC_SEVERITY_RANK[evaluation.option.severity] ?? -1;
+    const highestRank = highestRankByGroup.get(groupKey) ?? -1;
+    if (rank > highestRank) highestRankByGroup.set(groupKey, rank);
+  });
+
+  return evaluations.filter((evaluation) => {
+    if (!evaluation.triggered) return true;
+    const groupKey = `${evaluation.option.source}\u0000${evaluation.option.group}`;
+    const rank = DIAGNOSTIC_SEVERITY_RANK[evaluation.option.severity] ?? -1;
+    return rank === highestRankByGroup.get(groupKey);
+  });
+}
+
+/**
+ * Returns the diagnostic conditions that the supplied record can evaluate.
+ * The existing view-specific predicates remain the behavior source of truth.
+ */
+export function evaluateDiagnosticsForRecord(record, view = "topology") {
+  if (view !== "topology" && view !== "table") {
+    throw new Error(`Unsupported diagnostic view: ${view}`);
+  }
+  if (!record) return [];
+
+  return DIAGNOSTIC_FILTER_OPTIONS
+    .filter((option) => option.value !== "all")
+    .map((option) => {
+      const metric = getDiagnosticMetric(record, view, option);
+      const isBooleanTopologySummary =
+        view === "topology" && record?.[option.topoNodeField] === true;
+      if (!Number.isFinite(metric) && !isBooleanTopologySummary) return null;
+
+      const triggered = view === "topology"
+        ? isNodeVisibleByDiagnosticFilterLegacy(record, option.value)
+        : isRowVisibleByDiagnosticFilterLegacy(record, option.value);
+      return {
+        option,
+        metric,
+        metricText: formatDiagnosticMetric(metric, option.unit),
+        thresholdText: formatDiagnosticThreshold(option),
+        triggered,
+      };
+    })
+    .filter(Boolean);
+}
+
+export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
+  if (filterMode === "all") return true;
+  const option = getDiagnosticOptionByValue(filterMode);
+  if (!option) return true;
+  const evaluation = evaluateDiagnosticsForRecord(node, "topology")
+    .find((item) => item.option.value === filterMode);
+  return evaluation?.triggered === true;
+}
+
+export function isRowVisibleByDiagnosticFilter(row, filterMode) {
+  if (filterMode === "all") return true;
+  const option = getDiagnosticOptionByValue(filterMode);
+  if (!option) return true;
+  const evaluation = evaluateDiagnosticsForRecord(row, "table")
+    .find((item) => item.option.value === filterMode);
+  return evaluation?.triggered === true;
 }

@@ -64,6 +64,8 @@ import {
   populateFilterSelects,
   populateDiagnosticFilterBySource,
   populateDiagnosticFilterBySourceWithCapabilities,
+  evaluateDiagnosticsForRecord,
+  selectHighestQualifyingDiagnosticEvaluations,
 } from "./tdash-filters.js";
 import { parseSearchQuery, filterRowsBySearch } from "./tdash-search.js";
 
@@ -420,6 +422,7 @@ function setMoreInfo(enabled) {
     btn.classList.remove("active");
   }
   if (currentDataset && currentView === "table") applyTableFilters();
+  renderDeviceInsights(deviceInsightsState.record);
 }
 
 document
@@ -664,6 +667,106 @@ function initDeviceSettings() {
   });
   document.getElementById("btn-device-settings-save").addEventListener("click", () => {
     void saveSelectedDeviceLabel();
+  });
+}
+
+const DIAGNOSTIC_SOURCE_LABELS = Object.freeze({
+  macCounters: "MAC Counters",
+  mlecounters: "MLE Counters",
+  time_statistics: "Time Statistics",
+  link_quality: "Link Quality",
+});
+
+const deviceInsightsState = {
+  record: null,
+};
+
+function appendDeviceInsightElement(parent, tagName, text, className = "") {
+  const element = document.createElement(tagName);
+  element.textContent = text;
+  if (className) element.className = className;
+  parent.appendChild(element);
+  return element;
+}
+
+function renderDeviceInsights(record) {
+  const contentEl = document.getElementById("device-insights-panel-content");
+  if (!contentEl) return;
+  contentEl.replaceChildren();
+
+  if (!record) {
+    appendDeviceInsightElement(
+      contentEl,
+      "p",
+      "Select a device to view diagnostic insights.",
+      "device-insights-empty",
+    );
+    return;
+  }
+
+  const projection = projectSelectedDevice(record);
+  const identity = projection.deviceLabel || projection.name || projection.rloc16 ||
+    projection.extAddress || "Selected device";
+  appendDeviceInsightElement(contentEl, "h3", identity, "device-insights-title");
+
+  const evaluations = selectHighestQualifyingDiagnosticEvaluations(
+    evaluateDiagnosticsForRecord(record, currentView)
+      .filter((evaluation) =>
+        evaluation.triggered || (isMoreInfoEnabled() && evaluation.metricText),
+      ),
+  );
+  if (evaluations.length === 0) {
+    appendDeviceInsightElement(
+      contentEl,
+      "p",
+      "No diagnostic metrics are available for this device.",
+      "device-insights-empty",
+    );
+    return;
+  }
+
+  const evaluationsBySource = new Map();
+  evaluations.forEach((evaluation) => {
+    const source = evaluation.option.source;
+    const sourceEvaluations = evaluationsBySource.get(source) ?? [];
+    sourceEvaluations.push(evaluation);
+    evaluationsBySource.set(source, sourceEvaluations);
+  });
+
+  evaluationsBySource.forEach((sourceEvaluations, source) => {
+    const sectionEl = document.createElement("section");
+    sectionEl.className = "device-insights-source";
+    appendDeviceInsightElement(
+      sectionEl,
+      "h4",
+      DIAGNOSTIC_SOURCE_LABELS[source] ?? source,
+    );
+    const listEl = document.createElement("ul");
+    listEl.className = "device-insights-list";
+
+    sourceEvaluations.forEach((evaluation) => {
+      const { option, metricText, thresholdText, triggered } = evaluation;
+      const itemEl = document.createElement("li");
+      itemEl.className = [
+        "device-insight-item",
+        `severity-${option.severity}`,
+        triggered ? "is-triggered" : "is-observed",
+      ].join(" ");
+      const valueText = metricText ?? "Triggered";
+      itemEl.textContent = `${option.label}: ${valueText} (${thresholdText})`;
+      listEl.appendChild(itemEl);
+    });
+
+    sectionEl.appendChild(listEl);
+    contentEl.appendChild(sectionEl);
+  });
+}
+
+function initDeviceInsights() {
+  renderDeviceInsights(null);
+  document.addEventListener(DEVICE_SELECTION_EVENT, (event) => {
+    deviceInsightsState.record = event.detail?.record ?? null;
+    renderDeviceInsights(deviceInsightsState.record);
   });
 }
 
@@ -919,6 +1022,7 @@ document.getElementById("view-status-line-content").textContent =
 
 bindDeviceDetailsSectionFields();
 initDeviceSettings();
+initDeviceInsights();
 initDeviceDetailsPanelTabs();
 initDetailPanelToggles(document.getElementById("device-details"), () => {
   requestAnimationFrame(() => {

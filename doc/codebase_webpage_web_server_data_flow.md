@@ -470,10 +470,38 @@ applyFilters(nodeMode, linkMode, diagMode)   ← called here + on every filter c
      shouldShow = endpointsVisible AND (edgeMatchesLinkFilter OR forcedVisible)
     │
     ▼
-vis.Network click event → populateNodeDetailsLists()
+vis.Network click event → publishDeviceSelection() + populateNodeDetailsLists()
+  - publishes the selected merged record through `tdash:device-selected`
   - reads rawByIdForDetails and populates detail sections using runtime
     data-fields bindings from DEVICE_DETAILS_SECTIONS
 ```
+
+### Device details and diagnostic insights
+
+Both topology-node clicks and table-row clicks publish the selected record via
+`tdash:device-selected`. `tdash-ui.js` uses the event to update Device Settings
+and the Device Insights tab, including when Insights is not the active tab.
+
+Insights evaluates the selected record with
+`evaluateDiagnosticsForRecord(record, view)`. It is informational and does not
+change any filter state. Evaluations are grouped by diagnostic source (MAC
+Counters, MLE Counters, Time Statistics, and Link Quality) and show the
+observed value plus the structured threshold when that view supplies a metric.
+For topology boolean summaries without a numeric measurement, an insight is
+shown only when the condition is triggered. The tab has explicit no-selection
+and no-available-metrics states.
+
+When several triggered options describe tiers of the same source/group metric,
+Insights shows only the highest-severity qualifying tier. For example, a 9.3%
+MAC discard ratio renders the high `>= 8%` condition and omits the redundant
+medium `>= 2%` condition. Non-triggered observed tiers remain visible as
+context only while the **Advanced** control is active. With Advanced inactive,
+Insights shows only matching conditions.
+
+`DIAGNOSTIC_FILTER_OPTIONS` is the shared source of diagnostic labels, fields,
+severity, threshold, comparison, and unit metadata. This keeps dropdown
+matching and selected-device insight evaluation aligned without parsing the
+display label text.
 
 #### Physics profile behavior (current)
 

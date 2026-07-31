@@ -88,3 +88,29 @@ def test_settings_markup_starts_empty_and_disabled() -> None:
     assert 'role="status" aria-live="polite"' in html
     assert "0xa800" not in html
     assert "4e866ce96501b9ed" not in html
+
+
+def test_insights_panel_uses_shared_selection_and_evaluator() -> None:
+    ui_text = _read_text(UI_JS)
+    html = _read_text(HTML)
+
+    assert 'id="device-insights-panel-content" role="status" aria-live="polite"' in html
+    assert "evaluateDiagnosticsForRecord," in ui_text
+    assert "selectHighestQualifyingDiagnosticEvaluations," in ui_text
+    assert "function renderDeviceInsights(record)" in ui_text
+    assert 'contentEl.replaceChildren();' in ui_text
+    assert "evaluateDiagnosticsForRecord(record, currentView)" in ui_text
+    assert "selectHighestQualifyingDiagnosticEvaluations(" in ui_text
+    assert "evaluation.triggered || (isMoreInfoEnabled() && evaluation.metricText)" in ui_text
+    assert "renderDeviceInsights(deviceInsightsState.record);" in ui_text
+    assert "document.addEventListener(DEVICE_SELECTION_EVENT" in ui_text
+    assert "function initDeviceInsights()" in ui_text
+    assert "initDeviceInsights();" in ui_text
+
+
+def test_topology_selection_includes_adapted_node_diagnostic_fields() -> None:
+    topology_text = _read_text(TOPOLOGY_JS)
+
+    assert "const TOPOLOGY_DIAGNOSTIC_FIELDS" in topology_text
+    assert "TOPOLOGY_DIAGNOSTIC_FIELDS.map((field) => [field, node[field]])" in topology_text
+    assert "mergeForDisplay(rawSource, topologyDiagnosticDetails)" in topology_text

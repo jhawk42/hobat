@@ -14,6 +14,7 @@ import {
   EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD,
   EDGE_CATEGORY_EVE_CHILD,
   EDGE_CATEGORY_EVE_NATIVE_CHILD,
+  DIAGNOSTIC_FILTER_OPTIONS,
 } from "./tdash-constants.js";
 import {
   toText,
@@ -56,6 +57,13 @@ let _topologyRawRows = null;   // Map<nodeId, rawRow> from last render, used for
 let _topologyDatasetCounts = null;  // Counts derived from last topology render
 let _originalNodeStyling = null;  // Map<nodeId, {color, borderWidth, font}> — original styling for search restore
 let _onPhysicsDisabledCallback = null;  // Callback invoked when physics is auto-disabled after stabilization
+
+const TOPOLOGY_DIAGNOSTIC_FIELDS = Object.freeze([
+  ...new Set([
+    ...DIAGNOSTIC_FILTER_OPTIONS.map((option) => option.topoNodeField),
+    "isFtdRouter",
+  ].filter(Boolean)),
+]);
 
 const TREE_ZONE = Object.freeze({
   borderRouterChildren: 40,
@@ -2620,7 +2628,13 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
           : undefined,
       },
     };
-    const mergedDetails = mergeForDisplay(rawSource, graphDetails);
+    const topologyDiagnosticDetails = Object.fromEntries(
+      TOPOLOGY_DIAGNOSTIC_FIELDS.map((field) => [field, node[field]]),
+    );
+    const mergedDetails = mergeForDisplay(
+      mergeForDisplay(rawSource, topologyDiagnosticDetails),
+      graphDetails,
+    );
     publishDeviceSelection(mergedDetails);
     const details = sortDetailsWithPriority(
       flattenObjectEntries(mergedDetails).filter(
