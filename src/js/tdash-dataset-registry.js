@@ -233,7 +233,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 2
   },  
   // ── Single-file simple datasets ───
@@ -246,7 +246,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1
   },
 
@@ -291,7 +291,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1260
   },
   
@@ -305,7 +305,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 1200
   },
 
@@ -338,7 +338,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 2450
   },
 
@@ -358,7 +358,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "otbr_restapi",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 2450
   },
 
