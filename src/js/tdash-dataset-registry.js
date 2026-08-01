@@ -294,26 +294,7 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1260
   },
-
-  // ── Multi-file topology datasets (otbr-restapi) ────────────
-  {
-    source: "otbr-restapi",
-    value: "restapi_devices_fetch_diagnostics_fetch_mesh-diagnostics-fetch_all",
-    label: "Devices + Diagnostics + Mesh Diagnostics⏱️",
-    group: "Detailed: most time",
-    files: [
-      "td-otbr-restapi-devices-fetch.json", 
-      "td-otbr-restapi-diagnostics-fetch-all.json",
-      "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
-    ],
-    mergeStrategy: "none",
-    topologyMode: "otbr_restapi",
-    physicsProfile: "mesh-compact",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links",
-    estimateActionCostSecs: 2450
-  },
-
+  
   // ── Single-file simple datasets ───
   {
     source: "otbr-restapi",
@@ -341,6 +322,46 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 600
   },
+  
+  // ── Multi-file topology datasets (otbr-restapi) ────────────
+  {
+    source: "otbr-restapi",
+    value: "restapi_devices_fetch_diagnostics_fetch_mesh-diagnostics-fetch_all",
+    label: "Devices + Diagnostics + Mesh Diagnostics⏱️",
+    group: "Detailed: most time",
+    files: [
+      "td-otbr-restapi-devices-fetch.json", 
+      "td-otbr-restapi-diagnostics-fetch-all.json",
+      "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
+    ],
+    mergeStrategy: "none",
+    topologyMode: "otbr_restapi",
+    physicsProfile: "mesh-compact",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links",
+    estimateActionCostSecs: 2450
+  },
+
+  // ── Multi-file topology datasets (otbr-restapi) ────────────
+  {
+    source: "otbr-restapi",
+    value: "restapi_devices_fetch_diagnostics_fetch_mesh-diagnostics-fetch_all_mdns_scopes_thread",
+    label: "Devices + Diagnostics + Mesh Diagnostics + mDNS⏱️",
+    group: "Detailed: most time",
+    files: [
+      "td-otbr-restapi-devices-fetch.json", 
+      "td-otbr-restapi-diagnostics-fetch-all.json",
+      "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+      "td-mdns-scopes-thread.json"
+    ],
+    mergeStrategy: "none",
+    topologyMode: "otbr_restapi",
+    physicsProfile: "mesh-compact",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links",
+    estimateActionCostSecs: 2450
+  },
+
   // ── Single-file simple datasets ───
   {
     source: "otbr-restapi",
@@ -353,7 +374,7 @@ export const DATASET_REGISTRY = [
     defaultView: "table",
     defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1
-  },
+  },  
 
   // ── Single-file simple dataset ───
   {
