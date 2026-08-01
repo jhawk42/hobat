@@ -90,7 +90,7 @@ The dashboard search feature (normal mode) searches the following 28 fields:
 **Other:**
 - `mode.device`, `scope`, `status`
 
-**Advanced Mode:** When "Advanced" mode is enabled, all fields in the device record become searchable.
+**More Info Mode:** When "More Info" mode is enabled, all fields in the device record become searchable.
 
 ## Field Naming Conventions
 
@@ -179,7 +179,7 @@ Different dataset types provide different sets of fields:
 ## Tips for Users
 
 1. **Use Search for Quick Lookup:** Type any identifier (rloc16, extaddr, device label) to quickly find devices
-2. **Enable Advanced Mode:** To search diagnostic fields (counters, connectivity metrics), enable Advanced mode
+2. **Enable More Info Mode:** To search diagnostic fields (counters, connectivity metrics), enable More Info mode
 3. **Check Multiple Sources:** Load multiple dataset types (CLI + REST API) for comprehensive device information
 4. **Use Table View:** For comparing many devices, switch to Table view and sort by any column
 5. **Expand Detail Panels:** Click devices to see full field lists organized by section

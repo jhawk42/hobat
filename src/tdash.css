@@ -51,30 +51,105 @@ body {
   max-width: 100%;
 }
 
-h1 {
-  margin: 0 0 10px 0;
-    div.vis-network div.vis-navigation div.vis-button {
-      background: transparent;
-      border: 2px solid #fff;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.45);
-      color: #fff;
-      filter: none;
-      opacity: 1;
-      transition: background 0.15s, border-color 0.15s, color 0.15s;
-    }
-    div.vis-network div.vis-navigation div.vis-button:hover,
-    div.vis-network div.vis-navigation div.vis-button:focus {
-      background: transparent;
-      color: #fff;
-      border-color: #fff;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.55);
-    }
-    div.vis-network div.vis-navigation div.vis-button:active {
-      background: transparent;
-      color: #fff;
-      border-color: var(--accent);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-    }
+.dashboard-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "title"
+    "functions"
+    "workspace"
+    "details"
+    "navigation";
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+}
+
+.layout-panel {
+  min-width: 0;
+}
+
+#panel-title { grid-area: title; }
+#panel-navigation { grid-area: navigation; }
+#panel-functions { grid-area: functions; }
+#panel-workspace { grid-area: workspace; }
+#panel-device-details { grid-area: details; }
+
+#panel-navigation {
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+#panel-functions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#panel-functions > #device-status,
+#panel-functions > #panel-dataset,
+#panel-functions > #panel-node-link-filters {
+  margin-bottom: 0 !important;
+}
+
+#panel-functions #fieldset-devices,
+#panel-functions #fieldset-dataset,
+#panel-functions #fieldset-node-link-filters,
+#panel-functions #fieldset-diag-filters {
+  width: 100%;
+  min-width: 0;
+}
+
+#panel-functions #panel-dataset-inner {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "controls"
+    "actions"
+    "status"
+    "cache";
+}
+
+#panel-functions .dataset-controls,
+#panel-functions .filters-content .controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+}
+
+#panel-functions .control-pair,
+#panel-functions .control-pair-source,
+#panel-functions .control-pair-dataset {
+  grid-template-columns: auto minmax(0, 1fr);
+  width: 100%;
+}
+
+#panel-functions #datasource-filter,
+#panel-functions #dataset-select,
+#panel-functions #node-filter,
+#panel-functions #link-filter,
+#panel-functions #diagnostic-source-filter,
+#panel-functions #diagnostic-filter {
+  width: 100%;
+  min-width: 0;
+}
+
+#panel-functions #search-input {
+  flex: 1 1 140px;
+  width: auto;
+}
+
+#panel-functions #fetch-status {
+  width: 100%;
+}
+
+#panel-functions #fetch-status .status-row {
+  flex-wrap: wrap;
+}
+
+#panel-functions #fetch-cache-age-group {
+  margin-left: 0;
 }
 
 /* ── Home link ────────────────────────────────────────────── */
@@ -510,6 +585,8 @@ label {
 }
 
 .view-options {
+  width: 100%;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 4px 10px;
@@ -745,7 +822,9 @@ button.active {
   height: 30px;
 }
 
+#btn-functions-panel-toggle,
 #btn-details-panel-toggle {
+  min-width: 37px;
   font-weight: 700;
 }
 
@@ -774,11 +853,11 @@ button.active {
 
 /* ── Topology view ────────────────────────────────────────── */
 
-#view-topology {
+.workspace-view {
   display: block;
 }
 
-#view-table {
+.workspace-view[hidden] {
   display: none;
 }
 
@@ -792,47 +871,39 @@ button.active {
 /* Position device details panel on wider screens */
 #panel-view {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
   align-items: start;
   position: relative;
-}
-
-/* Keep the View legend button at the top of column 1 */
-#panel-view > legend {
-  grid-column: 1;
-  grid-row: 1;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin-bottom: 0 !important;
 }
 
 /* Place view controls and containers in column 1 */
 .view-toggle-bar {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 1;
 }
 
 #view-status-line-panel {
   grid-column: 1;
+  grid-row: 2;
+}
+
+#view-topology,
+#view-table {
+  grid-column: 1;
   grid-row: 3;
 }
 
-#view-topology {
+#view-insights,
+#view-settings,
+#view-logs {
   grid-column: 1;
-  grid-row: 4;
-}
-
-#view-table {
-  grid-column: 1;
-  grid-row: 4;
-}
-
-/* Device details spans column 2, all rows */
-#device-details {
-  grid-column: 2;
-  grid-row: 1 / 5;
-  position: sticky;
-  top: 12px;
-  align-self: start;
+  grid-row: 3;
 }
 
 .topology-canvas-wrap {
@@ -1001,12 +1072,73 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   margin-left: auto;
 }
 
-#panel-view.details-panel-collapsed {
-  grid-template-columns: minmax(0, 1fr);
+#panel-device-details.details-panel-collapsed {
+  display: none;
 }
 
-#panel-view.details-panel-collapsed #device-details {
+#panel-device-details.details-panel-collapsed #device-details {
   display: none;
+}
+
+.workspace-navigation-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.workspace-navigation-tabs button {
+  min-width: 0;
+}
+
+.workspace-view-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.workspace-placeholder {
+  min-height: 240px;
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.workspace-placeholder h2,
+.workspace-placeholder h3,
+.workspace-placeholder p {
+  margin-top: 0;
+}
+
+.workspace-log-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-log-list li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: baseline;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-log-list time,
+.workspace-log-list strong {
+  font-size: 12px;
+}
+
+.workspace-log-list code {
+  grid-column: 1 / -1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
 }
 
 /* Complex value tree inside detail lists */
@@ -1396,71 +1528,160 @@ td:last-child {
 
 /* ── Responsive ───────────────────────────────────────────── */
 
-@media (max-width: 1000px) {
-
-  .topology-layout,
-  .table-layout {
-    grid-template-columns: 1fr;
+@media (min-width: 721px) {
+  .dashboard-shell {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+    grid-template-areas:
+      "title title"
+      "functions workspace"
+      "navigation details";
   }
 
-  #panel-view {
-    grid-template-columns: 1fr;
+  .dashboard-shell.functions-panel-collapsed {
+    grid-template-areas:
+      "title title"
+      "workspace workspace"
+      "navigation details";
   }
 
-  .view-toggle-bar,
-  #view-status-line-panel,
+  #panel-functions,
+  #panel-workspace {
+    height: 72vh;
+    min-height: 0;
+  }
+
+  #panel-functions {
+    overflow: auto;
+  }
+
+  #panel-view,
   #view-topology,
   #view-table,
-  #device-details {
-    grid-column: 1;
-    grid-row: auto;
+  .topology-layout,
+  .topology-canvas-wrap {
+    min-height: 0;
   }
 
-  #device-details {
+  #view-topology,
+  .topology-layout,
+  .topology-canvas-wrap {
+    height: 100%;
+  }
+
+  #topology-view {
+    height: 100%;
+    min-height: 0;
+  }
+
+  #view-table {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  #view-table:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+  }
+
+  #view-table .table-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  #view-table .table-wrap {
+    height: 100%;
     max-height: none;
   }
-}
 
-@media (min-width: 841px) and (max-width: 1000px) {
-  #panel-view {
-    grid-template-columns: minmax(0, 1fr) 280px;
-    gap: 10px;
-  }
-
-  #device-details {
-    grid-column: 2;
-    grid-row: 1 / 5;
-    width: 280px;
+  #panel-device-details #device-details {
     max-height: 72vh;
-    position: sticky;
-    top: 12px;
   }
 
-  #topology-view {
-    height: 72vh;
+  #panel-navigation .workspace-navigation-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .node-details-panel {
-    max-height: 72vh;
+  #panel-navigation .workspace-navigation-tabs button {
+    width: 100%;
   }
 }
 
-@media (min-width: 1001px) and (max-width: 1280px) {
-  #panel-view {
-    grid-template-columns: minmax(0, 1fr) 300px;
-    gap: 10px;
+@media (min-width: 1124px) {
+  .dashboard-shell {
+    grid-template-columns:
+      88px
+      minmax(260px, 320px)
+      minmax(420px, 1fr)
+      minmax(300px, 360px);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "title title title title"
+      "navigation functions workspace details";
+    align-items: stretch;
+    height: 100dvh;
+    overflow: hidden;
   }
 
-  #device-details {
-    width: 300px;
+  .dashboard-shell.details-panel-collapsed {
+    grid-template-columns:
+      88px
+      minmax(260px, 320px)
+      minmax(420px, 1fr);
+    grid-template-areas:
+      "title title title"
+      "navigation functions workspace";
   }
 
-  #topology-view {
-    height: 72vh;
+  .dashboard-shell.functions-panel-collapsed {
+    grid-template-columns:
+      88px
+      minmax(420px, 1fr)
+      minmax(300px, 360px);
+    grid-template-areas:
+      "title title title"
+      "navigation workspace details";
   }
 
-  .node-details-panel {
-    max-height: 72vh;
+  .dashboard-shell.functions-panel-collapsed.details-panel-collapsed {
+    grid-template-columns:
+      88px
+      minmax(420px, 1fr);
+    grid-template-areas:
+      "title title"
+      "navigation workspace";
+  }
+
+  #panel-navigation,
+  #panel-functions,
+  #panel-workspace,
+  #panel-device-details {
+    height: 100%;
+    min-height: 0;
+  }
+
+  #panel-navigation,
+  #panel-functions {
+    overflow: auto;
+  }
+
+  #panel-navigation .workspace-navigation-tabs {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+
+  #panel-navigation .workspace-navigation-tabs button {
+    width: 100%;
+    min-height: 40px;
+    padding: 6px 4px;
+    overflow-wrap: anywhere;
+  }
+
+  #panel-device-details #device-details {
+    height: 100%;
+    max-height: none;
   }
 }
 
@@ -1469,49 +1690,61 @@ td:last-child {
     padding: 10px;
   }
 
+  .dashboard-shell {
+    padding-bottom: calc(68px + env(safe-area-inset-bottom));
+  }
+
+  .dashboard-shell.functions-panel-collapsed {
+    grid-template-areas:
+      "title"
+      "workspace"
+      "details"
+      "navigation";
+  }
+
+  #panel-navigation {
+    position: fixed;
+    z-index: 100;
+    right: 10px;
+    bottom: 0;
+    left: 10px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom));
+    box-shadow: 0 -4px 16px rgba(15, 45, 58, 0.18);
+  }
+
+  #panel-navigation .workspace-navigation-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  #panel-navigation .workspace-navigation-tabs button {
+    width: 100%;
+    min-height: 44px;
+    padding: 5px 2px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
   #topology-view {
     height: 64vh;
+    min-height: 360px;
   }
 
-  #panel-dataset-inner {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "controls"
-      "actions"
-      "status"
-      "cache";
+  #panel-view,
+  #panel-device-details #device-details {
+    max-height: none;
   }
+}
 
-  #fetch-status {
-    justify-self: stretch;
-    width: 100%;
-  }
+#panel-device-details #device-details {
+  position: relative;
+  top: auto;
+  width: 100%;
+  max-width: 100%;
+}
 
-  .filters-content .controls {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .dataset-controls {
-    width: 100%;
-  }
-
-  .control-pair,
-  .control-pair-dataset {
-    width: 100%;
-  }
-
-  .control-pair {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  #datasource-filter,
-  #dataset-select,
-  #node-filter,
-  #link-filter,
-  #diagnostic-filter {
-    min-width: 0;
-    width: 100%;
-  }
+.dashboard-shell.functions-panel-collapsed #panel-functions {
+  display: none;
 }
 
 /* ── Dark Mode ─────────────────────────────────────────────── */

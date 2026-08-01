@@ -111,6 +111,19 @@ class FetchCancelledError extends Error {
 
 let _fetchSessionSeq = 0;
 let _activeFetchSession = null;
+let _datasetActivityObserver = null;
+
+export function setDatasetActivityObserver(observer) {
+  _datasetActivityObserver = typeof observer === "function" ? observer : null;
+}
+
+function _emitDatasetActivity(type, metadata = {}) {
+  try {
+    _datasetActivityObserver?.({ timestamp: Date.now(), type, metadata });
+  } catch (err) {
+    console.warn("Dataset activity observer failed:", err);
+  }
+}
 
 function _isAbortError(err) {
   return (
@@ -189,6 +202,9 @@ export async function cancelActiveFetchSession() {
   _activeFetchSession.abortController.abort();
 
   const jobIds = Array.from(_activeFetchSession.activeJobIds);
+  jobIds.forEach((jobId) => {
+    _emitDatasetActivity("job-cancel-requested", { jobId });
+  });
   const cancelRequests = await Promise.allSettled(
     jobIds.map((jobId) => fetch(`/api/job/${jobId}`, { method: "DELETE" })),
   );
@@ -275,6 +291,8 @@ function _extractResponseCacheMetadata(response) {
 // handles HTTP 202 by delegating to pollJobUntilDone.
 async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpointData = null) {
   _assertFetchSessionActive(sessionId);
+  const requestStartedAt = Date.now();
+  _emitDatasetActivity("api-request", { method: "GET", url });
   const signal =
     sessionId != null && _activeFetchSession?.id === sessionId
       ? _activeFetchSession.abortController.signal
@@ -284,6 +302,12 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpoin
   try {
     response = await fetch(url, { headers: requestHeaders, signal });
   } catch (err) {
+    _emitDatasetActivity("api-error", {
+      method: "GET",
+      url,
+      durationMs: Date.now() - requestStartedAt,
+      error: err?.message || String(err),
+    });
     if (_isAbortError(err)) {
       throw new FetchCancelledError(`Fetch cancelled: ${url}`);
     }
@@ -291,8 +315,19 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpoin
   }
 
   _assertFetchSessionActive(sessionId);
+  _emitDatasetActivity("api-response", {
+    method: "GET",
+    url,
+    status: response.status,
+    durationMs: Date.now() - requestStartedAt,
+  });
   if (response.status === 202) {
     const job = await response.json();
+    _emitDatasetActivity("job-status", {
+      jobId: job.job_id,
+      filename: job.filename,
+      status: JOB_POLL_STATUS.RUNNING,
+    });
     _trackJobForSession(sessionId, job.job_id);
     try {
       const { data, responseMaxAge, lastModifiedAt } = await pollJobUntilDone(
@@ -341,6 +376,7 @@ async function pollJobUntilDone(
   let lastCheckpointMs = 0;
   // Wall-clock guard: enforces _CHECKPOINT_REDRAW_INTERVAL_MS between renders.
   let lastCheckpointRenderMs = 0;
+  let lastObservedStatus = JOB_POLL_STATUS.RUNNING;
 
   while (true) {
     _assertFetchSessionActive(sessionId);
@@ -373,6 +409,16 @@ async function pollJobUntilDone(
       );
     }
     const pollBody = await pollResponse.json();
+    if (pollBody.status !== lastObservedStatus) {
+      lastObservedStatus = pollBody.status;
+      _emitDatasetActivity("job-status", {
+        jobId,
+        filename,
+        status: pollBody.status,
+        elapsedSeconds: elapsed,
+        httpStatus: pollResponse.status,
+      });
+    }
 
     // Checkpoint render: fetch and render partial data while the job is in progress.
     if (
@@ -392,6 +438,11 @@ async function pollJobUntilDone(
         }
         if (cpResponse.ok) {
           const cpData = await cpResponse.json();
+          _emitDatasetActivity("api-response", {
+            method: "GET",
+            url: `/api/data/${pollBody.checkpoint_filename}`,
+            status: cpResponse.status,
+          });
           lastCheckpointMs = pollBody.checkpoint_last_modified;
           lastCheckpointRenderMs = Date.now();
           onCheckpointData(cpData);
@@ -432,6 +483,11 @@ async function pollJobUntilDone(
           `/api/data/${filename} returned HTTP ${finalResponse.status} after job done`,
         );
       }
+      _emitDatasetActivity("api-response", {
+        method: "GET",
+        url: `/api/data/${filename}`,
+        status: finalResponse.status,
+      });
       const data = await finalResponse.json();
       const { responseMaxAge, lastModifiedAt } = _extractResponseCacheMetadata(finalResponse);
       return { data, responseMaxAge, lastModifiedAt };

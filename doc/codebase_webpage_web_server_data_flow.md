@@ -495,7 +495,7 @@ When several triggered options describe tiers of the same source/group metric,
 Insights shows only the highest-severity qualifying tier. For example, a 9.3%
 MAC discard ratio renders the high `>= 8%` condition and omits the redundant
 medium `>= 2%` condition. Non-triggered observed tiers remain visible as
-context only while the **Advanced** control is active. With Advanced inactive,
+context only while the **More Info** control is active. With More Info inactive,
 Insights shows only matching conditions.
 
 `DIAGNOSTIC_FILTER_OPTIONS` is the shared source of diagnostic labels, fields,

@@ -20,23 +20,22 @@
 </head>
 
 <body>
-  <div class="page">
+  <div class="page dashboard-shell">
 
-    <!-- Title bar -->
-    <div id="panel-home" class="controls">
-      <a href="" class="home-link" title="tdash home">🏠 tdash </a>
-      <!-- fetch status line  -->
-      <div id="fetch-status-line-panel">
-        <div id="fetch-status-line-content" role="status" aria-live="polite">
-          <div class="fetch-status-placeholder">
-            Select a dataset to load and press Sync.
+    <header id="panel-title" class="layout-panel layout-panel-title">
+      <div id="panel-home" class="controls">
+        <a href="" class="home-link" title="tdash home">🏠 tdash </a>
+        <div id="fetch-status-line-panel">
+          <div id="fetch-status-line-content" role="status" aria-live="polite">
+            <div class="fetch-status-placeholder">
+              Select a dataset to load and press Sync.
+            </div>
           </div>
         </div>
       </div>
-      <button id="btn-panels-toggle-all" class="panels-toggle-all" title="Collapse all panels">
-        <span class="panels-toggle-arrow" aria-hidden="true">▼</span>
-      </button>
-    </div>
+    </header>
+
+    <aside id="panel-functions" class="layout-panel layout-panel-functions" aria-label="Dataset and filters">
 
     <!-- Fetch device status and network health bar -->
     <div id="device-status" class="controls" role="status" aria-live="polite">
@@ -213,96 +212,115 @@
       </div>
     </div>
 
-    <!-- View panel -->
-    <div id="panel-view">
-      <legend><button class="legend-toggle-btn" id="btn-toggle-panel-view" aria-expanded="true"><span
-            class="legend-toggle-arrow">▶</span>View</button></legend>
+    </aside>
 
-      <!-- View toggle -->
-      <div class="view-toggle-bar">
+    <main id="panel-workspace" class="layout-panel layout-panel-workspace">
+      <div id="panel-view">
 
-        <button id="btn-topology" class="active" title="Topology view">
-          Topology
-        </button>
-        <button id="btn-table" title="Table view">
-          Table
-        </button>
+        <div class="view-toggle-bar">
+          <button id="btn-functions-panel-toggle" title="Collapse functions panel" aria-label="Collapse functions panel"
+            aria-controls="panel-functions" aria-expanded="true">
+            ◀
+          </button>
+          <span class="toggle-bar-separator" aria-hidden="true"></span>
+          <button id="btn-details-panel-toggle" title="Collapse details panel" aria-label="Collapse details panel"
+            aria-expanded="true">
+            ▶
+          </button>
+        </div>
 
-        <fieldset class="view-options">
-          <legend></legend>
-          <label title="Automatically switch to the view specified by the dataset">
-            <input type="checkbox" id="chk-auto-view" checked />Switch
-          </label>
-        </fieldset>
+        <div id="view-status-line-panel" class="status-bar">
+          <div id="view-status-line-content" role="status" aria-live="polite">Select a dataset to load.</div>
+        </div>
 
-        <span class="toggle-bar-separator" aria-hidden="true"></span>
-        <button id="btn-more-info" title="Show all columns in table view">
-          Advanced
-        </button>
-        <button id="btn-details-panel-toggle" title="Collapse details panel" aria-label="Collapse details panel"
-          aria-expanded="true">
-          ▼
-        </button>
-      </div>
-
-      <!-- Status line -->
-      <div id="view-status-line-panel" class="status-bar">
-        <div id="view-status-line-content" role="status" aria-live="polite">Select a dataset to load.</div>
-      </div>
-
-      <!-- Topology view -->
-      <div id="view-topology">
-        <div class="topology-layout">
-          <div class="topology-canvas-wrap">
-            <div id="topology-view"></div>
-            <div id="legend-toggle" class="legend-toggle">
-              <button id="btn-legend-toggle" title="Toggle link quality legend" aria-expanded="false">
-                Legend
-              </button>
-              <select id="physics-profile-select" title="Physics profile selector" aria-label="Physics profile">
-                <option value="auto">auto</option>
-                <option value="mesh-compact">mesh compact</option>
-                <option value="mesh-ring">mesh ring</option>
-                <option value="mesh-tree-vertical">tree vert</option>
-                <option value="mesh-tree-horizontal">tree horiz</option>
-                <option value="mesh-balanced">hub spoke</option>
-              </select>
-              <button id="btn-physics" title="Toggle physics simulation" aria-label="Pause physics simulation">
-                ⏸
-              </button>
-            </div>
-            <div id="lq-legend" class="lq-legend hidden">
-              <span class="lq-legend-title">Link Quality</span>
-              <span class="lq-legend-item lq-high">
-                <span class="lq-legend-line lq-legend-line-high" aria-hidden="true"></span>
-                <span>High (LQ3)</span>
-              </span>
-              <span class="lq-legend-item lq-medium">
-                <span class="lq-legend-line lq-legend-line-medium" aria-hidden="true"></span>
-                <span>Medium (LQ2)</span>
-              </span>
-              <span class="lq-legend-item lq-low">
-                <span class="lq-legend-line lq-legend-line-low" aria-hidden="true"></span>
-                <span>Low (LQ1)</span>
-              </span>
+        <div id="view-topology" class="workspace-view" role="tabpanel" aria-labelledby="btn-topology">
+          <div class="topology-layout">
+            <div class="topology-canvas-wrap">
+              <div id="topology-view"></div>
+              <div id="legend-toggle" class="legend-toggle">
+                <button id="btn-legend-toggle" title="Toggle link quality legend" aria-expanded="false">
+                  Legend
+                </button>
+                <select id="physics-profile-select" title="Physics profile selector" aria-label="Physics profile">
+                  <option value="auto">auto</option>
+                  <option value="mesh-compact">mesh compact</option>
+                  <option value="mesh-ring">mesh ring</option>
+                  <option value="mesh-tree-vertical">tree vert</option>
+                  <option value="mesh-tree-horizontal">tree horiz</option>
+                  <option value="mesh-balanced">hub spoke</option>
+                </select>
+                <button id="btn-physics" title="Toggle physics simulation" aria-label="Pause physics simulation">
+                  ⏸
+                </button>
+              </div>
+              <div id="lq-legend" class="lq-legend hidden">
+                <span class="lq-legend-title">Link Quality</span>
+                <span class="lq-legend-item lq-high">
+                  <span class="lq-legend-line lq-legend-line-high" aria-hidden="true"></span>
+                  <span>High (LQ3)</span>
+                </span>
+                <span class="lq-legend-item lq-medium">
+                  <span class="lq-legend-line lq-legend-line-medium" aria-hidden="true"></span>
+                  <span>Medium (LQ2)</span>
+                </span>
+                <span class="lq-legend-item lq-low">
+                  <span class="lq-legend-line lq-legend-line-low" aria-hidden="true"></span>
+                  <span>Low (LQ1)</span>
+                </span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Table view -->
-      <div id="view-table">
-        <div class="table-layout">
-          <div class="table-wrap">
-            <table id="data-table" class="sortable">
-              <thead></thead>
-              <tbody></tbody>
-            </table>
+        <div id="view-table" class="workspace-view" role="tabpanel" aria-labelledby="btn-table" hidden>
+          <div class="workspace-view-toolbar">
+            <button id="btn-more-info" title="Show all columns in table view">More Info</button>
+          </div>
+          <div class="table-layout">
+            <div class="table-wrap">
+              <table id="data-table" class="sortable">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-insights" class="workspace-view workspace-placeholder" role="tabpanel"
+          aria-labelledby="btn-insights" hidden>
+          <h2>Network Insights</h2>
+          <p>Network insights are not available yet.</p>
+        </div>
+
+        <div id="view-settings" class="workspace-view workspace-placeholder" role="tabpanel"
+          aria-labelledby="btn-settings" hidden>
+          <h2>Application Settings</h2>
+          <section id="overview-settings-section" aria-labelledby="overview-settings-heading">
+            <h3 id="overview-settings-heading">Overview Settings</h3>
+            <fieldset class="view-options">
+              <legend>Navigation</legend>
+              <label title="Automatically switch to the view specified by the dataset">
+                <input type="checkbox" id="chk-auto-view" checked />Switch to dataset default view after Sync
+              </label>
+            </fieldset>
+          </section>
+          <section aria-labelledby="system-settings-heading">
+            <h3 id="system-settings-heading">System Settings</h3>
+            <p>System settings are not available yet.</p>
+          </section>
+        </div>
+
+        <div id="view-logs" class="workspace-view workspace-placeholder" role="tabpanel"
+          aria-labelledby="btn-logs" hidden>
+          <h2>Logs</h2>
+          <div id="workspace-log-content" role="status" aria-live="polite">
+            <p>No browser activity logged yet.</p>
           </div>
         </div>
       </div>
+    </main>
 
-      <!-- Device Details Panel (shared by topology and table views) -->
+    <aside id="panel-device-details" class="layout-panel layout-panel-details" aria-label="Device details">
       <div id="device-details" class="node-details-panel">
         <h2>Device details:</h2>
         <ul id="summary-list" class="node-details-list">
@@ -373,7 +391,22 @@
             </div>
         </div>
       </div>
-    </div>
+    </aside>
+
+    <nav id="panel-navigation" class="layout-panel layout-panel-navigation" aria-label="Workspace views">
+      <div class="workspace-navigation-tabs" role="tablist" aria-label="Workspace views">
+        <button id="btn-topology" class="active" type="button" role="tab" aria-selected="true"
+          aria-controls="view-topology" title="Topology view">Topology</button>
+        <button id="btn-table" type="button" role="tab" aria-selected="false" aria-controls="view-table"
+          tabindex="-1" title="Table view">Table</button>
+        <button id="btn-insights" type="button" role="tab" aria-selected="false" aria-controls="view-insights"
+          tabindex="-1" title="Network insights view">Insights</button>
+        <button id="btn-settings" type="button" role="tab" aria-selected="false" aria-controls="view-settings"
+          tabindex="-1" title="Application settings view">Settings</button>
+        <button id="btn-logs" type="button" role="tab" aria-selected="false" aria-controls="view-logs"
+          tabindex="-1" title="Browser activity logs view">Logs</button>
+      </div>
+    </nav>
   </div>
 
   <script type="module" src="js/tdash-ui.js"></script>

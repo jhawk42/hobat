@@ -17,6 +17,7 @@ import {
   endFetchSession,
   cancelActiveFetchSession,
   isFetchCancelledError,
+  setDatasetActivityObserver,
 } from "./tdash-dataset.js";
 import {
   renderTopologyForDataset,
@@ -146,6 +147,64 @@ let _enhanceEnabled = true;
 let _lastFetchStartedAt = null;
 let _currentSearchQuery = "";
 let _fetchInProgress = false;
+const WORKSPACE_ACTIVITY_LIMIT = 100;
+const workspaceActivity = [];
+
+function renderWorkspaceLogs() {
+  const contentEl = document.getElementById("workspace-log-content");
+  if (!contentEl) return;
+  contentEl.replaceChildren();
+
+  if (workspaceActivity.length === 0) {
+    const emptyEl = document.createElement("p");
+    emptyEl.textContent = "No browser activity logged yet.";
+    contentEl.appendChild(emptyEl);
+    return;
+  }
+
+  const listEl = document.createElement("ol");
+  listEl.className = "workspace-log-list";
+  [...workspaceActivity].reverse().forEach(({ timestamp, type, message, metadata }) => {
+    const itemEl = document.createElement("li");
+    const timeEl = document.createElement("time");
+    const date = new Date(timestamp);
+    timeEl.dateTime = date.toISOString();
+    timeEl.textContent = date.toLocaleTimeString();
+
+    const typeEl = document.createElement("strong");
+    typeEl.textContent = type;
+    const messageEl = document.createElement("span");
+    messageEl.textContent = message;
+    itemEl.append(timeEl, typeEl, messageEl);
+
+    if (metadata && Object.keys(metadata).length > 0) {
+      const metadataEl = document.createElement("code");
+      metadataEl.textContent = JSON.stringify(metadata);
+      itemEl.appendChild(metadataEl);
+    }
+    listEl.appendChild(itemEl);
+  });
+  contentEl.appendChild(listEl);
+}
+
+function recordWorkspaceActivity(type, message, metadata = {}) {
+  workspaceActivity.push({ timestamp: Date.now(), type, message, metadata });
+  if (workspaceActivity.length > WORKSPACE_ACTIVITY_LIMIT) {
+    workspaceActivity.splice(0, workspaceActivity.length - WORKSPACE_ACTIVITY_LIMIT);
+  }
+  if (currentView === "logs") renderWorkspaceLogs();
+}
+
+setDatasetActivityObserver(({ type, metadata }) => {
+  const messages = {
+    "api-request": "API request started",
+    "api-response": "API response received",
+    "api-error": "API request failed",
+    "job-status": "Asynchronous job status changed",
+    "job-cancel-requested": "Asynchronous job cancellation requested",
+  };
+  recordWorkspaceActivity(type, messages[type] || "Dataset activity", metadata);
+});
 
 export function getSearchQuery() {
   return _currentSearchQuery;
@@ -205,9 +264,13 @@ function refreshDiagnosticFilterForCurrentSource() {
   }
 }
 
-function renderCurrentView() {
+const lastRenderedDatasetByView = new Map();
+
+function renderCurrentView({ force = false } = {}) {
   if (!currentDataset) return;
   const view = currentView;
+  if (view !== "topology" && view !== "table") return;
+  if (!force && lastRenderedDatasetByView.get(view) === currentDataset) return;
 
   const effectiveDataset = _enhanceEnabled
     ? {
@@ -229,7 +292,7 @@ function renderCurrentView() {
     );
     const counts = getTopologyDatasetCounts();
     if (counts) updateDeviceStatusBar(counts);
-  } else {
+  } else if (view === "table") {
     renderTableForDataset(effectiveDataset);
     updateDeviceStatusBar(computeRowCounts(currentDataset.rows));
   }
@@ -249,6 +312,8 @@ function renderCurrentView() {
   if (_currentSearchQuery) {
     applySearch();
   }
+
+  lastRenderedDatasetByView.set(view, currentDataset);
 }
 
 function getPhysicsProfileSelect() {
@@ -337,59 +402,147 @@ function initPhysicsProfileSelector() {
   select.addEventListener("change", () => {
     setPhysicsProfile(select.value);
     if (currentDataset && currentView === "topology") {
-      renderCurrentView();
+      renderCurrentView({ force: true });
     }
   });
 }
 
 // ── Section 7: View Toggle ────────────────────────────────────────────────────
 
+let topologyResizeObserver = null;
+let topologyResizeFrame = null;
+
+function fitTopologyToContainer() {
+  const network = getVisNetwork();
+  const container = document.getElementById("topology-view");
+  if (!network || !container || container.clientWidth === 0 || container.clientHeight === 0) return;
+  network.setSize(`${container.clientWidth}px`, `${container.clientHeight}px`);
+  network.redraw();
+  network.fit({ animation: { duration: 220, easingFunction: "easeInOutQuad" } });
+}
+
+function resizeAndFitTopology() {
+  const container = document.getElementById("topology-view");
+  if (container && !topologyResizeObserver && typeof ResizeObserver === "function") {
+    topologyResizeObserver = new ResizeObserver(() => {
+      if (topologyResizeFrame !== null) cancelAnimationFrame(topologyResizeFrame);
+      topologyResizeFrame = requestAnimationFrame(() => {
+        topologyResizeFrame = null;
+        fitTopologyToContainer();
+      });
+    });
+    topologyResizeObserver.observe(container);
+  }
+  requestAnimationFrame(fitTopologyToContainer);
+}
+
+function handleDetailsPanelVisibilityChanged(isCollapsed) {
+  document.querySelector(".dashboard-shell")?.classList.toggle(
+    "details-panel-collapsed",
+    isCollapsed,
+  );
+  resizeAndFitTopology();
+}
+
+function setFunctionsPanelCollapsed(isCollapsed) {
+  const shell = document.querySelector(".dashboard-shell");
+  const toggleButton = document.getElementById("btn-functions-panel-toggle");
+  shell?.classList.toggle("functions-panel-collapsed", isCollapsed);
+  if (toggleButton) {
+    const action = isCollapsed ? "Expand" : "Collapse";
+    toggleButton.title = `${action} functions panel`;
+    toggleButton.setAttribute("aria-label", `${action} functions panel`);
+    toggleButton.setAttribute("aria-expanded", String(!isCollapsed));
+    toggleButton.textContent = isCollapsed ? "▶" : "◀";
+  }
+  resizeAndFitTopology();
+}
+
+document.getElementById("btn-functions-panel-toggle")?.addEventListener("click", () => {
+  const shell = document.querySelector(".dashboard-shell");
+  setFunctionsPanelCollapsed(!shell?.classList.contains("functions-panel-collapsed"));
+});
+
+const WORKSPACE_VIEWS = Object.freeze([
+  {
+    view: "topology",
+    buttonId: "btn-topology",
+    panelId: "view-topology",
+    rendersDataset: true,
+    onActivate: resizeAndFitTopology,
+  },
+  { view: "table", buttonId: "btn-table", panelId: "view-table", rendersDataset: true },
+  { view: "insights", buttonId: "btn-insights", panelId: "view-insights" },
+  { view: "settings", buttonId: "btn-settings", panelId: "view-settings" },
+  {
+    view: "logs",
+    buttonId: "btn-logs",
+    panelId: "view-logs",
+    onActivate: renderWorkspaceLogs,
+  },
+]);
+
 function switchView(newView) {
+  const nextView = WORKSPACE_VIEWS.find(({ view }) => view === newView);
+  if (!nextView) return;
   if (newView === currentView) return;
   currentView = newView;
 
-  const topoPanel = document.getElementById("view-topology");
-  const tablePanel = document.getElementById("view-table");
-  const btnTopology = document.getElementById("btn-topology");
-  const btnTable = document.getElementById("btn-table");
-  const btnPhysics = document.getElementById("btn-physics");
-  const btnAutoZoom = document.getElementById("btn-auto-zoom");
+  WORKSPACE_VIEWS.forEach(({ view, buttonId, panelId }) => {
+    const isActive = view === newView;
+    const buttonEl = document.getElementById(buttonId);
+    const panelEl = document.getElementById(panelId);
+
+    if (panelEl) panelEl.hidden = !isActive;
+    if (buttonEl) {
+      buttonEl.classList.toggle("active", isActive);
+      buttonEl.setAttribute("aria-selected", String(isActive));
+      buttonEl.tabIndex = isActive ? 0 : -1;
+    }
+  });
+
   const linkFilterEl = document.getElementById("link-filter");
+  linkFilterEl.classList.toggle("filter-disabled", newView !== "topology");
 
   if (newView === "topology") {
-    topoPanel.style.display = "block";
-    tablePanel.style.display = "none";
-    btnTopology.classList.add("active");
-    btnTable.classList.remove("active");
-    btnPhysics.style.display = "inline-block";
-    if (btnAutoZoom) btnAutoZoom.style.display = "inline-block";
-    linkFilterEl.classList.remove("filter-disabled");
     resetNodeDetailsLists();
-  } else {
-    topoPanel.style.display = "none";
-    tablePanel.style.display = "block";
-    btnTable.classList.add("active");
-    btnTopology.classList.remove("active");
-    btnPhysics.style.display = "none";
-    if (btnAutoZoom) btnAutoZoom.style.display = "none";
-    linkFilterEl.classList.add("filter-disabled");
+  } else if (newView === "table") {
     document.getElementById("details-list").innerHTML = "";
     const summaryListEl = document.getElementById("summary-list");
     if (summaryListEl)
       summaryListEl.innerHTML = "<li>Click a node or row to view its properties.</li>";
   }
 
-  if (currentDataset) {
+  if (currentDataset && nextView.rendersDataset) {
     renderCurrentView();
   }
+  nextView.onActivate?.();
 }
 
-document
-  .getElementById("btn-topology")
-  .addEventListener("click", () => switchView("topology"));
-document
-  .getElementById("btn-table")
-  .addEventListener("click", () => switchView("table"));
+WORKSPACE_VIEWS.forEach(({ view, buttonId }, index) => {
+  const buttonEl = document.getElementById(buttonId);
+  buttonEl?.addEventListener("click", () => switchView(view));
+  buttonEl?.addEventListener("keydown", (event) => {
+    const navigationKeys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!navigationKeys.includes(event.key)) return;
+
+    event.preventDefault();
+    let nextIndex = index;
+    if (event.key === "ArrowLeft") {
+      nextIndex = (index - 1 + WORKSPACE_VIEWS.length) % WORKSPACE_VIEWS.length;
+    } else if (event.key === "ArrowRight") {
+      nextIndex = (index + 1) % WORKSPACE_VIEWS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = WORKSPACE_VIEWS.length - 1;
+    }
+
+    const nextView = WORKSPACE_VIEWS[nextIndex];
+    document.getElementById(nextView.buttonId)?.focus();
+    switchView(nextView.view);
+  });
+});
 
 // ── Physics toggle ────────────────────────────────────────────────────────────
 
@@ -624,7 +777,7 @@ async function saveSelectedDeviceLabel() {
 
     const savedLabel = toText(payload.deviceLabel).trim() || deviceLabel;
     setStaticDeviceLabel(extAddress, savedLabel);
-    renderCurrentView();
+    renderCurrentView({ force: true });
     displaySelectedDevice(selectedRecord, savedLabel);
     setDeviceSettingsStatus(response.status === 201 ? "Device label added." : "Device label saved.");
   } catch (error) {
@@ -919,16 +1072,6 @@ document
     document.getElementById("diagnostic-filter").value = "all";
     setPhysicsProfile(PHYSICS_PROFILE_AUTO);
 
-    // Switch view based on the dataset's defaultView field if auto-view is enabled
-    const autoViewEnabled = document.getElementById("chk-auto-view").checked;
-    if (autoViewEnabled) {
-      const selectedValue = event.target.value;
-      const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
-      if (selectedDataset && selectedDataset.defaultView) {
-        switchView(selectedDataset.defaultView);
-      }
-    }
-
     // Update estimated fetch time immediately on dataset selection
     const selectedValue = event.target.value;
     const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
@@ -1024,11 +1167,10 @@ bindDeviceDetailsSectionFields();
 initDeviceSettings();
 initDeviceInsights();
 initDeviceDetailsPanelTabs();
-initDetailPanelToggles(document.getElementById("device-details"), () => {
-  requestAnimationFrame(() => {
-    getVisNetwork()?.fit({ animation: { duration: 220, easingFunction: "easeInOutQuad" } });
-  });
-});
+initDetailPanelToggles(
+  document.getElementById("device-details"),
+  handleDetailsPanelVisibilityChanged,
+);
 
 // Cache checkbox helper: make checkboxes mutually exclusive
 function updateCacheCheckboxes(changedCheckbox) {
@@ -1174,7 +1316,7 @@ function resetFetchTimeTakenProgressToDefault() {
 }
 
 // Fetch dataset function
-async function doFetchDataset() {
+async function doFetchDataset({ userInitiated = false } = {}) {
   if (_fetchInProgress) return;
 
   _fetchInProgress = true;
@@ -1189,6 +1331,10 @@ async function doFetchDataset() {
   }
 
   const sessionId = startFetchSession();
+  recordWorkspaceActivity("dataset-sync", "Dataset sync started", {
+    dataset: selectedValue,
+    userInitiated,
+  });
   // Debounce handle: coalesces rapid-fire onFileReady calls (e.g. cached files all resolving in
   // one tick) into a single incremental render. setTimeout(0) lets all microtask .then() callbacks
   // settle before the render fires.
@@ -1218,9 +1364,9 @@ async function doFetchDataset() {
 
   // Apply defaultView from registry if auto-view is enabled
   const autoViewEnabled = document.getElementById("chk-auto-view").checked;
-  if (autoViewEnabled) {
+  if (autoViewEnabled && userInitiated) {
     const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
-    if (selectedDataset && selectedDataset.defaultView) {
+    if (["topology", "table"].includes(selectedDataset?.defaultView)) {
       switchView(selectedDataset.defaultView);
     }
   }
@@ -1233,6 +1379,9 @@ async function doFetchDataset() {
   } catch (err) {
     if (_incrementalRenderTimer !== null) { clearTimeout(_incrementalRenderTimer); _incrementalRenderTimer = null; }
     if (isFetchCancelledError(err)) {
+      recordWorkspaceActivity("dataset-sync", "Dataset sync cancelled", {
+        dataset: selectedValue,
+      });
       resetFetchTimeTakenProgressToDefault();
 
       const statusEl = document.getElementById("fetch-status-line-content");
@@ -1261,6 +1410,10 @@ async function doFetchDataset() {
         }
       }
     } else {
+      recordWorkspaceActivity("dataset-sync", "Dataset sync failed", {
+        dataset: selectedValue,
+        error: err?.message || String(err),
+      });
       console.error("loadDataset threw:", err);
       _setStatusSpans(_FETCH_STATUS_IDS, "—");
       _setStatusSpans(_DEVICE_STATUS_IDS, "—");
@@ -1277,6 +1430,9 @@ async function doFetchDataset() {
     if (_incrementalRenderTimer !== null) { clearTimeout(_incrementalRenderTimer); _incrementalRenderTimer = null; }
     _setStatusSpans(_FETCH_STATUS_IDS, "—");
     _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+    recordWorkspaceActivity("dataset-sync", "Dataset sync produced no usable data", {
+      dataset: selectedValue,
+    });
     return;
   }
 
@@ -1309,10 +1465,18 @@ async function doFetchDataset() {
       ? `⚠ ${failedCount} file(s) unavailable — showing partial data`
       : "";
   }
+  recordWorkspaceActivity("dataset-sync", "Dataset sync completed", {
+    dataset: selectedValue,
+    durationMs: currentDataset.fetchDurationMs,
+    loadedFiles: currentDataset.loadedFiles?.length ?? 0,
+    totalFiles: currentDataset.entry?.files?.length ?? 0,
+  });
 }
 
 // Fetch button drives data acquisition.
-document.getElementById("btn-fetch").addEventListener("click", doFetchDataset);
+document.getElementById("btn-fetch").addEventListener("click", () => {
+  void doFetchDataset({ userInitiated: true });
+});
 
 document.getElementById("btn-fetch-cancel")?.addEventListener("click", async () => {
   if (!_fetchInProgress) return;
@@ -1399,12 +1563,11 @@ document.getElementById("chk-only-cache").addEventListener("change", (e) => {
 // ── Collapsible cache-options fieldsets and containers ─────────────────────────────────────
 
 const COLLAPSE_CONTAINER_BY_BUTTON_ID = {
-  "btn-toggle-panel-view": "panel-view",
   "btn-toggle-panel-dataset": "panel-dataset",
   "btn-toggle-filters": "panel-node-link-filters",
 };
 
-["btn-toggle-cache", "btn-toggle-status", "btn-toggle-devices", "btn-toggle-panel-view", "btn-toggle-panel-dataset", "btn-toggle-filters", "btn-toggle-node-link-filters", "btn-toggle-diag-filters"].forEach((id) => {
+["btn-toggle-cache", "btn-toggle-status", "btn-toggle-devices", "btn-toggle-panel-dataset", "btn-toggle-filters", "btn-toggle-node-link-filters", "btn-toggle-diag-filters"].forEach((id) => {
   document.getElementById(id)?.addEventListener("click", () => {
     const btn = document.getElementById(id);
     const explicitContainerId = COLLAPSE_CONTAINER_BY_BUTTON_ID[id];
@@ -1470,28 +1633,3 @@ document.getElementById("btn-fetch-toggle-status-chk-cache")?.addEventListener("
 // ── Collapsible Filters Panel ────────────────────────────────────────────────
 // (Handled by unified collapse logic above)
 
-// ── Collapse All / Expand All panels (home bar) ───────────────────────────────
-{
-  const MAIN_PANELS = [
-    { panelId: "panel-dataset",          btnId: "btn-toggle-panel-dataset" },
-    { panelId: "panel-node-link-filters", btnId: "btn-toggle-filters" },
-    { panelId: "panel-view",             btnId: "btn-toggle-panel-view" },
-  ];
-
-  const allBtn   = document.getElementById("btn-panels-toggle-all");
-  const allArrow = allBtn?.querySelector(".panels-toggle-arrow");
-  let isAllCollapsed = false;
-
-  allBtn?.addEventListener("click", () => {
-    isAllCollapsed = !isAllCollapsed;
-    allArrow.textContent = isAllCollapsed ? "▶" : "▼";
-    allBtn.title = isAllCollapsed ? "Expand all panels" : "Collapse all panels";
-
-    MAIN_PANELS.forEach(({ panelId, btnId }) => {
-      const panel = document.getElementById(panelId);
-      const btn   = document.getElementById(btnId);
-      if (panel) panel.classList.toggle("collapsed", isAllCollapsed);
-      if (btn)   btn.setAttribute("aria-expanded", String(!isAllCollapsed));
-    });
-  });
-}

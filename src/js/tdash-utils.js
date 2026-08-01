@@ -680,7 +680,7 @@ function _appendGrouped(entries, listEl) {
 // for the given panel element. Call once after the DOM is ready.
 export function initDetailPanelToggles(panelEl, onPanelVisibilityChanged) {
   const headings = Array.from(panelEl.querySelectorAll("h2"));
-  const panelViewEl = panelEl.closest("#panel-view");
+  const panelDetailsEl = panelEl.closest("#panel-device-details");
   const panelToggleBtn = document.getElementById("btn-details-panel-toggle");
   let isAllCollapsed = false;
   let isPanelCollapsed = false;
@@ -691,13 +691,13 @@ export function initDetailPanelToggles(panelEl, onPanelVisibilityChanged) {
     btn.title = `${action} details panel`;
     btn.setAttribute("aria-label", `${action} details panel`);
     btn.setAttribute("aria-expanded", String(!collapsed));
-    btn.textContent = collapsed ? "▶" : "▼";
+    btn.textContent = collapsed ? "◀" : "▶";
   };
 
   syncPanelToggleButton(panelToggleBtn, false);
   panelToggleBtn?.addEventListener("click", () => {
     isPanelCollapsed = !isPanelCollapsed;
-    panelViewEl?.classList.toggle("details-panel-collapsed", isPanelCollapsed);
+    panelDetailsEl?.classList.toggle("details-panel-collapsed", isPanelCollapsed);
     panelEl.classList.toggle("details-panel-collapsed", isPanelCollapsed);
     syncPanelToggleButton(panelToggleBtn, isPanelCollapsed);
     onPanelVisibilityChanged?.(isPanelCollapsed);

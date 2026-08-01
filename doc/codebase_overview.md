@@ -504,7 +504,7 @@ The full set of pre-configured datasets is listed below, grouped by category:
 | **Topology** | Interactive [vis-network](https://visjs.github.io/vis-network/docs/network/) graph of the mesh.  Click any node to see all its properties in the side panel. |
 | **Table** | Flat [sortable](https://github.com/tofsjonas/sortable) table of all rows in the loaded dataset.  Click any column header to sort. |
 | **Legend** | Toggles the link-quality colour/style legend panel.  Starts active (legend visible).  Topology view only. |
-| **Advanced** | Toggles expanded column display in Table view — shows all discovered columns rather than the priority subset.  Table view only. |
+| **More Info** | Toggles expanded column display in Table view — shows all discovered columns rather than the priority subset.  Table view only. |
 | **Auto Modem** | Auto or manual pick physicsProfile.  Topology view only. |
 | **Physics** | Toggles the vis-network physics simulation on/off (spring-force layout vs. fixed positions).  Topology view only. |
 
