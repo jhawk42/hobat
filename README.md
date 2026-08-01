@@ -32,6 +32,8 @@ Operators can correlate OTBR CLI, OTBR REST, mDNS, and Eve layout data to unders
 Link quality, MAC counters, MLE counters, and neighbor/child context help isolate unstable nodes before they degrade the network.
 3. Cache-first operating model.
 Most analysis runs on local snapshots, reducing Thread traffic and helping protect battery-powered sleepy devices.
+4. Streaming Results and Progressive Rendering.
+Collection writes incremental checkpoint files as data is gathered. The web dashboard displays results progressively, allowing users to see data as it arrives rather than waiting for the full collection to complete.
 
 **Medium capabilities**
 1. Powerful search and filtering across node identity and health fields.
