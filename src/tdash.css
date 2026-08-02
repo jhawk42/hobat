@@ -136,7 +136,7 @@ body {
 }
 
 #panel-functions #search-input {
-  flex: 1 1 140px;
+  flex: 1 1 135px;
   width: auto;
 }
 
@@ -987,7 +987,7 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   margin: 0 0 8px 0;
   font-size: 14px;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: Capitalize;
   letter-spacing: 0.04em;
   color: var(--muted);
 }
@@ -1028,7 +1028,7 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   padding: 0;
   font: inherit;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: Capitalize;
   letter-spacing: 0.04em;
   color: var(--muted);
   cursor: pointer;
@@ -1194,7 +1194,7 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   margin: 0 0 6px;
   font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: Capitalize;
   letter-spacing: 0.04em;
   color: var(--muted);
 }

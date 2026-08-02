@@ -1364,7 +1364,7 @@ async function doFetchDataset({ userInitiated = false } = {}) {
 
   // Apply defaultView from registry if auto-view is enabled
   const autoViewEnabled = document.getElementById("chk-auto-view").checked;
-  if (autoViewEnabled && userInitiated) {
+  if (autoViewEnabled) {
     const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
     if (["topology", "table"].includes(selectedDataset?.defaultView)) {
       switchView(selectedDataset.defaultView);
