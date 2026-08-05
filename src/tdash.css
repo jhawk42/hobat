@@ -893,6 +893,10 @@ button.active {
   grid-row: 2;
 }
 
+#view-status-line-content {
+  font-size: 14px;
+}
+
 #view-topology,
 #view-table {
   grid-column: 1;
