@@ -628,37 +628,45 @@ def dispatch(
                 (
                     "otbr_cli_thread_network_info.main",
                     otbr_cli_thread_network_info.main,
+                    None,
                 ),
                 (
                     "otbr_cli_router_table.main",
                     otbr_cli_router_table.main,
+                    None,
                 ),
                 (
                     "otbr_cli_meshdiag_topology.main",
                     otbr_cli_meshdiag_topology.main,
-                ),
-                (
-                    "otbr_cli_networkdiag_topology.main_multicast_network",
-                    otbr_cli_networkdiag_topology.main_multicast_network,
+                    None,
                 ),
                 (
                     "otbr_cli_networkdiag_topology.main",
                     otbr_cli_networkdiag_topology.main,
+                    ["multicast-network"],
+                ),
+                (
+                    "otbr_cli_networkdiag_topology.main",
+                    otbr_cli_networkdiag_topology.main,
+                    ["fetch-all"],
                 ),
                 (
                     "otbr_cli_meshdiag_routerneighbortable.main",
                     otbr_cli_meshdiag_routerneighbortable.main,
+                    None,
                 ),
                 (
                     "otbr_cli_meshdiag_childtable.main",
                     otbr_cli_meshdiag_childtable.main,
+                    None,
                 ),
             ]
 
             first_nonzero_rc = 0
-            for module_name, step_main in step_calls:
+            for module_name, step_main, step_argv in step_calls:
                 try:
-                    raw_rc = step_main(_forward_with_datadir(extra_args))
+                    forwarded_argv = list(step_argv) if step_argv is not None else list(extra_args)
+                    raw_rc = step_main(_forward_with_datadir(forwarded_argv))
                 except Exception:
                     logging.exception("topology step raised an exception: %s", module_name)
                     raw_rc = 1
@@ -706,38 +714,24 @@ def dispatch(
                 if not _print_child_subparser_help(sub_parsers["otbr-cli"], "networkdiag"):
                     sub_parsers["otbr-cli"].print_help()
                 return 0
+            networkdiag_argv = [args.networkdiag_command]
             if args.networkdiag_command == "fetch-all":
-                expand_children_argv = []
                 if not getattr(args, "expand_children", True):
-                    expand_children_argv.append("-cno")
+                    networkdiag_argv.append("-cno")
                 if getattr(args, "child_fetch_fast_mode_default", True):
-                    expand_children_argv.append("--children-fetch-fast")
+                    networkdiag_argv.append("--children-fetch-fast")
                 else:
-                    expand_children_argv.append("--children-fetch-fast-no")
+                    networkdiag_argv.append("--children-fetch-fast-no")
                 if getattr(args, "child_fetch_detail_mode_default", False):
-                    expand_children_argv.append("--children-fetch-detail")
+                    networkdiag_argv.append("--children-fetch-detail")
                 else:
-                    expand_children_argv.append("--children-fetch-detail-no")
-                return _normalize_module_rc(
-                    otbr_cli_networkdiag_topology.main(
-                        _forward_with_datadir(expand_children_argv)
-                    ),
-                    "otbr_cli_networkdiag_topology.main",
-                )
-            if args.networkdiag_command == "multicast-network":
-                return _normalize_module_rc(
-                    otbr_cli_networkdiag_topology.main_multicast_network(
-                        _forward_with_datadir([])
-                    ),
-                    "otbr_cli_networkdiag_topology.main_multicast_network",
-                )
-            if args.networkdiag_command == "multicast-neighbors":
-                return _normalize_module_rc(
-                    otbr_cli_networkdiag_topology.main_multicast_neighbors(
-                        _forward_with_datadir([])
-                    ),
-                    "otbr_cli_networkdiag_topology.main_multicast_neighbors",
-                )
+                    networkdiag_argv.append("--children-fetch-detail-no")
+            return _normalize_module_rc(
+                otbr_cli_networkdiag_topology.main(
+                    _forward_with_datadir(networkdiag_argv)
+                ),
+                "otbr_cli_networkdiag_topology.main",
+            )
 
 
     # --- mdns ---

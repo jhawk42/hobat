@@ -11,6 +11,7 @@ from unittest.mock import call, patch
 
 import td_cli
 import td_webserver
+import otbr_cli_networkdiag_topology
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +257,14 @@ class TestDispatchOtbrCli(unittest.TestCase):
             rc = self._dispatch(
                 ["otbr-cli", "networkdiag", "fetch-all", "--children-no"]
             )
-        # CLI now expands with explicit fetch mode flags
-        m.assert_called_once_with(["-cno", "--children-fetch-fast", "--children-fetch-detail-no"])
+        m.assert_called_once_with(
+            [
+                "fetch-all",
+                "-cno",
+                "--children-fetch-fast",
+                "--children-fetch-detail-no",
+            ]
+        )
         self.assertEqual(rc, 0)
 
     def test_router_table_none_return_keeps_compat_success(self):
@@ -288,12 +295,10 @@ class TestDispatchOtbrCli(unittest.TestCase):
         ) as m_router_table, patch.object(
             td_cli.otbr_cli_meshdiag_topology, "main", side_effect=_mark("meshdiag-topology")
         ) as m_meshdiag_topology, patch.object(
-            td_cli.otbr_cli_networkdiag_topology,
-            "main_multicast_network",
-            side_effect=_mark("networkdiag-multicast-network"),
-        ) as m_networkdiag_multicast, patch.object(
-            td_cli.otbr_cli_networkdiag_topology, "main", side_effect=_mark("networkdiag-fetch-all")
-        ) as m_networkdiag_fetch_all, patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main", side_effect=lambda argv: _mark(
+                f"networkdiag-{argv[0]}"
+            )(argv)
+        ) as m_networkdiag, patch.object(
             td_cli.otbr_cli_meshdiag_routerneighbortable,
             "main",
             side_effect=_mark("meshdiag-routerneighbortable"),
@@ -320,12 +325,18 @@ class TestDispatchOtbrCli(unittest.TestCase):
                 m_thread_info.call_args_list,
                 m_router_table.call_args_list,
                 m_meshdiag_topology.call_args_list,
-                m_networkdiag_multicast.call_args_list,
-                m_networkdiag_fetch_all.call_args_list,
+                m_networkdiag.call_args_list,
                 m_meshdiag_neighbors.call_args_list,
                 m_meshdiag_childtable.call_args_list,
             ],
-            [[call([])], [call([])], [call([])], [call([])], [call([])], [call([])], [call([])]],
+            [
+                [call([])],
+                [call([])],
+                [call([])],
+                [call(["multicast-network"]), call(["fetch-all"])],
+                [call([])],
+                [call([])],
+            ],
         )
 
     def test_topology_best_effort_runs_all_steps_on_failure(self):
@@ -336,10 +347,8 @@ class TestDispatchOtbrCli(unittest.TestCase):
         ) as m_router_table, patch.object(
             td_cli.otbr_cli_meshdiag_topology, "main", return_value=0
         ) as m_meshdiag_topology, patch.object(
-            td_cli.otbr_cli_networkdiag_topology, "main_multicast_network", return_value=0
-        ) as m_networkdiag_multicast, patch.object(
             td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
-        ) as m_networkdiag_fetch_all, patch.object(
+        ) as m_networkdiag, patch.object(
             td_cli.otbr_cli_meshdiag_routerneighbortable, "main", return_value=0
         ) as m_meshdiag_neighbors, patch.object(
             td_cli.otbr_cli_meshdiag_childtable, "main", return_value=0
@@ -351,12 +360,14 @@ class TestDispatchOtbrCli(unittest.TestCase):
             m_thread_info,
             m_router_table,
             m_meshdiag_topology,
-            m_networkdiag_multicast,
-            m_networkdiag_fetch_all,
             m_meshdiag_neighbors,
             m_meshdiag_childtable,
         ):
             mocked.assert_called_once_with([])
+        self.assertEqual(
+            m_networkdiag.call_args_list,
+            [call(["multicast-network"]), call(["fetch-all"])],
+        )
 
     def test_topology_forwards_datadir_to_every_step(self):
         with patch.object(
@@ -366,10 +377,8 @@ class TestDispatchOtbrCli(unittest.TestCase):
         ) as m_router_table, patch.object(
             td_cli.otbr_cli_meshdiag_topology, "main", return_value=0
         ) as m_meshdiag_topology, patch.object(
-            td_cli.otbr_cli_networkdiag_topology, "main_multicast_network", return_value=0
-        ) as m_networkdiag_multicast, patch.object(
             td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
-        ) as m_networkdiag_fetch_all, patch.object(
+        ) as m_networkdiag, patch.object(
             td_cli.otbr_cli_meshdiag_routerneighbortable, "main", return_value=0
         ) as m_meshdiag_neighbors, patch.object(
             td_cli.otbr_cli_meshdiag_childtable, "main", return_value=0
@@ -382,12 +391,47 @@ class TestDispatchOtbrCli(unittest.TestCase):
             m_thread_info,
             m_router_table,
             m_meshdiag_topology,
-            m_networkdiag_multicast,
-            m_networkdiag_fetch_all,
             m_meshdiag_neighbors,
             m_meshdiag_childtable,
         ):
             mocked.assert_called_once_with(expected_argv)
+        self.assertEqual(
+            m_networkdiag.call_args_list,
+            [
+                call(["--datadir", "/tmp/td", "multicast-network"]),
+                call(["--datadir", "/tmp/td", "fetch-all"]),
+            ],
+        )
+
+
+class TestNetworkdiagModuleDispatch(unittest.TestCase):
+    def test_fetch_all_forwards_command_options(self):
+        with patch.object(
+            otbr_cli_networkdiag_topology, "main_fetch_all", return_value=0
+        ) as handler:
+            rc = otbr_cli_networkdiag_topology.main(
+                ["fetch-all", "--children-no"]
+            )
+        handler.assert_called_once_with(["--children-no"])
+        self.assertEqual(rc, 0)
+
+    def test_multicast_network_forwards_datadir(self):
+        with patch.object(
+            otbr_cli_networkdiag_topology, "main_multicast_network", return_value=0
+        ) as handler:
+            rc = otbr_cli_networkdiag_topology.main(
+                ["--datadir", "/tmp/td", "multicast-network"]
+            )
+        handler.assert_called_once_with(["--datadir", "/tmp/td"])
+        self.assertEqual(rc, 0)
+
+    def test_multicast_neighbors_dispatches_to_handler(self):
+        with patch.object(
+            otbr_cli_networkdiag_topology, "main_multicast_neighbors", return_value=0
+        ) as handler:
+            rc = otbr_cli_networkdiag_topology.main(["multicast-neighbors"])
+        handler.assert_called_once_with([])
+        self.assertEqual(rc, 0)
 
 
 class TestDispatchOtherCommands(unittest.TestCase):

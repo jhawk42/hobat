@@ -1863,9 +1863,41 @@ def main_fetch_all(argv: Sequence[str] | None = None) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Main entry point with optional command-line arguments."""
+    """Dispatch a networkdiag subcommand to its collector entry point."""
 
-    return main_fetch_all(argv)
+    parser = argparse.ArgumentParser(
+        description="Thread Network Diagnostic Topology"
+    )
+    parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
+    subparsers = parser.add_subparsers(dest="networkdiag_command")
+    subparsers.add_parser(
+        "fetch-all",
+        help="Scan and poll networkdiag topology (unicast, router-by-router)",
+        add_help=False,
+    )
+    subparsers.add_parser(
+        "multicast-network",
+        help="Scan networkdiag topology via multicast to all Thread devices (ff03::1)",
+        add_help=False,
+    )
+    subparsers.add_parser(
+        "multicast-neighbors",
+        help="Scan networkdiag topology via multicast to one-hop neighbors (ff02::1)",
+        add_help=False,
+    )
+
+    args, command_argv = parser.parse_known_args(argv)
+    if args.datadir is not None:
+        command_argv = ["--datadir", args.datadir] + command_argv
+    if args.networkdiag_command == "fetch-all":
+        return main_fetch_all(command_argv)
+    if args.networkdiag_command == "multicast-network":
+        return main_multicast_network(command_argv)
+    if args.networkdiag_command == "multicast-neighbors":
+        return main_multicast_neighbors(command_argv)
+
+    parser.print_help()
+    return 0
 
 
 if __name__ == "__main__":
