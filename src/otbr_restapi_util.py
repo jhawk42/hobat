@@ -328,6 +328,41 @@ RESETTABLE_DIAGNOSTIC_TLVS: frozenset[str] = frozenset({
     DIAG_TLV_MLE_COUNTERS,   # TLV 34
 })
 
+_NETWORK_DIAGNOSTIC_TYPE_ALIASES: dict[str, str] = {
+    DIAG_TLV_EUI64: "eui",
+    DIAG_TLV_VERSION: "threadVersion",
+}
+
+_NETWORK_DIAGNOSTIC_TYPE_IDS: dict[int, str] = {
+    0: DIAG_TLV_EXT_ADDRESS,
+    1: DIAG_TLV_RLOC16,
+    2: DIAG_TLV_MODE,
+    3: DIAG_TLV_TIMEOUT,
+    4: DIAG_TLV_CONNECTIVITY,
+    5: DIAG_TLV_ROUTE,
+    6: DIAG_TLV_LEADER_DATA,
+    7: DIAG_TLV_NETWORK_DATA,
+    8: DIAG_TLV_IPV6_ADDRESSES,
+    9: DIAG_TLV_MAC_COUNTERS,
+    14: DIAG_TLV_BATTERY_LEVEL,
+    15: DIAG_TLV_SUPPLY_VOLTAGE,
+    16: DIAG_TLV_CHILD_TABLE,
+    17: DIAG_TLV_CHANNEL_PAGES,
+    19: DIAG_TLV_MAX_CHILD_TIMEOUT,
+    20: DIAG_TLV_LDEV_ID_SUBJECT,
+    21: DIAG_TLV_IDEV_ID_CERT,
+    23: "eui",
+    24: "threadVersion",
+    25: DIAG_TLV_VENDOR_NAME,
+    26: DIAG_TLV_VENDOR_MODEL,
+    27: DIAG_TLV_VENDOR_SW_VERSION,
+    28: DIAG_TLV_THREAD_STACK_VER,
+    29: DIAG_TLV_CHILDREN,
+    30: DIAG_TLV_CHILD_IPV6_ADDRS,
+    31: DIAG_TLV_ROUTER_NEIGHBORS,
+    34: DIAG_TLV_MLE_COUNTERS,
+}
+
 # 1.3 – Protocol string constants
 
 
@@ -686,7 +721,7 @@ class OTBRRestApiClient:
             destination=destination,
             destination_type=destination_type,
         )
-        attributes["types"] = self._validate_non_empty_sequence(types, "types")
+        attributes["types"] = self._normalize_network_diagnostic_types(types)
         if timeout is not None:
             attributes["timeout"] = timeout
 
@@ -705,10 +740,10 @@ class OTBRRestApiClient:
         raw: object = _RAW_UNSET,
     ) -> Any:
         raw = self._resolve_raw(raw)
-        validated = self._validate_non_empty_sequence(types, "types")
+        validated = self._normalize_network_diagnostic_types(types)
         non_resettable = [
             t for t in validated
-            if isinstance(t, str) and t not in RESETTABLE_DIAGNOSTIC_TLVS
+            if t not in RESETTABLE_DIAGNOSTIC_TLVS
         ]
         if non_resettable:
             raise OTBRUsageError(
@@ -2051,7 +2086,12 @@ class OTBRRestApiClient:
         destination_type: str | None = None,
     ) -> dict[str, Any]:
         self._validate_non_empty_string(destination, "destination")
-        if destination_type and destination_type in self._DEST_TYPE_LENGTHS:
+        if destination_type:
+            if destination_type not in self._DEST_TYPE_LENGTHS:
+                raise OTBRUsageError(
+                    "destination_type must be one of "
+                    f"{sorted(self._DEST_TYPE_LENGTHS)!r}"
+                )
             expected = self._DEST_TYPE_LENGTHS[destination_type]
             if len(destination) != expected:
                 raise OTBRUsageError(
@@ -2071,6 +2111,28 @@ class OTBRRestApiClient:
             raise OTBRUsageError(
                 f"{field_name} must contain at least one item")
         return items
+
+    def _normalize_network_diagnostic_types(
+        self, types: Sequence[str | int]
+    ) -> list[str]:
+        normalized: list[str] = []
+        for diagnostic_type in self._validate_non_empty_sequence(types, "types"):
+            if isinstance(diagnostic_type, int):
+                wire_name = _NETWORK_DIAGNOSTIC_TYPE_IDS.get(diagnostic_type)
+                if wire_name is None:
+                    raise OTBRUsageError(
+                        f"Unsupported network diagnostic TLV ID: {diagnostic_type}"
+                    )
+            elif isinstance(diagnostic_type, str):
+                wire_name = _NETWORK_DIAGNOSTIC_TYPE_ALIASES.get(
+                    diagnostic_type, diagnostic_type
+                )
+            else:
+                raise OTBRUsageError(
+                    "network diagnostic types must be strings or integer TLV IDs"
+                )
+            normalized.append(wire_name)
+        return normalized
 
     def _validate_non_empty_string(self, value: str, field_name: str) -> str:
         if not isinstance(value, str) or not value.strip():

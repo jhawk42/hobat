@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
@@ -94,6 +95,50 @@ class OTBRClientTests(unittest.TestCase):
         with self.assertRaises(client_module.OTBRUsageError):
             self.client.enqueue_get_network_diagnostic_task(
                 destination="abcd1234abcd1234", types=[]
+            )
+
+    def test_network_diagnostic_task_uses_otbr_wire_type_names(self) -> None:
+        payload = b'{"data":[{"id":"action-1","type":"getNetworkDiagnosticTask","attributes":{}}]}'
+
+        with patch.object(
+            client_module,
+            "urlopen",
+            return_value=FakeResponse(payload, "application/vnd.api+json"),
+        ) as urlopen:
+            self.client.enqueue_get_network_diagnostic_task(
+                destination="abcd1234abcd1234",
+                destination_type="extended",
+                types=["extAddress", "eui64", "version", 34],
+            )
+
+        request_body = json.loads(urlopen.call_args.args[0].data)
+        attributes = request_body["data"][0]["attributes"]
+        self.assertEqual(
+            attributes["types"], ["extAddress", "eui", "threadVersion", "mleCounters"]
+        )
+
+    def test_reset_counter_task_uses_otbr_wire_type_names(self) -> None:
+        payload = b'{"data":[{"id":"action-1","type":"resetNetworkDiagCounterTask","attributes":{}}]}'
+
+        with patch.object(
+            client_module,
+            "urlopen",
+            return_value=FakeResponse(payload, "application/vnd.api+json"),
+        ) as urlopen:
+            self.client.enqueue_reset_network_diag_counter_task(types=[9, 34])
+
+        request_body = json.loads(urlopen.call_args.args[0].data)
+        attributes = request_body["data"][0]["attributes"]
+        self.assertEqual(attributes["types"], ["macCounters", "mleCounters"])
+
+    def test_invalid_destination_type_raises_usage_error(self) -> None:
+        with self.assertRaisesRegex(
+            client_module.OTBRUsageError, "destination_type must be one of"
+        ):
+            self.client.enqueue_get_network_diagnostic_task(
+                destination="abcd1234abcd1234",
+                destination_type="invalid",
+                types=["extAddress"],
             )
 
 
