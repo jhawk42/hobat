@@ -26,6 +26,7 @@ BEHAVIOR_IDS = (
     "panel-node-link-filters",
     "panel-view",
     "btn-functions-panel-toggle",
+    "btn-more-info",
     "btn-topology",
     "btn-table",
     "btn-insights",
@@ -140,6 +141,7 @@ def test_semantic_layout_and_workspace_hierarchy() -> None:
     assert parser.parent_by_id["view-insights"] == "panel-view"
     assert parser.parent_by_id["view-settings"] == "panel-view"
     assert parser.parent_by_id["view-logs"] == "panel-view"
+    assert parser.parent_by_id["btn-more-info"] == "panel-view"
     assert parser.parent_by_id["chk-auto-view"] == "overview-settings-section"
     assert parser.parent_by_id["device-details"] == "panel-device-details"
     assert parser.parent_by_id["topology-view"] == "view-topology"

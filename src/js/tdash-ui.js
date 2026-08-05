@@ -501,6 +501,9 @@ function switchView(newView) {
     }
   });
 
+  const moreInfoButton = document.getElementById("btn-more-info");
+  if (moreInfoButton) moreInfoButton.hidden = newView !== "table";
+
   const linkFilterEl = document.getElementById("link-filter");
   linkFilterEl.classList.toggle("filter-disabled", newView !== "topology");
 
