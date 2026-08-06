@@ -1627,7 +1627,7 @@ export function adaptRawArray(fileMap) {
 // Diagnostics provide: extAddress, rloc16, route.routeData[], childTable[].
 // Primary node ID = extAddress (lowercase). Merged by extAddress identity.
 
-export function adaptOtbrRestApi(fileMap) {
+export function adaptOtbrRestApi(fileMap, mergedRows = []) {
   const devicesRaw = fileMap.get(FILE_RESTAPI_DEVICES) ?? fileMap.get(FILE_RESTAPI_DEVICES_LIST) ?? fileMap.get(FILE_RESTAPI_DEVICES_FETCH);
   
   // Load both basic diagnostics AND mesh diagnostics (which has link quality data)
@@ -1761,6 +1761,16 @@ export function adaptOtbrRestApi(fileMap) {
     if (rloc16Val) rloc16ToNodeId.set(rloc16Val, nodeId);
     const existing = rawByIdForDetails.get(nodeId) || {};
     rawByIdForDetails.set(nodeId, mergeForDisplay(existing, node));
+  });
+
+  mergedRows.forEach((row) => {
+    if (!isPlainObject(row)) return;
+    const nodeId = getCanonicalExtaddr(row);
+    if (!nodeId || !rawByIdForDetails.has(nodeId)) return;
+    rawByIdForDetails.set(
+      nodeId,
+      mergeForDisplay(rawByIdForDetails.get(nodeId), row),
+    );
   });
 
   // Pass 3: edges from diagnostics route.routeData (router routes) + childTable
@@ -1946,7 +1956,7 @@ export function runAdaptor(dataset) {
     case 'eve_native': return adaptEveNative(fileMap);
     case 'thread_tools_native': return adaptThreadToolsNative(fileMap);
     case 'router-table': return adaptRouterTable(fileMap);
-    case 'otbr_restapi': return adaptOtbrRestApi(fileMap);
+    case 'otbr_restapi': return adaptOtbrRestApi(fileMap, rows);
     case 'raw-array':
     default: return adaptRawArray(fileMap);
   }

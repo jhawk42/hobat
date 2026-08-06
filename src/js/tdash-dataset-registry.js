@@ -354,7 +354,7 @@ export const DATASET_REGISTRY = [
       "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
       "td-mdns-scopes-thread.json"
     ],
-    mergeStrategy: "none",
+    mergeStrategy: "by-identity",
     topologyMode: "otbr_restapi",
     physicsProfile: "mesh-compact",
     defaultView: "topology",
