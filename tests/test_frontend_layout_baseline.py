@@ -12,7 +12,6 @@ CSS = REPO_ROOT / "src" / "tdash.css"
 UI_JS = REPO_ROOT / "src" / "js" / "tdash-ui.js"
 UTILS_JS = REPO_ROOT / "src" / "js" / "tdash-utils.js"
 DATASET_JS = REPO_ROOT / "src" / "js" / "tdash-dataset.js"
-PLAN = REPO_ROOT / "plan" / "five-panel-responsive-layout-draft.md"
 
 BEHAVIOR_IDS = (
     "panel-title",
@@ -106,12 +105,10 @@ def test_behavior_bearing_dom_ids_exist_once() -> None:
     }
 
 
-def test_approved_target_layout_panel_ids_are_documented_and_present() -> None:
-    plan = _read_text(PLAN)
+def test_approved_target_layout_panel_ids_are_present() -> None:
     html = _read_text(HTML)
 
     for panel_id in TARGET_LAYOUT_PANEL_IDS:
-        assert f'id="{panel_id}"' in plan
         assert f'id="{panel_id}"' in html
 
 

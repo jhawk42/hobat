@@ -6,29 +6,20 @@
 	// https://mcr.microsoft.com/en-us/artifact/mar/devcontainers/python/about
 	"image": "mcr.microsoft.com/devcontainers/python:3-3.14-bookworm",
 	"features": {
-		"ghcr.io/devcontainers/features/docker-outside-of-docker:1.10.0": {}
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1.10.0": {},
+		"ghcr.io/devcontainers/features/node:2.1.0": {
+			"version": "22"
+		}
 	},
 	"customizations": {
 		"vscode": {}
 	},
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y ripgrep && python -m pip install -r requirements.txt",
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y ripgrep && python -m pip install -r requirements.txt && python -m pip install -r requirements_test.txt",
 	// Use docker container host network to allow access to services running on the host machine
 	"runArgs": [
 		"--network=host"
 	]
 
-	// Support for git worktree - mount workspace parent root to enable access to peer worktree directories
-	//"workspaceMount": "source=${localWorkspaceFolder}/..,target=/workspaces,type=bind",
-	//"workspaceFolder": "${localWorkspaceFolder}"
 
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-	
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [],
-
-	// "customizations": {},
-	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
 }

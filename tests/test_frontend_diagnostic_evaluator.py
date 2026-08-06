@@ -88,8 +88,8 @@ def test_evaluator_reports_view_specific_metrics_and_boolean_conditions() -> Non
     assert topology_error["option"]["severity"] == "high"
 
     topology_rss = result["topologyRss"]
-    assert topology_rss["metric"] is None
-    assert topology_rss["metricText"] is None
+    assert "metric" not in topology_rss
+    assert "metricText" not in topology_rss
     assert topology_rss["triggered"] is True
 
     table_frame = result["tableFrame"]

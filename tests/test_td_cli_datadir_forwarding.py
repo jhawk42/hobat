@@ -139,7 +139,7 @@ class TDCLIDataDirForwardingTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         # CLI now expands with explicit fetch mode flags
         module_main.assert_called_once_with([
-            "--datadir", "/tmp/td-data", "-cno", 
+            "--datadir", "/tmp/td-data", "fetch-all", "-cno",
             "--children-fetch-fast", "--children-fetch-detail-no"
         ])
 
