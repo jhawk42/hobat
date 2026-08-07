@@ -42,10 +42,10 @@
       <!--
         ⛬ Total: nn ■ TBR: nn ⬟ Router: nn ● End Device: nn 📶 Links: nn LQ3: nn LQ2: nn LQ1: nn
       -->
-      <fieldset class="cache-options" id="fieldset-devices">
-        <legend><button class="legend-toggle-btn" id="btn-toggle-devices" aria-expanded="true"><span
-              class="legend-toggle-arrow">▶</span>Devices</button>
-        </legend>
+      <legend><button class="legend-toggle-btn" id="btn-toggle-devices" aria-expanded="true"><span
+            class="legend-toggle-arrow">▶</span>Devices</button>
+      </legend>
+      <div id="fieldset-devices" class="device-status-content">
         <label title="Number of devices in the dataset">
           <span id="device-status-devices">⛬ Total: <span id="device-count">0</span></span>
         </label>
@@ -70,18 +70,18 @@
         <label title="Number of LQ1 links in the dataset">
           <span id="device-status-lq1">LQ1: <span id="lq1-count">0</span></span>
         </label>
-      </fieldset>
+      </div>
     </div>
 
     <!-- Source and dataset panel -->
     <div id="panel-dataset" class="controls">
-      <fieldset class="cache-options" id="fieldset-dataset">
-        <legend>
-          <button class="legend-toggle-btn" id="btn-toggle-panel-dataset" aria-expanded="true">
-            <span class="legend-toggle-arrow">▶</span>Dataset
-          </button>
-        </legend>
+      <legend>
+        <button class="legend-toggle-btn" id="btn-toggle-panel-dataset" aria-expanded="true">
+          <span class="legend-toggle-arrow">▶</span>Dataset
+        </button>
+      </legend>
 
+      <div id="fieldset-dataset">
         <div id="panel-dataset-inner">
           <div id="panel-dataset-controls" class="controls dataset-controls">
             <div id="panel-dataset-control-pair" class="control-pair control-pair-source">
@@ -148,7 +148,7 @@
             </div>
           </fieldset>
         </div>
-      </fieldset>
+      </div>
     </div>
 
     <!-- Filters bar -->

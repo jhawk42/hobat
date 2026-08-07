@@ -94,8 +94,6 @@ body {
   margin-bottom: 0 !important;
 }
 
-#panel-functions #fieldset-devices,
-#panel-functions #fieldset-dataset,
 #panel-functions #fieldset-node-link-filters,
 #panel-functions #fieldset-diag-filters {
   width: 100%;
@@ -344,10 +342,34 @@ body {
   gap: 4px;
 }
 
-#panel-dataset > legend {
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--line);
+#device-status,
+#panel-dataset,
+#panel-node-link-filters {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0;
+  background: var(--surface-raised);
+}
+
+#device-status > legend,
+#panel-dataset > legend,
+#panel-node-link-filters > legend {
+  padding: 1px 10px;
   margin: 0;
+}
+
+#device-status {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.device-status-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 10px;
 }
 
 #panel-dataset-inner {
@@ -386,7 +408,6 @@ body {
   width: 100%;
 }
 
-#panel-node-link-filters,
 #panel-view {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -464,7 +485,8 @@ label {
 /* Panel-level toggle buttons (Dataset, Filters, View) */
 #btn-toggle-panel-dataset,
 #btn-toggle-filters,
-#btn-toggle-panel-view {
+#btn-toggle-panel-view,
+#btn-toggle-devices {
   font-size: 14px;
 }
 
@@ -579,6 +601,10 @@ label {
   display: none;
 }
 
+#device-status.collapsed > #fieldset-devices {
+  display: none;
+}
+
 /* Panel-node-link-filters collapsed state */
 #panel-node-link-filters.collapsed > #filters-content {
   display: none;
@@ -661,19 +687,6 @@ select.filter-disabled {
 }
 
 /* ── Collapsible Filters Panel ────────────────────────────── */
-
-#panel-node-link-filters {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-raised);
-  margin-bottom: 8px !important;
-  padding: 0;
-}
-
-#panel-node-link-filters > legend {
-  padding: 1px 10px;
-  margin: 0;
-}
 
 #fieldset-diag-filters .control-pair-source {
   row-gap: 0;
@@ -1002,6 +1015,12 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   border-top: 1px solid var(--line);
 }
 
+.node-details-panel > h2:first-child {
+  margin-bottom: 8px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .node-details-list {
   margin: 0;
   padding-left: 0;
@@ -1047,6 +1066,12 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   min-width: 10px;
 }
 
+.node-details-panel > h2:first-child .detail-section-toggle {
+  font-size: 14px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 /* Collapse All / Expand All button */
 .node-details-panel .detail-toggle-all {
   display: inline-flex;
@@ -1054,9 +1079,9 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   gap: 4px;
   background: none;
   border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 3px 8px;
-  font-size: 13px;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.2;
   color: var(--muted);

@@ -1566,6 +1566,7 @@ document.getElementById("chk-only-cache").addEventListener("change", (e) => {
 // ── Collapsible cache-options fieldsets and containers ─────────────────────────────────────
 
 const COLLAPSE_CONTAINER_BY_BUTTON_ID = {
+  "btn-toggle-devices": "device-status",
   "btn-toggle-panel-dataset": "panel-dataset",
   "btn-toggle-filters": "panel-node-link-filters",
 };
