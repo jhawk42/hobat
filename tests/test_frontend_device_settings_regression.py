@@ -108,6 +108,26 @@ def test_insights_panel_uses_shared_selection_and_evaluator() -> None:
     assert "initDeviceInsights();" in ui_text
 
 
+def test_network_insights_uses_aggregation_and_dataset_refresh_lifecycle() -> None:
+    ui_text = _read_text(UI_JS)
+    html = _read_text(HTML)
+
+    assert 'id="network-insights-content" role="status" aria-live="polite"' in html
+    assert "aggregateNetworkDiagnosticsForRows," in ui_text
+    assert "function renderNetworkInsights()" in ui_text
+    assert "contentEl.replaceChildren();" in ui_text
+    assert "aggregateNetworkDiagnosticsForRows(currentDataset.rows)" in ui_text
+    assert "onActivate: renderNetworkInsights" in ui_text
+    assert "renderNetworkInsights();\n  const view = currentView;" in ui_text
+    assert "renderNetworkInsights();\ninitDeviceDetailsPanelTabs();" in ui_text
+    assert "NETWORK_INSIGHT_DEVICE_LIMIT = 10" in ui_text
+    assert "condition.triggeredDevices.slice(0, NETWORK_INSIGHT_DEVICE_LIMIT)" in ui_text
+    assert "Load a dataset to view network diagnostic insights." in ui_text
+    assert "No eligible Thread devices are available in this dataset." in ui_text
+    assert "Eligible Thread devices do not provide diagnostic metrics." in ui_text
+    assert "not triggering this condition." in ui_text
+
+
 def test_topology_selection_includes_adapted_node_diagnostic_fields() -> None:
     topology_text = _read_text(TOPOLOGY_JS)
 

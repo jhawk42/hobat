@@ -1140,6 +1140,73 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   margin-top: 0;
 }
 
+#network-insights-content {
+  min-width: 0;
+}
+
+.network-insights-coverage,
+.network-insights-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.network-insights-source {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.network-insights-source h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.network-insights-list,
+.network-insight-device-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.network-insight-item {
+  border-left: 3px solid var(--line);
+  padding-left: 9px;
+  overflow-wrap: anywhere;
+}
+
+.network-insight-item h4,
+.network-insight-item p {
+  margin: 0;
+}
+
+.network-insight-item h4 {
+  font-size: 13px;
+}
+
+.network-insight-observed,
+.network-insight-remaining,
+.network-insight-item.is-observed {
+  color: var(--muted);
+}
+
+.network-insight-triggered,
+.network-insight-device-list {
+  margin-top: 4px !important;
+}
+
+.network-insight-device-list {
+  padding-left: 16px;
+  list-style: disc;
+}
+
+.network-insight-item.severity-low { border-left-color: #008080; }
+.network-insight-item.severity-medium { border-left-color: #d55e00; }
+.network-insight-item.severity-high { border-left-color: #c62828; }
+.network-insight-item.severity-critical { border-left-color: #8b0000; }
+.network-insight-item.severity-info { border-left-color: #1565c0; }
+
 .workspace-log-list {
   display: grid;
   gap: 8px;
@@ -1621,6 +1688,12 @@ td:last-child {
   #view-table .table-wrap {
     height: 100%;
     max-height: none;
+  }
+
+  #view-insights {
+    height: 100%;
+    min-height: 0;
+    overflow: auto;
   }
 
   #panel-device-details #device-details {

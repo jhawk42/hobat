@@ -65,6 +65,7 @@ import {
   populateFilterSelects,
   populateDiagnosticFilterBySource,
   populateDiagnosticFilterBySourceWithCapabilities,
+  aggregateNetworkDiagnosticsForRows,
   evaluateDiagnosticsForRecord,
   selectHighestQualifyingDiagnosticEvaluations,
 } from "./tdash-filters.js";
@@ -268,6 +269,7 @@ const lastRenderedDatasetByView = new Map();
 
 function renderCurrentView({ force = false } = {}) {
   if (!currentDataset) return;
+  renderNetworkInsights();
   const view = currentView;
   if (view !== "topology" && view !== "table") return;
   if (!force && lastRenderedDatasetByView.get(view) === currentDataset) return;
@@ -472,7 +474,12 @@ const WORKSPACE_VIEWS = Object.freeze([
     onActivate: resizeAndFitTopology,
   },
   { view: "table", buttonId: "btn-table", panelId: "view-table", rendersDataset: true },
-  { view: "insights", buttonId: "btn-insights", panelId: "view-insights" },
+  {
+    view: "insights",
+    buttonId: "btn-insights",
+    panelId: "view-insights",
+    onActivate: renderNetworkInsights,
+  },
   { view: "settings", buttonId: "btn-settings", panelId: "view-settings" },
   {
     view: "logs",
@@ -833,6 +840,140 @@ const DIAGNOSTIC_SOURCE_LABELS = Object.freeze({
   link_quality: "Link Quality",
 });
 
+const NETWORK_INSIGHT_DEVICE_LIMIT = 10;
+
+function appendNetworkInsightElement(parent, tagName, text, className = "") {
+  const element = document.createElement(tagName);
+  element.textContent = text;
+  if (className) element.className = className;
+  parent.appendChild(element);
+  return element;
+}
+
+function selectNetworkInsightConditions(conditions) {
+  const selectedByGroup = new Map();
+  conditions.forEach((condition) => {
+    const groupKey = condition.option.group ?? condition.option.value;
+    const selected = selectedByGroup.get(groupKey);
+    if (condition.triggeredDeviceCount > 0 || !selected) {
+      selectedByGroup.set(groupKey, condition);
+    }
+  });
+  return [...selectedByGroup.values()];
+}
+
+function renderNetworkInsightCondition(parent, condition, eligibleDeviceCount) {
+  const itemEl = document.createElement("li");
+  const triggered = condition.triggeredDeviceCount > 0;
+  itemEl.className = [
+    "network-insight-item",
+    `severity-${condition.option.severity}`,
+    triggered ? "is-triggered" : "is-observed",
+  ].join(" ");
+  appendNetworkInsightElement(itemEl, "h4", condition.option.label);
+
+  if (condition.observedDeviceCount > 0) {
+    const range = condition.minMetricText === condition.maxMetricText
+      ? condition.minMetricText
+      : `${condition.minMetricText} to ${condition.maxMetricText}`;
+    appendNetworkInsightElement(
+      itemEl,
+      "p",
+      `${condition.observedDeviceCount}/${eligibleDeviceCount} devices report values; range ${range}; ${condition.nonTriggeredDeviceCount} not triggering this condition.`,
+      "network-insight-observed",
+    );
+  }
+
+  if (!triggered) return itemEl;
+
+  appendNetworkInsightElement(
+    itemEl,
+    "p",
+    `${condition.option.severity}: ${condition.triggeredDeviceCount} affected device${condition.triggeredDeviceCount === 1 ? "" : "s"}.`,
+    "network-insight-triggered",
+  );
+  const deviceListEl = document.createElement("ul");
+  deviceListEl.className = "network-insight-device-list";
+  condition.triggeredDevices.slice(0, NETWORK_INSIGHT_DEVICE_LIMIT).forEach((device) => {
+    appendNetworkInsightElement(deviceListEl, "li", device.displayName);
+  });
+  itemEl.appendChild(deviceListEl);
+
+  const remainingCount = condition.triggeredDeviceCount - NETWORK_INSIGHT_DEVICE_LIMIT;
+  if (remainingCount > 0) {
+    appendNetworkInsightElement(
+      itemEl,
+      "p",
+      `${remainingCount} additional affected devices.`,
+      "network-insight-remaining",
+    );
+  }
+  return itemEl;
+}
+
+function renderNetworkInsights() {
+  const contentEl = document.getElementById("network-insights-content");
+  if (!contentEl) return;
+  contentEl.replaceChildren();
+
+  if (!currentDataset) {
+    appendNetworkInsightElement(
+      contentEl,
+      "p",
+      "Load a dataset to view network diagnostic insights.",
+      "network-insights-empty",
+    );
+    return;
+  }
+
+  const model = aggregateNetworkDiagnosticsForRows(currentDataset.rows);
+  if (model.eligibleDeviceCount === 0) {
+    appendNetworkInsightElement(
+      contentEl,
+      "p",
+      "No eligible Thread devices are available in this dataset.",
+      "network-insights-empty",
+    );
+    return;
+  }
+  if (model.evaluableDeviceCount === 0) {
+    appendNetworkInsightElement(
+      contentEl,
+      "p",
+      "Eligible Thread devices do not provide diagnostic metrics.",
+      "network-insights-empty",
+    );
+    return;
+  }
+
+  appendNetworkInsightElement(
+    contentEl,
+    "p",
+    `${model.evaluableDeviceCount}/${model.eligibleDeviceCount} Thread devices provide diagnostic metrics.`,
+    "network-insights-coverage",
+  );
+  model.sources.forEach((source) => {
+    const sectionEl = document.createElement("section");
+    sectionEl.className = "network-insights-source";
+    appendNetworkInsightElement(
+      sectionEl,
+      "h3",
+      DIAGNOSTIC_SOURCE_LABELS[source.source] ?? source.source,
+    );
+    const listEl = document.createElement("ul");
+    listEl.className = "network-insights-list";
+    selectNetworkInsightConditions(source.conditions).forEach((condition) => {
+      listEl.appendChild(renderNetworkInsightCondition(
+        listEl,
+        condition,
+        model.eligibleDeviceCount,
+      ));
+    });
+    sectionEl.appendChild(listEl);
+    contentEl.appendChild(sectionEl);
+  });
+}
+
 const deviceInsightsState = {
   record: null,
 };
@@ -1169,6 +1310,7 @@ document.getElementById("view-status-line-content").textContent =
 bindDeviceDetailsSectionFields();
 initDeviceSettings();
 initDeviceInsights();
+renderNetworkInsights();
 initDeviceDetailsPanelTabs();
 initDetailPanelToggles(
   document.getElementById("device-details"),

@@ -503,6 +503,39 @@ severity, threshold, comparison, and unit metadata. This keeps dropdown
 matching and selected-device insight evaluation aligned without parsing the
 display label text.
 
+### Network Insights workspace
+
+The `#view-insights` workspace is a network-level, read-only diagnostic
+summary. It does not depend on selected-device state and does not modify
+filters, datasets, collectors, or server APIs.
+
+`renderNetworkInsights()` in `tdash-ui.js` rebuilds
+`#network-insights-content` with DOM nodes and `textContent`. It is invoked
+during every `renderCurrentView()` dataset update, including progressive
+updates while the workspace is hidden, and again when the Insights tab is
+activated. This prevents a prior dataset's summary from remaining visible.
+
+The renderer calls `aggregateNetworkDiagnosticsForRows(currentDataset.rows)`
+in `tdash-filters.js`. The pure helper evaluates normalized rows in table-view
+form through `evaluateDiagnosticsForRecord(record, "table")` and returns an
+ordered model grouped by diagnostic source. A row is eligible when it has a
+canonical `rloc16`, `br === true`, or a Thread router/child `type` or `role`.
+Records are deduplicated by canonical RLOC16, extended address, OMR IPv6
+address, then stable row identifier.
+
+For each condition, Network Insights reports metric coverage and observed
+minimum/maximum values when numeric diagnostics are present. Triggered
+conditions include severity, affected-device count, and up to ten stable device
+identities plus a remaining count. The highest triggered severity tier per
+device/source/group is retained, so overlapping thresholds do not inflate the
+summary. A non-triggering count is intentionally distinct from a health claim:
+missing telemetry and inapplicable guards are never presented as healthy.
+
+The workspace has explicit states for no dataset, no eligible Thread devices,
+and eligible devices without diagnostic metrics. Current scope excludes
+timestamps/trends, per-neighbor or per-child attribution, deep links to filter
+selections, and server-side aggregation for very large networks.
+
 #### Physics profile behavior (current)
 
 - Profile-specific seeded layout dispatch happens before `vis.Network(...)` construction.

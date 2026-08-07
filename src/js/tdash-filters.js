@@ -35,6 +35,9 @@ import {
   toFiniteNumber,
   isPlainObject,
   getColumnValue,
+  getCanonicalRloc16,
+  getCanonicalExtaddr,
+  getCanonicalOmrIpv6Address,
 } from "./tdash-utils.js";
 
 // ── Link-category normalisation ───────────────────────────────────────────────
@@ -1464,6 +1467,127 @@ export function evaluateDiagnosticsForRecord(record, view = "topology") {
       };
     })
     .filter(Boolean);
+}
+
+const THREAD_DEVICE_TYPES = new Set([
+  "router",
+  "border router",
+  "child",
+  "sleepy-child",
+  "sleepy child",
+]);
+
+function getNetworkInsightIdentity(record, rowIndex) {
+  const rloc16 = getCanonicalRloc16(record);
+  if (rloc16) return `rloc16:${rloc16}`;
+  const extAddress = getCanonicalExtaddr(record);
+  if (extAddress) return `extAddress:${extAddress}`;
+  const omrIpv6Address = getCanonicalOmrIpv6Address(record);
+  if (omrIpv6Address) return `omrIpv6Address:${omrIpv6Address}`;
+  const rowId = toText(record?.id) || toText(record?.recordKey);
+  return rowId ? `row:${rowId.toLowerCase()}` : `row-index:${rowIndex}`;
+}
+
+function getNetworkInsightDisplayName(record, identity) {
+  return toText(getColumnValue(record, "deviceLabel"))
+    || toText(getColumnValue(record, "name"))
+    || getCanonicalRloc16(record)
+    || getCanonicalExtaddr(record)
+    || getCanonicalOmrIpv6Address(record)
+    || identity;
+}
+
+export function isEligibleThreadDiagnosticRecord(record) {
+  if (!isPlainObject(record)) return false;
+  if (getCanonicalRloc16(record) || record.br === true) return true;
+  const type = toText(getColumnValue(record, "type")).toLowerCase();
+  const role = toText(getColumnValue(record, "role")).toLowerCase();
+  return THREAD_DEVICE_TYPES.has(type) || THREAD_DEVICE_TYPES.has(role);
+}
+
+/**
+ * Aggregates table-view diagnostic evaluations for normalized Thread rows.
+ * The returned model is independent of DOM and current dataset state.
+ */
+export function aggregateNetworkDiagnosticsForRows(rows) {
+  const devicesByIdentity = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((record, rowIndex) => {
+    if (!isEligibleThreadDiagnosticRecord(record)) return;
+    const identity = getNetworkInsightIdentity(record, rowIndex);
+    if (!devicesByIdentity.has(identity)) {
+      devicesByIdentity.set(identity, {
+        identity,
+        displayName: getNetworkInsightDisplayName(record, identity),
+        record,
+      });
+    }
+  });
+
+  const conditionsByValue = new Map();
+  const evaluableDevices = new Set();
+  devicesByIdentity.forEach((device) => {
+    const evaluations = selectHighestQualifyingDiagnosticEvaluations(
+      evaluateDiagnosticsForRecord(device.record, "table"),
+    );
+    if (evaluations.length > 0) evaluableDevices.add(device.identity);
+
+    evaluations.forEach((evaluation) => {
+      const { option, metric, triggered } = evaluation;
+      let condition = conditionsByValue.get(option.value);
+      if (!condition) {
+        condition = {
+          option,
+          triggeredDevices: [],
+          observedMetrics: [],
+        };
+        conditionsByValue.set(option.value, condition);
+      }
+      if (triggered) {
+        condition.triggeredDevices.push({
+          identity: device.identity,
+          displayName: device.displayName,
+        });
+      }
+      if (Number.isFinite(metric)) condition.observedMetrics.push(metric);
+    });
+  });
+
+  const sourcesByName = new Map();
+  DIAGNOSTIC_FILTER_OPTIONS
+    .filter((option) => option.value !== "all")
+    .forEach((option) => {
+      const condition = conditionsByValue.get(option.value);
+      if (!condition) return;
+      let source = sourcesByName.get(option.source);
+      if (!source) {
+        source = { source: option.source, conditions: [] };
+        sourcesByName.set(option.source, source);
+      }
+      const observedMetrics = condition.observedMetrics;
+      source.conditions.push({
+        option,
+        triggeredDevices: [...condition.triggeredDevices].sort((left, right) =>
+          left.identity.localeCompare(right.identity),
+        ),
+        triggeredDeviceCount: condition.triggeredDevices.length,
+        observedDeviceCount: observedMetrics.length,
+        nonTriggeredDeviceCount: observedMetrics.length - condition.triggeredDevices.length,
+        minMetric: observedMetrics.length > 0 ? Math.min(...observedMetrics) : undefined,
+        maxMetric: observedMetrics.length > 0 ? Math.max(...observedMetrics) : undefined,
+        minMetricText: observedMetrics.length > 0
+          ? formatDiagnosticMetric(Math.min(...observedMetrics), option.unit)
+          : undefined,
+        maxMetricText: observedMetrics.length > 0
+          ? formatDiagnosticMetric(Math.max(...observedMetrics), option.unit)
+          : undefined,
+      });
+    });
+
+  return {
+    eligibleDeviceCount: devicesByIdentity.size,
+    evaluableDeviceCount: evaluableDevices.size,
+    sources: [...sourcesByName.values()],
+  };
 }
 
 export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
