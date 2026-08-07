@@ -25,6 +25,8 @@ let _tableColumns = [];
 let _tableDatasetLabel = "";
 let _moreInfoEnabled = false;
 let _lastFilteredRows = [];
+const MORE_INFO_CELL_MAX_LINES = 6;
+const MORE_INFO_CELL_MAX_CHARACTERS = 60;
 
 export function setMoreInfoEnabled(val) {
   _moreInfoEnabled = val;
@@ -72,6 +74,19 @@ function formatCellValue(value, columnName) {
     }
   }
   return String(value);
+}
+
+function truncateMoreInfoCellValue(value, columnName) {
+  const text = formatCellValue(value, columnName);
+  const visibleLines = text
+    .split(/\r?\n/)
+    .slice(0, MORE_INFO_CELL_MAX_LINES)
+    .join("\n");
+  const clipped =
+    visibleLines.length > MORE_INFO_CELL_MAX_CHARACTERS
+      ? visibleLines.slice(0, MORE_INFO_CELL_MAX_CHARACTERS)
+      : visibleLines;
+  return clipped === text ? text : `${clipped} ...`;
 }
 
 // ── Table cell structured value renderer ────────────────────────────────────
@@ -184,6 +199,10 @@ function _createTdValueNode(value, depth) {
 }
 
 function renderTdContent(td, value, columnName) {
+  if (_moreInfoEnabled) {
+    td.textContent = truncateMoreInfoCellValue(value, columnName);
+    return;
+  }
   if (columnName === "routes") {
     td.textContent = formatCellValue(value, columnName);
     return;
