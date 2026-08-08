@@ -895,6 +895,20 @@ export function adaptThreadToolsNative(fileMap) {
   const routerIdsWithChildren = new Set();
   const routerNeighborByRloc16 = new Map();
   const routerChildByRloc16 = new Map();
+  const childByMacAddr = new Map();
+
+  function normalizeThreadToolsChild(child) {
+    if (!isPlainObject(child) || typeof child.isDeviceTypeMtd !== 'boolean') return child;
+    return { ...child, isDeviceTypeFtd: child.isDeviceTypeMtd };
+  }
+
+  diagnostics.forEach((node) => {
+    (Array.isArray(node?.children) ? node.children : []).forEach((child) => {
+      const normalizedChild = normalizeThreadToolsChild(child);
+      const childMacAddr = toFiniteNumber(normalizedChild?.macAddr);
+      if (Number.isFinite(childMacAddr)) childByMacAddr.set(childMacAddr, normalizedChild);
+    });
+  });
 
   function macAddrToRloc16(value) {
     const n = toFiniteNumber(value);
@@ -917,7 +931,8 @@ export function adaptThreadToolsNative(fileMap) {
     const extaddrVal = toText(rawNode.extMacAddr || rawNode.extAddress || rawNode.extaddr).toLowerCase()
       || (existing ? toText(existing.extAddress || existing.extaddr).toLowerCase() : '');
     const modeFtd = rawNode.mode?.ftd;
-    const inferredType = modeFtd === true ? 'router' : (modeFtd === false ? 'child' : '');
+    const isMainRouter = rloc16Val.toLowerCase().endsWith('00');
+    const inferredType = isMainRouter ? 'router' : (typeof modeFtd === 'boolean' ? 'child' : '');
     const inferredModeDevice = modeFtd === true ? 'FTD' : (modeFtd === false ? 'MTD' : '');
     const connectivity = isPlainObject(rawNode.connectivity) ? rawNode.connectivity : {};
     const totalLink3 = toFiniteNumber(connectivity.linkQuality3)
@@ -996,16 +1011,20 @@ export function adaptThreadToolsNative(fileMap) {
 
   diagnostics.forEach((node, index) => {
     if (!isPlainObject(node)) return;
-    const nodeId = chooseThreadToolsNodeId(node, index);
-    const modeFtd = node.mode?.ftd;
+    const childRecord = childByMacAddr.get(toFiniteNumber(node.macAddr));
+    const effectiveNode = node.isSynthesized === true && typeof childRecord?.isDeviceTypeFtd === 'boolean'
+      ? { ...node, mode: { ...node.mode, ftd: childRecord.isDeviceTypeFtd } }
+      : node;
+    const nodeId = chooseThreadToolsNodeId(effectiveNode, index);
+    const modeFtd = effectiveNode.mode?.ftd;
     const isChildLike = modeFtd === false;
-    upsertThreadToolsNode(nodeId, node, {
+    upsertThreadToolsNode(nodeId, effectiveNode, {
       shape: isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router,
       color: isChildLike ? NODE_COLORS.child : NODE_COLORS.router,
     });
 
     const existing = rawByIdForDetails.get(nodeId) || {};
-    rawByIdForDetails.set(nodeId, mergeForDisplay(existing, node));
+    rawByIdForDetails.set(nodeId, mergeForDisplay(existing, effectiveNode));
   });
 
   diagnostics.forEach((node, index) => {
@@ -1083,7 +1102,7 @@ export function adaptThreadToolsNative(fileMap) {
     });
 
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
-      const childObj = isPlainObject(child) ? child : {};
+      const childObj = normalizeThreadToolsChild(child) || {};
       const childRloc16 = toText(childObj.rloc16) || macAddrToRloc16(childObj.macAddr);
       const childExtaddr = toText(childObj.extAddress || childObj.extMacAddr || childObj.extaddr).toLowerCase();
       const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
@@ -1096,8 +1115,8 @@ export function adaptThreadToolsNative(fileMap) {
           id: childId,
           rloc16: childRloc16,
           extAddress: childExtaddr,
-          mode: childObj.mode,
-          type: childObj.mode?.ftd === false ? 'child' : '',
+          mode: { ...childObj.mode, ftd: childObj.isDeviceTypeFtd },
+          type: childObj.isDeviceTypeFtd === false ? 'child' : '',
         }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
       }
 
