@@ -207,12 +207,13 @@ OTBR_CLI_INPUT_FILES: list[str] = [
 ]
 
 OTBR_RESTAPI_INPUT_FILES: list[str] = [
-    "td-otbr-cli-router-table.json",
-    "td-otbr-cli-meshdiag-topology.json",
-    "td-otbr-cli-networkdiag-fetch-all.json",
-    "td-otbr-cli-networkdiag-multicast-network.json",
-    "td-otbr-cli-meshdiag-router-neighbortables.json",
-    "td-otbr-cli-meshdiag-router-childtables.json",
+    "td-otbr-restapi-devices-fetch.json",
+    "td-otbr-restapi-diagnostics-fetch-all.json",
+    "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+    "td-otbr-restapi-devices-list.json",
+    "td-otbr-restapi-diagnostics-list.json",
+    "td-otbr-restapi-diagnostics.json",
+    "td-otbr-restapi-devices.json"
 ]
 
 MDNS_INPUT_FILES: list[str] = [
