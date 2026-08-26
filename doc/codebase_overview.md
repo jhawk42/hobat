@@ -218,10 +218,10 @@ Interactive topology graph or sortable table in the browser
 
 ```
 python merge_dataset.py --datadir ./data
-    │  loads multiple JSON files from Layer 1
-    │  normalize_identifiers() → canonical rloc16 / extAddress / omrIpv6Address
-    │  derive_mode_device()    → infer FTD/MTD from various field shapes
-    │  build_merged_records()  → first-value-wins, conflict log
+    │  resolve_merge_command_inputs() → paths + required/optional classification
+    │  load_merge_supporting_data()   → labels + network metadata + OMR prefix
+    │  build_merge_output()           → normalize + merge/pass-through + report
+    │  write_merge_outputs()          → atomic merged JSON + optional report
     ▼
 Layer 1 — data/td-merged-topology-all.json
 
@@ -276,7 +276,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | `otbr_cli_meshdiag_routerneighbortable.py` | `meshdiag routerneighbortable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-neighbortables.json` | For every router in the router table, collects per-neighbour details: RLOC16, extaddr, Thread version, RSS (avg/last/margin), frame/message error rates, and connection time.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_networkdiag_parsers.py` | `networkdiag get` parser helpers | n/a | Parser helpers for networkdiag output sections, TLV decoding, and record normalization. |
 | `otbr_cli_networkdiag_util.py` | `networkdiag get` utilities | n/a | Shared utilities for networkdiag collection, device classification, and record merging. |
-| `otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (unicast per router) or `networkdiag get ff03::1/ff02::1 <tlvs>` (multicast) | `td-otbr-cli-networkdiag-fetch-all.json` (unicast poll), `td-otbr-cli-networkdiag-multicast-network.json` (multicast all), `td-otbr-cli-networkdiag-multicast-neighbors.json` (multicast neighbors) | Collects network diagnostic data from Thread devices via three modes: (1) Unicast fetch-all: polls each router individually via rloc IPv6. (2) Multicast network: broadcasts to all mesh devices (ff03::1) with retry strategy and TLV merging. (3) Multicast neighbors: broadcasts to one-hop neighbors (ff02::1) with retry strategy and TLV merging. For every device, parses 16 TLVs including: Ext Address (0), RLOC16 (1), Mode (2), EUI64 (23), IPv6 addresses (8), Connectivity (4), Leader Data (6), Thread Version (24), Vendor Name (25), Vendor Model (26), Vendor SW Version (27), Vendor App URL (28), Route64 (5), Child Table (16), MAC Counters (9), MLE Counters (34), and time-in-role statistics. Mode TLV provides RxOnWhenIdle/DeviceType/NetworkData for FTD/MTD classification. MAC counters include error/discard totals and percentages. MLE counters track role changes, partition ID changes, parent changes, and attach attempts. |
+| `otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (unicast per router) or `networkdiag get ff03::1/ff02::1 <tlvs>` (multicast) | `td-otbr-cli-networkdiag-fetch-all.json` (unicast poll), `td-otbr-cli-networkdiag-multicast-network.json` (multicast all), `td-otbr-cli-networkdiag-multicast-neighbors.json` (multicast neighbors) | Collects network diagnostic data from Thread devices via unicast and multicast modes. Child expansion uses frozen fast/detail attempt policies, stable canonical-RLOC16 target discovery, a mutation-free retry executor, collector-quality reconciliation through `_upsert_device_record(...)`, and one full-topology checkpoint after each effective mutation. Every device parser retains the existing TLV, role, address, counter, and route enrichment behavior. |
 | `otbr_cli_thread_network_info.py` | `dataset active`, `prefix meshlocal`, `br omrprefix favored` | `td-otbr-cli-thread-network-info.json` | Collects the active Thread dataset (channel, PAN ID, extended PAN ID, mesh-local prefix, network name, etc.) and derives the mesh-local IPv6 RLOC prefix and the OMR prefix for use by other collectors. |
 
 ### Data Collection — Other Sources
@@ -333,6 +333,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | File | Purpose |
 |---|---|
 | `tdash-adaptors.js` | Topology adaptors — converts raw data from each source (meshdiag, networkdiag, REST API, Eve native, Eve enhanced, router-table) into the unified `{nodes, edges}` format consumed by vis-network. |
+| `tdash-adaptor-model.js` | Browser-independent adaptor model for Phase 2 identity indexing, devices, relationships, details ownership, router filter indexes, validation, and stable vis-network result emission. |
 | `tdash-constants.js` | Central registry of merge-strategy identifiers, link-filter mode names, edge-category label strings, link-quality edge styles (`EDGE_LQ_STYLES`), vis-network physics/layout options (`VIS_OPTIONS`), priority column ordering for the table renderer (`TABLE_PRIORITY_COLUMNS`), and dropdown option metadata used across modules. |
 | `tdash-dataset-registry.js` | Defines `DATASET_REGISTRY`: each entry names the JSON file(s) to fetch, the merge strategy, the topology adaptor mode, and the default link filter for that dataset. |
 | `tdash-dataset.js` | Dataset loading pipeline — fetches JSON file(s) from the server, applies the client-side merge, and enriches nodes with static device labels from the extaddr map. |

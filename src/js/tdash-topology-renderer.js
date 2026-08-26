@@ -44,7 +44,11 @@ import {
 } from "./tdash-filters.js";
 import { rowMatchesSearch, parseSearchQuery } from "./tdash-search.js";
 import { runAdaptor } from "./tdash-adaptors.js";
-import { computeDatasetCounts } from "./tdash-topology-utils.js";
+import {
+  buildTopologyEdgeIndexes,
+  computeDatasetCounts,
+  expandVisibleRelationship,
+} from "./tdash-topology-utils.js";
 
 // ── Module-level state ────────────────────────────────────────────────────────
 
@@ -2175,6 +2179,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
 
   const nodesDataset = new vis.DataSet(nodeData);
   const edgesDataset = new vis.DataSet(edgeData);
+  const topologyEdgeIndexes = buildTopologyEdgeIndexes(edgeData);
 
   const nodeIdByRloc16 = new Map();
   const nodeIdByExtaddr = new Map();
@@ -2280,6 +2285,24 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
     const matchedTargetNodeIds = new Set();
     let visibleEdgeCount = 0;
 
+    function expandDiagnosticMatch(sourceId, targetId, categories, diagnosticRecord) {
+      for (const category of categories) {
+        expandVisibleRelationship(
+          {
+            sourceId,
+            targetId,
+            category,
+            directed: false,
+            diagnosticRecord,
+            optionValue: diagnosticFilterMode,
+          },
+          topologyEdgeIndexes,
+          visibleNodeIds,
+          forcedVisibleEdgeIds,
+        );
+      }
+    }
+
     nodesDataset.forEach((node) => {
       if (
         isNodeVisibleByFilter(node, nodeFilterMode) &&
@@ -2325,19 +2348,12 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
             const targetId = resolveDiagnosticTargetNodeId(neighbor);
             if (!targetId) return;
             matchedTargetNodeIds.add(targetId);
-            visibleNodeIds.add(targetId);
-            edgesDataset.forEach((edge) => {
-              const cats = normalizeLinkCategories(edge.linkCategories);
-              if (!cats.includes(EDGE_CATEGORY_ROUTER_NEIGHBOR)) return;
-              if (
-                (areNodeIdsEquivalent(edge.from, sourceNodeId) &&
-                  areNodeIdsEquivalent(edge.to, targetId)) ||
-                (areNodeIdsEquivalent(edge.to, sourceNodeId) &&
-                  areNodeIdsEquivalent(edge.from, targetId))
-              ) {
-                forcedVisibleEdgeIds.add(edge.id);
-              }
-            });
+            expandDiagnosticMatch(
+              sourceNodeId,
+              targetId,
+              [EDGE_CATEGORY_ROUTER_NEIGHBOR],
+              neighbor,
+            );
           });
       });
     }
@@ -2358,23 +2374,12 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
             const childId = resolveDiagnosticTargetNodeId(child);
             if (!childId) return;
             matchedTargetNodeIds.add(childId);
-            visibleNodeIds.add(childId);
-            edgesDataset.forEach((edge) => {
-              const cats = normalizeLinkCategories(edge.linkCategories);
-              if (
-                !cats.includes(EDGE_CATEGORY_DEFAULT_CHILDREN) &&
-                !cats.includes(EDGE_CATEGORY_OTBR_CHILD)
-              )
-                return;
-              if (
-                (areNodeIdsEquivalent(edge.from, parentNodeId) &&
-                  areNodeIdsEquivalent(edge.to, childId)) ||
-                (areNodeIdsEquivalent(edge.to, parentNodeId) &&
-                  areNodeIdsEquivalent(edge.from, childId))
-              ) {
-                forcedVisibleEdgeIds.add(edge.id);
-              }
-            });
+            expandDiagnosticMatch(
+              parentNodeId,
+              childId,
+              [EDGE_CATEGORY_DEFAULT_CHILDREN, EDGE_CATEGORY_OTBR_CHILD],
+              child,
+            );
           });
       });
     }
@@ -2393,23 +2398,12 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
             const childId = resolveDiagnosticTargetNodeId(child);
             if (!childId) return;
             matchedTargetNodeIds.add(childId);
-            visibleNodeIds.add(childId);
-            edgesDataset.forEach((edge) => {
-              const cats = normalizeLinkCategories(edge.linkCategories);
-              if (
-                !cats.includes(EDGE_CATEGORY_DEFAULT_CHILDREN) &&
-                !cats.includes(EDGE_CATEGORY_OTBR_CHILD)
-              )
-                return;
-              if (
-                (areNodeIdsEquivalent(edge.from, parentNodeId) &&
-                  areNodeIdsEquivalent(edge.to, childId)) ||
-                (areNodeIdsEquivalent(edge.to, parentNodeId) &&
-                  areNodeIdsEquivalent(edge.from, childId))
-              ) {
-                forcedVisibleEdgeIds.add(edge.id);
-              }
-            });
+            expandDiagnosticMatch(
+              parentNodeId,
+              childId,
+              [EDGE_CATEGORY_DEFAULT_CHILDREN, EDGE_CATEGORY_OTBR_CHILD],
+              child,
+            );
           });
       });
     }

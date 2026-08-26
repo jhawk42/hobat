@@ -3,20 +3,20 @@
 The dashboard and Python merge pipeline support canonical identity matching across these fields:
 
 - `rloc16`
-- `extAddress`,`extaddr`,  and `Extended MAC` as one canonical `extaddr` identity
-- `omr_ipv6_addr`
+- `extAddress`, with `extaddr` and `Extended MAC` accepted as aliases
+- `omrIpv6Address`, with `omr_ipv6_addr` accepted as an alias
 
 ## Supported dashboard merge strategies:
 
 - `none`: pass loaded JSON through without dashboard row merging
 - `by-rloc16`: merge rows only when `rloc16` matches
-- `by-identity`: merge rows when any canonical identity matches in this order of use: canonical `extaddr`, `omr_ipv6_addr`, `rloc16`
+- `by-identity`: merge rows when any canonical identity matches in this order of use: `extAddress`, `omrIpv6Address`, `rloc16`
 
 ## How `by-identity` merge works:
 
 1. **Collect identity values** — for each incoming record, extract up to three canonical identifiers:
-   - `extaddr`: first non-empty value found among the aliases `extaddr`, `extAddress`, `Extended MAC`, lowercased and trimmed
-   - `omr_ipv6_addr`: lowercased and trimmed
+   - `extAddress`: first non-empty value found among the accepted aliases, lowercased and trimmed
+   - `omrIpv6Address`: lowercased and trimmed
    - `rloc16`: lowercased and trimmed
 2. **Find candidate nodes** — look up each identity value in the existing index (`by_extaddr`, `by_omr`, `by_rloc16`). All matching node IDs are collected as candidates.
 3. **Merge or create**:
@@ -94,18 +94,48 @@ Handles 160+ field alias mappings between different data sources:
 - REST API sources: camelCase (e.g., `idSequence`, `routeData`)
 - Legacy sources: mixed conventions
 
-**Normalization Process:**
-- All fields normalized to canonical snake_case form
-- Bidirectional alias mapping preserves backward compatibility
+**Current normalization process:**
+- Legacy merge internals use a mixture of snake_case canonical aliases and camelCase output conversion.
+- `td_device_fields.py` and `tdash-device-fields.js` own the canonical field,
+   transform, placeholder, and identity APIs for their runtimes.
+- The versioned `thread_device_field_model.json` contract keeps both runtime
+   registries and normalization behavior in parity.
+
+**Common field model:**
+- OTBR REST API camelCase paths are the preferred names when a CLI and REST field are verified semantic equivalents.
+- Field-name authority is independent from source-value precedence. A REST field name can be canonical while a more detailed CLI observation supplies the winning value.
+- REST-only fields must survive normalization and merge.
+- CLI-only topology, collector, label, and derived fields remain documented extensions with provenance.
+- JSON:API `data`, `attributes`, `relationships`, and collection `meta` are transport envelopes, not device fields.
 
 **Example Aliases:**
 ```
-extAddress → extaddr
-omrIpv6Address → omr_ipv6_addr
-idSequence → id_sequence
-childTable → children
-leaderData → leader_data
+extaddr → extAddress
+omr_ipv6_addr → omrIpv6Address
+id_sequence → idSequence
+leader_data → leaderData
 ```
+
+These examples show the target preferred output direction. `children` and `childTable` represent different diagnostic collections and must not be collapsed in the common model.
+
+### 4.1 CLI/REST Field Coverage
+
+The field-model contract classifies the differences observed in the 2026-08-26
+checked-in snapshots as follows:
+
+| Category | REST API names | CLI names or additions |
+|---|---|---|
+| Mode | `fullThreadDevice`, `fullNetworkData`, `rxOnWhenIdle` | `deviceType`, `networkData`, `rxOnWhenIdle`, derived `device` |
+| Role/EUI | `isLeader`, `isBorderRouter`, `isRouter`, `isPrimaryBBR`, `eui` | `leader`, `br`, `isRouter`, `eui64` |
+| MLE counters | `partIdChangesCount`, `newParentCount`, `betterPartIdAttachAttemptsCount`, role counts and times | `partitionIdChanges`, `parentChanges`, `betterPartitionAttachAttempts`, role counters, `totalParentPartitionChanges` |
+| Relationships | `children`, `childTable`, `childIpv6Addresses`, `routerNeighbors` with detailed metrics | `children`, `childTable`, `links1`/`links2`/`links3`, labels, counts, and route enrichment |
+| REST-only state | `mlEidIid`, `rlocAddress`, `state`, `updated`, `hostname`, `routerCount`, `baId`, `baState`, `hostsService`, `brCounters` | No equivalent in the reviewed CLI snapshots |
+| CLI-only enrichment | No direct equivalent | `deviceLabel`, `tlvValues`, link summaries, route labels/link type, and collector error metadata |
+
+Work items `PY-14`, `JS-13`, `PY-11`, and `JS-02` are implemented. The shared
+catalog classifies every maintained snapshot path, and Python/JavaScript tests
+enforce matching metadata, canonical output, identity keys, placeholders, and
+idempotence. See the [completed Phase 2 field-model plan](../plan/inbox/2026_08_phase_2_thread_device_field_model_plan.md) and [Phase 3 merge-policy plan](../plan/inbox/2026_08_phase_3_explicit_merge_policy_plan.md).
 
 ### 5. mDNS Integration
 
@@ -137,6 +167,12 @@ Merges service discovery data from four mDNS scopes:
 ### 6. Source Precedence Rules
 
 When conflicts occur, source precedence determines the winner:
+
+- Sources are stable-sorted by descending configured priority before merge.
+- Equal-priority and unknown sources preserve caller order; unknown sources use priority zero.
+- Generic fields use first-non-empty-wins. A different non-empty incoming value is recorded as a conflict rather than replacing the retained value.
+- Domain handlers may select a newer route sequence or mDNS observation according to their explicit sequence, partition, timestamp, and event rules.
+- Python `MergeContext` and the JavaScript context factory carry source priority, owner, partition, Matter mode, field path, conflict target, and the 20-entry conflict limit through nested merges.
 
 | Source | Priority | Description |
 |--------|----------|-------------|
@@ -177,15 +213,25 @@ All merged records include metadata:
 {
   "_merge_conflicts": [
     {
-      "field_path": "mode",
-      "current": "rn",
-      "incoming": "r",
-      "resolution": "kept current",
-      "incoming_source": "td-otbr-cli-meshdiag-topology.json"
+         "path": "mode.device",
+         "current": "FTD",
+         "incoming": "MTD"
     }
   ]
 }
 ```
+
+Conflicts preserve raw JSON-compatible values, are deduplicated in stable
+order, and are bounded to 20 entries per merged record.
+
+### Phase 3 Validation
+
+The 2026-08-26 cached-snapshot validation produced 64 records, matching the
+checked-in merged snapshot: 47 records with extAddress, 32 with RLOC16, and 47
+with OMR identity. All 64 records retained source provenance and no duplicate
+extAddress identity key was produced. The report loaded 15 sources and recorded
+47 multi-source nodes, 17 single-source nodes, zero identity collisions, and a
+viable required seed.
 
 ## Performance Characteristics
 
@@ -260,6 +306,26 @@ Legacy sources (1):
 - `td-eve-topology.json`
 
 ## Usage
+
+### Command orchestration
+
+The merge command keeps data policy separate from command lifecycle:
+
+1. `resolve_merge_command_inputs(...)` expands groups, applies stable
+   deduplication/exclusions, classifies explicit files as required, and resolves
+   all paths without loading JSON.
+2. `load_merge_supporting_data(...)` loads the optional label map and Thread
+   network metadata with fallback diagnostics.
+3. `build_merge_output(...)` loads each selected source once, invokes the
+   canonical merge boundary or pass-through strategy, augments the report, and
+   returns a pure viability result.
+4. `write_merge_outputs(...)` atomically publishes the merged output and the
+   optional report.
+
+Exit codes remain `0` for success, `3` for a non-viable result or unexpected
+runtime failure, `4` for missing required input, and `5` for invalid payloads.
+Non-viable results preserve the established policy of writing requested output
+and report artifacts before returning `3`.
 
 ```bash
 # Basic merge with defaults
@@ -783,8 +849,6 @@ The merged output (`td-merged-topology-all.json`) is a JSON array of device reco
 - Special handling for routes, children, and mDNS data
 
 ### Troubleshooting
-
-See [doc/merge_thread_device_info.md](doc/merge_thread_device_info.md) for detailed troubleshooting guidance.
 
 **Common Issues:**
 

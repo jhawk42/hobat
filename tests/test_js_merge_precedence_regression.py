@@ -1,10 +1,43 @@
 from __future__ import annotations
 
-from pathlib import Path
+import json
 import re
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from merge_dataset import SOURCE_PRECEDENCE
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+RUNNER = REPO_ROOT / "tests" / "js" / "run-merge-policy-metadata.mjs"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_javascript_policy_metadata_matches_python() -> None:
+    completed = subprocess.run(
+        ["node", "--experimental-default-type=module", str(RUNNER)],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result["sourcePrecedence"] == SOURCE_PRECEDENCE
+    assert set(result["handlerPaths"]) == {
+        "route",
+        "children",
+        "childTable",
+        "childIpv6Addresses",
+        "routerNeighbors",
+    }
+    assert result["context"]["existingPriority"] == 10
+    assert result["context"]["incomingPriority"] == 0
+    assert result["contextFrozen"] is True
+
+
 MERGE_JS = REPO_ROOT / "src" / "js" / "tdash-merge.js"
 ADAPTORS_JS = REPO_ROOT / "src" / "js" / "tdash-adaptors.js"
 

@@ -4,6 +4,7 @@ import {
   getColumnValue,
   getCanonicalExtaddr,
   getCanonicalOmrIpv6Address,
+  areNodeIdsEquivalent,
 } from "./tdash-utils.js";
 import { normalizeLinkCategories } from "./tdash-filters.js";
 import {
@@ -17,6 +18,72 @@ import {
 import { EDGE_CATEGORY_LABELS } from "./tdash-constants.js";
 
 let _isolatedAnchorPresetName = ISOLATED_ANCHOR_PRESET_A;
+
+function normalizedTopologyNodeId(value) {
+  return toText(value).toLowerCase();
+}
+
+export function topologyEndpointPairKey(sourceId, targetId, directed = false) {
+  const source = normalizedTopologyNodeId(sourceId);
+  const target = normalizedTopologyNodeId(targetId);
+  if (!source || !target) return "";
+  return directed ? `${source}\u0000${target}` : [source, target].sort().join("\u0000");
+}
+
+export function buildTopologyEdgeIndexes(edgeData) {
+  const byEndpointPair = new Map();
+  const incidentByNodeId = new Map();
+  const byCategory = new Map();
+
+  const append = (index, key, edge) => {
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push(edge);
+  };
+
+  for (const edge of Array.isArray(edgeData) ? edgeData : []) {
+    const sourceId = normalizedTopologyNodeId(edge?.from);
+    const targetId = normalizedTopologyNodeId(edge?.to);
+    if (!sourceId || !targetId) continue;
+    const pairKey = topologyEndpointPairKey(sourceId, targetId, edge.directed === true);
+    append(byEndpointPair, pairKey, edge);
+    append(incidentByNodeId, sourceId, edge);
+    if (targetId !== sourceId) append(incidentByNodeId, targetId, edge);
+    for (const category of new Set(normalizeLinkCategories(edge.linkCategories))) {
+      append(byCategory, category, edge);
+    }
+  }
+
+  return { byEndpointPair, incidentByNodeId, byCategory };
+}
+
+export function expandVisibleRelationship(
+  match,
+  indexes,
+  visibleNodeIds,
+  forcedEdgeIds,
+) {
+  const pairKey = topologyEndpointPairKey(match?.sourceId, match?.targetId, match?.directed === true);
+  if (!pairKey) return { matchedEdgeCount: 0, expanded: false };
+  const candidates = indexes?.byEndpointPair?.get(pairKey) ?? [];
+  let matchedEdgeCount = 0;
+
+  for (const edge of candidates) {
+    if (edge.baseHidden === true) continue;
+    if (!normalizeLinkCategories(edge.linkCategories).includes(match.category)) continue;
+    const forward = areNodeIdsEquivalent(edge.from, match.sourceId)
+      && areNodeIdsEquivalent(edge.to, match.targetId);
+    const reverse = match.directed !== true
+      && areNodeIdsEquivalent(edge.to, match.sourceId)
+      && areNodeIdsEquivalent(edge.from, match.targetId);
+    if (!forward && !reverse) continue;
+    visibleNodeIds.add(match.sourceId);
+    visibleNodeIds.add(match.targetId);
+    if (edge.id !== undefined && edge.id !== null) forcedEdgeIds.add(edge.id);
+    matchedEdgeCount += 1;
+  }
+
+  return { matchedEdgeCount, expanded: matchedEdgeCount > 0 };
+}
 
 export function setIsolatedAnchorPreset(name) {
   const key = typeof name === "string" ? name.toLowerCase() : "";

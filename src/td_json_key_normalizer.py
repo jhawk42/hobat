@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from td_device_fields import PREFERRED_FIELD_NAMES
+
 
 # Explicit mappings for keys that do not follow simple snake_case -> camelCase.
 EXPLICIT_KEY_MAP: dict[str, str] = {
@@ -203,6 +205,7 @@ EXPLICIT_KEY_MAP: dict[str, str] = {
 
 
 _SNAKE_RE = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)+$")
+_CONTEXT_SENSITIVE_KEYS = frozenset({"route_data"})
 
 
 def _snake_to_camel(name: str) -> str:
@@ -212,6 +215,10 @@ def _snake_to_camel(name: str) -> str:
 
 def canonical_camel_key(key: str) -> str:
     """Convert a single key into canonical camelCase form."""
+    preferred = None if key in _CONTEXT_SENSITIVE_KEYS else PREFERRED_FIELD_NAMES.get(key)
+    if preferred is not None and "." not in preferred:
+        return preferred
+
     if key in EXPLICIT_KEY_MAP:
         return EXPLICIT_KEY_MAP[key]
 

@@ -1,8 +1,14 @@
 import {
-  MERGE_IDENTITY_FIELDS,
   FIELD_ALIASES,
   DEVICE_DETAILS_SECTIONS,
 } from "./tdash-constants.js";
+import {
+  getCanonicalExtAddress,
+  getCanonicalOmrAddress,
+  getCanonicalRloc16 as getDeviceCanonicalRloc16,
+  normalizeIdentifierText,
+  normalizeInputRecord,
+} from "./tdash-device-fields.js";
 
 // ── Primitive type helpers ────────────────────────────────────────────────────
 
@@ -23,26 +29,19 @@ export function isPlainObject(value) {
 // ── Canonical identity helpers ────────────────────────────────────────────────
 
 export function canonicalIdText(value) {
-  const text = toText(value);
-  return text ? text.toLowerCase() : "";
+  return normalizeIdentifierText(value);
 }
 
 export function getCanonicalRloc16(row) {
-  return canonicalIdText(row?.[MERGE_IDENTITY_FIELDS.rloc16]);
+  return getDeviceCanonicalRloc16(row);
 }
 
 export function getCanonicalExtaddr(row) {
-  for (const key of MERGE_IDENTITY_FIELDS.extaddrAliases) {
-    const value = canonicalIdText(row?.[key]);
-    if (value) return value;
-  }
-  return "";
+  return getCanonicalExtAddress(row);
 }
 
 export function getCanonicalOmrIpv6Address(row) {
-  if (!isPlainObject(row)) return "";
-  const value = _getOwnPropertyValueByAlias(row, "omrIpv6Address");
-  return canonicalIdText(value);
+  return getCanonicalOmrAddress(row);
 }
 
 // ── Field-name normalisation helpers ─────────────────────────────────────────
@@ -347,7 +346,6 @@ function enrichRouterIdentityHints(row) {
   const isRouter = rloc16Text.endsWith("00");
   if (isRouter) {
     row.isRouter = true;
-    row.is_router = true;
     if (!toText(row.role)) row.role = "router";
     if (!toText(row.type)) row.type = "router";
   }
@@ -358,10 +356,7 @@ function enrichRouterIdentityHints(row) {
   const isBorderRouter = isBorderRouterFromIpv6Addresses(ipv6Addresses);
   if (isBorderRouter) {
     row.isBorderRouter = true;
-    row.is_border_router = true;
-    row.br = true;
     row.isRouter = true;
-    row.is_router = true;
     row.role = "border router";
     if (!toText(row.type)) row.type = "border router";
   }
@@ -373,26 +368,36 @@ function enrichRouterIdentityHints(row) {
 
 export function normalizeRowMergeAliases(row, options = {}) {
   if (!isPlainObject(row)) return row;
-  // Step 1: normalize field names (camelCase-first, plus legacy aliases)
-  let normalized = normalizeFieldNames(row);
+  let normalized = normalizeInputRecord(row, options);
+  const serviceInfo = normalized.serviceInfo ?? normalized.service_info;
+  if (isPlainObject(serviceInfo)) {
+    const properties = isPlainObject(serviceInfo.properties)
+      ? Object.fromEntries(
+        Object.entries(serviceInfo.properties).map(([key, value]) => [
+          key === "FabricID_compressed" ? "fabricIdCompressed" : (key === "NodeID" ? "nodeId" : key),
+          value,
+        ]),
+      )
+      : serviceInfo.properties;
+    normalized = {
+      ...normalized,
+      serviceInfo: { ...serviceInfo, properties },
+    };
+    delete normalized.service_info;
+  }
   // Step 2: canonical identity fields
   const extaddr = getCanonicalExtaddr(normalized);
   let omrIpv6Addr = getCanonicalOmrIpv6Address(normalized);
   if (extaddr) {
     if (!normalized.extAddress) normalized.extAddress = extaddr;
-    if (!normalized.extaddr) normalized.extaddr = extaddr;
   }
   if (!omrIpv6Addr && options.omrPrefix) {
     omrIpv6Addr = getOmrIpv6FromIpv6Addrs(normalized, options.omrPrefix);
   }
   if (omrIpv6Addr) {
-    if (!normalized.omrIpv6Addr) normalized.omrIpv6Addr = omrIpv6Addr;
     if (!normalized.omrIpv6Address) normalized.omrIpv6Address = omrIpv6Addr;
-    if (!normalized.omr_ipv6_addr) normalized.omr_ipv6_addr = omrIpv6Addr;
   }
-  // Step 3: enrich router/border-router hints from identity and IPv6 data
-  normalized = enrichRouterIdentityHints(normalized);
-  // Step 4: derive mode.device (FTD/MTD) when not already set
+  // Step 3: derive mode.device (FTD/MTD) when not already set
   const existingModeDevice = normalized?.mode?.device ?? normalized?.["mode.device"];
   if (!existingModeDevice) {
     const derived = deriveModeDevice(normalized);
@@ -404,7 +409,7 @@ export function normalizeRowMergeAliases(row, options = {}) {
       }
     }
   }
-  // Step 5: optional route container canonicalization (route_data -> route.routeData)
+  // Step 4: optional route container canonicalization (route_data -> route.routeData)
   normalized = normalizeRouteContainer(normalized, options);
   return normalized;
 }

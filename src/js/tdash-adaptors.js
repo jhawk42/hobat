@@ -22,6 +22,10 @@ import {
   addEdge, groupIsolatedUnknownNodes, buildVisNodeData,
   lqStyleFromField, lqStyleFromAvgLqi, lqStyleFromLinkMargin
 } from './tdash-topology-utils.js';
+import {
+  createAdaptorModelFromResult,
+  emitAdaptorResult,
+} from './tdash-adaptor-model.js';
 
 // ── File name constants ───────────────────────────────────────────────────────
 
@@ -53,6 +57,10 @@ const MESHDIAG_PRIMARY_FILES = new Set([
 
 /** Coerce a value to an array; returns [] if value is not already an array. */
 function asArray(value) { return Array.isArray(value) ? value : []; }
+
+function emitThroughAdaptorModel(result) {
+  return emitAdaptorResult(createAdaptorModelFromResult(result));
+}
 
 /**
  * Build a Map<filename, loadedData> from the registry entry's files list and
@@ -623,7 +631,7 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
 
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 
-  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, routerChildByRloc16, sourceNames };
+  return emitThroughAdaptorModel({ nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, routerChildByRloc16, sourceNames });
 }
 
 // ── Adaptor 2: Eve topology ───────────────────────────────────────────────────
@@ -748,7 +756,7 @@ export function adaptEve(fileMap) {
 
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 
-  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['eve'] };
+  return emitThroughAdaptorModel({ nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['eve'] });
 }
 
 // ── Adaptor 2b: Eve native topology (Eve Thread Network Layout.evethreadlayout) ──
@@ -877,7 +885,7 @@ export function adaptEveNative(fileMap) {
 
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 
-  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['eve_native'] };
+  return emitThroughAdaptorModel({ nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['eve_native'] });
 }
 
 // ── Adaptor 2c: Thread Tools native diagnostics (diagnostics.json) ───────────
@@ -1207,7 +1215,7 @@ export function adaptThreadToolsNative(fileMap) {
 
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 
-  return {
+  return emitThroughAdaptorModel({
     nodeData,
     edgeData,
     nodeMap,
@@ -1215,7 +1223,7 @@ export function adaptThreadToolsNative(fileMap) {
     routerNeighborByRloc16,
     routerChildByRloc16,
     sourceNames: ['thread_tools_native'],
-  };
+  });
 }
 
 // ── Adaptor 3: Merged detailed topology ──────────────────────────────────────
@@ -1492,7 +1500,7 @@ export function adaptMergedDetailed(fileMap) {
 
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 
-  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, routerChildByRloc16, sourceNames: ['merged-detailed'] };
+  return emitThroughAdaptorModel({ nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, routerChildByRloc16, sourceNames: ['merged-detailed'] });
 }
 
 // ── Adaptor 4: Router table (Nodes from ID/rloc16, edges from Next Hop) ───────
@@ -1556,7 +1564,7 @@ export function adaptRouterTable(fileMap) {
 
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 
-  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['router-table'] };
+  return emitThroughAdaptorModel({ nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['router-table'] });
 }
 
 // ── Adaptor 5: Raw array generic fallback ─────────────────────────────────────
@@ -1636,7 +1644,7 @@ export function adaptRawArray(fileMap) {
 
   groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap);
 
-  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['raw-array'] };
+  return emitThroughAdaptorModel({ nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, sourceNames: ['raw-array'] });
 }
 
 // ── Adaptor 6: OTBR REST API (devices + diagnostics) ─────────────────────────
@@ -1646,43 +1654,34 @@ export function adaptRawArray(fileMap) {
 // Diagnostics provide: extAddress, rloc16, route.routeData[], childTable[].
 // Primary node ID = extAddress (lowercase). Merged by extAddress identity.
 
-export function adaptOtbrRestApi(fileMap, mergedRows = []) {
+export function extractOtbrRestApiItems(raw) {
+  if (!raw) return [];
+  const items = Array.isArray(raw)
+    ? raw
+    : (Array.isArray(raw.data) ? raw.data : (isPlainObject(raw) && raw.extAddress ? [raw] : []));
+  return items
+    .filter(isPlainObject)
+    .map((item) => ({
+      ...item,
+      ...(isPlainObject(item.attributes) ? item.attributes : {}),
+    }));
+}
+
+export function extractOtbrRestApiSources(fileMap) {
   const devicesRaw = fileMap.get(FILE_RESTAPI_DEVICES) ?? fileMap.get(FILE_RESTAPI_DEVICES_LIST) ?? fileMap.get(FILE_RESTAPI_DEVICES_FETCH);
-  
-  // Load both basic diagnostics AND mesh diagnostics (which has link quality data)
-  // Prioritize mesh-diagnostics-fetch-all over diagnostics-fetch-all when both are present
-  const diagRaw = fileMap.get(FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL);
-  
-  // If we have BOTH mesh-diagnostics AND regular diagnostics, load the basic one too for additional fields
-  const basicDiagRaw = fileMap.has(FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL) 
+  const meshDiagnosticsRaw = fileMap.get(FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL);
+  const diagRaw = meshDiagnosticsRaw ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL);
+  const basicDiagRaw = fileMap.has(FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL)
     ? (fileMap.get(FILE_RESTAPI_DIAGNOSTICS) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_LIST) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH) ?? fileMap.get(FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL))
     : null;
-  
-  // Accept JSON:API envelope ({data:[...]}), pre-flattened array, or a single diagnostic object
-  function extractItems(raw) {
-    if (!raw) return [];
-    if (Array.isArray(raw)) return raw;
-    if (Array.isArray(raw.data)) return raw.data;
-    if (isPlainObject(raw) && raw.extAddress) return [raw]; // single diagnostic record
-    return [];
-  }
-  const devicesData = extractItems(devicesRaw);
-  const diagData = extractItems(diagRaw);
-  const basicDiagData = extractItems(basicDiagRaw);
+  const devices = extractOtbrRestApiItems(devicesRaw);
+  const diagnostics = extractOtbrRestApiItems(diagRaw);
+  const basicDiagnostics = extractOtbrRestApiItems(basicDiagRaw);
+  const hasMeshDiagnostics = extractOtbrRestApiItems(meshDiagnosticsRaw).length > 0;
+  const hasBasicDiagnostics = hasMeshDiagnostics
+    ? basicDiagnostics.length > 0
+    : diagnostics.length > 0;
 
-  // Flatten each item: merge top-level fields + attributes sub-object
-  function flattenRestApiItem(item) {
-    if (!isPlainObject(item)) return item;
-    const attrs = isPlainObject(item.attributes) ? item.attributes : {};
-    return { ...item, ...attrs };
-  }
-
-  const devices = devicesData.map(flattenRestApiItem);
-  const diagnostics = diagData.map(flattenRestApiItem);
-  const basicDiagnostics = basicDiagData.map(flattenRestApiItem);
-  
-  // Merge basic diagnostics with mesh diagnostics (mesh diagnostics take precedence)
-  // If we have both, combine them by extAddress so we get both basic fields AND link quality data
   if (basicDiagnostics.length > 0) {
     const basicByExtaddr = new Map();
     basicDiagnostics.forEach(item => {
@@ -1690,16 +1689,24 @@ export function adaptOtbrRestApi(fileMap, mergedRows = []) {
       if (extaddr) basicByExtaddr.set(extaddr, item);
     });
     
-    // Merge basic data into diagnostics for matching extAddresses
     diagnostics.forEach((item, index) => {
       const extaddr = toText(item.extAddress).toLowerCase();
       const basic = basicByExtaddr.get(extaddr);
       if (basic) {
-        // Merge basic fields into item (mesh fields take precedence)
         diagnostics[index] = { ...basic, ...item };
       }
     });
   }
+
+  return { devices, diagnostics, hasBasicDiagnostics, hasMeshDiagnostics };
+}
+
+export function adaptOtbrRestApi(fileMap, mergedRows = []) {
+  const sources = extractOtbrRestApiSources(fileMap);
+  return emitAdaptorResult(buildOtbrRestApiModel(sources, mergedRows));
+}
+
+export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostics = diagnostics.length > 0, hasMeshDiagnostics = false }, mergedRows = []) {
 
   const nodeMap = new Map();
   const rawByIdForDetails = new Map();
@@ -1958,25 +1965,29 @@ export function adaptOtbrRestApi(fileMap, mergedRows = []) {
 
   const sourceNames = [];
   if (devices.length > 0) sourceNames.push('otbr_restapi_devices');
-  if (diagnostics.length > 0) sourceNames.push('otbr_restapi_diagnostics');
+  if (hasBasicDiagnostics) sourceNames.push('otbr_restapi_diagnostics');
+  if (hasMeshDiagnostics) sourceNames.push('restapi_mesh_diagnostics');
 
-  return { nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, routerChildByRloc16, sourceNames };
+  return createAdaptorModelFromResult({ nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, routerChildByRloc16, sourceNames });
 }
 
-// ── Dispatch: pick adaptor based on topologyMode ──────────────────────────────
+// ── Dispatch: pick adaptor from the dataset registry identifier ───────────────
+
+export const ADAPTOR_HANDLERS = Object.freeze({
+  'meshdiag-networkdiag': (fileMap, rows) => adaptMeshdiagNetworkdiag(fileMap, rows),
+  'merged-detailed': (fileMap) => adaptMergedDetailed(fileMap),
+  'eve-enhanced': (fileMap) => adaptEve(fileMap),
+  'eve-native': (fileMap) => adaptEveNative(fileMap),
+  'thread-tools-native': (fileMap) => adaptThreadToolsNative(fileMap),
+  'router-table': (fileMap) => adaptRouterTable(fileMap),
+  'otbr-restapi': (fileMap, rows) => adaptOtbrRestApi(fileMap, rows),
+  'raw-array': (fileMap) => adaptRawArray(fileMap),
+});
 
 export function runAdaptor(dataset) {
   const { entry, rawFiles, rows } = dataset;
   const fileMap = buildFileMap(entry.files || [], rawFiles);
-  switch (entry.topologyMode) {
-    case 'meshdiag-networkdiag': return adaptMeshdiagNetworkdiag(fileMap, rows);
-    case 'merged-detailed': return adaptMergedDetailed(fileMap);
-    case 'eve_enhanced': return adaptEve(fileMap);
-    case 'eve_native': return adaptEveNative(fileMap);
-    case 'thread_tools_native': return adaptThreadToolsNative(fileMap);
-    case 'router-table': return adaptRouterTable(fileMap);
-    case 'otbr_restapi': return adaptOtbrRestApi(fileMap, rows);
-    case 'raw-array':
-    default: return adaptRawArray(fileMap);
-  }
+  const handler = ADAPTOR_HANDLERS[entry.adaptor];
+  if (!handler) throw new Error(`Unknown adaptor: ${entry.adaptor}`);
+  return handler(fileMap, rows);
 }

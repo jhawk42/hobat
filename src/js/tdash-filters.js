@@ -356,11 +356,13 @@ export function computeTableCapabilities(rows) {
     if (Number.isFinite(toFiniteNumber(macDiscard)))
       hasFieldMacDiscardPct = true;
 
-    const partChanges = getColumnValue(row, "mle_counters.partitionidchanges");
+    const partChanges = getColumnValue(row, "mleCounters.partIdChangesCount")
+      ?? getColumnValue(row, "mle_counters.partitionidchanges");
     if (Number.isFinite(toFiniteNumber(partChanges)))
       hasFieldPartitionChanges = true;
 
-    const parentChanges = getColumnValue(row, "mle_counters.parentchanges");
+    const parentChanges = getColumnValue(row, "mleCounters.newParentCount")
+      ?? getColumnValue(row, "mle_counters.parentchanges");
     if (Number.isFinite(toFiniteNumber(parentChanges)))
       hasFieldParentChanges = true;
 
@@ -529,6 +531,11 @@ function normalizeDiagnosticSourceValue(sourceValue) {
   return sourceValue;
 }
 
+export function isDiagnosticOptionAvailable(option, capabilities) {
+  if (!option || option.alwaysShow === true) return true;
+  return capabilities?.[option.capabilityKey] === true;
+}
+
 // ── Populate diagnostic filter by source with capability checking ──────────────
 //
 // Populates the diagnostic-filter select based on the selected source and the
@@ -542,52 +549,6 @@ export function populateDiagnosticFilterBySourceWithCapabilities(sourceValue, ca
   el.innerHTML = "";
   sourceValue = normalizeDiagnosticSourceValue(sourceValue);
 
-  // Build capability mapping for diagnostic filters (same as in updateFilterOptionVisibility)
-  const diagCapabilityByValue = {
-    "medium-partition-changes": capabilities?.hasFieldPartitionChanges,
-    "high-partition-changes": capabilities?.hasFieldPartitionChanges,
-    "medium-parent-changes": capabilities?.hasFieldParentChanges,
-    "high-parent-changes": capabilities?.hasFieldParentChanges,
-    "router-neighbor-err-rate-frame-low": capabilities?.hasNeighborFrameErrRate,
-    "router-neighbor-err-rate-frame-medium": capabilities?.hasNeighborFrameErrRate,
-    "router-neighbor-err-rate-frame-high": capabilities?.hasNeighborFrameErrRate,
-    "router-neighbor-err-rate-frame-critical": capabilities?.hasNeighborFrameErrRate,
-    "router-neighbor-err-rate-msg-low": capabilities?.hasNeighborMsgErrRate,
-    "router-neighbor-err-rate-msg-medium": capabilities?.hasNeighborMsgErrRate,
-    "router-neighbor-err-rate-msg-high": capabilities?.hasNeighborMsgErrRate,
-    "router-neighbor-err-rate-msg-critical": capabilities?.hasNeighborMsgErrRate,
-    "router-neighbor-rss-very-low": capabilities?.hasNeighborRss,
-    "router-neighbor-rss-low": capabilities?.hasNeighborRss,
-    "router-neighbor-rss-medium": capabilities?.hasNeighborRss,
-    "router-neighbor-rss-high": capabilities?.hasNeighborRss,
-    "low-lq3-ratio-medium": capabilities?.hasLinkQualityDistribution,
-    "low-lq3-ratio-high": capabilities?.hasLinkQualityDistribution,
-    "high-lq1-ratio-medium": capabilities?.hasLinkQualityDistribution,
-    "high-lq1-ratio-high": capabilities?.hasLinkQualityDistribution,
-    "child-lq-medium": capabilities?.hasChildLinkQuality,
-    "child-lq-poor": capabilities?.hasChildLinkQuality,
-    "router-child-err-rate-frame-medium": capabilities?.hasChildFrameErrRate,
-    "router-child-err-rate-frame-high": capabilities?.hasChildFrameErrRate,
-    "router-child-err-rate-msg-low": capabilities?.hasChildMsgErrRate,
-    "router-child-err-rate-msg-high": capabilities?.hasChildMsgErrRate,
-    "router-child-rss-very-low": capabilities?.hasChildRss,
-    "router-child-rss-low": capabilities?.hasChildRss,
-    "router-child-rss-margin-low": capabilities?.hasChildRssMargin,
-    "router-child-has-queued-msgs": capabilities?.hasChildQueuedMsgs,
-    "mac-total-errors-ratio-medium": capabilities?.hasFieldMacTotalErrorsRatio,
-    "mac-total-errors-ratio-high": capabilities?.hasFieldMacTotalErrorsRatio,
-    "mac-total-discards-ratio-medium": capabilities?.hasFieldMacTotalDiscardsRatio,
-    "mac-total-discards-ratio-high": capabilities?.hasFieldMacTotalDiscardsRatio,
-    "mle-better-partition-medium": capabilities?.hasFieldBetterPartitionAttach,
-    "mle-better-partition-high": capabilities?.hasFieldBetterPartitionAttach,
-    "mle-total-parent-partition-medium": capabilities?.hasFieldTotalParentPartitionChanges,
-    "mle-total-parent-partition-high": capabilities?.hasFieldTotalParentPartitionChanges,
-    "ftd-router-pct-low": capabilities?.hasFieldRouterPct,
-    "ftd-router-pct-very-low": capabilities?.hasFieldRouterPct,
-    "detached-disabled-pct-medium": capabilities?.hasFieldDetachedDisabledPct,
-    "detached-disabled-pct-high": capabilities?.hasFieldDetachedDisabledPct,
-  };
-
   // Always add the "all" option first
   const allOpt = document.createElement("option");
   allOpt.value = "all";
@@ -600,7 +561,7 @@ export function populateDiagnosticFilterBySourceWithCapabilities(sourceValue, ca
     (entry) => {
       if (entry.source !== sourceValue) return false;
       if (entry.alwaysShow === true) return true;
-      if (diagCapabilityByValue[entry.value] !== true) return false;
+      if (!isDiagnosticOptionAvailable(entry, capabilities)) return false;
       // Only show if there are actual matches for this filter in the active view.
       if (!nodeData) return true;
       if (view === "table") {
@@ -709,52 +670,6 @@ export function updateFilterOptionVisibility(capabilities, view) {
   }
 
   // ── Diagnostic filter ───────────────────────────────────────────────────
-  const diagCapabilityByValue = {
-    "medium-partition-changes": capabilities.hasFieldPartitionChanges,
-    "high-partition-changes": capabilities.hasFieldPartitionChanges,
-    "medium-parent-changes": capabilities.hasFieldParentChanges,
-    "high-parent-changes": capabilities.hasFieldParentChanges,
-    "router-neighbor-err-rate-frame-low": capabilities.hasNeighborFrameErrRate,
-    "router-neighbor-err-rate-frame-medium":
-      capabilities.hasNeighborFrameErrRate,
-    "router-neighbor-err-rate-frame-high": capabilities.hasNeighborFrameErrRate,
-    "router-neighbor-err-rate-frame-critical": capabilities.hasNeighborFrameErrRate,
-    "router-neighbor-err-rate-msg-low": capabilities.hasNeighborMsgErrRate,
-    "router-neighbor-err-rate-msg-medium": capabilities.hasNeighborMsgErrRate,
-    "router-neighbor-err-rate-msg-high": capabilities.hasNeighborMsgErrRate,
-    "router-neighbor-err-rate-msg-critical": capabilities.hasNeighborMsgErrRate,
-    "router-neighbor-rss-very-low": capabilities.hasNeighborRss,
-    "router-neighbor-rss-low": capabilities.hasNeighborRss,
-    "router-neighbor-rss-medium": capabilities.hasNeighborRss,
-    "router-neighbor-rss-high": capabilities.hasNeighborRss,
-    "low-lq3-ratio-medium": capabilities.hasLinkQualityDistribution,
-    "low-lq3-ratio-high": capabilities.hasLinkQualityDistribution,
-    "high-lq1-ratio-medium": capabilities.hasLinkQualityDistribution,
-    "high-lq1-ratio-high": capabilities.hasLinkQualityDistribution,
-    "child-lq-medium": capabilities.hasChildLinkQuality,
-    "child-lq-poor": capabilities.hasChildLinkQuality,
-    "router-child-err-rate-frame-medium": capabilities.hasChildFrameErrRate,
-    "router-child-err-rate-frame-high": capabilities.hasChildFrameErrRate,
-    "router-child-err-rate-msg-low": capabilities.hasChildMsgErrRate,
-    "router-child-err-rate-msg-high": capabilities.hasChildMsgErrRate,
-    "router-child-rss-very-low": capabilities.hasChildRss,
-    "router-child-rss-low": capabilities.hasChildRss,
-    "router-child-rss-margin-low": capabilities.hasChildRssMargin,
-    "router-child-has-queued-msgs": capabilities.hasChildQueuedMsgs,
-    "mac-total-errors-ratio-medium": capabilities.hasFieldMacTotalErrorsRatio,
-    "mac-total-errors-ratio-high": capabilities.hasFieldMacTotalErrorsRatio,
-    "mac-total-discards-ratio-medium": capabilities.hasFieldMacTotalDiscardsRatio,
-    "mac-total-discards-ratio-high": capabilities.hasFieldMacTotalDiscardsRatio,
-    "mle-better-partition-medium": capabilities.hasFieldBetterPartitionAttach,
-    "mle-better-partition-high": capabilities.hasFieldBetterPartitionAttach,
-    "mle-total-parent-partition-medium": capabilities.hasFieldTotalParentPartitionChanges,
-    "mle-total-parent-partition-high": capabilities.hasFieldTotalParentPartitionChanges,
-    "ftd-router-pct-low": capabilities.hasFieldRouterPct,
-    "ftd-router-pct-very-low": capabilities.hasFieldRouterPct,
-    "detached-disabled-pct-medium": capabilities.hasFieldDetachedDisabledPct,
-    "detached-disabled-pct-high": capabilities.hasFieldDetachedDisabledPct,
-  };
-
   const diagFilterEl = document.getElementById("diagnostic-filter");
   Array.from(diagFilterEl.options).forEach((opt) => {
     const meta = DIAGNOSTIC_FILTER_OPTIONS.find((m) => m.value === opt.value);
@@ -763,7 +678,7 @@ export function updateFilterOptionVisibility(capabilities, view) {
       opt.disabled = false;
       return;
     }
-    const available = diagCapabilityByValue[opt.value] === true;
+    const available = isDiagnosticOptionAvailable(meta, capabilities);
     opt.hidden = !available;
     opt.disabled = !available;
   });
@@ -799,270 +714,32 @@ function getDiagnosticOptionByValue(filterMode) {
   return DIAGNOSTIC_FILTER_OPTIONS.find((entry) => entry.value === filterMode);
 }
 
-function getNodeDiagnosticMetric(node, filterMode) {
-  const option = getDiagnosticOptionByValue(filterMode);
-  if (!option?.topoNodeField) return undefined;
-  return toFiniteNumber(node?.[option.topoNodeField]);
-}
-
-function getRowDiagnosticMetric(row, filterMode) {
-  const option = getDiagnosticOptionByValue(filterMode);
-  if (!option?.tableRowField) return undefined;
-  return toFiniteNumber(getColumnValue(row, option.tableRowField));
-}
-
-function isNodeVisibleByDiagnosticFilterLegacy(node, filterMode) {
-  if (filterMode === "medium-partition-changes")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 2;
-  if (filterMode === "high-partition-changes")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 5;
-  if (filterMode === "medium-parent-changes")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 2;
-  if (filterMode === "high-parent-changes")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 5;
-  if (filterMode === "router-neighbor-err-rate-frame-low")
-    return (
-      Number.isFinite(node.router_neighbor_max_err_rate_frame_pct) &&
-      node.router_neighbor_max_err_rate_frame_pct >= 2
-    );
-  if (filterMode === "router-neighbor-err-rate-frame-medium")
-    return (
-      Number.isFinite(node.router_neighbor_max_err_rate_frame_pct) &&
-      node.router_neighbor_max_err_rate_frame_pct >= 5
-    );
-  if (filterMode === "router-neighbor-err-rate-frame-high")
-    return (
-      Number.isFinite(node.router_neighbor_max_err_rate_frame_pct) &&
-      node.router_neighbor_max_err_rate_frame_pct >= 10
-    );
-  if (filterMode === "router-neighbor-err-rate-frame-critical")
-    return (
-      Number.isFinite(node.router_neighbor_max_err_rate_frame_pct) &&
-      node.router_neighbor_max_err_rate_frame_pct >= 30
-    );
-  if (filterMode === "router-neighbor-err-rate-msg-low")
-    return (
-      Number.isFinite(node.router_neighbor_max_err_rate_msg_pct) &&
-      node.router_neighbor_max_err_rate_msg_pct >= 2
-    );
-  if (filterMode === "router-neighbor-err-rate-msg-medium")
-    return (
-      Number.isFinite(node.router_neighbor_max_err_rate_msg_pct) &&
-      node.router_neighbor_max_err_rate_msg_pct >= 5
-    );
-  if (filterMode === "router-neighbor-err-rate-msg-high")
-    return (
-      Number.isFinite(node.router_neighbor_max_err_rate_msg_pct) &&
-      node.router_neighbor_max_err_rate_msg_pct >= 10
-    );
-  if (filterMode === "router-neighbor-err-rate-msg-critical")
-    return (
-      Number.isFinite(node.router_neighbor_max_err_rate_msg_pct) &&
-      node.router_neighbor_max_err_rate_msg_pct >= 30
-    );
-  if (filterMode === "router-neighbor-rss-very-low")
-    return node.router_neighbor_has_rss_very_low === true;
-  if (filterMode === "router-neighbor-rss-low")
-    return node.router_neighbor_has_rss_low === true;
-  if (filterMode === "router-neighbor-rss-medium")
-    return node.router_neighbor_has_rss_medium === true;
-  if (filterMode === "router-neighbor-rss-high")
-    return node.router_neighbor_has_rss_high === true;
-  // Router link quality distribution
-  if (filterMode === "low-lq3-ratio-medium")
-    return Number.isFinite(node.lq3Ratio) && node.lq3Ratio < 0.60;
-  if (filterMode === "low-lq3-ratio-high")
-    return Number.isFinite(node.lq3Ratio) && node.lq3Ratio < 0.35;
-  if (filterMode === "high-lq1-ratio-medium")
-    return Number.isFinite(node.lq1Ratio) && node.lq1Ratio >= 0.20;
-  if (filterMode === "high-lq1-ratio-high")
-    return Number.isFinite(node.lq1Ratio) && node.lq1Ratio >= 0.35;
-  // Children link quality
-  if (filterMode === "child-lq-medium") return node.hasChildLqMedium === true;
-  if (filterMode === "child-lq-poor")   return node.hasChildLqPoor === true;
-  // Router child err rate frame
-  if (filterMode === "router-child-err-rate-frame-medium")
-    return (
-      Number.isFinite(node.router_child_max_err_rate_frame_pct) &&
-      node.router_child_max_err_rate_frame_pct >= 10
-    );
-  if (filterMode === "router-child-err-rate-frame-high")
-    return (
-      Number.isFinite(node.router_child_max_err_rate_frame_pct) &&
-      node.router_child_max_err_rate_frame_pct >= 25
-    );
-  // Router child err rate msg
-  if (filterMode === "router-child-err-rate-msg-low")
-    return (
-      Number.isFinite(node.router_child_max_err_rate_msg_pct) &&
-      node.router_child_max_err_rate_msg_pct >= 1
-    );
-  if (filterMode === "router-child-err-rate-msg-high")
-    return (
-      Number.isFinite(node.router_child_max_err_rate_msg_pct) &&
-      node.router_child_max_err_rate_msg_pct >= 5
-    );
-  // Router child RSS / margin / queued msgs
-  if (filterMode === "router-child-rss-very-low")
-    return node.router_child_has_rss_very_low === true;
-  if (filterMode === "router-child-rss-low")
-    return node.router_child_has_rss_low === true;
-  if (filterMode === "router-child-rss-margin-low")
-    return node.router_child_has_rss_margin_low === true;
-  if (filterMode === "router-child-has-queued-msgs")
-    return node.router_child_has_queued_msgs === true;
-  // Mac total errors ratio
-  if (filterMode === "mac-total-errors-ratio-medium")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 1.0;
-  if (filterMode === "mac-total-errors-ratio-high")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 5.0;
-  // Mac total discards ratio
-  if (filterMode === "mac-total-discards-ratio-medium")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 2.0;
-  if (filterMode === "mac-total-discards-ratio-high")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 8.0;
-  // MLE extended counters
-  if (filterMode === "mle-better-partition-medium")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 2;
-  if (filterMode === "mle-better-partition-high")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 5;
-  if (filterMode === "mle-total-parent-partition-medium")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 3;
-  if (filterMode === "mle-total-parent-partition-high")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 8;
-  // Time statistics
-  if (filterMode === "ftd-router-pct-low")
-    return (
-      node.isFtdRouter === true &&
-      Number.isFinite(node.routerPct) && node.routerPct < 80
-    );
-  if (filterMode === "ftd-router-pct-very-low")
-    return (
-      node.isFtdRouter === true &&
-      Number.isFinite(node.routerPct) && node.routerPct < 50
-    );
-  if (filterMode === "detached-disabled-pct-medium")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 1.0;
-  if (filterMode === "detached-disabled-pct-high")
-    return Number.isFinite(getNodeDiagnosticMetric(node, filterMode)) &&
-      getNodeDiagnosticMetric(node, filterMode) >= 5.0;
-  return true;
-}
-
 // ── Router-neighbor diagnostic mode helpers ───────────────────────────────────
 
 export function isRouterNeighborDiagnosticMode(mode) {
-  return (
-    mode === "router-neighbor-err-rate-frame-low" ||
-    mode === "router-neighbor-err-rate-frame-medium" ||
-    mode === "router-neighbor-err-rate-frame-high" ||
-    mode === "router-neighbor-err-rate-frame-critical" ||
-    mode === "router-neighbor-err-rate-msg-low" ||
-    mode === "router-neighbor-err-rate-msg-medium" ||
-    mode === "router-neighbor-err-rate-msg-high" ||
-    mode === "router-neighbor-err-rate-msg-critical" ||
-    mode === "router-neighbor-rss-very-low" ||
-    mode === "router-neighbor-rss-low" ||
-    mode === "router-neighbor-rss-medium" ||
-    mode === "router-neighbor-rss-high"
-  );
+  return getDiagnosticOptionByValue(mode)?.relationshipKind === "router-neighbor";
 }
 
 export function isChildLinkQualityDiagnosticMode(mode) {
-  return mode === "child-lq-medium" || mode === "child-lq-poor";
+  return getDiagnosticOptionByValue(mode)?.relationshipKind === "child-link-quality";
 }
 
 export function childMatchesLinkQualityFilter(child, mode) {
-  const lqRaw = child?.lq !== undefined ? child.lq : child?.link_quality;
-  const lqNum = Number.parseInt(lqRaw, 10);
-  if (!Number.isFinite(lqNum)) return false;
-  if (mode === "child-lq-medium") return lqNum <= 2;
-  if (mode === "child-lq-poor") return lqNum === 1;
-  return false;
+  return diagnosticRelationshipRecordMatches(child, mode);
 }
 
 export function routerNeighborRowMatchesDiagnosticFilter(row, mode) {
-  const fp = toFiniteNumber(row?.err_rate_frame_pct);
-  const mp = toFiniteNumber(row?.err_rate_msg_pct);
-  const rss = toFiniteNumber(row?.rss_ave);
-  if (mode === "router-neighbor-err-rate-frame-low")
-    return Number.isFinite(fp) && fp >= 2;
-  if (mode === "router-neighbor-err-rate-frame-medium")
-    return Number.isFinite(fp) && fp >= 5;
-  if (mode === "router-neighbor-err-rate-frame-high")
-    return Number.isFinite(fp) && fp >= 10;
-  if (mode === "router-neighbor-err-rate-frame-critical")
-    return Number.isFinite(fp) && fp >= 30;
-  if (mode === "router-neighbor-err-rate-msg-low")
-    return Number.isFinite(mp) && mp >= 2;
-  if (mode === "router-neighbor-err-rate-msg-medium")
-    return Number.isFinite(mp) && mp >= 5;
-  if (mode === "router-neighbor-err-rate-msg-high")
-    return Number.isFinite(mp) && mp >= 10;
-  if (mode === "router-neighbor-err-rate-msg-critical")
-    return Number.isFinite(mp) && mp >= 30;
-  if (mode === "router-neighbor-rss-very-low")
-    return Number.isFinite(rss) && rss < -80;
-  if (mode === "router-neighbor-rss-low")
-    return Number.isFinite(rss) && rss >= -80 && rss < -70;
-  if (mode === "router-neighbor-rss-medium")
-    return Number.isFinite(rss) && rss >= -70 && rss <= -60;
-  if (mode === "router-neighbor-rss-high")
-    return Number.isFinite(rss) && rss > -60;
-  return false;
+  return diagnosticRelationshipRecordMatches(row, mode);
 }
 
 // ── Router-child diagnostic mode helpers ───────────────────────────────────────
 
 export function isRouterChildDiagnosticMode(mode) {
-  return (
-    mode === "router-child-err-rate-frame-medium" ||
-    mode === "router-child-err-rate-frame-high" ||
-    mode === "router-child-err-rate-msg-low" ||
-    mode === "router-child-err-rate-msg-high" ||
-    mode === "router-child-rss-very-low" ||
-    mode === "router-child-rss-low" ||
-    mode === "router-child-rss-margin-low" ||
-    mode === "router-child-has-queued-msgs"
-  );
+  return getDiagnosticOptionByValue(mode)?.relationshipKind === "router-child";
 }
 
 export function routerChildRowMatchesDiagnosticFilter(row, mode) {
-  const fp = toFiniteNumber(row?.err_rate_frame_pct);
-  const mp = toFiniteNumber(row?.err_rate_msg_pct);
-  const rss = toFiniteNumber(row?.rss_ave);
-  const rssMargin = toFiniteNumber(row?.rss_margin);
-  const qMsg = toFiniteNumber(row?.q_msg);
-  if (mode === "router-child-err-rate-frame-medium")
-    return Number.isFinite(fp) && fp >= 10;
-  if (mode === "router-child-err-rate-frame-high")
-    return Number.isFinite(fp) && fp >= 25;
-  if (mode === "router-child-err-rate-msg-low")
-    return Number.isFinite(mp) && mp >= 1;
-  if (mode === "router-child-err-rate-msg-high")
-    return Number.isFinite(mp) && mp >= 5;
-  if (mode === "router-child-rss-very-low")
-    return Number.isFinite(rss) && rss < -80;
-  if (mode === "router-child-rss-low")
-    return Number.isFinite(rss) && rss >= -80 && rss < -70;
-  if (mode === "router-child-rss-margin-low")
-    return Number.isFinite(rssMargin) && rssMargin < 20;
-  if (mode === "router-child-has-queued-msgs")
-    return Number.isFinite(qMsg) && qMsg > 0;
-  return false;
+  return diagnosticRelationshipRecordMatches(row, mode);
 }
 
 // ── Row visibility predicates (table) ─────────────────────────────────────────
@@ -1109,287 +786,122 @@ export function isRowVisibleByNodeFilter(row, filterMode) {
   return true;
 }
 
-function isRowVisibleByDiagnosticFilterLegacy(row, filterMode) {
-  if (filterMode === "all") return true;
-  const getMetric = () => getRowDiagnosticMetric(row, filterMode);
-  if (filterMode === "medium-partition-changes") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 2;
-  }
-  if (filterMode === "high-partition-changes") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 5;
-  }
-  if (filterMode === "medium-parent-changes") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 2;
-  }
-  if (filterMode === "high-parent-changes") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 5;
-  }
-
-  const neighborRows = Array.isArray(
-    getColumnValue(row, "routerNeighbors"),
-  )
-    ? getColumnValue(row, "routerNeighbors")
-    : [];
-  const hasMatchingNeighbor = (pred) => neighborRows.some(pred);
-
-  if (filterMode === "router-neighbor-err-rate-frame-low")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.frameErrorRate);
-      return Number.isFinite(v) && v >= 2;
-    });
-  if (filterMode === "router-neighbor-err-rate-frame-medium")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.frameErrorRate);
-      return Number.isFinite(v) && v >= 5;
-    });
-  if (filterMode === "router-neighbor-err-rate-frame-high")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.frameErrorRate);
-      return Number.isFinite(v) && v >= 10;
-    });
-  if (filterMode === "router-neighbor-err-rate-frame-critical")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.frameErrorRate);
-      return Number.isFinite(v) && v >= 30;
-    });
-  if (filterMode === "router-neighbor-err-rate-msg-low")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.messageErrorRate);
-      return Number.isFinite(v) && v >= 2;
-    });
-  if (filterMode === "router-neighbor-err-rate-msg-medium")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.messageErrorRate);
-      return Number.isFinite(v) && v >= 5;
-    });
-  if (filterMode === "router-neighbor-err-rate-msg-high")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.messageErrorRate);
-      return Number.isFinite(v) && v >= 10;
-    });
-  if (filterMode === "router-neighbor-err-rate-msg-critical")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.messageErrorRate);
-      return Number.isFinite(v) && v >= 30;
-    });
-  if (filterMode === "router-neighbor-rss-very-low")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.averageRssi);
-      return Number.isFinite(v) && v < -80;
-    });
-  if (filterMode === "router-neighbor-rss-low")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.averageRssi);
-      return Number.isFinite(v) && v >= -80 && v < -70;
-    });
-  if (filterMode === "router-neighbor-rss-medium")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.averageRssi);
-      return Number.isFinite(v) && v >= -70 && v <= -60;
-    });
-  if (filterMode === "router-neighbor-rss-high")
-    return hasMatchingNeighbor((n) => {
-      const v = toFiniteNumber(n?.averageRssi);
-      return Number.isFinite(v) && v > -60;
-    });
-
-  // Router link quality distribution
-  if (filterMode === "low-lq3-ratio-medium" || filterMode === "low-lq3-ratio-high" ||
-      filterMode === "high-lq1-ratio-medium" || filterMode === "high-lq1-ratio-high") {
-    const tl3 = toFiniteNumber(getColumnValue(row, "links3"));
-    const tl1 = toFiniteNumber(getColumnValue(row, "links1"));
-    const tl = toFiniteNumber(getColumnValue(row, "totalLinks"));
-    if (!Number.isFinite(tl) || tl <= 0) return false;
-    const lq3r = Number.isFinite(tl3) ? tl3 / tl : undefined;
-    const lq1r = Number.isFinite(tl1) ? tl1 / tl : undefined;
-    if (filterMode === "low-lq3-ratio-medium")  return Number.isFinite(lq3r) && lq3r < 0.60;
-    if (filterMode === "low-lq3-ratio-high")    return Number.isFinite(lq3r) && lq3r < 0.35;
-    if (filterMode === "high-lq1-ratio-medium") return Number.isFinite(lq1r) && lq1r >= 0.20;
-    if (filterMode === "high-lq1-ratio-high")   return Number.isFinite(lq1r) && lq1r >= 0.35;
-  }
-
-  // Children link quality
-  if (filterMode === "child-lq-medium" || filterMode === "child-lq-poor") {
-    const childrenForLQ = Array.isArray(getColumnValue(row, "children"))
-      ? getColumnValue(row, "children")
-      : [];
-    for (const child of childrenForLQ) {
-      const lqRaw = child?.lq !== undefined ? child.lq : child?.link_quality;
-      const lqNum = Number.parseInt(lqRaw, 10);
-      if (!Number.isFinite(lqNum)) continue;
-      if (filterMode === "child-lq-medium" && lqNum <= 2) return true;
-      if (filterMode === "child-lq-poor"   && lqNum === 1) return true;
-    }
-    return false;
-  }
-
-  // Router child table filters
-  const childTableRows = Array.isArray(getColumnValue(row, "childTable"))
-    ? getColumnValue(row, "childTable")
-    : [];
-  const hasMatchingChild = (pred) => childTableRows.some(pred);
-
-  if (filterMode === "router-child-err-rate-frame-medium")
-    return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.frameErrorRate);
-      return Number.isFinite(v) && v >= 10;
-    });
-  if (filterMode === "router-child-err-rate-frame-high")
-    return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.frameErrorRate);
-      return Number.isFinite(v) && v >= 25;
-    });
-  if (filterMode === "router-child-err-rate-msg-low")
-    return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.messageErrorRate);
-      return Number.isFinite(v) && v >= 1;
-    });
-  if (filterMode === "router-child-err-rate-msg-high")
-    return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.messageErrorRate);
-      return Number.isFinite(v) && v >= 5;
-    });
-  if (filterMode === "router-child-rss-very-low")
-    return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.averageRssi);
-      return Number.isFinite(v) && v < -80;
-    });
-  if (filterMode === "router-child-rss-low")
-    return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.averageRssi);
-      return Number.isFinite(v) && v >= -80 && v < -70;
-    });
-  if (filterMode === "router-child-rss-margin-low")
-    return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.linkMargin);
-      return Number.isFinite(v) && v < 20;
-    });
-  if (filterMode === "router-child-has-queued-msgs")
-    return hasMatchingChild((c) => {
-      const v = toFiniteNumber(c?.queuedMessageCount);
-      return Number.isFinite(v) && v > 0;
-    });
-
-  // Mac total errors / discards ratio
-  if (filterMode === "mac-total-errors-ratio-medium") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 1.0;
-  }
-  if (filterMode === "mac-total-errors-ratio-high") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 5.0;
-  }
-  if (filterMode === "mac-total-discards-ratio-medium") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 2.0;
-  }
-  if (filterMode === "mac-total-discards-ratio-high") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 8.0;
-  }
-
-  // MLE extended counters
-  if (filterMode === "mle-better-partition-medium") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 2;
-  }
-  if (filterMode === "mle-better-partition-high") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 5;
-  }
-  if (filterMode === "mle-total-parent-partition-medium") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 3;
-  }
-  if (filterMode === "mle-total-parent-partition-high") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 8;
-  }
-
-  // Time statistics
-  if (filterMode === "ftd-router-pct-low" || filterMode === "ftd-router-pct-very-low") {
-    const modeDevice = toText(getColumnValue(row, "mode.device")).toUpperCase();
-    const rloc16Text = toText(getColumnValue(row, "rloc16")).toLowerCase();
-    const isFtdRouter = modeDevice === "FTD" && rloc16Text.length > 0 && rloc16Text.endsWith("00");
-    if (!isFtdRouter) return false;
-    const v = getMetric();
-    if (!Number.isFinite(v)) return false;
-    if (filterMode === "ftd-router-pct-low")      return v < 80;
-    if (filterMode === "ftd-router-pct-very-low") return v < 50;
-  }
-  if (filterMode === "detached-disabled-pct-medium") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 1.0;
-  }
-  if (filterMode === "detached-disabled-pct-high") {
-    const v = getMetric();
-    return Number.isFinite(v) && v >= 5.0;
-  }
-
-  return true;
-}
-
 // ── Per-record diagnostic evaluation ─────────────────────────────────────────
 
-function getDiagnosticArrayRows(record, option) {
-  if (option.tableNeighborField) {
-    const rows = getColumnValue(record, "routerNeighbors");
-    return Array.isArray(rows) ? rows : [];
-  }
-  if (option.tableChildField) {
-    const rows = getColumnValue(record, "childTable");
-    return Array.isArray(rows) ? rows : [];
-  }
-  if (option.value === "child-lq-medium" || option.value === "child-lq-poor") {
-    const rows = getColumnValue(record, "children");
-    return Array.isArray(rows) ? rows : [];
-  }
-  return [];
+const DIAGNOSTIC_RELATIONSHIP_FIELD_ALIASES = Object.freeze({
+  frameErrorRate: ["err_rate_frame_pct", "frameErrorRate"],
+  messageErrorRate: ["err_rate_msg_pct", "messageErrorRate"],
+  averageRssi: ["averageRssi", "rss_ave"],
+  linkMargin: ["linkMargin", "rss_margin"],
+  queuedMessageCount: ["queuedMessageCount", "q_msg"],
+  linkQuality: ["linkQuality", "lq", "link_quality"],
+});
+
+export function compareDiagnosticMetric(metric, comparison, threshold) {
+  if (!Number.isFinite(metric) || !Number.isFinite(threshold)) return false;
+  if (comparison === ">=") return metric >= threshold;
+  if (comparison === ">") return metric > threshold;
+  if (comparison === "<=") return metric <= threshold;
+  if (comparison === "<") return metric < threshold;
+  if (comparison === "==") return metric === threshold;
+  if (comparison === "!=") return metric !== threshold;
+  return false;
 }
 
-function getDiagnosticArrayMetric(row, option) {
-  if (option.tableNeighborField || option.tableChildField) {
-    return toFiniteNumber(row?.[option.tableNeighborField ?? option.tableChildField]);
+function getRelationshipMetric(record, option) {
+  const aliases = DIAGNOSTIC_RELATIONSHIP_FIELD_ALIASES[option.collectionMetricField] ?? [];
+  for (const field of aliases) {
+    const value = toFiniteNumber(record?.[field]);
+    if (Number.isFinite(value)) return value;
   }
-  const lqRaw = row?.lq !== undefined ? row.lq : row?.link_quality;
-  return Number.parseInt(lqRaw, 10);
+  return undefined;
 }
 
-function getDiagnosticMetric(record, view, option) {
-  if (view === "topology") {
-    const value = record?.[option.topoNodeField];
-    if (typeof value === "boolean") return undefined;
-    return Number.isFinite(toFiniteNumber(value)) ? toFiniteNumber(value) : undefined;
+function metricMatchesOption(metric, option) {
+  if (option.evaluatorId === "range") {
+    const [lowerBound, upperBound] = option.threshold;
+    return Number.isFinite(metric)
+      && metric >= lowerBound
+      && (option.rangeUpperInclusive ? metric <= upperBound : metric < upperBound);
   }
+  return compareDiagnosticMetric(metric, option.comparison, option.threshold);
+}
 
-  if (option.tableRowField) {
-    const value = toFiniteNumber(getColumnValue(record, option.tableRowField));
-    return Number.isFinite(value) ? value : undefined;
-  }
+export function diagnosticRelationshipRecordMatches(record, optionValue) {
+  const option = getDiagnosticOptionByValue(optionValue);
+  if (!option || option.conditionKind !== "collection") return false;
+  return metricMatchesOption(getRelationshipMetric(record, option), option);
+}
 
-  if (option.value === "low-lq3-ratio-medium" || option.value === "low-lq3-ratio-high" ||
-      option.value === "high-lq1-ratio-medium" || option.value === "high-lq1-ratio-high") {
+function getScalarDiagnosticMetric(record, view, option) {
+  const field = view === "topology" ? option.topoNodeField : option.tableRowField;
+  if (!field) return undefined;
+  const value = view === "topology" ? record?.[field] : getColumnValue(record, field);
+  if (typeof value === "boolean") return undefined;
+  const metric = toFiniteNumber(value);
+  return Number.isFinite(metric) ? metric : undefined;
+}
+
+function getCompoundDiagnosticMetric(record, view, option) {
+  if (view === "topology") return getScalarDiagnosticMetric(record, view, option);
+  if (option.evaluatorId === "link-ratio") {
     const totalLinks = toFiniteNumber(getColumnValue(record, "totalLinks"));
-    const links = toFiniteNumber(getColumnValue(
-      record,
-      option.value.startsWith("low-lq3") ? "links3" : "links1",
-    ));
+    const linkField = option.value.startsWith("low-lq3-") ? "links3" : "links1";
+    const links = toFiniteNumber(getColumnValue(record, linkField));
     return Number.isFinite(totalLinks) && totalLinks > 0 && Number.isFinite(links)
       ? links / totalLinks
       : undefined;
   }
+  return getScalarDiagnosticMetric(record, view, option);
+}
 
-  const metrics = getDiagnosticArrayRows(record, option)
-    .map((row) => getDiagnosticArrayMetric(row, option))
-    .filter(Number.isFinite);
-  if (metrics.length === 0) return undefined;
-  return option.comparison === "<" || option.comparison === "range"
-    ? Math.min(...metrics)
-    : Math.max(...metrics);
+function isFtdRouterRecord(record, view) {
+  if (view === "topology") return record?.isFtdRouter === true;
+  const modeDevice = toText(getColumnValue(record, "mode.device")).toUpperCase();
+  const rloc16 = toText(getColumnValue(record, "rloc16")).toLowerCase();
+  return modeDevice === "FTD" && rloc16.length > 0 && rloc16.endsWith("00");
+}
+
+export function evaluateDiagnosticOption(record, view, option) {
+  let metric;
+  let matchedRecords = [];
+  let triggered = false;
+
+  if (option.conditionKind === "collection" && view === "table") {
+    const rows = getColumnValue(record, option.collectionPath);
+    const records = Array.isArray(rows) ? rows : [];
+    const measured = records
+      .map((item) => ({ item, metric: getRelationshipMetric(item, option) }))
+      .filter(({ metric: value }) => Number.isFinite(value));
+    matchedRecords = measured
+      .filter(({ metric: value }) => metricMatchesOption(value, option))
+      .map(({ item }) => item);
+    const metrics = measured.map(({ metric: value }) => value);
+    if (metrics.length > 0) {
+      metric = option.aggregation === "min" ? Math.min(...metrics) : Math.max(...metrics);
+    }
+    triggered = matchedRecords.length > 0;
+  } else {
+    const summaryValue = view === "topology" ? record?.[option.topoNodeField] : undefined;
+    metric = option.conditionKind === "compound"
+      ? getCompoundDiagnosticMetric(record, view, option)
+      : getScalarDiagnosticMetric(record, view, option);
+    triggered = typeof summaryValue === "boolean"
+      ? summaryValue
+      : metricMatchesOption(metric, option);
+    if (option.evaluatorId === "ftd-router" && !isFtdRouterRecord(record, view)) {
+      triggered = false;
+    }
+  }
+
+  return {
+    option,
+    metric,
+    metricText: formatDiagnosticMetric(metric, option.unit),
+    thresholdText: formatDiagnosticThreshold(option),
+    triggered,
+    matchedRecords,
+  };
 }
 
 function formatDiagnosticMetric(value, unit) {
@@ -1403,12 +915,13 @@ function formatDiagnosticMetric(value, unit) {
 }
 
 function formatDiagnosticThreshold(option) {
-  if (option.comparison === "range") {
+  if (option.evaluatorId === "range") {
     const [lowerBound, upperBound] = option.threshold;
     return `${lowerBound} to ${upperBound} ${option.unit}`;
   }
   const value = formatDiagnosticMetric(option.threshold, option.unit);
-  return `${option.comparison} ${value}`;
+  const comparison = option.comparison === "==" ? "=" : option.comparison;
+  return `${comparison} ${value}`;
 }
 
 const DIAGNOSTIC_SEVERITY_RANK = Object.freeze({
@@ -1439,7 +952,6 @@ export function selectHighestQualifyingDiagnosticEvaluations(evaluations) {
 
 /**
  * Returns the diagnostic conditions that the supplied record can evaluate.
- * The existing view-specific predicates remain the behavior source of truth.
  */
 export function evaluateDiagnosticsForRecord(record, view = "topology") {
   if (view !== "topology" && view !== "table") {
@@ -1449,23 +961,11 @@ export function evaluateDiagnosticsForRecord(record, view = "topology") {
 
   return DIAGNOSTIC_FILTER_OPTIONS
     .filter((option) => option.value !== "all")
-    .map((option) => {
-      const metric = getDiagnosticMetric(record, view, option);
-      const isBooleanTopologySummary =
-        view === "topology" && record?.[option.topoNodeField] === true;
-      if (!Number.isFinite(metric) && !isBooleanTopologySummary) return null;
-
-      const triggered = view === "topology"
-        ? isNodeVisibleByDiagnosticFilterLegacy(record, option.value)
-        : isRowVisibleByDiagnosticFilterLegacy(record, option.value);
-      return {
-        option,
-        metric,
-        metricText: formatDiagnosticMetric(metric, option.unit),
-        thresholdText: formatDiagnosticThreshold(option),
-        triggered,
-      };
-    })
+    .map((option) => evaluateDiagnosticOption(record, view, option))
+    .map((evaluation) => Number.isFinite(evaluation.metric)
+      || (evaluation.triggered && evaluation.option.conditionKind === "collection")
+      ? evaluation
+      : null)
     .filter(Boolean);
 }
 

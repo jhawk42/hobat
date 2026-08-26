@@ -9,8 +9,9 @@ import logging
 
 from collections import defaultdict
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from extaddr_device_label_map import (
     EXTADDR_FIELD_ALIASES,
@@ -18,10 +19,26 @@ from extaddr_device_label_map import (
 )
 from otbr_restapi_util import RECOMMENDED_DIAGNOSTIC_TLVS
 from td_json_key_normalizer import convert_keys_to_camel_case
+from td_device_fields import (
+    EXT_ADDRESS_ALIASES,
+    OMR_ADDRESS_ALIASES,
+    get_canonical_ext_address,
+    get_canonical_omr_address,
+    is_placeholder_ext_address,
+    normalize_identifier_text as normalize_device_identifier_text,
+    normalize_input_record,
+)
+from td_device_merge import MergeContext, create_merge_context, sort_sources_by_priority
+from td_record_merge import (
+    append_merge_conflict as append_record_conflict,
+    merge_lists as merge_record_lists,
+    merge_unique_strings as merge_record_unique_strings,
+    value_is_empty as record_value_is_empty,
+    values_equivalent as record_values_equivalent,
+)
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
 from util_data import (
     load_optional_input,
-    require_existing_input_file,
     resolve_data_dir,
     save_json_atomic,
 )
@@ -159,8 +176,8 @@ MATTER_IDENTITY_MERGE_MODES = {
 }
 
 MERGE_IDENTITY_FIELDS = {
-    "extaddr_aliases": ("extAddress", "extaddr", "Extended MAC"),
-    "omr_ipv6_addr_aliases": ("omrIpv6Address","omrIpv6Address", "omrIpv6Addr"),
+    "extaddr_aliases": EXT_ADDRESS_ALIASES,
+    "omr_ipv6_addr_aliases": OMR_ADDRESS_ALIASES,
     "rloc16": "rloc16",
 }
 
@@ -250,9 +267,7 @@ def load_json(path: Path) -> Any:
 
 
 def normalize_identifier_text(value: Any) -> str:
-    if not isinstance(value, str):
-        return ""
-    return value.strip().lower()
+    return normalize_device_identifier_text(value)
 
 
 def first_normalized_identifier(record: dict[str, Any], keys: tuple[str, ...]) -> str:
@@ -264,19 +279,16 @@ def first_normalized_identifier(record: dict[str, Any], keys: tuple[str, ...]) -
 
 
 def get_canonical_extaddr(record: dict[str, Any]) -> str:
-    return first_normalized_identifier(record, MERGE_IDENTITY_FIELDS["extaddr_aliases"])
+    return get_canonical_ext_address(record)
 
 
 def get_canonical_omr(record: dict[str, Any]) -> str:
-    return first_normalized_identifier(record, MERGE_IDENTITY_FIELDS["omr_ipv6_addr_aliases"])
+    return get_canonical_omr_address(record)
 
 
 def is_placeholder_extaddr(value: Any) -> bool:
     """Return True for known non-identity extaddr placeholder values."""
-    if not isinstance(value, str):
-        return False
-    normalized = normalize_identifier_text(value)
-    return normalized in {"", "0000000000000000"}
+    return is_placeholder_ext_address(value)
 
 
 def normalize_record_aliases(record: dict[str, Any]) -> dict[str, Any]:
@@ -334,11 +346,9 @@ def derive_mode_device(record: dict[str, Any]) -> str:
 
 
 def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, Any]:
-    normalize_record_aliases(record)
-
-    rloc16 = record.get("rloc16")
-    if isinstance(rloc16, str):
-        record["rloc16"] = rloc16.lower()
+    normalized = normalize_input_record(record)
+    record.clear()
+    record.update(normalized)
 
     omr_addr = get_canonical_omr(record)
 
@@ -404,89 +414,25 @@ def extract_records(filename: str, data: Any) -> list[dict[str, Any]]:
 
 
 def value_is_empty(value: Any) -> bool:
-    if value is None:
-        return True
-    if value == "":
-        return True
-    if value == [] or value == {}:
-        return True
-    return False
+    return record_value_is_empty(value)
 
 
 def merge_unique_strings(existing: list[Any], incoming: list[Any]) -> list[str]:
-    merged: list[str] = []
-    for value in existing + incoming:
-        if not isinstance(value, str):
-            continue
-        text = value.strip()
-        if text and text not in merged:
-            merged.append(text)
-    return merged
+    return merge_record_unique_strings(existing, incoming)
 
 
 def values_equivalent(left: Any, right: Any) -> bool:
-    if left == right:
-        return True
-    try:
-        return json.dumps(left, sort_keys=True, ensure_ascii=True) == json.dumps(
-            right, sort_keys=True, ensure_ascii=True
-        )
-    except TypeError:
-        return False
+    return record_values_equivalent(left, right)
 
 
 def append_merge_conflict(
-    base: dict[str, Any], path: str, cur_val: Any, new_value: Any
+    base: dict[str, Any], path: str, cur_val: Any, new_value: Any, limit: int = 20
 ) -> None:
-    if not path:
-        return
-
-    conflicts = base.setdefault("_merge_conflicts", [])
-    if not isinstance(conflicts, list):
-        conflicts = []
-        base["_merge_conflicts"] = conflicts
-
-    if len(conflicts) >= 20:
-        return
-
-    current_text = json.dumps(
-        cur_val, sort_keys=True, ensure_ascii=True, default=str
-    )
-    incoming_text = json.dumps(
-        new_value, sort_keys=True, ensure_ascii=True, default=str
-    )
-
-    for entry in conflicts:
-        if not isinstance(entry, dict):
-            continue
-        if (
-            entry.get("path") == path
-            and entry.get("current") == current_text
-            and entry.get("incoming") == incoming_text
-        ):
-            return
-
-    conflicts.append(
-        {
-            "path": path,
-            "current": current_text,
-            "incoming": incoming_text,
-        }
-    )
+    append_record_conflict(base, path, cur_val, new_value, limit=limit)
 
 
 def merge_lists(left: list[Any], right: list[Any]) -> list[Any]:
-    seen: set[str] = set()
-    merged: list[Any] = []
-
-    for item in left + right:
-        key = json.dumps(item, sort_keys=True, ensure_ascii=True)
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(item)
-
-    return merged
+    return merge_record_lists(left, right)
 
 
 # ============================================================================
@@ -783,18 +729,17 @@ def merge_children_array(
         
         # Get child extaddr (globally unique)
         child_extaddr = child.get("extAddress")
-        if not child_extaddr:
+        child_rloc16 = child.get("rloc16")
+        if not child_extaddr and not child_rloc16:
             # No extaddr - can't create composite identity
             # Add as-is (might be duplicate, but can't determine)
             temp_key = json.dumps(child, sort_keys=True)
             merged[temp_key] = child
             continue
         
-        # Normalize extaddr
-        child_extaddr = normalize_identifier_text(child_extaddr)
-        
-        # Composite identity
-        identity = (parent_rloc16, child_extaddr)
+        identity_kind = "extAddress" if child_extaddr else "rloc16"
+        identity_value = normalize_identifier_text(child_extaddr or child_rloc16)
+        identity = (parent_rloc16, identity_kind, identity_value)
         
         if identity not in merged:
             merged[identity] = deepcopy(child)
@@ -955,83 +900,58 @@ def merge_mdns_records(
     Returns:
         Merged mDNS record
     """
-    base_timestamp = base.get("captured_at_epoch")
-    incoming_timestamp = incoming.get("captured_at_epoch")
-    
-    # Compare timestamps
-    if base_timestamp is not None and incoming_timestamp is not None:
+    base_timestamp = base.get("capturedAtEpoch", base.get("captured_at_epoch"))
+    incoming_timestamp = incoming.get(
+        "capturedAtEpoch", incoming.get("captured_at_epoch")
+    )
+    incoming_is_primary = False
+    if isinstance(base_timestamp, (int, float)) and isinstance(
+        incoming_timestamp, (int, float)
+    ):
         if incoming_timestamp > base_timestamp:
-            # Incoming is newer, use it as base
-            result = deepcopy(incoming)
-            # Merge service_info specially
-            if "service_info" in base and "service_info" in incoming:
-                result["service_info"] = merge_mdns_service_info(
-                    base["service_info"],
-                    incoming["service_info"],
-                    base_timestamp,
-                    incoming_timestamp,
-                )
-            return result
-        elif incoming_timestamp < base_timestamp:
-            # Base is newer, keep it
-            result = deepcopy(base)
-            # Still merge any missing fields from incoming
-            for key, value in incoming.items():
-                if key not in result or value_is_empty(result.get(key)):
-                    result[key] = deepcopy(value)
-            return result
-        else:
-            # Timestamps equal, use event priority
-            base_event = base.get("event", "")
-            incoming_event = incoming.get("event", "")
-            base_priority = get_mdns_event_priority(base_event)
-            incoming_priority = get_mdns_event_priority(incoming_event)
-            
-            if incoming_priority > base_priority:
-                result = deepcopy(incoming)
-                # Merge any missing fields from base (but incoming wins)
-                for key, value in base.items():
-                    if key == "service_info":
-                        continue  # Handle separately
-                    if key not in result or value_is_empty(result.get(key)):
-                        result[key] = deepcopy(value)
-                # Merge service_info - incoming as base since it has higher priority
-                if "service_info" in incoming:
-                    result["service_info"] = deepcopy(incoming["service_info"])
-                    if "service_info" in base:
-                        # Merge missing fields from base
-                        for key, value in base["service_info"].items():
-                            if key not in result["service_info"] or value_is_empty(result["service_info"].get(key)):
-                                result["service_info"][key] = deepcopy(value)
-            else:
-                result = deepcopy(base)
-                # Merge any missing fields from incoming
-                for key, value in incoming.items():
-                    if key == "service_info":
-                        continue  # Handle separately
-                    if key not in result or value_is_empty(result.get(key)):
-                        result[key] = deepcopy(value)
-                # Merge service_info - base as primary since it has higher/equal priority
-                if "service_info" in incoming:
-                    for key, value in incoming["service_info"].items():
-                        if key not in result.get("service_info", {}) or value_is_empty(result.get("service_info", {}).get(key)):
-                            result.setdefault("service_info", {})[key] = deepcopy(value)
-            
-            return result
-    
-    # No timestamp comparison, merge deeply
-    result = deepcopy(base)
-    for key, value in incoming.items():
-        if key == "service_info" and "service_info" in base:
-            result["service_info"] = merge_mdns_service_info(
-                base["service_info"],
-                value,
-                base_timestamp,
-                incoming_timestamp,
-            )
-        elif key not in result or value_is_empty(result.get(key)):
+            incoming_is_primary = True
+        elif incoming_timestamp == base_timestamp:
+            incoming_is_primary = get_mdns_event_priority(
+                str(incoming.get("event", ""))
+            ) > get_mdns_event_priority(str(base.get("event", "")))
+
+    primary, secondary = (
+        (incoming, base) if incoming_is_primary else (base, incoming)
+    )
+    result = deepcopy(primary)
+    for key, value in secondary.items():
+        if key in {"serviceInfo", "service_info"}:
+            continue
+        if key not in result or value_is_empty(result.get(key)):
             result[key] = deepcopy(value)
-    
+
+    base_service = base.get("serviceInfo", base.get("service_info"))
+    incoming_service = incoming.get("serviceInfo", incoming.get("service_info"))
+    if isinstance(base_service, dict) or isinstance(incoming_service, dict):
+        service_key = (
+            "serviceInfo"
+            if "serviceInfo" in base or "serviceInfo" in incoming
+            else "service_info"
+        )
+        if base_timestamp == incoming_timestamp:
+            primary_service = primary.get(service_key, {})
+            secondary_service = secondary.get(service_key, {})
+            result[service_key] = merge_mdns_service_info(
+                primary_service if isinstance(primary_service, dict) else {},
+                secondary_service if isinstance(secondary_service, dict) else {},
+                None,
+                None,
+            )
+        else:
+            result[service_key] = merge_mdns_service_info(
+                base_service if isinstance(base_service, dict) else {},
+                incoming_service if isinstance(incoming_service, dict) else {},
+                base_timestamp if isinstance(base_timestamp, (int, float)) else None,
+                incoming_timestamp
+                if isinstance(incoming_timestamp, (int, float))
+                else None,
+            )
+        result.pop("service_info" if service_key == "serviceInfo" else "serviceInfo", None)
     return result
 
 
@@ -1076,7 +996,7 @@ def _append_unique_alias(container: dict[str, Any], key: str, value: str) -> Non
 
 
 def _extract_service_info_property_decoded(record: dict[str, Any], key: str) -> str:
-    service_info = record.get("service_info")
+    service_info = record.get("serviceInfo", record.get("service_info"))
     if not isinstance(service_info, dict):
         return ""
     props = service_info.get("properties")
@@ -1125,7 +1045,7 @@ def update_mdns_aliases(target: dict[str, Any], record: dict[str, Any]) -> None:
     server_key_value = _normalize_alias_text(record.get("server_key"), lower=True)
 
     if not server_value:
-        service_info = record.get("service_info")
+        service_info = record.get("serviceInfo", record.get("service_info"))
         if isinstance(service_info, dict):
             server_value = _normalize_alias_text(service_info.get("server"), lower=False)
             if not server_key_value:
@@ -1232,11 +1152,73 @@ def merge_mdns_record_into_node(target: dict[str, Any], incoming: dict[str, Any]
     apply_mdns_merge_view(target, merged_view)
 
 
+def _merge_route_field(
+    current: Any, incoming: Any, context: MergeContext
+) -> Any:
+    if not isinstance(incoming, dict):
+        return deepcopy(current)
+    if (
+        context.partition_id != "unknown"
+        and context.incoming_partition_id != "unknown"
+        and context.partition_id != context.incoming_partition_id
+    ):
+        return deepcopy(current)
+    if not isinstance(current, dict):
+        return deepcopy(incoming)
+    return merge_route_data(
+        context.owner_rloc16,
+        current,
+        incoming,
+        context.partition_id,
+    )
+
+
+def _merge_relationship_field(
+    current: Any, incoming: Any, context: MergeContext
+) -> Any:
+    if not isinstance(incoming, list):
+        return deepcopy(current)
+    return merge_children_array(
+        context.owner_rloc16,
+        current if isinstance(current, list) else [],
+        incoming,
+    )
+
+
+def _merge_neighbor_field(
+    current: Any, incoming: Any, _context: MergeContext
+) -> Any:
+    if not isinstance(incoming, list):
+        return deepcopy(current)
+    return merge_router_neighbors(
+        current if isinstance(current, list) else [],
+        incoming,
+    )
+
+
+def _merge_address_field(
+    current: Any, incoming: Any, _context: MergeContext
+) -> Any:
+    if not isinstance(incoming, list):
+        return deepcopy(current)
+    return merge_unique_strings(current if isinstance(current, list) else [], incoming)
+
+
+MERGE_FIELD_HANDLERS = {
+    "route": _merge_route_field,
+    "children": _merge_relationship_field,
+    "childTable": _merge_relationship_field,
+    "childIpv6Addresses": _merge_address_field,
+    "routerNeighbors": _merge_neighbor_field,
+}
+
+
 def deep_merge(
     base: dict[str, Any],
     incoming: dict[str, Any],
     path_prefix: str = "",
     conflict_target: dict[str, Any] | None = None,
+    context: MergeContext | None = None,
 ) -> dict[str, Any]:
     """
     Deep merge with Phase 2 enhancements:
@@ -1251,7 +1233,15 @@ def deep_merge(
 
     # Phase 2: Extract partition and RLOC16 for context-aware merges
     partition_id = get_partition_id(conflict_target)
+    incoming_partition_id = get_partition_id(incoming)
     owner_rloc16 = normalize_identifier_text(conflict_target.get("rloc16"))
+    if context is None:
+        context = MergeContext(
+            owner_rloc16=owner_rloc16,
+            partition_id=partition_id,
+            incoming_partition_id=incoming_partition_id,
+            conflict_target=conflict_target,
+        )
 
     for key, value in incoming.items():
         if key == "_merge_conflicts":
@@ -1278,56 +1268,9 @@ def deep_merge(
             continue
 
         current_path = f"{path_prefix}.{key}" if path_prefix else key
-        
-        # Phase 3: canonical route merge on camelCase key only.
-        if key == "route" and isinstance(value, dict):
-            if "route" in base and isinstance(base["route"], dict):
-                base["route"] = merge_route_data(
-                    owner_rloc16,
-                    base["route"],
-                    value,
-                    partition_id,
-                )
-            else:
-                base["route"] = deepcopy(value)
-            continue
-        
-        # Phase 2: Special handling for children array (composite identity merge)
-        if key == "children" and isinstance(value, list):
-            base_children = base.get("children", [])
-            if isinstance(base_children, list):
-                base["children"] = merge_children_array(
-                    owner_rloc16,
-                    base_children,
-                    value,
-                )
-            else:
-                base["children"] = deepcopy(value)
-            continue
-        
-        # Phase 2: Special handling for childTable array (composite identity merge)
-        if key == "childTable" and isinstance(value, list):
-            base_children = base.get("childTable", [])
-            if isinstance(base_children, list):
-                base["childTable"] = merge_children_array(
-                    owner_rloc16,
-                    base_children,
-                    value,
-                )
-            else:
-                base["childTable"] = deepcopy(value)
-            continue
-        
-        # Phase 2: Special handling for routerNeighbors array (identity merge)
-        if key == "routerNeighbors" and isinstance(value, list):
-            base_neighbors = base.get("routerNeighbors", [])
-            if isinstance(base_neighbors, list):
-                base["routerNeighbors"] = merge_router_neighbors(
-                    base_neighbors,
-                    value,
-                )
-            else:
-                base["routerNeighbors"] = deepcopy(value)
+        handler = MERGE_FIELD_HANDLERS.get(key)
+        if handler is not None:
+            base[key] = handler(base.get(key), value, context.for_field(key))
             continue
         
         if key not in base:
@@ -1336,7 +1279,7 @@ def deep_merge(
 
         cur = base[key]
         if isinstance(cur, dict) and isinstance(value, dict):
-            deep_merge(cur, value, current_path, conflict_target)
+            deep_merge(cur, value, current_path, conflict_target, context.for_field(key))
         elif isinstance(cur, list) and isinstance(value, list):
             base[key] = merge_lists(cur, value)
         elif value_is_empty(cur) and not value_is_empty(value):
@@ -1349,7 +1292,13 @@ def deep_merge(
             and not value_is_empty(value)
             and not values_equivalent(cur, value)
         ):
-            append_merge_conflict(conflict_target, current_path, cur, value)
+            append_merge_conflict(
+                conflict_target,
+                current_path,
+                cur,
+                value,
+                context.conflict_limit,
+            )
     return base
 
 
@@ -1549,7 +1498,21 @@ def merge_nodes(
     target = nodes[target_id]
     source = nodes[source_id]
     merge_mdns_record_into_node(target, source)
-    deep_merge(target, source)
+    existing_source = next(iter(target.get("_source_files", [])), "")
+    incoming_source = next(iter(source.get("_source_files", [])), "")
+    deep_merge(
+        target,
+        source,
+        context=create_merge_context(
+            existing_source,
+            incoming_source,
+            SOURCE_PRECEDENCE,
+            owner_rloc16=normalize_identifier_text(target.get("rloc16")),
+            partition_id=get_partition_id(target),
+            incoming_partition_id=get_partition_id(source),
+            conflict_target=target,
+        ),
+    )
 
     for lookup in (by_rloc16, by_extaddr, by_omr, by_matter_fabric_node):
         for key, value in list(lookup.items()):
@@ -1566,6 +1529,8 @@ def build_merged_records(
     input_files: list[str],
     device_label_map: dict[str, str],
     matter_identity_mode: str = MATTER_IDENTITY_MERGE_MODES["strict_omr"],
+    *,
+    input_data: Mapping[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     nodes: dict[int, dict[str, Any]] = {}
     by_rloc16: dict[str, int] = {}
@@ -1580,8 +1545,9 @@ def build_merged_records(
     identity_collision_count = 0
     identity_collision_examples: list[dict[str, Any]] = []
 
-    for filename in input_files:
-        data = load_json(base_dir / filename)
+    ordered_input_files = sort_sources_by_priority(input_files, SOURCE_PRECEDENCE)
+    for filename in ordered_input_files:
+        data = input_data[filename] if input_data is not None else load_json(base_dir / filename)
         records = extract_records(filename, data)
         records_read_by_source[filename] = len(records)
         for raw_record in records:
@@ -1660,7 +1626,25 @@ def build_merged_records(
                         by_matter_fabric_node,
                     )
                 merge_mdns_record_into_node(nodes[node_id], record)
-                deep_merge(nodes[node_id], record)
+                existing_source = next(
+                    iter(nodes[node_id].get("_source_files", [])), ""
+                )
+                deep_merge(
+                    nodes[node_id],
+                    record,
+                    context=create_merge_context(
+                        existing_source,
+                        filename,
+                        SOURCE_PRECEDENCE,
+                        owner_rloc16=normalize_identifier_text(
+                            nodes[node_id].get("rloc16")
+                        ),
+                        partition_id=get_partition_id(nodes[node_id]),
+                        incoming_partition_id=get_partition_id(record),
+                        conflict_target=nodes[node_id],
+                        matter_identity_mode=matter_identity_mode,
+                    ),
+                )
                 existing_sources = nodes[node_id].setdefault(
                     "_source_files", [])
                 if filename not in existing_sources:
@@ -1704,9 +1688,7 @@ def build_merged_records(
 
         for key in PRIORITY_FIELDS:
             if "." in key:
-                value = nested_get(node, key)
-                if value is not None:
-                    ordered[key] = value
+                continue
             elif key in node:
                 ordered[key] = node[key]
 
@@ -1735,7 +1717,7 @@ def build_merged_records(
             merged_nodes_by_source[src] += 1
 
     report = {
-        "input_files": input_files,
+        "input_files": ordered_input_files,
         "matter_identity_mode": matter_identity_mode,
         "records_read_by_source": records_read_by_source,
         "new_nodes_by_source": dict(sorted(new_nodes_by_source.items())),
@@ -1769,16 +1751,23 @@ def parse_file_list_args(values: list[str] | None) -> list[str]:
     return result
 
 
+def resolve_input_groups(group_names: list[str]) -> list[str]:
+    resolved: list[str] = []
+    unknown = [name for name in group_names if name not in GROUP_TO_INPUT_FILES]
+    if unknown:
+        raise ValueError(f"Unknown input group(s): {', '.join(unknown)}")
+
+    for group_name in group_names:
+        resolved.extend(GROUP_TO_INPUT_FILES[group_name])
+    return resolved
+
+
 def resolve_input_files(
     default_files: list[str],
     include_files: list[str],
     exclude_files: list[str],
 ) -> list[str]:
-    resolved: list[str] = list(default_files)
-
-    for filename in include_files:
-        if filename not in resolved:
-            resolved.append(filename)
+    resolved = list(dict.fromkeys([*default_files, *include_files]))
 
     excluded = set(exclude_files)
     resolved = [filename for filename in resolved if filename not in excluded]
@@ -1877,201 +1866,286 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+@dataclass(frozen=True)
+class MergeCommandInputs:
+    data_dir: Path
+    input_files: tuple[str, ...]
+    required_files: frozenset[str]
+    loaded_input_files: tuple[str, ...]
+    skipped_files: tuple[dict[str, str], ...]
+    dataset_path: Path
+    extaddr_map_path: Path
+    output_path: Path
+    report_path: Path | None
+    dataset_file: str
+    extaddr_map_file: str
+    merge_strategy: str
+    matter_identity_mode: str
+
+
+@dataclass(frozen=True)
+class MergeSupportingData:
+    device_label_map: dict[str, Any]
+    network_info: dict[str, Any]
+    omr_prefix: str
+    reference_files: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class MergeCommandResult:
+    records: list[dict[str, Any]]
+    report: dict[str, Any]
+    viable: bool
+    viability_reason: str | None
+
+
+def resolve_merge_command_inputs(
+    args: argparse.Namespace,
+    data_dir: Path,
+) -> MergeCommandInputs:
+    base_dir = data_dir if args.base_dir == "." else Path(args.base_dir)
+    raw_groups = args.include_groups
+    group_values = [raw_groups] if isinstance(raw_groups, str) else raw_groups
+    group_names = parse_file_list_args(group_values)
+    default_files = resolve_input_groups(group_names) if group_names else []
+    include_files = parse_file_list_args(args.include_files)
+    exclude_files = parse_file_list_args(args.exclude_files)
+    input_files = resolve_input_files(default_files, include_files, exclude_files)
+
+    required_files = frozenset(include_files).intersection(input_files)
+    loaded_input_files: list[str] = []
+    skipped_files: list[dict[str, str]] = []
+    for filename in input_files:
+        source_path = base_dir / filename
+        if source_path.is_file():
+            loaded_input_files.append(filename)
+        elif filename in required_files:
+            raise TDRequiredInputMissingError(
+                command_path="merge-dataset",
+                data_dir=base_dir,
+                missing_file=source_path,
+                classification="required",
+                action="fail code=4",
+            )
+        else:
+            logging.warning(
+                "merge-dataset: skipping missing optional input file %s",
+                source_path,
+            )
+            skipped_files.append({"file": filename, "reason": "missing"})
+
+    if not loaded_input_files:
+        raise TDRequiredInputMissingError(
+            command_path="merge-dataset",
+            data_dir=base_dir,
+            missing_file=base_dir / "<all-input-files>",
+            classification="required-seed",
+            action="fail code=4",
+        )
+
+    return MergeCommandInputs(
+        data_dir=base_dir,
+        input_files=tuple(input_files),
+        required_files=required_files,
+        loaded_input_files=tuple(loaded_input_files),
+        skipped_files=tuple(skipped_files),
+        dataset_path=base_dir / args.dataset_file,
+        extaddr_map_path=base_dir / args.extaddr_map_file,
+        output_path=base_dir / args.output,
+        report_path=base_dir / args.report_file if args.report_file else None,
+        dataset_file=args.dataset_file,
+        extaddr_map_file=args.extaddr_map_file,
+        merge_strategy=args.merge_strategy,
+        matter_identity_mode=args.matter_identity_mode,
+    )
+
+
+def load_merge_supporting_data(
+    command_inputs: MergeCommandInputs,
+) -> MergeSupportingData:
+    logger = logging.getLogger(__name__)
+    extaddr_map_result = load_optional_input(
+        command_inputs.extaddr_map_path,
+        loader=lambda path: load_extaddr_device_label_map_flexible(
+            str(path),
+            extaddr_aliases=EXTADDR_FIELD_ALIASES,
+        ),
+        default_value={},
+        command_path="merge-dataset",
+        data_dir=command_inputs.data_dir,
+        logger=logger,
+        classification="optional",
+        fallback_action="continue fallback=empty-map",
+    )
+    dataset_result = load_optional_input(
+        command_inputs.dataset_path,
+        loader=load_json,
+        default_value={},
+        command_path="merge-dataset",
+        data_dir=command_inputs.data_dir,
+        logger=logger,
+        classification="optional",
+        fallback_action="continue fallback=empty-dataset",
+    )
+
+    network_info = dataset_result.value if isinstance(dataset_result.value, dict) else {}
+    omr_prefix_value = network_info.get("prefixOmrIpv6AddrPrefix", "")
+    omr_prefix = omr_prefix_value if isinstance(omr_prefix_value, str) else ""
+    device_label_map = (
+        extaddr_map_result.value
+        if isinstance(extaddr_map_result.value, dict)
+        else {}
+    )
+    reference_files = (
+        {
+            "file": command_inputs.extaddr_map_file,
+            "loaded": not extaddr_map_result.used_fallback,
+            "fallback": extaddr_map_result.used_fallback,
+        },
+        {
+            "file": command_inputs.dataset_file,
+            "loaded": not dataset_result.used_fallback,
+            "fallback": dataset_result.used_fallback,
+        },
+    )
+    return MergeSupportingData(
+        device_label_map=device_label_map,
+        network_info=network_info,
+        omr_prefix=omr_prefix,
+        reference_files=reference_files,
+    )
+
+
+def evaluate_merge_viability(
+    records: Sequence[dict[str, Any]],
+) -> tuple[bool, int, str | None]:
+    identity_seed_record_count = 0
+    for node in records:
+        extaddr = get_canonical_extaddr(node)
+        rloc16 = normalize_identifier_text(node.get("rloc16"))
+        omr_addr = get_canonical_omr(node)
+        if (extaddr and not is_placeholder_extaddr(extaddr)) or rloc16 or omr_addr:
+            identity_seed_record_count += 1
+
+    viable = identity_seed_record_count > 0
+    reason = None if viable else "no viable seed identities found in loaded input files"
+    return viable, identity_seed_record_count, reason
+
+
+def build_merge_output(
+    command_inputs: MergeCommandInputs,
+    supporting_data: MergeSupportingData,
+) -> MergeCommandResult:
+    input_data = {
+        filename: load_json(command_inputs.data_dir / filename)
+        for filename in command_inputs.loaded_input_files
+    }
+    merged_records, report = build_merged_records(
+        command_inputs.data_dir,
+        supporting_data.omr_prefix,
+        list(command_inputs.loaded_input_files),
+        supporting_data.device_label_map,
+        matter_identity_mode=command_inputs.matter_identity_mode,
+        input_data=input_data,
+    )
+    report["input_files"] = list(command_inputs.input_files)
+    report["loaded_input_files"] = list(command_inputs.loaded_input_files)
+    report["skipped_input_files"] = list(command_inputs.skipped_files)
+    report["reference_extaddr_map_file"] = command_inputs.extaddr_map_file
+    report["reference_extaddr_map_entries"] = len(supporting_data.device_label_map)
+    report["optional_reference_files"] = list(supporting_data.reference_files)
+
+    viable, identity_seed_record_count, viability_reason = evaluate_merge_viability(
+        merged_records
+    )
+    report["required_seed_status"] = {
+        "dataset_file": command_inputs.dataset_file,
+        "loaded_input_file_count": len(command_inputs.loaded_input_files),
+        "identity_seed_record_count": identity_seed_record_count,
+        "viable": viable,
+    }
+
+    output_records = merged_records
+    if command_inputs.merge_strategy == "none":
+        passthrough_records: list[dict[str, Any]] = []
+        for filename in command_inputs.loaded_input_files:
+            records = extract_records(filename, input_data[filename])
+            for raw_record in records:
+                record = normalize_identifiers(raw_record, supporting_data.omr_prefix)
+                record.setdefault("_source_files", [filename])
+                passthrough_records.append(record)
+        output_records = passthrough_records
+        report["merge_strategy"] = "none"
+        report["passthrough_record_count"] = len(passthrough_records)
+        logging.info(
+            "merge-strategy=none: collected %s records without merging.",
+            len(passthrough_records),
+        )
+    else:
+        report["merge_strategy"] = "merge"
+
+    return MergeCommandResult(
+        records=convert_keys_to_camel_case(output_records),
+        report=report,
+        viable=viable,
+        viability_reason=viability_reason,
+    )
+
+
+def write_merge_outputs(
+    result: MergeCommandResult,
+    output_path: Path,
+    report_path: Path | None = None,
+) -> None:
+    save_json_atomic(
+        result.records,
+        output_path,
+        indent=2,
+        add_trailing_newline=True,
+    )
+    if report_path is not None:
+        save_json_atomic(
+            result.report,
+            report_path,
+            indent=2,
+            add_trailing_newline=True,
+        )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
 
-    default_files = []
-
     args = parse_args(argv)
     td_data_dir = resolve_data_dir(data_dir=args.datadir)
-    base_dir = td_data_dir if args.base_dir == "." else Path(args.base_dir)
-
-    # Process args.include_groups to expand GROUP_TO_INPUT_FILES into default_files
-    if args.include_groups:
-        if isinstance(args.include_groups, str):
-            args.include_groups = [g.strip() for g in args.include_groups.split(",") if g.strip()]
-
-        # Populate with files from specified groups
-        for group in args.include_groups:
-            default_files.extend(GROUP_TO_INPUT_FILES.get(group, []))
-        logging.info(f"Included groups: {args.include_groups}")    
-        logging.debug(f"Resolved files: {default_files}")    
-    
-    include_files = parse_file_list_args(args.include_files)
-    exclude_files = parse_file_list_args(args.exclude_files)
 
     try:
-        input_files = resolve_input_files(
-            default_files, include_files, exclude_files
+        command_inputs = resolve_merge_command_inputs(args, td_data_dir)
+        supporting_data = load_merge_supporting_data(command_inputs)
+        result = build_merge_output(command_inputs, supporting_data)
+        write_merge_outputs(
+            result,
+            command_inputs.output_path,
+            command_inputs.report_path,
         )
 
-        extaddr_map_path = base_dir / args.extaddr_map_file
-        extaddr_map_result = load_optional_input(
-            extaddr_map_path,
-            loader=lambda path: load_extaddr_device_label_map_flexible(
-                str(path),
-                extaddr_aliases=EXTADDR_FIELD_ALIASES,
-            ),
-            default_value={},
-            command_path="merge-dataset",
-            data_dir=base_dir,
-            logger=logging.getLogger(__name__),
-            classification="optional",
-            fallback_action="continue fallback=empty-map",
-        )
-        device_label_map = extaddr_map_result.value
-
-        dataset_path = base_dir / args.dataset_file
-        dataset_result = load_optional_input(
-            dataset_path,
-            loader=lambda path: load_json(path),
-            default_value={},
-            command_path="merge-dataset",
-            data_dir=base_dir,
-            logger=logging.getLogger(__name__),
-            classification="optional",
-            fallback_action="continue fallback=empty-dataset",
-        )
-        dataset = dataset_result.value
-        omr_prefix = ""
-        if isinstance(dataset, dict):
-            omr_prefix_value = dataset.get("prefixOmrIpv6AddrPrefix", "")
-            if isinstance(omr_prefix_value, str):
-                omr_prefix = omr_prefix_value
-
-        available_input_files: list[str] = []
-        skipped_input_files: list[dict[str, str]] = []
-
-        include_file_set = set(include_files)
-        for filename in input_files:
-            source_path = base_dir / filename
-            if source_path.exists():
-                available_input_files.append(filename)
-                continue
-
-            # Explicitly included files are treated as required.
-            if filename in include_file_set:
-                raise TDRequiredInputMissingError(
-                    command_path="merge-dataset",
-                    data_dir=base_dir,
-                    missing_file=source_path,
-                    classification="required",
-                    action="fail code=4",
-                )
-
-            warning = (
-                f"merge-dataset: skipping missing optional input file {source_path}"
-            )
-            logging.warning(warning)
-            skipped_input_files.append(
-                {
-                    "file": filename,
-                    "reason": "missing",
-                }
-            )
-
-        if not available_input_files:
-            raise TDRequiredInputMissingError(
-                command_path="merge-dataset",
-                data_dir=base_dir,
-                missing_file=base_dir / "<all-input-files>",
-                classification="required-seed",
-                action="fail code=4",
-            )
-
-        merged_records, report = build_merged_records(
-            base_dir,
-            omr_prefix,
-            available_input_files,
-            device_label_map,
-            matter_identity_mode=args.matter_identity_mode,
-        )
-        report["input_files"] = input_files
-        report["loaded_input_files"] = available_input_files
-        report["skipped_input_files"] = skipped_input_files
-        report["reference_extaddr_map_file"] = args.extaddr_map_file
-        report["reference_extaddr_map_entries"] = len(device_label_map)
-        report["optional_reference_files"] = [
-            {
-                "file": args.extaddr_map_file,
-                "loaded": not extaddr_map_result.used_fallback,
-                "fallback": extaddr_map_result.used_fallback,
-            },
-            {
-                "file": args.dataset_file,
-                "loaded": not dataset_result.used_fallback,
-                "fallback": dataset_result.used_fallback,
-            }
-        ]
-
-        identity_seed_record_count = 0
-        for node in merged_records:
-            if not isinstance(node, dict):
-                continue
-            extaddr = get_canonical_extaddr(node)
-            rloc16 = normalize_identifier_text(node.get("rloc16"))
-            omr_addr = get_canonical_omr(node)
-            if (extaddr and not is_placeholder_extaddr(extaddr)) or rloc16 or omr_addr:
-                identity_seed_record_count += 1
-
-        required_seed_status = {
-            "dataset_file": args.dataset_file,
-            "loaded_input_file_count": len(available_input_files),
-            "identity_seed_record_count": identity_seed_record_count,
-            "viable": identity_seed_record_count > 0,
-        }
-        report["required_seed_status"] = required_seed_status
-
-        if args.merge_strategy == "none":
-            # Pass-through: collect all records without identity matching.
-            passthrough_records: list[dict[str, Any]] = []
-            for filename in available_input_files:
-                data = load_json(base_dir / filename)
-                records = extract_records(filename, data)
-                for raw_record in records:
-                    record = normalize_identifiers(raw_record, omr_prefix)
-                    record.setdefault("_source_files", [filename])
-                    passthrough_records.append(record)
-            merged_records = passthrough_records
-            report["merge_strategy"] = "none"
-            report["passthrough_record_count"] = len(passthrough_records)
-            logging.info(
-                f"merge-strategy=none: collected {len(passthrough_records)} "
-                "records without merging."
-            )
-        else:
-            report["merge_strategy"] = "merge"
-
-        output_path = base_dir / args.output
-        merged_records_camel = convert_keys_to_camel_case(merged_records)
-        save_json_atomic(
-            merged_records_camel,
-            output_path,
-            indent=2,
-            add_trailing_newline=True,
-        )
-        logging.debug("Saved merged records into %s as JSON:\n%s",
-            output_path, json.dumps(merged_records_camel, indent=2))
-        if args.report_file:
-            report_path = base_dir / args.report_file
-            save_json_atomic(report, report_path, indent=2, add_trailing_newline=True)
-            logging.info(f"Wrote merge report to {report_path}")
-
+        if command_inputs.report_path is not None:
+            logging.info("Wrote merge report to %s", command_inputs.report_path)
         logging.info(
-            f"Wrote {len(merged_records_camel)} merged records to {output_path}")
+            "Wrote %s merged records to %s",
+            len(result.records),
+            command_inputs.output_path,
+        )
         logging.info(
             "Validation summary: "
-            f"multi_source_nodes={report['multi_source_nodes_total']}, "
-            f"single_source_nodes={report['single_source_nodes_total']}, "
-            f"identity_collisions={report['identity_collision_count']}"
+            f"multi_source_nodes={result.report['multi_source_nodes_total']}, "
+            f"single_source_nodes={result.report['single_source_nodes_total']}, "
+            f"identity_collisions={result.report['identity_collision_count']}"
         )
 
-        if not required_seed_status["viable"]:
-            logging.error(
-                "merge-dataset: no viable seed identities found in loaded input files"
-            )
+        if not result.viable:
+            logging.error("merge-dataset: %s", result.viability_reason)
             return 3
         return 0
     except TDRequiredInputMissingError as exc:

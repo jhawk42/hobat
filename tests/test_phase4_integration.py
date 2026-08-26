@@ -644,8 +644,8 @@ def test_conflict_tracking_field_conflicts():
     
     assert device_label_conflict is not None
     # Conflict structure uses "current" (base) and "incoming" keys
-    assert '"Living Room"' in device_label_conflict["current"]
-    assert '"Kitchen"' in device_label_conflict["incoming"]
+    assert device_label_conflict["current"] == "Living Room"
+    assert device_label_conflict["incoming"] == "Kitchen"
     
     print("✅ PASS: Field conflicts detected and tracked")
 

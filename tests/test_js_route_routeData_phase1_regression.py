@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -63,17 +62,9 @@ def test_dataset_uses_internal_vs_canonical_route_normalization_modes() -> None:
 def test_dataset_partial_and_final_outputs_use_canonicalized_buffers() -> None:
     text = _read_text(DATASET_JS)
 
-    assert "const canonicalRows = rows.map((row) =>" in text
+    assert "export function buildDatasetRows(entry, rawFiles, options = {})" in text
+    assert "normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT)" in text
     assert "const canonicalRawFiles = rawFiles.map((file) =>" in text
-
-    partial_pattern = re.compile(
-        r"return\s*\{\s*\n\s*entry,\s*\n\s*rawFiles:\s*canonicalRawFiles,\s*\n\s*rows:\s*canonicalRows,",
-        re.DOTALL,
-    )
-    assert partial_pattern.search(text)
-
-    final_pattern = re.compile(
-        r"currentDataset\s*=\s*\{\s*\n\s*entry,\s*\n\s*rawFiles:\s*canonicalRawFiles,\s*\n\s*rows:\s*canonicalRows,",
-        re.DOTALL,
-    )
-    assert final_pattern.search(text)
+    assert "const { rows, loadedFiles } = buildDatasetRows(entry, rawFiles);" in text
+    assert "const assembled = buildDatasetRows(entry, rawFiles);" in text
+    assert "rows: assembled.rows" in text

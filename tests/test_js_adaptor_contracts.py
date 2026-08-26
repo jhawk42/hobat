@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNNER = REPO_ROOT / "tests" / "js" / "run-adaptor-contracts.mjs"
 
 
-def test_route_data_adaptor_contracts_are_executable() -> None:
+def test_all_adaptors_preserve_the_public_result_contract() -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is required for the JavaScript adaptor contract")

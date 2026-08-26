@@ -1,0 +1,485 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "2.0.0",
+  "cases": [
+    {
+      "id": "normalize-extaddress-case-whitespace",
+      "area": "normalization",
+      "operation": "normalize",
+      "enforcement": "contract",
+      "description": "Canonical extAddress identity is trimmed and lowercased.",
+      "inputs": {
+        "record": {"extAddress": " AA11BB22CC33DD44 "}
+      },
+      "expected": {
+        "contract": {"extAddress": "aa11bb22cc33dd44"}
+      }
+    },
+    {
+      "id": "normalize-identity-idempotent",
+      "area": "normalization",
+      "operation": "normalize",
+      "enforcement": "contract",
+      "description": "Canonical identity aliases remain stable across repeated normalization.",
+      "inputs": {
+        "record": {
+          "rloc16": "0xabcd",
+          "_source_files": []
+        },
+        "repeat": 2
+      },
+      "expected": {
+        "contract": {
+          "rloc16": "0xabcd",
+          "_source_files": []
+        }
+      }
+    },
+    {
+      "id": "normalize-rloc16-case",
+      "area": "identity",
+      "operation": "normalize",
+      "enforcement": "contract",
+      "description": "RLOC16 identity uses lowercase canonical text.",
+      "inputs": {
+        "record": {
+          "extAddress": "aa11bb22cc33dd44",
+          "extaddr": "aa11bb22cc33dd44",
+          "rloc16": "0XABCD",
+          "_source_files": []
+        }
+      },
+      "expected": {
+        "contract": {
+          "extAddress": "aa11bb22cc33dd44",
+          "rloc16": "0xabcd",
+          "_source_files": []
+        }
+      }
+    },
+    {
+      "id": "merge-empty-scalar-and-provenance",
+      "area": "provenance",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "A non-empty scalar fills an empty value and source provenance is retained in order.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {
+            "name": "alpha.json",
+            "records": [
+              {
+                "rloc16": "0xabcd",
+                "status": ""
+              }
+            ]
+          },
+          {
+            "name": "beta.json",
+            "records": [
+              {
+                "rloc16": "0xabcd",
+                "status": "online",
+                "sample": 21
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0xabcd",
+            "status": "online",
+            "sample": 21,
+            "_source_files": ["alpha.json", "beta.json"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "identity-missing",
+      "area": "identity",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Records without a merge identity follow one explicit retention policy.",
+      "inputs": {
+        "strategy": "by-identity",
+        "sources": [
+          {"name": "unknown.json", "records": [{"status": "detached"}]}
+        ]
+      },
+      "expected": {
+        "contract": [{"status": "detached", "_source_files": ["unknown.json"]}]
+      }
+    },
+    {
+      "id": "scalar-existing-nonempty-incoming-empty",
+      "area": "scalar",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "An empty incoming scalar does not replace an existing value.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {"name": "alpha.json", "records": [{"rloc16": "0xabcd", "status": "online"}]},
+          {"name": "beta.json", "records": [{"rloc16": "0xabcd", "status": ""}]}
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0xabcd",
+            "status": "online",
+            "_source_files": ["alpha.json", "beta.json"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "scalar-equal-nonempty",
+      "area": "scalar",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Equal non-empty scalar values merge without a conflict.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {"name": "alpha.json", "records": [{"rloc16": "0xabcd", "status": "online"}]},
+          {"name": "beta.json", "records": [{"rloc16": "0xabcd", "status": "online"}]}
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0xabcd",
+            "status": "online",
+            "_source_files": ["alpha.json", "beta.json"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "scalar-source-priority-reversed-input",
+      "area": "precedence",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Configured source priority wins regardless of input order.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {
+            "name": "td-otbr-restapi-diagnostics.json",
+            "records": [{"rloc16": "0xabcd", "status": "low"}]
+          },
+          {
+            "name": "td-otbr-cli-networkdiag-fetch-all.json",
+            "records": [{"rloc16": "0xabcd", "status": "high"}]
+          }
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0xabcd",
+            "status": "high",
+            "_source_files": [
+              "td-otbr-cli-networkdiag-fetch-all.json",
+              "td-otbr-restapi-diagnostics.json"
+            ],
+            "_merge_conflicts": [
+              {"path": "status", "current": "high", "incoming": "low"}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "precedence-unknown-source-stable-order",
+      "area": "precedence",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Unknown sources use stable input order for equal default priority.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {"name": "unknown-a.json", "records": [{"rloc16": "0xabcd", "status": "first"}]},
+          {"name": "unknown-b.json", "records": [{"rloc16": "0xabcd", "status": "second"}]}
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0xabcd",
+            "status": "first",
+            "_source_files": ["unknown-a.json", "unknown-b.json"],
+            "_merge_conflicts": [
+              {"path": "status", "current": "first", "incoming": "second"}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "children-merge-by-rloc16",
+      "area": "child",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Child observations with the same RLOC16 merge within one parent.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {
+            "name": "alpha.json",
+            "records": [
+              {"rloc16": "0x1000", "children": [{"rloc16": "0x1001", "status": "online"}]}
+            ]
+          },
+          {
+            "name": "beta.json",
+            "records": [
+              {"rloc16": "0x1000", "children": [{"rloc16": "0x1001", "sample": 21}]}
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0x1000",
+            "children": [{"rloc16": "0x1001", "status": "online", "sample": 21}],
+            "_source_files": ["alpha.json", "beta.json"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "children-and-childtable-distinct",
+      "area": "child",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Topology children and diagnostic childTable remain distinct collections.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {
+            "name": "alpha.json",
+            "records": [{"rloc16": "0x1000", "children": [{"rloc16": "0x1001"}]}]
+          },
+          {
+            "name": "beta.json",
+            "records": [{"rloc16": "0x1000", "childTable": [{"rloc16": "0x1002"}]}]
+          }
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0x1000",
+            "children": [{"rloc16": "0x1001"}],
+            "childTable": [{"rloc16": "0x1002"}],
+            "_source_files": ["alpha.json", "beta.json"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "neighbors-merge-by-rloc16",
+      "area": "neighbor",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Router neighbor observations merge by RLOC16 and retain complementary metrics.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {
+            "name": "alpha.json",
+            "records": [
+              {"rloc16": "0x1000", "routerNeighbors": [{"rloc16": "0x2000", "lqIn": 3}]}
+            ]
+          },
+          {
+            "name": "beta.json",
+            "records": [
+              {"rloc16": "0x1000", "routerNeighbors": [{"rloc16": "0x2000", "lqOut": 2}]}
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0x1000",
+            "routerNeighbors": [{"rloc16": "0x2000", "lqIn": 3, "lqOut": 2}],
+            "_source_files": ["alpha.json", "beta.json"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "route-sequence-wraparound-250-to-5",
+      "area": "route",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "RFC 1982 sequence comparison treats 5 as newer than 250.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {
+            "name": "alpha.json",
+            "records": [
+              {
+                "rloc16": "0x1000",
+                "route": {"idSequence": 250, "routeData": [{"routeId": 1, "routeCost": 5}]}
+              }
+            ]
+          },
+          {
+            "name": "beta.json",
+            "records": [
+              {
+                "rloc16": "0x1000",
+                "route": {"idSequence": 5, "routeData": [{"routeId": 1, "routeCost": 2}]}
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0x1000",
+            "route": {"idSequence": 5, "routeData": [{"routeId": 1, "routeCost": 2}]},
+            "_source_files": ["alpha.json", "beta.json"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "route-known-partition-mismatch",
+      "area": "route",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Route observations from different known partitions do not merge.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {
+            "name": "alpha.json",
+            "records": [{"rloc16":"0x1000","leaderData":{"partitionId":"0x00000001"},"route":{"idSequence":1,"routeData":[{"routeId":1,"routeCost":5}]}}]
+          },
+          {
+            "name": "beta.json",
+            "records": [{"rloc16":"0x1000","leaderData":{"partitionId":"0x00000002"},"route":{"idSequence":2,"routeData":[{"routeId":1,"routeCost":1}]}}]
+          }
+        ]
+      },
+      "expected": {
+        "contract": [{
+          "rloc16":"0x1000",
+          "leaderData":{"partitionId":"0x00000001"},
+          "route":{"idSequence":1,"routeData":[{"routeId":1,"routeCost":5}]},
+          "_source_files":["alpha.json","beta.json"],
+          "_merge_conflicts":[{"path":"leaderData.partitionId","current":"0x00000001","incoming":"0x00000002"}]
+        }]
+      }
+    },
+    {
+      "id": "conflict-deduplicated",
+      "area": "conflict",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Repeated identical conflicts are recorded once with raw values.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {"name":"alpha.json","records":[{"rloc16":"0x1000","status":"online"}]},
+          {"name":"beta.json","records":[{"rloc16":"0x1000","status":"offline"}]},
+          {"name":"gamma.json","records":[{"rloc16":"0x1000","status":"offline"}]}
+        ]
+      },
+      "expected": {
+        "contract": [{
+          "rloc16":"0x1000",
+          "status":"online",
+          "_source_files":["alpha.json","beta.json","gamma.json"],
+          "_merge_conflicts":[{"path":"status","current":"online","incoming":"offline"}]
+        }]
+      }
+    },
+    {
+      "id": "identity-collision-reconciles-nodes",
+      "area": "identity",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "A bridge observation reconciles nodes matched by two consistent strong identities.",
+      "inputs": {
+        "strategy": "by-identity",
+        "sources": [
+          {"name":"alpha.json","records":[{"extAddress":"aa11","status":"online"}]},
+          {"name":"beta.json","records":[{"omrIpv6Address":"fd00::1","sample":21}]},
+          {"name":"bridge.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","role":"router"}]}
+        ]
+      },
+      "expected": {
+        "contract": [{
+          "extAddress":"aa11",
+          "status":"online",
+          "omrIpv6Address":"fd00::1",
+          "sample":21,
+          "role":"router",
+          "mode.device":"FTD",
+          "_source_files":["alpha.json","beta.json","bridge.json"]
+        }]
+      }
+    },
+    {
+      "id": "mdns-newer-timestamp-wins",
+      "area": "mdns",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "A newer mDNS observation wins and fills missing service fields from the older record.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {"name":"alpha.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","recordKey":"first","event":"add","capturedAtEpoch":1,"serviceInfo":{"port":1,"oldOnly":true}}]},
+          {"name":"beta.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","recordKey":"second","event":"update","capturedAtEpoch":2,"serviceInfo":{"port":2,"newOnly":true}}]}
+        ]
+      },
+      "expected": {
+        "contract": [{
+          "rloc16":"0x1000",
+          "scope":"_meshcop._udp.local.",
+          "recordKey":"second",
+          "event":"update",
+          "capturedAtEpoch":2,
+          "serviceInfo":{"port":2,"newOnly":true,"oldOnly":true},
+          "_source_files":["alpha.json","beta.json"],
+          "_mdns_aliases":{}
+        }]
+      }
+    },
+    {
+      "id": "matter-composite-guard-separates-shared-omr",
+      "area": "matter",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Composite guard keeps Matter records with different Fabric and Node identities separate.",
+      "inputs": {
+        "strategy": "by-identity",
+        "options":{"matterIdentityMode":"composite-guard"},
+        "sources": [
+          {"name":"alpha.json","records":[{"scope":"_matter._tcp.local.","omrIpv6Address":"fd00::1","serviceInfo":{"properties":{"FabricID_compressed":{"decoded":"aaaa"},"NodeID":{"decoded":"0001"}}}}]},
+          {"name":"beta.json","records":[{"scope":"_matter._tcp.local.","omrIpv6Address":"fd00::1","serviceInfo":{"properties":{"FabricID_compressed":{"decoded":"bbbb"},"NodeID":{"decoded":"0002"}}}}]}
+        ]
+      },
+      "expected": {
+        "contract": [
+          {"omrIpv6Address":"fd00::1","scope":"_matter._tcp.local.","serviceInfo":{"properties":{"fabricIdCompressed":{"decoded":"aaaa"},"nodeId":{"decoded":"0001"}}},"_source_files":["alpha.json"],"_mdns_aliases":{"fabricIdCompressedAliases":["aaaa"],"nodeIdAliases":["0001"],"matterFabricNodeAliases":["aaaa|0001"]}},
+          {"omrIpv6Address":"fd00::1","scope":"_matter._tcp.local.","serviceInfo":{"properties":{"fabricIdCompressed":{"decoded":"bbbb"},"nodeId":{"decoded":"0002"}}},"_source_files":["beta.json"],"_mdns_aliases":{"fabricIdCompressedAliases":["bbbb"],"nodeIdAliases":["0002"],"matterFabricNodeAliases":["bbbb|0002"]}}
+        ]
+      }
+    }
+  ]
+}

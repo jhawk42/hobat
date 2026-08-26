@@ -78,6 +78,63 @@ const NORMALIZE_OPTIONS_CANONICAL_OUTPUT = Object.freeze({
   dropLegacyRouteData: true,
 });
 
+function extractRawRows(payload) {
+  return Array.isArray(payload) ? payload : [];
+}
+
+function extractEnvelopeRows(payload, property) {
+  if (Array.isArray(payload)) return payload;
+  return isPlainObject(payload) && Array.isArray(payload[property])
+    ? payload[property]
+    : [];
+}
+
+export const ROW_EXTRACTORS = Object.freeze({
+  "raw-array": extractRawRows,
+  "eve-native": (payload) => extractEnvelopeRows(payload, "nodes"),
+  "thread-tools-native": (payload) => extractEnvelopeRows(payload, "diagnostics"),
+  "otbr-restapi": (payload) => extractEnvelopeRows(payload, "data"),
+});
+
+export const MERGE_STRATEGY_HANDLERS = Object.freeze({
+  [MERGE_STRATEGIES.none]: (groups) => groups[0] ?? [],
+  [MERGE_STRATEGIES.byRloc16]: mergeRowsByRloc16,
+  [MERGE_STRATEGIES.byIdentity]: mergeRowsByIdentity,
+});
+
+export function buildDatasetRows(entry, rawFiles, options = {}) {
+  const loadedFileIndexes = [];
+  rawFiles.forEach((file, index) => {
+    if (file !== null && file !== undefined) loadedFileIndexes.push(index);
+  });
+  const loadedFiles = loadedFileIndexes.map((index) => entry.files[index]);
+  if (loadedFileIndexes.length === 0) {
+    return { rows: [], loadedFiles, loadedFileIndexes };
+  }
+
+  const strategyHandler = MERGE_STRATEGY_HANDLERS[entry.mergeStrategy];
+  if (!strategyHandler) {
+    throw new Error(`Unknown merge strategy: ${entry.mergeStrategy}`);
+  }
+
+  let groups;
+  if (entry.mergeStrategy === MERGE_STRATEGIES.none) {
+    const firstIndex = loadedFileIndexes[0];
+    const extractor = ROW_EXTRACTORS[entry.rowExtractor];
+    if (!extractor) throw new Error(`Unknown row extractor: ${entry.rowExtractor}`);
+    groups = [normalizeRows(extractor(rawFiles[firstIndex]), entry.files[firstIndex])];
+  } else {
+    groups = loadedFileIndexes.map((index) =>
+      normalizeRows(rawFiles[index], entry.files[index]),
+    );
+  }
+
+  const rows = strategyHandler(groups, options).map((row) =>
+    normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
+  );
+  return { rows, loadedFiles, loadedFileIndexes };
+}
+
 function _isProgressiveFeatureEnabled() {
 
   return _FEATURE_PROGRESSIVE_FETCH_DEFAULT;
@@ -551,39 +608,10 @@ export function setStaticDeviceLabel(extaddr, deviceLabel) {
 // Builds a partial dataset from whichever entries in rawFiles are non-null.
 // Returns null when no file has arrived yet. Used for incremental rendering.
 function _buildPartialDataset(entry, rawFiles, loadStartTime) {
-  const loadedFiles = entry.files.filter((_, i) => rawFiles[i] !== null);
+  const { rows, loadedFiles } = buildDatasetRows(entry, rawFiles);
   if (loadedFiles.length === 0) return null;
-
-  let rows;
-  if (entry.mergeStrategy === MERGE_STRATEGIES.byRloc16) {
-    const groups = rawFiles
-      .map((d, i) => (d !== null ? normalizeRows(d, entry.files[i]) : null))
-      .filter((g) => g !== null);
-    rows = mergeRowsByRloc16(groups);
-  } else if (entry.mergeStrategy === MERGE_STRATEGIES.byIdentity) {
-    const groups = rawFiles
-      .map((d, i) => (d !== null ? normalizeRows(d, entry.files[i]) : null))
-      .filter((g) => g !== null);
-    rows = mergeRowsByIdentity(groups);
-  } else {
-    const firstLoaded = rawFiles.find((d) => d !== null);
-    const firstLoadedIndex = rawFiles.findIndex((d) => d !== null);
-    const rowSource =
-      entry.topologyMode === "eve_native" && firstLoaded && Array.isArray(firstLoaded.nodes)
-        ? firstLoaded.nodes
-        : entry.topologyMode === "thread_tools_native" && firstLoaded && Array.isArray(firstLoaded.diagnostics)
-          ? firstLoaded.diagnostics
-        : entry.topologyMode === "otbr_restapi" && firstLoaded && Array.isArray(firstLoaded.data)
-          ? firstLoaded.data
-          : firstLoaded;
-    rows = rowSource !== null ? normalizeRows(rowSource, entry.files[firstLoadedIndex]) : [];
-  }
-
-  const canonicalRows = rows.map((row) =>
-    normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
-  );
   const canonicalRawFiles = rawFiles.map((file) =>
-    file === null
+    file === null || file === undefined
       ? null
       : normalizeDatasetPayload(file, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
   );
@@ -601,7 +629,7 @@ function _buildPartialDataset(entry, rawFiles, loadStartTime) {
   return {
     entry,
     rawFiles: canonicalRawFiles,
-    rows: canonicalRows,
+    rows,
     loadedFiles,
     fetchDurationMs: Date.now() - loadStartTime,
     fileLastModifiedAt: oldestLastModifiedAt,
@@ -767,55 +795,8 @@ export async function loadDataset(entryValue, options = {}) {
     return;
   }
 
-  // Apply merge strategy to produce a flat rows array for the table renderer
-  let rows;
-  if (entry.mergeStrategy === MERGE_STRATEGIES.byRloc16) {
-    const groups = rawFiles
-      .map((d, index) =>
-        d !== null ? normalizeRows(d, entry.files[index]) : null,
-      )
-      .filter((group) => group !== null);
-    rows = mergeRowsByRloc16(groups);
-  } else if (entry.mergeStrategy === MERGE_STRATEGIES.byIdentity) {
-    const groups = rawFiles
-      .map((d, index) =>
-        d !== null ? normalizeRows(d, entry.files[index]) : null,
-      )
-      .filter((group) => group !== null);
-    rows = mergeRowsByIdentity(groups);
-  } else {
-    // 'none' — for single-file datasets just normalise the first loaded file;
-    // multi-file 'none' datasets hand the full rawFiles array to the adaptor
-    const firstLoaded = rawFiles.find((d) => d !== null);
-    const firstLoadedIndex = rawFiles.findIndex((d) => d !== null);
-    // For eve_native files the top-level shape is { version, nodes: [...] };
-    // For thread_tools_native files the top-level shape is { diagnostics: [...] };
-    // For otbr_restapi files the top-level shape is { data: [...] };
-    // extract the inner array so the table renderer shows one row per node.
-    const rowSource =
-      entry.topologyMode === "eve_native" &&
-      firstLoaded &&
-      Array.isArray(firstLoaded.nodes)
-        ? firstLoaded.nodes
-        : entry.topologyMode === "thread_tools_native" &&
-            firstLoaded &&
-            Array.isArray(firstLoaded.diagnostics)
-          ? firstLoaded.diagnostics
-        : entry.topologyMode === "otbr_restapi" &&
-            firstLoaded &&
-            Array.isArray(firstLoaded.data)
-          ? firstLoaded.data
-          : firstLoaded;
-    rows =
-      rowSource !== null
-        ? normalizeRows(rowSource, entry.files[firstLoadedIndex])
-        : [];
-  }
-
+  const assembled = buildDatasetRows(entry, rawFiles);
   const fetchDurationMs = Date.now() - loadStartTime;
-  const canonicalRows = rows.map((row) =>
-    normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
-  );
   const canonicalRawFiles = rawFiles.map((file) =>
     file === null
       ? null
@@ -836,8 +817,8 @@ export async function loadDataset(entryValue, options = {}) {
   currentDataset = {
     entry,
     rawFiles: canonicalRawFiles,
-    rows: canonicalRows,
-    loadedFiles,
+    rows: assembled.rows,
+    loadedFiles: assembled.loadedFiles,
     fetchDurationMs,
     fileLastModifiedAt: oldestLastModifiedAt,
     isPartial: false,

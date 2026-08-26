@@ -81,7 +81,7 @@ def test_multicast_to_json_output_has_all_fields():
         json_device = json_output[0]
         
         # Verify all new TLV fields are in the JSON output (camelCase after normalization)
-        assert "eui64" in json_device, "eui64 missing from JSON output"
+        assert "eui" in json_device, "eui missing from JSON output"
         assert "connectivity" in json_device, "connectivity missing from JSON output"
         assert "leaderData" in json_device, "leaderData missing from JSON output"
         assert "vendorName" in json_device, "vendorName missing from JSON output"
@@ -90,7 +90,7 @@ def test_multicast_to_json_output_has_all_fields():
         assert "route" in json_device, "route missing from JSON output"
         
         # Verify values in JSON (note: keys are normalized to camelCase)
-        assert json_device["eui64"] == "f434f0fffe1e1774"
+        assert json_device["eui"] == "f434f0fffe1e1774"
         assert json_device["vendorName"] == "Apple"
         assert json_device["vendorModel"] == "Default"
         assert json_device["vendorSwVersion"] == "Default"

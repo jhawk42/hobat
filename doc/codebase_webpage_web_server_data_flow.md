@@ -268,16 +268,22 @@ Start concurrent per-file fetches (Promise.allSettled)
       - enforces monotonic freshness and redraw cadence guards
     - on checkpoint or final file data:
       - updates rawFilesInProgress[fileIdx]
-      - rebuilds partial dataset via _buildPartialDataset(...)
+      - rebuilds partial rows via buildDatasetRows(...)
       - sets currentDataset.isPartial = true
       - notifies UI via onFileReady callback
     │
     ▼
 After all files settle:
-  - build final rows with merge strategy
+  - build final rows through the same buildDatasetRows(...) path
   - set currentDataset.isPartial = false
   - attach fetchMetrics
 ```
+
+`buildDatasetRows(entry, rawFiles)` is pure. It preserves source file indexes,
+selects non-merged payload rows through `entry.rowExtractor`, dispatches merge
+strategies through `MERGE_STRATEGY_HANDLERS`, and applies canonical output
+normalization. Fetch sessions, cache metadata, timing, and commits remain in
+`loadDataset(...)`.
 
 ### Normalisation and merge (`tdash-merge.js`)
 
@@ -312,17 +318,29 @@ Different data sources use inconsistent field naming conventions—OTBR CLI uses
 
 ## 4. Adaptation Layer (`tdash-adaptors.js`, `tdash-topology-utils.js`)
 
+`tdash-adaptor-model.js` is the browser-independent boundary between source
+adaptors and vis-network. It registers canonical devices using Phase 2 identity
+keys, category-aware relationships, explicit details ownership, router
+neighbor/child indexes, and source names. `emitAdaptorResult(...)` validates
+the model and produces the renderer contract. Existing source-specific graph
+builders enter this boundary through `createAdaptorModelFromResult(...)`, which
+preserves node/edge ordering and presentation while centralizing identity and
+emission. OTBR REST additionally exposes pure envelope extraction and a
+separate model-building stage.
+
 ### Dispatch
 
-`runAdaptor(dataset)` selects the adaptor function from `dataset.entry.topologyMode`:
+`runAdaptor(dataset)` selects an owner-module handler from
+`ADAPTOR_HANDLERS` using `dataset.entry.adaptor`:
 
-| topologyMode | Adaptor | Input |
+| adaptor | Handler | Input |
 |---|---|---|
 | `meshdiag-networkdiag` | `adaptMeshdiagNetworkdiag` | meshdiag + networkdiag (with routeData links) + neighbor/child tables |
 | `merged-detailed` | `adaptMergedDetailed` | pre-merged topology-all file |
-| `otbr_restapi` | `adaptOtbrRestApi` | REST API devices + diagnostics |
-| `eve_enhanced` | `adaptEve` | td-eve-topology.json |
-| `eve_native` | `adaptEveNative` | raw .evethreadlayout |
+| `otbr-restapi` | `adaptOtbrRestApi` | REST API devices + diagnostics |
+| `eve-enhanced` | `adaptEve` | td-eve-topology.json |
+| `eve-native` | `adaptEveNative` | raw .evethreadlayout |
+| `thread-tools-native` | `adaptThreadToolsNative` | Thread Tools diagnostics envelope |
 | `router-table` | `adaptRouterTable` | td-otbr-cli-router-table.json |
 | `raw-array` | `adaptRawArray` | any flat JSON array |
 
@@ -337,6 +355,7 @@ Every adaptor returns the same shape consumed by `renderTopologyForDataset`:
   nodeMap:               Map<nodeId, rawNodeObject>
   rawByIdForDetails:     Map<nodeId, rawObject>  // for the details panel
   routerNeighborByRloc16: Map<rloc16, neighborTableRow>
+  routerChildByRloc16:    Map<rloc16, childTableRow> // optional by adaptor
   sourceNames:           string[]
 }
 ```
@@ -454,7 +473,12 @@ computeTopologyCapabilities(nodeData, edgeData)
     │
     ▼
 updateFilterOptionVisibility(capabilities, 'topology')
+  → isDiagnosticOptionAvailable(option, capabilities)
   → show/hide dropdown <option> elements
+    │
+    ▼
+buildTopologyEdgeIndexes(edgeData)
+  → endpoint-pair, incident-node, and category maps for this render
     │
     ▼
 new vis.DataSet(nodeData), new vis.DataSet(edgeData)
@@ -464,9 +488,10 @@ new vis.Network(container, { nodes, edges }, VIS_OPTIONS)
 applyFilters(nodeMode, linkMode, diagMode)   ← called here + on every filter change
   1. Compute visibleNodeIds from node filter + diagnostic filter predicates
   2. Expand set: routers-with-children → add child node IDs via parent-child edges
-  3. Router-neighbor diagnostic modes: add matched neighbor IDs + force-visible their edges
-  4. nodesDataset.update({ id, hidden: !visible }) for each node
-  5. edgesDataset.update({ id, hidden: !shouldShow }) for each edge
+  3. Relationship diagnostics produce normalized source/target/category matches
+  4. expandVisibleRelationship() resolves indexed edges and expands visibility
+  5. nodesDataset.update({ id, hidden: !visible }) for each node
+  6. edgesDataset.update({ id, hidden: !shouldShow }) for each edge
      shouldShow = endpointsVisible AND (edgeMatchesLinkFilter OR forcedVisible)
     │
     ▼
@@ -490,6 +515,14 @@ observed value plus the structured threshold when that view supplies a metric.
 For topology boolean summaries without a numeric measurement, an insight is
 shown only when the condition is triggered. The tab has explicit no-selection
 and no-available-metrics states.
+
+`DIAGNOSTIC_FILTER_OPTIONS` is the diagnostic policy owner. Each non-reset
+option declares its capability key, condition kind, view fields or collection
+path, aggregation, comparator or named evaluator, threshold, unit, severity,
+and relationship family. Module-load validation rejects duplicate values and
+unknown or incomplete policy identifiers. Public topology/table predicates and
+relationship row matchers delegate to `evaluateDiagnosticOption(...)`; no
+separate threshold decision stacks are maintained by the views.
 
 When several triggered options describe tiers of the same source/group metric,
 Insights shows only the highest-severity qualifying tier. For example, a 9.3%
@@ -792,11 +825,19 @@ Each entry is a plain object:
   label:             "otbr-cli-*, networkdiag-fetch-all",
   files:             ["td-otbr-cli-meshdiag-topology.json", ...],
   mergeStrategy:     "by-identity",
+  rowExtractor:      "raw-array",
+  adaptor:           "meshdiag-networkdiag",
+  defaultPhysicsProfile: "mesh-compact",
   topologyMode:      "meshdiag-networkdiag",
   defaultView:       "topology",
   defaultLinkFilter: "all_links"
 }
 ```
+
+Registry validation runs when the module loads. It rejects duplicate values,
+empty or unknown file lists, unknown merge/extractor/adaptor/profile
+identifiers, conflicting profile fields, and unsupported native
+adaptor/extractor combinations.
 
 ### `tdash-constants.js`
 
@@ -829,12 +870,13 @@ loadDataset(value, { onFileReady }) [tdash-dataset.js]
   │           └── client renders checkpoint-backed partial dataset while polling continues
   │
   ├── progressive partial path:
+  │     buildDatasetRows(entry, rawFilesInProgress)
   │     currentDataset = { ..., isPartial: true }
   │     onFileReady() → debounced incremental render
   │
   ├── final path after all files settle:
-  │     normalizeRows() per loaded file group [tdash-merge.js]
-  │     mergeRowsByIdentity() / mergeRowsByRloc16() / pass-through [tdash-merge.js]
+  │     buildDatasetRows(entry, rawFiles)
+  │       └── normalize + strategy handler + canonical output
   │     currentDataset = { ..., isPartial: false, fetchMetrics }
   │
   └── final reconciliation render

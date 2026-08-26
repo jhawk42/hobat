@@ -482,51 +482,163 @@ export const LINK_FILTER_OPTIONS = Object.freeze([
 ]);
 
 const DIAGNOSTIC_DISPLAY_METADATA = Object.freeze({
-  "mac-total-errors-ratio-medium": { severity: "medium", threshold: 1, comparison: ">=", unit: "percent" },
-  "mac-total-errors-ratio-high": { severity: "high", threshold: 5, comparison: ">=", unit: "percent" },
-  "mac-total-discards-ratio-medium": { severity: "medium", threshold: 2, comparison: ">=", unit: "percent" },
-  "mac-total-discards-ratio-high": { severity: "high", threshold: 8, comparison: ">=", unit: "percent" },
-  "medium-partition-changes": { severity: "medium", threshold: 2, comparison: ">=", unit: "count" },
-  "high-partition-changes": { severity: "high", threshold: 5, comparison: ">=", unit: "count" },
-  "medium-parent-changes": { severity: "medium", threshold: 2, comparison: ">=", unit: "count" },
-  "high-parent-changes": { severity: "high", threshold: 5, comparison: ">=", unit: "count" },
-  "mle-better-partition-medium": { severity: "medium", threshold: 2, comparison: ">=", unit: "count" },
-  "mle-better-partition-high": { severity: "high", threshold: 5, comparison: ">=", unit: "count" },
-  "mle-total-parent-partition-medium": { severity: "medium", threshold: 3, comparison: ">=", unit: "count" },
-  "mle-total-parent-partition-high": { severity: "high", threshold: 8, comparison: ">=", unit: "count" },
-  "router-neighbor-err-rate-frame-low": { severity: "low", threshold: 2, comparison: ">=", unit: "percent" },
-  "router-neighbor-err-rate-frame-medium": { severity: "medium", threshold: 5, comparison: ">=", unit: "percent" },
-  "router-neighbor-err-rate-frame-high": { severity: "high", threshold: 10, comparison: ">=", unit: "percent" },
-  "router-neighbor-err-rate-frame-critical": { severity: "critical", threshold: 30, comparison: ">=", unit: "percent" },
-  "router-neighbor-err-rate-msg-low": { severity: "low", threshold: 2, comparison: ">=", unit: "percent" },
-  "router-neighbor-err-rate-msg-medium": { severity: "medium", threshold: 5, comparison: ">=", unit: "percent" },
-  "router-neighbor-err-rate-msg-high": { severity: "high", threshold: 10, comparison: ">=", unit: "percent" },
-  "router-neighbor-err-rate-msg-critical": { severity: "critical", threshold: 30, comparison: ">=", unit: "percent" },
-  "router-neighbor-rss-very-low": { severity: "critical", threshold: -80, comparison: "<", unit: "dBm" },
-  "router-neighbor-rss-low": { severity: "medium", threshold: [-80, -70], comparison: "range", unit: "dBm" },
-  "router-neighbor-rss-medium": { severity: "low", threshold: [-70, -60], comparison: "range", unit: "dBm" },
-  "router-neighbor-rss-high": { severity: "info", threshold: -60, comparison: ">", unit: "dBm" },
-  "low-lq3-ratio-medium": { severity: "medium", threshold: 0.6, comparison: "<", unit: "ratio" },
-  "low-lq3-ratio-high": { severity: "high", threshold: 0.35, comparison: "<", unit: "ratio" },
-  "high-lq1-ratio-medium": { severity: "medium", threshold: 0.2, comparison: ">=", unit: "ratio" },
-  "high-lq1-ratio-high": { severity: "high", threshold: 0.35, comparison: ">=", unit: "ratio" },
-  "child-lq-medium": { severity: "medium", threshold: 2, comparison: "<=", unit: "linkQuality" },
-  "child-lq-poor": { severity: "high", threshold: 1, comparison: "=", unit: "linkQuality" },
-  "router-child-err-rate-frame-medium": { severity: "medium", threshold: 10, comparison: ">=", unit: "percent" },
-  "router-child-err-rate-frame-high": { severity: "high", threshold: 25, comparison: ">=", unit: "percent" },
-  "router-child-err-rate-msg-low": { severity: "low", threshold: 1, comparison: ">=", unit: "percent" },
-  "router-child-err-rate-msg-high": { severity: "high", threshold: 5, comparison: ">=", unit: "percent" },
-  "router-child-rss-very-low": { severity: "critical", threshold: -80, comparison: "<", unit: "dBm" },
-  "router-child-rss-low": { severity: "medium", threshold: [-80, -70], comparison: "range", unit: "dBm" },
-  "router-child-rss-margin-low": { severity: "medium", threshold: 20, comparison: "<", unit: "dB" },
-  "router-child-has-queued-msgs": { severity: "medium", threshold: 0, comparison: ">", unit: "count" },
-  "ftd-router-pct-low": { severity: "medium", threshold: 80, comparison: "<", unit: "percent" },
-  "ftd-router-pct-very-low": { severity: "high", threshold: 50, comparison: "<", unit: "percent" },
-  "detached-disabled-pct-medium": { severity: "medium", threshold: 1, comparison: ">=", unit: "percent" },
-  "detached-disabled-pct-high": { severity: "high", threshold: 5, comparison: ">=", unit: "percent" },
+  "mac-total-errors-ratio-medium": { capabilityKey: "hasFieldMacTotalErrorsRatio", severity: "medium", threshold: 1, comparison: ">=", unit: "percent" },
+  "mac-total-errors-ratio-high": { capabilityKey: "hasFieldMacTotalErrorsRatio", severity: "high", threshold: 5, comparison: ">=", unit: "percent" },
+  "mac-total-discards-ratio-medium": { capabilityKey: "hasFieldMacTotalDiscardsRatio", severity: "medium", threshold: 2, comparison: ">=", unit: "percent" },
+  "mac-total-discards-ratio-high": { capabilityKey: "hasFieldMacTotalDiscardsRatio", severity: "high", threshold: 8, comparison: ">=", unit: "percent" },
+  "medium-partition-changes": { capabilityKey: "hasFieldPartitionChanges", severity: "medium", threshold: 2, comparison: ">=", unit: "count" },
+  "high-partition-changes": { capabilityKey: "hasFieldPartitionChanges", severity: "high", threshold: 5, comparison: ">=", unit: "count" },
+  "medium-parent-changes": { capabilityKey: "hasFieldParentChanges", severity: "medium", threshold: 2, comparison: ">=", unit: "count" },
+  "high-parent-changes": { capabilityKey: "hasFieldParentChanges", severity: "high", threshold: 5, comparison: ">=", unit: "count" },
+  "mle-better-partition-medium": { capabilityKey: "hasFieldBetterPartitionAttach", severity: "medium", threshold: 2, comparison: ">=", unit: "count" },
+  "mle-better-partition-high": { capabilityKey: "hasFieldBetterPartitionAttach", severity: "high", threshold: 5, comparison: ">=", unit: "count" },
+  "mle-total-parent-partition-medium": { capabilityKey: "hasFieldTotalParentPartitionChanges", severity: "medium", threshold: 3, comparison: ">=", unit: "count" },
+  "mle-total-parent-partition-high": { capabilityKey: "hasFieldTotalParentPartitionChanges", severity: "high", threshold: 8, comparison: ">=", unit: "count" },
+  "router-neighbor-err-rate-frame-low": { capabilityKey: "hasNeighborFrameErrRate", severity: "low", threshold: 2, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-frame-medium": { capabilityKey: "hasNeighborFrameErrRate", severity: "medium", threshold: 5, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-frame-high": { capabilityKey: "hasNeighborFrameErrRate", severity: "high", threshold: 10, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-frame-critical": { capabilityKey: "hasNeighborFrameErrRate", severity: "critical", threshold: 30, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-msg-low": { capabilityKey: "hasNeighborMsgErrRate", severity: "low", threshold: 2, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-msg-medium": { capabilityKey: "hasNeighborMsgErrRate", severity: "medium", threshold: 5, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-msg-high": { capabilityKey: "hasNeighborMsgErrRate", severity: "high", threshold: 10, comparison: ">=", unit: "percent" },
+  "router-neighbor-err-rate-msg-critical": { capabilityKey: "hasNeighborMsgErrRate", severity: "critical", threshold: 30, comparison: ">=", unit: "percent" },
+  "router-neighbor-rss-very-low": { capabilityKey: "hasNeighborRss", severity: "critical", threshold: -80, comparison: "<", unit: "dBm" },
+  "router-neighbor-rss-low": { capabilityKey: "hasNeighborRss", severity: "medium", threshold: [-80, -70], comparison: null, evaluatorId: "range", rangeUpperInclusive: false, unit: "dBm" },
+  "router-neighbor-rss-medium": { capabilityKey: "hasNeighborRss", severity: "low", threshold: [-70, -60], comparison: null, evaluatorId: "range", rangeUpperInclusive: true, unit: "dBm" },
+  "router-neighbor-rss-high": { capabilityKey: "hasNeighborRss", severity: "info", threshold: -60, comparison: ">", unit: "dBm" },
+  "low-lq3-ratio-medium": { capabilityKey: "hasLinkQualityDistribution", severity: "medium", threshold: 0.6, comparison: "<", unit: "ratio" },
+  "low-lq3-ratio-high": { capabilityKey: "hasLinkQualityDistribution", severity: "high", threshold: 0.35, comparison: "<", unit: "ratio" },
+  "high-lq1-ratio-medium": { capabilityKey: "hasLinkQualityDistribution", severity: "medium", threshold: 0.2, comparison: ">=", unit: "ratio" },
+  "high-lq1-ratio-high": { capabilityKey: "hasLinkQualityDistribution", severity: "high", threshold: 0.35, comparison: ">=", unit: "ratio" },
+  "child-lq-medium": { capabilityKey: "hasChildLinkQuality", severity: "medium", threshold: 2, comparison: "<=", unit: "linkQuality" },
+  "child-lq-poor": { capabilityKey: "hasChildLinkQuality", severity: "high", threshold: 1, comparison: "==", unit: "linkQuality" },
+  "router-child-err-rate-frame-medium": { capabilityKey: "hasChildFrameErrRate", severity: "medium", threshold: 10, comparison: ">=", unit: "percent" },
+  "router-child-err-rate-frame-high": { capabilityKey: "hasChildFrameErrRate", severity: "high", threshold: 25, comparison: ">=", unit: "percent" },
+  "router-child-err-rate-msg-low": { capabilityKey: "hasChildMsgErrRate", severity: "low", threshold: 1, comparison: ">=", unit: "percent" },
+  "router-child-err-rate-msg-high": { capabilityKey: "hasChildMsgErrRate", severity: "high", threshold: 5, comparison: ">=", unit: "percent" },
+  "router-child-rss-very-low": { capabilityKey: "hasChildRss", severity: "critical", threshold: -80, comparison: "<", unit: "dBm" },
+  "router-child-rss-low": { capabilityKey: "hasChildRss", severity: "medium", threshold: [-80, -70], comparison: null, evaluatorId: "range", rangeUpperInclusive: false, unit: "dBm" },
+  "router-child-rss-margin-low": { capabilityKey: "hasChildRssMargin", severity: "medium", threshold: 20, comparison: "<", unit: "dB" },
+  "router-child-has-queued-msgs": { capabilityKey: "hasChildQueuedMsgs", severity: "medium", threshold: 0, comparison: ">", unit: "count" },
+  "ftd-router-pct-low": { capabilityKey: "hasFieldRouterPct", severity: "medium", threshold: 80, comparison: "<", unit: "percent" },
+  "ftd-router-pct-very-low": { capabilityKey: "hasFieldRouterPct", severity: "high", threshold: 50, comparison: "<", unit: "percent" },
+  "detached-disabled-pct-medium": { capabilityKey: "hasFieldDetachedDisabledPct", severity: "medium", threshold: 1, comparison: ">=", unit: "percent" },
+  "detached-disabled-pct-high": { capabilityKey: "hasFieldDetachedDisabledPct", severity: "high", threshold: 5, comparison: ">=", unit: "percent" },
 });
 
-export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
+const DIAGNOSTIC_CAPABILITY_KEYS = new Set([
+  "hasFieldPartitionChanges",
+  "hasFieldParentChanges",
+  "hasNeighborFrameErrRate",
+  "hasNeighborMsgErrRate",
+  "hasNeighborRss",
+  "hasLinkQualityDistribution",
+  "hasChildLinkQuality",
+  "hasChildFrameErrRate",
+  "hasChildMsgErrRate",
+  "hasChildRss",
+  "hasChildRssMargin",
+  "hasChildQueuedMsgs",
+  "hasFieldMacTotalErrorsRatio",
+  "hasFieldMacTotalDiscardsRatio",
+  "hasFieldBetterPartitionAttach",
+  "hasFieldTotalParentPartitionChanges",
+  "hasFieldRouterPct",
+  "hasFieldDetachedDisabledPct",
+]);
+
+const DIAGNOSTIC_EVALUATOR_IDS = new Set(["range", "link-ratio", "ftd-router"]);
+const DIAGNOSTIC_COMPARISONS = new Set([">=", ">", "<=", "<", "==", "!="]);
+const DIAGNOSTIC_SEVERITIES = new Set(["info", "low", "medium", "high", "critical"]);
+
+function completeDiagnosticOption(option) {
+  if (option.value === "all") return Object.freeze({ ...option });
+  const metadata = DIAGNOSTIC_DISPLAY_METADATA[option.value] ?? {};
+  let collectionPath = null;
+  let collectionMetricField = null;
+  if (option.tableNeighborField) {
+    collectionPath = "routerNeighbors";
+    collectionMetricField = option.tableNeighborField;
+  } else if (option.tableChildField) {
+    collectionPath = "childTable";
+    collectionMetricField = option.tableChildField;
+  } else if (option.value === "child-lq-medium" || option.value === "child-lq-poor") {
+    collectionPath = "children";
+    collectionMetricField = "linkQuality";
+  }
+
+  const evaluatorId = metadata.evaluatorId
+    ?? (option.value.startsWith("low-lq3-") || option.value.startsWith("high-lq1-")
+      ? "link-ratio"
+      : option.value.startsWith("ftd-router-pct-") ? "ftd-router" : null);
+  const conditionKind = collectionPath
+    ? "collection"
+    : evaluatorId ? "compound" : "numeric";
+  const relationshipKind = collectionPath === "routerNeighbors"
+    ? "router-neighbor"
+    : collectionPath === "children"
+      ? "child-link-quality"
+      : collectionPath === "childTable" ? "router-child" : null;
+  const comparison = metadata.comparison ?? null;
+  const aggregation = collectionPath
+    ? (comparison === "<" || comparison === "<=" || evaluatorId === "range" ? "min" : "max")
+    : null;
+
+  return Object.freeze({
+    ...option,
+    ...metadata,
+    conditionKind,
+    collectionPath,
+    collectionMetricField,
+    aggregation,
+    evaluatorId,
+    relationshipKind,
+  });
+}
+
+export function validateDiagnosticFilterOptions(options) {
+  const values = new Set();
+  for (const option of options) {
+    if (!option?.value || values.has(option.value)) {
+      throw new Error(`Invalid or duplicate diagnostic option value: ${option?.value}`);
+    }
+    values.add(option.value);
+    if (option.value === "all") continue;
+    if (!DIAGNOSTIC_CAPABILITY_KEYS.has(option.capabilityKey)) {
+      throw new Error(`Unknown diagnostic capability: ${option.capabilityKey}`);
+    }
+    if (!["numeric", "collection", "compound"].includes(option.conditionKind)) {
+      throw new Error(`Unknown diagnostic condition kind: ${option.conditionKind}`);
+    }
+    if (option.evaluatorId && !DIAGNOSTIC_EVALUATOR_IDS.has(option.evaluatorId)) {
+      throw new Error(`Unknown diagnostic evaluator: ${option.evaluatorId}`);
+    }
+    if (option.comparison && !DIAGNOSTIC_COMPARISONS.has(option.comparison)) {
+      throw new Error(`Unknown diagnostic comparison: ${option.comparison}`);
+    }
+    if (!DIAGNOSTIC_SEVERITIES.has(option.severity) || !option.unit) {
+      throw new Error(`Invalid diagnostic display metadata: ${option.value}`);
+    }
+    const validThreshold = Number.isFinite(option.threshold)
+      || (option.evaluatorId === "range"
+        && Array.isArray(option.threshold)
+        && option.threshold.length === 2
+        && option.threshold.every(Number.isFinite));
+    if (!validThreshold) throw new Error(`Invalid diagnostic threshold: ${option.value}`);
+    if (option.conditionKind === "numeric" && (!option.topoNodeField || !option.tableRowField)) {
+      throw new Error(`Numeric diagnostic is missing view fields: ${option.value}`);
+    }
+    if (option.conditionKind === "collection" && (!option.collectionPath || !option.collectionMetricField)) {
+      throw new Error(`Collection diagnostic is missing collection metadata: ${option.value}`);
+    }
+    if (option.conditionKind === "collection" && !option.relationshipKind) {
+      throw new Error(`Collection diagnostic is missing relationship metadata: ${option.value}`);
+    }
+  }
+  return true;
+}
+
+const diagnosticFilterOptions = [
   { value: "all", label: "All Rows", alwaysShow: true, group: null },
   // ── Mac counters ──────────────────────────────────────────────────────
   // ── Mac total errors ratio ────────────────────────────────────────────
@@ -881,10 +993,10 @@ export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze([
     topoNodeField: "detachedDisabledPct",
     tableRowField: "timeStatistics.detachedDisabledPct",
   },
-].map((option) => Object.freeze({
-  ...option,
-  ...(DIAGNOSTIC_DISPLAY_METADATA[option.value] ?? {}),
-})));
+].map(completeDiagnosticOption);
+
+validateDiagnosticFilterOptions(diagnosticFilterOptions);
+export const DIAGNOSTIC_FILTER_OPTIONS = Object.freeze(diagnosticFilterOptions);
 
 // ── Device details section field registry ───────────────────────────────────
 //

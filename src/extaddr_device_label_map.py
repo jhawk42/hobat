@@ -3,10 +3,10 @@ import logging
 from typing import Any
 
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from td_device_fields import EXT_ADDRESS_ALIASES, normalize_identifier_text
 
 
-# Extaddr field name aliases used across different data sources
-EXTADDR_FIELD_ALIASES = ("extAddress", "extaddr", "Extended MAC")
+EXTADDR_FIELD_ALIASES = EXT_ADDRESS_ALIASES
 
 
 def normalize_extaddr(value: Any) -> str:
@@ -28,9 +28,7 @@ def normalize_extaddr(value: Any) -> str:
         >>> normalize_extaddr(None)
         ""
     """
-    if not isinstance(value, str):
-        return ""
-    return value.strip().lower()
+    return normalize_identifier_text(value)
 
 
 def get_extaddr_from_record(record: dict[str, Any], aliases: tuple[str, ...] = EXTADDR_FIELD_ALIASES) -> str:

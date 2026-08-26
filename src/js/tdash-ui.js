@@ -40,11 +40,6 @@ import {
 import { EDGE_LQ_STYLES } from "./tdash-constants.js";
 import {
   PHYSICS_PROFILE_MESH_BASELINE,
-  PHYSICS_PROFILE_MESH_DENSE,
-  PHYSICS_PROFILE_MESH_BALANCED,
-  PHYSICS_PROFILE_MESH_SPARSE,
-  PHYSICS_PROFILE_MESH_COMPACT,
-  PHYSICS_PROFILE_MESH_RING,
   PHYSICS_PROFILE_MESH_TREE_HORIZONTAL,
   PHYSICS_PROFILE_MESH_TREE_VERTICAL,
   PHYSICS_PROFILES,
@@ -327,19 +322,6 @@ function getSelectedDatasetEntry() {
   return DATASET_REGISTRY.find((entry) => entry.value === selectedValue) || null;
 }
 
-function getModeMappedPhysicsProfileName(entry) {
-  const topologyMode = entry?.topologyMode;
-  if (topologyMode === "meshdiag-networkdiag") return PHYSICS_PROFILE_MESH_COMPACT;
-  if (topologyMode === "merged-detailed") return PHYSICS_PROFILE_MESH_RING;
-  if (topologyMode === "router-table") return PHYSICS_PROFILE_MESH_RING;
-  if (topologyMode === "eve_native") return PHYSICS_PROFILE_MESH_RING;
-  if (topologyMode === "eve_enhanced") return PHYSICS_PROFILE_MESH_RING;
-  if (topologyMode === "thread_tools_native") return PHYSICS_PROFILE_MESH_COMPACT;
-  if (topologyMode === "raw-array") return PHYSICS_PROFILE_MESH_BALANCED;
-  if (topologyMode === "otbr_restapi") return PHYSICS_PROFILE_MESH_COMPACT;
-  return PHYSICS_PROFILE_MESH_BASELINE;
-}
-
 function getEffectivePhysicsProfileName(entry = getSelectedDatasetEntry()) {
   // Manual user selection (not auto) has highest precedence
   if (_physicsProfileName !== PHYSICS_PROFILE_AUTO) return _physicsProfileName;
@@ -348,14 +330,12 @@ function getEffectivePhysicsProfileName(entry = getSelectedDatasetEntry()) {
     profileName === PHYSICS_PROFILE_MESH_TREE_HORIZONTAL
     || profileName === PHYSICS_PROFILE_MESH_TREE_VERTICAL;
   
-  // If auto mode: dataset-level physicsProfile takes precedence over topologyMode mapping
   // Mesh-tree profiles are manual-only for initial rollout (Phase 6).
-  if (entry?.physicsProfile && !isMeshTreeProfile(entry.physicsProfile)) {
-    return entry.physicsProfile;
+  if (entry?.defaultPhysicsProfile && !isMeshTreeProfile(entry.defaultPhysicsProfile)) {
+    return entry.defaultPhysicsProfile;
   }
-  
-  // Fall back to topologyMode-based auto mapping
-  return getModeMappedPhysicsProfileName(entry);
+
+  return PHYSICS_PROFILE_MESH_BASELINE;
 }
 
 function getPhysicsProfileStatusLabel(entry = getSelectedDatasetEntry()) {

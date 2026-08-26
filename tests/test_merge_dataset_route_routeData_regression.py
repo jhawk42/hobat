@@ -15,17 +15,24 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from merge_dataset import build_merged_records, deep_merge
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-NETWORKDIAG_FIXTURE = REPO_ROOT / "data" / "td-otbr-cli-networkdiag-fetch-all.json"
-
-
 def _load_first_route_row() -> dict:
-    rows = json.loads(NETWORKDIAG_FIXTURE.read_text(encoding="utf-8"))
-    for row in rows:
-        route = row.get("route")
-        if isinstance(route, dict) and isinstance(route.get("routeData"), list) and route["routeData"]:
-            return row
-    raise AssertionError("No row with route.routeData found in td-otbr-cli-networkdiag-fetch-all.json")
+    return {
+        "extAddress": "aabbccddeeff0011",
+        "rloc16": "0x1000",
+        "deviceLabel": "router-a",
+        "route": {
+            "idSequence": 7,
+            "routeData": [
+                {
+                    "routeId": 1,
+                    "linkQualityIn": 3,
+                    "linkQualityOut": 3,
+                    "routeCost": 1,
+                    "rloc16": "0x0400",
+                }
+            ],
+        },
+    }
 
 
 def test_deep_merge_uses_route_routeData_from_real_networkdiag_row() -> None:
