@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from otbr_cli_networkdiag_topology import parse_ipv6_address_list
+from otbr_cli_networkdiag_parsers import parse_ipv6_address_list
 
 
 def test_ipv6_parse_stops_at_connectivity():

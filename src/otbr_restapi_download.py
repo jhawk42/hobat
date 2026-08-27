@@ -7,10 +7,6 @@ from pathlib import Path
 from typing import Any, Sequence, Tuple
 
 from td_const import TD_DATA_DIR_ARG_HELP
-from otbr_restapi_download_helpers import (
-    download_static_endpoints,
-    save_device_diagnostics,
-)
 from otbr_restapi_util import (
     add_common_rest_client_args,
     build_rest_client_from_args,
@@ -152,6 +148,73 @@ def _build_client_from_options(
 # Core download logic
 # ---------------------------------------------------------------------------
 
+def _download_static_endpoints(
+    client: OTBRRestApiClient,
+    data_dir: Path,
+    static_endpoints: Sequence[Tuple[str, str]],
+) -> int:
+    failures = 0
+    logger = logging.getLogger(__name__)
+
+    for method_name, filename in static_endpoints:
+        output_file = resolve_data_file_path(filename, data_dir)
+        method = getattr(client, method_name)
+        try:
+            data = method(raw=True)
+            emit_rest_payload_output(data, output_file, logger)
+            logging.info("OK: %s -> %s", method_name, output_file)
+        except OTBRClientError as exc:
+            logging.error("Failed to download %s: %s", method_name, exc)
+            failures += 1
+        except OSError as exc:
+            logging.error("File write error for %s: %s", output_file, exc)
+            failures += 1
+
+    return failures
+
+
+def _save_device_diagnostics(
+    client: OTBRRestApiClient,
+    data_dir: Path,
+    diag_types: list[str],
+) -> int:
+    try:
+        devices = client.list_devices(raw=False)
+    except OTBRClientError as exc:
+        logging.error("Failed to list devices for diagnostics: %s", exc)
+        return 1
+
+    if not devices:
+        logging.info("No devices found; skipping diagnostics.")
+        return 0
+
+    failures = 0
+    logger = logging.getLogger(__name__)
+    for device in devices:
+        device_id = device.get("id") if isinstance(device, dict) else None
+        if not device_id:
+            continue
+        filename = f"td-otbr-restapi-diagnostic-{device_id}.json"
+        output_file = resolve_data_file_path(filename, data_dir)
+        try:
+            diag = client.fetch_device_diagnostics(device_id, types=diag_types, raw=True)
+            emit_rest_payload_output(diag, output_file, logger)
+            logging.info("Diagnostic saved: %s -> %s", device_id, output_file)
+        except (OTBRActionFailedError, OTBRActionTimeoutError) as exc:
+            logging.warning("Diagnostic skipped for %s: %s", device_id, exc)
+            failures += 1
+        except OTBRClientError as exc:
+            logging.error("Diagnostic error for %s: %s", device_id, exc)
+            failures += 1
+        except OSError as exc:
+            logging.error("File write error for %s: %s", output_file, exc)
+            failures += 1
+
+    if failures:
+        logging.warning("Diagnostics completed with %d failure(s).", failures)
+        return 1
+    return 0
+
 def download_all_restapi_endpoints(
     client: OTBRRestApiClient | None = None,
     data_dir: Path | None = None,
@@ -199,29 +262,13 @@ def download_all_restapi_endpoints(
         except OTBRClientError as exc:
             logging.warning("Device collection update failed: %s", exc)
 
-    failures = download_static_endpoints(client, data_dir, _STATIC_ENDPOINTS)
+    failures = _download_static_endpoints(client, data_dir, _STATIC_ENDPOINTS)
     if failures:
         logging.error("Completed with %d failure(s).", failures)
         return 1
 
     logging.info("All downloads completed successfully.")
     return 0
-
-
-def fetch_and_save_diagnostics(
-    client: OTBRRestApiClient,
-    data_dir: Path,
-    diag_types: list[str],
-) -> int:
-    """
-    5.5 – For each device in /api/devices, enqueue getNetworkDiagnosticTask,
-    wait for the result, and save to td-otbr-restapi-diagnostic-{device_id}.json.
-
-    Returns:
-        Exit code: 0 on full success, 1 if any device diagnostic failed.
-    """
-    return save_device_diagnostics(client, data_dir, diag_types)
-
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -260,7 +307,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Optionally fetch per-device diagnostics
         if args.fetch_diagnostics:
             diag_types = args.diag_types or list(RECOMMENDED_DIAGNOSTIC_TLVS)
-            diag_exit = fetch_and_save_diagnostics(client, data_dir, diag_types)
+            diag_exit = _save_device_diagnostics(client, data_dir, diag_types)
             if diag_exit != 0:
                 exit_code = diag_exit
 

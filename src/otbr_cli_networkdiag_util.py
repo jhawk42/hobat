@@ -123,44 +123,6 @@ def fetch_ipv6_addresses():
     return ipv6_map
 
 
-def parse_ipv6_address_list(output):
-    """Extracts IPv6 Address List from diagnostic output."""
-    ipv6_list = []
-    # Match IPv6 addresses in the IP6 Address List section
-    lines = output.split("\n")
-    in_ipv6_section = False
-    for line in lines:
-        if "IP6 Address List:" in line:
-            in_ipv6_section = True
-            continue
-        if in_ipv6_section:
-            if line.strip().startswith("- "):
-                ipv6_addr = line.strip().lstrip("- ")
-                ipv6_list.append(ipv6_addr)
-            # Check for end of IPv6 section (next section header)
-            elif line.strip() and (
-                line.strip().startswith("ChildId:")
-                or line.strip().startswith("Child Table:")
-                or line.strip().startswith("MAC Counters:")
-                or line.strip().startswith("MLE Counters:")
-                or line.strip().startswith("Connectivity:")
-                or line.strip().startswith("Leader Data:")
-                or line.strip().startswith("Vendor Name:")
-                or line.strip().startswith("Vendor Model:")
-                or line.strip().startswith("Vendor SW Version:")
-                or line.strip().startswith("Route:")
-                or line.strip().startswith("Thread Stack Version:")
-                or line.strip().startswith("EUI64:")
-                or ("Ext Address:" in line and "Rloc16:" not in line)
-            ):
-                # End of IP6 list section
-                break
-            elif not line.strip():
-                # Empty line might also indicate section boundary
-                continue
-    return ipv6_list
-
-
 # TLV 2: Mode TLV to get more detailed info about the node's capabilities and role (e.g., if it's a sleepy end device, router-eligible end device, or full router) which can help better understand the topology and identify potential issues with devices that are not behaving as expected. This will also help enrich the topology map with more detailed information about each node's role and capabilities in the network.
 
 def device_type_from_mode(mode):

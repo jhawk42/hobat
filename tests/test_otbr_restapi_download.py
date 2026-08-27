@@ -117,6 +117,99 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
             "http://0.0.0.0:8081",
         )
 
+    def test_static_downloads_preserve_order_and_continue_after_failure(self) -> None:
+        mock_client = MagicMock()
+        mock_client.get_active_dataset.return_value = {"dataset": True}
+        mock_client.list_devices.side_effect = script_module.OTBRClientError("failed")
+        mock_client.list_diagnostics.return_value = {"diagnostics": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = script_module.Path(temp_dir)
+            exit_code = script_module.download_all_restapi_endpoints(
+                client=mock_client,
+                data_dir=data_dir,
+            )
+
+            output_filenames = [path.name for path in data_dir.iterdir()]
+
+        self.assertEqual(exit_code, 1)
+        mock_client.get_active_dataset.assert_called_once_with(raw=True)
+        mock_client.list_devices.assert_called_once_with(raw=True)
+        mock_client.list_diagnostics.assert_called_once_with(raw=True)
+        self.assertEqual(
+            mock_client.method_calls,
+            [
+                unittest.mock.call.get_active_dataset(raw=True),
+                unittest.mock.call.list_devices(raw=True),
+                unittest.mock.call.list_diagnostics(raw=True),
+            ],
+        )
+        self.assertEqual(
+            sorted(output_filenames),
+            [
+                "td-otbr-restapi-dataset-active.json",
+                "td-otbr-restapi-diagnostics.json",
+            ],
+        )
+
+    def test_diagnostics_continue_after_device_failures(self) -> None:
+        mock_client = MagicMock()
+        mock_client.list_devices.return_value = [
+            {"id": "ok"},
+            {"missing": "id"},
+            {"id": "action-failed"},
+            {"id": "client-failed"},
+        ]
+        mock_client.fetch_device_diagnostics.side_effect = [
+            {"data": "ok"},
+            script_module.OTBRActionFailedError(
+                "failed", "action-1", "failed"
+            ),
+            script_module.OTBRClientError("failed"),
+        ]
+        diag_types = ["EXT_ADDRESS", "RLOC16"]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = script_module.Path(temp_dir)
+            exit_code = script_module._save_device_diagnostics(
+                mock_client,
+                data_dir,
+                diag_types,
+            )
+
+            output_filenames = [path.name for path in data_dir.iterdir()]
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(
+            mock_client.fetch_device_diagnostics.call_args_list,
+            [
+                unittest.mock.call("ok", types=diag_types, raw=True),
+                unittest.mock.call("action-failed", types=diag_types, raw=True),
+                unittest.mock.call("client-failed", types=diag_types, raw=True),
+            ],
+        )
+        self.assertEqual(
+            output_filenames,
+            ["td-otbr-restapi-diagnostic-ok.json"],
+        )
+
+    def test_diagnostics_skip_empty_device_collection(self) -> None:
+        mock_client = MagicMock()
+        mock_client.list_devices.return_value = []
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            script_module, "emit_rest_payload_output"
+        ) as emit_output:
+            exit_code = script_module._save_device_diagnostics(
+                mock_client,
+                script_module.Path(temp_dir),
+                ["EXT_ADDRESS"],
+            )
+
+        self.assertEqual(exit_code, 0)
+        mock_client.fetch_device_diagnostics.assert_not_called()
+        emit_output.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

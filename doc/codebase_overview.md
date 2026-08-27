@@ -253,8 +253,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 
 | File | Purpose |
 |---|---|
-| `otbr_restapi_download.py` | Fixed-target downloader: fetches the active dataset, devices, and diagnostics snapshots and writes them to local JSON files.  Uses shared download helpers for static endpoint writes and per-device diagnostics updates. |
-| `otbr_restapi_download_helpers.py` | Shared helper functions for downloading static endpoints and saving device diagnostics. |
+| `otbr_restapi_download.py` | Fixed-target downloader: owns the ordered static endpoint writes and per-device diagnostics updates, and writes their snapshots to local JSON files. |
 | `otbr_restapi_util.py` | Full-featured REST API client (`OTBRRestApiClient`).  Returns **flattened** Python objects by default (JSON:API `id`/`type`/`attributes` merged into a single dict). Also contains the shared exception hierarchy (`OTBRHTTPError`, `OTBRConnectionError`, etc.). |
 | `otbr_restapi_cli.py` | CLI front-end for the flattened client.  Dispatches to handler modules for `node`, `devices`, `diagnostics`, `actions`, `mesh-diagnostics`, and `topology` commands. |
 | `otbr_restapi_node.py` | REST CLI handlers for node, state, and dataset commands. |
