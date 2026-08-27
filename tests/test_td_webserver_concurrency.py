@@ -39,7 +39,7 @@ def _reset_module_state() -> None:
 
 def _make_app(data_dir: Path) -> object:
     """Return a minimal app-like dict used in place of aiohttp.web.Application."""
-    return {"td_data_dir": data_dir}
+    return {td_webserver.TD_DATA_DIR_APP_KEY: data_dir}
 
 
 def _make_request(filename: str, app: object, *, no_cache: bool = False):

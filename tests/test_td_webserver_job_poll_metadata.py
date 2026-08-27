@@ -26,7 +26,7 @@ def _make_job_request(job_id: str, data_dir: Path):
     req = MagicMock()
     req.match_info = {"job_id": job_id}
     req.headers = {}
-    req.app = {"td_data_dir": data_dir}
+    req.app = {td_webserver.TD_DATA_DIR_APP_KEY: data_dir}
     return req
 
 

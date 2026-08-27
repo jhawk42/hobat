@@ -25,7 +25,7 @@ class DeviceApiTests(unittest.IsolatedAsyncioTestCase):
     def _request(self, extaddr: str, payload: object | None = None) -> MagicMock:
         request = MagicMock()
         request.match_info = {"extAddress": extaddr}
-        request.app = {"td_data_dir": self.data_dir}
+        request.app = {td_webserver.TD_DATA_DIR_APP_KEY: self.data_dir}
         request.json = AsyncMock(return_value=payload)
         return request
 

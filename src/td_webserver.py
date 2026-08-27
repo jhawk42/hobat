@@ -33,6 +33,9 @@ from merge_extaddr_device_label_map import (
 TD_WEB_HOST_ADDR = ""
 TD_WEB_HOST_PORT = 9165
 
+TD_DATA_DIR_APP_KEY = aiohttp.web.AppKey("td_data_dir", Path)
+_CLEANUP_TASK_APP_KEY = aiohttp.web.AppKey("cleanup_task", asyncio.Task)
+
 # Default max-age for data files in seconds; can be overridden per-file in FILE_ACTION_MAP.
 TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT_DEV = 3600  # 1 hour in seconds
 TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT_OPS = 86400  # 1 day in seconds
@@ -863,7 +866,7 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     Response building      → _build_file_response
     """
     filename = request.match_info["filename"]
-    data_dir: Path = request.app["td_data_dir"]
+    data_dir = request.app[TD_DATA_DIR_APP_KEY]
     cc = parse_request_cache_control(request.headers.get("Cache-Control"))
     no_cache = bool(cc.get("no-cache", False))
 
@@ -922,14 +925,14 @@ def _device_json_response(payload: dict[str, str], *, status: int = 200) -> aioh
 async def handle_device_get_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """GET /api/device/{extAddress} — return the current static device label."""
     extaddr = _validate_device_extaddr(request.match_info.get("extAddress"))
-    data_dir: Path = request.app["td_data_dir"]
+    data_dir = request.app[TD_DATA_DIR_APP_KEY]
     return _device_json_response(_read_device_label_for_api(data_dir, extaddr))
 
 
 async def handle_device_patch_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """PATCH /api/device/{extAddress} — update or insert one device label."""
     extaddr = _validate_device_extaddr(request.match_info.get("extAddress"))
-    data_dir: Path = request.app["td_data_dir"]
+    data_dir = request.app[TD_DATA_DIR_APP_KEY]
 
     try:
         payload = await request.json()
@@ -1074,7 +1077,7 @@ async def handle_job_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
 
     body = _build_job_poll_body(job)
     if job.status in {JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING}:
-        data_dir = request.app.get("td_data_dir")
+        data_dir = request.app.get(TD_DATA_DIR_APP_KEY)
         if isinstance(data_dir, Path):
             body.update(_build_checkpoint_poll_metadata(job.filename, data_dir))
 
@@ -1286,15 +1289,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     app = aiohttp.web.Application()
-    app["td_data_dir"] = td_data_dir
+    app[TD_DATA_DIR_APP_KEY] = td_data_dir
 
     async def _start_cleanup(app: aiohttp.web.Application) -> None:
-        app["_cleanup_task"] = asyncio.create_task(
+        app[_CLEANUP_TASK_APP_KEY] = asyncio.create_task(
             _cleanup_job_registry_loop())
 
     async def _on_shutdown(app: aiohttp.web.Application) -> None:
         # Cancel the periodic cleanup task.
-        cleanup_task: asyncio.Task | None = app.get("_cleanup_task")
+        cleanup_task = app.get(_CLEANUP_TASK_APP_KEY)
         if cleanup_task is not None:
             cleanup_task.cancel()
 

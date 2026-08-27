@@ -26,7 +26,7 @@ def _reset_state() -> None:
 
 
 def _make_app(data_dir: Path) -> dict:
-    return {"td_data_dir": data_dir}
+    return {td_webserver.TD_DATA_DIR_APP_KEY: data_dir}
 
 
 def _make_request(filename: str, app: dict) -> MagicMock:

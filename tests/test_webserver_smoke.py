@@ -45,7 +45,7 @@ def _reset_module_state() -> None:
 
 def _make_app(data_dir: Path) -> dict:
     """Return a minimal app dict substituting for aiohttp.web.Application."""
-    return {"td_data_dir": data_dir}
+    return {td_webserver.TD_DATA_DIR_APP_KEY: data_dir}
 
 
 def _make_request(filename: str, app: dict, *, no_cache: bool = False) -> MagicMock:
