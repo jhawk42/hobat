@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
 import {
   extractOtbrRestApiItems,
@@ -44,10 +45,10 @@ assertResult(meshdiag, {
 });
 assert.equal(meshdiag.edgeData[0].width, 12);
 
-const eveRows = [
-  { id: "eve-a", name: "A", type: "router", routes: [{ to: "eve-b", in: 3, out: 3 }] },
-  { id: "eve-b", name: "B", type: "router" },
-];
+const eveRows = {
+  "0x1000": { id: "eve-a", name: "A", type: "router", routes: [{ to: "eve-b", in: 3, out: 3 }] },
+  "0x2000": { id: "eve-b", name: "B", type: "router" },
+};
 const eve = run("eve-enhanced", ["eve.json"], [eveRows]);
 assertResult(eve, {
   nodeIds: ["eve-a", "eve-b"],
@@ -55,8 +56,25 @@ assertResult(eve, {
   sourceNames: ["eve"],
   hasChildIndex: false,
 });
+assert.deepEqual(eve.rawByIdForDetails.get("eve-a"), eveRows["0x1000"]);
 
-const eveNative = run("eve-native", ["eve-native.json"], [{ nodes: eveRows }]);
+const cachedEveRows = JSON.parse(fs.readFileSync("data/td-eve-topology.json", "utf8"));
+const cachedEve = run(
+  "eve-enhanced",
+  ["td-eve-topology.json"],
+  [cachedEveRows],
+);
+assert.equal(cachedEve.nodeData.length, 79);
+assert.equal(cachedEve.edgeData.length, 207);
+assert.deepEqual(
+  cachedEve.nodeData.map((node) => node.id),
+  Object.values(cachedEveRows).map((row) => row.id),
+);
+assert.equal(cachedEve.rawByIdForDetails.size, 79);
+assert.deepEqual(cachedEve.sourceNames, ["eve"]);
+
+const eveNativeRows = Object.values(eveRows);
+const eveNative = run("eve-native", ["eve-native.json"], [{ nodes: eveNativeRows }]);
 assertResult(eveNative, {
   nodeIds: ["eve-a", "eve-b"],
   edges: [["eve-a", "eve-b", ["eve_native_route"]]],

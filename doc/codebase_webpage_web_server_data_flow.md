@@ -285,6 +285,12 @@ strategies through `MERGE_STRATEGY_HANDLERS`, and applies canonical output
 normalization. Fetch sessions, cache metadata, timing, and commits remain in
 `loadDataset(...)`.
 
+The `eve-processed` row extractor handles `td-eve-topology.json` device records
+keyed by RLOC16 or Eve UUID. It preserves object-key order, copies accepted
+records, fills a missing canonical identity from a valid RLOC16 key, and omits
+malformed or unrelated object members. The `eve-enhanced` adaptor remains the
+owner of topology conversion for the unchanged keyed payload.
+
 ### Normalisation and merge (`tdash-merge.js`)
 
 `normalizeRows(rawData, sourceName)` converts any JSON shape (array, object, scalar) into a flat array of plain objects. Every row is stamped with `_source_files: [sourceName]`.

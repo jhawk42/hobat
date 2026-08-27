@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
 import {
   DATASET_REGISTRY,
@@ -26,6 +27,9 @@ function entry(overrides = {}) {
 function payloadForExtractor(extractor, index) {
   const rows = [{ extAddress: `00000000000000${index}`, index }];
   if (extractor === "eve-native") return { nodes: rows };
+  if (extractor === "eve-processed") {
+    return { [`0x${String(index).padStart(4, "0")}`]: rows[0] };
+  }
   if (extractor === "thread-tools-native") return { diagnostics: rows };
   if (extractor === "otbr-restapi") return { data: rows };
   return rows;
@@ -44,6 +48,26 @@ assert.deepEqual(ROW_EXTRACTORS["raw-array"]({ metadata: true }), []);
 assert.deepEqual(ROW_EXTRACTORS["eve-native"]({ nodes: [{ id: 1 }] }), [{ id: 1 }]);
 assert.deepEqual(ROW_EXTRACTORS["eve-native"]([{ id: 1 }]), [{ id: 1 }]);
 assert.deepEqual(ROW_EXTRACTORS["eve-native"]({ version: 1 }), []);
+const processedEvePayload = {
+  "0x1000": { id: "eve-a", name: "A" },
+  "0x2000": { id: "eve-b", extAddress: "AA" },
+  "EVE-C": { id: "eve-c", name: "C" },
+  "0x3000": "malformed",
+  metadata: { version: 1 },
+};
+const processedEveRows = ROW_EXTRACTORS["eve-processed"](processedEvePayload);
+assert.deepEqual(processedEveRows, [
+  { id: "eve-a", name: "A", rloc16: "0x1000" },
+  { id: "eve-b", extAddress: "AA" },
+  { id: "eve-c", name: "C" },
+]);
+assert.notEqual(processedEveRows[0], processedEvePayload["0x1000"]);
+assert.equal(Object.hasOwn(processedEvePayload["0x1000"], "rloc16"), false);
+const processedEveArray = [{ id: "eve-c", rloc16: "0x4000" }, null, "bad"];
+assert.deepEqual(ROW_EXTRACTORS["eve-processed"](processedEveArray), [
+  { id: "eve-c", rloc16: "0x4000" },
+]);
+assert.notEqual(ROW_EXTRACTORS["eve-processed"](processedEveArray)[0], processedEveArray[0]);
 assert.deepEqual(ROW_EXTRACTORS["thread-tools-native"]({ diagnostics: [{ id: 1 }] }), [{ id: 1 }]);
 assert.deepEqual(ROW_EXTRACTORS["thread-tools-native"]({ metadata: true }), []);
 assert.deepEqual(ROW_EXTRACTORS["otbr-restapi"]({ data: [{ id: 1 }] }), [{ id: 1 }]);
@@ -87,6 +111,27 @@ const canonicalResult = buildDatasetRows(entry(), [[{
 }], null]);
 assert.ok(Array.isArray(canonicalResult.rows[0].route.routeData));
 assert.equal(Object.hasOwn(canonicalResult.rows[0].route, "route_data"), false);
+
+const processedEveEntry = DATASET_REGISTRY.find(
+  (dataset) => dataset.value === "eve_processed_topology",
+);
+const cachedProcessedEve = JSON.parse(
+  fs.readFileSync("data/td-eve-topology.json", "utf8"),
+);
+const cachedProcessedEveBefore = JSON.stringify(cachedProcessedEve);
+const cachedProcessedEveResult = buildDatasetRows(processedEveEntry, [cachedProcessedEve]);
+assert.equal(processedEveEntry.rowExtractor, "eve-processed");
+assert.deepEqual(cachedProcessedEveResult.loadedFiles, ["td-eve-topology.json"]);
+assert.equal(cachedProcessedEveResult.rows.length, 79);
+assert.deepEqual(
+  cachedProcessedEveResult.rows.map((row) => row.id),
+  Object.values(cachedProcessedEve).map((row) => row.id),
+);
+assert.ok(cachedProcessedEveResult.rows.every((row) => row.id));
+assert.ok(cachedProcessedEveResult.rows.every(
+  (row) => row._source_files.includes("td-eve-topology.json"),
+));
+assert.equal(JSON.stringify(cachedProcessedEve), cachedProcessedEveBefore);
 
 for (const mergeStrategy of ["by-rloc16", "by-identity"]) {
   const mergeEntry = entry({ mergeStrategy });
@@ -153,6 +198,13 @@ assert.throws(
 assert.throws(
   () => validateDatasetRegistry([entry({
     adaptor: "eve-native",
+    rowExtractor: "raw-array",
+  })]),
+  /unsupported adaptor\/row extractor combination/i,
+);
+assert.throws(
+  () => validateDatasetRegistry([entry({
+    adaptor: "eve-enhanced",
     rowExtractor: "raw-array",
   })]),
   /unsupported adaptor\/row extractor combination/i,

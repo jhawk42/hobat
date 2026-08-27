@@ -465,7 +465,7 @@ export const DATASET_REGISTRY = [
     group: "Processed",
     files: ["td-eve-topology.json"],
     mergeStrategy: "none",
-    rowExtractor: "raw-array",
+    rowExtractor: "eve-processed",
     adaptor: "eve-enhanced",
     defaultPhysicsProfile: "mesh-compact",
     topologyMode: "eve_enhanced",
@@ -646,6 +646,7 @@ const MERGE_STRATEGY_IDS = new Set(["none", "by-rloc16", "by-identity"]);
 const ROW_EXTRACTOR_IDS = new Set([
   "raw-array",
   "eve-native",
+  "eve-processed",
   "thread-tools-native",
   "otbr-restapi",
 ]);
@@ -671,6 +672,7 @@ const PHYSICS_PROFILE_IDS = new Set([
 ]);
 
 const REQUIRED_EXTRACTOR_BY_ADAPTOR = Object.freeze({
+  "eve-enhanced": "eve-processed",
   "eve-native": "eve-native",
   "thread-tools-native": "thread-tools-native",
   "otbr-restapi": "otbr-restapi",

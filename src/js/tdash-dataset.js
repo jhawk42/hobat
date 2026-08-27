@@ -5,6 +5,8 @@ import {
   isPlainObject,
   canonicalIdText,
   getCanonicalExtaddr,
+  getCanonicalOmrIpv6Address,
+  getCanonicalRloc16,
   normalizeRowMergeAliases,
   normalizeDatasetPayload,
 } from "./tdash-utils.js";
@@ -89,9 +91,30 @@ function extractEnvelopeRows(payload, property) {
     : [];
 }
 
+function extractProcessedEveRows(payload) {
+  if (Array.isArray(payload)) {
+    return payload.filter(isPlainObject).map((row) => ({ ...row }));
+  }
+  if (!isPlainObject(payload)) return [];
+
+  return Object.entries(payload).flatMap(([key, value]) => {
+    if (!isPlainObject(value)) return [];
+    const row = { ...value };
+    const keyIsRloc16 = /^0x[0-9a-f]{4}$/i.test(key);
+    const hasCanonicalIdentity = getCanonicalRloc16(row)
+      || getCanonicalExtaddr(row)
+      || getCanonicalOmrIpv6Address(row);
+    const keyMatchesEveId = canonicalIdText(row.id) === canonicalIdText(key);
+    if (!keyIsRloc16 && !hasCanonicalIdentity && !keyMatchesEveId) return [];
+    if (!hasCanonicalIdentity && keyIsRloc16) row.rloc16 = key;
+    return [row];
+  });
+}
+
 export const ROW_EXTRACTORS = Object.freeze({
   "raw-array": extractRawRows,
   "eve-native": (payload) => extractEnvelopeRows(payload, "nodes"),
+  "eve-processed": extractProcessedEveRows,
   "thread-tools-native": (payload) => extractEnvelopeRows(payload, "diagnostics"),
   "otbr-restapi": (payload) => extractEnvelopeRows(payload, "data"),
 });
