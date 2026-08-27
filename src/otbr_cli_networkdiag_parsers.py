@@ -5,8 +5,23 @@ and extracts a specific TLV field, returning a structured dict or value.
 """
 import re
 import logging
+from collections.abc import Mapping
 
 from otbr_cli_networkdiag_util import device_type_from_mode
+from util_mac_counters import derive_mac_counter_metrics, enrich_mac_counters
+
+
+RAW_MAC_COUNTER_FIELDS: Mapping[str, str] = {
+    "IfInUnknownProtos": "ifinunknownprotos",
+    "IfInErrors": "ifinerrors",
+    "IfOutErrors": "ifouterrors",
+    "IfInUcastPkts": "ifinucastpkts",
+    "IfInBroadcastPkts": "ifinbroadcastpkts",
+    "IfInDiscards": "ifindiscards",
+    "IfOutUcastPkts": "ifoutucastpkts",
+    "IfOutBroadcastPkts": "ifoutbroadcastpkts",
+    "IfOutDiscards": "ifoutdiscards",
+}
 
 
 def parse_ipv6_address_list(output):
@@ -195,42 +210,12 @@ def parse_child_table(output, parent_rloc16):
     return children
 
 
-def parse_mac_counters(output):
-    """Extracts MAC Counters from diagnostic output.
-
-    Thread network MAC counters track packet-level performance, where high errors indicate radio
-    interference or weak signal strength, and high discards often signal network congestion or
-    inadequate buffer space. Common causes include improperly placed Border Routers, interference
-    with 2.4GHz Wi-Fi, or outdated firmware, requiring node reboots or improved mesh topology
-
-    Troubleshooting Steps:
-    -Improve Topology: Ensure Thread Border Routers are well-spaced and not directly next to Wi-Fi
-     routers to minimize interference.
-    -Reboot Devices: Cycle power on unresponsive accessories (turn off/on) to clear hung buffers
-     and force reconnection.
-    -Check Signal: If a device has high discard counts, it may be too far from its neighbors in
-     the mesh, requiring a repeater or closer proximity to a border router
-
-    Example MAC Counters:
-        "mac_counters": {
-            "ifinunknownprotos": 0,
-            "ifinerrors": 2654,
-            "ifouterrors": 175,
-            "ifinucastpkts": 1019,
-            "ifinbroadcastpkts": 32654,
-            "ifindiscards": 17,
-            "ifoutucastpkts": 2235,
-            "ifoutbroadcastpkts": 243,
-            "ifoutdiscards": 0
-        }
-
-    """
-
-    counters = {}
-    lines = output.split("\n")
+def parse_mac_counter_tokens(output: str) -> dict[str, int]:
+    """Extract accepted raw integer values from the MAC Counters section."""
+    counters: dict[str, int] = {}
     in_mac_section = False
 
-    for line in lines:
+    for line in output.splitlines():
         if "MAC Counters:" in line:
             in_mac_section = True
             continue
@@ -244,167 +229,22 @@ def parse_mac_counters(output):
             if any(x in line for x in ["Counters:", "Errors", "Pkts", "Discards"]):
                 break
 
-        # Parse counter lines like "IfInUnknownProtos: 0"
         if ":" in line and line.startswith(" "):
-            parts = line.strip().split(":")
+            parts = line.strip().split(":", 1)
             if len(parts) == 2:
-                key = parts[0].strip().lower().replace(" ", "_")
+                key = RAW_MAC_COUNTER_FIELDS.get(parts[0].strip())
+                if key is None:
+                    continue
                 try:
-                    value = int(parts[1].strip())
-                    counters[key] = value
+                    counters[key] = int(parts[1].strip())
                 except ValueError:
                     pass
-
-    # Enrich MAC counters with totals
-    if counters:
-        # Calculate total packets by summing unicast and broadcast packets for both in and out directions.
-        # This provides a more comprehensive view of the overall traffic volume at the MAC layer, which can
-        # help contextualize the error and discard counts. For example, a high number of errors may be more
-        # concerning if the total packet count is low, while it may be less significant if the total packet
-        # count is very high. By having the total packet count, we can better assess the health and performance
-        # of the network and identify potential issues that may need to be addressed.
-
-        # total IN packets = IN unicast + IN broadcast
-        ifintotalpkts = counters.get("ifinucastpkts", 0) + counters.get("ifinbroadcastpkts", 0)
-        counters["ifintotalpkts"] = ifintotalpkts
-
-        # total OUT packets = OUT unicast + OUT broadcast
-        ifouttotalpkts = counters.get("ifoutucastpkts", 0) + counters.get("ifoutbroadcastpkts", 0)
-        counters["ifouttotalpkts"] = ifouttotalpkts
-
-        # total IN and OUT packets = IN unicast + IN broadcast + OUT unicast + OUT broadcast
-        iftotalpkts = ifintotalpkts + ifouttotalpkts
-        counters["iftotalpkts"] = iftotalpkts
-
-        # Errors are from malformed packets, interference, or weak signal strength causing corruption during
-        # transmission, while discards typically indicate congestion or buffer overflows where packets are
-        # discards, we can get a clearer picture of the overall health and performance of the network at
-        # the MAC layer. High error counts relative to total packets may indicate issues with signal quality
-        # or interference, while high discard counts may point to congestion or insufficient buffering
-        # capacity in the network.
-        #
-        # Discards can also occur when a device is overwhelmed with more traffic than it can handle, which
-        # may be the case in a dense network or if a device has limited resources. By looking at the total
-        # packets in relation to errors and discards, we can better understand whether high error/discard
-        # counts are significant issues that need to be addressed or if they are just a small fraction of
-        # the overall traffic and may not be as concerning.
-
-        # IN Errors
-        ifinerrors = counters.get("ifinerrors", 0)
-        # OUT Errors
-        ifouterrors = counters.get("ifouterrors", 0)
-        # TOTAL Errors
-        totalerrors = ifinerrors + ifouterrors
-        counters["iftotalerrors"] = totalerrors
-
-        # Discards
-        # IN Discards
-        ifindiscards = counters.get("ifindiscards", 0)
-        # OUT Discards
-        ifoutdiscards = counters.get("ifoutdiscards", 0)
-        # TOTAL Discards
-        totaldiscards = ifindiscards + ifoutdiscards
-        counters["iftotaldiscards"] = totaldiscards
-
-        # TOTAL IN  errdiscs (errors and discards)
-        iftotal_inerrdiscs = ifinerrors + ifindiscards
-        counters["iftotal_inerrdiscs"] = iftotal_inerrdiscs
-        
-        # TOTAL OUT errdiscs (errors and discards)
-        iftotal_outerrdiscs = ifouterrors + ifoutdiscards
-        counters["iftotal_outerrdiscs"] = iftotal_outerrdiscs
-
-        # TOTAL IN AND OUT errdiscs (errors and discards)
-        iftotal_errdiscs = totalerrors + totaldiscards
-        counters["iftotal_errdiscs"] = iftotal_errdiscs
-
-        # Calc Ratios
-
-        # TOTAL IN ERRORS DISCARDS
-        if iftotal_inerrdiscs > 0:
-            # Calc ratio of ifinerrors to total in errors and discards
-            ifinerrors_totalinerrdiscs_ratio = round((ifinerrors / iftotal_inerrdiscs), 1)
-            counters["ifinerrors_totalinerrdiscs_ratio"] = ifinerrors_totalinerrdiscs_ratio
-
-            # Calc ratio of ifindiscards to total in errors and discards
-            ifindiscards_totalinerrdiscs_ratio = round((ifindiscards / iftotal_inerrdiscs), 1)
-            counters["ifindiscards_totalinerrdiscs_ratio"] = ifindiscards_totalinerrdiscs_ratio
-
-        # TOTAL OUT ERRORS DISCARDS
-        if iftotal_outerrdiscs > 0:
-            # Calc ratio of ifouterrors to total out errors and discards
-            ifouterrors_totalouterrdiscs_ratio = round((ifouterrors / iftotal_outerrdiscs), 1)
-            counters["ifouterrors_totalouterrdiscs_ratio"] = ifouterrors_totalouterrdiscs_ratio
-
-            # Calc ratio of ifoutdiscards to total out errors and discards
-            ifoutdiscards_totalouterrdiscs_ratio = round((ifoutdiscards / iftotal_outerrdiscs), 1)
-            counters["ifoutdiscards_totalouterrdiscs_ratio"] = ifoutdiscards_totalouterrdiscs_ratio
-
-        # TOTAL IN AND OUT ERRORS DISCARDS
-        if iftotal_errdiscs > 0:
-            # Calc ratio of total errors to total errors and discards
-            iftotalerrors_totalerrdiscs_ratio = round((totalerrors / iftotal_errdiscs), 1)
-            counters["iftotalerrors_totalerrdiscs_ratio"] = iftotalerrors_totalerrdiscs_ratio
-
-            # Calc ratio of total discards to total errors and discards
-            iftotaldiscards_totalerrdiscs_ratio = round((totaldiscards / iftotal_errdiscs), 1)
-            counters["iftotaldiscards_totalerrdiscs_ratio"] = iftotaldiscards_totalerrdiscs_ratio
-
-        # Help determine if high error counts are significant
-        # Format the percentages to 1 decimal place when printing
-        
-        # Calc errors ratio of inerrors to IN total packets
-        if ifintotalpkts > 0:
-            counters["ifinerrors_intotalpkts_ratio"] = round(
-                (ifinerrors / ifintotalpkts), 1)
-
-        # Calc errors ratio of outerrors to OUT total packets
-        if ifouttotalpkts > 0:
-            counters["ifouterrors_outtotalpkts_ratio"] = round(
-                (ifouterrors / ifouttotalpkts), 1)
-            
-        if iftotalpkts > 0:
-            counters["iftotalerrors_totalpkts_ratio"] = round(
-                (totalerrors / iftotalpkts), 1)
-            counters["iftotaldiscards_totalpkts_ratio"] = round(
-                (totaldiscards / iftotalpkts), 1)
-
-        # calc errors pct relative to total errors to help determine if high error counts are significant or just a small fraction of overall traffic. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of errors, which may indicate more severe issues with signal quality or interference that need to be addressed to improve network performance and reliability.
-        if totalerrors > 0:
-            counters["ifinerrors_totalerrors_pct"] = round(
-                (ifinerrors / totalerrors) * 100, 1)
-            counters["ifouterrors_totalerrors_pct"] = round(
-                (ifouterrors / totalerrors) * 100, 1)
-        else:
-            counters["ifinerrors_totalerrors_pct"] = 0
-            counters["ifouterrors_totalerrors_pct"] = 0
-
-        # Help determine if high discard counts are significant
-        # Format the percentages to 1 decimal place when printing
-
-        # Calc discards ratio of indiscards to IN total packets
-        if ifintotalpkts > 0:
-            counters["ifindiscards_intotalpkts_ratio"] = round(
-                (ifindiscards / ifintotalpkts), 1)
-
-        # Calc discards ratio of outdiscards to OUT total packets
-        if ifouttotalpkts > 0:
-            counters["ifoutdiscards_outtotalpkts_ratio"] = round(
-                (ifoutdiscards / ifouttotalpkts), 1)
-
-        # calc discards pct relative to total discards to help determine if high discard counts are significant or just a small fraction of overall traffic. This can help prioritize troubleshooting efforts by focusing on nodes that have a high percentage of discards, which may indicate more severe issues with congestion or insufficient buffering capacity that need to be addressed to improve network performance and reliability.
-        if totaldiscards > 0:
-            counters["ifindiscards_totaldiscards_pct"] = round(
-                (ifindiscards / totaldiscards) * 100, 1
-            )
-            counters["ifoutdiscards_totaldiscards_pct"] = round(
-                (ifoutdiscards / totaldiscards) * 100, 1
-            )
-        else:
-            counters["ifindiscards_totaldiscards_pct"] = 0
-            counters["ifoutdiscards_totaldiscards_pct"] = 0
-
     return counters
+
+def parse_mac_counters(output: str) -> dict[str, int | float]:
+    """Extract raw MAC counters and add derived metrics."""
+    counters = parse_mac_counter_tokens(output)
+    return enrich_mac_counters(counters) if counters else {}
 
 
 def parse_mle_counters(output):

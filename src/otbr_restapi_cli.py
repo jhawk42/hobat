@@ -51,6 +51,7 @@ from otbr_restapi_actions import dispatch_actions
 from otbr_restapi_diagnostics import dispatch_diagnostics
 from otbr_restapi_mesh_diagnostics import dispatch_mesh_diagnostics
 from otbr_restapi_topology import dispatch_topology
+from util_mac_counters import derive_rest_mac_counter_metrics
 
 # Reference: https://github.com/openthread/ot-br-posix/blob/main/src/rest/openapi.yaml
 
@@ -758,67 +759,34 @@ def enrich_mac_counters(mac: dict[str, Any]) -> None:
     Accepts the camelCase key format returned by the OTBR REST API and adds
     camelCase totals/ratios used by TDash filtering and rendering.
     """
-    in_ucast   = mac.get("ifInUcastPkts", 0)
-    in_bcast   = mac.get("ifInBroadcastPkts", 0)
-    out_ucast  = mac.get("ifOutUcastPkts", 0)
-    out_bcast  = mac.get("ifOutBroadcastPkts", 0)
-    in_errors  = mac.get("ifInErrors", 0)
-    out_errors = mac.get("ifOutErrors", 0)
-    in_disc    = mac.get("ifInDiscards", 0)
-    out_disc   = mac.get("ifOutDiscards", 0)
-
-    ifintotalpkts  = in_ucast  + in_bcast
-    ifouttotalpkts = out_ucast + out_bcast
-    iftotalpkts    = ifintotalpkts + ifouttotalpkts
-    totalerrors    = in_errors + out_errors
-    totaldiscards  = in_disc   + out_disc
-
-    mac["ifInTotalPkts"] = ifintotalpkts
-    mac["ifOutTotalPkts"] = ifouttotalpkts
-    mac["ifTotalPkts"] = iftotalpkts
-    mac["ifTotalErrors"] = totalerrors
-    mac["ifTotalDiscards"] = totaldiscards
-
-    iftotal_inerrdiscs  = in_errors  + in_disc
-    iftotal_outerrdiscs = out_errors + out_disc
-    iftotal_errdiscs    = totalerrors + totaldiscards
-
-    mac["ifTotalInErrDiscs"] = iftotal_inerrdiscs
-    mac["ifTotalOutErrDiscs"] = iftotal_outerrdiscs
-    mac["ifTotalErrDiscs"] = iftotal_errdiscs
-
-    if iftotal_inerrdiscs > 0:
-        mac["ifInErrorsTotalInErrDiscsRatio"] = round(in_errors / iftotal_inerrdiscs, 1)
-        mac["ifInDiscardsTotalInErrDiscsRatio"] = round(in_disc / iftotal_inerrdiscs, 1)
-    if iftotal_outerrdiscs > 0:
-        mac["ifOutErrorsTotalOutErrDiscsRatio"] = round(out_errors / iftotal_outerrdiscs, 1)
-        mac["ifOutDiscardsTotalOutErrDiscsRatio"] = round(out_disc / iftotal_outerrdiscs, 1)
-    if iftotal_errdiscs > 0:
-        mac["ifTotalErrorsTotalErrDiscsRatio"] = round(totalerrors / iftotal_errdiscs, 1)
-        mac["ifTotalDiscardsTotalErrDiscsRatio"] = round(totaldiscards / iftotal_errdiscs, 1)
-
-    if ifintotalpkts > 0:
-        mac["ifInErrorsInTotalPktsRatio"] = round(in_errors / ifintotalpkts, 1)
-        mac["ifInDiscardsInTotalPktsRatio"] = round(in_disc / ifintotalpkts, 1)
-    if ifouttotalpkts > 0:
-        mac["ifOutErrorsOutTotalPktsRatio"] = round(out_errors / ifouttotalpkts, 1)
-        mac["ifOutDiscardsOutTotalPktsRatio"] = round(out_disc / ifouttotalpkts, 1)
-    if iftotalpkts > 0:
-        mac["ifTotalErrorsTotalPktsRatio"] = round(totalerrors / iftotalpkts, 1)
-        mac["ifTotalDiscardsTotalPktsRatio"] = round(totaldiscards / iftotalpkts, 1)
-
-    mac["ifInErrorsPercentage"] = (
-        round((in_errors  / totalerrors) * 100, 1) if totalerrors > 0 else 0
-    )
-    mac["ifOutErrorsPercentage"] = (
-        round((out_errors / totalerrors) * 100, 1) if totalerrors > 0 else 0
-    )
-    mac["ifInDiscardsPercentage"] = (
-        round((in_disc  / totaldiscards) * 100, 1) if totaldiscards > 0 else 0
-    )
-    mac["ifOutDiscardsPercentage"] = (
-        round((out_disc / totaldiscards) * 100, 1) if totaldiscards > 0 else 0
-    )
+    key_map = {
+        "ifintotalpkts": "ifInTotalPkts",
+        "ifouttotalpkts": "ifOutTotalPkts",
+        "iftotalpkts": "ifTotalPkts",
+        "iftotalerrors": "ifTotalErrors",
+        "iftotaldiscards": "ifTotalDiscards",
+        "iftotal_inerrdiscs": "ifTotalInErrDiscs",
+        "iftotal_outerrdiscs": "ifTotalOutErrDiscs",
+        "iftotal_errdiscs": "ifTotalErrDiscs",
+        "ifinerrors_totalinerrdiscs_ratio": "ifInErrorsTotalInErrDiscsRatio",
+        "ifindiscards_totalinerrdiscs_ratio": "ifInDiscardsTotalInErrDiscsRatio",
+        "ifouterrors_totalouterrdiscs_ratio": "ifOutErrorsTotalOutErrDiscsRatio",
+        "ifoutdiscards_totalouterrdiscs_ratio": "ifOutDiscardsTotalOutErrDiscsRatio",
+        "iftotalerrors_totalerrdiscs_ratio": "ifTotalErrorsTotalErrDiscsRatio",
+        "iftotaldiscards_totalerrdiscs_ratio": "ifTotalDiscardsTotalErrDiscsRatio",
+        "ifinerrors_intotalpkts_ratio": "ifInErrorsInTotalPktsRatio",
+        "ifindiscards_intotalpkts_ratio": "ifInDiscardsInTotalPktsRatio",
+        "ifouterrors_outtotalpkts_ratio": "ifOutErrorsOutTotalPktsRatio",
+        "ifoutdiscards_outtotalpkts_ratio": "ifOutDiscardsOutTotalPktsRatio",
+        "iftotalerrors_totalpkts_ratio": "ifTotalErrorsTotalPktsRatio",
+        "iftotaldiscards_totalpkts_ratio": "ifTotalDiscardsTotalPktsRatio",
+        "ifinerrors_totalerrors_pct": "ifInErrorsPercentage",
+        "ifouterrors_totalerrors_pct": "ifOutErrorsPercentage",
+        "ifindiscards_totaldiscards_pct": "ifInDiscardsPercentage",
+        "ifoutdiscards_totaldiscards_pct": "ifOutDiscardsPercentage",
+    }
+    metrics = derive_rest_mac_counter_metrics(mac)
+    mac.update({key_map[key]: value for key, value in metrics.items()})
 
 
 def _apply_mac_enrichment(diagnostics: list[Any]) -> list[Any]:
