@@ -147,6 +147,31 @@ Eve app layout json file: Enhances and visualizes the eve layout file data.
 
 The tdash dashboard and tools can run in a docker container or directly the host.
 
+### Test suite
+
+Install `requirements_test.txt`, then run the authoritative offline suite from
+the repository root:
+
+```bash
+python3 -m pytest -q
+```
+
+Performance and live OTBR checks are explicit opt-ins:
+
+```bash
+python3 -m pytest -q -m benchmark
+TD_LIVE_TESTS=1 python3 -m pytest -q -m live
+```
+
+The live suite is skipped unless `TD_LIVE_TESTS=1`; it requires a configured
+OTBR environment. The default suite requires no OTBR, mDNS network, Docker
+daemon, or internet access and treats checked-in data as immutable fixtures.
+Branch coverage is ratcheted from the Phase 15 baseline:
+
+```bash
+python3 -m pytest -q --cov
+```
+
 Note: **Setup: Manual on a host** - To manually run on a host, git clone this repro onto the host. See details below to manually run td_cli.py and td_webserver.py commands.
 
 ### Pull tdash docker container

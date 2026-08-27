@@ -28,34 +28,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
+from webserver_test_support import (
+    make_data_request as _make_request,
+    make_webserver_app as _make_app,
+    reset_webserver_state as _reset_module_state,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers (mirrors the pattern established in test_td_webserver_concurrency.py)
 # ---------------------------------------------------------------------------
-
-def _reset_module_state() -> None:
-    """Clear module-level dicts between tests to prevent cross-test pollution."""
-    td_webserver._active_processes.clear()
-    td_webserver._source_locks.clear()
-    td_webserver._job_registry.clear()
-    td_webserver._background_tasks.clear()
-
-
-def _make_app(data_dir: Path) -> dict:
-    """Return a minimal app dict substituting for aiohttp.web.Application."""
-    return {td_webserver.TD_DATA_DIR_APP_KEY: data_dir}
-
-
-def _make_request(filename: str, app: dict, *, no_cache: bool = False) -> MagicMock:
-    """Build a minimal mock aiohttp Request for handle_data_api."""
-    req = MagicMock()
-    req.match_info = {"filename": filename}
-    req.app = app
-    req.headers = {"Cache-Control": "no-cache"} if no_cache else {}
-    return req
-
 
 class SmokeTestBase(unittest.IsolatedAsyncioTestCase):
     """Common setUp / tearDown for all smoke tests."""

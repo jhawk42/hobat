@@ -18,8 +18,6 @@ from pathlib import Path
 
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
 
 @unittest.skip("td_webserver uses aiohttp; TDashHandler-based routing tests superseded by test_td_webserver_concurrency.py")
 class TestTDashHandlerRouting(unittest.TestCase):

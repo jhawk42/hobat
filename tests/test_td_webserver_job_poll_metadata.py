@@ -8,18 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
 import td_webserver
-
-
-def _reset_state() -> None:
-    td_webserver._active_processes.clear()
-    td_webserver._source_locks.clear()
-    td_webserver._job_registry.clear()
-    td_webserver._job_runtime_registry.clear()
-    td_webserver._job_id_by_task.clear()
-    td_webserver._background_tasks.clear()
+from webserver_test_support import reset_webserver_state as _reset_state
 
 
 def _make_job_request(job_id: str, data_dir: Path):

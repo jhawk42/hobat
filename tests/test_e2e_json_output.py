@@ -7,8 +7,6 @@ import sys
 import os
 import json
 import tempfile
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-
 from otbr_cli_networkdiag_topology import (
     parse_multicast_diag_output,
     save_topology_to_json_file,

@@ -1,0 +1,82 @@
+{
+  "base": {
+    "rloc16": "0x0000",
+    "route": {
+      "idSequence": 10,
+      "routeData": [
+        {
+          "routeId": "0x10",
+          "idSequence": 10,
+          "linkQualityIn": 3,
+          "linkQualityOut": 3,
+          "routeCost": 1,
+          "rloc16": "0x4000"
+        },
+        {
+          "routeId": "0x11",
+          "idSequence": 10,
+          "linkQualityIn": 1,
+          "linkQualityOut": 1,
+          "routeCost": 3,
+          "rloc16": "0x4400"
+        }
+      ]
+    }
+  },
+  "incoming": {
+    "rloc16": "0x0000",
+    "route": {
+      "idSequence": 15,
+      "routeData": [
+        {
+          "routeId": "0x11",
+          "idSequence": 15,
+          "linkQualityIn": 3,
+          "linkQualityOut": 2,
+          "routeCost": 1,
+          "rloc16": "0x4400"
+        },
+        {
+          "routeId": "0x12",
+          "idSequence": 15,
+          "linkQualityIn": 2,
+          "linkQualityOut": 2,
+          "routeCost": 2,
+          "rloc16": "0x4800"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "rloc16": "0x0000",
+    "route": {
+      "idSequence": 15,
+      "routeData": [
+        {
+          "routeId": "0x10",
+          "idSequence": 10,
+          "linkQualityIn": 3,
+          "linkQualityOut": 3,
+          "routeCost": 1,
+          "rloc16": "0x4000"
+        },
+        {
+          "routeId": "0x11",
+          "idSequence": 15,
+          "linkQualityIn": 3,
+          "linkQualityOut": 2,
+          "routeCost": 1,
+          "rloc16": "0x4400"
+        },
+        {
+          "routeId": "0x12",
+          "idSequence": 15,
+          "linkQualityIn": 2,
+          "linkQualityOut": 2,
+          "routeCost": 2,
+          "rloc16": "0x4800"
+        }
+      ]
+    }
+  }
+}

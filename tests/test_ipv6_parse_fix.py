@@ -6,8 +6,6 @@ and doesn't incorrectly capture RouteId entries as IPv6 addresses.
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-
 from otbr_cli_networkdiag_parsers import parse_ipv6_address_list
 
 

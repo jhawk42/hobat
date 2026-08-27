@@ -12,8 +12,6 @@ from pathlib import Path
 from copy import deepcopy
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 from merge_dataset import (
     deep_merge,
     merge_lists,
@@ -294,10 +292,18 @@ def test_partition_awareness():
     
     result = deep_merge(deepcopy(base), incoming)
     print(f"Result: {json.dumps(result, indent=2)}")
-    
-    # Current behavior: no partition awareness, merges across partitions
-    # Problem: Cross-partition merge is invalid!
-    print("⚠️  No partition-aware merge constraints (merges across partitions)")
+
+    assert result["leader_data"]["partition_id"] == "0x12345678"
+    assert result["route_data"]["id_sequence"] == 100
+    assert result["route_data"]["route_data"] == [
+        {"route_id": "0x03"},
+        {"route_id": "0x05"},
+    ]
+    assert {conflict["path"] for conflict in result["_merge_conflicts"]} == {
+        "rloc16",
+        "leader_data.partition_id",
+        "route_data.id_sequence",
+    }
 
 
 def test_sequence_number_precedence():
@@ -330,10 +336,23 @@ def test_sequence_number_precedence():
     
     result = deep_merge(deepcopy(base), incoming)
     print(f"Result: {json.dumps(result, indent=2)}")
-    
-    # Current behavior: doesn't use sequence number for precedence
-    # Problem: Older sequence data overwrites newer!
-    print("⚠️  No sequence number precedence (older data can overwrite newer)")
+
+    assert result["route_data"] == {
+        "id_sequence": 100,
+        "route_data": [
+            {"route_id": "0x03", "link_quality_out": 3},
+            {"route_id": "0x03", "link_quality_out": 2},
+        ],
+    }
+    assert result["connectivity"] == {
+        "id_sequence": 100,
+        "active_routers": 15,
+    }
+    assert {conflict["path"] for conflict in result["_merge_conflicts"]} == {
+        "route_data.id_sequence",
+        "connectivity.id_sequence",
+        "connectivity.active_routers",
+    }
 
 
 def run_all_tests():

@@ -23,34 +23,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
+from webserver_test_support import (
+    make_data_request as _make_request,
+    make_webserver_app as _make_app,
+    reset_webserver_state as _reset_module_state,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _reset_module_state() -> None:
-    """Clear module-level dicts between tests to prevent cross-test pollution."""
-    td_webserver._active_processes.clear()
-    td_webserver._source_locks.clear()
-    td_webserver._job_registry.clear()
-
-
-def _make_app(data_dir: Path) -> object:
-    """Return a minimal app-like dict used in place of aiohttp.web.Application."""
-    return {td_webserver.TD_DATA_DIR_APP_KEY: data_dir}
-
-
-def _make_request(filename: str, app: object, *, no_cache: bool = False):
-    """Build a minimal mock aiohttp Request for handle_data_api."""
-    from unittest.mock import MagicMock
-    req = MagicMock()
-    req.match_info = {"filename": filename}
-    req.app = app
-    req.headers = {"Cache-Control": "no-cache"} if no_cache else {}
-    return req
-
 
 # ---------------------------------------------------------------------------
 # Base test case
@@ -86,10 +67,12 @@ class TestSameFilenameDeduplication(ConcurrencyTestBase):
 
         call_count = 0
         barrier = asyncio.Event()
+        first_call_started = asyncio.Event()
 
         async def slow_td_cli(args, data_dir, *, timeout_s=None):
             nonlocal call_count
             call_count += 1
+            first_call_started.set()
             await barrier.wait()  # hold until released
             # Write the file so the handler is satisfied
             (data_dir / filename).write_text("{}")
@@ -101,8 +84,7 @@ class TestSameFilenameDeduplication(ConcurrencyTestBase):
         with patch.object(td_webserver, "run_td_cli", side_effect=slow_td_cli):
             # Launch both requests concurrently before releasing the barrier.
             t1 = asyncio.ensure_future(td_webserver.handle_data_api(req))
-            # Give t1 a chance to register in _active_processes.
-            await asyncio.sleep(0)
+            await asyncio.wait_for(first_call_started.wait(), timeout=1)
             t2 = asyncio.ensure_future(td_webserver.handle_data_api(req))
 
             barrier.set()
@@ -126,14 +108,20 @@ class TestSameSourceSerializationShortCost(ConcurrencyTestBase):
         running_at_same_time = False
         currently_running = 0
         max_concurrent = 0
+        first_call_started = asyncio.Event()
+        release_first_call = asyncio.Event()
+        call_count = 0
 
         async def controlled_td_cli(args, data_dir, *, timeout_s=None):
-            nonlocal currently_running, max_concurrent, running_at_same_time
+            nonlocal call_count, currently_running, max_concurrent, running_at_same_time
+            call_count += 1
             currently_running += 1
             if currently_running > 1:
                 running_at_same_time = True
             max_concurrent = max(max_concurrent, currently_running)
-            await asyncio.sleep(0.01)  # simulate work
+            if call_count == 1:
+                first_call_started.set()
+                await release_first_call.wait()
             # Write the output file
             fname = args[args.index("--datadir") -
                          1] if "--datadir" in args else None
@@ -153,10 +141,19 @@ class TestSameSourceSerializationShortCost(ConcurrencyTestBase):
         req_b = _make_request(file_b, app)
 
         with patch.object(td_webserver, "run_td_cli", side_effect=controlled_td_cli):
-            await asyncio.gather(
-                td_webserver.handle_data_api(req_a),
-                td_webserver.handle_data_api(req_b),
-            )
+            task_a = asyncio.create_task(td_webserver.handle_data_api(req_a))
+            await asyncio.wait_for(first_call_started.wait(), timeout=1)
+            second_request_started = asyncio.Event()
+
+            async def run_second_request():
+                second_request_started.set()
+                return await td_webserver.handle_data_api(req_b)
+
+            task_b = asyncio.create_task(run_second_request())
+            await asyncio.wait_for(second_request_started.wait(), timeout=1)
+            self.assertEqual(call_count, 1)
+            release_first_call.set()
+            await asyncio.gather(task_a, task_b)
 
         self.assertFalse(running_at_same_time,
                          "Two otbr-cli short-cost tasks must not run concurrently")
@@ -275,13 +272,19 @@ class TestSameSourceSerializationLongCost(ConcurrencyTestBase):
 
         running_at_same_time = False
         currently_running = 0
+        call_count = 0
+        first_call_started = asyncio.Event()
+        release_first_call = asyncio.Event()
 
         async def controlled_td_cli(args, data_dir, *, timeout_s=None):
-            nonlocal currently_running, running_at_same_time
+            nonlocal call_count, currently_running, running_at_same_time
+            call_count += 1
             currently_running += 1
             if currently_running > 1:
                 running_at_same_time = True
-            await asyncio.sleep(0.02)
+            if call_count == 1:
+                first_call_started.set()
+                await release_first_call.wait()
             (data_dir / file_a).write_text("{}")
             (data_dir / file_b).write_text("{}")
             currently_running -= 1
@@ -301,15 +304,13 @@ class TestSameSourceSerializationLongCost(ConcurrencyTestBase):
                 self.assertEqual(resp_a.status, 202)
                 self.assertEqual(resp_b.status, 202)
 
-                # Wait for both background jobs to complete.
-                for _ in range(50):
-                    await asyncio.sleep(0.01)
-                    done = all(
-                        j.status != "running"
-                        for j in td_webserver._job_registry.values()
-                    )
-                    if done:
-                        break
+                await asyncio.wait_for(first_call_started.wait(), timeout=1)
+                self.assertEqual(call_count, 1)
+                release_first_call.set()
+                await asyncio.wait_for(
+                    asyncio.gather(*tuple(td_webserver._background_tasks)),
+                    timeout=1,
+                )
         finally:
             td_webserver._LONG_COST_THRESHOLD_S = original_threshold
 
@@ -357,12 +358,14 @@ class TestLongCostBlocksShortCostSameSource(ConcurrencyTestBase):
             # Wait until the background job has actually acquired the lock.
             await long_job_started.wait()
 
-            # Now fire the short-cost request in a task; it must block on the lock.
-            short_task = asyncio.ensure_future(
-                td_webserver.handle_data_api(req_short))
+            short_request_started = asyncio.Event()
 
-            # Give the short-cost task a moment to reach the lock.
-            await asyncio.sleep(0.01)
+            async def run_short_request():
+                short_request_started.set()
+                return await td_webserver.handle_data_api(req_short)
+
+            short_task = asyncio.create_task(run_short_request())
+            await asyncio.wait_for(short_request_started.wait(), timeout=1)
 
             # It should still be pending (lock held by long-cost job).
             self.assertFalse(short_task.done(),

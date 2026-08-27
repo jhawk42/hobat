@@ -206,12 +206,18 @@ class DeviceApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_concurrent_patch_requests_are_serialized(self) -> None:
         currently_running = 0
         max_concurrent = 0
+        call_count = 0
+        first_call_started = asyncio.Event()
+        release_first_call = asyncio.Event()
 
         async def fake_td_cli(args, data_dir, *, timeout_s=None):
-            nonlocal currently_running, max_concurrent
+            nonlocal call_count, currently_running, max_concurrent
+            call_count += 1
             currently_running += 1
             max_concurrent = max(max_concurrent, currently_running)
-            await asyncio.sleep(0.01)
+            if call_count == 1:
+                first_call_started.set()
+                await release_first_call.wait()
             upsert_device_label(
                 data_dir / "td-static-extaddr-device-label.json",
                 args[2],
@@ -221,20 +227,26 @@ class DeviceApiTests(unittest.IsolatedAsyncioTestCase):
             return 0
 
         with patch.object(td_webserver, "run_td_cli", side_effect=fake_td_cli):
-            first, second = await asyncio.gather(
+            first_task = asyncio.create_task(
                 td_webserver.handle_device_patch_api(
                     self._request(
                         "4e866ce96501b9ed",
                         {"deviceLabel": "First"},
                     )
-                ),
+                )
+            )
+            await asyncio.wait_for(first_call_started.wait(), timeout=1)
+            second_task = asyncio.create_task(
                 td_webserver.handle_device_patch_api(
                     self._request(
                         "4e866ce96501b9ed",
                         {"deviceLabel": "Second"},
                     )
-                ),
+                )
             )
+            self.assertEqual(call_count, 1)
+            release_first_call.set()
+            first, second = await asyncio.gather(first_task, second_task)
 
         self.assertEqual(max_concurrent, 1)
         self.assertEqual(sorted((first.status, second.status)), [200, 201])

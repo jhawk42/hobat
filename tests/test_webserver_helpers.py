@@ -19,10 +19,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
 import aiohttp.web
 import td_webserver
+from webserver_test_support import reset_webserver_state as _reset_module_state
 from td_webserver import (
     FileAction,
     _build_file_response,
@@ -38,13 +37,6 @@ TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT = td_webserver.TD_DATA_FILE_CACHE_MAX_AGE_DEF
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-def _reset_module_state() -> None:
-    td_webserver._active_processes.clear()
-    td_webserver._source_locks.clear()
-    td_webserver._job_registry.clear()
-    td_webserver._background_tasks.clear()
-
 
 def _make_file_action(
     *,

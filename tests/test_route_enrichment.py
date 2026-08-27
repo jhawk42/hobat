@@ -5,8 +5,6 @@ Test to verify _enrich_device_route_data_with_router_info correctly enriches rou
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-
 from otbr_cli_networkdiag_topology import _enrich_device_route_data_with_router_info
 
 

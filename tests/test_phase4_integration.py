@@ -18,8 +18,6 @@ from pathlib import Path
 from copy import deepcopy
 
 # Add src directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 from merge_dataset import (
     deep_merge,
     build_merged_records,

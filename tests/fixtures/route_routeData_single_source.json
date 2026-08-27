@@ -1,0 +1,28 @@
+[
+  {
+    "rloc16": "0x0000",
+    "extAddress": "0011223344556677",
+    "deviceLabel": "Router A",
+    "route": {
+      "idSequence": 42,
+      "routeData": [
+        {
+          "routeId": "0x10",
+          "linkQualityIn": 3,
+          "linkQualityOut": 2,
+          "routeCost": 1,
+          "rloc16": "0x4000"
+        },
+        {
+          "routeId": "0x11",
+          "linkQualityIn": 1,
+          "linkQualityOut": 1,
+          "routeCost": 2,
+          "rloc16": "0x4400"
+        }
+      ]
+    },
+    "children": [],
+    "totalChildren": 0
+  }
+]

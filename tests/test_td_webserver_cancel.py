@@ -7,10 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
 import aiohttp.web
 import td_webserver
+from webserver_test_support import reset_webserver_state as _reset_state
 
 
 class _DummyTask:
@@ -32,6 +31,7 @@ class _FakeProcess:
         self.kill_called = False
         self._communicate_calls = 0
         self._block_event = asyncio.Event()
+        self.communicate_started = asyncio.Event()
 
     def terminate(self) -> None:
         self.terminate_called = True
@@ -41,18 +41,10 @@ class _FakeProcess:
 
     async def communicate(self):
         self._communicate_calls += 1
+        self.communicate_started.set()
         if self._communicate_calls == 1:
             await self._block_event.wait()
         return b"", b""
-
-
-def _reset_state() -> None:
-    td_webserver._active_processes.clear()
-    td_webserver._source_locks.clear()
-    td_webserver._job_registry.clear()
-    td_webserver._job_runtime_registry.clear()
-    td_webserver._job_id_by_task.clear()
-    td_webserver._background_tasks.clear()
 
 
 def _make_job_request(job_id: str):
@@ -133,7 +125,7 @@ class TestRunTdCliCancellation(unittest.IsolatedAsyncioTestCase):
                     Path("/tmp"),
                 )
             )
-            await asyncio.sleep(0)
+            await asyncio.wait_for(fake_process.communicate_started.wait(), timeout=1)
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await task

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Phase 5 End-to-End Validation Tests
 
@@ -10,8 +9,8 @@ Tests for Phase 5 comprehensive validation:
 - Backward compatibility verification
 """
 
-import sys
 import json
+import shutil
 import time
 import tracemalloc
 import traceback
@@ -19,15 +18,11 @@ from pathlib import Path
 from typing import Any
 import pytest
 
-# Add src directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 from merge_dataset import main as merge_dataset_main
 
 
 # Test data directory
 DATA_DIR = Path(__file__).parent.parent / "data"
-TEST_OUTPUT_DIR = Path(__file__).parent.parent / "data"
 PLACEHOLDER_EXTADDRS = {"0000000000000000"}
 
 
@@ -35,78 +30,52 @@ PLACEHOLDER_EXTADDRS = {"0000000000000000"}
 # Test 1: End-to-End Merge with Real Data
 # =============================================================================
 
-def _run_e2e_merge_with_real_data() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _data_manifest(data_dir: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(data_dir)): path.read_bytes()
+        for path in sorted(data_dir.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _run_e2e_merge_with_real_data(data_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Run the full merge pipeline and return merged/report data."""
-    print("\n=== Test: End-to-End Merge with Real Data ===")
-    
-    # Backup existing merged file if it exists
-    output_file = TEST_OUTPUT_DIR / "td-merged-topology-all.json"
-    backup_file = TEST_OUTPUT_DIR / "td-merged-topology-all.json.backup-phase5"
-    
-    if output_file.exists():
-        print(f"  Backing up existing merged file to {backup_file}")
-        output_file.rename(backup_file)
-    
-    try:
-        # Run the merge with real data
-        print(f"  Running merge with data from {DATA_DIR}")
-        
-        # Prepare arguments
-        args = [
-            "--base-dir", str(DATA_DIR),
-            "--dataset-file", "td-otbr-cli-thread-network-info.json",
-            "--output", "td-merged-topology-all.json",
-            "--extaddr-map-file", "td-static-extaddr-device-label.json",
-            "--report-file", "td-merge-report-phase5.json",
-        ]
-        
-        # Run merge
-        start_time = time.time()
-        exit_code = merge_dataset_main(args)
-        end_time = time.time()
-        
-        assert exit_code == 0, f"Merge failed with exit code {exit_code}"
-        
-        # Verify output file was created
-        assert output_file.exists(), f"Output file not created: {output_file}"
-        
-        # Load and validate output
-        with output_file.open("r") as f:
-            merged_data = json.load(f)
-        
-        print(f"  ✅ Merge completed successfully in {end_time - start_time:.2f}s")
-        print(f"  ✅ Merged {len(merged_data)} nodes")
-        
-        # Verify report file
-        report_file = TEST_OUTPUT_DIR / "td-merge-report-phase5.json"
-        assert report_file.exists(), f"Report file not created: {report_file}"
-        
-        with report_file.open("r") as f:
-            report_data = json.load(f)
-        
-        print(f"  ✅ Report generated:")
-        print(f"     - Multi-source nodes: {report_data.get('multi_source_nodes_total', 0)}")
-        print(f"     - Single-source nodes: {report_data.get('single_source_nodes_total', 0)}")
-        print(f"     - Identity collisions: {report_data.get('identity_collision_count', 0)}")
-        
-        return merged_data, report_data
-        
-    except Exception as e:
-        print(f"  ❌ FAIL: {e}")
-        traceback.print_exc()
-        raise
-    finally:
-        # Restore backup if it exists
-        if backup_file.exists() and output_file.exists():
-            print(f"  Restoring backup from {backup_file}")
-            output_file.unlink()
-            backup_file.rename(output_file)
+    output_file = data_dir / "td-merged-topology-all.json"
+    args = [
+        "--base-dir", str(data_dir),
+        "--dataset-file", "td-otbr-cli-thread-network-info.json",
+        "--output", "td-merged-topology-all.json",
+        "--extaddr-map-file", "td-static-extaddr-device-label.json",
+        "--report-file", "td-merge-report-phase5.json",
+    ]
+
+    exit_code = merge_dataset_main(args)
+    assert exit_code == 0, f"Merge failed with exit code {exit_code}"
+    assert output_file.exists(), f"Output file not created: {output_file}"
+    with output_file.open("r") as file_handle:
+        merged_data = json.load(file_handle)
+
+    report_file = data_dir / "td-merge-report-phase5.json"
+    assert report_file.exists(), f"Report file not created: {report_file}"
+    with report_file.open("r") as file_handle:
+        report_data = json.load(file_handle)
+
+    return merged_data, report_data
 
 
 @pytest.fixture(scope="module")
-def merged_bundle() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def isolated_data_dir(tmp_path_factory: pytest.TempPathFactory):
+    original_manifest = _data_manifest(DATA_DIR)
+    data_dir = tmp_path_factory.mktemp("phase5-data")
+    shutil.copytree(DATA_DIR, data_dir, dirs_exist_ok=True)
+    yield data_dir
+    assert _data_manifest(DATA_DIR) == original_manifest
+
+
+@pytest.fixture(scope="module")
+def merged_bundle(isolated_data_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Run merge once for module-level tests that validate merged output."""
-    return _run_e2e_merge_with_real_data()
+    return _run_e2e_merge_with_real_data(isolated_data_dir)
 
 
 @pytest.fixture(scope="module")
@@ -202,7 +171,8 @@ def test_validate_merged_output_correctness(merged_data: list[dict[str, Any]]):
 # Test 3: Performance Benchmarking
 # =============================================================================
 
-def test_performance_benchmarking():
+@pytest.mark.benchmark
+def test_performance_benchmarking(isolated_data_dir: Path):
     """Benchmark merge performance with real data."""
     print("\n=== Test: Performance Benchmarking ===")
     
@@ -211,7 +181,7 @@ def test_performance_benchmarking():
     
     # Prepare arguments
     args = [
-        "--base-dir", str(DATA_DIR),
+        "--base-dir", str(isolated_data_dir),
         "--dataset-file", "td-otbr-cli-thread-network-info.json",
         "--output", "td-merged-topology-all-perf.json",
         "--extaddr-map-file", "td-static-extaddr-device-label.json",
@@ -227,7 +197,7 @@ def test_performance_benchmarking():
     tracemalloc.stop()
     
     # Clean up temporary file
-    temp_output = TEST_OUTPUT_DIR / "td-merged-topology-all-perf.json"
+    temp_output = isolated_data_dir / "td-merged-topology-all-perf.json"
     if temp_output.exists():
         temp_output.unlink()
     
@@ -239,20 +209,17 @@ def test_performance_benchmarking():
     print(f"  Peak memory usage: {peak_memory_mb:.2f} MB")
     
     # Performance assertions
+    assert exit_code == 0, f"Benchmark merge failed with exit code {exit_code}"
     assert execution_time < 30.0, f"Merge took too long: {execution_time:.2f}s (expected < 30s)"
     assert peak_memory_mb < 500, f"Memory usage too high: {peak_memory_mb:.2f} MB (expected < 500 MB)"
     
     print("  ✅ PASS: Performance is acceptable")
     
-    assert execution_time >= 0.0
-    assert peak_memory_mb >= 0.0
-
-
 # =============================================================================
 # Test 4: Data Loss Detection
 # =============================================================================
 
-def test_data_loss_detection(merged_data: list[dict[str, Any]]):
+def test_data_loss_detection(merged_data: list[dict[str, Any]], isolated_data_dir: Path):
     """Detect potential data loss during merge."""
     print("\n=== Test: Data Loss Detection ===")
     
@@ -276,10 +243,8 @@ def test_data_loss_detection(merged_data: list[dict[str, Any]]):
     input_extaddrs = set()
     
     for filename in input_files:
-        filepath = DATA_DIR / filename
-        if not filepath.exists():
-            print(f"  ⚠️  Skipping missing file: {filename}")
-            continue
+        filepath = isolated_data_dir / filename
+        assert filepath.is_file(), f"Required Phase 5 fixture is missing: {filename}"
         
         with filepath.open("r") as f:
             try:
@@ -301,8 +266,8 @@ def test_data_loss_detection(merged_data: list[dict[str, Any]]):
                         normalized = str(extaddr).strip().lower()
                         if normalized and normalized not in PLACEHOLDER_EXTADDRS:
                             input_extaddrs.add(normalized)
-            except json.JSONDecodeError:
-                print(f"  ⚠️  Could not parse: {filename}")
+            except json.JSONDecodeError as exc:
+                pytest.fail(f"Required Phase 5 fixture is malformed: {filename}: {exc}")
     
     print(f"  Total input records: {total_input_records}")
     print(f"  Unique extaddrs in inputs: {len(input_extaddrs)}")
@@ -411,7 +376,13 @@ def test_validate_specific_merge_features(merged_data: list[dict[str, Any]]):
                            if "leader_data" in n or "leaderData" in n]
     if nodes_with_partition:
         print(f"  ✅ Partition awareness: Found {len(nodes_with_partition)} nodes with partition data")
-    
+
+    assert nodes_with_routes, "Maintained snapshot must exercise route merging"
+    assert nodes_with_children, "Maintained snapshot must exercise child relationships"
+    assert multi_source_nodes, "Maintained snapshot must exercise multi-source merging"
+    assert nodes_with_conflicts, "Maintained snapshot must exercise conflict tracking"
+    assert nodes_with_partition, "Maintained snapshot must exercise partition-aware records"
+
     print("  ✅ PASS: All Phase 2-4 features present in merged output")
 
 
