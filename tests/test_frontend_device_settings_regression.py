@@ -6,6 +6,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UTILS_JS = REPO_ROOT / "src" / "js" / "tdash-utils.js"
 TOPOLOGY_JS = REPO_ROOT / "src" / "js" / "tdash-topology-renderer.js"
+TOPOLOGY_VIEW_MODEL_JS = REPO_ROOT / "src" / "js" / "tdash-topology-view-model.js"
 TABLE_JS = REPO_ROOT / "src" / "js" / "tdash-table-renderer.js"
 DATASET_JS = REPO_ROOT / "src" / "js" / "tdash-dataset.js"
 UI_JS = REPO_ROOT / "src" / "js" / "tdash-ui.js"
@@ -129,8 +130,8 @@ def test_network_insights_uses_aggregation_and_dataset_refresh_lifecycle() -> No
 
 
 def test_topology_selection_includes_adapted_node_diagnostic_fields() -> None:
-    topology_text = _read_text(TOPOLOGY_JS)
+    topology_text = _read_text(TOPOLOGY_VIEW_MODEL_JS)
 
     assert "const TOPOLOGY_DIAGNOSTIC_FIELDS" in topology_text
     assert "TOPOLOGY_DIAGNOSTIC_FIELDS.map((field) => [field, node[field]])" in topology_text
-    assert "mergeForDisplay(rawSource, topologyDiagnosticDetails)" in topology_text
+    assert "mergeForDisplay(viewModel.rawByIdForDetails.get(selectedId) || {}, diagnosticDetails)" in topology_text
