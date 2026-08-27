@@ -26,7 +26,7 @@ Use [README.md](README.md) for operator-facing behavior, setup, and runtime expe
 ## Validation
 
 - Prefer the narrowest validation that matches the touched area: targeted `pytest` tests for Python, focused browser/UI checks for `tdash.html`, `tdash.css`, or `src/js/*.js`, and route/data-flow checks for webserver changes.
-- For frontend changes, use the linked browser when available to confirm layout, scrolling, filtering, and dataset-specific behavior did not regress.
+- For frontend changes, use the linked browser when available to confirm layout, scrolling, filtering, and dataset-specific behavior did not regress. Start the td_webserver.py backend using port 9178 to test backend changes and front end changes.
 - Preserve existing regression coverage patterns in `tests/`; extend nearby tests instead of adding broad new harnesses when a focused test will do.
 
 ## Conventions
