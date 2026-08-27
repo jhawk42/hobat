@@ -3,7 +3,9 @@
 Provides decode/format helpers, TXT field enrichers, and a console print
 function for Matter service records discovered by MDNSDumpListener.
 """
+from dataclasses import dataclass
 import logging
+from typing import Any, Callable, Literal
 
 from mdns_thread_util import _base_field_dict
 
@@ -326,13 +328,225 @@ def _enrich_field_ICD(raw_value, full_name: str) -> dict:
     return result
 
 
+MATTER_FIELD_ENRICHERS = {
+    "VP": _enrich_field_VP,
+    "DT": _enrich_field_DT,
+    "CD": _enrich_field_CD,
+    "D": _enrich_field_D,
+    "PH": _enrich_field_PH,
+    "SII": _enrich_field_interval_ms,
+    "SAI": _enrich_field_interval_ms,
+    "SAT": _enrich_field_interval_ms,
+    "T": _enrich_field_T,
+    "ICD": _enrich_field_ICD,
+}
+
+
 # ---------------------------------------------------------------------------
 # Console print helper for Matter scope
 # ---------------------------------------------------------------------------
 
+MatterApplicability = Literal["commissionable", "operational", "both"]
+
+
+@dataclass(frozen=True)
+class MatterFieldDescriptor:
+    txt_key: str
+    label: str
+    applicability: MatterApplicability
+    decoder: Callable[[Any], Any]
+    formatter: Callable[[str, Any], tuple[str, str]]
+    detail_renderer: Callable[[Any], tuple[str, ...]] | None = None
+
+
+@dataclass(frozen=True)
+class _MatterIdentifier:
+    value: str
+    from_name: bool = False
+    decimal: int | None = None
+
+
+def _decode_text(value: Any) -> str:
+    return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+
+
+def _decode_vendor_product(value: Any) -> tuple[int | None, int | None, str]:
+    return parse_matter_vp(value)
+
+
+def _decode_device_type(value: Any) -> tuple[str, str]:
+    text = _decode_text(value)
+    return text, get_matter_device_type_name(text)
+
+
+def _decode_commissioning(value: Any) -> tuple[str, dict | None]:
+    text = _decode_text(value)
+    return text, decode_matter_commissioning_data(text)
+
+
+def _decode_discriminator(value: Any) -> tuple[str, str | None]:
+    text = _decode_text(value)
+    try:
+        return text, f"0x{format(int(text), '03x')}"
+    except ValueError:
+        return text, None
+
+
+def _decode_pairing_hint(value: Any) -> tuple[str, str]:
+    text = _decode_text(value)
+    return text, get_pairing_hint_description(text)
+
+
+def _decode_interval(value: Any) -> tuple[str, float | None]:
+    text = _decode_text(value)
+    try:
+        return text, int(text) / 1000.0
+    except ValueError:
+        return text, None
+
+
+def _decode_tcp(value: Any) -> tuple[str, bool | None]:
+    text = _decode_text(value)
+    return text, decode_matter_tcp_support(text)
+
+
+def _decode_icd(value: Any) -> tuple[str, str | None]:
+    return _decode_text(value), decode_matter_icd_capability(value)
+
+
+def _decode_identifier(value: Any) -> _MatterIdentifier:
+    if isinstance(value, _MatterIdentifier):
+        return value
+    return _MatterIdentifier(_decode_text(value))
+
+
+def _format_text(label: str, value: str) -> tuple[str, str]:
+    return label, value
+
+
+def _format_vendor_product(
+    label: str, value: tuple[int | None, int | None, str]
+) -> tuple[str, str]:
+    return label, value[2]
+
+
+def _format_primary(label: str, value: tuple[str, Any]) -> tuple[str, str]:
+    return label, value[0]
+
+
+def _format_parenthetical(
+    label: str, value: tuple[str, str | None]
+) -> tuple[str, str]:
+    text, detail = value
+    return label, f"{text} ({detail})" if detail is not None else text
+
+
+def _format_interval(label: str, value: tuple[str, float | None]) -> tuple[str, str]:
+    text, seconds = value
+    if seconds is None:
+        return label, text
+    return label, f"{text}ms ({seconds:.1f}s)"
+
+
+def _format_tcp(label: str, value: tuple[str, bool | None]) -> tuple[str, str]:
+    text, supported = value
+    if supported is None:
+        return label, text
+    status = "Supported" if supported else "Not Supported"
+    return label, f"{text} ({status})"
+
+
+def _format_identifier(
+    label: str, identifier: _MatterIdentifier
+) -> tuple[str, str]:
+    if identifier.from_name and label == "Node ID":
+        label = "Node ID (from name)"
+    return label, identifier.value
+
+
+def _vendor_product_details(
+    value: tuple[int | None, int | None, str]
+) -> tuple[str, ...]:
+    vendor_id, product_id, _ = value
+    if vendor_id is None or product_id is None:
+        return ()
+    return f"Vendor ID: {vendor_id}", f"Product ID: {product_id}"
+
+
+def _commissioning_details(value: tuple[str, dict | None]) -> tuple[str, ...]:
+    bits = value[1]
+    return (f"Status: {format_matter_commissioning_data(bits)}",) if bits else ()
+
+
+def _pairing_hint_details(value: tuple[str, str]) -> tuple[str, ...]:
+    return (f"Description: {value[1]}",)
+
+
+def _icd_details(value: tuple[str, str | None]) -> tuple[str, ...]:
+    return (f"Description: {value[1]}",) if value[1] else ()
+
+
+def _identifier_details(identifier: _MatterIdentifier) -> tuple[str, ...]:
+    if identifier.from_name and identifier.decimal is not None:
+        return (f"Decimal: {identifier.decimal}",)
+    return ()
+
+
+MATTER_PRESENTATION_DESCRIPTORS = (
+    MatterFieldDescriptor("txtvers", "TXT Record Version (txtvers)", "both", _decode_text, _format_text),
+    MatterFieldDescriptor("VP", "Vendor Product (VP)", "both", _decode_vendor_product, _format_vendor_product, _vendor_product_details),
+    MatterFieldDescriptor("DT", "Device Type (DT)", "both", _decode_device_type, _format_parenthetical),
+    MatterFieldDescriptor("DN", "Device Name (DN)", "both", _decode_text, _format_text),
+    MatterFieldDescriptor("RI", "Rotating Identifier (RI)", "both", _decode_text, _format_text),
+    MatterFieldDescriptor("PI", "Product Identifier (PI)", "both", _decode_text, _format_text),
+    MatterFieldDescriptor("CD", "Commissioning Data (CD)", "both", _decode_commissioning, _format_primary, _commissioning_details),
+    MatterFieldDescriptor("D", "Discriminator (D)", "both", _decode_discriminator, _format_parenthetical),
+    MatterFieldDescriptor("PH", "Pairing Hint (PH)", "both", _decode_pairing_hint, _format_primary, _pairing_hint_details),
+    MatterFieldDescriptor("PI", "Pairing Instruction (PI)", "commissionable", _decode_text, _format_text),
+    MatterFieldDescriptor("FabricID", "Fabric ID (raw)", "both", _decode_text, _format_text),
+    MatterFieldDescriptor("FabricID_compressed", "Compressed Fabric ID (from name)", "both", _decode_identifier, _format_identifier, _identifier_details),
+    MatterFieldDescriptor("NodeID", "Node ID", "both", _decode_identifier, _format_identifier, _identifier_details),
+    MatterFieldDescriptor("SII", "Sleepy Idle Interval (SII)", "both", _decode_interval, _format_interval),
+    MatterFieldDescriptor("SAI", "Sleepy Active Interval (SAI)", "both", _decode_interval, _format_interval),
+    MatterFieldDescriptor("SAT", "Sleepy Active Threshold (SAT)", "both", _decode_interval, _format_interval),
+    MatterFieldDescriptor("T", "TCP Support (T)", "both", _decode_tcp, _format_tcp),
+    MatterFieldDescriptor("ICD", "Intermittently Connected Device (ICD)", "both", _decode_icd, _format_primary, _icd_details),
+)
+
+
+def _validate_presentation_descriptors(
+    descriptors: tuple[MatterFieldDescriptor, ...],
+) -> None:
+    registrations = set()
+    for descriptor in descriptors:
+        registration = (descriptor.txt_key, descriptor.applicability)
+        if registration in registrations:
+            raise ValueError(
+                f"Duplicate Matter presentation descriptor: {descriptor.txt_key} "
+                f"({descriptor.applicability})"
+            )
+        registrations.add(registration)
+        if descriptor.applicability not in {"commissionable", "operational", "both"}:
+            raise ValueError(
+                f"Invalid Matter descriptor applicability: {descriptor.applicability}"
+            )
+        for callback in (descriptor.decoder, descriptor.formatter):
+            if not callable(callback):
+                raise TypeError(
+                    f"Matter presentation callback for {descriptor.txt_key} must be callable"
+                )
+        if descriptor.detail_renderer is not None and not callable(
+            descriptor.detail_renderer
+        ):
+            raise TypeError(
+                f"Matter detail renderer for {descriptor.txt_key} must be callable"
+            )
+
+
+_validate_presentation_descriptors(MATTER_PRESENTATION_DESCRIPTORS)
+
 _MATTER_STANDARD_FIELDS = {
-    "txtvers", "VP", "DT", "DN", "RI", "PI", "CD", "D",
-    "FabricID", "FabricID_compressed", "NodeID", "SII", "SAI", "SAT", "T", "PH", "ICD",
+    descriptor.txt_key for descriptor in MATTER_PRESENTATION_DESCRIPTORS
 }
 
 
@@ -346,211 +560,31 @@ def print_matter_service_info(name: str, type_: str, info, props: dict) -> None:
     )
     logging.debug("\n  %s Attributes:", scope_name)
 
-    # TXT Record Version (txtvers)
-    if "txtvers" in props:
-        txtvers_val = props["txtvers"]
-        txtvers_str = (
-            txtvers_val.decode("utf-8")
-            if isinstance(txtvers_val, bytes)
-            else str(txtvers_val)
-        )
-        logging.debug("    - TXT Record Version (txtvers): %s", txtvers_str)
-
-    # Vendor Product (VP) - VendorID+ProductID
-    if "VP" in props:
-        vendor_id, product_id, vp_str = parse_matter_vp(props["VP"])
-        logging.debug("    - Vendor Product (VP): %s", vp_str)
-        if vendor_id is not None and product_id is not None:
-            logging.debug("      * Vendor ID: %s", vendor_id)
-            logging.debug("      * Product ID: %s", product_id)
-
-    # Device Type (DT)
-    if "DT" in props:
-        dt_val = props["DT"]
-        dt_str = (
-            dt_val.decode("utf-8") if isinstance(dt_val, bytes) else str(dt_val)
-        )
-        dt_name = get_matter_device_type_name(dt_str)
-        logging.debug("    - Device Type (DT): %s (%s)", dt_str, dt_name)
-
-    # Device Name (DN)
-    if "DN" in props:
-        dn_val = props["DN"]
-        dn_str = (
-            dn_val.decode("utf-8") if isinstance(dn_val, bytes) else dn_val
-        )
-        logging.debug("    - Device Name (DN): %s", dn_str)
-
-    # Rotating Identifier (RI) - Privacy protection
-    if "RI" in props:
-        ri_val = props["RI"]
-        ri_str = (
-            ri_val.decode("utf-8") if isinstance(ri_val, bytes) else ri_val
-        )
-        logging.debug("    - Rotating Identifier (RI): %s", ri_str)
-
-    # Product Identifier (PI) - Optional vendor-specific
-    if "PI" in props:
-        pi_val = props["PI"]
-        pi_str = (
-            pi_val.decode("utf-8") if isinstance(pi_val, bytes) else pi_val
-        )
-        logging.debug("    - Product Identifier (PI): %s", pi_str)
-
-    # Commissioning Data (CD)
-    if "CD" in props:
-        cd_val = props["CD"]
-        cd_str = (
-            cd_val.decode("utf-8") if isinstance(cd_val, bytes) else str(cd_val)
-        )
-        cd_bits = decode_matter_commissioning_data(cd_str)
-        logging.debug("    - Commissioning Data (CD): %s", cd_str)
-        if cd_bits:
-            logging.debug("      * Status: %s", format_matter_commissioning_data(cd_bits))
-
-    # Discriminator (D) - 12-bit value for differentiating devices during commissioning
-    if "D" in props:
-        d_val = props["D"]
-        d_str = (
-            d_val.decode("utf-8") if isinstance(d_val, bytes) else str(d_val)
-        )
-        try:
-            d_int = int(d_str)
-            d_hex = format(d_int, "03x")
-            logging.debug("    - Discriminator (D): %s (0x%s)", d_str, d_hex)
-        except ValueError:
-            logging.debug("    - Discriminator (D): %s", d_str)
-
-    # Pairing Hint (PH) - Commissionable only
-    if "PH" in props:
-        ph_val = props["PH"]
-        ph_str = (
-            ph_val.decode("utf-8") if isinstance(ph_val, bytes) else str(ph_val)
-        )
-        ph_desc = get_pairing_hint_description(ph_str)
-        logging.debug("    - Pairing Hint (PH): %s", ph_str)
-        logging.debug("      * Description: %s", ph_desc)
-
-    # Pairing Instruction (PI) - Commissionable only, replaces Product ID
-    if "PI" in props and is_commissionable:
-        pi_val = props["PI"]
-        pi_str = (
-            pi_val.decode("utf-8") if isinstance(pi_val, bytes) else pi_val
-        )
-        logging.debug("    - Pairing Instruction (PI): %s", pi_str)
-
-    # Compressed Fabric ID and Node ID (Operational only — encoded in instance name)
-    compressed_fabric_id_hex, node_id_hex, compressed_fabric_id_dec, node_id_dec = (
+    presentation_props = dict(props)
+    compressed_hex, node_hex, compressed_decimal, node_decimal = (
         parse_fabric_and_node_ids_from_name(name)
     )
+    if "FabricID_compressed" not in presentation_props and compressed_hex:
+        presentation_props["FabricID_compressed"] = _MatterIdentifier(
+            compressed_hex, from_name=True, decimal=compressed_decimal
+        )
+    if "NodeID" not in presentation_props and node_hex:
+        presentation_props["NodeID"] = _MatterIdentifier(
+            node_hex, from_name=True, decimal=node_decimal
+        )
 
-    # Raw Fabric ID — only present when explicitly carried in TXT props (rare)
-    if "FabricID" in props:
-        fabric_val = props["FabricID"]
-        fabric_str = (
-            fabric_val.decode("utf-8") if isinstance(fabric_val, bytes) else fabric_val
-        )
-        logging.debug("    - Fabric ID (raw): %s", fabric_str)
-
-    # Compressed Fabric ID — derived via HKDF from RootPublicKey + FabricID;
-    # always present for operational records, encoded as the first 16 hex chars
-    # of the instance name: <CompressedFabricID>-<NodeID>._matter._tcp.local.
-    if "FabricID_compressed" in props:
-        cfid_val = props["FabricID_compressed"]
-        cfid_str = (
-            cfid_val.decode("utf-8") if isinstance(cfid_val, bytes) else cfid_val
-        )
-        logging.debug("    - Compressed Fabric ID (from name): %s", cfid_str)
-    elif compressed_fabric_id_hex:
-        logging.debug(
-            "    - Compressed Fabric ID (from name): %s", compressed_fabric_id_hex
-        )
-        if compressed_fabric_id_dec is not None:
-            logging.debug("      * Decimal: %s", compressed_fabric_id_dec)
-
-    # Node ID (Operational only)
-    if "NodeID" in props:
-        node_val = props["NodeID"]
-        node_str = (
-            node_val.decode("utf-8") if isinstance(node_val, bytes) else node_val
-        )
-        logging.debug("    - Node ID: %s", node_str)
-    elif node_id_hex:
-        logging.debug("    - Node ID (from name): %s", node_id_hex)
-        if node_id_dec is not None:
-            logging.debug("      * Decimal: %s", node_id_dec)
-
-    # Sleepy Idle Interval (SII) - Optional, for sleepy end devices
-    if "SII" in props:
-        sii_val = props["SII"]
-        sii_str = (
-            sii_val.decode("utf-8") if isinstance(sii_val, bytes) else str(sii_val)
-        )
-        try:
-            sii_ms = int(sii_str)
-            sii_sec = sii_ms / 1000.0
-            logging.debug(
-                "    - Sleepy Idle Interval (SII): %sms (%.1fs)", sii_str, sii_sec
-            )
-        except ValueError:
-            logging.debug("    - Sleepy Idle Interval (SII): %s", sii_str)
-
-    # Sleepy Active Interval (SAI) - Optional, for sleepy end devices
-    if "SAI" in props:
-        sai_val = props["SAI"]
-        sai_str = (
-            sai_val.decode("utf-8") if isinstance(sai_val, bytes) else str(sai_val)
-        )
-        try:
-            sai_ms = int(sai_str)
-            sai_sec = sai_ms / 1000.0
-            logging.debug(
-                "    - Sleepy Active Interval (SAI): %sms (%.1fs)", sai_str, sai_sec
-            )
-        except ValueError:
-            logging.debug("    - Sleepy Active Interval (SAI): %s", sai_str)
-
-    # Sleepy Active Threshold (SAT) - Optional, for sleepy end devices
-    if "SAT" in props:
-        sat_val = props["SAT"]
-        sat_str = (
-            sat_val.decode("utf-8") if isinstance(sat_val, bytes) else str(sat_val)
-        )
-        try:
-            sat_ms = int(sat_str)
-            sat_sec = sat_ms / 1000.0
-            logging.debug(
-                "    - Sleepy Active Threshold (SAT): %sms (%.1fs)", sat_str, sat_sec
-            )
-        except ValueError:
-            logging.debug("    - Sleepy Active Threshold (SAT): %s", sat_str)
-
-    # TCP Support (T) - Optional flag for Matter-over-TCP support
-    if "T" in props:
-        t_val = props["T"]
-        t_str = (
-            t_val.decode("utf-8") if isinstance(t_val, bytes) else str(t_val)
-        )
-        tcp_support = decode_matter_tcp_support(t_str)
-        if tcp_support is not None:
-            logging.debug(
-                "    - TCP Support (T): %s (%s)",
-                t_str,
-                "Supported" if tcp_support else "Not Supported",
-            )
-        else:
-            logging.debug("    - TCP Support (T): %s", t_str)
-
-    # ICD (Intermittently Connected Device) - Power management capability
-    if "ICD" in props:
-        icd_val = props["ICD"]
-        icd_str = (
-            icd_val.decode("utf-8") if isinstance(icd_val, bytes) else str(icd_val)
-        )
-        icd_desc = decode_matter_icd_capability(icd_val)
-        logging.debug("    - Intermittently Connected Device (ICD): %s", icd_str)
-        if icd_desc:
-            logging.debug("      * Description: %s", icd_desc)
+    applicability = "commissionable" if is_commissionable else "operational"
+    for descriptor in MATTER_PRESENTATION_DESCRIPTORS:
+        if descriptor.applicability not in {"both", applicability}:
+            continue
+        if descriptor.txt_key not in presentation_props:
+            continue
+        decoded = descriptor.decoder(presentation_props[descriptor.txt_key])
+        label, value = descriptor.formatter(descriptor.label, decoded)
+        logging.debug("    - %s: %s", label, value)
+        if descriptor.detail_renderer:
+            for detail in descriptor.detail_renderer(decoded):
+                logging.debug("      * %s", detail)
 
     other_fields = {k: v for k, v in props.items() if k not in _MATTER_STANDARD_FIELDS}
     if other_fields:

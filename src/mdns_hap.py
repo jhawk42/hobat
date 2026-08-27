@@ -259,6 +259,14 @@ def _enrich_field_ci(raw_value, full_name: str) -> dict:
     return result
 
 
+HAP_FIELD_ENRICHERS = {
+    "sf": _enrich_field_sf,
+    "ff": _enrich_field_ff,
+    "sh": _enrich_field_sh,
+    "ci": _enrich_field_ci,
+}
+
+
 # ---------------------------------------------------------------------------
 # Console print helper for HAP scope
 # ---------------------------------------------------------------------------

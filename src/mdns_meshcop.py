@@ -278,6 +278,15 @@ def _enrich_field_pt(raw_value, full_name: str) -> dict:
     return result
 
 
+MESHCOP_FIELD_ENRICHERS = {
+    "sb": _enrich_field_sb,
+    "bb": _enrich_field_bb,
+    "at": _enrich_field_at,
+    "xa": _enrich_field_xa,
+    "pt": _enrich_field_pt,
+}
+
+
 # ---------------------------------------------------------------------------
 # Console print helper for meshcop scope
 # ---------------------------------------------------------------------------

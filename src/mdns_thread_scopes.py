@@ -21,52 +21,12 @@ from util_data import (
 )
 from td_const import TD_DATA_DIR_ARG_HELP
 
-from mdns_thread_util import VENDORS, FIELD_METADATA, _base_field_dict, get_vendor_from_oui
-from mdns_meshcop import (
-    decode_state_bitmap_br,
-    format_state_bitmap_br,
-    decode_thread_partition_id,
-    decode_thread_beacon_bitmap,
-    format_thread_beacon_bitmap,
-    _enrich_field_sb,
-    _enrich_field_bb,
-    _enrich_field_at,
-    _enrich_field_xa,
-    _enrich_field_pt,
-    print_meshcop_service_info,
-)
-from mdns_hap import (
-    HAP_CATEGORIES,
-    decode_hap_status_flags,
-    format_hap_status_flags,
-    decode_hap_feature_flags,
-    format_hap_feature_flags,
-    get_hap_category_name,
-    decode_hap_setup_hash,
-    _enrich_field_sf,
-    _enrich_field_ff,
-    _enrich_field_sh,
-    _enrich_field_ci,
-    print_hap_service_info,
-)
+from mdns_thread_util import FIELD_METADATA, _base_field_dict
+from mdns_meshcop import MESHCOP_FIELD_ENRICHERS, print_meshcop_service_info
+from mdns_hap import HAP_FIELD_ENRICHERS, print_hap_service_info
 from mdns_matter import (
-    MATTER_DEVICE_TYPES,
-    get_matter_device_type_name,
-    parse_matter_vp,
-    decode_matter_commissioning_data,
-    format_matter_commissioning_data,
-    decode_matter_tcp_support,
-    get_pairing_hint_description,
-    decode_matter_icd_capability,
+    MATTER_FIELD_ENRICHERS,
     parse_fabric_and_node_ids_from_name,
-    _enrich_field_VP,
-    _enrich_field_DT,
-    _enrich_field_CD,
-    _enrich_field_D,
-    _enrich_field_PH,
-    _enrich_field_interval_ms,
-    _enrich_field_T,
-    _enrich_field_ICD,
     print_matter_service_info,
 )
 
@@ -77,27 +37,23 @@ TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE = 3
 # ---------------------------------------------------------------------------
 # Enricher dispatch table
 # ---------------------------------------------------------------------------
-FIELD_ENRICHERS = {
-    "sb": _enrich_field_sb,
-    "bb": _enrich_field_bb,
-    "at": _enrich_field_at,
-    "xa": _enrich_field_xa,
-    "pt": _enrich_field_pt,
-    "sf": _enrich_field_sf,
-    "ff": _enrich_field_ff,
-    "sh": _enrich_field_sh,
-    "ci": _enrich_field_ci,
-    "VP": _enrich_field_VP,
-    "DT": _enrich_field_DT,
-    "CD": _enrich_field_CD,
-    "D": _enrich_field_D,
-    "PH": _enrich_field_PH,
-    "SII": _enrich_field_interval_ms,
-    "SAI": _enrich_field_interval_ms,
-    "SAT": _enrich_field_interval_ms,
-    "T": _enrich_field_T,
-    "ICD": _enrich_field_ICD,
-}
+def _compose_field_enrichers(*registries: dict) -> dict:
+    enrichers = {}
+    for registry in registries:
+        for key, enricher in registry.items():
+            if key in enrichers:
+                raise ValueError(f"Duplicate mDNS field enricher: {key}")
+            if not callable(enricher):
+                raise TypeError(f"mDNS field enricher for {key} must be callable")
+            enrichers[key] = enricher
+    return enrichers
+
+
+FIELD_ENRICHERS = _compose_field_enrichers(
+    MESHCOP_FIELD_ENRICHERS,
+    HAP_FIELD_ENRICHERS,
+    MATTER_FIELD_ENRICHERS,
+)
 
 
 def _enrich_properties(properties: dict) -> dict:
