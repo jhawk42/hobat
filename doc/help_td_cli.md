@@ -30,7 +30,7 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 | `otbr-restapi` | Query OTBR REST API commands |
 | `mdns` | Scan Thread-related mDNS scopes |
 | `process-eve` | Parse and enhance an Eve Thread layout file |
-| `merge-dataset` | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file |
+| `merge-dataset` (`merge-data`) | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file; `merge-data` is a compatibility alias |
 | `merge-extaddr` | Read or upsert one device label, or bulk-merge missing extaddr entries into the static map |
 
 ---
@@ -64,7 +64,7 @@ td_cli process-eve ...
 ### `merge-dataset`
 
 ```text
-td_cli merge-dataset ...
+td_cli {merge-dataset,merge-data} ...
 ```
 
 ### `merge-extaddr`

@@ -351,6 +351,7 @@ def _add_merge_commands(subparsers: argparse._SubParsersAction) -> None:
     # Remaining args are captured as extras via parse_known_args and forwarded to subordinate module main().
     subparsers.add_parser(
         "merge-dataset",
+        aliases=["merge-data"],
         help="Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file",
         add_help=False,
     )
@@ -546,316 +547,279 @@ def _print_restapi_resource_help(resource: str) -> bool:
     return True
 
 
+def _forward_with_datadir(args: argparse.Namespace, argv: list[str]) -> list[str]:
+    if getattr(args, "datadir", None):
+        return [TD_DATA_DIR_ARG, str(args.datadir)] + list(argv)
+    return list(argv)
+
+
+def _normalize_module_rc(raw_rc: object, module_name: str) -> int:
+    """Normalize subordinate module return values into a process exit code."""
+    if raw_rc is None:
+        logging.debug(
+            "%s returned None; treating as rc=0 for compatibility.", module_name
+        )
+        return 0
+    if isinstance(raw_rc, int):
+        return raw_rc
+    logging.error(
+        "%s returned non-int exit code (%s); treating as rc=1.",
+        module_name,
+        type(raw_rc).__name__,
+    )
+    return 1
+
+
+_EXPERIMENTAL_RESTAPI_COMMANDS = frozenset(
+    {
+        ("node", "state", "set"),
+        ("node", "dataset", "active", "set"),
+        ("actions", "enqueue", "add-thread-device"),
+        ("actions", "enqueue", "reset-network-diag-counter"),
+    }
+)
+_RESTAPI_RESOURCE_COMMANDS = frozenset(
+    {"node", "devices", "diagnostics", "actions", "mesh-diagnostics"}
+)
+
+
+def _experimental_restapi_command_name(
+    restapi_command: str, forwarded_args: list[str]
+) -> str | None:
+    command_path = (restapi_command, *forwarded_args)
+    for experimental_path in _EXPERIMENTAL_RESTAPI_COMMANDS:
+        if command_path[:len(experimental_path)] == experimental_path:
+            return " ".join(experimental_path)
+    return None
+
+
+def _restapi_globals(args: argparse.Namespace) -> list[str]:
+    forwarded: list[str] = []
+    if getattr(args, "output", None):
+        forwarded += ["--output", args.output]
+    if getattr(args, "host", None):
+        forwarded += ["--host", args.host]
+    if getattr(args, "port", None) is not None:
+        forwarded += ["--port", str(args.port)]
+    if getattr(args, "base_url", None):
+        forwarded += ["--base-url", args.base_url]
+    if getattr(args, "timeout", None) is not None:
+        forwarded += ["--timeout", str(args.timeout)]
+    if getattr(args, "accept", None):
+        forwarded += ["--accept", args.accept]
+    for attribute, option in (
+        ("raw", "--raw"),
+        ("poll_interval", "--poll-interval"),
+        ("poll_timeout", "--poll-timeout"),
+        ("no_progress", "--no-progress"),
+        ("no_auto_output", "--no-auto-output"),
+        ("debug", "--debug"),
+        ("lab", "--lab"),
+    ):
+        value = getattr(args, attribute, None)
+        if attribute in ("poll_interval", "poll_timeout") and value is not None:
+            forwarded += [option, str(value)]
+        elif value:
+            forwarded.append(option)
+    return forwarded
+
+
+def _dispatch_otbr_cli(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    sub_parser = parser._subcommand_parsers["otbr-cli"]  # type: ignore[attr-defined]
+    cli_command = args.cli_command
+    if not cli_command:
+        sub_parser.print_help()
+        return 0
+
+    direct_commands = {
+        "thread-network-info": (
+            otbr_cli_thread_network_info.main,
+            "otbr_cli_thread_network_info.main",
+        ),
+        "router-table": (otbr_cli_router_table.main, "otbr_cli_router_table.main"),
+    }
+    if cli_command in direct_commands:
+        command_main, module_name = direct_commands[cli_command]
+        return _normalize_module_rc(
+            command_main(_forward_with_datadir(args, extra_args)), module_name
+        )
+
+    if cli_command == "topology":
+        step_calls = [
+            ("otbr_cli_thread_network_info.main", otbr_cli_thread_network_info.main, None),
+            ("otbr_cli_router_table.main", otbr_cli_router_table.main, None),
+            ("otbr_cli_meshdiag_topology.main", otbr_cli_meshdiag_topology.main, None),
+            ("otbr_cli_networkdiag_topology.main", otbr_cli_networkdiag_topology.main, ["multicast-network"]),
+            ("otbr_cli_networkdiag_topology.main", otbr_cli_networkdiag_topology.main, ["fetch-all"]),
+            ("otbr_cli_meshdiag_routerneighbortable.main", otbr_cli_meshdiag_routerneighbortable.main, None),
+            ("otbr_cli_meshdiag_childtable.main", otbr_cli_meshdiag_childtable.main, None),
+        ]
+        first_nonzero_rc = 0
+        for module_name, step_main, step_argv in step_calls:
+            try:
+                forwarded_argv = list(step_argv) if step_argv is not None else list(extra_args)
+                raw_rc = step_main(_forward_with_datadir(args, forwarded_argv))
+            except Exception:
+                logging.exception("topology step raised an exception: %s", module_name)
+                raw_rc = 1
+            normalized_rc = _normalize_module_rc(raw_rc, module_name)
+            if first_nonzero_rc == 0 and normalized_rc != 0:
+                first_nonzero_rc = normalized_rc
+                logging.error("topology step failed: %s rc=%s", module_name, normalized_rc)
+        return first_nonzero_rc
+
+    if cli_command == "meshdiag":
+        meshdiag_command = args.meshdiag_command
+        if not meshdiag_command:
+            if not _print_child_subparser_help(sub_parser, "meshdiag"):
+                sub_parser.print_help()
+            return 0
+        meshdiag_commands = {
+            "topology": (otbr_cli_meshdiag_topology.main, "otbr_cli_meshdiag_topology.main"),
+            "routerneighbortable": (
+                otbr_cli_meshdiag_routerneighbortable.main,
+                "otbr_cli_meshdiag_routerneighbortable.main",
+            ),
+            "childtable": (otbr_cli_meshdiag_childtable.main, "otbr_cli_meshdiag_childtable.main"),
+            "childip6": (otbr_cli_meshdiag_childip6.main, "otbr_cli_meshdiag_childip6.main"),
+        }
+        command_main, module_name = meshdiag_commands[meshdiag_command]
+        return _normalize_module_rc(
+            command_main(_forward_with_datadir(args, extra_args)), module_name
+        )
+
+    if cli_command == "networkdiag":
+        networkdiag_command = args.networkdiag_command
+        if not networkdiag_command:
+            if not _print_child_subparser_help(sub_parser, "networkdiag"):
+                sub_parser.print_help()
+            return 0
+        networkdiag_argv = [networkdiag_command]
+        if networkdiag_command == "fetch-all":
+            if not getattr(args, "expand_children", True):
+                networkdiag_argv.append("-cno")
+            networkdiag_argv.append(
+                "--children-fetch-fast"
+                if getattr(args, "child_fetch_fast_mode_default", True)
+                else "--children-fetch-fast-no"
+            )
+            networkdiag_argv.append(
+                "--children-fetch-detail"
+                if getattr(args, "child_fetch_detail_mode_default", False)
+                else "--children-fetch-detail-no"
+            )
+        return _normalize_module_rc(
+            otbr_cli_networkdiag_topology.main(
+                _forward_with_datadir(args, networkdiag_argv)
+            ),
+            "otbr_cli_networkdiag_topology.main",
+        )
+
+    raise ValueError(f"Unhandled otbr-cli command: {cli_command}")
+
+
+def _dispatch_mdns(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    del parser
+    mdns_argv: list[str] = [getattr(args, "mdns_scope", "thread")]
+    if getattr(args, "browse_timeout", None) is not None:
+        mdns_argv += ["--browse-timeout", str(args.browse_timeout)]
+    if getattr(args, "haptcp", False):
+        mdns_argv.append("--haptcp")
+    if getattr(args, "mattertcpsupported", False):
+        mdns_argv.append("--mattertcpsupported")
+    mdns_argv += list(extra_args)
+    return _normalize_module_rc(
+        mdns_thread_scopes.main(_forward_with_datadir(args, mdns_argv)),
+        "mdns_thread_scopes.main",
+    )
+
+
+def _dispatch_otbr_restapi(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    sub_parser = parser._subcommand_parsers["otbr-restapi"]  # type: ignore[attr-defined]
+    restapi_command = args.restapi_command
+    if not restapi_command:
+        sub_parser.print_help()
+        return 0
+    if restapi_command == "download":
+        return _normalize_module_rc(
+            otbr_restapi_download.main(_forward_with_datadir(args, extra_args)),
+            "otbr_restapi_download.main",
+        )
+    if restapi_command in _RESTAPI_RESOURCE_COMMANDS:
+        if not extra_args:
+            if not _print_restapi_resource_help(restapi_command):
+                sub_parser.print_help()
+            return 0
+        experimental_command = _experimental_restapi_command_name(
+            restapi_command, extra_args
+        )
+        if experimental_command and not getattr(args, "lab", False):
+            print(
+                f"Command '{experimental_command}' is currently experimental and requires --lab. "
+                "Use only in controlled lab/test environments.",
+                file=sys.stderr,
+            )
+            return 2
+    elif restapi_command != "topology":
+        raise ValueError(f"Unhandled otbr-restapi command: {restapi_command}")
+
+    forwarded_argv = _restapi_globals(args) + [restapi_command] + extra_args
+    return _normalize_module_rc(
+        otbr_restapi_cli.main(_forward_with_datadir(args, forwarded_argv)),
+        "otbr_restapi_cli.main",
+    )
+
+
+def _dispatch_process_eve(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    del parser
+    return _normalize_module_rc(
+        eve_process.main(_forward_with_datadir(args, extra_args)),
+        "eve_process.main",
+    )
+
+
+def _dispatch_merge(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    del parser
+    if args.command in ("merge-dataset", "merge-data"):
+        command_main = merge_dataset.main
+        module_name = "merge_dataset.main"
+    else:
+        command_main = merge_extaddr_device_label_map.main
+        module_name = "merge_extaddr_device_label_map.main"
+    return _normalize_module_rc(
+        command_main(_forward_with_datadir(args, extra_args)), module_name
+    )
+
+
+_FAMILY_DISPATCHERS = {
+    "otbr-cli": _dispatch_otbr_cli,
+    "mdns": _dispatch_mdns,
+    "otbr-restapi": _dispatch_otbr_restapi,
+    "process-eve": _dispatch_process_eve,
+    "merge-dataset": _dispatch_merge,
+    "merge-data": _dispatch_merge,
+    "merge-extaddr": _dispatch_merge,
+}
+
+
 def dispatch(
     args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
 ) -> int:
-    """Dispatch parsed arguments to the appropriate module entry point.
-
-    extra_args contains the unrecognised arguments returned by parse_known_args.
-    For scan commands it should be empty.  For forwarding commands (web, process,
-    merge) it is passed directly to the subordinate module's main().
-    """
-    sub_parsers = parser._subcommand_parsers  # type: ignore[attr-defined]
-
-    def _forward_with_datadir(argv: list[str]) -> list[str]:
-        if getattr(args, "datadir", None):
-            return [TD_DATA_DIR_ARG, str(args.datadir)] + list(argv)
-        return list(argv)
-
-    def _normalize_module_rc(raw_rc: object, module_name: str) -> int:
-        """Normalize subordinate module return values into a process exit code.
-
-        Compatibility behavior:
-        - None is treated as success (0), because some existing collectors do not
-          return explicit values on success paths yet.
-        - Non-int return values are treated as internal errors (1).
-        """
-        if raw_rc is None:
-            logging.debug(
-                "%s returned None; treating as rc=0 for compatibility.", module_name
-            )
-            return 0
-        if isinstance(raw_rc, int):
-            return raw_rc
-        logging.error(
-            "%s returned non-int exit code (%s); treating as rc=1.",
-            module_name,
-            type(raw_rc).__name__,
-        )
-        return 1
-
-    def _experimental_restapi_command_name(
-        restapi_cmd: str | None, forwarded_args: list[str]
-    ) -> str | None:
-        if restapi_cmd == "node":
-            if len(forwarded_args) >= 2 and forwarded_args[0] == "state" and forwarded_args[1] == "set":
-                return "node state set"
-            if (
-                len(forwarded_args) >= 3
-                and forwarded_args[0] == "dataset"
-                and forwarded_args[1] == "active"
-                and forwarded_args[2] == "set"
-            ):
-                return "node dataset active set"
-        if restapi_cmd == "actions" and len(forwarded_args) >= 2 and forwarded_args[0] == "enqueue":
-            if forwarded_args[1] == "add-thread-device":
-                return "actions enqueue add-thread-device"
-            if forwarded_args[1] == "reset-network-diag-counter":
-                return "actions enqueue reset-network-diag-counter"
-        return None
-
-    # --- otbr-cli ---
-    if args.command == "otbr-cli":
-        cli_cmd = args.cli_command
-        if not cli_cmd:
-            sub_parsers["otbr-cli"].print_help()
-            return 0
-
-        if cli_cmd == "thread-network-info":
-            return _normalize_module_rc(
-                otbr_cli_thread_network_info.main(_forward_with_datadir(extra_args)),
-                "otbr_cli_thread_network_info.main",
-            )
-
-        if cli_cmd == "router-table":
-            return _normalize_module_rc(
-                otbr_cli_router_table.main(_forward_with_datadir(extra_args)),
-                "otbr_cli_router_table.main",
-            )
-
-        if cli_cmd == "topology":
-            step_calls = [
-                (
-                    "otbr_cli_thread_network_info.main",
-                    otbr_cli_thread_network_info.main,
-                    None,
-                ),
-                (
-                    "otbr_cli_router_table.main",
-                    otbr_cli_router_table.main,
-                    None,
-                ),
-                (
-                    "otbr_cli_meshdiag_topology.main",
-                    otbr_cli_meshdiag_topology.main,
-                    None,
-                ),
-                (
-                    "otbr_cli_networkdiag_topology.main",
-                    otbr_cli_networkdiag_topology.main,
-                    ["multicast-network"],
-                ),
-                (
-                    "otbr_cli_networkdiag_topology.main",
-                    otbr_cli_networkdiag_topology.main,
-                    ["fetch-all"],
-                ),
-                (
-                    "otbr_cli_meshdiag_routerneighbortable.main",
-                    otbr_cli_meshdiag_routerneighbortable.main,
-                    None,
-                ),
-                (
-                    "otbr_cli_meshdiag_childtable.main",
-                    otbr_cli_meshdiag_childtable.main,
-                    None,
-                ),
-            ]
-
-            first_nonzero_rc = 0
-            for module_name, step_main, step_argv in step_calls:
-                try:
-                    forwarded_argv = list(step_argv) if step_argv is not None else list(extra_args)
-                    raw_rc = step_main(_forward_with_datadir(forwarded_argv))
-                except Exception:
-                    logging.exception("topology step raised an exception: %s", module_name)
-                    raw_rc = 1
-                normalized_rc = _normalize_module_rc(raw_rc, module_name)
-                if first_nonzero_rc == 0 and normalized_rc != 0:
-                    first_nonzero_rc = normalized_rc
-                    logging.error("topology step failed: %s rc=%s", module_name, normalized_rc)
-
-            return first_nonzero_rc
-
-        if cli_cmd == "meshdiag":
-            meshdiag_cmd = args.meshdiag_command
-            if not meshdiag_cmd:
-                if not _print_child_subparser_help(sub_parsers["otbr-cli"], "meshdiag"):
-                    sub_parsers["otbr-cli"].print_help()
-                return 0
-            if meshdiag_cmd == "topology":
-                return _normalize_module_rc(
-                    otbr_cli_meshdiag_topology.main(
-                        _forward_with_datadir(extra_args)
-                    ),
-                    "otbr_cli_meshdiag_topology.main",
-                )
-            if meshdiag_cmd == "routerneighbortable":
-                return _normalize_module_rc(
-                    otbr_cli_meshdiag_routerneighbortable.main(
-                        _forward_with_datadir(extra_args)
-                    ),
-                    "otbr_cli_meshdiag_routerneighbortable.main",
-                )
-            if meshdiag_cmd == "childtable":
-                return _normalize_module_rc(
-                    otbr_cli_meshdiag_childtable.main(_forward_with_datadir(extra_args)),
-                    "otbr_cli_meshdiag_childtable.main",
-                )
-            if meshdiag_cmd == "childip6":
-                return _normalize_module_rc(
-                    otbr_cli_meshdiag_childip6.main(_forward_with_datadir(extra_args)),
-                    "otbr_cli_meshdiag_childip6.main",
-                )
-
-
-        if cli_cmd == "networkdiag":
-            if not args.networkdiag_command:
-                if not _print_child_subparser_help(sub_parsers["otbr-cli"], "networkdiag"):
-                    sub_parsers["otbr-cli"].print_help()
-                return 0
-            networkdiag_argv = [args.networkdiag_command]
-            if args.networkdiag_command == "fetch-all":
-                if not getattr(args, "expand_children", True):
-                    networkdiag_argv.append("-cno")
-                if getattr(args, "child_fetch_fast_mode_default", True):
-                    networkdiag_argv.append("--children-fetch-fast")
-                else:
-                    networkdiag_argv.append("--children-fetch-fast-no")
-                if getattr(args, "child_fetch_detail_mode_default", False):
-                    networkdiag_argv.append("--children-fetch-detail")
-                else:
-                    networkdiag_argv.append("--children-fetch-detail-no")
-            return _normalize_module_rc(
-                otbr_cli_networkdiag_topology.main(
-                    _forward_with_datadir(networkdiag_argv)
-                ),
-                "otbr_cli_networkdiag_topology.main",
-            )
-
-
-    # --- mdns ---
-    if args.command == "mdns":
-        mdns_argv: list[str] = [getattr(args, "mdns_scope", "thread")]
-        if getattr(args, "browse_timeout", None) is not None:
-            mdns_argv += ["--browse-timeout", str(args.browse_timeout)]
-        if getattr(args, "haptcp", False):
-            mdns_argv.append("--haptcp")
-        if getattr(args, "mattertcpsupported", False):
-            mdns_argv.append("--mattertcpsupported")
-        mdns_argv += list(extra_args)
-        return _normalize_module_rc(
-            mdns_thread_scopes.main(_forward_with_datadir(mdns_argv)),
-            "mdns_thread_scopes.main",
-        )
-
-    # --- otbr-restapi ---
-    if args.command == "otbr-restapi":
-        restapi_cmd = args.restapi_command
-        if not restapi_cmd:
-            sub_parsers["otbr-restapi"].print_help()
-            return 0
-
-        if restapi_cmd == "download":
-            return _normalize_module_rc(
-                otbr_restapi_download.main(_forward_with_datadir(extra_args)),
-                "otbr_restapi_download.main",
-            )
-
-        # Build the base global-option args that otbr_restapi_cli expects before the
-        # resource subcommand.  --output and --datadir are td_cli globals consumed by
-        # parse_known_args and handled separately; all other pass-through options are
-        # collected here so they land before the resource name in forwarded argv.
-        def _restapi_globals() -> list[str]:
-            fwd: list[str] = []
-            if getattr(args, "output", None):
-                fwd += ["--output", args.output]
-            if getattr(args, "host", None):
-                fwd += ["--host", args.host]
-            if getattr(args, "port", None) is not None:
-                fwd += ["--port", str(args.port)]
-            if getattr(args, "base_url", None):
-                fwd += ["--base-url", args.base_url]
-            if getattr(args, "timeout", None) is not None:
-                fwd += ["--timeout", str(args.timeout)]
-            if getattr(args, "accept", None):
-                fwd += ["--accept", args.accept]
-            if getattr(args, "raw", False):
-                fwd += ["--raw"]
-            if getattr(args, "poll_interval", None) is not None:
-                fwd += ["--poll-interval", str(args.poll_interval)]
-            if getattr(args, "poll_timeout", None) is not None:
-                fwd += ["--poll-timeout", str(args.poll_timeout)]
-            if getattr(args, "no_progress", False):
-                fwd += ["--no-progress"]
-            if getattr(args, "no_auto_output", False):
-                fwd += ["--no-auto-output"]
-            if getattr(args, "debug", False):
-                fwd += ["--debug"]
-            if getattr(args, "lab", False):
-                fwd += ["--lab"]
-            return fwd
-
-        _RESTAPI_RESOURCE_CMDS = frozenset(
-            {"node", "devices", "diagnostics", "actions", "mesh-diagnostics"}
-        )
-
-        if restapi_cmd in _RESTAPI_RESOURCE_CMDS:
-            if not extra_args:
-                if not _print_restapi_resource_help(restapi_cmd):
-                    sub_parsers["otbr-restapi"].print_help()
-                return 0
-            experimental_cmd = _experimental_restapi_command_name(restapi_cmd, list(extra_args))
-            if experimental_cmd and not getattr(args, "lab", False):
-                print(
-                    (
-                        f"Command '{experimental_cmd}' is currently experimental and requires --lab. "
-                        "Use only in controlled lab/test environments."
-                    ),
-                    file=sys.stderr,
-                )
-                return 2
-            return _normalize_module_rc(
-                otbr_restapi_cli.main(
-                    _forward_with_datadir(
-                        _restapi_globals() + [restapi_cmd] + extra_args
-                    )
-                ),
-                "otbr_restapi_cli.main",
-            )
-
-        if restapi_cmd == "topology":
-            return _normalize_module_rc(
-                otbr_restapi_cli.main(
-                    _forward_with_datadir(_restapi_globals() + ["topology"] + extra_args)
-                ),
-                "otbr_restapi_cli.main",
-            )
-
-
-    # --- process-eve ---
-    if args.command == "process-eve":
-        return _normalize_module_rc(
-            eve_process.main(_forward_with_datadir(extra_args)),
-            "eve_process.main",
-        )
-
-    # --- merge-dataset ---
-    if args.command in ("merge-dataset", "merge-data"):
-        return _normalize_module_rc(
-            merge_dataset.main(_forward_with_datadir(extra_args)),
-            "merge_dataset.main",
-        )
-
-    # --- merge-extaddr ---
-    if args.command == "merge-extaddr":
-        return _normalize_module_rc(
-            merge_extaddr_device_label_map.main(_forward_with_datadir(extra_args)),
-            "merge_extaddr_device_label_map.main",
-        )
-
-    # --- unhandled command ---
-    raise ValueError(f"Unhandled command: {args.command}")
+    """Dispatch parsed arguments to the owning command-family handler."""
+    handler = _FAMILY_DISPATCHERS.get(args.command)
+    if handler is None:
+        raise ValueError(f"Unhandled command: {args.command}")
+    return handler(args, extra_args, parser)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
