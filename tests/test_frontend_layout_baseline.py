@@ -165,6 +165,10 @@ def test_workspace_lifecycle_and_activity_contract() -> None:
 
     assert "const lastRenderedDatasetByView = new Map();" in ui_text
     assert "lastRenderedDatasetByView.get(view) === currentDataset" in ui_text
+    activation_index = ui_text.index("activateViewStatus(view, currentDataset);")
+    cache_return_index = ui_text.index("lastRenderedDatasetByView.get(view) === currentDataset")
+    assert activation_index < cache_return_index
+    assert "supersedeViewStatus(`Loading ${selectedDataset?.label ?? selectedValue}…`);" in ui_text
     assert "rendersDataset: true" in ui_text
     assert "onActivate: resizeAndFitTopology" in ui_text
     assert "network.setSize" in ui_text

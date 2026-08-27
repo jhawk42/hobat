@@ -65,6 +65,16 @@ import {
   selectHighestQualifyingDiagnosticEvaluations,
 } from "./tdash-filters.js";
 import { parseSearchQuery, filterRowsBySearch } from "./tdash-search.js";
+import {
+  activateViewStatus,
+  configureViewStatusPresenter,
+  supersedeViewStatus,
+} from "./tdash-view-status.js";
+
+configureViewStatusPresenter((status) => {
+  const statusEl = document.getElementById("view-status-line-content");
+  if (statusEl) statusEl.textContent = status;
+});
 
 // ── Build datasource <select> ────────────────────────────────────────
 
@@ -267,6 +277,7 @@ function renderCurrentView({ force = false } = {}) {
   renderNetworkInsights();
   const view = currentView;
   if (view !== "topology" && view !== "table") return;
+  activateViewStatus(view, currentDataset);
   if (!force && lastRenderedDatasetByView.get(view) === currentDataset) return;
 
   const effectiveDataset = _enhanceEnabled
@@ -286,11 +297,12 @@ function renderCurrentView({ force = false } = {}) {
       effectiveDataset,
       _physicsEnabled,
       effectivePhysicsProfileName,
+      currentDataset,
     );
     const counts = getTopologyDatasetCounts();
     if (counts) updateDeviceStatusBar(counts);
   } else if (view === "table") {
-    renderTableForDataset(effectiveDataset);
+    renderTableForDataset(effectiveDataset, currentDataset);
     updateDeviceStatusBar(computeRowCounts(currentDataset.rows));
   }
 
@@ -1456,6 +1468,8 @@ async function doFetchDataset({ userInitiated = false } = {}) {
   }
 
   const sessionId = startFetchSession();
+  const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
+  supersedeViewStatus(`Loading ${selectedDataset?.label ?? selectedValue}…`);
   recordWorkspaceActivity("dataset-sync", "Dataset sync started", {
     dataset: selectedValue,
     userInitiated,
@@ -1527,6 +1541,7 @@ async function doFetchDataset({ userInitiated = false } = {}) {
         if (statusEl) statusEl.textContent = `Fetch cancelled for "${selectedValue}".`;
         // No partial data available: keep current view or clear bars.
         if (currentDataset) {
+          activateViewStatus(currentView, currentDataset);
           renderCurrentView();
           updateFetchStatusBar(_lastFetchStartedAt);
         } else {
@@ -1540,6 +1555,7 @@ async function doFetchDataset({ userInitiated = false } = {}) {
         error: err?.message || String(err),
       });
       console.error("loadDataset threw:", err);
+      supersedeViewStatus(`Error loading "${selectedValue}": ${err?.message || String(err)}`);
       _setStatusSpans(_FETCH_STATUS_IDS, "—");
       _setStatusSpans(_DEVICE_STATUS_IDS, "—");
     }
@@ -1555,6 +1571,7 @@ async function doFetchDataset({ userInitiated = false } = {}) {
     if (_incrementalRenderTimer !== null) { clearTimeout(_incrementalRenderTimer); _incrementalRenderTimer = null; }
     _setStatusSpans(_FETCH_STATUS_IDS, "—");
     _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+    supersedeViewStatus(`Error: could not load dataset "${selectedValue}".`);
     recordWorkspaceActivity("dataset-sync", "Dataset sync produced no usable data", {
       dataset: selectedValue,
     });

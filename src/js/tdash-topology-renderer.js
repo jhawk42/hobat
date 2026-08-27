@@ -45,6 +45,7 @@ import {
   applyRingStarSeedLayout as applyExtractedRingStarSeedLayout,
   buildMeshTreeZoningContext as buildExtractedMeshTreeZoningContext,
 } from "./tdash-layouts.js";
+import { publishViewStatus } from "./tdash-view-status.js";
 
 // ── Module-level state ────────────────────────────────────────────────────────
 
@@ -196,9 +197,13 @@ function _meshTreeUpperText(value) {
 
 // ── Main renderer ─────────────────────────────────────────────────────────────
 
-export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfileName = "mesh-baseline") {
+export function renderTopologyForDataset(
+  dataset,
+  physicsEnabled,
+  physicsProfileName = "mesh-baseline",
+  statusDatasetToken = dataset,
+) {
   const container = document.getElementById("topology-view");
-  const statusEl = document.getElementById("view-status-line-content");
   const nodeFilterEl = document.getElementById("node-filter");
   const linkFilterEl = document.getElementById("link-filter");
   const diagnosticFilterEl = document.getElementById("diagnostic-filter");
@@ -240,7 +245,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
   try {
     adaptorResult = runAdaptor(dataset);
   } catch (err) {
-    statusEl.textContent = `Topology error: ${err.message}`;
+    publishViewStatus("topology", `Topology error: ${err.message}`, statusDatasetToken);
     return;
   }
 
@@ -519,7 +524,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
     if (fetchStatusEl && !isFetchStatusPinned) {
       fetchStatusEl.textContent = `Loaded: ${viewModel.sourceNames.join(", ")}`;
     }
-    statusEl.textContent = status.text;
+    publishViewStatus("topology", status.text, statusDatasetToken);
   }
 
   // ── Node detail click handler ──────────────────────────────────────────
@@ -646,7 +651,7 @@ export function renderTopologyForDataset(dataset, physicsEnabled, physicsProfile
     restoreOriginalNodeStyling();
   } catch (error) {
     owner.dispose();
-    statusEl.textContent = `Topology error: ${error.message}`;
+    publishViewStatus("topology", `Topology error: ${error.message}`, statusDatasetToken);
     return;
   }
 

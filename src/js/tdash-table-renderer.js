@@ -17,12 +17,14 @@ import {
   isRowVisibleByNodeFilter,
   isRowVisibleByDiagnosticFilter,
 } from "./tdash-filters.js";
+import { publishViewStatus } from "./tdash-view-status.js";
 
 // ── Module-level table state ──────────────────────────────────────────────────
 
 let _tableRows = [];
 let _tableColumns = [];
 let _tableDatasetLabel = "";
+let _tableDatasetToken = null;
 let _moreInfoEnabled = false;
 let _lastFilteredRows = [];
 const MORE_INFO_CELL_MAX_LINES = 6;
@@ -352,7 +354,7 @@ function updateTableStatus(visibleRowCount, columnCount, totalFilteredCount, sea
     statusText += ` Search: "${searchQuery}" — ${visibleRowCount} of ${totalFilteredCount} rows match.`;
   }
   statusText += " Click a header to sort.";
-  document.getElementById("view-status-line-content").textContent = statusText;
+  publishViewStatus("table", statusText, _tableDatasetToken);
 }
 
 export function applyTableFilters() {
@@ -401,13 +403,14 @@ export function applyTableFilters() {
   }
 }
 
-export function renderTableForDataset(dataset) {
+export function renderTableForDataset(dataset, statusDatasetToken = dataset) {
   const rows = dataset.rows;
   const columns = collectColumns(rows);
 
   _tableRows = rows;
   _tableColumns = columns;
   _tableDatasetLabel = dataset.loadedFiles.join(", ");
+  _tableDatasetToken = statusDatasetToken;
 
   // ── compute and apply dynamic filter option visibility ────────
   const capabilities = computeTableCapabilities(rows);
