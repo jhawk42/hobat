@@ -339,6 +339,58 @@ class TestDispatchOtbrCli(unittest.TestCase):
             ],
         )
 
+    def test_topology_waits_for_each_step_to_persist_before_starting_next(self):
+        events: list[str] = []
+
+        def _persisting_step(name: str):
+            def _inner(_argv):
+                events.extend([f"collect:{name}", f"save:{name}", f"return:{name}"])
+                return 0
+
+            return _inner
+
+        with patch.object(
+            td_cli.otbr_cli_thread_network_info,
+            "main",
+            side_effect=_persisting_step("thread-network-info"),
+        ), patch.object(
+            td_cli.otbr_cli_router_table,
+            "main",
+            side_effect=_persisting_step("router-table"),
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_topology,
+            "main",
+            side_effect=_persisting_step("meshdiag-topology"),
+        ), patch.object(
+            td_cli.otbr_cli_networkdiag_topology,
+            "main",
+            side_effect=lambda argv: _persisting_step(f"networkdiag-{argv[0]}")(argv),
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_routerneighbortable,
+            "main",
+            side_effect=_persisting_step("meshdiag-routerneighbortable"),
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_childtable,
+            "main",
+            side_effect=_persisting_step("meshdiag-childtable"),
+        ):
+            rc = self._dispatch(["otbr-cli", "topology"])
+
+        self.assertEqual(rc, 0)
+        names = [
+            "thread-network-info",
+            "router-table",
+            "meshdiag-topology",
+            "networkdiag-multicast-network",
+            "networkdiag-fetch-all",
+            "meshdiag-routerneighbortable",
+            "meshdiag-childtable",
+        ]
+        self.assertEqual(
+            events,
+            [event for name in names for event in (f"collect:{name}", f"save:{name}", f"return:{name}")],
+        )
+
     def test_topology_best_effort_runs_all_steps_on_failure(self):
         with patch.object(
             td_cli.otbr_cli_thread_network_info, "main", return_value=0

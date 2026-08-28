@@ -166,6 +166,96 @@ def test_networkdiag_fetch_all_collector_saves_after_all_stages(monkeypatch, tmp
     assert events == ["router-table", "meshdiag", "ipv6", "multicast", "routers", "children", ("save", output_path), "returned"]
 
 
+def test_networkdiag_fetch_all_does_not_give_internal_collectors_final_paths(
+    monkeypatch, tmp_path
+):
+    output_path = tmp_path / OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+    internal_calls = []
+
+    def router_table(extaddr_map, output_path=None):
+        internal_calls.append(("router-table", output_path))
+        return []
+
+    def meshdiag(extaddr_map, thread_network_info, output_path=None):
+        internal_calls.append(("meshdiag", output_path))
+        return []
+
+    def multicast(
+        extaddr_map,
+        thread_network_info,
+        router_table_by_router_id,
+        checkpoint_filepath=None,
+        final_output_path=None,
+    ):
+        internal_calls.append(
+            ("multicast", checkpoint_filepath, final_output_path)
+        )
+        return {}
+
+    monkeypatch.setattr(networkdiag, "fetch_and_parse_router_table", router_table)
+    monkeypatch.setattr(networkdiag, "get_meshdiag_topology", meshdiag)
+    monkeypatch.setattr(
+        networkdiag,
+        "fetch_network_diag_topology_multicast_network",
+        multicast,
+    )
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_ipv6_addresses", lambda *_args: {})
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_detail_routers", lambda *_args: None)
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_expand_children", lambda *_args: None)
+    monkeypatch.setattr(networkdiag, "save_topology_to_json_file", lambda *_args: None)
+
+    networkdiag.fetch_network_diag_topology(
+        {},
+        {},
+        checkpoint_filepath=tmp_path / "aggregate.partial.json",
+        final_output_path=output_path,
+    )
+
+    assert internal_calls == [
+        ("router-table", None),
+        ("meshdiag", None),
+        ("multicast", None, None),
+    ]
+
+
+def test_networkdiag_fetch_all_checkpoint_and_final_paths_are_distinct(
+    monkeypatch, tmp_path
+):
+    checkpoint_path = tmp_path / "networkdiag.partial.json"
+    final_path = tmp_path / OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+    writes = []
+
+    def router_stage(_extaddr_map, topology, _extaddr_to_rloc, stage_checkpoint):
+        networkdiag.save_topology_to_json_file(topology, stage_checkpoint)
+        return [], [], {}
+
+    monkeypatch.setattr(
+        networkdiag,
+        "fetch_network_diag_topology_router_table",
+        router_stage,
+    )
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_meshdiag_topology", lambda *_args: [])
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_ipv6_addresses", lambda *_args: {})
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_multicast", lambda *_args: {})
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_detail_routers", lambda *_args: None)
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_expand_children", lambda *_args: None)
+    monkeypatch.setattr(
+        networkdiag,
+        "save_topology_to_json_file",
+        lambda _payload, path: writes.append(Path(path)),
+    )
+
+    networkdiag.fetch_network_diag_topology(
+        {},
+        {},
+        checkpoint_filepath=checkpoint_path,
+        final_output_path=final_path,
+    )
+
+    assert writes == [checkpoint_path, final_path]
+    assert writes.count(final_path) == 1
+
+
 @pytest.mark.parametrize(
     ("collector_name", "filename"),
     [
@@ -207,6 +297,32 @@ def test_networkdiag_checkpoint_serializer_treats_none_as_no_output(monkeypatch)
     )
 
     assert networkdiag.save_topology_to_json_file({}, None) is None
+
+
+def test_networkdiag_checkpoint_failure_propagates_from_aggregate_stage(monkeypatch):
+    router = {
+        "router_id": 1,
+        "rloc16": "0x0400",
+        "extaddr": "0011223344556677",
+    }
+    monkeypatch.setattr(
+        networkdiag,
+        "fetch_and_parse_router_table",
+        lambda _extaddr_map: [router],
+    )
+    monkeypatch.setattr(
+        networkdiag,
+        "save_topology_to_json_file",
+        lambda *_args: (_ for _ in ()).throw(OSError("checkpoint disk full")),
+    )
+
+    with pytest.raises(OSError, match="checkpoint disk full"):
+        networkdiag.fetch_network_diag_topology_router_table(
+            {},
+            {},
+            {},
+            "/tmp/networkdiag.partial.json",
+        )
 
 
 def test_networkdiag_fetch_all_main_delegates_both_output_paths(monkeypatch, tmp_path):

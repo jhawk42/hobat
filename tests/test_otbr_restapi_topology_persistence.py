@@ -92,3 +92,61 @@ def test_topology_mandatory_save_failure_stops_before_next_collection(tmp_path):
 
     client.fetch_all_devices_diagnostics.assert_not_called()
     client.fetch_mesh_diagnostics_all_devices.assert_not_called()
+
+
+def test_topology_skip_devices_keeps_device_inputs_unsaved(tmp_path):
+    args = cli_module.build_parser().parse_args(
+        [
+            "--no-progress",
+            "topology",
+            "--skip-devices",
+            "--no-enrich-mac-counters",
+        ]
+    )
+    args.td_data_dir = tmp_path
+    client = MagicMock()
+    client.list_devices.return_value = [{"id": "listed", "rloc16": "0x4000"}]
+    client.fetch_device_collection.return_value = [
+        {"id": "refreshed", "rloc16": "0x4400"}
+    ]
+    client.fetch_all_devices_diagnostics.return_value = {
+        "items": [{"id": "diag-1"}],
+        "deviceResults": [],
+        "partial": False,
+    }
+    client.fetch_mesh_diagnostics_all_devices.return_value = {
+        "items": [{"id": "mesh-1"}],
+        "deviceResults": [],
+        "partial": False,
+    }
+    saved_paths = []
+
+    with patch.object(
+        topology_module,
+        "emit_rest_payload_output",
+        side_effect=lambda _payload, path, _logger: saved_paths.append(path.name),
+    ):
+        assert topology_module.dispatch_topology(client, args, raw_arg=False) is None
+
+    client.list_devices.assert_called_once_with(raw=False)
+    client.fetch_device_collection.assert_called_once_with(items_only=True)
+    assert OTBR_RESTAPI_DEVICES_FETCH_FILENAME not in saved_paths
+    assert saved_paths == [
+        OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+        OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+        OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+        OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+    ]
+
+
+def test_topology_run_cli_does_not_add_a_generic_final_write(tmp_path):
+    with patch.object(cli_module, "build_client", return_value=MagicMock()), patch.object(
+        cli_module, "dispatch_topology", return_value=None
+    ), patch.object(
+        cli_module.Path,
+        "write_text",
+        side_effect=AssertionError("run_cli attempted a generic topology write"),
+    ):
+        result = cli_module.main(["--datadir", str(tmp_path), "topology"])
+
+    assert result == cli_module.EXIT_SUCCESS

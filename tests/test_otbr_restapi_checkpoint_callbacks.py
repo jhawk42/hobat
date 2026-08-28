@@ -28,7 +28,13 @@ def test_devices_fetch_writes_checkpoint_when_output_path_is_resolved() -> None:
         resolved_output_path="/tmp/td-otbr-restapi-devices-fetch.json",
     )
 
-    with patch.object(devices_module, "_write_checkpoint_best_effort") as checkpoint_write:
+    with patch.object(
+        devices_module, "_write_checkpoint_best_effort"
+    ) as checkpoint_write, patch.object(
+        devices_module,
+        "emit_rest_command_output",
+        side_effect=lambda payload, *_args, **_kwargs: payload,
+    ) as final_write:
         result = devices_module.dispatch_devices(client, args, raw_arg=False, fields=None)
 
     assert result == [{"id": "dev-1"}]
@@ -36,6 +42,8 @@ def test_devices_fetch_writes_checkpoint_when_output_path_is_resolved() -> None:
     payload, checkpoint_path = checkpoint_write.call_args.args
     assert payload == [{"id": "dev-1"}]
     assert checkpoint_path == Path("/tmp/td-otbr-restapi-devices-fetch.partial.json")
+    final_write.assert_called_once()
+    assert final_write.call_args.args[1] == args.resolved_output_path
 
 
 def test_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_resolved() -> None:
@@ -70,7 +78,13 @@ def test_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_r
         }
 
     client.fetch_all_devices_diagnostics.side_effect = _fake_fetch_all_devices_diagnostics
-    with patch.object(diagnostics_module, "_write_checkpoint_best_effort") as checkpoint_write:
+    with patch.object(
+        diagnostics_module, "_write_checkpoint_best_effort"
+    ) as checkpoint_write, patch.object(
+        diagnostics_module,
+        "emit_rest_command_output",
+        side_effect=lambda payload, *_args, **_kwargs: payload,
+    ) as final_write:
         result = diagnostics_module.dispatch_diagnostics(client, args, raw_arg=False, fields=None)
 
     assert isinstance(result, list)
@@ -80,6 +94,8 @@ def test_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_r
     assert checkpoint_path == Path("/tmp/td-otbr-restapi-diagnostics-fetch-all.partial.json")
     assert command_name == "otbr-restapi diagnostics fetch-all"
     assert stage == "device"
+    final_write.assert_called_once()
+    assert final_write.call_args.args[1] == args.resolved_output_path
 
 
 def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_resolved() -> None:
@@ -113,7 +129,13 @@ def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path
 
     client.fetch_mesh_diagnostics_all_devices.side_effect = _fake_fetch_mesh_all
 
-    with patch.object(mesh_module, "_write_checkpoint_best_effort") as checkpoint_write:
+    with patch.object(
+        mesh_module, "_write_checkpoint_best_effort"
+    ) as checkpoint_write, patch.object(
+        mesh_module,
+        "emit_rest_command_output",
+        side_effect=lambda payload, *_args, **_kwargs: payload,
+    ) as final_write:
         result = mesh_module.dispatch_mesh_diagnostics(client, args, raw_arg=False)
 
     assert result == [{"id": "mesh-1"}]
@@ -121,6 +143,8 @@ def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path
     payload, checkpoint_path = checkpoint_write.call_args.args
     assert payload == [{"id": "mesh-1"}]
     assert checkpoint_path == Path("/tmp/td-otbr-restapi-mesh-diagnostics-fetch-all.partial.json")
+    final_write.assert_called_once()
+    assert final_write.call_args.args[1] == args.resolved_output_path
 
 
 @pytest.mark.parametrize(

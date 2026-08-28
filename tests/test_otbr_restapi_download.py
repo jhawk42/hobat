@@ -193,6 +193,41 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
             ],
         )
 
+    def test_device_diagnostics_save_before_fetching_the_next_device(self) -> None:
+        events = []
+        mock_client = MagicMock()
+        mock_client.list_devices.return_value = [{"id": "dev-1"}, {"id": "dev-2"}]
+
+        def fetch(device_id, **_kwargs):
+            events.append(f"collect:{device_id}")
+            return {"deviceId": device_id}
+
+        mock_client.fetch_device_diagnostics.side_effect = fetch
+
+        def save(payload, output_file, _logger):
+            events.append(f"save:{payload['deviceId']}:{output_file.name}")
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            script_module, "emit_rest_payload_output", side_effect=save
+        ) as final_write:
+            exit_code = script_module._save_device_diagnostics(
+                mock_client,
+                script_module.Path(temp_dir),
+                ["EXT_ADDRESS"],
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(final_write.call_count, 2)
+        self.assertEqual(
+            events,
+            [
+                "collect:dev-1",
+                "save:dev-1:td-otbr-restapi-diagnostic-dev-1.json",
+                "collect:dev-2",
+                "save:dev-2:td-otbr-restapi-diagnostic-dev-2.json",
+            ],
+        )
+
     def test_diagnostics_continue_after_device_failures(self) -> None:
         mock_client = MagicMock()
         mock_client.list_devices.return_value = [
