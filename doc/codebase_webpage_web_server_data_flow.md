@@ -403,14 +403,17 @@ Different datasets encode link quality information in different formats. The ada
 
 #### meshdiag datasets (OTBR CLI `meshdiag topology`)
 
-**Source data:** `3_links[]`, `2_links[]`, `1_links[]` arrays on each router node
+**Primary source data:** `route.routeData[]` arrays on each router node. Each
+route is adapted through the same OTBR route-edge builder used by networkdiag.
 
-**Processing:** Each link array is iterated, creating edges with:
-- `linkCategories: [EDGE_CATEGORY_DEFAULT_3]` (for `3_links`), `[EDGE_CATEGORY_DEFAULT_2]` (for `2_links`), or `[EDGE_CATEGORY_DEFAULT_1]` (for `1_links`)
-- `lqLevel: 3` (high), `2` (medium), or `1` (low) via `lqStyleFromField(field)`
-- Visual style (width, color, dashes) from `EDGE_LQ_STYLES.high`/`.medium`/`.low`
+**Fallback source data:** When `route.routeData[]` is absent, canonical
+`links3[]`, `links2[]`, and `links1[]` arrays supply router links. The legacy
+`3_links[]`, `2_links[]`, and `1_links[]` aliases remain compatibility fallbacks
+and are planned for removal.
 
-**Example:** A router with `"3_links": [{"id": "52", "rloc16": "0xd000", ...}]` creates an edge with `EDGE_CATEGORY_DEFAULT_3` and `lqLevel: 3`.
+`routeData` edges receive OTBR route categories and LQ styling from
+`linkQualityIn`/`linkQualityOut`. Bucket fallback edges receive the matching
+`EDGE_CATEGORY_DEFAULT_*` category and LQ level.
 
 #### networkdiag datasets (OTBR CLI `networkdiag topology`)
 

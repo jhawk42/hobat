@@ -25,7 +25,7 @@ function assertResult(result, expected) {
   assert.equal("routerChildByRloc16" in result, expected.hasChildIndex);
 }
 
-const meshdiag = run(
+const networkdiag = run(
   "meshdiag-networkdiag",
   ["td-otbr-cli-networkdiag-fetch-all.json"],
   [[
@@ -37,13 +37,48 @@ const meshdiag = run(
     { rloc16: "0x2000", role: "router" },
   ]],
 );
-assertResult(meshdiag, {
+assertResult(networkdiag, {
   nodeIds: ["0x1000", "0x2000"],
   edges: [["0x1000", "0x2000", ["otbr_route", "otbr_route_router"]]],
   sourceNames: ["networkdiagnostic"],
   hasChildIndex: true,
 });
-assert.equal(meshdiag.edgeData[0].width, 12);
+assert.equal(networkdiag.edgeData[0].width, 12);
+
+const meshdiagRoutes = run(
+  "meshdiag-networkdiag",
+  ["td-otbr-cli-meshdiag-topology.json"],
+  [[
+    {
+      rloc16: "0x1000",
+      role: "router",
+      route: { routeData: [{ rloc16: "0x2000", linkQualityIn: 2, linkQualityOut: 3 }] },
+      links3: [{ rloc16: "0x2000" }],
+    },
+    { rloc16: "0x2000", role: "router" },
+  ]],
+);
+assertResult(meshdiagRoutes, {
+  nodeIds: ["0x1000", "0x2000"],
+  edges: [["0x1000", "0x2000", ["otbr_route", "otbr_route_router"]]],
+  sourceNames: ["meshdiag"],
+  hasChildIndex: true,
+});
+
+const meshdiagLinkFallback = run(
+  "meshdiag-networkdiag",
+  ["td-otbr-cli-meshdiag-topology.json"],
+  [[
+    { rloc16: "0x1000", role: "router", links3: [{ rloc16: "0x2000" }] },
+    { rloc16: "0x2000", role: "router" },
+  ]],
+);
+assertResult(meshdiagLinkFallback, {
+  nodeIds: ["0x1000", "0x2000"],
+  edges: [["0x1000", "0x2000", ["default_3_links"]]],
+  sourceNames: ["meshdiag"],
+  hasChildIndex: true,
+});
 
 const eveRows = {
   "0x1000": { id: "eve-a", name: "A", type: "router", routes: [{ to: "eve-b", in: 3, out: 3 }] },

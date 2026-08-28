@@ -371,6 +371,32 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
     return toFiniteNumber(childRow?.rss_margin);
   }
 
+  function addOtbrRouteDataEdges(node, fromId, source) {
+    const routeData = Array.isArray(node.route?.routeData) ? node.route.routeData : [];
+    const routeCategories = getOtbrRouteCategories(node);
+    if (routeCategories.length === 0) return routeData.length > 0;
+
+    routeData.forEach((route) => {
+      const toRloc16 = toText(route.rloc16);
+      if (!toRloc16) return;
+      const toId = ensureNode(
+        toRloc16,
+        { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
+        { source, shape: NODE_SHAPES.router, color: NODE_COLORS.router }
+      );
+      const lqIn = toFiniteNumber(route.linkQualityIn) || 0;
+      const lqOut = toFiniteNumber(route.linkQualityOut) || 0;
+      const lqStyle = lqStyleFromAvgLqi(Math.max(lqIn, lqOut), 3);
+      const toNodeEnriched = nodeMap.get(toId);
+      addEdge(edgeMap, edgeData, fromId, toId, {
+        ...lqStyle,
+        ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
+        linkCategories: routeCategories,
+      });
+    });
+    return routeData.length > 0;
+  }
+
   for (const node of meshdiag) {
     const fromId = chooseNodeId(node, 'meshdiag-parent', 0);
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
@@ -394,9 +420,17 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
       routerIdsWithChildren.add(fromId);
     });
 
-    ['3_links', '2_links', '1_links'].forEach((field) => {
-      const lqStyle = lqStyleFromField(field);
-      (Array.isArray(node[field]) ? node[field] : []).forEach((link) => {
+    const hasRouteData = addOtbrRouteDataEdges(node, fromId, 'meshdiag');
+    if (!hasRouteData) [
+      ['links3', '3_links', EDGE_CATEGORY_DEFAULT_3],
+      ['links2', '2_links', EDGE_CATEGORY_DEFAULT_2],
+      ['links1', '1_links', EDGE_CATEGORY_DEFAULT_1],
+    ].forEach(([field, legacyField, category]) => {
+      const links = Array.isArray(node[field])
+        ? node[field]
+        : (Array.isArray(node[legacyField]) ? node[legacyField] : []);
+      const lqStyle = lqStyleFromField(legacyField);
+      links.forEach((link) => {
         const linkMeshId = toText(link.id);
         const toId = meshIdToUnifiedId.get(linkMeshId) || toText(link.rloc16) || linkMeshId;
         if (!toId) return;
@@ -408,7 +442,7 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
         addEdge(edgeMap, edgeData, fromId, toId, {
           ...lqStyle,
           ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-          linkCategories: [field === '3_links' ? EDGE_CATEGORY_DEFAULT_3 : field === '2_links' ? EDGE_CATEGORY_DEFAULT_2 : EDGE_CATEGORY_DEFAULT_1]
+          linkCategories: [category]
         });
       });
     });
@@ -481,7 +515,6 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
 
   for (const node of networkDiag) {
     const fromId = chooseNodeId(node, 'netdiag-parent', 0);
-    const routeCategories = getOtbrRouteCategories(node);
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
       const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
       const linkMargin = findRouterChildLinkMargin(node.rloc16, child.rloc16);
@@ -502,36 +535,7 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
       });
       routerIdsWithChildren.add(fromId);
     });
-
-    // Process route routes from networkdiag (multicast variant).
-    // route.routeData[] contains routing table entries with LQI metrics.
-    // Each route has a direct rloc16 target (no ID conversion needed).
-    (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
-      if (routeCategories.length === 0) return;
-      const toRloc16 = toText(route.rloc16);
-      if (!toRloc16) return;
-
-      // Ensure target node exists
-      const toId = ensureNode(
-        toRloc16,
-        { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
-        { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.router }
-      );
-
-      // Compute LQI-based edge style
-      const lqIn = toFiniteNumber(route.linkQualityIn) || 0;
-      const lqOut = toFiniteNumber(route.linkQualityOut) || 0;
-      const avgLqi = Math.max(lqIn, lqOut); // Take max for conservative estimate
-      const lqStyle = lqStyleFromAvgLqi(avgLqi, 3);
-
-      // Add edge with LQI styling
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        ...lqStyle,
-        ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-        linkCategories: routeCategories,
-      });
-    });
+    addOtbrRouteDataEdges(node, fromId, 'networkdiagnostic');
   }
 
   restApiDiagnostics.forEach((node) => {
