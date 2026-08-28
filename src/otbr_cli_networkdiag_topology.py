@@ -12,9 +12,11 @@ from typing import Any, Callable, Literal, Sequence
 
 from td_const import (
     EXTADDR_DEVICE_LABEL_MAP_FILENAME,
+    OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
     OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
     OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME,
     OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME,
+    OTBR_CLI_ROUTER_TABLE_FILENAME,
     TD_DATA_DIR_ARG_HELP,
     TD_THREAD_MULTICAST_ADDRESSES_LINK_LOCAL_ALL_FTDS_AND_MEDS,
     TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS_AND_MEDS,
@@ -681,13 +683,21 @@ def fetch_network_diag_topology_router_table(
     network_topology_map: dict,
     extaddr_to_rloc: dict,
     checkpoint_filepath: str | None,
+    final_output_path: str | os.PathLike | None = None,
 ) -> tuple[list, list, dict]:
     """Fetches router table data and merges router records into topology map.
+
+    The nested router-table collector atomically persists its standalone result
+    before this stage consumes and returns that collection when final_output_path
+    is supplied.
 
     Returns:
         Tuple of (router_table_data, router_rlocs, router_table_by_router_id)
     """
-    router_table_data = fetch_and_parse_router_table(extaddr_map)
+    router_table_data = fetch_and_parse_router_table(
+        extaddr_map,
+        output_path=final_output_path,
+    )
     if router_table_data is None:
         logging.warning("Router table is None. No routers found.")
         return [], [], {}
@@ -760,11 +770,18 @@ def fetch_network_diag_topology_meshdiag_topology(
     network_topology_map: dict,
     extaddr_to_rloc: dict,
     checkpoint_filepath: str | None,
+    final_output_path: str | os.PathLike | None = None,
 ) -> list | None:
-    """Fetches meshdiag topology data and merges router records into topology map."""
+    """Fetches, atomically persists, and merges meshdiag topology data.
+
+    Persistence is enabled only when final_output_path is supplied.
+    """
 
     meshdiag_topology_data = get_meshdiag_topology(
-        extaddr_map, thread_network_info)
+        extaddr_map,
+        thread_network_info,
+        output_path=final_output_path,
+    )
 
     if meshdiag_topology_data is not None:
         network_topology_map_meshdiag_routers = {}
@@ -842,11 +859,18 @@ def fetch_network_diag_topology_multicast(
     network_topology_map: dict,
     extaddr_to_rloc: dict,
     checkpoint_filepath: str | None,
+    final_output_path: str | os.PathLike | None = None,
 ) -> dict:
-    """Fetches multicast topology data and merges it into the topology map."""
+    """Fetches, atomically persists, and merges multicast topology data.
+
+    Persistence is enabled only when final_output_path is supplied.
+    """
     
     network_topology_map_multicast = fetch_network_diag_topology_multicast_network(
-        extaddr_map, thread_network_info, router_table_by_router_id
+        extaddr_map,
+        thread_network_info,
+        router_table_by_router_id,
+        final_output_path=final_output_path,
     )
 
     if network_topology_map_multicast:
@@ -1285,7 +1309,12 @@ def fetch_network_diag_topology(
     checkpoint_filepath=None,
     final_output_path=None,
 ):
-    """Maps the full network topology and returns a Python dictionary."""
+    """Maps the full network topology and returns a Python dictionary.
+
+    When td_data_dir is supplied, collection stages atomically refresh their
+    established standalone snapshots before their results return to this
+    aggregate collector. Aggregate checkpoints and final output remain separate.
+    """
 
     # expand_children controls whether to perform additional queries for each router to get their child table data and include that in the topology map.
     # Set to True to also query and include child nodes in the topology map (will increase runtime significantly)
@@ -1301,6 +1330,23 @@ def fetch_network_diag_topology(
         )
         checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
     logging.debug("Checkpoint filepath: %s", checkpoint_filepath)
+
+    router_table_output_path = None
+    meshdiag_output_path = None
+    multicast_output_path = None
+    if td_data_dir is not None:
+        router_table_output_path = data_file_path(
+            OTBR_CLI_ROUTER_TABLE_FILENAME,
+            td_data_dir,
+        )
+        meshdiag_output_path = data_file_path(
+            OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+            td_data_dir,
+        )
+        multicast_output_path = data_file_path(
+            OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME,
+            td_data_dir,
+        )
 
     # Track extaddr -> rloc16 mapping to detect duplicate devices with changed RLOC16
     extaddr_to_rloc = {}
@@ -1329,6 +1375,7 @@ def fetch_network_diag_topology(
         network_topology_map,
         extaddr_to_rloc,
         checkpoint_filepath,
+        final_output_path=router_table_output_path,
     )
 
     # 5. Query meshdiag topology and merge router records
@@ -1338,6 +1385,7 @@ def fetch_network_diag_topology(
         network_topology_map,
         extaddr_to_rloc,
         checkpoint_filepath,
+        final_output_path=meshdiag_output_path,
     )
 
     # 6. Build IPv6 map for lookup by RLOC16
@@ -1352,6 +1400,7 @@ def fetch_network_diag_topology(
         network_topology_map,
         extaddr_to_rloc,
         checkpoint_filepath,
+        final_output_path=multicast_output_path,
     )
 
     # 7b. Query per-router details and merge

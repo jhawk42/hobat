@@ -145,10 +145,10 @@ def test_per_router_collectors_checkpoint_then_save_final_once(monkeypatch, tmp_
 
 
 def _stub_fetch_all_stages(monkeypatch, events):
-    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_router_table", lambda *_args: events.append("router-table") or ([], [], {}))
-    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_meshdiag_topology", lambda *_args: events.append("meshdiag") or [])
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_router_table", lambda *_args, **_kwargs: events.append("router-table") or ([], [], {}))
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_meshdiag_topology", lambda *_args, **_kwargs: events.append("meshdiag") or [])
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_ipv6_addresses", lambda *_args: events.append("ipv6") or {})
-    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_multicast", lambda *_args: events.append("multicast") or {})
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_multicast", lambda *_args, **_kwargs: events.append("multicast") or {})
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_detail_routers", lambda *_args: events.append("routers"))
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_expand_children", lambda *_args: events.append("children"))
 
@@ -166,7 +166,7 @@ def test_networkdiag_fetch_all_collector_saves_after_all_stages(monkeypatch, tmp
     assert events == ["router-table", "meshdiag", "ipv6", "multicast", "routers", "children", ("save", output_path), "returned"]
 
 
-def test_networkdiag_fetch_all_does_not_give_internal_collectors_final_paths(
+def test_networkdiag_fetch_all_persists_internal_collections_before_return(
     monkeypatch, tmp_path
 ):
     output_path = tmp_path / OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
@@ -207,14 +207,19 @@ def test_networkdiag_fetch_all_does_not_give_internal_collectors_final_paths(
     networkdiag.fetch_network_diag_topology(
         {},
         {},
+        td_data_dir=tmp_path,
         checkpoint_filepath=tmp_path / "aggregate.partial.json",
         final_output_path=output_path,
     )
 
     assert internal_calls == [
-        ("router-table", None),
-        ("meshdiag", None),
-        ("multicast", None, None),
+        ("router-table", tmp_path / OTBR_CLI_ROUTER_TABLE_FILENAME),
+        ("meshdiag", tmp_path / OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME),
+        (
+            "multicast",
+            None,
+            tmp_path / OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME,
+        ),
     ]
 
 
@@ -225,7 +230,13 @@ def test_networkdiag_fetch_all_checkpoint_and_final_paths_are_distinct(
     final_path = tmp_path / OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
     writes = []
 
-    def router_stage(_extaddr_map, topology, _extaddr_to_rloc, stage_checkpoint):
+    def router_stage(
+        _extaddr_map,
+        topology,
+        _extaddr_to_rloc,
+        stage_checkpoint,
+        final_output_path=None,
+    ):
         networkdiag.save_topology_to_json_file(topology, stage_checkpoint)
         return [], [], {}
 
@@ -234,9 +245,9 @@ def test_networkdiag_fetch_all_checkpoint_and_final_paths_are_distinct(
         "fetch_network_diag_topology_router_table",
         router_stage,
     )
-    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_meshdiag_topology", lambda *_args: [])
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_meshdiag_topology", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_ipv6_addresses", lambda *_args: {})
-    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_multicast", lambda *_args: {})
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_multicast", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_detail_routers", lambda *_args: None)
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_expand_children", lambda *_args: None)
     monkeypatch.setattr(
@@ -308,7 +319,7 @@ def test_networkdiag_checkpoint_failure_propagates_from_aggregate_stage(monkeypa
     monkeypatch.setattr(
         networkdiag,
         "fetch_and_parse_router_table",
-        lambda _extaddr_map: [router],
+        lambda _extaddr_map, output_path=None: [router],
     )
     monkeypatch.setattr(
         networkdiag,
