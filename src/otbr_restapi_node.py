@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
-from otbr_restapi_util import OTBRRestApiClient, OTBRUsageError
+from otbr_restapi_util import (
+    OTBRRestApiClient,
+    OTBRUsageError,
+    emit_rest_command_output,
+)
 from util_data import resolve_data_file_path
 
 
@@ -40,18 +45,30 @@ def dispatch_node(
     raw_arg: object,
     fields: dict[str, str] | None,
 ) -> Any:
+    output_path = getattr(args, "resolved_output_path", None)
+    logger = logging.getLogger(__name__)
     if args.node_command == "get":
-        return client.get_node(fields=fields, raw=raw_arg)
+        result = client.get_node(fields=fields, raw=raw_arg)
+        return emit_rest_command_output(result, output_path, logger=logger)
     if args.node_command == "state":
         if args.state_command == "get":
-            return client.get_node_state()
+            result = client.get_node_state()
+            return emit_rest_command_output(result, output_path, logger=logger)
         if args.state_command == "set":
-            return client.set_node_state(args.value)
+            result = client.set_node_state(args.value)
+            return emit_rest_command_output(result, output_path, logger=logger)
     if args.node_command == "dataset" and args.dataset_kind == "active":
         if args.dataset_command == "get":
-            return client.get_active_dataset(plain_text=args.text, raw=raw_arg)
+            result = client.get_active_dataset(plain_text=args.text, raw=raw_arg)
+            return emit_rest_command_output(
+                result,
+                output_path,
+                plain_text=args.text,
+                logger=logger,
+            )
         if args.dataset_command == "set":
             dataset = _parse_dataset_input(args)
-            return client.set_active_dataset(dataset)
+            result = client.set_active_dataset(dataset)
+            return emit_rest_command_output(result, output_path, logger=logger)
 
     raise ValueError("Unsupported node command")

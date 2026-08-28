@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from typing import Any, Sequence
 
 from otbr_restapi_diagnostics import resolve_types
@@ -8,6 +9,7 @@ from otbr_restapi_util import (
     DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
     OTBRRestApiClient,
     OTBRUsageError,
+    emit_rest_command_output,
     extract_action_result_id,
 )
 
@@ -29,32 +31,37 @@ def dispatch_actions(
     fields: dict[str, str] | None,
     effective_raw: bool,
 ) -> Any:
+    output_path = getattr(args, "resolved_output_path", None)
+
+    def finish(result: Any) -> Any:
+        return emit_rest_command_output(result, output_path, logger=logging.getLogger(__name__))
+
     if args.actions_command == "list":
-        return client.list_actions(fields=fields, raw=raw_arg, with_meta=args.with_meta)
+        return finish(client.list_actions(fields=fields, raw=raw_arg, with_meta=args.with_meta))
     if args.actions_command == "get":
-        return client.get_action(args.action_id, fields=fields, raw=raw_arg)
+        return finish(client.get_action(args.action_id, fields=fields, raw=raw_arg))
     if args.actions_command == "enqueue":
         if args.enqueue_type == "add-thread-device":
-            return client.enqueue_add_thread_device_task(
+            return finish(client.enqueue_add_thread_device_task(
                 pskd=args.pskd,
                 eui=args.eui,
                 discerner=args.discerner,
                 joiner_id=args.joiner_id,
                 timeout=args.timeout,
                 raw=raw_arg,
-            )
+            ))
         if args.enqueue_type == "get-network-diagnostic":
             resolved_types = resolve_types(args)
             if not resolved_types:
                 raise OTBRUsageError("Provide --types or --preset for get-network-diagnostic")
             if not getattr(args, "wait", False):
-                return client.enqueue_get_network_diagnostic_task(
+                return finish(client.enqueue_get_network_diagnostic_task(
                     destination=args.destination,
                     types=resolved_types,
                     timeout=args.timeout,
                     destination_type=args.destination_type,
                     raw=raw_arg,
-                )
+                ))
             task_timeout = args.timeout or DIAGNOSTICS_DEFAULT_TASK_TIMEOUT
             action = client.run_action(
                 lambda: client.enqueue_get_network_diagnostic_task(
@@ -72,18 +79,18 @@ def dispatch_actions(
             )
             result_id = extract_action_result_id(action)
             if result_id:
-                return client.get_diagnostic(result_id, raw=raw_arg)
-            return action
+                return finish(client.get_diagnostic(result_id, raw=raw_arg))
+            return finish(action)
         if args.enqueue_type == "reset-network-diag-counter":
-            return client.enqueue_reset_network_diag_counter_task(
+            return finish(client.enqueue_reset_network_diag_counter_task(
                 destination=args.destination,
                 types=_parse_typed_values(args.types),
                 timeout=args.timeout,
                 destination_type=args.destination_type,
                 raw=raw_arg,
-            )
+            ))
         if args.enqueue_type == "get-energy-scan":
-            return client.enqueue_get_energy_scan_task(
+            return finish(client.enqueue_get_energy_scan_task(
                 destination=args.destination,
                 channel_mask=args.channel_mask,
                 count=args.count,
@@ -92,14 +99,14 @@ def dispatch_actions(
                 timeout=args.timeout,
                 destination_type=args.destination_type,
                 raw=raw_arg,
-            )
+            ))
         if args.enqueue_type == "update-device-collection":
-            return client.enqueue_update_device_collection_task(
+            return finish(client.enqueue_update_device_collection_task(
                 max_age=args.max_age,
                 max_retries=args.max_retries,
                 device_count=args.device_count,
                 timeout=args.timeout,
                 raw=raw_arg,
-            )
+            ))
 
     raise ValueError("Unsupported actions command")

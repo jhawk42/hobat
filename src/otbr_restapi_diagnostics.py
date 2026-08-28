@@ -16,6 +16,7 @@ from otbr_restapi_util import (
     OTBRActionTimeoutError,
     OTBRInvalidResponseError,
     OTBRRestApiClient,
+    emit_rest_command_output,
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
 from util_data import create_checkpoint_filename, save_json_atomic
@@ -305,6 +306,11 @@ def dispatch_diagnostics(
     raw_arg: object,
     fields: dict[str, str] | None,
 ) -> Any:
+    output_path = getattr(args, "resolved_output_path", None)
+
+    def finish(result: Any) -> Any:
+        return emit_rest_command_output(result, output_path, logger=logging.getLogger(__name__))
+
     if args.diagnostics_command == "list":
         diagnostics = client.list_diagnostics(
             fields=fields,
@@ -312,7 +318,7 @@ def dispatch_diagnostics(
             with_meta=args.with_meta,
         )
         if raw_arg is True or getattr(args, "no_enrich_mac_counters", False):
-            return diagnostics
+            return finish(diagnostics)
 
         if args.with_meta and isinstance(diagnostics, dict):
             items = diagnostics.get("items")
@@ -320,15 +326,15 @@ def dispatch_diagnostics(
                 _apply_mac_enrichment(items)
                 _apply_time_stats_enrichment(items)
                 _apply_border_router_enrichment(items)
-            return convert_keys_to_camel_case(diagnostics)
+            return finish(convert_keys_to_camel_case(diagnostics))
 
         if isinstance(diagnostics, list):
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
             _apply_border_router_enrichment(diagnostics)
-        return convert_keys_to_camel_case(diagnostics)
+        return finish(convert_keys_to_camel_case(diagnostics))
     if args.diagnostics_command == "get":
-        return client.get_diagnostic(args.diagnostics_id, raw=raw_arg)
+        return finish(client.get_diagnostic(args.diagnostics_id, raw=raw_arg))
     if args.diagnostics_command == "fetch":
         primary_types = resolve_types(args)
         fallback_types = resolve_fallback_types(args)
@@ -345,7 +351,7 @@ def dispatch_diagnostics(
         )
         if not getattr(args, "no_enrich_mac_counters", False):
             _apply_mac_enrichment([result])
-        return convert_keys_to_camel_case(result)
+        return finish(convert_keys_to_camel_case(result))
     if args.diagnostics_command == "fetch-all":
         resolved_types = resolve_types(args)
         fallback_types = resolve_fallback_types(args)
@@ -363,7 +369,6 @@ def dispatch_diagnostics(
         selected_devices = getattr(args, "device_ids", None) or devices
 
         checkpoint_path = None
-        output_path = getattr(args, "resolved_output_path", None)
         if output_path:
             output_file = Path(output_path)
             checkpoint_path = output_file.parent / create_checkpoint_filename(
@@ -400,7 +405,7 @@ def dispatch_diagnostics(
             _apply_time_stats_enrichment(diagnostics)
             _apply_border_router_enrichment(diagnostics)
         if getattr(args, "items_only", False):
-            return convert_keys_to_camel_case(diagnostics)
-        return convert_keys_to_camel_case(outcome)
+            return finish(convert_keys_to_camel_case(diagnostics))
+        return finish(convert_keys_to_camel_case(outcome))
 
     raise ValueError("Unsupported diagnostics command")

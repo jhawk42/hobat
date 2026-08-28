@@ -389,3 +389,19 @@ def save_json_atomic(data, filename: str | os.PathLike, indent: int = 4, add_tra
             pass
         logging.error(f"Failed to save {filename}: {e}")
         raise
+
+
+def save_text_atomic(text: str, filename: str | os.PathLike) -> None:
+    """Save text atomically using a temporary file and replace."""
+    tmp_file = os.fspath(filename) + ".tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as file:
+            file.write(text)
+        os.replace(tmp_file, filename)
+    except Exception as exc:
+        try:
+            os.remove(tmp_file)
+        except FileNotFoundError:
+            pass
+        logging.error("Failed to save %s: %s", filename, exc)
+        raise

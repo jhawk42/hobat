@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from otbr_restapi_util import OTBRRestApiClient
+from otbr_restapi_util import OTBRRestApiClient, emit_rest_command_output
 from td_json_key_normalizer import convert_keys_to_camel_case
 from util_data import create_checkpoint_filename, save_json_atomic
 
@@ -33,10 +33,15 @@ def dispatch_devices(
     raw_arg: object,
     fields: dict[str, str] | None,
 ) -> Any:
+    output_path = getattr(args, "resolved_output_path", None)
+
+    def finish(result: Any) -> Any:
+        return emit_rest_command_output(result, output_path, logger=logging.getLogger(__name__))
+
     if args.devices_command == "list":
-        return client.list_devices(fields=fields, raw=raw_arg, with_meta=args.with_meta)
+        return finish(client.list_devices(fields=fields, raw=raw_arg, with_meta=args.with_meta))
     if args.devices_command == "get":
-        return client.get_device(args.device_id, fields=fields, raw=raw_arg)
+        return finish(client.get_device(args.device_id, fields=fields, raw=raw_arg))
     if args.devices_command == "fetch":
         result = client.fetch_device_collection(
             device_count=args.device_count,
@@ -49,13 +54,12 @@ def dispatch_devices(
             whole_action_attempts=getattr(args, "whole_action_attempts", 1),
             raw=raw_arg,
         )
-        output_path = getattr(args, "resolved_output_path", None)
         if output_path:
             output_file = Path(output_path)
             checkpoint_path = output_file.parent / create_checkpoint_filename(
                 output_file.name
             )
             _write_checkpoint_best_effort(result, checkpoint_path)
-        return result
+        return finish(result)
 
     raise ValueError("Unsupported devices command")

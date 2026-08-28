@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
 import otbr_restapi_cli as rest_cli
+import otbr_restapi_devices as devices_module
+from otbr_restapi_util import emit_rest_command_output
 from td_const import (
     OTBR_RESTAPI_ACTIONS_LIST_FILENAME,
     OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
@@ -46,30 +48,30 @@ COMMAND_CONTRACTS = (
     PersistenceContract("otbr-cli networkdiag multicast-neighbors", AUTOMATIC_JSON, "fetch_network_diag_topology_multicast_neighbors"),
     PersistenceContract("otbr-cli topology", COMPOSITE, "td_cli._dispatch_otbr_cli"),
     PersistenceContract("otbr-restapi download", ALREADY_OWNED, "download helpers"),
-    PersistenceContract("otbr-restapi node get", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi node state get", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi node state set", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi node dataset active get", EXPLICIT_TEXT, "run_cli"),
-    PersistenceContract("otbr-restapi node dataset active set", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi devices list", AUTOMATIC_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi devices get", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi devices fetch", AUTOMATIC_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi diagnostics list", AUTOMATIC_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi diagnostics get", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi diagnostics fetch", AUTOMATIC_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi diagnostics fetch-all", AUTOMATIC_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi actions list", AUTOMATIC_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi actions get", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi actions enqueue add-thread-device", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi actions enqueue get-network-diagnostic", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi actions enqueue reset-network-diag-counter", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi actions enqueue get-energy-scan", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi actions enqueue update-device-collection", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi mesh-diagnostics children", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi mesh-diagnostics child-ipv6", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi mesh-diagnostics router-neighbors", EXPLICIT_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi mesh-diagnostics fetch", AUTOMATIC_JSON, "run_cli"),
-    PersistenceContract("otbr-restapi mesh-diagnostics fetch-all", AUTOMATIC_JSON, "run_cli"),
+    PersistenceContract("otbr-restapi node get", EXPLICIT_JSON, "dispatch_node"),
+    PersistenceContract("otbr-restapi node state get", EXPLICIT_JSON, "dispatch_node"),
+    PersistenceContract("otbr-restapi node state set", EXPLICIT_JSON, "dispatch_node"),
+    PersistenceContract("otbr-restapi node dataset active get", EXPLICIT_TEXT, "dispatch_node"),
+    PersistenceContract("otbr-restapi node dataset active set", EXPLICIT_JSON, "dispatch_node"),
+    PersistenceContract("otbr-restapi devices list", AUTOMATIC_JSON, "dispatch_devices"),
+    PersistenceContract("otbr-restapi devices get", EXPLICIT_JSON, "dispatch_devices"),
+    PersistenceContract("otbr-restapi devices fetch", AUTOMATIC_JSON, "dispatch_devices"),
+    PersistenceContract("otbr-restapi diagnostics list", AUTOMATIC_JSON, "dispatch_diagnostics"),
+    PersistenceContract("otbr-restapi diagnostics get", EXPLICIT_JSON, "dispatch_diagnostics"),
+    PersistenceContract("otbr-restapi diagnostics fetch", AUTOMATIC_JSON, "dispatch_diagnostics"),
+    PersistenceContract("otbr-restapi diagnostics fetch-all", AUTOMATIC_JSON, "dispatch_diagnostics"),
+    PersistenceContract("otbr-restapi actions list", AUTOMATIC_JSON, "dispatch_actions"),
+    PersistenceContract("otbr-restapi actions get", EXPLICIT_JSON, "dispatch_actions"),
+    PersistenceContract("otbr-restapi actions enqueue add-thread-device", EXPLICIT_JSON, "dispatch_actions"),
+    PersistenceContract("otbr-restapi actions enqueue get-network-diagnostic", EXPLICIT_JSON, "dispatch_actions"),
+    PersistenceContract("otbr-restapi actions enqueue reset-network-diag-counter", EXPLICIT_JSON, "dispatch_actions"),
+    PersistenceContract("otbr-restapi actions enqueue get-energy-scan", EXPLICIT_JSON, "dispatch_actions"),
+    PersistenceContract("otbr-restapi actions enqueue update-device-collection", EXPLICIT_JSON, "dispatch_actions"),
+    PersistenceContract("otbr-restapi mesh-diagnostics children", EXPLICIT_JSON, "dispatch_mesh_diagnostics"),
+    PersistenceContract("otbr-restapi mesh-diagnostics child-ipv6", EXPLICIT_JSON, "dispatch_mesh_diagnostics"),
+    PersistenceContract("otbr-restapi mesh-diagnostics router-neighbors", EXPLICIT_JSON, "dispatch_mesh_diagnostics"),
+    PersistenceContract("otbr-restapi mesh-diagnostics fetch", AUTOMATIC_JSON, "dispatch_mesh_diagnostics"),
+    PersistenceContract("otbr-restapi mesh-diagnostics fetch-all", AUTOMATIC_JSON, "dispatch_mesh_diagnostics"),
     PersistenceContract("otbr-restapi topology", COMPOSITE, "dispatch_topology"),
 )
 
@@ -106,8 +108,20 @@ def test_rest_auto_output_filename_matrix_is_exact():
 
 
 def _run_with_result(argv: list[str], result):
+    def dispatch(_client, args):
+        plain_text = (
+            getattr(args, "resource", None) == "node"
+            and getattr(args, "dataset_command", None) == "get"
+            and getattr(args, "text", False)
+        )
+        return emit_rest_command_output(
+            result,
+            args.resolved_output_path,
+            plain_text=plain_text,
+        )
+
     with patch.object(rest_cli, "build_client", return_value=object()), patch.object(
-        rest_cli, "dispatch", return_value=result
+        rest_cli, "dispatch", side_effect=dispatch
     ):
         return rest_cli.main(argv)
 
@@ -191,18 +205,23 @@ def test_rest_no_auto_output_writes_only_stdout(tmp_path, capsys):
 def test_rest_run_cli_orders_dispatch_then_save_before_success_return(tmp_path):
     events = []
 
-    def dispatch(_client, _args):
+    client = Mock()
+
+    def collect(**_kwargs):
         events.append("collect")
         return [{"deviceId": "dev-1"}]
 
-    def emit_output(result, output_path):
+    client.list_devices.side_effect = collect
+
+    def save(result, output_path, **_kwargs):
         assert result == [{"deviceId": "dev-1"}]
         assert Path(output_path).name == OTBR_RESTAPI_DEVICES_LIST_FILENAME
         events.append("save")
+        return result
 
-    with patch.object(rest_cli, "build_client", return_value=object()), patch.object(
-        rest_cli, "dispatch", side_effect=dispatch
-    ), patch.object(rest_cli, "emit_output", side_effect=emit_output):
+    with patch.object(rest_cli, "build_client", return_value=client), patch.object(
+        devices_module, "emit_rest_command_output", side_effect=save
+    ):
         rc = rest_cli.main(["--datadir", str(tmp_path), "devices", "list"])
         events.append("returned")
 
@@ -211,9 +230,11 @@ def test_rest_run_cli_orders_dispatch_then_save_before_success_return(tmp_path):
 
 
 def test_rest_final_write_failure_is_unexpected_error_and_nonzero(tmp_path, capsys):
-    with patch.object(rest_cli, "build_client", return_value=object()), patch.object(
-        rest_cli, "dispatch", return_value=[{"deviceId": "dev-1"}]
-    ), patch.object(Path, "write_text", side_effect=OSError("disk full")):
+    client = Mock()
+    client.list_devices.return_value = [{"deviceId": "dev-1"}]
+    with patch.object(rest_cli, "build_client", return_value=client), patch.object(
+        devices_module, "emit_rest_command_output", side_effect=OSError("disk full")
+    ):
         rc = rest_cli.main(
             ["--datadir", str(tmp_path), "--output", "result.json", "devices", "list"]
         )

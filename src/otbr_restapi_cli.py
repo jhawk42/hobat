@@ -1286,10 +1286,6 @@ def emit_output(result: Any, output_path: str | None) -> None:
     else:
         rendered = json.dumps(result, indent=4, sort_keys=True)
 
-    if output_path:
-        suffix = "\n" if rendered and not rendered.endswith("\n") else ""
-        Path(output_path).write_text(rendered + suffix, encoding="utf-8")
-
     if not output_path and rendered:
         print(rendered)
 

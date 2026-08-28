@@ -2452,6 +2452,41 @@ def emit_rest_payload_output(
         raise
 
 
+def emit_rest_command_output(
+    payload: Any,
+    output_path: str | Path | None,
+    *,
+    plain_text: bool = False,
+    logger=None,
+) -> Any:
+    """Persist a command result when an output path is resolved, then return it."""
+    if output_path is None:
+        return payload
+
+    if not plain_text:
+        emit_rest_payload_output(payload, output_path, logger)
+        return payload
+
+    from util_data import save_text_atomic
+
+    if payload is None:
+        rendered = ""
+    elif isinstance(payload, str):
+        rendered = payload
+    else:
+        rendered = json.dumps(payload, indent=4, sort_keys=True)
+    if rendered and not rendered.endswith("\n"):
+        rendered += "\n"
+
+    output_file = Path(output_path)
+    save_text_atomic(rendered, output_file)
+    if logger is None:
+        import logging
+        logger = logging.getLogger(__name__)
+    logger.info("Saved: %s", output_file)
+    return payload
+
+
 def exit_code_for_rest_exception(exc: Exception) -> int:
     """Map REST API exceptions to CLI exit codes.
     

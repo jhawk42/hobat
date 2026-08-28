@@ -16,6 +16,7 @@ from otbr_restapi_util import (
     MESH_DIAGNOSTIC_TLVS,
     OTBRRestApiClient,
     OTBRUsageError,
+    emit_rest_command_output,
 )
 
 CLI_MESH_TASK_TIMEOUT_DEFAULT = 15
@@ -83,9 +84,13 @@ def dispatch_mesh_diagnostics(
     poll_interval = args.poll_interval
     dest_type = args.destination_type
     task_timeout = args.task_timeout
+    output_path = getattr(args, "resolved_output_path", None)
+
+    def finish(result: Any) -> Any:
+        return emit_rest_command_output(result, output_path, logger=logging.getLogger(__name__))
 
     if cmd == "children":
-        return client.fetch_mesh_diagnostics(
+        return finish(client.fetch_mesh_diagnostics(
             args.device_id,
             types=[DIAG_TLV_CHILDREN],
             destination_type=dest_type,
@@ -93,9 +98,9 @@ def dispatch_mesh_diagnostics(
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             raw=raw_arg,
-        )
+        ))
     if cmd == "child-ipv6":
-        return client.fetch_mesh_diagnostics(
+        return finish(client.fetch_mesh_diagnostics(
             args.device_id,
             types=[DIAG_TLV_CHILD_IPV6_ADDRS],
             destination_type=dest_type,
@@ -103,9 +108,9 @@ def dispatch_mesh_diagnostics(
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             raw=raw_arg,
-        )
+        ))
     if cmd == "router-neighbors":
-        return client.fetch_mesh_diagnostics(
+        return finish(client.fetch_mesh_diagnostics(
             args.device_id,
             types=[DIAG_TLV_ROUTER_NEIGHBORS],
             destination_type=dest_type,
@@ -113,10 +118,10 @@ def dispatch_mesh_diagnostics(
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             raw=raw_arg,
-        )
+        ))
     if cmd == "fetch":
         types = parse_mesh_diag_types(args.types or list(MESH_DIAGNOSTIC_TLVS))
-        return client.fetch_mesh_diagnostics(
+        return finish(client.fetch_mesh_diagnostics(
             args.device_id,
             types=types,
             destination_type=dest_type,
@@ -124,7 +129,7 @@ def dispatch_mesh_diagnostics(
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             raw=raw_arg,
-        )
+        ))
     if cmd == "fetch-all":
         types = parse_mesh_diag_types(args.types or list(MESH_DIAGNOSTIC_TLVS))
         do_update = not getattr(args, "no_update_devices", False)
@@ -146,7 +151,6 @@ def dispatch_mesh_diagnostics(
             )
 
         checkpoint_path = None
-        output_path = getattr(args, "resolved_output_path", None)
         if output_path:
             output_file = Path(output_path)
             checkpoint_path = output_file.parent / create_checkpoint_filename(
@@ -172,7 +176,7 @@ def dispatch_mesh_diagnostics(
             raw=raw_arg,
         )
         if getattr(args, "items_only", False):
-            return outcome["items"]
-        return outcome
+            return finish(outcome["items"])
+        return finish(outcome)
 
     raise ValueError("Unsupported mesh-diagnostics command")
