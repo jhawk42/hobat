@@ -19,7 +19,7 @@ from util_data import (
     resolve_data_dir,
     save_json_atomic,
 )
-from td_const import TD_DATA_DIR_ARG_HELP
+from td_const import MDNS_SCOPE_FILENAMES, TD_DATA_DIR_ARG_HELP
 
 from mdns_thread_util import FIELD_METADATA, _base_field_dict
 from mdns_meshcop import MESHCOP_FIELD_ENRICHERS, print_meshcop_service_info
@@ -502,11 +502,10 @@ options:
     else:
         scope_tag = args.scope.lower()
 
-    output_file = resolve_data_file_path(
-        f"td-mdns-scopes-{scope_tag}.json", td_data_dir
-    )
+    output_filename = MDNS_SCOPE_FILENAMES[scope_tag]
+    output_file = resolve_data_file_path(output_filename, td_data_dir)
     checkpoint_file = resolve_data_file_path(
-        create_checkpoint_filename(f"td-mdns-scopes-{scope_tag}.json"),
+        create_checkpoint_filename(output_filename),
         td_data_dir,
     )
 

@@ -5,7 +5,10 @@ import json
 import logging
 from typing import Sequence
 
-from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+from td_const import (
+    EXTADDR_DEVICE_LABEL_MAP_FILENAME,
+    OTBR_CLI_ROUTER_TABLE_FILENAME,
+)
 from extaddr_device_label_map import load_extaddr_device_label_map
 from td_json_key_normalizer import convert_keys_to_camel_case
 import util_ot_ctl
@@ -175,7 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         router_table_data = fetch_and_parse_router_table(extaddr_map)
         save_path = data_file_path(
-            "td-otbr-cli-router-table.json", td_data_dir)
+            OTBR_CLI_ROUTER_TABLE_FILENAME, td_data_dir)
         save_json_atomic(convert_keys_to_camel_case(router_table_data), save_path)
         logging.debug("Saved router-table data into %s as JSON:\n%s",
                 save_path, json.dumps(router_table_data, indent=4))

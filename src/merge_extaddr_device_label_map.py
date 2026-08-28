@@ -18,7 +18,13 @@ import re
 import unicodedata
 from pathlib import Path
 
-from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
+from td_const import (
+    EXTADDR_DEVICE_LABEL_MAP_FILENAME,
+    MDNS_SCOPES_BR_FILENAME,
+    MERGED_TOPOLOGY_ALL_FILENAME,
+    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+    TD_DATA_DIR_ARG_HELP,
+)
 from util_data import (
     TDRequiredInputMissingError,
     data_file_path,
@@ -28,9 +34,6 @@ from util_data import (
 )
 from extaddr_device_label_map import load_extaddr_device_label_map
 
-OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME = 'td-otbr-cli-networkdiag-fetch-all.json'
-MDNS_SCOPES_BR_FILENAME = "td-mdns-scopes-br.json"
-MERGED_TOPOLOGY_ALL_FILENAME = "td-merged-topology-all.json"
 EXTADDR_PATTERN = re.compile(r"^[0-9a-fA-F]{16}$")
 DEVICE_LABEL_MAX_LENGTH = 128
 

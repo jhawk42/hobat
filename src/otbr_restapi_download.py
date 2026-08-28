@@ -6,7 +6,13 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence, Tuple
 
-from td_const import TD_DATA_DIR_ARG_HELP
+from td_const import (
+    OTBR_RESTAPI_DATASET_ACTIVE_FILENAME,
+    OTBR_RESTAPI_DEVICE_DIAGNOSTIC_FILENAME_TEMPLATE,
+    OTBR_RESTAPI_DEVICES_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FILENAME,
+    TD_DATA_DIR_ARG_HELP,
+)
 from otbr_restapi_util import (
     add_common_rest_client_args,
     build_rest_client_from_args,
@@ -32,9 +38,9 @@ TIMEOUT = DEFAULT_TIMEOUT
 
 # (client method name, output filename) – static endpoints downloaded unconditionally
 _STATIC_ENDPOINTS: Sequence[Tuple[str, str]] = [
-    ("get_active_dataset", "td-otbr-restapi-dataset-active.json"),
-    ("list_devices",       "td-otbr-restapi-devices.json"),
-    ("list_diagnostics",   "td-otbr-restapi-diagnostics.json"),
+    ("get_active_dataset", OTBR_RESTAPI_DATASET_ACTIVE_FILENAME),
+    ("list_devices",       OTBR_RESTAPI_DEVICES_FILENAME),
+    ("list_diagnostics",   OTBR_RESTAPI_DIAGNOSTICS_FILENAME),
 ]
 
 # Active data-dir context used by direct-entry verification tests.
@@ -194,7 +200,9 @@ def _save_device_diagnostics(
         device_id = device.get("id") if isinstance(device, dict) else None
         if not device_id:
             continue
-        filename = f"td-otbr-restapi-diagnostic-{device_id}.json"
+        filename = OTBR_RESTAPI_DEVICE_DIAGNOSTIC_FILENAME_TEMPLATE.format(
+            device_id=device_id
+        )
         output_file = resolve_data_file_path(filename, data_dir)
         try:
             diag = client.fetch_device_diagnostics(device_id, types=diag_types, raw=True)

@@ -2,6 +2,7 @@ import logging
 import json
 from typing import Sequence
 from td_json_key_normalizer import convert_keys_to_camel_case
+from td_const import OTBR_CLI_THREAD_NETWORK_INFO_FILENAME
 import util_network
 from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
 
@@ -15,7 +16,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         thread_network_info = util_network.fetch_thread_network_info()
         save_json_path = data_file_path(
-            "td-otbr-cli-thread-network-info.json", td_data_dir
+            OTBR_CLI_THREAD_NETWORK_INFO_FILENAME, td_data_dir
         )
         save_json_atomic(
             convert_keys_to_camel_case(thread_network_info),

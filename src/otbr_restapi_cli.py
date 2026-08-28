@@ -11,7 +11,17 @@ from pathlib import Path
 from typing import Any, Sequence
 from contextlib import redirect_stderr
 from util_data import resolve_data_file_path, resolve_data_dir
-from td_const import TD_DATA_DIR_ARG_HELP
+from td_const import (
+    OTBR_RESTAPI_ACTIONS_LIST_FILENAME,
+    OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
+    OTBR_RESTAPI_DEVICES_LIST_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_FILENAME,
+    TD_DATA_DIR_ARG_HELP,
+)
 
 from otbr_restapi_util import (
     add_common_rest_client_args,
@@ -827,14 +837,14 @@ def _make_progress_fn(total: int, enabled: bool):
 # ---------------------------------------------------------------------------
 
 _AUTO_OUTPUT_NAMES: dict[tuple[str, str], str] = {
-    ("devices", "list"):                "td-otbr-restapi-devices-list.json",
-    ("devices", "fetch"):               "td-otbr-restapi-devices-fetch.json",
-    ("diagnostics", "list"):            "td-otbr-restapi-diagnostics-list.json",
-    ("diagnostics", "fetch"):           "td-otbr-restapi-diagnostics-fetch.json",
-    ("diagnostics", "fetch-all"):       "td-otbr-restapi-diagnostics-fetch-all.json",
-    ("actions", "list"):                "td-otbr-restapi-actions-list.json",
-    ("mesh-diagnostics", "fetch"):      "td-otbr-restapi-mesh-diagnostics-fetch.json",
-    ("mesh-diagnostics", "fetch-all"):  "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+    ("devices", "list"):                OTBR_RESTAPI_DEVICES_LIST_FILENAME,
+    ("devices", "fetch"):               OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
+    ("diagnostics", "list"):            OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME,
+    ("diagnostics", "fetch"):           OTBR_RESTAPI_DIAGNOSTICS_FETCH_FILENAME,
+    ("diagnostics", "fetch-all"):       OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    ("actions", "list"):                OTBR_RESTAPI_ACTIONS_LIST_FILENAME,
+    ("mesh-diagnostics", "fetch"):      OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_FILENAME,
+    ("mesh-diagnostics", "fetch-all"):  OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
 }
 
 

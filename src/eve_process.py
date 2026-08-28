@@ -4,6 +4,7 @@ import logging
 from typing import Sequence
 
 import util_network
+from td_const import EVE_TOPOLOGY_FILENAME
 from td_json_key_normalizer import convert_keys_to_camel_case
 from util_convert import b64_to_extended_address
 from util_data import (
@@ -310,7 +311,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         eve_data_enhanced = enrich_eve_nodes(eve_data_raw)
 
         # Save json data structures for reference
-        file_path = data_file_path("td-eve-topology.json", td_data_dir)
+        file_path = data_file_path(EVE_TOPOLOGY_FILENAME, td_data_dir)
         save_json_atomic(convert_keys_to_camel_case(eve_data_enhanced), file_path)
 
         logging.info("Saved eve topology data to %s", file_path)

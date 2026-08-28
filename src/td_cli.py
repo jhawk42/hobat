@@ -9,7 +9,12 @@ import argparse
 import io
 from typing import Sequence
 from contextlib import redirect_stderr
-from td_const import TD_DATA_DIR_ARG, TD_DATA_DIR_ARG_HELP, TD_DATA_DIR_RESOLUTION_SUMMARY
+from td_const import (
+    LEGACY_THREADSTATIC_EXTADDR_FILENAME,
+    TD_DATA_DIR_ARG,
+    TD_DATA_DIR_ARG_HELP,
+    TD_DATA_DIR_RESOLUTION_SUMMARY,
+)
 
 # Note: The imports below are organized to reflect the different components of the project, such as OTBR CLI parsing, REST API interactions, dataset merging, and the web interface. This structure helps maintain clarity and separation of concerns within the codebase.
 import util_network
@@ -502,7 +507,7 @@ def _print_help_for_typo_or_invalid_command(
 
 def _load_extaddr_device_label_map() -> dict:
     """lazily load the extaddr-to-device-label map for scan commands."""
-    default_filename = "threadstatic-extaddr.json"
+    default_filename = LEGACY_THREADSTATIC_EXTADDR_FILENAME
     if os.path.exists(default_filename):
         return extaddr_device_label_map.load_extaddr_device_label_map(
             default_filename

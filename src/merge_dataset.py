@@ -36,7 +36,30 @@ from td_record_merge import (
     value_is_empty as record_value_is_empty,
     values_equivalent as record_values_equivalent,
 )
-from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
+from td_const import (
+    EVE_TOPOLOGY_FILENAME,
+    EXTADDR_DEVICE_LABEL_MAP_FILENAME,
+    MDNS_SCOPES_BR_FILENAME,
+    MDNS_SCOPES_HAP_FILENAME,
+    MDNS_SCOPES_MATTER_FILENAME,
+    MDNS_SCOPES_THREAD_FILENAME,
+    MERGED_TOPOLOGY_ALL_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME,
+    OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+    OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME,
+    OTBR_CLI_ROUTER_TABLE_FILENAME,
+    OTBR_CLI_THREAD_NETWORK_INFO_FILENAME,
+    OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
+    OTBR_RESTAPI_DEVICES_FILENAME,
+    OTBR_RESTAPI_DEVICES_LIST_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    TD_DATA_DIR_ARG_HELP,
+)
 from util_data import (
     load_optional_input,
     resolve_data_dir,
@@ -184,64 +207,64 @@ MERGE_IDENTITY_FIELDS = {
 # Phase 3: Source Precedence Rules (Priority: Higher = Wins)
 # Used to resolve conflicts when multiple sources provide same field
 SOURCE_PRECEDENCE = {
-    "td-static-extaddr-device-label.json": 101, # Highest priority
+    EXTADDR_DEVICE_LABEL_MAP_FILENAME: 101, # Highest priority
 
-    "td-otbr-cli-networkdiag-fetch-all.json": 100, # Highest priority (most detailed)
-    "td-otbr-cli-networkdiag-multicast-network.json": 99,
-    "td-otbr-cli-meshdiag-topology.json": 98,
-    "td-otbr-cli-meshdiag-router-neighbortables.json": 97,
-    "td-otbr-cli-meshdiag-router-childtables.json": 96,
-    "td-otbr-cli-router-table.json": 95,
+    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME: 100, # Highest priority (most detailed)
+    OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME: 99,
+    OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME: 98,
+    OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME: 97,
+    OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME: 96,
+    OTBR_CLI_ROUTER_TABLE_FILENAME: 95,
 
-    "td-otbr-restapi-diagnostics-fetch-all.json": 90, 
-    "td-otbr-restapi-mesh-diagnostics-fetch-all.json": 89,
-    "td-otbr-restapi-diagnostics-list.json": 88,
-    "td-otbr-restapi-diagnostics.json": 87,      
-    "td-otbr-restapi-devices-fetch.json": 86,
-    "td-otbr-restapi-devices-list.json": 85,
-    "td-otbr-restapi-devices.json": 84,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME: 90,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME: 89,
+    OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME: 88,
+    OTBR_RESTAPI_DIAGNOSTICS_FILENAME: 87,
+    OTBR_RESTAPI_DEVICES_FETCH_FILENAME: 86,
+    OTBR_RESTAPI_DEVICES_LIST_FILENAME: 85,
+    OTBR_RESTAPI_DEVICES_FILENAME: 84,
 
-    "td-eve-topology.json": 60,
+    EVE_TOPOLOGY_FILENAME: 60,
 
-    "td-mdns-scopes-thread.json": 50,
-    "td-mdns-scopes-br.json": 49,                # mDNS scopes (service discovery)
-    "td-mdns-scopes-hap.json": 48,
-    "td-mdns-scopes-matter.json": 47,
+    MDNS_SCOPES_THREAD_FILENAME: 50,
+    MDNS_SCOPES_BR_FILENAME: 49,                # mDNS scopes (service discovery)
+    MDNS_SCOPES_HAP_FILENAME: 48,
+    MDNS_SCOPES_MATTER_FILENAME: 47,
 }
 
 
 SYSTEM_INPUT_FILES: list[str] = [
-    "td-static-extaddr-device-label.json",
+    EXTADDR_DEVICE_LABEL_MAP_FILENAME,
 ]
 
 OTBR_CLI_INPUT_FILES: list[str] = [
-    "td-otbr-cli-router-table.json",
-    "td-otbr-cli-meshdiag-topology.json",
-    "td-otbr-cli-networkdiag-fetch-all.json",
-    "td-otbr-cli-networkdiag-multicast-network.json",
-    "td-otbr-cli-meshdiag-router-neighbortables.json",
-    "td-otbr-cli-meshdiag-router-childtables.json",
+    OTBR_CLI_ROUTER_TABLE_FILENAME,
+    OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+    OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
 ]
 
 OTBR_RESTAPI_INPUT_FILES: list[str] = [
-    "td-otbr-restapi-devices-fetch.json",
-    "td-otbr-restapi-diagnostics-fetch-all.json",
-    "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
-    "td-otbr-restapi-devices-list.json",
-    "td-otbr-restapi-diagnostics-list.json",
-    "td-otbr-restapi-diagnostics.json",
-    "td-otbr-restapi-devices.json"
+    OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DEVICES_LIST_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FILENAME,
+    OTBR_RESTAPI_DEVICES_FILENAME,
 ]
 
 MDNS_INPUT_FILES: list[str] = [
-    ##"td-mdns-scopes-thread.json",                 # mDNS Thread devices
-    "td-mdns-scopes-br.json",                    # mDNS Border Router discovery
-    "td-mdns-scopes-hap.json",                   # mDNS HomeKit devices
-    ##"td-mdns-scopes-matter.json",                # mDNS Matter devices   
+    ##MDNS_SCOPES_THREAD_FILENAME,                 # mDNS Thread devices
+    MDNS_SCOPES_BR_FILENAME,                       # mDNS Border Router discovery
+    MDNS_SCOPES_HAP_FILENAME,                      # mDNS HomeKit devices
+    ##MDNS_SCOPES_MATTER_FILENAME,                 # mDNS Matter devices
 ]
 
 EVE_INPUT_FILES: list[str] = [
-    "td-eve-topology.json",
+    EVE_TOPOLOGY_FILENAME,
 ]
 
 DEFAULT_FULL_INPUT_FILES: list[str] = (
@@ -1792,12 +1815,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     parser.add_argument(
         "--dataset-file",
-        default="td-otbr-cli-thread-network-info.json",
+        default=OTBR_CLI_THREAD_NETWORK_INFO_FILENAME,
         help="File that contains prefix_omr_ipv6addr_prefix.",
     )
     parser.add_argument(
         "--output",
-        default="td-merged-topology-all.json",
+        default=MERGED_TOPOLOGY_ALL_FILENAME,
         help="Output merged JSON file path.",
     )
     # add --include-groups 

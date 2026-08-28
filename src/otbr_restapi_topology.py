@@ -6,6 +6,13 @@ import time
 from pathlib import Path
 from typing import Any
 
+from td_const import (
+    OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+)
 from otbr_restapi_diagnostics import (
     _apply_border_router_enrichment,
     _apply_mac_enrichment,
@@ -40,7 +47,7 @@ def dispatch_topology(
     if not getattr(args, "skip_devices", False):
         logging.info("topology step 1: devices fetch ...")
         devices = client.fetch_device_collection(items_only=True)
-        path = data_dir / "td-otbr-restapi-devices-fetch.json"
+        path = data_dir / OTBR_RESTAPI_DEVICES_FETCH_FILENAME
         emit_rest_payload_output(devices, path, logging.getLogger(__name__))
         logging.info("topology step 1 done: %d device(s) → %s", len(devices), path)
     else:
@@ -84,9 +91,9 @@ def dispatch_topology(
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
             _apply_border_router_enrichment(diagnostics)
-        path = data_dir / "td-otbr-restapi-diagnostics-fetch-all.json"
+        path = data_dir / OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME
         emit_rest_payload_output(diagnostics, path, logging.getLogger(__name__))
-        outcome_path = data_dir / "td-otbr-restapi-diagnostics-fetch-all.outcome.json"
+        outcome_path = data_dir / OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME
         emit_rest_payload_output(
             diagnostic_outcome,
             outcome_path,
@@ -119,9 +126,9 @@ def dispatch_topology(
             on_progress=mesh_progress_fn,
         )
         mesh_results = mesh_outcome["items"]
-        path = data_dir / "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
+        path = data_dir / OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME
         emit_rest_payload_output(mesh_results, path, logging.getLogger(__name__))
-        mesh_outcome_path = data_dir / "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json"
+        mesh_outcome_path = data_dir / OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME
         emit_rest_payload_output(
             mesh_outcome,
             mesh_outcome_path,

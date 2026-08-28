@@ -10,7 +10,15 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Sequence
 
-from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP, TD_THREAD_MULTICAST_ADDRESSES_LINK_LOCAL_ALL_FTDS_AND_MEDS, TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS_AND_MEDS
+from td_const import (
+    EXTADDR_DEVICE_LABEL_MAP_FILENAME,
+    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+    OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME,
+    OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME,
+    TD_DATA_DIR_ARG_HELP,
+    TD_THREAD_MULTICAST_ADDRESSES_LINK_LOCAL_ALL_FTDS_AND_MEDS,
+    TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS_AND_MEDS,
+)
 import util_ot_ctl
 import util_network
 from util_data import data_file_path, resolve_data_dir, save_json_atomic, create_checkpoint_filename
@@ -52,11 +60,6 @@ from otbr_cli_networkdiag_parsers import (
 from otbr_cli_meshdiag_topology import (
     get_meshdiag_topology
 )
-
-
-NETWORKDIAG_MULTICAST_NETWORK_FILENAME = "td-otbr-cli-networkdiag-multicast-network.json"
-NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME = "td-otbr-cli-networkdiag-multicast-neighbors.json"
-NETWORKDIAG_FETCH_ALL_FILENAME = "td-otbr-cli-networkdiag-fetch-all.json"
 
 
 def fetch_network_diag_for_device(
@@ -1269,7 +1272,7 @@ def fetch_network_diag_topology(
 
     # Create checkpoint filename for saving intermediate results during topology mapping.
     checkpoint_filename = create_checkpoint_filename(
-        NETWORKDIAG_FETCH_ALL_FILENAME)
+        OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME)
     checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
     logging.debug("Checkpoint filepath: %s", checkpoint_filepath)
 
@@ -1433,7 +1436,7 @@ def print_network_diag_topology(topology):
 
 
 def save_topology_to_json_file(
-    data, filename=NETWORKDIAG_FETCH_ALL_FILENAME
+    data, filename=OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
 ):
     """Converts dict format to list format and saves to JSON."""
     network_map = []
@@ -1520,7 +1523,7 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
         "router_id"): router for router in router_table_data if router.get("router_id") is not None}
 
     checkpoint_filename = create_checkpoint_filename(
-        NETWORKDIAG_MULTICAST_NETWORK_FILENAME
+        OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME
     )
     checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
 
@@ -1534,7 +1537,7 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
 
     # Save the topology as JSON to file
     save_json_filename = data_file_path(
-        NETWORKDIAG_MULTICAST_NETWORK_FILENAME, td_data_dir
+        OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME, td_data_dir
     )
     save_topology_to_json_file(data, checkpoint_filepath)
     logging.info(
@@ -1586,7 +1589,7 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
         "router_id"): router for router in router_table_data if router.get("router_id") is not None}
 
     checkpoint_filename = create_checkpoint_filename(
-        NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME
+        OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME
     )
     checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
 
@@ -1602,7 +1605,7 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
 
     # Save the topology as JSON to file
     save_json_filename = data_file_path(
-        NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME, td_data_dir
+        OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME, td_data_dir
     )
     save_topology_to_json_file(data, checkpoint_filepath)
     logging.info(
@@ -1715,7 +1718,7 @@ def main_fetch_all(argv: Sequence[str] | None = None) -> int:
 
         # save the topology as JSON to file
         save_json_filepath = data_file_path(
-            NETWORKDIAG_FETCH_ALL_FILENAME, td_data_dir
+            OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME, td_data_dir
         )
         save_topology_to_json_file(
             networkdiagnostic_topology_data, save_json_filepath

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Sequence
 
 from extaddr_device_label_map import load_extaddr_device_label_map
+from td_const import OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME
 from td_json_key_normalizer import convert_keys_to_camel_case
 from otbr_cli_router_table import fetch_and_parse_router_table
 from otbr_cli_util import (
@@ -173,7 +174,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Resolve runtime paths using shared utility
     runtime = resolve_collector_runtime(
         datadir_arg=parse_datadir_from_argv(argv),
-        default_output_filename="td-otbr-cli-meshdiag-router-neighbortables.json",
+        default_output_filename=OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME,
     )
     
     # Load extaddr map with unified helper

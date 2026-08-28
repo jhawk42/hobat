@@ -22,7 +22,35 @@ from util_data import (
     format_data_dir_log_message,
     resolve_data_dir_with_source,
 )
-from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME, TD_DATA_DIR_ARG_HELP
+from td_const import (
+    EVE_TOPOLOGY_FILENAME,
+    EXTADDR_DEVICE_LABEL_MAP_FILENAME,
+    MDNS_SCOPES_BR_FILENAME,
+    MDNS_SCOPES_HAP_FILENAME,
+    MDNS_SCOPES_MATTER_FILENAME,
+    MDNS_SCOPES_THREAD_FILENAME,
+    MERGED_TOPOLOGY_ALL_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_CHILDIP6_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
+    OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME,
+    OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+    OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME,
+    OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME,
+    OTBR_CLI_ROUTER_TABLE_FILENAME,
+    OTBR_CLI_THREAD_NETWORK_INFO_FILENAME,
+    OTBR_RESTAPI_ACTIONS_LIST_FILENAME,
+    OTBR_RESTAPI_DATASET_ACTIVE_FILENAME,
+    OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
+    OTBR_RESTAPI_DEVICES_FILENAME,
+    OTBR_RESTAPI_DEVICES_LIST_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME,
+    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    TD_DATA_DIR_ARG_HELP,
+    THREAD_TOOLS_DIAGNOSTICS_FILENAME,
+)
 from merge_extaddr_device_label_map import (
     ExtaddrNotFoundError,
     normalize_valid_device_label,
@@ -67,77 +95,77 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
     return {
         # System
         # Fetches extaddr to device_label mapping file.
-        "td-static-extaddr-device-label.json": FileAction(
+        EXTADDR_DEVICE_LABEL_MAP_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["merge-extaddr","--merge-mdns-br"], action_cost_s=2
         ),
 
         # mdns
         # Fetches mDNS using zeroconf. Browse window is ~60 sec per service type.
-        "td-mdns-scopes-thread.json": FileAction(
+        MDNS_SCOPES_THREAD_FILENAME: FileAction(
             # ~60 sec browse
             max_age_s=default_max_age_s, action=["mdns", "thread"], action_cost_s=60, force_async=True,
         ),
-        "td-mdns-scopes-br.json": FileAction(
+        MDNS_SCOPES_BR_FILENAME: FileAction(
             # ~60 sec browse
             max_age_s=default_max_age_s, action=["mdns", "br"], action_cost_s=60, force_async=True
         ),
-        "td-mdns-scopes-hap.json": FileAction(
+        MDNS_SCOPES_HAP_FILENAME: FileAction(
             # ~60 sec browse
             max_age_s=default_max_age_s, action=["mdns", "hap"], action_cost_s=60, force_async=True
         ),
-        "td-mdns-scopes-matter.json": FileAction(
+        MDNS_SCOPES_MATTER_FILENAME: FileAction(
             # ~60 sec browse
             max_age_s=default_max_age_s, action=["mdns", "matter"], action_cost_s=60, force_async=True
         ),
 
         # otbr-cli
         # Single ot-ctl commands — near-instant.
-        "td-otbr-cli-thread-network-info.json": FileAction(
+        OTBR_CLI_THREAD_NETWORK_INFO_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["otbr-cli", "thread-network-info"], action_cost_s=2
         ),
-        "td-otbr-cli-router-table.json": FileAction(
+        OTBR_CLI_ROUTER_TABLE_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["otbr-cli", "router-table"], action_cost_s=2
         ),
         # meshdiag topology — single command, a few seconds.
-        "td-otbr-cli-meshdiag-topology.json": FileAction(
+        OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["otbr-cli", "meshdiag", "topology"], action_cost_s=6
         ),
         # Per-router meshdiag commands — ~1–2 s each router; 90 s for ~50-router network.
         # force_async=True: 90 s exceeds the browser-safe synchronous limit (~30 s).
-        "td-otbr-cli-meshdiag-router-childip6.json": FileAction(
+        OTBR_CLI_MESHDIAG_ROUTER_CHILDIP6_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-cli", "meshdiag", "childip6"],
             action_cost_s=90,
             force_async=True,
         ),
-        "td-otbr-cli-meshdiag-router-childtables.json": FileAction(
+        OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-cli", "meshdiag", "childtable"],
             action_cost_s=90,  # ~1–2 s per router
             force_async=True,
         ),
-        "td-otbr-cli-meshdiag-router-neighbortables.json": FileAction(
+        OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-cli", "meshdiag", "routerneighbortable"],
             action_cost_s=90,  # ~1–2 s per router
             force_async=True,
         ),
         # networkdiag — TLV request per router with retries; up to ~10 min on large networks.
-        "td-otbr-cli-networkdiag-fetch-all.json": FileAction(
+        OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-cli", "networkdiag", "fetch-all"],
             action_cost_s=600,  # ~10 min for ~60 routers with timeout retries
             force_async=True,
         ),
         # networkdiag multicast-network — TLV request per router with retries; up to ~16 seconds on large networks.
-        "td-otbr-cli-networkdiag-multicast-network.json": FileAction(
+        OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-cli", "networkdiag", "multicast-network"],
             action_cost_s=16,  # ~16 seconds with timeout retries
             force_async=True,
         ),
         # networkdiag multicast-neighbors — TLV request per router with retries; up to ~16 seconds on large networks.
-        "td-otbr-cli-networkdiag-multicast-neighbors.json": FileAction(
+        OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-cli", "networkdiag", "multicast-neighbors"],
             action_cost_s=16,  # ~16 seconds with timeout retries
@@ -146,31 +174,31 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
 
         # otbr-restapi
         # REST API downloads — single HTTP call, near-instant.
-        "td-otbr-restapi-dataset-active.json": FileAction(
+        OTBR_RESTAPI_DATASET_ACTIVE_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2
         ),
-        "td-otbr-restapi-devices.json": FileAction(
+        OTBR_RESTAPI_DEVICES_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2
         ),
-        "td-otbr-restapi-diagnostics.json": FileAction(
+        OTBR_RESTAPI_DIAGNOSTICS_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["otbr-restapi", "download"], action_cost_s=2
         ),
-        "td-otbr-restapi-devices-list.json": FileAction(
+        OTBR_RESTAPI_DEVICES_LIST_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["otbr-restapi", "devices", "list"], action_cost_s=2
         ),
-        "td-otbr-restapi-devices-fetch.json": FileAction(
+        OTBR_RESTAPI_DEVICES_FETCH_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-restapi", "devices", "fetch"],
             action_cost_s=40,
             force_async=True,
         ),
-        "td-otbr-restapi-diagnostics-list.json": FileAction(
+        OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["otbr-restapi", "diagnostics", "list"], action_cost_s=2
         ),
-        "td-otbr-restapi-actions-list.json": FileAction(
+        OTBR_RESTAPI_ACTIONS_LIST_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["otbr-restapi", "actions", "list"], action_cost_s=2
         ),
-        "td-otbr-restapi-mesh-diagnostics-fetch-all.json": FileAction(
+        OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=[
                 "otbr-restapi", "mesh-diagnostics", "fetch-all",
@@ -179,7 +207,7 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             action_cost_s=1200,
             force_async=True,
         ),
-        "td-otbr-restapi-diagnostics-fetch-all.json": FileAction(
+        OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["otbr-restapi", "diagnostics", "fetch-all", "--items-only"],
             action_cost_s=1200,
@@ -191,17 +219,17 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
         "Eve Thread Network Layout.evethreadlayout": FileAction(
             max_age_s=default_max_age_s, action="STATIC", action_cost_s=2
         ),
-        "td-eve-topology.json": FileAction(
+        EVE_TOPOLOGY_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["process-eve"], action_cost_s=2
         ),
 
         # Thread Tools app — externally managed static file.
-        "diagnostics.json": FileAction(
+        THREAD_TOOLS_DIAGNOSTICS_FILENAME: FileAction(
             max_age_s=default_max_age_s, action="STATIC", action_cost_s=2
         ),
 
         # Pre-merged output — produced by merge_dataset; treated as static here.
-        "td-merged-topology-all.json": FileAction(
+        MERGED_TOPOLOGY_ALL_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["merge-dataset"], action_cost_s=2
         ),
     }
