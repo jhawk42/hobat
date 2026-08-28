@@ -152,6 +152,47 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
             ],
         )
 
+    def test_static_download_saves_each_payload_before_collecting_the_next(self) -> None:
+        events = []
+        mock_client = MagicMock()
+
+        def collect(name, payload):
+            def _inner(raw):
+                self.assertTrue(raw)
+                events.append(f"collect:{name}")
+                return payload
+
+            return _inner
+
+        mock_client.get_active_dataset.side_effect = collect("dataset", {"dataset": True})
+        mock_client.list_devices.side_effect = collect("devices", [{"id": "dev-1"}])
+        mock_client.list_diagnostics.side_effect = collect("diagnostics", [{"id": "diag-1"}])
+
+        def save(_payload, output_file, _logger):
+            events.append(f"save:{output_file.name}")
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            script_module, "emit_rest_payload_output", side_effect=save
+        ):
+            exit_code = script_module._download_static_endpoints(
+                mock_client,
+                script_module.Path(temp_dir),
+                script_module._STATIC_ENDPOINTS,
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            events,
+            [
+                "collect:dataset",
+                "save:td-otbr-restapi-dataset-active.json",
+                "collect:devices",
+                "save:td-otbr-restapi-devices.json",
+                "collect:diagnostics",
+                "save:td-otbr-restapi-diagnostics.json",
+            ],
+        )
+
     def test_diagnostics_continue_after_device_failures(self) -> None:
         mock_client = MagicMock()
         mock_client.list_devices.return_value = [

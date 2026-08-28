@@ -3,6 +3,7 @@ import sys
 import subprocess
 import json
 import logging
+from pathlib import Path
 from typing import Sequence
 
 from td_const import (
@@ -134,7 +135,7 @@ def parse_router_table(output, extaddr_map=None):
     return routers
 
 
-def fetch_and_parse_router_table(extaddr_map=None):
+def fetch_and_parse_router_table(extaddr_map=None, output_path: Path | None = None):
     """
     Retrieves and parses the thread router table data.
 
@@ -150,7 +151,22 @@ def fetch_and_parse_router_table(extaddr_map=None):
     raw_output = fetch_router_table()
     if not raw_output:
         raise ValueError("Router table output is empty")
-    return parse_router_table(raw_output, extaddr_map)
+    router_table_data = parse_router_table(raw_output, extaddr_map)
+    if output_path is not None:
+        save_json_atomic(
+            convert_keys_to_camel_case(router_table_data), output_path
+        )
+        logging.debug(
+            "Saved router-table data into %s as JSON:\n%s",
+            output_path,
+            json.dumps(router_table_data, indent=4),
+        )
+        logging.info(
+            "Saved router table with %d entries into %s.",
+            len(router_table_data),
+            output_path,
+        )
+    return router_table_data
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -176,23 +192,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             extaddr_map = {}
 
-        router_table_data = fetch_and_parse_router_table(extaddr_map)
         save_path = data_file_path(
             OTBR_CLI_ROUTER_TABLE_FILENAME, td_data_dir)
-        save_json_atomic(convert_keys_to_camel_case(router_table_data), save_path)
-        logging.debug("Saved router-table data into %s as JSON:\n%s",
-                save_path, json.dumps(router_table_data, indent=4))
-        # log a summary of the data
-        logging.info(f"Saved router table with {len(router_table_data)} entries into {save_path}.")
+        fetch_and_parse_router_table(extaddr_map, output_path=save_path)
+        return 0
         
     except FileNotFoundError as e:
         logging.error(f"Error: File not found - {e}")
+        return 4
     except json.JSONDecodeError as e:
         logging.error(f"Error: Invalid JSON - {e}")
+        return 5
     except IOError as e:
         logging.error(f"Error: I/O error - {e}")
+        return 3
     except Exception as e:
         logging.error(f"Error: {e}")
+        return 3
 
 
 if __name__ == "__main__":

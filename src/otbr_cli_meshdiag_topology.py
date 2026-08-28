@@ -3,6 +3,7 @@ import subprocess
 import re
 import json
 import logging
+from pathlib import Path
 from typing import Sequence
 
 from td_const import (
@@ -343,7 +344,7 @@ def enrich_topology_routers(
 
 
 def get_meshdiag_topology(
-    extaddr_map=None, thread_network_info=None
+    extaddr_map=None, thread_network_info=None, output_path: Path | None = None
 ):
     """
     Retrieves, parses, and enhances the thread topology IP6 addresses and children data.
@@ -382,6 +383,29 @@ def get_meshdiag_topology(
         f"Meshdiag consolidation complete: {routers_count} unique routers, {children_count} unique children, and {total_devices_count} total devices found in topology map."
     )
 
+    if output_path is not None:
+        logging.info(
+            "Saving %d entries of meshdiag topology data into %s as JSON...",
+            len(enhanced_links),
+            output_path,
+        )
+        converted = convert_keys_to_camel_case(enhanced_links)
+        logging.info(
+            "Saved %d entries after converting keys to camel case for meshdiag topology data.",
+            len(converted),
+        )
+        save_json_atomic(converted, output_path)
+        logging.debug(
+            "Saved meshdiag topology data into %s as JSON:\n%s",
+            output_path,
+            json.dumps(converted, indent=4),
+        )
+        logging.info(
+            "Saved meshdiag topology with %d entries into %s.",
+            len(converted),
+            output_path,
+        )
+
     return enhanced_links
 
 
@@ -407,20 +431,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         thread_network_info = util_network.fetch_thread_network_info()
 
-        meshdiag_topology_data = get_meshdiag_topology(
-            extaddr_map, thread_network_info
-        )
         save_path = data_file_path(
             OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME, td_data_dir)
-
-        logging.info("Saving %d entries of meshdiag topology data into %s as JSON...", len(meshdiag_topology_data), save_path)
-        converted = convert_keys_to_camel_case(meshdiag_topology_data)
-        logging.info("Saved %d entries after converting keys to camel case for meshdiag topology data.", len(converted))
-        save_json_atomic(converted, save_path)
-
-        logging.debug("Saved meshdiag topology data into %s as JSON:\n%s",
-                      save_path, json.dumps(converted, indent=4))
-        logging.info(f"Saved meshdiag topology with {len(converted)} entries into {save_path}.")
+        get_meshdiag_topology(
+            extaddr_map, thread_network_info, output_path=save_path
+        )
         return 0
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         logging.error(f"Invalid payload while collecting meshdiag-topology: {exc}")

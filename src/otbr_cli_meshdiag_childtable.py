@@ -176,18 +176,44 @@ def fetch_meshdiag_child_table_for_device(parent_rloc16, router=None, extaddr_ma
     return router_child_table
 
 
-def fetch_all_meshdiag_child_tables(extaddr_map, on_result=None):
+def fetch_all_meshdiag_child_tables(
+    extaddr_map, on_result=None, output_path: Path | None = None
+):
     """Collect child tables for all active routers in the router table."""
 
     router_table_data = fetch_and_parse_router_table(extaddr_map)
-    
-    return collect_per_router(
+
+    result_callback = on_result
+    if output_path is not None:
+        checkpoint_path = output_path.parent / create_checkpoint_filename(
+            output_path.name
+        )
+
+        def result_callback(results, rloc16, router) -> None:
+            _write_checkpoint_best_effort(results, checkpoint_path)
+            if on_result is not None:
+                on_result(results, rloc16, router)
+
+    results = collect_per_router(
         router_table_data=router_table_data,
         collect_fn=fetch_meshdiag_child_table_for_device,
         extaddr_map=extaddr_map,
         collection_name="meshdiag childtable",
-        on_result=on_result,
+        on_result=result_callback,
     )
+    if output_path is not None:
+        save_json_atomic(convert_keys_to_camel_case(results), output_path)
+        logging.debug(
+            "Saved meshdiag router childtables data into %s as JSON:\n%s",
+            output_path,
+            json.dumps(results, indent=4),
+        )
+        logging.info(
+            "Saved meshdiag router childtables with %d entries into %s.",
+            len(results),
+            output_path,
+        )
+    return results
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -205,26 +231,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     extaddr_map = load_extaddr_map_or_empty(runtime.extaddr_map_path)
 
     try:
-        checkpoint_path = runtime.td_data_dir / create_checkpoint_filename(
-            runtime.output_path.name
-        )
-
-        def _on_result(results, _rloc16, _router) -> None:
-            _write_checkpoint_best_effort(results, checkpoint_path)
-
-        router_child_tables = fetch_all_meshdiag_child_tables(
+        fetch_all_meshdiag_child_tables(
             extaddr_map,
-            on_result=_on_result,
+            output_path=runtime.output_path,
         )
-
-        save_json_atomic(
-            convert_keys_to_camel_case(router_child_tables),
-            runtime.output_path,
-        )
-
-        logging.debug("Saved meshdiag router childtables data into %s as JSON:\n%s",
-                      runtime.output_path, json.dumps(router_child_tables, indent=4))
-        logging.info(f"Saved meshdiag router childtables with {len(router_child_tables)} entries into {runtime.output_path}.")
         return 0
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         logging.error(f"Invalid payload while collecting meshdiag-childtable: {exc}")

@@ -329,7 +329,8 @@ def fetch_network_diag_topology_multicast_network(
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
     router_table_by_router_id: dict | None = None,
-    checkpoint_filepath: str | None = None
+    checkpoint_filepath: str | None = None,
+    final_output_path: str | None = None,
 ) -> dict:
     """
     Queries network diagnostic data via multicast to all Thread devices in the mesh (ff03::1).
@@ -344,20 +345,31 @@ def fetch_network_diag_topology_multicast_network(
     Returns:
         Dict keyed by rloc16 with device records from all mesh devices
     """
-    return fetch_network_diag_multicast(
+    result = fetch_network_diag_multicast(
         multicast_addr=TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS_AND_MEDS,  # "ff03::1"
         extaddr_map=extaddr_map,
         thread_network_info=thread_network_info,
         router_table_by_router_id=router_table_by_router_id,
         checkpoint_filepath=checkpoint_filepath
     )
+    if checkpoint_filepath is not None:
+        save_topology_to_json_file(result, checkpoint_filepath)
+        logging.info(
+            "event=checkpoint_write command=otbr-cli networkdiag multicast-network checkpoint_file=%s records=%d stage=final",
+            checkpoint_filepath,
+            len(result),
+        )
+    if final_output_path is not None:
+        save_topology_to_json_file(result, final_output_path)
+    return result
 
 
 def fetch_network_diag_topology_multicast_neighbors(
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
     router_table_by_router_id: dict | None = None,
-    checkpoint_filepath: str | None = None
+    checkpoint_filepath: str | None = None,
+    final_output_path: str | None = None,
 ) -> dict:
     """
     Queries network diagnostic data via multicast to immediate one-hop neighbors (ff02::1).
@@ -374,13 +386,23 @@ def fetch_network_diag_topology_multicast_neighbors(
     Returns:
         Dict keyed by rloc16 with device records from immediate one-hop neighbors
     """
-    return fetch_network_diag_multicast(
+    result = fetch_network_diag_multicast(
         multicast_addr=TD_THREAD_MULTICAST_ADDRESSES_LINK_LOCAL_ALL_FTDS_AND_MEDS,  # "ff02::1"
         extaddr_map=extaddr_map,
         thread_network_info=thread_network_info,
         router_table_by_router_id=router_table_by_router_id,
         checkpoint_filepath=checkpoint_filepath
     )
+    if checkpoint_filepath is not None:
+        save_topology_to_json_file(result, checkpoint_filepath)
+        logging.info(
+            "event=checkpoint_write command=otbr-cli networkdiag multicast-neighbors checkpoint_file=%s records=%d stage=final",
+            checkpoint_filepath,
+            len(result),
+        )
+    if final_output_path is not None:
+        save_topology_to_json_file(result, final_output_path)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1260,6 +1282,8 @@ def fetch_network_diag_topology(
     td_data_dir=None,
     child_fetch_fast_mode_default: bool = True,
     child_fetch_detail_mode_default: bool = False,
+    checkpoint_filepath=None,
+    final_output_path=None,
 ):
     """Maps the full network topology and returns a Python dictionary."""
 
@@ -1271,9 +1295,11 @@ def fetch_network_diag_topology(
     network_topology_map = {}
 
     # Create checkpoint filename for saving intermediate results during topology mapping.
-    checkpoint_filename = create_checkpoint_filename(
-        OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME)
-    checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
+    if checkpoint_filepath is None and td_data_dir is not None:
+        checkpoint_filename = create_checkpoint_filename(
+            OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+        )
+        checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
     logging.debug("Checkpoint filepath: %s", checkpoint_filepath)
 
     # Track extaddr -> rloc16 mapping to detect duplicate devices with changed RLOC16
@@ -1361,6 +1387,9 @@ def fetch_network_diag_topology(
         f"Poll consolidation complete: {len(network_topology_map)} unique devices found in topology map."
     )
 
+    if final_output_path is not None:
+        save_topology_to_json_file(network_topology_map, final_output_path)
+
     return network_topology_map
 
 
@@ -1439,6 +1468,9 @@ def save_topology_to_json_file(
     data, filename=OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
 ):
     """Converts dict format to list format and saves to JSON."""
+    if filename is None:
+        return
+
     network_map = []
 
     for rloc, data in data.items():
@@ -1528,24 +1560,19 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
     checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
 
     # Get the multicast topology data
+    save_json_filename = data_file_path(
+        OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME, td_data_dir
+    )
     data = fetch_network_diag_topology_multicast_network(
-        extaddr_map, thread_network_info, router_table_by_router_id, checkpoint_filepath
+        extaddr_map,
+        thread_network_info,
+        router_table_by_router_id,
+        checkpoint_filepath=checkpoint_filepath,
+        final_output_path=save_json_filename,
     )
 
     # Print the topology in tree format to console
     print_network_diag_topology(data)
-
-    # Save the topology as JSON to file
-    save_json_filename = data_file_path(
-        OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME, td_data_dir
-    )
-    save_topology_to_json_file(data, checkpoint_filepath)
-    logging.info(
-        "event=checkpoint_write command=otbr-cli networkdiag multicast-network checkpoint_file=%s records=%d stage=final",
-        checkpoint_filepath,
-        len(data) if isinstance(data, dict) else 0,
-    )
-    save_topology_to_json_file(data, save_json_filename)
 
     # Print the raw topology dictionary as JSON to console for debugging
     logging.debug(json.dumps(data, indent=4))
@@ -1594,26 +1621,21 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
     checkpoint_filepath = data_file_path(checkpoint_filename, td_data_dir)
 
     # Get the multicast topology data
+    save_json_filename = data_file_path(
+        OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME, td_data_dir
+    )
     data = fetch_network_diag_topology_multicast_neighbors(
-        extaddr_map, thread_network_info, router_table_by_router_id, checkpoint_filepath
+        extaddr_map,
+        thread_network_info,
+        router_table_by_router_id,
+        checkpoint_filepath=checkpoint_filepath,
+        final_output_path=save_json_filename,
     )
 
     # Print the topology in tree format to console
     logging.debug("Final multicast neighbors topology data structure:\n%s", json.dumps(
         data, indent=4))
     print_network_diag_topology(data)
-
-    # Save the topology as JSON to file
-    save_json_filename = data_file_path(
-        OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME, td_data_dir
-    )
-    save_topology_to_json_file(data, checkpoint_filepath)
-    logging.info(
-        "event=checkpoint_write command=otbr-cli networkdiag multicast-neighbors checkpoint_file=%s records=%d stage=final",
-        checkpoint_filepath,
-        len(data) if isinstance(data, dict) else 0,
-    )
-    save_topology_to_json_file(data, save_json_filename)
 
     # Print the raw topology dictionary as JSON to console for debugging
     logging.debug("Raw multicast neighbors topology data as JSON:\n%s",
@@ -1703,6 +1725,14 @@ def main_fetch_all(argv: Sequence[str] | None = None) -> int:
         expand_children = args.expand_children
         logging.info(f"Expand children is set to {expand_children}")
 
+        save_json_filepath = data_file_path(
+            OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME, td_data_dir
+        )
+        checkpoint_filepath = data_file_path(
+            create_checkpoint_filename(OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME),
+            td_data_dir,
+        )
+
         # Get the networkdiagnostic topology data
         networkdiagnostic_topology_data = fetch_network_diag_topology(
             extaddr_map,
@@ -1711,18 +1741,12 @@ def main_fetch_all(argv: Sequence[str] | None = None) -> int:
             td_data_dir=td_data_dir,
             child_fetch_fast_mode_default=args.child_fetch_fast_mode_default,
             child_fetch_detail_mode_default=args.child_fetch_detail_mode_default,
+            checkpoint_filepath=checkpoint_filepath,
+            final_output_path=save_json_filepath,
         )
 
         # print the topology in tree format to console
         print_network_diag_topology(networkdiagnostic_topology_data)
-
-        # save the topology as JSON to file
-        save_json_filepath = data_file_path(
-            OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME, td_data_dir
-        )
-        save_topology_to_json_file(
-            networkdiagnostic_topology_data, save_json_filepath
-        )
 
         # Print the raw topology dictionary as JSON to console for debugging
         logging.debug("Raw topology data as JSON:\n%s", json.dumps(
