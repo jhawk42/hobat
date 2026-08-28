@@ -245,6 +245,37 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | `_cleanup_job_registry_loop` | `td_webserver.py` | Prevents unbounded growth of `_job_registry` in long-lived server processes |
 | Missing-file resilience helpers | `util_data.py`, `td_cli.py`, collector/merge modules | Provide consistent required/optional input handling and preserve explicit exit codes |
 
+### Persistence Ownership
+
+Command-level collectors own mandatory final snapshots. Their success ordering is:
+
+```text
+collect -> normalize final payload -> atomic save -> return collected data
+```
+
+- OTBR CLI `main*()` functions resolve arguments and data-directory paths, invoke
+    collectors, present results, and map exceptions to exit codes. They do not write
+    moved final snapshots after a collector returns.
+- REST resource dispatchers own command output because they know the command and
+    resolved output path. `otbr_restapi_cli.run_cli()` retains stdout rendering,
+    record summaries, and exit-code mapping; low-level `OTBRRestApiClient` transport
+    methods remain filesystem-free.
+- JSON snapshots use `save_json_atomic()` directly or
+    `emit_rest_payload_output()`. Active-dataset text output uses
+    `save_text_atomic()` so its unquoted format is also replaced atomically.
+- Progressive `.partial.json` checkpoints are separate from mandatory final
+    snapshots. Explicitly best-effort checkpoint helpers warn and continue;
+    networkdiag checkpoint failures propagate. A checkpoint never substitutes for
+    the exactly-once final save.
+- Reusable collectors accept optional output paths and remain side-effect free
+    when no path is supplied. Composite workflows pass paths deliberately: the
+    networkdiag fetch-all collector refreshes router-table, meshdiag-topology, and
+    multicast-network snapshots before consuming those collections, while pure
+    transformations and in-place enrichment stages create no standalone files.
+- Project-owned Python JSON filenames and templates are defined in `td_const.py`.
+    Browser-side filename literals remain a separately tested cross-language
+    contract.
+
 ---
 
 ## Source File Catalogue
@@ -254,13 +285,13 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | File | Purpose |
 |---|---|
 | `otbr_restapi_download.py` | Fixed-target downloader: owns the ordered static endpoint writes and per-device diagnostics updates, and writes their snapshots to local JSON files. |
-| `otbr_restapi_util.py` | Full-featured REST API client (`OTBRRestApiClient`).  Returns **flattened** Python objects by default (JSON:API `id`/`type`/`attributes` merged into a single dict). Also contains the shared exception hierarchy (`OTBRHTTPError`, `OTBRConnectionError`, etc.). |
-| `otbr_restapi_cli.py` | CLI front-end for the flattened client.  Dispatches to handler modules for `node`, `devices`, `diagnostics`, `actions`, `mesh-diagnostics`, and `topology` commands. |
-| `otbr_restapi_node.py` | REST CLI handlers for node, state, and dataset commands. |
-| `otbr_restapi_devices.py` | REST CLI handlers for device list/get/fetch commands. |
-| `otbr_restapi_diagnostics.py` | REST CLI handlers for diagnostics list/get/fetch commands and TLV presets. |
-| `otbr_restapi_actions.py` | REST CLI handlers for action list/get/enqueue commands. |
-| `otbr_restapi_mesh_diagnostics.py` | REST CLI helpers and handlers for child tables, child IPv6 addresses, router neighbours, and mesh-diagnostic batch fetches. |
+| `otbr_restapi_util.py` | Full-featured, filesystem-free REST API client (`OTBRRestApiClient`). Returns **flattened** Python objects by default and provides shared exception and atomic command-output helpers. |
+| `otbr_restapi_cli.py` | CLI front-end for the flattened client. Resolves output paths, dispatches to resource handlers, renders stdout, reports record counts, and maps exceptions; it does not write final files after dispatch. |
+| `otbr_restapi_node.py` | REST CLI handlers for node, state, and dataset commands; owns optional final JSON or active-dataset text output. |
+| `otbr_restapi_devices.py` | REST CLI handlers for device list/get/fetch commands; owns final output and fetch checkpoints. |
+| `otbr_restapi_diagnostics.py` | REST CLI handlers for diagnostics list/get/fetch commands and TLV presets; owns enriched final output and fetch-all checkpoints. |
+| `otbr_restapi_actions.py` | REST CLI handlers for action list/get/enqueue commands and their optional final output. |
+| `otbr_restapi_mesh_diagnostics.py` | REST CLI helpers and handlers for child tables, child IPv6 addresses, router neighbours, and batch fetches; owns final output and fetch-all checkpoints. |
 | `otbr_restapi_topology.py` | Combined topology sweep for devices, diagnostics, and mesh diagnostics. |
 
 
@@ -275,7 +306,7 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 | `otbr_cli_meshdiag_routerneighbortable.py` | `meshdiag routerneighbortable <rloc16>` (once per router) | `td-otbr-cli-meshdiag-router-neighbortables.json` | For every router in the router table, collects per-neighbour details: RLOC16, extaddr, Thread version, RSS (avg/last/margin), frame/message error rates, and connection time.  Handles `ResponseTimeout` gracefully. |
 | `otbr_cli_networkdiag_parsers.py` | `networkdiag get` parser helpers | n/a | Parser helpers for networkdiag output sections, TLV decoding, and record normalization. |
 | `otbr_cli_networkdiag_util.py` | `networkdiag get` utilities | n/a | Shared utilities for networkdiag collection, device classification, and record merging. |
-| `otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (unicast per router) or `networkdiag get ff03::1/ff02::1 <tlvs>` (multicast) | `td-otbr-cli-networkdiag-fetch-all.json` (unicast poll), `td-otbr-cli-networkdiag-multicast-network.json` (multicast all), `td-otbr-cli-networkdiag-multicast-neighbors.json` (multicast neighbors) | Collects network diagnostic data from Thread devices via unicast and multicast modes. Child expansion uses frozen fast/detail attempt policies, stable canonical-RLOC16 target discovery, a mutation-free retry executor, collector-quality reconciliation through `_upsert_device_record(...)`, and one full-topology checkpoint after each effective mutation. Every device parser retains the existing TLV, role, address, counter, and route enrichment behavior. |
+| `otbr_cli_networkdiag_topology.py` | `networkdiag get <rloc-ipv6> <tlvs>` (unicast per router) or `networkdiag get ff03::1/ff02::1 <tlvs>` (multicast) | `td-otbr-cli-networkdiag-fetch-all.json` (unicast poll), `td-otbr-cli-networkdiag-multicast-network.json` (multicast all), `td-otbr-cli-networkdiag-multicast-neighbors.json` (multicast neighbors) | Collects network diagnostic data via unicast and multicast. Fetch-all deliberately persists router-table, meshdiag-topology, and multicast-network stage collections before consuming them, retains progressive aggregate checkpoints, and writes its mandatory aggregate snapshot after child expansion. Child retries and reconciliation preserve the existing TLV, role, address, counter, and route behavior. |
 | `otbr_cli_thread_network_info.py` | `dataset active`, `prefix meshlocal`, `br omrprefix favored` | `td-otbr-cli-thread-network-info.json` | Collects the active Thread dataset (channel, PAN ID, extended PAN ID, mesh-local prefix, network name, etc.) and derives the mesh-local IPv6 RLOC prefix and the OMR prefix for use by other collectors. |
 
 ### Data Collection — Other Sources
@@ -306,8 +337,8 @@ Layer 1 — data/td-static-extaddr-device-label.json  (updated atomically)
 
 | File | Purpose |
 |---|---|
-| `td_const.py` | Shared constants used across all modules: `TD_DATA_DIR_ENV_VAR`, `TD_DATA_DIR_ARG`, `TD_DATA_DIR_DOCKER_DEFAULT`, `TD_DATA_DIR_LOCAL_DEFAULT`, `TD_DATA_DIR_RESOLUTION_SUMMARY`, `TD_DATA_DIR_ARG_HELP`, and `EXTADDR_DEVICE_LABEL_MAP_FILENAME`.  The `td_` prefix aligns this project-level file with `td_cli.py` and `td_webserver.py`. |
-| `util_data.py` | Data-directory resolution utilities.  Provides `TDDataDirSource` (enum), `TDDataDirResolution` (dataclass), `parse_datadir_from_argv()`, `resolve_data_dir()`, `resolve_data_dir_with_source()`, `ensure_data_dir_exists()`, `format_data_dir_log_message()`, `data_file_path()`, `resolve_data_file_path()`, and `save_json_atomic()`.  Implements the `--datadir` CLI → `TD_DATA_DIR` env → `/data` → `./data` precedence chain. |
+| `td_const.py` | Shared data-directory constants and the authoritative definitions for every project-owned Python JSON filename, immutable closed filename mapping, and validated dynamic filename template. |
+| `util_data.py` | Data-directory resolution utilities and atomic `save_json_atomic()` / `save_text_atomic()` writers. Implements the `--datadir` CLI → `TD_DATA_DIR` env → `/data` → `./data` precedence chain. |
 | `util_ot_ctl.py` | Low-level wrapper that runs `ot-ctl <command>` inside a named Docker container via `docker exec`.  The container name defaults to `"otbr"` and can be overridden with `TD_OTBR_CONTAINER_NAME`.  Docker container use itself can be disabled via `TD_OTBR_CONTAINER_USE=0`, which falls back to running `ot-ctl` locally without `docker exec`.  The subprocess timeout defaults to 30 s and is overridable via `TD_OT_CTL_TIMEOUT`. |
 | `util_network.py` | Network helpers: mesh-local and OMR prefix retrieval, IPv6 address prefix formatting, RLOC16 manipulation, OMR address matching in an address list, and full `get_network_dataset_info()` aggregator. |
 | `util_convert.py` | Base64 ↔ hex conversion for 64-bit extended addresses (handles JSON-escaped slashes and optional byte-order reversal for 802.15.4 little-endianness). |
