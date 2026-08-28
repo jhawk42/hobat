@@ -367,9 +367,15 @@ body {
 
 .device-status-content {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
   padding: 4px 10px;
+}
+
+.device-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 #panel-dataset-inner {
