@@ -26,7 +26,10 @@ Use [README.md](README.md) for operator-facing behavior, setup, and runtime expe
 ## Validation
 
 - Prefer the narrowest validation that matches the touched area: targeted `pytest` tests for Python, focused browser/UI checks for `tdash.html`, `tdash.css`, or `src/js/*.js`, and route/data-flow checks for webserver changes.
-- For frontend changes, use the linked browser when available to confirm layout, scrolling, filtering, and dataset-specific behavior did not regress. Start the td_webserver.py backend using port 9178 to test backend changes and front end changes.
+- For frontend changes, use the linked browser and start `td_webserver.py` on port 9178 with `--datadir ./data`. Enable Cache Only before the first Sync, derive source/dataset/filter inventories from rendered DOM options, and hash `data/` before and after broad acceptance runs so tests cannot silently repair fixtures through live calls.
+- In Playwright, attach console, page-error, failed-request, and HTTP-status instrumentation before reload and track the active source, dataset, view, and filter value. For hidden selects, set `value` and dispatch a bubbling `change` event; if actionability waits are flaky, use a native click and poll `#btn-fetch` plus `#view-status-line-content` directly.
+- Validate topology from the visible `Showing: N nodes, M links` status, positive canvas dimensions, and nonblank pixels after stabilization; zero links are valid. Validate tables from rendered rows/headers, `.table-wrap` scrolling, and no document-level mobile overflow. Exercise only offered options, require exact baseline restoration after resets, accept HTTP 200/304, and classify explicit error states rather than the bare word `Error` in diagnostic labels.
+- Stop the test server, confirm port 9178 is free, and verify cached file hashes are unchanged after browser validation.
 - Preserve existing regression coverage patterns in `tests/`; extend nearby tests instead of adding broad new harnesses when a focused test will do.
 
 ## Conventions
