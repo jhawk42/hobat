@@ -2,13 +2,13 @@
 
 Hobat is a Thread mesh dashboard and toolkit for visualizing topology, diagnosing device health, and managing multi-source network data with low mesh impact. It collects data from OTBR CLI, OTBR REST API, mDNS scopes, and optional Eve exports, then serves an interactive topology and table experience from local cache snapshots. This cache-first approach improves troubleshooting speed while reducing live query load on constrained Thread devices.
 
-Environment: Hobat runs on Debian-based Linux in a Docker container or directly on a host. The dashboard is browser-based and works well on desktops and phones. See [Hobat backstory](https://github.com/jhawk42/smarthome/blob/main/tdash/tdash_backstory.md) for details.
+Environment: Hobat runs on Debian-based Linux in a Docker container or directly on a host. The dashboard is browser-based and works well on desktops and phones. See [Hobat backstory](https://github.com/jhawk42/smarthome/blob/main/hobat/backstory.md) for details.
 
 
-<a href="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash1.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash1.jpg?raw=true" alt="tdash1" width="200px" >
-<a href="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash2.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash2.jpg?raw=true" alt="tdash2" width="200px" >
-<a href="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash3.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash3.jpg?raw=true" alt="tdash3"  height="150px" >
-<a href="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash4.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash4.jpg?raw=true" alt="tdash4" height="150px" >
+<a href="https://github.com/jhawk42/smarthome/blob/main/hobat/images/image1.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/hobat/images/image1.jpg?raw=true" alt="image1" width="200px" >
+<a href="https://github.com/jhawk42/smarthome/blob/main/hobat/images/image2.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/hobat/images/image2.jpg?raw=true" alt="image2" width="200px" >
+<a href="https://github.com/jhawk42/smarthome/blob/main/hobat/images/image3.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/hobat/images/image3.jpg?raw=true" alt="image3"  height="150px" >
+<a href="https://github.com/jhawk42/smarthome/blob/main/hobat/images/image4.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/hobat/images/image4.jpg?raw=true" alt="image4" height="150px" >
 
 
 Jump to: [Getting Started](#getting-started) [help docs](./doc/) [td_cli](./doc/help_td_cli.md) [td cli rest-api](./doc/help_td_restapi_cli.md) [td_webserver](./doc/help_td_webserver.md) [env vars](./doc/help_env_vars.md) [openthread](https://github.com/openthread/openthread)
