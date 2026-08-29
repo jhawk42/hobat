@@ -23,7 +23,7 @@ LABEL \
     io.hass.type="app" \
     io.hass.arch="aarch64|amd64"
 
-# Install runtime Python, Bash for /init, and the Docker CLI
+# Install runtime Python, Bash, and the Docker CLI
 RUN apk add --no-cache python3 bash docker-cli
 
 # Copy the pre-compiled virtual environment from the builder
@@ -35,11 +35,12 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy init script to the container
-COPY rootfs /
+# Copy and set permissions for the run script
+COPY addon_hobat/run.sh /run.sh
+RUN chmod a+x /run.sh
 
 # Copy the application code
-COPY . .
+COPY src /app/src
 
 # Set the working directory to where td_cli.py is located
 WORKDIR /app/src
@@ -50,5 +51,5 @@ ENV SCRIPT_NAME=td_webserver.py
 ENV HOST=0.0.0.0
 ENV TD_DATA_DIR=/data
 
-# Command to run the script via init
-CMD ["/init"]
+# Command to run the script
+CMD [ "/run.sh" ]
