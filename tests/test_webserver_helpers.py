@@ -150,6 +150,17 @@ class TestShouldRegenerate(unittest.TestCase):
         p = self._write(mtime_offset=-120.0)
         self.assertTrue(_should_regenerate(p, self.fa, no_cache=False))
 
+    def test_request_max_age_can_accept_server_stale_file(self) -> None:
+        p = self._write(mtime_offset=-120.0)
+        self.assertFalse(
+            _should_regenerate(
+                p,
+                self.fa,
+                no_cache=False,
+                request_max_age_s=31536000,
+            )
+        )
+
     def test_file_at_exact_boundary_is_fresh(self) -> None:
         # mtime set to now -> age ~= 0, well within 60 s
         p = self._write()

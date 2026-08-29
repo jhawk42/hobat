@@ -1,8 +1,8 @@
-# tdash - Thread mesh dashboard and tools
+# Hobat - Thread mesh dashboard and tools
 
-tdash is a Thread mesh dashboard and toolkit for visualizing topology, diagnosing device health, and managing multi-source network data with low mesh impact. It collects data from OTBR CLI, OTBR REST API, mDNS scopes, and optional Eve exports, then serves an interactive topology and table experience from local cache snapshots. This cache-first approach improves troubleshooting speed while reducing live query load on constrained Thread devices.
+Hobat is a Thread mesh dashboard and toolkit for visualizing topology, diagnosing device health, and managing multi-source network data with low mesh impact. It collects data from OTBR CLI, OTBR REST API, mDNS scopes, and optional Eve exports, then serves an interactive topology and table experience from local cache snapshots. This cache-first approach improves troubleshooting speed while reducing live query load on constrained Thread devices.
 
-Environment: tdash runs on Debian-based Linux in a Docker container or directly on a host. The dashboard is browser-based and works well on desktops and phones. See [tdash backstory](https://github.com/jhawk42/smarthome/blob/main/tdash/tdash_backstory.md) for details.
+Environment: Hobat runs on Debian-based Linux in a Docker container or directly on a host. The dashboard is browser-based and works well on desktops and phones. See [Hobat backstory](https://github.com/jhawk42/smarthome/blob/main/tdash/tdash_backstory.md) for details.
 
 
 <a href="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash1.jpg?raw=true"> <img src="https://github.com/jhawk42/smarthome/blob/main/tdash/images/tdash1.jpg?raw=true" alt="tdash1" width="200px" >
@@ -15,7 +15,7 @@ Jump to: [Getting Started](#getting-started) [help docs](./doc/) [td_cli](./doc/
 
 ## Overview
 
-tdash follows a cache-first operating model: collect Thread data from OTBR and related sources, store normalized snapshots in the local data directory, and run most dashboard analysis from cache.
+Hobat follows a cache-first operating model: collect Thread data from OTBR and related sources, store normalized snapshots in the local data directory, and run most dashboard analysis from cache.
 
 The dashboard renders both topology and table views and supports diagnostics workflows across node roles, link quality, MAC counters, and MLE counters. You can trigger refresh actions when you need fresh data, while keeping day-to-day analysis low impact on the live mesh.
 
@@ -89,7 +89,7 @@ See [Dashboard Features](#dashboard-features)
 
 ### Python webserver
 
-`td_webserver` hosts the dashboard UI and provides REST API endpoints used by the dashboard for cached data access and refresh operations. For longer actions, the webserver launches data collection workflows and serves results from the cache model used by tdash.
+`td_webserver` hosts the dashboard UI and provides REST API endpoints used by the dashboard for cached data access and refresh operations. For longer actions, the webserver launches data collection workflows and serves results from the cache model used by Hobat.
 
 ### Extended MAC Address (extAddress) to deviceLabel
 
@@ -145,7 +145,7 @@ Eve app layout json file: Enhances and visualizes the eve layout file data.
 
 ## Getting Started
 
-The tdash dashboard and tools can run in a docker container or directly the host.
+The Hobat dashboard and tools can run in a docker container or directly on the host.
 
 ### Test suite
 
@@ -174,42 +174,42 @@ python3 -m pytest -q --cov
 
 Note: **Setup: Manual on a host** - To manually run on a host, git clone this repro onto the host. See details below to manually run td_cli.py and td_webserver.py commands.
 
-### Pull tdash docker container
+### Pull hobat docker container
 
-The tdash docker container hosts the td_cli and web server.
+The hobat docker container hosts the td_cli and web server.
 
 ```bash
-docker pull ghcr.io/jhawk42/tdash:latest
+docker pull ghcr.io/jhawk42/hobat:latest
 ```
 
 
 ### Create Data Directrory
 
-tdash uses a data directory for:
+Hobat uses a data directory for:
   - Caching Thread device data
   - Extended MAC Address to device label via a side json file
   - Loading eve layout file
 
-Create a data directory and map this directory into the docker container via docker run. See the ***Start the tdash docker container*** section
+Create a data directory and map this directory into the docker container via docker run. See the ***Start the hobat docker container*** section
 
 ```bash
 mkdir $PWD/data
 export TD_DATA_DIR=$PWD/data
 ```
 
-The TD_DATA_DIR environment variable is used by the tdash tools (cli, webserver, container) to find the data directory. If not specified in the docker container the TD_DATA_DIR will automatically resolve to: /data directory within the docker container.
+The TD_DATA_DIR environment variable is used by the Hobat tools (cli, webserver, container) to find the data directory. If not specified in the docker container the TD_DATA_DIR will automatically resolve to: /data directory within the docker container.
 
 
 ### Copy Eve layout file (optional)
 
-To use the tdash dashbaord to visualize Eve app layout shared file, copy the 'Eve Thread Network Layout.evethreadlayout' into the data directory. 
+To use the Hobat dashboard to visualize an Eve app layout shared file, copy the 'Eve Thread Network Layout.evethreadlayout' into the data directory.
 Steps: In Eve app -> Settings -> Thread Network -> wait a couple of minutes (5 min+ for larger thread networks) for the list to populate -> click the share icon in the upper right -> Save to files 
-- Quick: Save to a usb drive attached top the phone. On the Linux machine copy from usb drive into the tdash data directory.
-- Long: Save to iCloud Drive Download -> Desktop -> use scp to copy to Linux machine tdash data directory running tdash tools.
+- Quick: Save to a usb drive attached top the phone. On the Linux machine copy from usb drive into the Hobat data directory.
+- Long: Save to iCloud Drive Download -> Desktop -> use scp to copy to the Linux machine running the Hobat tools.
 
 Copy from desktop to Linux
 ```bash
-scp "Eve Thread Network Layout.evethreadlayout" user@hostname:/your/directory/here/tdash/data
+scp "Eve Thread Network Layout.evethreadlayout" user@hostname:/your/directory/here/hobat/data
 ```
 
 ### Create Device Labeling file
@@ -217,7 +217,7 @@ scp "Eve Thread Network Layout.evethreadlayout" user@hostname:/your/directory/he
 To create the lookup file manually, add `td-static-extaddr-device-label.json`
 with the format below to the data directory. The dashboard can also create this
 file on the first label save. Map the data directory into the Docker container
-when running tdash in Docker.
+when running Hobat in Docker.
 
 The td_cli commands and dashboard use the file to map extAddress (Extended MAC
 Address) values to deviceLabel values. Collection commands and the dashboard
@@ -279,12 +279,12 @@ own label updates, but another process editing the same file does not share that
 lock. Atomic replacement prevents partial JSON, not conflicts between separate
 writers.
 
-### Start the tdash docker container
+### Start the hobat docker container
 
 Notes: 
-- **Data Directory**: Map a local data directory into the tdash docker container data directory via docker volume.
-- **Default PORT**: The tdash docker container automatically starts the td_webserver.py with the dashboard. Default port is 9165.
-- **Docker Socket**: The otbr-cli datasetsource requires the tdash docker container to have access to the docker socket to enable td_cli otbr-cli to call between docker containers. This enables td_cli in the tdash container to call into the otbr container to execute ot-ctl commands via: docker exec -it otbr /usr/sbin/ot-ctl to fetch Thread device data.
+- **Data Directory**: Map a local data directory into the Hobat docker container data directory via docker volume.
+- **Default PORT**: The Hobat docker container automatically starts the td_webserver.py with the dashboard. Default port is 9165.
+- **Docker Socket**: The otbr-cli dataset source requires the Hobat docker container to have access to the docker socket so td_cli can call between containers. This enables td_cli in the Hobat container to execute `docker exec -it otbr /usr/sbin/ot-ctl` and fetch Thread device data.
 - **Optional Environment Variables**:
   - data directory: TD_DATA_DIR
   - td_webserver.py: HOST, PORT 
@@ -293,19 +293,19 @@ Notes:
   - See [Environment Variables](./doc/help_env_vars.md) for more details.
 
 ```bash
-docker run --name=tdash -d \
+docker run --name=hobat -d \
   --network=host \
   --volume $PWD/data:/data \
   --volume /var/run/docker.sock:/var/run/docker.sock \
   --restart=unless-stopped \
-  tdash:latest 
+  ghcr.io/jhawk42/hobat:latest
 ```
 
 ## Dashboard Webserver - manual startup
 
-Note: The tdash docker container automatically executes td_webserver.py when the container starts up.
+Note: The Hobat docker container automatically executes td_webserver.py when the container starts up.
 
-tdash dashboard webserver commands
+Hobat dashboard webserver commands
 ```bash
 # listen on localhost
 python3 -m td_webserver --host localhost --port 9165
@@ -315,9 +315,9 @@ python3 -m td_webserver --host 0.0.0.0 --port 9165
 ```
 
 
-## Open the tdash dashboard web page in a browser
+## Open the Hobat dashboard web page in a browser
 
-Open the tdash dashboard in a browser. 
+Open the Hobat dashboard in a browser.
 Default PORT is 9165.
 
 ```
@@ -328,14 +328,14 @@ http://localhost:9165/
 http://<your-host-ip-addr>:9165/
 ```
 
-Note: The tdash webserver will automatically use td_cli.py to discover the thread network and refresh the cached data files:
+Note: The Hobat webserver will automatically use td_cli.py to discover the thread network and refresh the cached data files:
 - When cached data files don't exist.
 - When cached data files are stale beyond a certain threshold. See help for details on environment variables.
 
 
 ## Dashboard Features
 
-The tdash web dashboard provides comprehensive visualization and querying capabilities:
+The Hobat web dashboard provides comprehensive visualization and querying capabilities:
 
 - **Fetch from Multiple Data Sources:** Supports otbr-cli (meshdiag, networkdiag), otbr-restapi, mDNS, and Eve topology datasets
 - **Multiple Views:** Topology view (graph) and Table view for different analysis needs
@@ -354,7 +354,7 @@ For complete field reference and dashboard usage, see [doc/dashboard_ui_fields.m
 
 
 
-## tdash cli examples
+## Hobat CLI examples
 
 See below for additional details for running td_cli.py commands 
 
@@ -366,11 +366,11 @@ python3 -m td_cli --help
 Docker exec into dash docker container cli entry point and run td_cli.py.
 
 ```
-# docker exec into tdash container: run bash and then td_cli.py commands.
+# docker exec into the Hobat container: run bash and then td_cli.py commands.
 
-docker exec -it tdash /bin/bash $*
+docker exec -it hobat /bin/bash $*
 
-# bash in tdash docker container: td_cli.py examples:
+# bash in the Hobat docker container: td_cli.py examples:
 python3 -m td_cli --help
 
 usage: td_cli [-h] [--verbose] [--debug] [--output FILE] [--datadir DIR] {otbr-cli,mdns,otbr-restapi,process-eve,merge-dataset} ...
@@ -378,15 +378,15 @@ usage: td_cli [-h] [--verbose] [--debug] [--output FILE] [--datadir DIR] {otbr-c
 python3 -m td_cli otbr-cli router-table
 ```
 
-docker exec into tdash: run td_cli.py commands
+docker exec into Hobat: run td_cli.py commands
 ```
-docker exec -it tdash /usr/local/bin/python3 -m td_cli otbr-cli router-table
-docker exec -it tdash /usr/local/bin/python3 -m td_cli --debug otbr-cli router-table
+docker exec -it hobat /usr/local/bin/python3 -m td_cli otbr-cli router-table
+docker exec -it hobat /usr/local/bin/python3 -m td_cli --debug otbr-cli router-table
 ```
 
-## tdash cli commands (docker or direct on host)
+## Hobat CLI commands (docker or direct on host)
 
-These commands can be run inside the tdash docker container.
+These commands can be run inside the Hobat docker container.
 They can also be run directly on the host if you are running without docker.
 
 ```bash
@@ -475,7 +475,7 @@ python3 -m td_cli merge-dataset --datadir /path/to/data --output my-merged.json
 
 
 # Docker container
-docker exec tdash python3 -m td_cli merge-dataset
+docker exec hobat python3 -m td_cli merge-dataset
 ```
 
 ### Input Files

@@ -663,16 +663,26 @@ async def run_td_cli(
 # R1b — pure freshness / regen decision (no asyncio, no shared state)
 # ---------------------------------------------------------------------------
 
-def _should_regenerate(file_path: Path, file_action: "FileAction", no_cache: bool) -> bool:
+def _should_regenerate(
+    file_path: Path,
+    file_action: "FileAction",
+    no_cache: bool,
+    request_max_age_s: int | None = None,
+) -> bool:
     """Return True if the dynamic file needs to be (re)generated.
 
     True when the file is absent, ``no_cache`` is set, or the cached copy is stale.
     Callers must not call this for STATIC actions.
     """
+    max_age_s = (
+        request_max_age_s
+        if request_max_age_s is not None and request_max_age_s >= 0
+        else file_action.max_age_s
+    )
     return (
         not file_path.is_file()
         or no_cache
-        or not is_file_fresh(file_path, file_action.max_age_s)
+        or not is_file_fresh(file_path, max_age_s)
     )
 
 
@@ -897,6 +907,7 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     data_dir = request.app[TD_DATA_DIR_APP_KEY]
     cc = parse_request_cache_control(request.headers.get("Cache-Control"))
     no_cache = bool(cc.get("no-cache", False))
+    request_max_age_s = cc.get("max-age")
 
     file_action, file_path = _resolve_and_validate(filename, data_dir)
 
@@ -908,7 +919,7 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
         if not file_path.is_file():
             raise aiohttp.web.HTTPNotFound(
                 reason=f"Static file not found: {filename}")
-    elif _should_regenerate(file_path, file_action, no_cache):
+    elif _should_regenerate(file_path, file_action, no_cache, request_max_age_s):
         action_args: list[str] = file_action.action  # type: ignore[assignment]
         if file_action.force_async or file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
             return await _dispatch_long_cost(filename, action_args, data_dir, file_action)

@@ -1,4 +1,4 @@
-# TDash Codebase Overview
+# Hobat Codebase Overview
 
 ## Key Technologies
 
@@ -20,7 +20,7 @@
 ## Repository Layout
 
 ```
-tdash/
+hobat/
 ├── doc/                        # Documentation
 │   ├── codebase_overview.md    # This file
 │   ├── help_td_cli.md          # td_cli --help snapshot

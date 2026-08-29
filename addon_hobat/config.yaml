@@ -3,7 +3,7 @@ version: "0.1.0"
 slug: hobat
 description: Hobat - thread mesh dashboard and diagnostics toolkit
 url: "https://github.com/jhawk42/hobat"
-image: ghcr.io/jhawk42/hobat
+image: ghcr.io/jhawk42/hobat-ha-app
 arch:
   - aarch64
   - amd64

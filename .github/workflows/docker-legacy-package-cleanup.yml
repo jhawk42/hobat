@@ -1,0 +1,40 @@
+name: Delete Legacy TDash Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type delete-tdash-package to delete every legacy package version
+        required: true
+        type: string
+
+jobs:
+  delete-legacy-package:
+    if: ${{ inputs.confirmation == 'delete-tdash-package' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Delete all ghcr.io/${{ github.repository_owner }}/tdash versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION_IDS=$(gh api --paginate \
+            "/users/${{ github.repository_owner }}/packages/container/tdash/versions" \
+            --jq '.[].id')
+
+          if [[ -z "$VERSION_IDS" ]]; then
+            echo "No legacy tdash package versions found."
+            exit 0
+          fi
+
+          DELETED=0
+          while IFS= read -r version_id; do
+            echo "Deleting legacy tdash version ID: $version_id"
+            gh api --method DELETE \
+              "/users/${{ github.repository_owner }}/packages/container/tdash/versions/$version_id"
+            DELETED=$((DELETED + 1))
+          done <<< "$VERSION_IDS"
+
+          echo "Deleted $DELETED legacy tdash package version(s)."

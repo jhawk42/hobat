@@ -15,15 +15,18 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
@@ -36,11 +39,11 @@ jobs:
         id: tags
         run: |
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            echo "tags=ghcr.io/${{ github.repository_owner }}/tdash:nightly" >> $GITHUB_OUTPUT
+            echo "tags=ghcr.io/${{ github.repository_owner }}/hobat:nightly" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "tags=ghcr.io/${{ github.repository_owner }}/tdash:latest,ghcr.io/${{ github.repository_owner }}/tdash:${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "tags=ghcr.io/${{ github.repository_owner }}/hobat:latest,ghcr.io/${{ github.repository_owner }}/hobat:${{ github.sha }}" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-            echo "tags=ghcr.io/${{ github.repository_owner }}/tdash:dev,ghcr.io/${{ github.repository_owner }}/tdash:dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "tags=ghcr.io/${{ github.repository_owner }}/hobat:dev,ghcr.io/${{ github.repository_owner }}/hobat:dev-${{ github.sha }}" >> $GITHUB_OUTPUT
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "Manual builds are only permitted on main or dev branches. Current ref: ${{ github.ref }}" >&2
             exit 1
@@ -50,9 +53,33 @@ jobs:
           fi
 
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify published platforms
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/hobat@$IMAGE_DIGEST"
+          ACTUAL_PLATFORMS=$(docker buildx imagetools inspect --raw "$IMAGE" |
+            jq -r '.manifests[].platform | select(.os != "unknown") | "\(.os)/\(.architecture)"' |
+            sort -u)
+          EXPECTED_PLATFORMS=$(printf '%s\n' linux/amd64 linux/arm64)
+
+          if [[ "$ACTUAL_PLATFORMS" != "$EXPECTED_PLATFORMS" ]]; then
+            echo "Expected platforms:" >&2
+            echo "$EXPECTED_PLATFORMS" >&2
+            echo "Published platforms:" >&2
+            echo "$ACTUAL_PLATFORMS" >&2
+            exit 1
+          fi
+
+          echo "Verified published platforms:"
+          echo "$ACTUAL_PLATFORMS"

@@ -1,6 +1,6 @@
 # Environment Variables
 
-List of environment variables for tdash.
+List of environment variables.
 
 | module name | environment variable name | default value | description of what the env var does |
 | --- | --- | --- | --- |

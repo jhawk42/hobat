@@ -20,11 +20,16 @@ app's `/data` directory and included in Home Assistant backups.
 
 ## Local Image Testing
 
-The published app uses the image configured in `config.yaml`. To force
-Supervisor to build the app locally, temporarily comment out the `image` key.
+The published app uses `ghcr.io/jhawk42/hobat-ha-app`, configured in
+`config.yaml`. This package is separate from the regular
+`ghcr.io/jhawk42/hobat` image. To force Supervisor to build the app locally,
+temporarily comment out the `image` key.
 
-For a standalone build from the TDash repository root, run:
+Published app versions must use the version from `config.yaml` as their image
+tag, for example `ghcr.io/jhawk42/hobat-ha-app:0.1.0`.
+
+For a standalone build from the Hobat repository root, run:
 
 ```bash
-docker build -f addon_hobat/Dockerfile -t local/hobat .
+docker build -f addon_hobat/Dockerfile -t local/hobat-ha-app .
 ```

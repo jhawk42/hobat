@@ -22,11 +22,11 @@ jobs:
             [ -z "$version_id" ] && continue
             echo "Deleting version ID: $version_id"
             gh api --method DELETE \
-              "/users/${{ github.repository_owner }}/packages/container/tdash/versions/$version_id"
+              "/users/${{ github.repository_owner }}/packages/container/hobat/versions/$version_id"
             DELETED=$((DELETED + 1))
           done < <(
             gh api --paginate \
-              "/users/${{ github.repository_owner }}/packages/container/tdash/versions" \
+              "/users/${{ github.repository_owner }}/packages/container/hobat/versions" \
               --jq --arg cutoff "$CUTOFF" \
               '.[] | select(.metadata.container.tags | any(startswith("dev-"))) | select(.created_at < $cutoff) | .id | tostring'
           )
@@ -50,11 +50,11 @@ jobs:
             [ -z "$version_id" ] && continue
             echo "Deleting version ID: $version_id"
             gh api --method DELETE \
-              "/users/${{ github.repository_owner }}/packages/container/tdash/versions/$version_id"
+              "/users/${{ github.repository_owner }}/packages/container/hobat/versions/$version_id"
             DELETED=$((DELETED + 1))
           done < <(
             gh api --paginate \
-              "/users/${{ github.repository_owner }}/packages/container/tdash/versions" \
+              "/users/${{ github.repository_owner }}/packages/container/hobat/versions" \
               --jq --arg cutoff "$CUTOFF" \
               '.[] | select(.metadata.container.tags | any(test("^[0-9a-f]{40}$"))) | select(.created_at < $cutoff) | .id | tostring'
           )

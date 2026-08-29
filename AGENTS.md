@@ -11,7 +11,7 @@ Use [README.md](README.md) for operator-facing behavior, setup, and runtime expe
 
 ## Architecture
 
-- Treat tdash as a cache-first system: prefer fixes that preserve cached snapshot workflows and avoid adding unnecessary live mesh load.
+- Treat hobat (renamed from tdash to hobat, code filenames stay the same) as a cache-first system: prefer fixes that preserve cached snapshot workflows and avoid adding unnecessary live mesh load.
 - Keep the source split explicit: `otbr_cli_*.py` is OTBR `ot-ctl`, `otbr_restapi_*.py` is OTBR REST, `mdns_*.py` is Zeroconf/mDNS, `src/js/*.js` is browser-only dashboard logic.
 - Prefer changes in the layer that owns the behavior. Avoid pushing source-specific logic into unrelated shared utilities or UI glue.
 - Keep Python server/collector changes aligned with the documented data flow between `td_cli.py`, `td_webserver.py`, the data directory, and the dashboard fetch/render path.
