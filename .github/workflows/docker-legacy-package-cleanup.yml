@@ -30,11 +30,21 @@ jobs:
           fi
 
           DELETED=0
+          SKIPPED=0
+          NON_DELETABLE_REASON="more than 5000 downloads cannot be deleted"
           while IFS= read -r version_id; do
+            [ -z "$version_id" ] && continue
             echo "Deleting legacy tdash version ID: $version_id"
-            gh api --method DELETE \
-              "/users/${{ github.repository_owner }}/packages/container/tdash/versions/$version_id"
-            DELETED=$((DELETED + 1))
+            if DELETE_OUTPUT=$(gh api --method DELETE \
+              "/users/${{ github.repository_owner }}/packages/container/tdash/versions/$version_id" 2>&1); then
+              DELETED=$((DELETED + 1))
+            elif grep -Fq "$NON_DELETABLE_REASON" <<< "$DELETE_OUTPUT"; then
+              echo "Skipping legacy tdash version ID $version_id: $NON_DELETABLE_REASON"
+              SKIPPED=$((SKIPPED + 1))
+            else
+              echo "$DELETE_OUTPUT" >&2
+              exit 1
+            fi
           done <<< "$VERSION_IDS"
 
-          echo "Deleted $DELETED legacy tdash package version(s)."
+          echo "Deleted $DELETED legacy tdash package version(s); skipped $SKIPPED non-deletable public version(s)."
