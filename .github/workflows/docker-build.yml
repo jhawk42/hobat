@@ -35,15 +35,42 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Determine image tags
+      - name: Read Home Assistant app version
+        id: app-version
+        uses: mikefarah/yq@v4.47.2
+        with:
+          cmd: yq -r '.version' addon_hobat/config.yaml
+
+      - name: Read Home Assistant app image
+        id: app-image
+        uses: mikefarah/yq@v4.47.2
+        with:
+          cmd: yq -r '.image' addon_hobat/config.yaml
+
+      - name: Determine image metadata
         id: tags
+        env:
+          APP_IMAGE: ${{ steps.app-image.outputs.result }}
+          APP_VERSION: ${{ steps.app-version.outputs.result }}
         run: |
+          if [[ ! "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([._+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid Home Assistant app version: $APP_VERSION" >&2
+            exit 1
+          fi
+          if [[ "$APP_IMAGE" != "ghcr.io/${{ github.repository_owner }}/hobat-ha-app" ]]; then
+            echo "Unexpected Home Assistant app image: $APP_IMAGE" >&2
+            exit 1
+          fi
+
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            echo "tags=ghcr.io/${{ github.repository_owner }}/hobat:nightly" >> $GITHUB_OUTPUT
+            REGULAR_TAGS="ghcr.io/${{ github.repository_owner }}/hobat:nightly"
+            APP_TAGS="$APP_IMAGE:nightly"
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "tags=ghcr.io/${{ github.repository_owner }}/hobat:latest,ghcr.io/${{ github.repository_owner }}/hobat:${{ github.sha }}" >> $GITHUB_OUTPUT
+            REGULAR_TAGS="ghcr.io/${{ github.repository_owner }}/hobat:latest,ghcr.io/${{ github.repository_owner }}/hobat:${{ github.sha }}"
+            APP_TAGS="$APP_IMAGE:$APP_VERSION,$APP_IMAGE:latest,$APP_IMAGE:${{ github.sha }}"
           elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-            echo "tags=ghcr.io/${{ github.repository_owner }}/hobat:dev,ghcr.io/${{ github.repository_owner }}/hobat:dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+            REGULAR_TAGS="ghcr.io/${{ github.repository_owner }}/hobat:dev,ghcr.io/${{ github.repository_owner }}/hobat:dev-${{ github.sha }}"
+            APP_TAGS="$APP_IMAGE:dev,$APP_IMAGE:dev-${{ github.sha }}"
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "Manual builds are only permitted on main or dev branches. Current ref: ${{ github.ref }}" >&2
             exit 1
@@ -52,20 +79,25 @@ jobs:
             exit 1
           fi
 
-      - name: Build and push image
-        id: build
+          echo "regular_tags=$REGULAR_TAGS" >> "$GITHUB_OUTPUT"
+          echo "app_tags=$APP_TAGS" >> "$GITHUB_OUTPUT"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "app_image=$APP_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push regular image
+        id: regular-build
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.tags.outputs.regular_tags }}
+          cache-from: type=gha,scope=hobat
+          cache-to: type=gha,mode=max,scope=hobat
 
-      - name: Verify published platforms
+      - name: Verify regular image platforms
         env:
-          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_DIGEST: ${{ steps.regular-build.outputs.digest }}
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/hobat@$IMAGE_DIGEST"
           ACTUAL_PLATFORMS=$(docker buildx imagetools inspect --raw "$IMAGE" |
@@ -82,4 +114,40 @@ jobs:
           fi
 
           echo "Verified published platforms:"
+          echo "$ACTUAL_PLATFORMS"
+
+      - name: Build and push Home Assistant app image
+        id: app-build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: addon_hobat/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.tags.outputs.app_tags }}
+          build-args: |
+            BUILD_VERSION=${{ steps.tags.outputs.app_version }}
+          cache-from: type=gha,scope=hobat-ha-app
+          cache-to: type=gha,mode=max,scope=hobat-ha-app
+
+      - name: Verify Home Assistant app image platforms
+        env:
+          APP_IMAGE: ${{ steps.tags.outputs.app_image }}
+          IMAGE_DIGEST: ${{ steps.app-build.outputs.digest }}
+        run: |
+          IMAGE="$APP_IMAGE@$IMAGE_DIGEST"
+          ACTUAL_PLATFORMS=$(docker buildx imagetools inspect --raw "$IMAGE" |
+            jq -r '.manifests[].platform | select(.os != "unknown") | "\(.os)/\(.architecture)"' |
+            sort -u)
+          EXPECTED_PLATFORMS=$(printf '%s\n' linux/amd64 linux/arm64)
+
+          if [[ "$ACTUAL_PLATFORMS" != "$EXPECTED_PLATFORMS" ]]; then
+            echo "Expected platforms:" >&2
+            echo "$EXPECTED_PLATFORMS" >&2
+            echo "Published platforms:" >&2
+            echo "$ACTUAL_PLATFORMS" >&2
+            exit 1
+          fi
+
+          echo "Verified published Home Assistant app platforms:"
           echo "$ACTUAL_PLATFORMS"
