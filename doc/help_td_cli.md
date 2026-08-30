@@ -43,6 +43,11 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 td_cli otbr-cli {thread-network-info,router-table,topology,meshdiag,networkdiag} ...
 ```
 
+`otbr-cli topology` runs seven steps in order: thread network info, router
+table, meshdiag topology, networkdiag multicast-network, networkdiag fetch-all,
+meshdiag router-neighbor tables, and meshdiag child tables. It attempts every
+step and returns the first non-zero step result.
+
 ### `otbr-restapi`
 
 ```text
@@ -54,6 +59,11 @@ td_cli otbr-restapi [global-forwarded-options] {download,node,devices,diagnostic
 ```text
 td_cli mdns [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
 ```
+
+The owning mDNS parser uses a 3-second idle timeout unless
+`TD_MDNS_BROWSE_TIMEOUT` or `--browse-timeout` overrides it. `--haptcp` adds
+`_hap._tcp.local.` for `thread` or `hap`; `--mattertcpsupported` includes
+`_matter._tcp` records whose `T=1` TXT value reports TCP support.
 
 ### `process-eve`
 
@@ -186,6 +196,19 @@ Troubleshooting empty-data-dir runs:
 - If `merge-dataset` returns `4`, confirm `td-otbr-cli-thread-network-info.json` exists and contains `prefix_omr_ipv6addr_prefix`.
 - If an OTBR CLI command emits a warning about `td-static-extaddr-device-label.json`, the command still completed and wrote output without label enrichment.
 - If `otbr-restapi` returns `4`, that still indicates an HTTP/action failure, not a local missing-file error.
+
+### Final, checkpoint, and outcome files
+
+Collectors atomically write mandatory final snapshots before reporting command
+success. Long-running collectors may also replace a sibling `.partial.json`
+checkpoint as records arrive. Checkpoints are transient progress data used by
+the dashboard and never substitute for the final snapshot.
+
+REST topology writes compatibility array snapshots plus
+`td-otbr-restapi-diagnostics-fetch-all.outcome.json` and
+`td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json`. Outcome sidecars
+retain per-device status and partial-completion metadata without changing the
+array shape consumed by the dashboard.
 
 ---
 

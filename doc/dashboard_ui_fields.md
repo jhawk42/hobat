@@ -1,192 +1,83 @@
-# Dashboard UI Fields Reference
+# Dashboard UI Fields
 
-This document describes the device record fields available in the tdash web dashboard UI.
+The dashboard accepts source-specific records from OTBR CLI, OTBR REST, mDNS,
+Eve, Thread Tools, and merged snapshots. Field availability depends on the
+selected dataset.
 
-## Overview
+## Field Authority
 
-The tdash dashboard displays Thread network device information from multiple data sources (CLI, REST API, mDNS, Eve topology). Device records can contain 77+ fields organized by priority for optimal visibility and usability.
+`src/js/tdash-device-fields.js` owns the browser's maintained field definitions,
+preferred names, aliases, transforms, identity fields, and placeholders.
+`src/js/tdash-constants.js` owns table priority and details-section metadata.
+The Python counterpart is `src/td_device_fields.py`; tests enforce parity for
+the shared contract.
 
-## Field Organization
+Preferred output names are camelCase. Legacy and source-specific aliases remain
+accepted during normalization. Important examples are:
 
-Fields are organized into 5 priority tiers that determine their display order in both table columns and detail panels:
+| Preferred field | Accepted aliases |
+|---|---|
+| `extAddress` | `extaddr`, `extMacAddr`, `Extended MAC` |
+| `omrIpv6Address` | `omrIpv6Addr`, `omr_ipv6_addr` |
+| `rloc16` | `RLOC16` |
+| `deviceLabel` | `device_label` |
+| `threadVersion` | `thread_version` |
+| `threadStackVersion` | `thread_stack_version` |
+| `route` | `route64`, `route_data` |
+| `childTable` | `router_child_table` |
+| `routerNeighbors` | `router_neighbor_table` |
 
-### TIER 1: Primary Identity
-Core device identifiers that appear first in the UI:
-- `rloc16` - Router/Child Location (16-bit identifier)
-- `extAddress`, `extaddr` - Extended MAC address (64-bit)
-- `deviceLabel` - User-assigned device label
-- `name` - Device name
-- `routerId`,  - Router ID (for router-capable devices)
-- `eui64` - EUI-64 identifier
-- `id`, `ID` - Generic device ID
+Transport envelope fields such as `data`, `attributes`, `relationships`,
+`links`, `included`, and collection `meta` are not device fields.
 
-### TIER 2: Secondary Identity
-Additional identification fields:
-- `omrIpv6Address`, `omr_ipv6_addr`  - Off-Mesh Routable IPv6 address
-- `mlEidIid` - ML-EID Interface Identifier
-- `room` - Room assignment (from Eve topology)
-- `Extended MAC` - Extended MAC (alternative field name)
-- Link quality fields: `Next Hop`, `Path Cost`, `LQ In`, `LQ Out`, `Age`
+## Field Groups
 
-### TIER 3: Device Role & Status
-Device type, role, and operational mode:
-- `type` - Device type (e.g., router, child, border-router)
-- `Role` - Computed role field
-- `isBorderRouter`, `br`  - Border router flag
-- `isLeader`, `leader`,  - Leader flag
-- `isRouter` - Router capability flag
-- `mode.*` - Device mode flags:
-  - `mode.deviceTypeFTD` - Full Thread Device
-  - `mode.rxOnWhenIdle` - Receiver always on
-  - `mode.secureDataRequest` - Secure data request enabled
-  - `mode.networkData` - Network data type
-  - `mode.device` - Device mode summary
-- `isPrimaryBBR` - Primary Backbone Router flag
-- `has_children` - Has child devices
+The maintained model covers these groups:
 
-### TIER 4: Topology & Connectivity
-Network topology, link quality, and connectivity metrics:
-- `total_children`, `total_routers`, `total_links` - Topology counts
-- `neighbors`, `children`, `routes` - Relationship arrays
-- `child_count`, `router_count`, `neighbor_count` - Alternative count fields
-- `ipAddressList` - Complete list of IPv6 addresses
-- `connectivity.*` - Connectivity metrics:
-  - `parentPriority`, `linkQuality3`, `linkQuality2`, `linkQuality1`
-  - `leaderCost`, `idSequence`, `activeRouters`
-  - `sedBufferSize`, `sedDatagramCount`
-- `leaderData.*` - Leader data fields:
-  - `partitionId`, `weighting`, `dataVersion`, `stableDataVersion`, `leaderRouterId`
+- Identity: `rloc16`, `extAddress`, `omrIpv6Address`, `eui`, `id`, `routerId`,
+  `mlEidIid`, `deviceLabel`, and network identity fields.
+- Role and mode: `role`, `type`, `mode.*`, `isLeader`, `isBorderRouter`,
+  `isRouter`, and `isPrimaryBBR`.
+- Network state: IPv6 addresses, `leaderData`, `connectivity`, routes, children,
+  child tables, child IPv6 addresses, and router neighbors.
+- Diagnostics: `macCounters`, `mleCounters`, `timeStatistics`, and derived
+  totals/ratios.
+- Source details: version, vendor, mDNS, Eve, state, and collection fields.
+- Merge metadata: `_source_files` and `_merge_conflicts`.
 
-### TIER 5: Advanced/Diagnostic
-Detailed diagnostics, counters, and vendor information:
-- `vendor_name`, `vendor_model`, `vendor_sw_version`, `vendor_oui` - Vendor identification
-- `ver`, `version`, `thread_version`, `thread_stack_version`, `threadStackVersion` - Version info
-- `mleCounters.*` - MLE (Mesh Link Establishment) counters
-- `macCounters.*` - MAC layer counters
-- `route.route_data` - Routing table data
-- `scope`, `status` - Dataset-specific fields
-- Internal fields: `_source`, `_dataset_type`, `_merge_conflicts`
+Missing fields are omitted from details and capability-dependent controls.
+Fields are not synthesized merely to fill every table column; defined
+placeholders are used only where the normalization contract requires them.
 
-## Searchable Fields
+## Table and Details
 
-The dashboard search feature (normal mode) searches the following 28 fields:
+The table renderer discovers fields from the loaded rows, places priority
+columns first, and formats nested values for inspection. **More Info** expands
+the displayed column set.
 
-**Identity & Addresses:**
-- `rloc16`, `extaddr`, `extAddress`, `eui64`
-- `device_label`, `name`, `room`
-- `ID`, `Extended MAC`
-- `routerId`, `router_id`
-- `omr_ipv6_addr`, `omrIpv6Address`, `mlEidIid`
+Selecting a topology node or table row publishes `tdash:device-selected`.
+Details, Device Settings, and Device Insights consume that shared selection.
+Details sections and field bindings come from `DEVICE_DETAILS_SECTIONS`; section
+containers are declared in `tdash.html`.
 
-**Device Type & Role:**
-- `type`, `Role`
-- `br`, `isBorderRouter`
-- `leader`, `isLeader`
+## Search
 
-**Versions:**
-- `ver`, `version`
-- `thread_version`, `thread_stack_version`, `threadStackVersion`
+Normal search is case-insensitive and checks the curated
+`SEARCH_TARGET_FIELDS` list, including identities, addresses, labels, roles,
+versions, network state, status, and vendor name. Dot paths such as
+`mode.device` are resolved normally.
 
-**Other:**
-- `mode.device`, `scope`, `status`
+Advanced search checks every top-level field and one level of nested object
+values. Object and array values are stringified for substring matching.
 
-**More Info Mode:** When "More Info" mode is enabled, all fields in the device record become searchable.
+## Filters and Insights
 
-## Field Naming Conventions
+Node, link, and diagnostic options are capability-driven. The application scans
+the current topology or rows and offers only filters supported by available
+fields or relationship categories. Link filters are topology-only.
 
-The dashboard supports both naming conventions to accommodate different data sources:
+Diagnostic insights evaluate the selected normalized record. They are
+informational and use the same diagnostic predicates as filtering where the
+field shapes overlap.
 
-- **snake_case** (CLI datasets): `extaddr`, `omr_ipv6_addr`, `thread_stack_version`, `router_id`
-- **camelCase** (REST API datasets): `extAddress`, `omrIpv6Address`, `threadStackVersion`, `routerId`
-
-Both variants can appear in the same dataset. The UI displays whichever variant is present in the data. Search works with both naming conventions.
-
-## Dataset Type Compatibility
-
-Different dataset types provide different sets of fields:
-
-| Dataset Type | Primary Fields | Naming Convention |
-|-------------|----------------|-------------------|
-| **CLI - meshdiag** | rloc16, extaddr, omr_ipv6_addr, thread_version, type, neighbors, children | snake_case |
-| **CLI - networkdiag** | rloc16, extaddr, connectivity.*, mleCounters.*, macCounters.* | snake_case |
-| **CLI - router table** | rloc16, router_id, Next Hop, Path Cost, LQ In, LQ Out, Age | snake_case |
-| **REST API - devices** | rloc16, extAddress, routerId, omrIpv6Address, mlEidIid, type | camelCase |
-| **REST API - diagnostics** | extAddress, routerId, mode.*, leaderData.*, connectivity.*, mleCounters.* | camelCase |
-| **Eve topology** | extaddr, device_label, room, type, total_children, total_links | mixed |
-| **MDNS records** | extaddr, name, type, vendor_* fields | mixed |
-
-## Field Display Behavior
-
-- **Missing Fields:** Fields not present in the dataset are automatically hidden (no errors)
-- **Empty Values:** Fields with empty/null values may be hidden or shown as "(not available)"
-- **Nested Objects:** Fields like `mode.*`, `connectivity.*`, `leaderData.*` appear as expandable groups in detail panels
-- **Table Columns:** In table view, columns appear left-to-right in priority order
-- **Detail Panels:** Fields are organized into sections (Keys, Highlights, Connections, Routes & Links) with priority ordering within each section
-
-## Detail Panel Sections
-
-**Keys Section (Identity):**
-- Primary identifiers: rloc16, extaddr, device_label, routerId, id, omrIpv6Address, mlEidIid
-
-**Highlights Section (Role & Status):**
-- Device type, role, mode flags, leaderData, vendor info, version
-
-**Connections Section (Topology):**
-- Connectivity metrics, link quality, neighbor counts, ipAddressList
-
-**Routes & Links Section:**
-- Routing data, route_data field, link relationships
-
-## Example Device Records
-
-**CLI meshdiag device:**
-```json
-{
-  "rloc16": "0x4400",
-  "extAddress": "1a7fbf0434e4f043",
-  "deviceLabel": "Device 1",
-  "type": "router",
-  "omrIpv6Address": "fd00:1234::1",
-  "threadVersion": "4",
-  "totalChildren": 3,
-  "neighbors": ["0x4800", "0x4c00"]
-}
-```
-
-**REST API diagnostics device:**
-```json
-{
-  "rloc16": "0x4400",
-  "extAddress": "1a7fbf0434e4f043",
-  "routerId": 17,
-  "omrIpv6Address": "fd00:1234::1",
-  "mlEidIid": "0000000000000001",
-  "type": "threadBorderRouter",
-  "mode": {
-    "deviceTypeFTD": true,
-    "rxOnWhenIdle": true,
-    "secureDataRequest": true,
-    "networkData": "full"
-  },
-  "leaderData": {
-    "partitionId": 123456,
-    "weighting": 64,
-    "leaderRouterId": 17
-  }
-}
-```
-
-## Tips for Users
-
-1. **Use Search for Quick Lookup:** Type any identifier (rloc16, extaddr, device label) to quickly find devices
-2. **Enable More Info Mode:** To search diagnostic fields (counters, connectivity metrics), enable More Info mode
-3. **Check Multiple Sources:** Load multiple dataset types (CLI + REST API) for comprehensive device information
-4. **Use Table View:** For comparing many devices, switch to Table view and sort by any column
-5. **Expand Detail Panels:** Click devices to see full field lists organized by section
-6. **Missing Fields:** If a field isn't shown, it's not present in the current dataset - try a different data source
-
-## References
-
-- **Code:** Field lists defined in `src/js/tdash-constants.js`, `tdash-search.js`, `tdash-utils.js`
-- **HTML:** Detail panel sections defined in `src/tdash.html`
-- **Dataset Formats:** See `data/` folder for example JSON files from each source type
+See [Webpage, Web Server, and Data Flow](codebase_webpage_web_server_data_flow.md) and [Merge Thread Device Information](merge_thread_device_info.md).

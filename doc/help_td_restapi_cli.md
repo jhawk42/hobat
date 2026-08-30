@@ -979,6 +979,11 @@ When `--no-auto-output` is not set and `--output` is not specified, fetch/list c
 
 Topology also writes `td-otbr-restapi-diagnostics-fetch-all.outcome.json` and `td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json`. These sidecars distinguish complete and partial sweeps without changing the array shape consumed by existing dashboard code.
 
+Commands with an automatic or explicit output path may atomically update a
+sibling `.partial.json` checkpoint while collection is running. The web server
+exposes checkpoint metadata to the dashboard for progressive rendering. A
+checkpoint is transient and does not replace the mandatory final output.
+
 Action POST requests are single-attempt because the OTBR action API has no idempotency key. A lost POST response is reported as `indeterminate_enqueue`; the client does not blindly create a replacement action. Idempotent reads may use bounded transport retries.
 
 > **Note:** The `topology` command always writes its three files regardless of `--no-auto-output` because all output is file-based (the command returns nothing to stdout).

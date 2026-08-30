@@ -8,6 +8,19 @@ Start the Thread Network Topology Dashboard web server.
 
 When the webserver regenerates data files by invoking `td_cli`, it surfaces the underlying command return codes instead of normalizing them away. That matters for empty- or partial-data-directory runs, where missing local inputs now distinguish rc `4` from runtime rc `3` and invalid-payload rc `5`.
 
+The root route redirects to `/tdash.html`. Data requests use the allowlisted
+`/api/data/{filename}` endpoint. Fresh files are served from cache; stale or
+missing dynamic files invoke `td_cli` unless the browser requests Cache Only.
+Short actions are awaited. Long or forced-background actions return HTTP 202
+and are polled through `/api/job/{job_id}`; running jobs can be cancelled with
+DELETE on the same route.
+
+Data files use `Cache-Control`, `Last-Modified`, and ETag revalidation. Static
+HTML, CSS, and JavaScript use `Cache-Control: no-cache`. Progressive
+`.partial.json` checkpoints are served without triggering regeneration.
+Device labels are read and updated through `GET`/`PATCH
+/api/device/{extAddress}` and use `Cache-Control: no-store`.
+
 
 ## Options
 

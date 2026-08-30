@@ -1,6 +1,7 @@
 # Environment Variables
 
-List of environment variables.
+Command-line options take precedence over environment variables. Data-directory
+defaults are selected only when neither `--datadir` nor `TD_DATA_DIR` is set.
 
 | module name | environment variable name | default value | description of what the env var does |
 | --- | --- | --- | --- |
@@ -12,5 +13,9 @@ List of environment variables.
 | `otbr_restapi_util.py` | `OT_REST_LISTEN_PORT` | `8081` | Sets the default OTBR REST API port used by the OTBR REST CLI/client when `--port` is not provided. Invalid or empty values fall back to `8081`. |
 | `util_ot_ctl.py` | `TD_OTBR_CONTAINER_NAME` | `otbr` | Overrides the OTBR Docker container name used when running `ot-ctl` via `docker exec`, including composite otbr-cli workflows. |
 | `util_ot_ctl.py` | `TD_OTBR_CONTAINER_USE` | `1` | Controls whether to use Docker container execution for `ot-ctl` (`1` = use container, `0` = run locally without `docker exec`) across all otbr-cli commands, including `td_cli otbr-cli topology`. |
-| `util_ot_ctl.py` | `TD_OT_CTL_TIMEOUT` | `30` | Sets the timeout (seconds) for each `ot-ctl` subprocess execution, including every step invoked by `td_cli otbr-cli topology`. |
-| `mdns_thread_scopes.py` | `TD_MDNS_BROWSE_TIMEOUT` | `5` | Sets the default idle browse timeout (seconds) used by the mDNS scope browser when `--browse-timeout` is not provided. |
+| `util_ot_ctl.py` | `TD_OT_CTL_TIMEOUT` | `30` | Sets the timeout (seconds) for each `ot-ctl` subprocess execution. A timeout is returned as a command error; `util_ot_ctl.py` does not retry it. |
+| `mdns_thread_scopes.py` | `TD_MDNS_BROWSE_TIMEOUT` | `3` | Sets the idle browse timeout (seconds) when `--browse-timeout` is not provided. |
+
+`OT_REST_LISTEN_ADDR` and `OT_REST_LISTEN_PORT` use the same names as OTBR's
+container configuration, but here they select the client destination. Use
+`--base-url` to override both host and port with a complete URL.
