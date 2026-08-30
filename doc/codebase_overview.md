@@ -8,7 +8,7 @@ known dynamic files; browser modules normalize, merge, adapt, filter, lay out,
 and render the returned data.
 
 ```text
-OTBR CLI / OTBR REST / mDNS / Eve
+OTBR CLI / OTBR REST / HA Matter WS / mDNS / Eve
                  |
                  v
         Python collectors and parsers
@@ -25,12 +25,12 @@ Browser <---- aiohttp web server ----> td_cli subprocess
 | Browser | `tdash.html`, `tdash.css`, `js/*.js` | Dataset selection, fetch sessions, merge/adaptation, filters, layouts, topology/table rendering |
 | HTTP server | `td_webserver.py` | Static assets, data allowlist, cache policy, jobs, cancellation, device labels |
 | CLI dispatcher | `td_cli.py` | Top-level command tree and command-family dispatch |
-| Collectors | `otbr_cli_*.py`, `otbr_restapi_*.py`, `mdns_*.py`, `eve_process.py` | Live collection, parsing, normalization, checkpoints, final snapshots |
+| Collectors | `otbr_cli_*.py`, `otbr_restapi_*.py`, `ha_matter_ws_*.py`, `mdns_*.py`, `eve_process.py` | Live collection, parsing, normalization, checkpoints, final snapshots |
 | Processing | `merge_dataset.py`, `merge_extaddr_device_label_map.py` | Cross-source merge and label-map administration |
 | Shared contracts | `td_const.py`, `td_device_fields.py`, `td_device_merge.py`, `td_record_merge.py`, `td_json_key_normalizer.py`, `util_*.py` | Filenames, fields, merge policies, data paths, network and subprocess helpers |
 | Persistence | Effective data directory | Operator inputs and generated snapshots |
 
-Runtime dependencies include `aiohttp`, `aiohttp-cors`, and `zeroconf`. The
+Runtime dependencies include `aiohttp`, `aiohttp-cors`, `websockets`, and `zeroconf`. The
 browser uses vendored vis-network and sortable table libraries.
 
 ## Python Modules
@@ -39,7 +39,7 @@ browser uses vendored vis-network and sortable table libraries.
 
 | File | Responsibility |
 |---|---|
-| `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `mdns`, `process-eve`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
+| `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
 | `td_webserver.py` | aiohttp application, file action registry, HTTP caching, background jobs, cancellation, and device-label API |
 | `td_const.py` | Authoritative Python cache filenames, data-directory constants, and Thread multicast addresses |
 | `td_device_fields.py` | Python field definitions, preferred names, aliases, identities, and placeholders |
@@ -89,6 +89,19 @@ Transport methods do not write files. Resource dispatchers or composite
 workflows own command output because they know the command and resolved path.
 Mutating action POSTs are not retried after an ambiguous response because the
 OTBR action API has no idempotency key; idempotent reads use bounded retries.
+
+### Home Assistant Matter WebSocket
+
+| File | Responsibility |
+|---|---|
+| `ha_matter_ws_client.py`, `ha_matter_ws_contract.py` | Correlated WebSocket transport, handshake compatibility, and pinned Matter paths |
+| `ha_matter_ws_extractor.py`, `ha_matter_ws_snapshots.py` | Matter node decoding, canonical records, coverage, and credential exclusion |
+| `ha_matter_ws_topology.py` | Directional neighbor, child, route, and placeholder topology derivation |
+| `ha_matter_ws_fetch_all.py`, `ha_matter_ws_cli.py` | One-snapshot orchestration, checkpoints, atomic files, outcome, and source CLI |
+
+The source is read-only and controller-scoped. Its default URI is
+`ws://localhost:5580/ws`; missing or unavailable node telemetry remains
+explicitly absent. It does not replace OTBR network-wide collection.
 
 ### Other Sources and Processing
 

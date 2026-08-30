@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 import {
+  DATASOURCE_REGISTRY,
   DATASET_REGISTRY,
   validateDatasetRegistry,
 } from "../../src/js/tdash-dataset-registry.js";
@@ -151,6 +152,20 @@ assert.deepEqual(inputFiles, [rawFirst, undefined]);
 assert.equal(Object.hasOwn(inputEntry, "loadedFiles"), false);
 
 assert.doesNotThrow(() => validateDatasetRegistry(DATASET_REGISTRY));
+
+const haMatterSource = DATASOURCE_REGISTRY.find((source) => source.value === "ha-matter-ws");
+assert.equal(haMatterSource?.default_dataset_value, "ha_matter_ws_topology");
+assert.deepEqual(
+  DATASET_REGISTRY
+    .filter((entry) => entry.source === "ha-matter-ws")
+    .map((entry) => entry.value),
+  [
+    "ha_matter_ws_devices",
+    "ha_matter_ws_diagnostics",
+    "ha_matter_ws_mesh_diagnostics",
+    "ha_matter_ws_topology",
+  ],
+);
 assert.ok(DATASET_REGISTRY.every((dataset) => ADAPTOR_HANDLERS[dataset.adaptor]));
 for (const dataset of DATASET_REGISTRY) {
   const finalRawFiles = dataset.files.map((_, index) =>

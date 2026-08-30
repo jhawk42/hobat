@@ -1,3 +1,4 @@
 aiohttp>=3.14.3
 aiohttp-cors>=0.8.1
+websockets>=16.0,<17
 zeroconf==0.150.0

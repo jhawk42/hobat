@@ -11,4 +11,4 @@ RUNNER = REPO_ROOT / "tests" / "js" / "run-adaptor-contracts.mjs"
 
 @pytest.mark.frontend
 def test_route_data_adaptor_contracts_are_executable(node_json) -> None:
-    assert node_json(RUNNER) == {"adaptorCount": 8}
+    assert node_json(RUNNER) == {"adaptorCount": 9}

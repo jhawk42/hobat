@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 
 from collections import defaultdict
 from copy import deepcopy
@@ -39,6 +40,10 @@ from td_record_merge import (
 from td_const import (
     EVE_TOPOLOGY_FILENAME,
     EXTADDR_DEVICE_LABEL_MAP_FILENAME,
+    HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME,
+    HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    HA_MATTER_WS_TOPOLOGY_FILENAME,
     MDNS_SCOPES_BR_FILENAME,
     MDNS_SCOPES_HAP_FILENAME,
     MDNS_SCOPES_MATTER_FILENAME,
@@ -224,6 +229,11 @@ SOURCE_PRECEDENCE = {
     OTBR_RESTAPI_DEVICES_LIST_FILENAME: 85,
     OTBR_RESTAPI_DEVICES_FILENAME: 84,
 
+    HA_MATTER_WS_TOPOLOGY_FILENAME: 83,
+    HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME: 82,
+    HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME: 81,
+    HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME: 80,
+
     EVE_TOPOLOGY_FILENAME: 60,
 
     MDNS_SCOPES_THREAD_FILENAME: 50,
@@ -256,6 +266,10 @@ OTBR_RESTAPI_INPUT_FILES: list[str] = [
     OTBR_RESTAPI_DEVICES_FILENAME,
 ]
 
+HA_MATTER_WS_INPUT_FILES: list[str] = [
+    HA_MATTER_WS_TOPOLOGY_FILENAME,
+]
+
 MDNS_INPUT_FILES: list[str] = [
     ##MDNS_SCOPES_THREAD_FILENAME,                 # mDNS Thread devices
     MDNS_SCOPES_BR_FILENAME,                       # mDNS Border Router discovery
@@ -271,6 +285,7 @@ DEFAULT_FULL_INPUT_FILES: list[str] = (
                                        ## SYSTEM_INPUT_FILES 
                                        OTBR_CLI_INPUT_FILES 
                                        + OTBR_RESTAPI_INPUT_FILES 
+                                       + HA_MATTER_WS_INPUT_FILES
                                        + MDNS_INPUT_FILES 
                                        ##+ EVE_INPUT_FILES
                                        + [])
@@ -279,6 +294,7 @@ GROUP_TO_INPUT_FILES: dict[str, list[str]] = {
     "system": SYSTEM_INPUT_FILES,
     "otbr-cli": OTBR_CLI_INPUT_FILES,
     "otbr-restapi": OTBR_RESTAPI_INPUT_FILES,
+    "ha-matter-ws": HA_MATTER_WS_INPUT_FILES,
     "mdns": MDNS_INPUT_FILES,
     "eve": EVE_INPUT_FILES,
     "full": DEFAULT_FULL_INPUT_FILES,
@@ -1039,6 +1055,32 @@ def get_matter_fabric_node_identity(record: dict[str, Any]) -> str:
     if not isinstance(record, dict):
         return ""
 
+    matter = record.get("matter")
+    matter_record = matter if isinstance(matter, dict) else record
+    fabric_value = matter_record.get(
+        "compressedFabricId", matter_record.get("fabricId")
+    )
+    node_value = matter_record.get("nodeId")
+
+    def normalize_component(value: Any) -> str:
+        if isinstance(value, bool):
+            return ""
+        if isinstance(value, int):
+            return f"{value:016x}" if 0 <= value < 1 << 64 else ""
+        if not isinstance(value, str):
+            return ""
+        text = value.strip().lower()
+        if not text:
+            return ""
+        if re.fullmatch(r"(?:0x)?[0-9a-f]{1,16}", text):
+            return f"{int(text, 16):016x}"
+        return text
+
+    fabric_id = normalize_component(fabric_value)
+    node_id = normalize_component(node_value)
+    if fabric_id and node_id:
+        return f"{fabric_id}|{node_id}"
+
     fabric_id = _normalize_alias_text(
         _extract_service_info_property_decoded(record, "FabricID_compressed"),
         lower=True,
@@ -1351,10 +1393,9 @@ def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
     if rloc16:
         identities["rloc16"] = rloc16
 
-    if is_matter_operational_mdns_record(record):
-        matter_id = get_matter_fabric_node_identity(record)
-        if matter_id:
-            identities["matter_fabric_node"] = matter_id
+    matter_id = get_matter_fabric_node_identity(record)
+    if matter_id:
+        identities["matter_fabric_node"] = matter_id
 
     return identities
 
@@ -1428,9 +1469,6 @@ def filter_candidate_ids_for_matter_identity_consistency(
     - Else if candidate has Matter composite identity, keep only exact match.
     - Else keep only when rloc16 also matches; otherwise drop (OMR-only weak match).
     """
-    if not is_matter_operational_mdns_record(incoming_record):
-        return candidate_ids
-
     incoming_matter_id = get_matter_fabric_node_identity(incoming_record)
     if not incoming_matter_id:
         return candidate_ids

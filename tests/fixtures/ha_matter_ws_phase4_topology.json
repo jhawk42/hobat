@@ -1,0 +1,70 @@
+{
+  "diagnostics": [
+    {
+      "nodeId": 1,
+      "matterId": "FABRIC-1",
+      "extAddress": "AA00000000000001",
+      "rloc16": "0x1000",
+      "networkName": "Golden Thread",
+      "extPanId": "0x1111222233334444",
+      "role": "Router",
+      "neighborTable": [
+        {"extAddress": "BB00000000000002", "rloc16": "0x2000", "lqi": 3, "isChild": false},
+        {"extAddress": "BB00000000000002", "rloc16": "0x2000", "lqi": 3, "isChild": false},
+        {"extAddress": "CC00000000000003", "rloc16": "0x3001", "lqi": 2, "isChild": true},
+        {"extAddress": "BB00000000000002", "rloc16": "0x4000", "lqi": 1, "isChild": false}
+      ],
+      "routeTable": [
+        {"extAddress": "BB00000000000002", "rloc16": "0x2000", "routerId": 8, "pathCost": 1, "allocated": true, "linkEstablished": false},
+        {"extAddress": "EE00000000000005", "rloc16": "0x5000", "routerId": 20, "pathCost": 2, "allocated": false, "linkEstablished": true},
+        {"routerId": 22, "nextHop": 8, "pathCost": 3, "allocated": true, "linkEstablished": true}
+      ]
+    },
+    {
+      "nodeId": 2,
+      "matterId": "FABRIC-2",
+      "extAddress": "BB00000000000002",
+      "rloc16": "0x2000",
+      "networkName": "Golden Thread",
+      "extPanId": "0x1111222233334444",
+      "role": "Router",
+      "neighborTable": [
+        {"extAddress": "AA00000000000001", "rloc16": "0x1000", "lqi": 1, "isChild": false}
+      ],
+      "routeTable": []
+    },
+    {
+      "nodeId": 4,
+      "matterId": "FABRIC-4",
+      "extAddress": "DD00000000000004",
+      "rloc16": "0x4000",
+      "networkName": "Golden Thread",
+      "extPanId": "0x1111222233334444",
+      "role": "Router",
+      "neighborTable": [],
+      "routeTable": []
+    },
+    {
+      "nodeId": 6,
+      "matterId": "FABRIC-6",
+      "networkName": "Golden Thread",
+      "extPanId": "0x1111222233334444",
+      "role": "EndDevice",
+      "neighborTable": [
+        {"extAddress": "BB00000000000002", "rloc16": "0x2000", "lqi": 2, "isChild": false}
+      ],
+      "routeTable": []
+    },
+    {
+      "nodeId": 7,
+      "matterId": "FABRIC-7",
+      "extAddress": "7700000000000007",
+      "rloc16": "0x7000",
+      "networkName": "Golden Thread",
+      "extPanId": "0x1111222233334444",
+      "role": "Router",
+      "neighborTable": [],
+      "routeTable": []
+    }
+  ]
+}

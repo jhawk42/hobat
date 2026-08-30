@@ -81,7 +81,9 @@ browser revalidates it.
 The server deduplicates simultaneous refreshes of the same filename and uses an
 `asyncio.Lock` per source command family. Two OTBR CLI actions therefore do not
 run concurrently in one server process, while unrelated source families can
-progress independently.
+progress independently. Devices, diagnostics, mesh diagnostics, topology, and
+outcome refreshes from `ha-matter-ws` share one source lock so concurrent
+dashboard requests do not load the Matter controller in parallel.
 
 ## Background Jobs and Cancellation
 
@@ -161,7 +163,7 @@ last-write-wins.
 
 ## Dataset Assembly
 
-`DATASOURCE_REGISTRY` defines seven source groups. `DATASET_REGISTRY` is the
+`DATASOURCE_REGISTRY` defines eight source groups. `DATASET_REGISTRY` is the
 runtime authority for selectable datasets and declares ordered files, merge
 strategy, row extractor, adaptor, default view, link filter, physics profile,
 and estimated action cost.

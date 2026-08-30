@@ -23,8 +23,14 @@ import {
   lqStyleFromField, lqStyleFromAvgLqi, lqStyleFromLinkMargin
 } from './tdash-topology-utils.js';
 import {
+  createAdaptorModel,
   createAdaptorModelFromResult,
   emitAdaptorResult,
+  registerDetails,
+  registerDevice,
+  registerRelationship,
+  registerRouterChildRows,
+  registerRouterNeighborRows,
 } from './tdash-adaptor-model.js';
 
 // ── File name constants ───────────────────────────────────────────────────────
@@ -1975,6 +1981,134 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
   return createAdaptorModelFromResult({ nodeData, edgeData, nodeMap, rawByIdForDetails, routerNeighborByRloc16, routerChildByRloc16, sourceNames });
 }
 
+// ── Adaptor 7: Home Assistant Matter WebSocket canonical snapshots ──────────
+
+export function adaptHaMatterWs(fileMap) {
+  const rows = asArray(fileMap.values().next().value);
+  const model = createAdaptorModel(['ha-matter-ws']);
+  const topologyIdToDeviceId = new Map();
+  const relationships = new Map();
+
+  rows.forEach((row, index) => {
+    if (!isPlainObject(row)) return;
+    const canonicalRow = {
+      ...row,
+      ...(isPlainObject(row.matter) ? row.matter : {}),
+      ...(isPlainObject(row.thread) ? row.thread : {}),
+      matter: row.matter,
+    };
+    const explicitId = toText(canonicalRow.topologyId)
+      || toText(canonicalRow.id)
+      || toText(canonicalRow.matterId)
+      || `ha-matter-ws-${index + 1}`;
+    const role = toText(canonicalRow.role || canonicalRow.routingRole).toLowerCase();
+    const isChild = role.includes('child') || role.includes('enddevice');
+    const deviceId = registerDevice(model, canonicalRow, {
+      id: explicitId,
+      preserveId: true,
+      sourceName: 'ha-matter-ws',
+      nodeRecord: canonicalRow,
+      presentation: {
+        label: buildLabel(canonicalRow),
+        shape: isChild ? NODE_SHAPES.child : NODE_SHAPES.router,
+        color: isChild ? NODE_COLORS.child : NODE_COLORS.eve,
+        isRouter: canonicalRow.isRouter === true || role === 'router' || role === 'leader',
+        isLeader: canonicalRow.isLeader === true || role === 'leader',
+        relationshipOnly: canonicalRow.relationshipOnly === true,
+      },
+    });
+    topologyIdToDeviceId.set(explicitId, deviceId);
+    registerDetails(model, deviceId, row, 'replace');
+    registerRouterNeighborRows(model, row.rloc16, row.routerNeighbors);
+    registerRouterChildRows(model, row.rloc16, row.children);
+  });
+
+  function collectRelationship(ownerId, relationship, categories) {
+    if (!isPlainObject(relationship)) return;
+    const sourceId = topologyIdToDeviceId.get(toText(relationship.sourceId)) || ownerId;
+    const targetId = topologyIdToDeviceId.get(toText(relationship.targetId));
+    if (!sourceId || !targetId) return;
+    const key = `${sourceId}|${targetId}`;
+    const aggregate = relationships.get(key) || {
+      sourceId,
+      targetId,
+      categories: [],
+      records: [],
+      metrics: {},
+    };
+    categories.forEach((category) => {
+      if (!aggregate.categories.includes(category)) aggregate.categories.push(category);
+    });
+    aggregate.records.push(relationship);
+    [
+      'lqi', 'averageRssi', 'lastRssi', 'frameErrorRate',
+      'messageErrorRate', 'routeCost',
+    ].forEach((field) => {
+      if (aggregate.metrics[field] === undefined && relationship[field] !== undefined) {
+        aggregate.metrics[field] = relationship[field];
+      }
+    });
+    relationships.set(key, aggregate);
+  }
+
+  rows.forEach((row, index) => {
+    if (!isPlainObject(row)) return;
+    const explicitId = toText(row.topologyId)
+      || toText(row.id)
+      || toText(row.matterId)
+      || `ha-matter-ws-${index + 1}`;
+    const ownerId = topologyIdToDeviceId.get(explicitId);
+    if (!ownerId) return;
+    const childTargets = new Set(
+      asArray(row.children).map((relationship) => toText(relationship?.targetId)),
+    );
+    asArray(row.routerNeighbors).forEach((relationship) => {
+      collectRelationship(
+        ownerId,
+        relationship,
+        [childTargets.has(toText(relationship?.targetId))
+          ? EDGE_CATEGORY_DEFAULT_CHILDREN
+          : EDGE_CATEGORY_ROUTER_NEIGHBOR],
+      );
+    });
+    asArray(row.children).forEach((relationship) => {
+      if (!asArray(row.routerNeighbors).some(
+        (neighbor) => toText(neighbor?.targetId) === toText(relationship?.targetId),
+      )) {
+        collectRelationship(ownerId, relationship, [EDGE_CATEGORY_DEFAULT_CHILDREN]);
+      }
+    });
+    asArray(row.route?.routeData).forEach((relationship) => {
+      const routeCategories = getOtbrRouteCategories(row);
+      collectRelationship(
+        ownerId,
+        relationship,
+        routeCategories.length > 0 ? routeCategories : [EDGE_CATEGORY_OTBR_ROUTE],
+      );
+    });
+  });
+
+  relationships.forEach((relationship) => {
+    const lqi = toFiniteNumber(relationship.metrics.lqi);
+    registerRelationship(model, {
+      sourceId: relationship.sourceId,
+      targetId: relationship.targetId,
+      category: relationship.categories.join('+'),
+      directed: true,
+      sourceName: 'ha-matter-ws',
+      metrics: relationship.metrics,
+      presentation: {
+        ...lqStyleFromAvgLqi(lqi, 3),
+        arrows: 'to',
+        linkCategories: relationship.categories,
+      },
+      rawRecord: { observations: relationship.records },
+    });
+  });
+
+  return emitAdaptorResult(model);
+}
+
 // ── Dispatch: pick adaptor from the dataset registry identifier ───────────────
 
 export const ADAPTOR_HANDLERS = Object.freeze({
@@ -1985,6 +2119,7 @@ export const ADAPTOR_HANDLERS = Object.freeze({
   'thread-tools-native': (fileMap) => adaptThreadToolsNative(fileMap),
   'router-table': (fileMap) => adaptRouterTable(fileMap),
   'otbr-restapi': (fileMap, rows) => adaptOtbrRestApi(fileMap, rows),
+  'ha-matter-ws': (fileMap) => adaptHaMatterWs(fileMap),
   'raw-array': (fileMap) => adaptRawArray(fileMap),
 });
 

@@ -1,0 +1,83 @@
+{
+  "nodes": [
+    {
+      "node_id": 7,
+      "name": "stale duplicate",
+      "available": false,
+      "attributes": {}
+    },
+    {
+      "node_id": 3,
+      "name": "Wi-Fi Plug",
+      "available": true,
+      "attributes": {
+        "0/40/1": "Example Vendor",
+        "0/40/3": "Example Plug",
+        "0/40/5": "Kitchen Plug",
+        "0/51/0": [
+          {
+            "0": "wlan0",
+            "1": true,
+            "4": "ABEiM0RV",
+            "5": ["wKgBAg=="],
+            "6": ["IAENuAAAAAAAAAAAAAAAAQ=="],
+            "7": 1
+          }
+        ],
+        "0/31/0": [
+          {
+            "1": 1,
+            "2": 2,
+            "3": 3,
+            "4": 4,
+            "5": 5
+          }
+        ],
+        "0/62/0": ["SENSITIVE-NOC"],
+        "0/62/4": ["SENSITIVE-ROOT"],
+        "0/63/0": ["SENSITIVE-GROUP-KEY"]
+      }
+    },
+    {
+      "node_id": 7,
+      "name": "Thread Sensor",
+      "available": true,
+      "attributes": {
+        "0/40/5": "Office Sensor",
+        "0/51/0": [
+          {
+            "0": "wlan0",
+            "1": true,
+            "4": "ABEiM0RV",
+            "5": ["wKgBAg=="],
+            "6": ["IAENuAAAAAAAAAAAAAAAAQ=="],
+            "7": 1
+          },
+          {
+            "0": "thread0",
+            "1": true,
+            "4": "ESIzRFVmd4g=",
+            "5": [],
+            "6": ["/TuiVUqmVIMAAAAAAAAAAQ=="],
+            "7": 4
+          }
+        ],
+        "0/53/7": [
+          {
+            "0": 9833440827789222417,
+            "1": 12,
+            "2": 3073,
+            "5": 3,
+            "10": false,
+            "13": true
+          }
+        ],
+        "0/53/8": [],
+        "0/53/9": 343066305,
+        "0/53/63": null,
+        "0/53/64": null,
+        "0/53/65533": 3
+      }
+    }
+  ]
+}

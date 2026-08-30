@@ -246,6 +246,25 @@ export function normalizeInputRecord(record, options = {}) {
 }
 
 function matterCompositeIdentity(record) {
+  const matter = isPlainObject(record?.matter) ? record.matter : record;
+  const explicitMatterId = normalizeIdentifierText(matter?.matterId);
+  const explicitMatch = explicitMatterId.match(
+    /^([0-9a-f]{16})-([0-9a-f]{16})$/,
+  );
+  if (explicitMatch) return `${explicitMatch[1]}|${explicitMatch[2]}`;
+  const fabricValue = matter?.compressedFabricId ?? matter?.fabricId;
+  const nodeValue = matter?.nodeId;
+  const normalizeMatterComponent = (value) => {
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+      return value.toString(16).padStart(16, "0");
+    }
+    const text = normalizeIdentifierText(value).replace(/^0x/, "");
+    return /^[0-9a-f]{1,16}$/.test(text) ? text.padStart(16, "0") : "";
+  };
+  const directFabric = normalizeMatterComponent(fabricValue);
+  const directNode = normalizeMatterComponent(nodeValue);
+  if (directFabric && directNode) return `${directFabric}|${directNode}`;
+
   const scope = String(record?.scope ?? "").trim().toLowerCase();
   if (scope !== "_matter._tcp.local.") return "";
   const properties = record?.serviceInfo?.properties ?? record?.service_info?.properties;

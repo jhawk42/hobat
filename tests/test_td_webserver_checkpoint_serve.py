@@ -167,6 +167,40 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(diagnostics.action_cost_s, 1200)
         self.assertGreaterEqual(mesh.action_cost_s, 1200)
 
+    async def test_ha_matter_ws_actions_share_source_and_expensive_work_is_async(self) -> None:
+        expected_actions = {
+            "td-ha-matter-ws-server-info.json": ["ha-matter-ws", "server-info"],
+            "td-ha-matter-ws-devices-fetch-all.json": [
+                "ha-matter-ws", "devices", "fetch-all"
+            ],
+            "td-ha-matter-ws-diagnostics-fetch-all.json": [
+                "ha-matter-ws", "diagnostics", "fetch-all"
+            ],
+            "td-ha-matter-ws-mesh-diagnostics-fetch-all.json": [
+                "ha-matter-ws", "mesh-diagnostics", "fetch-all"
+            ],
+            "td-ha-matter-ws-topology.json": ["ha-matter-ws", "topology"],
+            "td-ha-matter-ws-collection.outcome.json": ["ha-matter-ws", "all"],
+        }
+
+        for filename, action in expected_actions.items():
+            file_action = td_webserver.FILE_ACTION_MAP[filename]
+            self.assertEqual(file_action.action, action)
+            self.assertEqual(file_action.action[0], "ha-matter-ws")
+
+        self.assertFalse(
+            td_webserver.FILE_ACTION_MAP[
+                "td-ha-matter-ws-server-info.json"
+            ].force_async
+        )
+        for filename in set(expected_actions) - {"td-ha-matter-ws-server-info.json"}:
+            self.assertTrue(td_webserver.FILE_ACTION_MAP[filename].force_async)
+
+        self.assertIs(
+            td_webserver._get_source_lock("ha-matter-ws"),
+            td_webserver._get_source_lock("ha-matter-ws"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

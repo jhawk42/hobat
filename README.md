@@ -1,8 +1,9 @@
 # Hobat - Thread mesh dashboard and tools
 
 Hobat is a cache-first Thread network dashboard and command-line toolkit. It
-collects data from OTBR `ot-ctl`, the OTBR REST API, mDNS, Eve exports, and
-Thread Tools exports, then presents topology and table views in a browser.
+collects data from OTBR `ot-ctl`, the OTBR REST API, Home Assistant Matter
+Server, mDNS, Eve exports, and Thread Tools exports, then presents topology and
+table views in a browser.
 
 The cache-first model keeps routine analysis off the live mesh. Long diagnostic
 collections can consume time and battery, especially on sleepy end devices, so
@@ -11,7 +12,7 @@ run them deliberately or schedule them for quiet periods.
 ## Capabilities
 
 - Interactive topology and sortable table views.
-- OTBR CLI, OTBR REST, mDNS, Eve, Thread Tools, and merged datasets.
+- OTBR CLI, OTBR REST, Home Assistant Matter, mDNS, Eve, Thread Tools, and merged datasets.
 - Search and capability-driven node, link, and diagnostic filters.
 - Canonical identity and field normalization across source formats.
 - Progressive rendering from `.partial.json` checkpoints during long jobs.
@@ -28,6 +29,7 @@ Flow](doc/codebase_webpage_web_server_data_flow.md), and the [CLI Reference](doc
 - Python 3.10 or newer.
 - Dependencies from `requirements.txt`.
 - An OTBR instance for live OTBR collection.
+- Home Assistant Matter Server for `ha-matter-ws` collection.
 - Docker access when using the default container-based `ot-ctl` path.
 
 Install development and test dependencies from the repository root:
@@ -96,6 +98,11 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi devices fetch
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi diagnostics fetch-all
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi topology
 
+# Home Assistant Matter Server snapshots
+PYTHONPATH=src python3 -m td_cli --datadir ./data ha-matter-ws server-info
+PYTHONPATH=src python3 -m td_cli --datadir ./data ha-matter-ws topology
+PYTHONPATH=src python3 -m td_cli --datadir ./data ha-matter-ws all
+
 # Other sources and processing
 PYTHONPATH=src python3 -m td_cli --datadir ./data mdns thread
 PYTHONPATH=src python3 -m td_cli --datadir ./data process-eve
@@ -105,6 +112,14 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data merge-dataset
 `otbr-cli topology` runs the complete CLI collection sequence. Detailed
 `networkdiag fetch-all` and REST diagnostic sweeps are the highest-impact
 commands; use cached snapshots for repeated analysis.
+
+`ha-matter-ws` connects to `ws://localhost:5580/ws` by default; use `--uri`
+when Matter Server is reachable elsewhere. It is read-only and
+controller-scoped: only commissioned Matter nodes are visible, sleeping or
+unavailable nodes may omit diagnostics, and Wi-Fi Matter nodes do not provide
+Thread telemetry. This source complements OTBR network-wide collection rather
+than replacing it. The dashboard serializes Matter refreshes and serves cached
+snapshots until they are stale or explicitly refreshed.
 
 See [CLI Reference](doc/help_td_cli.md), [OTBR REST CLI Reference](doc/help_td_restapi_cli.md), and [Environment Variables](doc/help_env_vars.md).
 
@@ -152,6 +167,8 @@ docker run --name hobat -d \
 
 Set `TD_OTBR_CONTAINER_USE=0` to run `ot-ctl` locally instead of through
 `docker exec`. Home Assistant add-on configuration is under `addon_hobat/`.
+The Matter WebSocket default requires the container to share the host network;
+otherwise run the CLI with a reachable `--uri`.
 
 ## Tests
 

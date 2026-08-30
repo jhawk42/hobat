@@ -1,0 +1,46 @@
+{
+  "contractVersion": 1,
+  "source": "Sanitized from td-matter-ws-devices-fetch-all.json and matterjs-server schema 12 envelope definitions",
+  "requests": [
+    {"message_id": "request-listen", "command": "start_listening"},
+    {"message_id": "request-nodes", "command": "get_nodes", "args": {"only_available": false}},
+    {"message_id": "request-missing", "command": "get_node", "args": {"node_id": 404}}
+  ],
+  "frames": [
+    {
+      "fabric_id": 1,
+      "compressed_fabric_id": 3281868928683057420,
+      "fabric_index": 1,
+      "schema_version": 12,
+      "min_supported_schema_version": 11,
+      "sdk_version": "matter-server/1.2.3 (matter.js/0.17.5-alpha.0-20260710-82b39217b)",
+      "wifi_credentials_set": false,
+      "thread_credentials_set": false,
+      "bluetooth_enabled": false
+    },
+    {
+      "event": "node_updated",
+      "data": {"node_id": 2, "available": false, "is_bridge": false, "attributes": {}}
+    },
+    {
+      "message_id": "request-nodes",
+      "result": [
+        {"node_id": 1, "available": true, "is_bridge": false, "attributes": {}},
+        {"node_id": 2, "available": false, "is_bridge": false, "attributes": {}},
+        {"node_id": 1, "available": true, "is_bridge": false, "attributes": {}}
+      ]
+    },
+    {
+      "message_id": "request-missing",
+      "error_code": 5,
+      "details": "Node 404 does not exist"
+    },
+    {
+      "message_id": "request-listen",
+      "result": [
+        {"node_id": 1, "available": true, "is_bridge": false, "attributes": {}}
+      ]
+    }
+  ],
+  "timeout": {"message_id": "request-timeout", "frames": []}
+}

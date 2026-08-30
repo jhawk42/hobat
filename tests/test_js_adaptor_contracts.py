@@ -26,4 +26,4 @@ def test_all_adaptors_preserve_the_public_result_contract() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"adaptorCount": 8}
+    assert json.loads(result.stdout) == {"adaptorCount": 9}

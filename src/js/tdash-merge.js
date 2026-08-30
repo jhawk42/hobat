@@ -80,6 +80,9 @@ function getServiceInfoPropDecodedText(row, key) {
 }
 
 function getMatterFabricNodeIdentity(row) {
+  const directKeys = getDeviceIdentityKeys(row, "by-identity")
+    .find((key) => key.startsWith("matterFabricNode:"));
+  if (directKeys) return directKeys.slice("matterFabricNode:".length);
   if (!isMatterOperationalMdnsRow(row)) return "";
   const fabricId = getServiceInfoPropDecodedText(row, "FabricID_compressed");
   const nodeId = getServiceInfoPropDecodedText(row, "NodeID");
@@ -88,8 +91,6 @@ function getMatterFabricNodeIdentity(row) {
 }
 
 function filterCandidateIdsForMatterIdentityConsistency(candidateIds, incomingRow, mergedRows) {
-  if (!isMatterOperationalMdnsRow(incomingRow)) return candidateIds;
-
   const incomingMatterId = getMatterFabricNodeIdentity(incomingRow);
   if (!incomingMatterId) return candidateIds;
 

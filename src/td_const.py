@@ -41,6 +41,13 @@ OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME = "td-otbr-restapi-mesh-diagnos
 OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME = "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json"
 OTBR_RESTAPI_DEVICE_DIAGNOSTIC_FILENAME_TEMPLATE = "td-otbr-restapi-diagnostic-{device_id}.json"
 
+HA_MATTER_WS_SERVER_INFO_FILENAME = "td-ha-matter-ws-server-info.json"
+HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME = "td-ha-matter-ws-devices-fetch-all.json"
+HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME = "td-ha-matter-ws-diagnostics-fetch-all.json"
+HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME = "td-ha-matter-ws-mesh-diagnostics-fetch-all.json"
+HA_MATTER_WS_TOPOLOGY_FILENAME = "td-ha-matter-ws-topology.json"
+HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME = "td-ha-matter-ws-collection.outcome.json"
+
 EVE_TOPOLOGY_FILENAME = "td-eve-topology.json"
 THREAD_TOOLS_DIAGNOSTICS_FILENAME = "diagnostics.json"
 MERGED_TOPOLOGY_ALL_FILENAME = "td-merged-topology-all.json"

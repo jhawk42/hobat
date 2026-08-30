@@ -36,6 +36,11 @@ export const SOURCE_PRECEDENCE = Object.freeze({
   "td-otbr-restapi-devices-list.json": 85,
   "td-otbr-restapi-devices.json": 84,
 
+  "td-ha-matter-ws-topology.json": 83,
+  "td-ha-matter-ws-mesh-diagnostics-fetch-all.json": 82,
+  "td-ha-matter-ws-diagnostics-fetch-all.json": 81,
+  "td-ha-matter-ws-devices-fetch-all.json": 80,
+
   "td-eve-topology.json": 60,
 
   "td-mdns-scopes-thread.json": 50,

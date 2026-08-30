@@ -13,10 +13,21 @@ enable this for a trusted image.
 The OpenThread Border Router app must be installed and running. Hobat targets
 its standard HAOS container name, `addon_core_openthread_border_router`.
 
+For Home Assistant Matter datasets, install and start Matter Server. Hobat uses
+host networking and connects read-only to `ws://localhost:5580/ws` by default.
+Only nodes commissioned to that Matter controller are visible. Unavailable or
+sleeping nodes may omit diagnostics, Wi-Fi Matter nodes do not expose Thread
+diagnostics, and Matter collection does not replace OTBR network-wide data.
+
 ## Web Interface
 
 Start Hobat, then select **Open Web UI**. Dashboard data is persisted in the
 app's `/data` directory and included in Home Assistant backups.
+
+Select **Home Assistant Matter** to view Devices, Diagnostics, Mesh
+Diagnostics, or Topology. Enable **Cache Only** before Sync when the dashboard
+must not contact Matter Server. Refreshes are serialized under one Matter
+source lock and expensive collections run as cancellable background jobs.
 
 ## Local Image Testing
 

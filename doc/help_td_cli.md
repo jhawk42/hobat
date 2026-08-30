@@ -28,6 +28,7 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 |---|---|
 | `otbr-cli` | Scan OTBR CLI commands |
 | `otbr-restapi` | Query OTBR REST API commands |
+| `ha-matter-ws` | Read commissioned nodes from Home Assistant Matter Server |
 | `mdns` | Scan Thread-related mDNS scopes |
 | `process-eve` | Parse and enhance an Eve Thread layout file |
 | `merge-dataset` (`merge-data`) | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file; `merge-data` is a compatibility alias |
@@ -53,6 +54,24 @@ step and returns the first non-zero step result.
 ```text
 td_cli otbr-restapi [global-forwarded-options] {download,node,devices,diagnostics,actions,mesh-diagnostics,topology} ...
 ```
+
+### `ha-matter-ws`
+
+```text
+td_cli ha-matter-ws [source-options] {server-info,devices,diagnostics,mesh-diagnostics,topology,all} ...
+```
+
+Source options include `--uri`, `--connect-timeout`, `--request-timeout`,
+`--settle-timeout`, `--output`, and `--no-progress`. The default URI is
+`ws://localhost:5580/ws`. `devices`, `diagnostics`, and `mesh-diagnostics`
+provide `get` and `fetch-all` commands; `devices` also provides `list`.
+`topology` writes the canonical topology snapshot, while `all` performs one
+inventory transaction and writes every fixed snapshot plus the collection
+outcome. `--output` applies only to leaf commands.
+
+Normal output excludes Matter credentials. Collection is read-only and limited
+to nodes commissioned to the connected controller. Missing diagnostics on an
+unavailable or non-Thread Matter node are not treated as zero values.
 
 ### `mdns`
 
@@ -221,6 +240,7 @@ Examples:
 - `td_cli otbr-cli meshdiag` prints `otbr-cli meshdiag` subcommand help
 - `td_cli otbr-cli networkdiag` prints `otbr-cli networkdiag` subcommand help
 - `td_cli otbr-restapi actions` prints `otbr-restapi actions` subcommand help
+- `td_cli ha-matter-ws devices` prints `ha-matter-ws devices` subcommand help
 
 ---
 

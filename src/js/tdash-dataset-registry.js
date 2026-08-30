@@ -5,6 +5,7 @@
 export const DATASOURCE_REGISTRY = [
   { value: "otbr-cli", label: "otbr-cli", default_dataset_value: "merged_otbr_cli_meshdiag_networkdiag_multicast" },
   { value: "otbr-restapi", label: "otbr-restapi", default_dataset_value: "restapi_devices_diagnostics_list" },
+  { value: "ha-matter-ws", label: "Home Assistant Matter", default_dataset_value: "ha_matter_ws_topology" },
   { value: "eve", label: "eve app" },
   { value: "thread-tools", label: "thread tools app" },
   { value: "mdns", label: "mdns" },
@@ -42,6 +43,68 @@ export const DATASOURCE_REGISTRY = [
 //   defaultPhysicsProfile — resolved automatic physics profile
 
 export const DATASET_REGISTRY = [
+
+  // Home Assistant Matter Server
+  {
+    source: "ha-matter-ws",
+    value: "ha_matter_ws_devices",
+    label: "Devices",
+    group: "Inventory",
+    files: ["td-ha-matter-ws-devices-fetch-all.json"],
+    mergeStrategy: "none",
+    rowExtractor: "raw-array",
+    adaptor: "ha-matter-ws",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "ha-matter-ws",
+    defaultView: "table",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 60
+  },
+  {
+    source: "ha-matter-ws",
+    value: "ha_matter_ws_diagnostics",
+    label: "Diagnostics",
+    group: "Diagnostics",
+    files: ["td-ha-matter-ws-diagnostics-fetch-all.json"],
+    mergeStrategy: "none",
+    rowExtractor: "raw-array",
+    adaptor: "ha-matter-ws",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "ha-matter-ws",
+    defaultView: "table",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 60
+  },
+  {
+    source: "ha-matter-ws",
+    value: "ha_matter_ws_mesh_diagnostics",
+    label: "Mesh Diagnostics",
+    group: "Topology",
+    files: ["td-ha-matter-ws-mesh-diagnostics-fetch-all.json"],
+    mergeStrategy: "none",
+    rowExtractor: "raw-array",
+    adaptor: "ha-matter-ws",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "ha-matter-ws",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links",
+    estimateActionCostSecs: 60
+  },
+  {
+    source: "ha-matter-ws",
+    value: "ha_matter_ws_topology",
+    label: "Topology",
+    group: "Topology",
+    files: ["td-ha-matter-ws-topology.json"],
+    mergeStrategy: "none",
+    rowExtractor: "raw-array",
+    adaptor: "ha-matter-ws",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "ha-matter-ws",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links",
+    estimateActionCostSecs: 60
+  },
 
   // otbr-cli
   // ── Single-file simple datasets (otbr-cli) ───  
@@ -622,6 +685,10 @@ const KNOWN_DATASET_FILES = new Set([
   "Eve Thread Network Layout.evethreadlayout",
   "diagnostics.json",
   "td-eve-topology.json",
+  "td-ha-matter-ws-devices-fetch-all.json",
+  "td-ha-matter-ws-diagnostics-fetch-all.json",
+  "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
+  "td-ha-matter-ws-topology.json",
   "td-mdns-scopes-br.json",
   "td-mdns-scopes-hap.json",
   "td-mdns-scopes-matter.json",
@@ -657,6 +724,7 @@ const ADAPTOR_IDS = new Set([
   "eve-native",
   "thread-tools-native",
   "otbr-restapi",
+  "ha-matter-ws",
   "router-table",
   "raw-array",
 ]);

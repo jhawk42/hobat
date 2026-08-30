@@ -35,6 +35,8 @@ import otbr_cli_networkdiag_topology
 import otbr_restapi_download
 import otbr_restapi_cli
 
+import ha_matter_ws_cli
+
 import merge_dataset
 import merge_extaddr_device_label_map
 
@@ -350,6 +352,51 @@ def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
 
 
 # type: ignore[type-arg]
+def _add_ha_matter_ws_commands(subparsers: argparse._SubParsersAction) -> None:
+    """Build the routing-only Home Assistant Matter command tree."""
+    matter = subparsers.add_parser(
+        "ha-matter-ws",
+        help="Collect snapshots from Home Assistant Matter Server",
+        description="Collect snapshots from Home Assistant Matter Server",
+    )
+    matter.add_argument("--uri", default=None)
+    matter.add_argument("--connect-timeout", type=float, default=None)
+    matter.add_argument("--request-timeout", type=float, default=None)
+    matter.add_argument("--settle-timeout", type=float, default=None)
+    matter.add_argument("--datadir", default=argparse.SUPPRESS, metavar="DIR")
+    matter.add_argument("--output", "-o", default=argparse.SUPPRESS, metavar="FILE")
+    matter.add_argument("--no-progress", action="store_true", default=False)
+    matter.add_argument("--debug", "-d", action="store_true", default=argparse.SUPPRESS)
+
+    commands = matter.add_subparsers(dest="ha_matter_command", required=False)
+    commands.add_parser("server-info")
+
+    devices = commands.add_parser("devices")
+    device_commands = devices.add_subparsers(dest="ha_matter_devices_command")
+    device_commands.add_parser("list")
+    device_get = device_commands.add_parser("get")
+    device_get.add_argument("--node-id", required=True)
+    device_commands.add_parser("fetch-all")
+
+    diagnostics = commands.add_parser("diagnostics")
+    diagnostic_commands = diagnostics.add_subparsers(
+        dest="ha_matter_diagnostics_command"
+    )
+    diagnostic_get = diagnostic_commands.add_parser("get")
+    diagnostic_get.add_argument("--node-id", required=True)
+    diagnostic_commands.add_parser("fetch-all")
+
+    mesh = commands.add_parser("mesh-diagnostics")
+    mesh_commands = mesh.add_subparsers(dest="ha_matter_mesh_diagnostics_command")
+    mesh_get = mesh_commands.add_parser("get")
+    mesh_get.add_argument("--node-id", required=True)
+    mesh_commands.add_parser("fetch-all")
+
+    commands.add_parser("topology")
+    commands.add_parser("all")
+
+
+# type: ignore[type-arg]
 def _add_merge_commands(subparsers: argparse._SubParsersAction) -> None:
     """Build the flattened merge commands."""
 
@@ -403,6 +450,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_otbr_cli_commands(subparsers)
     _add_otbr_restapi_commands(subparsers)
+    _add_ha_matter_ws_commands(subparsers)
     _add_process_commands(subparsers)
     _add_merge_commands(subparsers)
 
@@ -413,6 +461,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     otbr-restapi
         usage: td_cli otbr-restapi [-h] {node,devices,diagnostics,actions,mesh-diagnostics,topology,download} ...
+
+    ha-matter-ws
+        usage: td_cli ha-matter-ws [-h] {server-info,devices,diagnostics,mesh-diagnostics,topology,all} ...
 
     mdns
         usage: td_cli mdns [-h] [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
@@ -432,6 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser._subcommand_parsers = {  # type: ignore[attr-defined]
         "otbr-cli": subparsers._name_parser_map["otbr-cli"],
         "otbr-restapi": subparsers._name_parser_map["otbr-restapi"],
+        "ha-matter-ws": subparsers._name_parser_map["ha-matter-ws"],
         "process-eve": subparsers._name_parser_map["process-eve"],
         "merge-dataset": subparsers._name_parser_map["merge-dataset"],
         "merge-extaddr": subparsers._name_parser_map["merge-extaddr"]
@@ -791,6 +843,53 @@ def _dispatch_process_eve(
     )
 
 
+def _dispatch_ha_matter_ws(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    sub_parser = parser._subcommand_parsers["ha-matter-ws"]  # type: ignore[attr-defined]
+    command = getattr(args, "ha_matter_command", None)
+    if not command:
+        sub_parser.print_help()
+        return 0
+
+    nested_attribute = f"ha_matter_{command.replace('-', '_')}_command"
+    nested = getattr(args, nested_attribute, None)
+    if command in {"devices", "diagnostics", "mesh-diagnostics"} and not nested:
+        return _normalize_module_rc(
+            ha_matter_ws_cli.main([command, "--help"]),
+            "ha_matter_ws_cli.main",
+        )
+
+    forwarded: list[str] = []
+    if getattr(args, "datadir", None):
+        forwarded += ["--datadir", str(args.datadir)]
+    for attribute, option in (
+        ("uri", "--uri"),
+        ("connect_timeout", "--connect-timeout"),
+        ("request_timeout", "--request-timeout"),
+        ("settle_timeout", "--settle-timeout"),
+        ("output", "--output"),
+    ):
+        value = getattr(args, attribute, None)
+        if value is not None:
+            forwarded += [option, str(value)]
+    if getattr(args, "no_progress", False):
+        forwarded.append("--no-progress")
+    if getattr(args, "debug", False):
+        forwarded.append("--debug")
+
+    forwarded.append(command)
+    if nested:
+        forwarded.append(nested)
+    node_id = getattr(args, "node_id", None)
+    if node_id is not None:
+        forwarded += ["--node-id", str(node_id)]
+    forwarded += extra_args
+    return _normalize_module_rc(
+        ha_matter_ws_cli.main(forwarded), "ha_matter_ws_cli.main"
+    )
+
+
 def _dispatch_merge(
     args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
 ) -> int:
@@ -810,6 +909,7 @@ _FAMILY_DISPATCHERS = {
     "otbr-cli": _dispatch_otbr_cli,
     "mdns": _dispatch_mdns,
     "otbr-restapi": _dispatch_otbr_restapi,
+    "ha-matter-ws": _dispatch_ha_matter_ws,
     "process-eve": _dispatch_process_eve,
     "merge-dataset": _dispatch_merge,
     "merge-data": _dispatch_merge,
@@ -878,6 +978,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "meshdiag_command",
         "networkdiag_command",
         "restapi_command",
+        "ha_matter_command",
+        "ha_matter_devices_command",
+        "ha_matter_diagnostics_command",
+        "ha_matter_mesh_diagnostics_command",
     ):
         value = getattr(args, attr, None)
         if value:

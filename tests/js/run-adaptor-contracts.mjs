@@ -170,6 +170,70 @@ assertResult(raw, {
   hasChildIndex: false,
 });
 
+const haMatter = run("ha-matter-ws", ["td-ha-matter-ws-topology.json"], [[
+  {
+    topologyId: "matter:a",
+    extAddress: "aa00112233445566",
+    rloc16: "0x1000",
+    role: "Router",
+    routerNeighbors: [{ sourceId: "matter:a", targetId: "matter:b", lqi: 3 }],
+    children: [{ sourceId: "matter:a", targetId: "matter:b", lqi: 3 }],
+    route: { routeData: [{ sourceId: "matter:a", targetId: "matter:b", routeCost: 1 }] },
+  },
+  {
+    topologyId: "matter:b",
+    extAddress: "bb00112233445566",
+    rloc16: "0x1001",
+    role: "Child",
+    routerNeighbors: [],
+    children: [],
+    route: { routeData: [] },
+  },
+]]);
+assertResult(haMatter, {
+  nodeIds: ["matter:a", "matter:b"],
+  edges: [[
+    "matter:a",
+    "matter:b",
+    ["default_children", "otbr_route", "otbr_route_router"],
+  ]],
+  sourceNames: ["ha-matter-ws"],
+  hasChildIndex: true,
+});
+assert.equal(haMatter.edgeData[0].arrows, "to");
+assert.equal(haMatter.rawByIdForDetails.get("matter:a").role, "Router");
+
+const haMatterDevices = run(
+  "ha-matter-ws",
+  ["td-ha-matter-ws-devices-fetch-all.json"],
+  [[{
+    matter: {
+      matterId: "0000000000001234-0000000000000001",
+      nodeId: 1,
+      deviceLabel: "Hall Sensor",
+    },
+    thread: { extAddress: "aa00112233445566", routingRole: "Child" },
+  }]],
+);
+assert.equal(haMatterDevices.nodeData[0].id, "0000000000001234-0000000000000001");
+assert.match(haMatterDevices.nodeData[0].label, /Hall Sensor/);
+assert.equal(
+  haMatterDevices.nodeMap.get("0000000000001234-0000000000000001").extAddress,
+  "aa00112233445566",
+);
+
+const cachedHaMatterRows = JSON.parse(
+  fs.readFileSync("data/td-ha-matter-ws-topology.json", "utf8"),
+);
+const cachedHaMatter = run(
+  "ha-matter-ws",
+  ["td-ha-matter-ws-topology.json"],
+  [cachedHaMatterRows],
+);
+assert.equal(cachedHaMatter.nodeData.length, 2);
+assert.equal(cachedHaMatter.edgeData.length, 1);
+assert.equal(cachedHaMatter.edgeData[0].arrows, "to");
+
 const devicesEnvelope = { data: [
   { id: "device-a", attributes: { extAddress: "aa00112233445566", hostName: "Device A", role: "router" } },
   { id: "device-b", attributes: { extAddress: "bb00112233445566", hostName: "Device B", role: "router" } },
@@ -221,4 +285,4 @@ const extracted = extractOtbrRestApiSources(new Map(restFiles.map((name, index) 
 assert.equal(extracted.diagnostics[0].shared, "mesh");
 assert.equal(extracted.diagnostics[0].basicOnly, true);
 
-process.stdout.write(`${JSON.stringify({ adaptorCount: 8 })}\n`);
+process.stdout.write(`${JSON.stringify({ adaptorCount: 9 })}\n`);

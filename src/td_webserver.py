@@ -25,6 +25,12 @@ from util_data import (
 from td_const import (
     EVE_TOPOLOGY_FILENAME,
     EXTADDR_DEVICE_LABEL_MAP_FILENAME,
+    HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
+    HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME,
+    HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    HA_MATTER_WS_SERVER_INFO_FILENAME,
+    HA_MATTER_WS_TOPOLOGY_FILENAME,
     MDNS_SCOPES_BR_FILENAME,
     MDNS_SCOPES_HAP_FILENAME,
     MDNS_SCOPES_MATTER_FILENAME,
@@ -211,6 +217,43 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s,
             action=["otbr-restapi", "diagnostics", "fetch-all", "--items-only"],
             action_cost_s=1200,
+            force_async=True,
+        ),
+
+        # Home Assistant Matter Server WebSocket snapshots share one controller lock.
+        HA_MATTER_WS_SERVER_INFO_FILENAME: FileAction(
+            max_age_s=default_max_age_s,
+            action=["ha-matter-ws", "server-info"],
+            action_cost_s=10,
+        ),
+        HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME: FileAction(
+            max_age_s=default_max_age_s,
+            action=["ha-matter-ws", "devices", "fetch-all"],
+            action_cost_s=60,
+            force_async=True,
+        ),
+        HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME: FileAction(
+            max_age_s=default_max_age_s,
+            action=["ha-matter-ws", "diagnostics", "fetch-all"],
+            action_cost_s=60,
+            force_async=True,
+        ),
+        HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME: FileAction(
+            max_age_s=default_max_age_s,
+            action=["ha-matter-ws", "mesh-diagnostics", "fetch-all"],
+            action_cost_s=60,
+            force_async=True,
+        ),
+        HA_MATTER_WS_TOPOLOGY_FILENAME: FileAction(
+            max_age_s=default_max_age_s,
+            action=["ha-matter-ws", "topology"],
+            action_cost_s=60,
+            force_async=True,
+        ),
+        HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME: FileAction(
+            max_age_s=default_max_age_s,
+            action=["ha-matter-ws", "all"],
+            action_cost_s=90,
             force_async=True,
         ),
 
