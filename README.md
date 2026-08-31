@@ -12,6 +12,7 @@ run them deliberately or schedule them for quiet periods.
 ## Capabilities
 
 - Interactive topology and sortable table views.
+- Multiple physics profiles for topology layout: mesh compact, mesh ring, mesh tree horizontal, mesh tree vertical and hub spoke.
 - OTBR CLI, OTBR REST, Home Assistant Matter, mDNS, Eve, Thread Tools, and merged datasets.
 - Search and capability-driven node, link, and diagnostic filters.
 - Canonical identity and field normalization across source formats.
@@ -28,8 +29,8 @@ Flow](doc/codebase_webpage_web_server_data_flow.md), and the [CLI Reference](doc
 
 - Python 3.10 or newer.
 - Dependencies from `requirements.txt`.
-- An OTBR instance for live OTBR collection.
-- Home Assistant Matter Server for `ha-matter-ws` collection.
+- An OTBR instance for live OTBR collection for `otbr-cli` and `otbr-restapi` collection.
+- Optional Home Assistant Matter Server for `ha-matter-ws` collection.
 - Docker access when using the default container-based `ot-ctl` path.
 
 Install development and test dependencies from the repository root:
@@ -72,10 +73,7 @@ PYTHONPATH=src python3 -m td_webserver --host 0.0.0.0 --port 9165 --datadir ./da
 
 Open `http://localhost:9165/`. The root redirects to `/tdash.html`.
 
-The dashboard does not fetch a dataset until **Sync** is selected. Enable
-**Cache Only** before Sync to guarantee that missing or stale files do not
-trigger live collection. **Force Refresh** requests regeneration. Long actions
-return a background job that the browser polls and can cancel.
+On startup the dashboard does not fetch a dataset until **Sync** is selected. Default is **Auto**. Enable **Cache Only** before Sync to not trigger live collection. **Force Refresh** requests regeneration. Long actions return a background job that the browser polls and can cancel.
 
 ## CLI Quick Start
 
@@ -91,6 +89,7 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag multicast
 
 # Detailed OTBR CLI collection; may take minutes and reach sleepy devices
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag fetch-all
+PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli topology
 
 # OTBR REST snapshots
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi devices list
@@ -166,7 +165,10 @@ docker run --name hobat -d \
 ```
 
 Set `TD_OTBR_CONTAINER_USE=0` to run `ot-ctl` locally instead of through
-`docker exec`. Home Assistant add-on configuration is under `addon_hobat/`.
+`docker exec`. 
+
+Home Assistant add-on configuration is under `addon_hobat/`.
+
 The Matter WebSocket default requires the container to share the host network;
 otherwise run the CLI with a reachable `--uri`.
 
