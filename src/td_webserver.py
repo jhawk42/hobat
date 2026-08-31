@@ -26,6 +26,7 @@ from td_const import (
     EVE_TOPOLOGY_FILENAME,
     EXTADDR_DEVICE_LABEL_MAP_FILENAME,
     HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
+    HA_MATTER_WS_DASHBOARD_FILENAME,
     HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME,
     HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME,
     HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
@@ -247,6 +248,12 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
         HA_MATTER_WS_TOPOLOGY_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "topology"],
+            action_cost_s=60,
+            force_async=True,
+        ),
+        HA_MATTER_WS_DASHBOARD_FILENAME: FileAction(
+            max_age_s=default_max_age_s,
+            action=["ha-matter-ws", "dashboard"],
             action_cost_s=60,
             force_async=True,
         ),

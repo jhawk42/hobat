@@ -180,6 +180,7 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
                 "ha-matter-ws", "mesh-diagnostics", "fetch-all"
             ],
             "td-ha-matter-ws-topology.json": ["ha-matter-ws", "topology"],
+            "td-ha-matter-ws-dashboard.json": ["ha-matter-ws", "dashboard"],
             "td-ha-matter-ws-collection.outcome.json": ["ha-matter-ws", "all"],
         }
 

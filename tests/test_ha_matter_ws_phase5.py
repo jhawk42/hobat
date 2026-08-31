@@ -11,6 +11,7 @@ import ha_matter_ws_cli
 import td_cli
 
 from ha_matter_ws_cli import (
+    DASHBOARD_SCHEMA_VERSION,
     EXIT_CANCELLED,
     EXIT_CONNECTION,
     EXIT_EXTRACTION,
@@ -18,6 +19,7 @@ from ha_matter_ws_cli import (
     EXIT_PERSISTENCE,
     EXIT_PROTOCOL,
     MatterPartialCollectionError,
+    build_dashboard_snapshot,
     build_parser,
     main,
 )
@@ -27,6 +29,7 @@ from ha_matter_ws_extractor import MatterExtractionError
 from ha_matter_ws_fetch_all import MatterCollection
 from td_const import (
     HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
+    HA_MATTER_WS_DASHBOARD_FILENAME,
     HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME,
     HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME,
     HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
@@ -41,6 +44,7 @@ FINAL_FILENAMES = [
     HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME,
     HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
     HA_MATTER_WS_TOPOLOGY_FILENAME,
+    HA_MATTER_WS_DASHBOARD_FILENAME,
     HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
 ]
 
@@ -95,6 +99,7 @@ def _collection() -> MatterCollection:
         ["mesh-diagnostics", "get", "--node-id", "1"],
         ["mesh-diagnostics", "fetch-all"],
         ["topology"],
+        ["dashboard"],
         ["all"],
     ],
 )
@@ -109,8 +114,21 @@ def test_snapshot_filenames_match_approved_contract() -> None:
         "td-ha-matter-ws-diagnostics-fetch-all.json",
         "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
         "td-ha-matter-ws-topology.json",
+        "td-ha-matter-ws-dashboard.json",
         "td-ha-matter-ws-collection.outcome.json",
     ]
+
+
+def test_dashboard_snapshot_preserves_table_and_topology_projections() -> None:
+    payload = build_dashboard_snapshot(_collection())
+
+    assert payload == {
+        "schemaVersion": DASHBOARD_SCHEMA_VERSION,
+        "devices": list(_collection().devices),
+        "diagnostics": list(_collection().diagnostics),
+        "meshDiagnostics": list(_collection().mesh_diagnostics),
+        "topology": list(_collection().topology),
+    }
 
 
 def test_all_collects_once_and_writes_outcome_last(monkeypatch, tmp_path) -> None:

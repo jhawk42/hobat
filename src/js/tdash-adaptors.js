@@ -1993,7 +1993,8 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
 // ── Adaptor 7: Home Assistant Matter WebSocket canonical snapshots ──────────
 
 export function adaptHaMatterWs(fileMap) {
-  const rows = asArray(fileMap.values().next().value);
+  const payload = fileMap.values().next().value;
+  const rows = Array.isArray(payload) ? payload : asArray(payload?.topology);
   const model = createAdaptorModel(['ha-matter-ws']);
   const topologyIdToDeviceId = new Map();
   const relationships = new Map();

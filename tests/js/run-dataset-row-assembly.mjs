@@ -33,6 +33,8 @@ function payloadForExtractor(extractor, index) {
   }
   if (extractor === "thread-tools-native") return { diagnostics: rows };
   if (extractor === "otbr-restapi") return { data: rows };
+  if (extractor === "ha-matter-ws-diagnostics") return { diagnostics: rows };
+  if (extractor === "ha-matter-ws-mesh-diagnostics") return { meshDiagnostics: rows };
   return rows;
 }
 
@@ -155,6 +157,18 @@ assert.doesNotThrow(() => validateDatasetRegistry(DATASET_REGISTRY));
 
 const haMatterSource = DATASOURCE_REGISTRY.find((source) => source.value === "ha-matter-ws");
 assert.equal(haMatterSource?.default_dataset_value, "ha_matter_ws_topology");
+const haMatterDashboard = {
+  diagnostics: [{ nodeId: 1, branch: "diagnostics" }],
+  meshDiagnostics: [{ nodeId: 2, branch: "meshDiagnostics" }],
+};
+assert.deepEqual(
+  ROW_EXTRACTORS["ha-matter-ws-diagnostics"](haMatterDashboard),
+  haMatterDashboard.diagnostics,
+);
+assert.deepEqual(
+  ROW_EXTRACTORS["ha-matter-ws-mesh-diagnostics"](haMatterDashboard),
+  haMatterDashboard.meshDiagnostics,
+);
 assert.deepEqual(
   DATASET_REGISTRY
     .filter((entry) => entry.source === "ha-matter-ws")

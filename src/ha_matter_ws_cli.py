@@ -19,6 +19,7 @@ from ha_matter_ws_fetch_all import MatterCollection, collect_devices
 from ha_matter_ws_snapshots import MatterSnapshotSecurityError
 from td_const import (
     HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
+    HA_MATTER_WS_DASHBOARD_FILENAME,
     HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME,
     HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME,
     HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
@@ -43,6 +44,7 @@ EXIT_PARTIAL = 5
 EXIT_EXTRACTION = 6
 EXIT_PERSISTENCE = 7
 EXIT_CANCELLED = 130
+DASHBOARD_SCHEMA_VERSION = "1.0.0"
 
 
 class MatterPartialCollectionError(RuntimeError):
@@ -101,6 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     mesh_commands.add_parser("fetch-all", help="Save all mesh diagnostics")
 
     commands.add_parser("topology", help="Save canonical Matter topology")
+    commands.add_parser("dashboard", help="Save the dashboard data bundle")
     commands.add_parser("all", help="Collect once and save every Matter snapshot")
     return parser
 
@@ -120,6 +123,7 @@ def _fixed_filename(path: tuple[str, ...]) -> str | None:
         ("diagnostics", "fetch-all"): HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME,
         ("mesh-diagnostics", "fetch-all"): HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
         ("topology",): HA_MATTER_WS_TOPOLOGY_FILENAME,
+        ("dashboard",): HA_MATTER_WS_DASHBOARD_FILENAME,
     }.get(path)
 
 
@@ -182,6 +186,8 @@ def _payload(collection: MatterCollection, path: tuple[str, ...], node_id: str |
         return collection.server_info
     if path == ("devices", "list"):
         return _device_inventory(collection.devices)
+    if path == ("dashboard",):
+        return build_dashboard_snapshot(collection)
     if path[0] == "devices":
         records = collection.devices
     elif path[0] == "diagnostics":
@@ -195,6 +201,16 @@ def _payload(collection: MatterCollection, path: tuple[str, ...], node_id: str |
     if path[-1] == "get":
         return _select_node(records, node_id or "")
     return list(records)
+
+
+def build_dashboard_snapshot(collection: MatterCollection) -> dict[str, Any]:
+    return {
+        "schemaVersion": DASHBOARD_SCHEMA_VERSION,
+        "devices": list(collection.devices),
+        "diagnostics": list(collection.diagnostics),
+        "meshDiagnostics": list(collection.mesh_diagnostics),
+        "topology": list(collection.topology),
+    }
 
 
 def make_checkpoint_callback(
@@ -211,16 +227,24 @@ def make_checkpoint_callback(
             return
         for name, final_path in output_paths.items():
             partial_path = final_path.with_name(create_checkpoint_filename(final_path.name))
-            records = list(getattr(collection, name))
+            if name == "dashboard":
+                payload = {
+                    "partial": True,
+                    "completed": completed,
+                    "total": total,
+                    **build_dashboard_snapshot(collection),
+                }
+            else:
+                payload = {
+                    "partial": True,
+                    "dataset": name,
+                    "completed": completed,
+                    "total": total,
+                    "records": list(getattr(collection, name)),
+                }
             try:
                 save_json_atomic(
-                    {
-                        "partial": True,
-                        "dataset": name,
-                        "completed": completed,
-                        "total": total,
-                        "records": records,
-                    },
+                    payload,
                     partial_path,
                     add_trailing_newline=True,
                 )
@@ -333,6 +357,7 @@ def _run(args: argparse.Namespace) -> int:
         ("diagnostics", "fetch-all"): "diagnostics",
         ("mesh-diagnostics", "fetch-all"): "mesh_diagnostics",
         ("topology",): "topology",
+        ("dashboard",): "dashboard",
     }.get(path)
     if checkpoint_dataset:
         filename = _fixed_filename(path)
@@ -353,6 +378,9 @@ def _run(args: argparse.Namespace) -> int:
                 HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME, data_dir
             ),
             "topology": resolve_data_file_path(HA_MATTER_WS_TOPOLOGY_FILENAME, data_dir),
+            "dashboard": resolve_data_file_path(
+                HA_MATTER_WS_DASHBOARD_FILENAME, data_dir
+            ),
         }
     progress_callback = (
         make_checkpoint_callback(
@@ -384,6 +412,10 @@ def _run(args: argparse.Namespace) -> int:
                 checkpoint_outputs["mesh_diagnostics"],
             ),
             (list(collection.topology), checkpoint_outputs["topology"]),
+            (
+                build_dashboard_snapshot(collection),
+                checkpoint_outputs["dashboard"],
+            ),
         ]
         for payload, output_path in outputs:
             save_json_atomic(payload, output_path, add_trailing_newline=True)

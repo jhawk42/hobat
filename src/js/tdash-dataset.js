@@ -68,6 +68,7 @@ const _PROGRESSIVE_ROLLOUT_FILES = new Set([
   "td-ha-matter-ws-diagnostics-fetch-all.json",
   "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
   "td-ha-matter-ws-topology.json",
+  "td-ha-matter-ws-dashboard.json",
   "td-mdns-scopes-thread.json",
   "td-mdns-scopes-br.json",
   "td-mdns-scopes-hap.json",
@@ -121,6 +122,8 @@ export const ROW_EXTRACTORS = Object.freeze({
   "eve-processed": extractProcessedEveRows,
   "thread-tools-native": (payload) => extractEnvelopeRows(payload, "diagnostics"),
   "otbr-restapi": (payload) => extractEnvelopeRows(payload, "data"),
+  "ha-matter-ws-diagnostics": (payload) => extractEnvelopeRows(payload, "diagnostics"),
+  "ha-matter-ws-mesh-diagnostics": (payload) => extractEnvelopeRows(payload, "meshDiagnostics"),
 });
 
 export const MERGE_STRATEGY_HANDLERS = Object.freeze({

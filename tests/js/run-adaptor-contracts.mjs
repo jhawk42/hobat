@@ -245,6 +245,39 @@ assert.equal(haMatter.nodeData[1].font.background, "rgba(7, 18, 40, 0.62)");
 assert.equal(haMatter.nodeData[1].font.size, 13);
 assert.equal(haMatter.nodeData[1].font.vadjust, undefined);
 
+const haMatterDashboard = run(
+  "ha-matter-ws",
+  ["td-ha-matter-ws-dashboard.json"],
+  [{
+    diagnostics: [{ nodeId: 1 }],
+    meshDiagnostics: [{ nodeId: 1 }],
+    topology: [
+      {
+        topologyId: "matter:a",
+        rloc16: "0x1000",
+        role: "Router",
+        routerNeighbors: [{ sourceId: "matter:a", targetId: "matter:b", lqi: 3 }],
+        children: [],
+        route: { routeData: [] },
+      },
+      {
+        topologyId: "matter:b",
+        rloc16: "0x2000",
+        role: "Router",
+        routerNeighbors: [],
+        children: [],
+        route: { routeData: [] },
+      },
+    ],
+  }],
+);
+assertResult(haMatterDashboard, {
+  nodeIds: ["matter:a", "matter:b"],
+  edges: [["matter:a", "matter:b", ["router_neighbor"]]],
+  sourceNames: ["ha-matter-ws"],
+  hasChildIndex: true,
+});
+
 const haMatterDevices = run(
   "ha-matter-ws",
   ["td-ha-matter-ws-devices-fetch-all.json"],
@@ -272,8 +305,8 @@ const cachedHaMatter = run(
   ["td-ha-matter-ws-topology.json"],
   [cachedHaMatterRows],
 );
-assert.equal(cachedHaMatter.nodeData.length, 2);
-assert.equal(cachedHaMatter.edgeData.length, 1);
+assert.equal(cachedHaMatter.nodeData.length, 31);
+assert.equal(cachedHaMatter.edgeData.length, 30);
 assert.equal(cachedHaMatter.edgeData[0].arrows, "to");
 
 const devicesEnvelope = { data: [

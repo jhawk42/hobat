@@ -46,6 +46,7 @@ HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME = "td-ha-matter-ws-devices-fetch-all.jso
 HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME = "td-ha-matter-ws-diagnostics-fetch-all.json"
 HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME = "td-ha-matter-ws-mesh-diagnostics-fetch-all.json"
 HA_MATTER_WS_TOPOLOGY_FILENAME = "td-ha-matter-ws-topology.json"
+HA_MATTER_WS_DASHBOARD_FILENAME = "td-ha-matter-ws-dashboard.json"
 HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME = "td-ha-matter-ws-collection.outcome.json"
 
 EVE_TOPOLOGY_FILENAME = "td-eve-topology.json"
