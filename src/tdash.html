@@ -393,17 +393,31 @@
     </aside>
 
     <nav id="panel-navigation" class="layout-panel layout-panel-navigation" aria-label="Workspace views">
-      <div class="workspace-navigation-tabs" role="tablist" aria-label="Workspace views">
+      <div class="workspace-navigation-controls">
+        <button id="btn-navigation-panel-toggle" type="button" title="Show icons only"
+          aria-label="Show icons only" aria-controls="workspace-navigation-tabs" aria-expanded="true">◀</button>
+      </div>
+      <div id="workspace-navigation-tabs" class="workspace-navigation-tabs" role="tablist" aria-label="Workspace views">
         <button id="btn-topology" class="active" type="button" role="tab" aria-selected="true"
-          aria-controls="view-topology" title="Topology view">🌐 Topology</button>
+          aria-controls="view-topology" aria-label="Topology view" title="Topology view"><span
+            class="workspace-navigation-tab-icon" aria-hidden="true">🌐</span><span
+            class="workspace-navigation-tab-label">Topology</span></button>
         <button id="btn-table" type="button" role="tab" aria-selected="false" aria-controls="view-table"
-          tabindex="-1" title="Table view">田 Table</button>
+          tabindex="-1" aria-label="Table view" title="Table view"><span
+            class="workspace-navigation-tab-icon" aria-hidden="true">田</span><span
+            class="workspace-navigation-tab-label">Table</span></button>
         <button id="btn-insights" type="button" role="tab" aria-selected="false" aria-controls="view-insights"
-          tabindex="-1" title="Network insights view">💡 Insights</button>
+          tabindex="-1" aria-label="Network insights view" title="Network insights view"><span
+            class="workspace-navigation-tab-icon" aria-hidden="true">💡</span><span
+            class="workspace-navigation-tab-label">Insights</span></button>
         <button id="btn-settings" type="button" role="tab" aria-selected="false" aria-controls="view-settings"
-          tabindex="-1" title="Application settings view">⛭ Settings</button>
+          tabindex="-1" aria-label="Application settings view" title="Application settings view"><span
+            class="workspace-navigation-tab-icon" aria-hidden="true">⛭</span><span
+            class="workspace-navigation-tab-label">Settings</span></button>
         <button id="btn-logs" type="button" role="tab" aria-selected="false" aria-controls="view-logs"
-          tabindex="-1" title="Browser activity logs view">📋 Logs</button>
+          tabindex="-1" aria-label="Browser activity logs view" title="Browser activity logs view"><span
+            class="workspace-navigation-tab-icon" aria-hidden="true">📋</span><span
+            class="workspace-navigation-tab-label">Logs</span></button>
       </div>
     </nav>
   </div>

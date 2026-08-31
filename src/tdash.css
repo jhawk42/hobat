@@ -1121,7 +1121,29 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   gap: 4px;
 }
 
+.workspace-navigation-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.workspace-navigation-tab-icon {
+  display: inline-block;
+  min-width: 1.4em;
+}
+
+.workspace-navigation-tab-label {
+  margin-left: 4px;
+}
+
+.dashboard-shell.navigation-panel-collapsed .workspace-navigation-tab-label {
+  display: none;
+}
+
 .workspace-navigation-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 0;
 }
 
@@ -1714,12 +1736,18 @@ td:last-child {
   #panel-navigation .workspace-navigation-tabs button {
     width: 100%;
   }
+
+  .dashboard-shell.navigation-panel-collapsed #panel-navigation {
+    width: 52px;
+    justify-self: start;
+  }
 }
 
 @media (min-width: 1124px) {
   .dashboard-shell {
+    --navigation-panel-width: 132px;
     grid-template-columns:
-      88px
+      var(--navigation-panel-width)
       minmax(260px, 320px)
       minmax(420px, 1fr)
       minmax(300px, 360px);
@@ -1734,7 +1762,7 @@ td:last-child {
 
   .dashboard-shell.details-panel-collapsed {
     grid-template-columns:
-      88px
+      var(--navigation-panel-width)
       minmax(260px, 320px)
       minmax(420px, 1fr);
     grid-template-areas:
@@ -1744,7 +1772,7 @@ td:last-child {
 
   .dashboard-shell.functions-panel-collapsed {
     grid-template-columns:
-      88px
+      var(--navigation-panel-width)
       minmax(420px, 1fr)
       minmax(300px, 360px);
     grid-template-areas:
@@ -1754,11 +1782,19 @@ td:last-child {
 
   .dashboard-shell.functions-panel-collapsed.details-panel-collapsed {
     grid-template-columns:
-      88px
+      var(--navigation-panel-width)
       minmax(420px, 1fr);
     grid-template-areas:
       "title title"
       "navigation workspace";
+  }
+
+  .dashboard-shell.navigation-panel-collapsed {
+    --navigation-panel-width: 52px;
+  }
+
+  .dashboard-shell.navigation-panel-collapsed #panel-navigation {
+    width: auto;
   }
 
   #panel-navigation,
@@ -1823,6 +1859,15 @@ td:last-child {
   #panel-navigation .workspace-navigation-tabs {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .dashboard-shell.navigation-panel-collapsed #panel-navigation {
+    left: auto;
+    width: 240px;
+  }
+
+  .dashboard-shell.navigation-panel-collapsed #panel-navigation .workspace-navigation-tabs {
+    grid-template-columns: repeat(5, 44px);
   }
 
   #panel-navigation .workspace-navigation-tabs button {

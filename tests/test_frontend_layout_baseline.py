@@ -16,6 +16,7 @@ DATASET_JS = REPO_ROOT / "src" / "js" / "tdash-dataset.js"
 BEHAVIOR_IDS = (
     "panel-title",
     "panel-navigation",
+    "btn-navigation-panel-toggle",
     "panel-functions",
     "panel-workspace",
     "panel-device-details",
@@ -225,3 +226,20 @@ def test_responsive_dashboard_grid_contract() -> None:
     assert "position: fixed;" in css
     assert "env(safe-area-inset-bottom)" in css
     assert "grid-template-columns: repeat(5, minmax(0, 1fr));" in css
+
+
+def test_navigation_panel_supports_expanded_and_icon_only_states() -> None:
+    html = _read_text(HTML)
+    css = _read_text(CSS)
+    ui_text = _read_text(UI_JS)
+
+    assert 'id="btn-navigation-panel-toggle"' in html
+    assert html.count('class="workspace-navigation-tab-icon"') == 5
+    assert html.count('class="workspace-navigation-tab-label"') == 5
+    assert "setNavigationPanelCollapsed" in ui_text
+    assert '"navigation-panel-collapsed"' in ui_text
+    assert "--navigation-panel-width: 132px;" in css
+    assert "--navigation-panel-width: 52px;" in css
+    assert ".workspace-navigation-tab-label" in css
+    assert "grid-template-columns: repeat(5, 44px);" in css
+    assert "width: 240px;" in css

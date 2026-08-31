@@ -457,6 +457,25 @@ document.getElementById("btn-functions-panel-toggle")?.addEventListener("click",
   setFunctionsPanelCollapsed(!shell?.classList.contains("functions-panel-collapsed"));
 });
 
+function setNavigationPanelCollapsed(isCollapsed) {
+  const shell = document.querySelector(".dashboard-shell");
+  const toggleButton = document.getElementById("btn-navigation-panel-toggle");
+  shell?.classList.toggle("navigation-panel-collapsed", isCollapsed);
+  if (toggleButton) {
+    const action = isCollapsed ? "Show icons and labels" : "Show icons only";
+    toggleButton.title = action;
+    toggleButton.setAttribute("aria-label", action);
+    toggleButton.setAttribute("aria-expanded", String(!isCollapsed));
+    toggleButton.textContent = isCollapsed ? "▶" : "◀";
+  }
+  resizeAndFitTopology();
+}
+
+document.getElementById("btn-navigation-panel-toggle")?.addEventListener("click", () => {
+  const shell = document.querySelector(".dashboard-shell");
+  setNavigationPanelCollapsed(!shell?.classList.contains("navigation-panel-collapsed"));
+});
+
 const WORKSPACE_VIEWS = Object.freeze([
   {
     view: "topology",
