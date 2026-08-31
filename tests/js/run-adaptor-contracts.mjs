@@ -148,6 +148,25 @@ assertResult(merged, {
   hasChildIndex: true,
 });
 
+const mergedRouterNeighbors = run("merged-detailed", ["neighbors.json"], [[
+  {
+    rloc16: "0x1000",
+    role: "router",
+    routerNeighbors: [{ rloc16: "0x2000", extAddress: "bb00112233445566", linkMargin: 30 }],
+  },
+  { rloc16: "0x2000", role: "router" },
+]]);
+assertResult(mergedRouterNeighbors, {
+  nodeIds: ["0x1000", "0x2000"],
+  edges: [["0x1000", "0x2000", ["router_neighbor"]]],
+  sourceNames: ["merged-detailed"],
+  hasChildIndex: true,
+});
+assert.equal(
+  mergedRouterNeighbors.routerNeighborByRloc16.get("0x1000").routerNeighbors.length,
+  1,
+);
+
 const routerTable = run("router-table", ["router-table.json"], [[
   { rloc16: "0x0400", nextHop: 2, linkQualityOut: 3 },
   { rloc16: "0x0800", nextHop: 2 },

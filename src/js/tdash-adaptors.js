@@ -1374,6 +1374,12 @@ export function adaptMergedDetailed(fileMap) {
     const nodeId = chooseMergedId(node, index);
     rawNodeById.set(nodeId, node);
     const rloc16Text = toText(node.rloc16).toLowerCase();
+    const routerNeighbors = Array.isArray(node.routerNeighbors)
+      ? node.routerNeighbors
+      : (Array.isArray(node.router_neighbor_table) ? node.router_neighbor_table : []);
+    const childTable = Array.isArray(node.childTable)
+      ? node.childTable
+      : (Array.isArray(node.router_child_table) ? node.router_child_table : []);
     const modeDevice = toText(node['mode.device'] || node.mode?.device).toUpperCase();
     const isRouterLike = rloc16Text.endsWith('00') || modeDevice === 'FTD' || toText(node.role).toLowerCase() === 'router';
     const isChildLike = modeDevice === 'MTD' || toText(node.role).toLowerCase().includes('child');
@@ -1383,12 +1389,12 @@ export function adaptMergedDetailed(fileMap) {
       color: isChildLike && !isRouterLike ? NODE_COLORS.child : NODE_COLORS.eve
     });
     // populate routerNeighborByRloc16 for filter support
-    if (Array.isArray(node.router_neighbor_table) && rloc16Text) {
+    if (routerNeighbors.length > 0 && rloc16Text) {
       routerNeighborByRloc16.set(rloc16Text, node);
     }
     // populate routerChildByRloc16 for filter support
-    const rloc16ForChild = toText(node.parent_rloc16 || node.rloc16).toLowerCase();
-    if (Array.isArray(node.router_child_table) && rloc16ForChild) {
+    const rloc16ForChild = toText(node.parentRloc16 || node.parent_rloc16 || node.rloc16).toLowerCase();
+    if (childTable.length > 0 && rloc16ForChild) {
       routerChildByRloc16.set(rloc16ForChild, node);
     }
   });
@@ -1411,7 +1417,10 @@ export function adaptMergedDetailed(fileMap) {
         });
       });
     });
-    (Array.isArray(node.router_neighbor_table) ? node.router_neighbor_table : []).forEach((neighbor) => {
+    const routerNeighbors = Array.isArray(node.routerNeighbors)
+      ? node.routerNeighbors
+      : (Array.isArray(node.router_neighbor_table) ? node.router_neighbor_table : []);
+    routerNeighbors.forEach((neighbor) => {
       const toId = ensureNodeForLink(neighbor, neighbor.rloc16 || neighbor.extAddress || neighbor.id);
       if (!toId) return;
       const linkMargin = toFiniteNumber(neighbor.rss_margin ?? neighbor.linkMargin);
