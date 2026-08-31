@@ -4,6 +4,16 @@ import {
   createTopologyEventBindings,
   createTopologyRenderOwner,
 } from "../../src/js/tdash-topology-view-model.js";
+import { isSecondaryRouterRouteEdge } from "../../src/js/tdash-topology-renderer.js";
+
+assert.equal(isSecondaryRouterRouteEdge(["otbr_route"]), false);
+assert.equal(isSecondaryRouterRouteEdge(["router_neighbor", "otbr_route"]), false);
+assert.equal(isSecondaryRouterRouteEdge(["otbr_route", "otbr_route_router"]), true);
+assert.equal(
+  isSecondaryRouterRouteEdge(["router_neighbor", "otbr_route", "otbr_route_router"]),
+  false,
+);
+assert.equal(isSecondaryRouterRouteEdge(["otbr_route", "otbr_route_ftd_child"]), false);
 
 class FakeEventTarget {
   constructor() {

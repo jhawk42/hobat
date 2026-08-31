@@ -10,6 +10,7 @@ import {
   EDGE_CATEGORY_ROUTER_NEIGHBOR,
   EDGE_CATEGORY_OTBR_ROUTE,
   EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD,
+  EDGE_CATEGORY_OTBR_ROUTE_ROUTER,
 } from "./tdash-constants.js";
 import {
   toText,
@@ -77,6 +78,14 @@ const MESH_HUB_SPOKE_LAYOUT = Object.freeze({
   routeEdgeWidth: 0.45,
   routeEdgeOpacity: 0.16,
 });
+
+export function isSecondaryRouterRouteEdge(linkCategories) {
+  const categories = normalizeLinkCategories(linkCategories);
+  return categories.includes(EDGE_CATEGORY_OTBR_ROUTE)
+    && categories.includes(EDGE_CATEGORY_OTBR_ROUTE_ROUTER)
+    && !categories.includes(EDGE_CATEGORY_ROUTER_NEIGHBOR)
+    && !categories.includes(EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD);
+}
 
 // ── Exported accessors / setters ──────────────────────────────────────────────
 
@@ -345,11 +354,7 @@ export function renderTopologyForDataset(
           roundness: isMeshTreeProfile ? 0.34 : 0.3,
         };
       } else if (physicsProfileName === PHYSICS_PROFILE_MESH_RING && routerToChildLike) {
-        const categories = normalizeLinkCategories(edge.linkCategories);
-        if (
-          categories.includes(EDGE_CATEGORY_OTBR_ROUTE) &&
-          !categories.includes(EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD)
-        ) {
+        if (isSecondaryRouterRouteEdge(edge.linkCategories)) {
           const color = typeof edge.color === "string" ? edge.color : undefined;
           edge.color = { color, opacity: MESH_RING_LAYOUT.routeEdgeOpacity };
           edge.width = Math.min(Number(edge.width) || 1.5, MESH_RING_LAYOUT.routeEdgeWidth);
@@ -400,11 +405,7 @@ export function renderTopologyForDataset(
       }
 
       if (routerToChildLike) {
-        const categories = normalizeLinkCategories(edge.linkCategories);
-        if (
-          categories.includes(EDGE_CATEGORY_OTBR_ROUTE) &&
-          !categories.includes(EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD)
-        ) {
+        if (isSecondaryRouterRouteEdge(edge.linkCategories)) {
           const color = typeof edge.color === "string" ? edge.color : undefined;
           edge.color = { color, opacity: MESH_HUB_SPOKE_LAYOUT.routeEdgeOpacity };
           edge.width = Math.min(Number(edge.width) || 1.5, MESH_HUB_SPOKE_LAYOUT.routeEdgeWidth);
