@@ -225,7 +225,8 @@ def test_responsive_dashboard_grid_contract() -> None:
     assert "grid-template-rows: auto minmax(0, 1fr);" in css
     assert "position: fixed;" in css
     assert "env(safe-area-inset-bottom)" in css
-    assert "grid-template-columns: repeat(5, minmax(0, 1fr));" in css
+    assert "grid-template-columns: 44px minmax(0, 1fr);" in css
+    assert "grid-template-columns: repeat(5, 44px);" in css
 
 
 def test_navigation_panel_supports_expanded_and_icon_only_states() -> None:
@@ -239,7 +240,10 @@ def test_navigation_panel_supports_expanded_and_icon_only_states() -> None:
     assert "setNavigationPanelCollapsed" in ui_text
     assert '"navigation-panel-collapsed"' in ui_text
     assert "--navigation-panel-width: 132px;" in css
-    assert "--navigation-panel-width: 52px;" in css
+    assert "--navigation-panel-width: 58px;" in css
     assert ".workspace-navigation-tab-label" in css
+    assert "grid-template-columns: 44px minmax(0, 1fr);" in css
     assert "grid-template-columns: repeat(5, 44px);" in css
-    assert "width: 240px;" in css
+    assert "overflow-x: auto;" in css
+    assert "scrollbar-width: none;" in css
+    assert "width: 240px;" not in css

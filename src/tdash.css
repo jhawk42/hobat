@@ -1123,8 +1123,13 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 
 .workspace-navigation-controls {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   margin-bottom: 6px;
+}
+
+.workspace-navigation-controls button {
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .workspace-navigation-tab-icon {
@@ -1143,7 +1148,7 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .workspace-navigation-tabs button {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   min-width: 0;
 }
 
@@ -1728,6 +1733,17 @@ td:last-child {
     max-height: 72vh;
   }
 
+  #panel-navigation {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 4px;
+    align-items: start;
+  }
+
+  #panel-navigation .workspace-navigation-controls {
+    margin-bottom: 0;
+  }
+
   #panel-navigation .workspace-navigation-tabs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1735,11 +1751,16 @@ td:last-child {
 
   #panel-navigation .workspace-navigation-tabs button {
     width: 100%;
+    min-height: 44px;
   }
 
-  .dashboard-shell.navigation-panel-collapsed #panel-navigation {
-    width: 52px;
-    justify-self: start;
+  .dashboard-shell.navigation-panel-collapsed #panel-navigation .workspace-navigation-tabs {
+    grid-template-columns: repeat(5, 44px);
+    justify-content: start;
+  }
+
+  .dashboard-shell.navigation-panel-collapsed #panel-navigation .workspace-navigation-tabs button {
+    justify-content: center;
   }
 }
 
@@ -1790,11 +1811,15 @@ td:last-child {
   }
 
   .dashboard-shell.navigation-panel-collapsed {
-    --navigation-panel-width: 52px;
+    --navigation-panel-width: 58px;
   }
 
-  .dashboard-shell.navigation-panel-collapsed #panel-navigation {
-    width: auto;
+  #panel-navigation {
+    display: block;
+  }
+
+  #panel-navigation .workspace-navigation-controls {
+    margin-bottom: 6px;
   }
 
   #panel-navigation,
@@ -1818,9 +1843,13 @@ td:last-child {
 
   #panel-navigation .workspace-navigation-tabs button {
     width: 100%;
-    min-height: 40px;
+    min-height: 44px;
     padding: 6px 4px;
     overflow-wrap: anywhere;
+  }
+
+  .dashboard-shell.navigation-panel-collapsed #panel-navigation .workspace-navigation-tabs button {
+    justify-content: center;
   }
 
   #panel-device-details #device-details {
@@ -1852,30 +1881,49 @@ td:last-child {
     right: 10px;
     bottom: 0;
     left: 10px;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 4px;
+    align-items: start;
     padding-bottom: calc(6px + env(safe-area-inset-bottom));
     box-shadow: 0 -4px 16px rgba(15, 45, 58, 0.18);
   }
 
-  #panel-navigation .workspace-navigation-tabs {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+  #panel-navigation .workspace-navigation-controls {
+    margin-bottom: 0;
   }
 
-  .dashboard-shell.navigation-panel-collapsed #panel-navigation {
-    left: auto;
-    width: 240px;
+  #panel-navigation .workspace-navigation-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  #panel-navigation .workspace-navigation-tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .dashboard-shell.navigation-panel-collapsed #panel-navigation .workspace-navigation-tabs {
+    display: grid;
     grid-template-columns: repeat(5, 44px);
+    justify-content: start;
+    overflow-x: visible;
   }
 
   #panel-navigation .workspace-navigation-tabs button {
-    width: 100%;
+    flex: 0 0 auto;
+    width: auto;
     min-height: 44px;
-    padding: 5px 2px;
+    padding: 5px 6px;
     font-size: 12px;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+  }
+
+  .dashboard-shell.navigation-panel-collapsed #panel-navigation .workspace-navigation-tabs button {
+    width: 44px;
+    padding: 5px 2px;
+    justify-content: center;
   }
 
   #topology-view {
