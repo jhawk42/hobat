@@ -5,11 +5,11 @@
 export const DATASOURCE_REGISTRY = [
   { value: "otbr-cli", label: "otbr-cli", default_dataset_value: "merged_otbr_cli_meshdiag_networkdiag_multicast" },
   { value: "otbr-restapi", label: "otbr-restapi", default_dataset_value: "restapi_devices_diagnostics_list" },
-  { value: "ha-matter-ws", label: "Home Assistant Matter", default_dataset_value: "ha_matter_ws_topology" },
+  { value: "ha-matter-ws", label: "ha matter ws", default_dataset_value: "ha_matter_ws_topology" },
   { value: "eve", label: "eve app" },
   { value: "thread-tools", label: "thread tools app" },
   { value: "mdns", label: "mdns" },
-  { value: "merged", label: "multi-source" },
+  { value: "merged", label: "multi-source", default_dataset_value: "merged_otbr_cli_meshdiag_networkdiag_multicast" },
   { value: "system", label: "system" },
 ];
 
@@ -43,68 +43,6 @@ export const DATASOURCE_REGISTRY = [
 //   defaultPhysicsProfile — resolved automatic physics profile
 
 export const DATASET_REGISTRY = [
-
-  // Home Assistant Matter Server
-  {
-    source: "ha-matter-ws",
-    value: "ha_matter_ws_devices",
-    label: "Devices",
-    group: "Inventory",
-    files: ["td-ha-matter-ws-devices-fetch-all.json"],
-    mergeStrategy: "none",
-    rowExtractor: "raw-array",
-    adaptor: "ha-matter-ws",
-    defaultPhysicsProfile: "mesh-compact",
-    topologyMode: "ha-matter-ws",
-    defaultView: "table",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 60
-  },
-  {
-    source: "ha-matter-ws",
-    value: "ha_matter_ws_diagnostics",
-    label: "Diagnostics",
-    group: "Diagnostics",
-    files: ["td-ha-matter-ws-diagnostics-fetch-all.json"],
-    mergeStrategy: "none",
-    rowExtractor: "raw-array",
-    adaptor: "ha-matter-ws",
-    defaultPhysicsProfile: "mesh-compact",
-    topologyMode: "ha-matter-ws",
-    defaultView: "table",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 60
-  },
-  {
-    source: "ha-matter-ws",
-    value: "ha_matter_ws_mesh_diagnostics",
-    label: "Mesh Diagnostics",
-    group: "Topology",
-    files: ["td-ha-matter-ws-mesh-diagnostics-fetch-all.json"],
-    mergeStrategy: "none",
-    rowExtractor: "raw-array",
-    adaptor: "ha-matter-ws",
-    defaultPhysicsProfile: "mesh-compact",
-    topologyMode: "ha-matter-ws",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links",
-    estimateActionCostSecs: 60
-  },
-  {
-    source: "ha-matter-ws",
-    value: "ha_matter_ws_topology",
-    label: "Topology",
-    group: "Topology",
-    files: ["td-ha-matter-ws-topology.json"],
-    mergeStrategy: "none",
-    rowExtractor: "raw-array",
-    adaptor: "ha-matter-ws",
-    defaultPhysicsProfile: "mesh-compact",
-    topologyMode: "ha-matter-ws",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links",
-    estimateActionCostSecs: 60
-  },
 
   // otbr-cli
   // ── Single-file simple datasets (otbr-cli) ───  
@@ -281,6 +219,29 @@ export const DATASET_REGISTRY = [
     source: "otbr-cli",
     value: "merged_otbr_cli_poll_all_mdns",
     label: "Mesh + Diag All + Neighbor/Child + mDNS⏱️",
+    group: "Detailed: most time",
+    files: [
+      "td-otbr-cli-meshdiag-topology.json",
+      "td-otbr-cli-networkdiag-fetch-all.json",
+      "td-otbr-cli-meshdiag-router-neighbortables.json",
+      "td-otbr-cli-meshdiag-router-childtables.json",
+      "td-mdns-scopes-thread.json"
+    ],
+    mergeStrategy: "by-identity",
+    rowExtractor: "raw-array",
+    adaptor: "meshdiag-networkdiag",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "meshdiag-networkdiag",
+    physicsProfile: "mesh-compact",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links",
+    estimateActionCostSecs: 900
+  },
+
+  {
+    source: "otbr-cli",
+    value: "merged_otbr_cli_topology_mdns",
+    label: "Topology + mDNS⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -487,6 +448,29 @@ export const DATASET_REGISTRY = [
     estimateActionCostSecs: 2450
   },
 
+ // ── Multi-file topology datasets (otbr-restapi) ────────────
+  {
+    source: "otbr-restapi",
+    value: "restapi_topology_mdns_scopes_thread",
+    label: "Topology + mDNS⏱️",
+    group: "Detailed: most time",
+    files: [
+      "td-otbr-restapi-devices-fetch.json", 
+      "td-otbr-restapi-diagnostics-fetch-all.json",
+      "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+      "td-mdns-scopes-thread.json"
+    ],
+    mergeStrategy: "by-identity",
+    rowExtractor: "otbr-restapi",
+    adaptor: "otbr-restapi",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "otbr_restapi",
+    physicsProfile: "mesh-compact",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 2450
+  },
+
   // ── Single-file simple datasets ───
   {
     source: "otbr-restapi",
@@ -503,6 +487,68 @@ export const DATASET_REGISTRY = [
     defaultLinkFilter: "default_links",
     estimateActionCostSecs: 1
   },  
+
+  // Home Assistant Matter Server
+  {
+    source: "ha-matter-ws",
+    value: "ha_matter_ws_devices",
+    label: "Devices",
+    group: "Inventory",
+    files: ["td-ha-matter-ws-devices-fetch-all.json"],
+    mergeStrategy: "none",
+    rowExtractor: "raw-array",
+    adaptor: "ha-matter-ws",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "ha-matter-ws",
+    defaultView: "table",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 60
+  },
+  {
+    source: "ha-matter-ws",
+    value: "ha_matter_ws_diagnostics",
+    label: "Diagnostics",
+    group: "Diagnostics",
+    files: ["td-ha-matter-ws-diagnostics-fetch-all.json"],
+    mergeStrategy: "none",
+    rowExtractor: "raw-array",
+    adaptor: "ha-matter-ws",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "ha-matter-ws",
+    defaultView: "table",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 60
+  },
+  {
+    source: "ha-matter-ws",
+    value: "ha_matter_ws_mesh_diagnostics",
+    label: "Mesh Diagnostics",
+    group: "Topology",
+    files: ["td-ha-matter-ws-mesh-diagnostics-fetch-all.json"],
+    mergeStrategy: "none",
+    rowExtractor: "raw-array",
+    adaptor: "ha-matter-ws",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "ha-matter-ws",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links",
+    estimateActionCostSecs: 60
+  },
+  {
+    source: "ha-matter-ws",
+    value: "ha_matter_ws_topology",
+    label: "Topology",
+    group: "Topology",
+    files: ["td-ha-matter-ws-topology.json"],
+    mergeStrategy: "none",
+    rowExtractor: "raw-array",
+    adaptor: "ha-matter-ws",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "ha-matter-ws",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links",
+    estimateActionCostSecs: 60
+  },
 
   // ── Single-file simple dataset ───
   {
@@ -618,31 +664,11 @@ export const DATASET_REGISTRY = [
     estimateActionCostSecs: 60
   },
 
-  // ── Merged (all nodes) ─
-  {
-    source: "merged",
-    value: "merged_all_deep_wide_otbr_cli_restapi_eve",
-    label: "Premerged Multi-Source Topology",
-    group: null,
-    files: [
-      "td-merged-topology-all.json"
-    ],
-    mergeStrategy: "none",
-    rowExtractor: "raw-array",
-    adaptor: "merged-detailed",
-    defaultPhysicsProfile: "mesh-compact",
-    topologyMode: "merged-detailed",
-    physicsProfile: "mesh-compact",
-    defaultView: "topology",
-    defaultLinkFilter: "default_links",
-    estimateActionCostSecs: 1
-  },
-
   // ── Multi-file topology datasets (otbr-cli, otbr-restapi) ────────────
   {
     source: "merged",
     value: "merged_otbr_cli_otbr_restapi",
-    label: "Dynamic Merge: CLI + REST + mDNS",
+    label: "Topology Dynamic Merge: CLI + REST + mDNS",
     group: null,
     files: [
       "td-static-extaddr-device-label.json",
@@ -661,6 +687,26 @@ export const DATASET_REGISTRY = [
     defaultView: "topology",
     defaultLinkFilter: "default_links",
     estimateActionCostSecs: 720
+  },
+
+  // ── Merged (all nodes) ─
+  {
+    source: "merged",
+    value: "merged_all_deep_wide_otbr_cli_restapi_eve",
+    label: "Topology Premerged Multi-Source",
+    group: null,
+    files: [
+      "td-merged-topology-all.json"
+    ],
+    mergeStrategy: "none",
+    rowExtractor: "raw-array",
+    adaptor: "merged-detailed",
+    defaultPhysicsProfile: "mesh-compact",
+    topologyMode: "merged-detailed",
+    physicsProfile: "mesh-compact",
+    defaultView: "topology",
+    defaultLinkFilter: "default_links",
+    estimateActionCostSecs: 1
   },
 
   // ── Single-file simple datasets (system) ───
