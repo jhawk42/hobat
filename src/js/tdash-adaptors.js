@@ -2117,6 +2117,7 @@ export function adaptHaMatterWs(fileMap) {
         relationship.targetId,
       ),
       arrows: 'to',
+      isParentChild: relationship.categories.includes(EDGE_CATEGORY_DEFAULT_CHILDREN),
       linkCategories: relationship.categories,
     };
     presentation.title = buildEdgeTitle({

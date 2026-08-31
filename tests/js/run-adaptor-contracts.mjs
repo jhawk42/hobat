@@ -228,6 +228,7 @@ assertResult(haMatter, {
   hasChildIndex: true,
 });
 assert.equal(haMatter.edgeData[0].arrows, "to");
+assert.equal(haMatter.edgeData[0].isParentChild, true);
 assert.equal(haMatter.rawByIdForDetails.get("matter:a").role, "Router");
 assert.match(haMatter.edgeData[0].title, /type: Parent-child, Route, Route: Router/);
 assert.match(haMatter.edgeData[0].title, /from: 0x1000/);
@@ -277,6 +278,7 @@ assertResult(haMatterDashboard, {
   sourceNames: ["ha-matter-ws"],
   hasChildIndex: true,
 });
+assert.equal(haMatterDashboard.edgeData[0].isParentChild, false);
 
 const haMatterDevices = run(
   "ha-matter-ws",
