@@ -308,6 +308,14 @@ const cachedHaMatter = run(
 assert.equal(cachedHaMatter.nodeData.length, 31);
 assert.equal(cachedHaMatter.edgeData.length, 30);
 assert.equal(cachedHaMatter.edgeData[0].arrows, "to");
+assert.equal(cachedHaMatter.nodeData.filter((node) => node.isRouter === true).length, 20);
+assert.equal(cachedHaMatter.nodeData.filter((node) => node.isRouter !== true).length, 11);
+assert.equal(
+  cachedHaMatter.nodeData.find(
+    (node) => cachedHaMatter.nodeMap.get(node.id)?.role === "Reed",
+  )?.isRouter,
+  false,
+);
 
 const devicesEnvelope = { data: [
   { id: "device-a", attributes: { extAddress: "aa00112233445566", hostName: "Device A", role: "router" } },

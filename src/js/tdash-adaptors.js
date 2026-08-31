@@ -2012,8 +2012,12 @@ export function adaptHaMatterWs(fileMap) {
       || toText(canonicalRow.matterId)
       || `ha-matter-ws-${index + 1}`;
     const role = toText(canonicalRow.role || canonicalRow.routingRole).toLowerCase();
+    const rloc16 = toText(canonicalRow.rloc16).toLowerCase();
     const isChild = role.includes('child') || role.includes('enddevice');
-    const isRouter = canonicalRow.isRouter === true || role === 'router' || role === 'leader';
+    const isRouter = canonicalRow.isRouter === true
+      || role === 'router'
+      || role === 'leader'
+      || (canonicalRow.relationshipOnly === true && rloc16.endsWith('00'));
     const deviceId = registerDevice(model, canonicalRow, {
       id: explicitId,
       preserveId: true,
