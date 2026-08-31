@@ -19,7 +19,7 @@ import {
 import {
   chooseNodeId, buildLabel,
   buildMainRouterRloc16, buildChildRloc16,
-  addEdge, groupIsolatedUnknownNodes, buildVisNodeData,
+  addEdge, buildEdgeTitle, groupIsolatedUnknownNodes, buildVisNodeData, buildNodeLabelFont,
   lqStyleFromField, lqStyleFromAvgLqi, lqStyleFromLinkMargin
 } from './tdash-topology-utils.js';
 import {
@@ -2012,6 +2012,7 @@ export function adaptHaMatterWs(fileMap) {
       || `ha-matter-ws-${index + 1}`;
     const role = toText(canonicalRow.role || canonicalRow.routingRole).toLowerCase();
     const isChild = role.includes('child') || role.includes('enddevice');
+    const isRouter = canonicalRow.isRouter === true || role === 'router' || role === 'leader';
     const deviceId = registerDevice(model, canonicalRow, {
       id: explicitId,
       preserveId: true,
@@ -2021,7 +2022,8 @@ export function adaptHaMatterWs(fileMap) {
         label: buildLabel(canonicalRow),
         shape: isChild ? NODE_SHAPES.child : NODE_SHAPES.router,
         color: isChild ? NODE_COLORS.child : NODE_COLORS.eve,
-        isRouter: canonicalRow.isRouter === true || role === 'router' || role === 'leader',
+        font: buildNodeLabelFont({ fontSize: isRouter ? 19.5 : 13, isRouter }),
+        isRouter,
         isLeader: canonicalRow.isLeader === true || role === 'leader',
         relationshipOnly: canonicalRow.relationshipOnly === true,
       },
@@ -2099,6 +2101,23 @@ export function adaptHaMatterWs(fileMap) {
 
   relationships.forEach((relationship) => {
     const lqi = toFiniteNumber(relationship.metrics.lqi);
+    const sourceNode = model.devicesById.get(relationship.sourceId)?.nodeRecord;
+    const targetNode = model.devicesById.get(relationship.targetId)?.nodeRecord;
+    const presentation = {
+      ...lqStyleFromAvgLqi(lqi, 3),
+      ...buildEdgeEndpointTitles(
+        sourceNode,
+        targetNode,
+        relationship.sourceId,
+        relationship.targetId,
+      ),
+      arrows: 'to',
+      linkCategories: relationship.categories,
+    };
+    presentation.title = buildEdgeTitle({
+      ...relationship.metrics,
+      ...presentation,
+    });
     registerRelationship(model, {
       sourceId: relationship.sourceId,
       targetId: relationship.targetId,
@@ -2106,11 +2125,7 @@ export function adaptHaMatterWs(fileMap) {
       directed: true,
       sourceName: 'ha-matter-ws',
       metrics: relationship.metrics,
-      presentation: {
-        ...lqStyleFromAvgLqi(lqi, 3),
-        arrows: 'to',
-        linkCategories: relationship.categories,
-      },
+      presentation,
       rawRecord: { observations: relationship.records },
     });
   });

@@ -168,74 +168,77 @@ export function lqStyleFromLinkMargin(linkMargin) {
 // - edgeKeySuffix in style creates a distinct key so multiple edge types
 //   between the same pair can co-exist.
 
+function lqiBarSuffix(lqiValue) {
+  const level = toFiniteNumber(lqiValue);
+  if (!Number.isFinite(level)) return "";
+  if (level >= 3) return " ▂▄▆";
+  if (level >= 2) return " ▂▄";
+  if (level >= 1) return "  ▂";
+  return "  _";
+}
+
+function linkMarginBarSuffix(linkMarginValue) {
+  const margin = toFiniteNumber(linkMarginValue);
+  if (!Number.isFinite(margin)) return "";
+  if (margin > 30) return " ▂▄▆█";
+  if (margin >= 20) return " ▂▄▆";
+  if (margin >= 10) return " ▂▄";
+  return " ▂";
+}
+
+export function buildEdgeTitle(edgeStyle) {
+  const edgeType =
+    Array.isArray(edgeStyle.linkCategories) && edgeStyle.linkCategories.length > 0
+      ? `${edgeStyle.linkCategories.join(", ")}`
+      : null;
+
+  const edgeTypeReadable = edgeType
+    ? `type: ${edgeType
+        .split(", ")
+        .map((category) => EDGE_CATEGORY_LABELS[category] ?? category)
+        .join(", ")}`
+    : null;
+
+  const lqi = toFiniteNumber(edgeStyle.lqLevel ?? edgeStyle.lqi);
+  const lqiIn = toFiniteNumber(edgeStyle.lqiIn);
+  const lqiOut = toFiniteNumber(edgeStyle.lqiOut);
+  const linkMargin = toFiniteNumber(edgeStyle.linkMargin);
+  const averageRssi = toFiniteNumber(edgeStyle.averageRssi);
+  const lastRssi = toFiniteNumber(edgeStyle.lastRssi);
+  const frameErrorRate = toFiniteNumber(edgeStyle.frameErrorRate);
+  const messageErrorRate = toFiniteNumber(edgeStyle.messageErrorRate);
+  const routeCost = toFiniteNumber(edgeStyle.routeCost);
+  const edgeFrom = toText(edgeStyle.edgeFromTitle)
+    ? `from: ${toText(edgeStyle.edgeFromTitle)}`
+    : null;
+  const edgeTo = toText(edgeStyle.edgeToTitle)
+    ? `to: ${toText(edgeStyle.edgeToTitle)}`
+    : null;
+  const titleParts = [
+    edgeTypeReadable,
+    edgeFrom,
+    edgeTo,
+    Number.isFinite(lqiOut)
+      ? `LQI out: ${lqiOut}${lqiBarSuffix(lqiOut)}`
+      : null,
+    Number.isFinite(lqiIn)
+      ? `LQI in: ${lqiIn}${lqiBarSuffix(lqiIn)}`
+      : null,
+    Number.isFinite(lqi) ? `LQI: ${lqi}${lqiBarSuffix(lqi)}` : null,
+    Number.isFinite(linkMargin)
+      ? `Link margin: ${linkMargin} dB${linkMarginBarSuffix(linkMargin)}`
+      : null,
+    Number.isFinite(averageRssi) ? `Average RSSI: ${averageRssi} dBm` : null,
+    Number.isFinite(lastRssi) ? `Last RSSI: ${lastRssi} dBm` : null,
+    Number.isFinite(frameErrorRate) ? `Frame error rate: ${frameErrorRate}%` : null,
+    Number.isFinite(messageErrorRate) ? `Message error rate: ${messageErrorRate}%` : null,
+    Number.isFinite(routeCost) ? `Route cost: ${routeCost}` : null,
+  ].filter(Boolean);
+  return titleParts.join("\n");
+}
+
 export function addEdge(edgeMap, edgeData, from, to, style) {
   if (!from || !to || from === to) return;
-
-  function lqiBarSuffix(lqiValue) {
-    const level = toFiniteNumber(lqiValue);
-    if (!Number.isFinite(level)) return "";
-    if (level >= 3) return " ▂▄▆";
-    if (level >= 2) return " ▂▄";
-    if (level >= 1) return "  ▂";
-    return "  _";
-  }
-
-  function linkMarginBarSuffix(linkMarginValue) {
-    const margin = toFiniteNumber(linkMarginValue);
-    if (!Number.isFinite(margin)) return "";
-    if (margin > 30) return " ▂▄▆█";
-    if (margin >= 20) return " ▂▄▆";
-    if (margin >= 10) return " ▂▄";
-    return " ▂";
-  }
-
-  function buildEdgeTitle(edgeStyle) {
-    const edgeType =
-      Array.isArray(edgeStyle.linkCategories) && edgeStyle.linkCategories.length > 0
-        ? `${edgeStyle.linkCategories.join(", ")}`
-        : null;
-
-    // Convert edgeType to display form if it matches known categories.
-    const edgeTypeReadable = edgeType
-      ? `type: ${edgeType
-          .split(", ")
-          .map((category) => EDGE_CATEGORY_LABELS[category] ?? category)
-          .join(", ")}`
-      : null;
-
-    const styleLqLevel =
-      edgeStyle.lqLevel !== undefined
-        ? `LQI: ${edgeStyle.lqLevel}${lqiBarSuffix(edgeStyle.lqLevel)}`
-        : "";
-    const lqiIn =
-      Number.isFinite(edgeStyle.lqiIn)
-        ? `LQI in: ${edgeStyle.lqiIn}${lqiBarSuffix(edgeStyle.lqiIn)}`
-        : null;
-    const lqiOut =
-      Number.isFinite(edgeStyle.lqiOut)
-        ? `LQI out: ${edgeStyle.lqiOut}${lqiBarSuffix(edgeStyle.lqiOut)}`
-        : null;
-    const linkMargin =
-      Number.isFinite(edgeStyle.linkMargin)
-        ? `Link margin: ${edgeStyle.linkMargin} dB${linkMarginBarSuffix(edgeStyle.linkMargin)}`
-        : null;
-    const edgeFrom = toText(edgeStyle.edgeFromTitle)
-      ? `from: ${toText(edgeStyle.edgeFromTitle)}`
-      : null;
-    const edgeTo = toText(edgeStyle.edgeToTitle)
-      ? `to: ${toText(edgeStyle.edgeToTitle)}`
-      : null;
-    const titleParts = [
-      edgeTypeReadable,
-      edgeFrom,
-      lqiOut,
-      edgeTo,
-      lqiIn,
-      styleLqLevel,
-      linkMargin,
-    ].filter(Boolean);
-    return titleParts.join("\n");
-  }
 
   const suffix = toText(style.edgeKeySuffix);
   const keyBase = [from, to].sort().join("|");
@@ -505,19 +508,7 @@ export function buildVisNodeData(
       fontSize = 19.5;
       size = 45;
     }
-    const font = {
-      size: fontSize,
-      face: "monospace",
-      multi: "md",
-      color: "#e8f1ff",
-      strokeWidth: 0,
-      background: "rgba(7, 18, 40, 0.62)",
-    };
-    if (isRouter) {
-      // vis-network renders labels below polygon shapes (square/hexagon) by default.
-      // Pull router labels upward so they remain clearly visible with role-based shapes.
-      font.vadjust = -8;
-    }
+    const font = buildNodeLabelFont({ fontSize, isRouter });
     // Enforce role-based color independently from shape strings.
     const effectiveColor = unknown
       ? (node.color || NODE_COLORS.unknown)
@@ -621,6 +612,18 @@ export function buildVisNodeData(
       router_child_has_queued_msgs: childStats.router_child_has_queued_msgs,
     };
   });
+}
+
+export function buildNodeLabelFont({ fontSize = 13, isRouter = false } = {}) {
+  return {
+    size: fontSize,
+    face: "monospace",
+    multi: "md",
+    color: "#e8f1ff",
+    strokeWidth: 0,
+    background: "rgba(7, 18, 40, 0.62)",
+    ...(isRouter ? { vadjust: -8 } : {}),
+  };
 }
 
 // ── Dataset counts helper ─────────────────────────────────────────────────────

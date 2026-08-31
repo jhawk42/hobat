@@ -195,7 +195,15 @@ const haMatter = run("ha-matter-ws", ["td-ha-matter-ws-topology.json"], [[
     extAddress: "aa00112233445566",
     rloc16: "0x1000",
     role: "Router",
-    routerNeighbors: [{ sourceId: "matter:a", targetId: "matter:b", lqi: 3 }],
+    routerNeighbors: [{
+      sourceId: "matter:a",
+      targetId: "matter:b",
+      lqi: 3,
+      averageRssi: -61,
+      lastRssi: -63,
+      frameErrorRate: 4,
+      messageErrorRate: 1,
+    }],
     children: [{ sourceId: "matter:a", targetId: "matter:b", lqi: 3 }],
     route: { routeData: [{ sourceId: "matter:a", targetId: "matter:b", routeCost: 1 }] },
   },
@@ -221,6 +229,21 @@ assertResult(haMatter, {
 });
 assert.equal(haMatter.edgeData[0].arrows, "to");
 assert.equal(haMatter.rawByIdForDetails.get("matter:a").role, "Router");
+assert.match(haMatter.edgeData[0].title, /type: Parent-child, Route, Route: Router/);
+assert.match(haMatter.edgeData[0].title, /from: 0x1000/);
+assert.match(haMatter.edgeData[0].title, /to: 0x1001/);
+assert.match(haMatter.edgeData[0].title, /LQI: 3/);
+assert.match(haMatter.edgeData[0].title, /Average RSSI: -61 dBm/);
+assert.match(haMatter.edgeData[0].title, /Last RSSI: -63 dBm/);
+assert.match(haMatter.edgeData[0].title, /Frame error rate: 4%/);
+assert.match(haMatter.edgeData[0].title, /Message error rate: 1%/);
+assert.match(haMatter.edgeData[0].title, /Route cost: 1/);
+assert.equal(haMatter.nodeData[0].font.background, "rgba(7, 18, 40, 0.62)");
+assert.equal(haMatter.nodeData[0].font.size, 19.5);
+assert.equal(haMatter.nodeData[0].font.vadjust, -8);
+assert.equal(haMatter.nodeData[1].font.background, "rgba(7, 18, 40, 0.62)");
+assert.equal(haMatter.nodeData[1].font.size, 13);
+assert.equal(haMatter.nodeData[1].font.vadjust, undefined);
 
 const haMatterDevices = run(
   "ha-matter-ws",
