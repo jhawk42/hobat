@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 1,
+  "datasets": [
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_networkdiag_fetch_all",
+      "files": ["td-otbr-cli-networkdiag-fetch-all.json"],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "healthEligible": true,
+      "healthProfile": "otbr-cli-networkdiag-v1"
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_meshdiag_topology_networkdiag_fetch_all_mdns_scopes_thread",
+      "files": [
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-mdns-scopes-thread.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "healthEligible": true,
+      "healthProfile": "otbr-cli-topology-networkdiag-mdns-v1"
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_meshdiag_topology_networkdiag_fetch_all_router_neighbortables_router_childtables_mdns_scopes_thread_health",
+      "files": [
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-otbr-cli-meshdiag-router-neighbortables.json",
+        "td-otbr-cli-meshdiag-router-childtables.json",
+        "td-mdns-scopes-thread.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "healthEligible": true,
+      "healthProfile": "otbr-cli-topology-diagnostics-mdns-v1"
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_diagnostics_fetch_all",
+      "files": ["td-otbr-restapi-diagnostics-fetch-all.json"],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "healthEligible": true,
+      "healthProfile": "otbr-restapi-diagnostics-v1"
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_devices_fetch_diagnostics_fetch_all",
+      "files": [
+        "td-otbr-restapi-devices-fetch.json",
+        "td-otbr-restapi-diagnostics-fetch-all.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "healthEligible": true,
+      "healthProfile": "otbr-restapi-devices-diagnostics-v1"
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_mesh_diagnostics_fetch_all",
+      "files": ["td-otbr-restapi-mesh-diagnostics-fetch-all.json"],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "healthEligible": true,
+      "healthProfile": "otbr-restapi-mesh-diagnostics-v1"
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all",
+      "files": [
+        "td-otbr-restapi-devices-fetch.json",
+        "td-otbr-restapi-diagnostics-fetch-all.json",
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "healthEligible": true,
+      "healthProfile": "otbr-restapi-topology-diagnostics-v1"
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all_mdns_scopes_thread_health",
+      "files": [
+        "td-otbr-restapi-devices-fetch.json",
+        "td-otbr-restapi-diagnostics-fetch-all.json",
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+        "td-mdns-scopes-thread.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "healthEligible": true,
+      "healthProfile": "otbr-restapi-topology-diagnostics-mdns-v1"
+    }
+  ],
+  "healthProfiles": {
+    "otbr-cli-networkdiag-v1": {
+      "identityFile": "td-otbr-cli-thread-network-info.json",
+      "requiredOutcomes": [],
+      "coverage": {
+        "availability": "sufficient",
+        "connectivity": "limited",
+        "delivery": "sufficient",
+        "resilience": "missing",
+        "externalRouting": "missing"
+      },
+      "topologyAuthority": false,
+      "borderRouterAuthority": false
+    },
+    "otbr-cli-topology-diagnostics-mdns-v1": {
+      "identityFile": "td-otbr-cli-thread-network-info.json",
+      "requiredOutcomes": [],
+      "coverage": {
+        "availability": "sufficient",
+        "connectivity": "sufficient",
+        "delivery": "sufficient",
+        "resilience": "sufficient",
+        "externalRouting": "limited"
+      },
+      "topologyAuthority": true,
+      "borderRouterAuthority": true
+    },
+    "otbr-cli-topology-networkdiag-mdns-v1": {
+      "identityFile": "td-otbr-cli-thread-network-info.json",
+      "requiredOutcomes": [],
+      "coverage": {
+        "availability": "sufficient",
+        "connectivity": "sufficient",
+        "delivery": "sufficient",
+        "resilience": "limited",
+        "externalRouting": "limited"
+      },
+      "topologyAuthority": true,
+      "borderRouterAuthority": false
+    },
+    "otbr-restapi-diagnostics-v1": {
+      "identityFile": "td-otbr-restapi-dataset-active.json",
+      "requiredOutcomes": [
+        "td-otbr-restapi-diagnostics-fetch-all.outcome.json"
+      ],
+      "coverage": {
+        "availability": "limited",
+        "connectivity": "limited",
+        "delivery": "sufficient",
+        "resilience": "missing",
+        "externalRouting": "missing"
+      },
+      "topologyAuthority": false,
+      "borderRouterAuthority": false
+    },
+    "otbr-restapi-devices-diagnostics-v1": {
+      "identityFile": "td-otbr-restapi-dataset-active.json",
+      "requiredOutcomes": [
+        "td-otbr-restapi-diagnostics-fetch-all.outcome.json"
+      ],
+      "coverage": {
+        "availability": "sufficient",
+        "connectivity": "limited",
+        "delivery": "sufficient",
+        "resilience": "missing",
+        "externalRouting": "missing"
+      },
+      "topologyAuthority": false,
+      "borderRouterAuthority": false
+    },
+    "otbr-restapi-mesh-diagnostics-v1": {
+      "identityFile": "td-otbr-restapi-dataset-active.json",
+      "requiredOutcomes": [
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json"
+      ],
+      "coverage": {
+        "availability": "limited",
+        "connectivity": "sufficient",
+        "delivery": "sufficient",
+        "resilience": "limited",
+        "externalRouting": "missing"
+      },
+      "topologyAuthority": false,
+      "borderRouterAuthority": false
+    },
+    "otbr-restapi-topology-diagnostics-v1": {
+      "identityFile": "td-otbr-restapi-dataset-active.json",
+      "requiredOutcomes": [
+        "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json"
+      ],
+      "coverage": {
+        "availability": "sufficient",
+        "connectivity": "sufficient",
+        "delivery": "sufficient",
+        "resilience": "sufficient",
+        "externalRouting": "missing"
+      },
+      "topologyAuthority": true,
+      "borderRouterAuthority": false
+    },
+    "otbr-restapi-topology-diagnostics-mdns-v1": {
+      "identityFile": "td-otbr-restapi-dataset-active.json",
+      "requiredOutcomes": [
+        "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json"
+      ],
+      "coverage": {
+        "availability": "sufficient",
+        "connectivity": "sufficient",
+        "delivery": "sufficient",
+        "resilience": "sufficient",
+        "externalRouting": "limited"
+      },
+      "topologyAuthority": true,
+      "borderRouterAuthority": true
+    }
+  }
+}

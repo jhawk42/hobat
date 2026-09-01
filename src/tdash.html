@@ -76,6 +76,7 @@
             <span id="device-status-lq1">LQ1: <span id="lq1-count">0</span></span>
           </label>
         </div>
+        <div id="health-status-summary" class="health-status-summary" aria-label="Processed network health" hidden></div>
       </div>
     </div>
 
@@ -293,6 +294,26 @@
         <div id="view-insights" class="workspace-view workspace-placeholder" role="tabpanel"
           aria-labelledby="btn-insights" hidden>
           <h2>Thread Network Insights</h2>
+          <div id="health-insights-filters" class="health-insights-filters" hidden>
+            <label title="Filter findings by their assessed health status.">Status
+              <select id="health-status-filter" title="Show only findings with the selected health status.">
+                <option value="all">All</option>
+                <option value="poor">Poor</option>
+                <option value="moderate">Moderate</option>
+                <option value="strong">Strong</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </label>
+            <label title="Filter findings by the network object they describe.">Scope
+              <select id="health-scope-filter" title="Show network-wide, device-specific, or relationship-specific findings.">
+                <option value="all">All</option>
+                <option value="network">Network</option>
+                <option value="device">Device</option>
+                <option value="relationship">Relationship</option>
+              </select>
+            </label>
+            <button id="btn-health-export" type="button" title="Download the pinned health assessment">Export JSON</button>
+          </div>
           <div id="network-insights-content" role="status" aria-live="polite"></div>
         </div>
 

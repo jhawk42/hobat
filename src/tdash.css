@@ -1177,6 +1177,96 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   min-width: 0;
 }
 
+.health-status-summary,
+.health-assessment-header,
+.health-insights-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+}
+
+.health-status-summary {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.health-status-state { font-weight: 700; }
+.health-status-state.state-strong { color: #067647; }
+.health-status-state.state-moderate { color: #a15c00; }
+.health-status-state.state-poor { color: #b42318; }
+.health-status-state.state-unknown,
+.health-status-state.is-loading,
+.health-status-detail { color: var(--muted); }
+
+.health-insights-filters { margin-bottom: 14px; }
+
+.health-insights-filters label {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.health-assessment-header {
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.health-coverage-pillars {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(90px, 1fr));
+  gap: 3px 12px;
+  margin: 12px 0 16px;
+}
+
+.health-coverage-pillars dt,
+.health-coverage-pillars dd { margin: 0; }
+.health-coverage-pillars dt { color: var(--muted); font-size: 12px; }
+.health-coverage-pillars dd { grid-row: 2; font-weight: 600; }
+
+.health-finding-groups {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.health-finding-group {
+  padding-left: 10px;
+  border-left: 3px solid var(--line);
+}
+
+.health-finding-group.state-poor,
+.device-insight-item.state-poor { border-left-color: #b42318; }
+.health-finding-group.state-moderate,
+.device-insight-item.state-moderate { border-left-color: #a15c00; }
+.health-finding-group.state-strong,
+.device-insight-item.state-strong { border-left-color: #067647; }
+.health-finding-group h3,
+.health-finding-group p { margin: 0; }
+.health-finding-group h3 { font-size: 14px; }
+.health-finding-meta,
+.health-finding-endpoints { margin-top: 3px !important; color: var(--muted); }
+
+.health-history-summary {
+  margin: 0 0 14px;
+  color: var(--muted);
+}
+
+.health-finding-details { margin-top: 6px; }
+.health-finding-details summary { cursor: pointer; color: var(--muted); }
+.health-finding-details ol { display: grid; gap: 5px; margin: 7px 0 0; padding-left: 22px; }
+.health-finding-details li span { display: block; color: var(--muted); }
+
+@media (max-width: 760px) {
+  .health-coverage-pillars { grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr); }
+  .health-coverage-pillars dd { grid-row: auto; }
+}
+
 .network-insights-coverage,
 .network-insights-empty {
   margin: 0;

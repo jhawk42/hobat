@@ -1,0 +1,170 @@
+"""Pure evaluator tests for directional quality and materiality."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from types import MappingProxyType
+
+from td_health_evaluator import evaluate_observation
+from td_health_observation_model import (
+    Completeness,
+    DeviceSample,
+    HealthStatus,
+    MetricSample,
+    Observation,
+    RelationshipSample,
+)
+from td_health_policy import load_health_policy
+from td_health_manifest import load_health_manifest
+
+
+PROFILE = load_health_manifest().dataset(
+    "otbr_cli_meshdiag_topology_networkdiag_fetch_all_router_neighbortables_router_childtables_mdns_scopes_thread_health"
+).health_profile
+
+
+def _observation(relationship: RelationshipSample) -> Observation:
+    devices = tuple(
+        DeviceSample(device_id, device_id.removeprefix("extaddr:"), "router", None, False, ("source.json",))
+        for device_id in (relationship.from_device_id, relationship.to_device_id)
+    )
+    return Observation(
+        "observation:test",
+        "otbr-cli",
+        "otbr_cli_meshdiag_topology_networkdiag_fetch_all_router_neighbortables_router_childtables_mdns_scopes_thread_health",
+        "extpan:78b9775b001c1cbe",
+        "test",
+        "2026-09-01T00:00:00+00:00",
+        "2026-09-01T00:00:00+00:00",
+        Completeness.COMPLETE,
+        "digest",
+        (),
+        devices,
+        (relationship,),
+    )
+
+
+def _relationship(**overrides) -> RelationshipSample:
+    values = {
+        "relationship_id": "link:test",
+        "relationship_type": "router-neighbor",
+        "from_device_id": "extaddr:1111111111111111",
+        "to_device_id": "extaddr:2222222222222222",
+        "link_quality_in": 3,
+        "link_quality_out": 3,
+        "average_rssi": -50.0,
+        "last_rssi": -50.0,
+        "link_margin": 40.0,
+        "frame_error_rate": 0.0,
+        "message_error_rate": 0.0,
+        "reporter_device_id": "extaddr:1111111111111111",
+        "source_files": ("source.json",),
+    }
+    values.update(overrides)
+    return RelationshipSample(**values)
+
+
+def test_bidirectional_lq3_is_positive_evidence() -> None:
+    assessment = evaluate_observation(
+        _observation(_relationship()), load_health_policy(), profile=PROFILE
+    )
+    assert any(f.rule_id == "relationship.bidirectional-lq3" for f in assessment.findings)
+
+
+def test_complete_topology_profile_reports_border_router_redundancy() -> None:
+    observation = _observation(_relationship())
+    source_files = (
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-mdns-scopes-thread.json",
+    )
+    observation = replace(
+        observation,
+        devices=(
+            DeviceSample(
+                "extaddr:1111111111111111",
+                "1111111111111111",
+                "router",
+                None,
+                True,
+                source_files,
+            ),
+            DeviceSample(
+                "extaddr:2222222222222222",
+                "2222222222222222",
+                "router",
+                None,
+                True,
+                source_files,
+            ),
+        ),
+    )
+
+    assessment = evaluate_observation(
+        observation, load_health_policy(), profile=PROFILE
+    )
+    finding = next(
+        finding
+        for finding in assessment.findings
+        if finding.rule_id == "network.border-router-redundancy"
+    )
+
+    assert PROFILE.border_router_authority is True
+    assert finding.status is HealthStatus.STRONG
+    assert finding.evidence["observedBorderRouterCount"] == 2
+    assert finding.evidence["moreThanOne"] is True
+    assert finding.source_files == tuple(sorted(source_files))
+
+
+def test_profile_capability_changes_assessment_identity() -> None:
+    observation = _observation(_relationship())
+    policy = load_health_policy()
+    original = evaluate_observation(observation, policy, profile=PROFILE)
+    changed_profile = replace(
+        PROFILE,
+        coverage=MappingProxyType({**PROFILE.coverage, "externalRouting": "missing"}),
+    )
+    changed = evaluate_observation(observation, policy, profile=changed_profile)
+
+    assert changed.assessment_id != original.assessment_id
+
+
+def test_critical_delivery_only_escalates_on_observed_sole_path() -> None:
+    relationship = _relationship(frame_error_rate=0.35)
+    assessment = evaluate_observation(
+        _observation(relationship), load_health_policy(), profile=PROFILE
+    )
+    finding = next(f for f in assessment.findings if f.rule_id == "relationship.directional-quality")
+    assert finding.status is HealthStatus.POOR
+    assert finding.evidence["solePath"] is True
+
+
+def test_mac_ratio_requires_denominator_backed_metric_and_lq_excludes_unknown() -> None:
+    observation = _observation(_relationship())
+    observation = Observation(
+        **{
+            **observation.__dict__,
+            "metrics": (
+                MetricSample(
+                    "extaddr:1111111111111111",
+                    "totalMacDiscardRatio",
+                    0.09,
+                    "ratio",
+                    1000,
+                    "source.json",
+                ),
+                MetricSample("extaddr:1111111111111111", "observedLinkQuality1Count", 4, "count", None, "source.json"),
+                MetricSample("extaddr:1111111111111111", "observedLinkQuality2Count", 2, "count", None, "source.json"),
+                MetricSample("extaddr:1111111111111111", "observedLinkQuality3Count", 6, "count", None, "source.json"),
+            ),
+        }
+    )
+    assessment = evaluate_observation(
+        observation, load_health_policy(), profile=PROFILE
+    )
+    assert any(f.rule_id == "device.totalMacDiscardRatio" for f in assessment.findings)
+    lq = next(f for f in assessment.findings if f.rule_id == "network.observed-link-quality-ratios")
+    assert lq.status is HealthStatus.MODERATE
+    assert lq.evidence["observedCount"] == 12
+    assert lq.evidence["lq2Ratio"] == 1 / 6
+    assert lq.summary == "LQ3 is 50.0%; LQ2 is 16.7%; LQ1 is 33.3% of observed links."

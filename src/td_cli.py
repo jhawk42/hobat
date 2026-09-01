@@ -22,6 +22,7 @@ import extaddr_device_label_map
 
 import mdns_thread_scopes
 import eve_process
+import td_health_cli
 
 import otbr_cli_thread_network_info
 import otbr_cli_router_table
@@ -341,12 +342,17 @@ def _add_otbr_restapi_commands(subparsers: argparse._SubParsersAction) -> None:
 
 # type: ignore[type-arg]
 def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
-    """Build the flattened process-eve command."""
+    """Build routing-only processing commands."""
 
     # Remaining args are captured as extras via parse_known_args and forwarded to eve_process.main().
     subparsers.add_parser(
         "process-eve",
         help="Parse and enhance an Eve Thread layout file",
+        add_help=False,
+    )
+    subparsers.add_parser(
+        "process-health",
+        help="Assess approved cached Thread datasets",
         add_help=False,
     )
 
@@ -471,6 +477,9 @@ def build_parser() -> argparse.ArgumentParser:
     process-eve
         usage: td_cli process-eve [-h] ...
 
+    process-health
+        usage: td_cli process-health [-h] --dataset DATASET ...
+
     merge-dataset
         usage: td_cli merge-dataset [-h] ...
 
@@ -485,6 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
         "otbr-restapi": subparsers._name_parser_map["otbr-restapi"],
         "ha-matter-ws": subparsers._name_parser_map["ha-matter-ws"],
         "process-eve": subparsers._name_parser_map["process-eve"],
+        "process-health": subparsers._name_parser_map["process-health"],
         "merge-dataset": subparsers._name_parser_map["merge-dataset"],
         "merge-extaddr": subparsers._name_parser_map["merge-extaddr"]
     }
@@ -843,6 +853,16 @@ def _dispatch_process_eve(
     )
 
 
+def _dispatch_process_health(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    del parser
+    return _normalize_module_rc(
+        td_health_cli.main(_forward_with_datadir(args, extra_args)),
+        "td_health_cli.main",
+    )
+
+
 def _dispatch_ha_matter_ws(
     args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
 ) -> int:
@@ -911,6 +931,7 @@ _FAMILY_DISPATCHERS = {
     "otbr-restapi": _dispatch_otbr_restapi,
     "ha-matter-ws": _dispatch_ha_matter_ws,
     "process-eve": _dispatch_process_eve,
+    "process-health": _dispatch_process_health,
     "merge-dataset": _dispatch_merge,
     "merge-data": _dispatch_merge,
     "merge-extaddr": _dispatch_merge,
@@ -961,9 +982,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    single_record_json_output = args.command == "merge-extaddr" and any(
-        option in extras for option in ("--read-extaddr", "--update-extaddr")
-    )
+    single_record_json_output = (
+        args.command == "merge-extaddr"
+        and any(option in extras for option in ("--read-extaddr", "--update-extaddr"))
+    ) or (args.command == "process-health" and "--json" in extras)
 
     if not single_record_json_output:
         print("Thread Network Topology CLI")

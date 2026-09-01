@@ -11,6 +11,7 @@ from otbr_restapi_util import (
     OTBRActionTimeoutError,
     OTBRHTTPError,
     OTBRIndeterminateEnqueueError,
+    OTBRInvalidResponseError,
     OTBRRestApiClient,
     OTBRUsageError,
 )
@@ -245,6 +246,31 @@ def test_terminal_diagnostic_failure_retries_only_with_explicit_fallback(monkeyp
     assert outcome["partial"] is False
     assert outcome["deviceResults"][0]["attempts"] == 2
     assert fetch.call_count == 2
+
+
+def test_completed_diagnostic_without_result_retries_with_explicit_fallback(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fetch = MagicMock(
+        side_effect=[
+            OTBRInvalidResponseError("Completed action action-1 has no result relationship"),
+            {
+                "item": {"id": "diag-1"},
+                "action": completed_action("action-2", "diag-1"),
+                "diagnosticId": "diag-1",
+            },
+        ]
+    )
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        ["1111111111111111"],
+        fallback_types=["extAddress"],
+    )
+
+    assert outcome["partial"] is False
+    assert outcome["deviceResults"][0]["attempts"] == 2
+    assert fetch.call_count == 2
+    assert fetch.call_args_list[1].kwargs["types"] == ["extAddress"]
 
 
 def test_diagnostic_timeout_never_starts_fallback_action(monkeypatch) -> None:

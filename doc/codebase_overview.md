@@ -26,9 +26,9 @@ Browser <---- aiohttp web server ----> td_cli subprocess
 | HTTP server | `td_webserver.py` | Static assets, data allowlist, cache policy, jobs, cancellation, device labels |
 | CLI dispatcher | `td_cli.py` | Top-level command tree and command-family dispatch |
 | Collectors | `otbr_cli_*.py`, `otbr_restapi_*.py`, `ha_matter_ws_*.py`, `mdns_*.py`, `eve_process.py` | Live collection, parsing, normalization, checkpoints, final snapshots |
-| Processing | `merge_dataset.py`, `merge_extaddr_device_label_map.py` | Cross-source merge and label-map administration |
+| Processing | `merge_dataset.py`, `merge_extaddr_device_label_map.py`, `td_health_*.py` | Cross-source merge, label-map administration, and cache-only health assessment |
 | Shared contracts | `td_const.py`, `td_device_fields.py`, `td_device_merge.py`, `td_record_merge.py`, `td_json_key_normalizer.py`, `util_*.py` | Filenames, fields, merge policies, data paths, network and subprocess helpers |
-| Persistence | Effective data directory | Operator inputs and generated snapshots |
+| Persistence | Effective data directory | Operator inputs, generated snapshots, and `td-health.db` observation history |
 
 Runtime dependencies include `aiohttp`, `aiohttp-cors`, `websockets`, and `zeroconf`. The
 browser uses vendored vis-network and sortable table libraries.
@@ -39,7 +39,7 @@ browser uses vendored vis-network and sortable table libraries.
 
 | File | Responsibility |
 |---|---|
-| `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
+| `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `process-health`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
 | `td_webserver.py` | aiohttp application, file action registry, HTTP caching, background jobs, cancellation, and device-label API |
 | `td_const.py` | Authoritative Python cache filenames, data-directory constants, and Thread multicast addresses |
 | `td_device_fields.py` | Python field definitions, preferred names, aliases, identities, and placeholders |
@@ -112,6 +112,11 @@ explicitly absent. It does not replace OTBR network-wide collection.
 | `merge_dataset.py` | Input selection, normalization, identity-aware merge, validation report, and merged snapshot |
 | `merge_extaddr_device_label_map.py` | Bulk merge plus single-record read/upsert for the static label map |
 | `extaddr_device_label_map.py` | Static label-map loading |
+| `td_health_manifest.py`, `td-dataset-manifest.json` | Approved health dataset/profile contracts shared with browser registry metadata |
+| `td_health_processor.py`, `td_health_evaluator.py` | Stable cached-file reads, safe normalization, completeness, and Python-owned verdicts |
+| `td_health_observation_model.py`, `td_health_policy.py` | Frozen domain contracts and validated `snapshot-v1` policy |
+| `td_health_sqlite.py`, `td_health_history.py` | Atomic observation history, current assessment, bounded retention, and explicit roster operations |
+| `td_health_read.py`, `td_webserver.py` health routes | Query-only SQLite projections, assessment pinning, grouped findings, bounded history, and no-store HTTP responses |
 | `util_data.py` | Data-directory resolution and atomic JSON/text writes |
 | `util_network.py`, `util_convert.py`, `util_mac_counters.py` | Network, address conversion, and counter helpers |
 | `profile_wrapper_td_cli.py`, `profile_wrapper_td_webserver.py` | Development profiling wrappers |
@@ -119,6 +124,8 @@ explicitly absent. It does not replace OTBR network-wide collection.
 ## Browser Modules
 
 All files under `src/js/` are browser ES modules.
+`tdash-health.js` fetches and renders stored Python verdicts for health-eligible
+datasets. It does not contain health thresholds or reclassify evidence.
 
 | File | Responsibility |
 |---|---|

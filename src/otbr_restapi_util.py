@@ -1360,12 +1360,12 @@ class OTBRRestApiClient:
                         return_context=True,
                         raw=raw,
                     )
-                except OTBRActionFailedError:
+                except (OTBRActionFailedError, OTBRInvalidResponseError):
                     if not fallback_types:
                         raise
                     action_attempts = 2
                     logging.warning(
-                        "Device %s terminal diagnostic attempt failed; "
+                        "Device %s terminal diagnostic attempt failed or returned no result; "
                         "retrying with explicitly configured fallback TLVs",
                         device_id,
                     )

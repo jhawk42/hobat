@@ -168,6 +168,14 @@ runtime authority for selectable datasets and declares ordered files, merge
 strategy, row extractor, adaptor, default view, link filter, physics profile,
 and estimated action cost.
 
+Health datasets declare `healthEligible` and `healthProfile`. A cross-language
+contract test keeps their source, files,
+merge strategy, extractor, adaptor, and profile aligned with
+`td-dataset-manifest.json`. For eligible datasets, `tdash-health.js` reads a
+pinned assessment from the query-only `/api/health/*` routes and renders its
+status, five-pillar coverage, grouped findings, bounded history metadata, and
+device-attributed findings. Python remains the only verdict owner.
+
 On Sync, `loadDataset()` starts per-file requests concurrently and uses
 `Promise.allSettled` so successful files can still produce a partial result when
 another file fails or is cancelled. `buildDatasetRows()` is the pure assembly

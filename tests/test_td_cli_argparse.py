@@ -85,6 +85,13 @@ class TestTopLevelCommands(unittest.TestCase):
         args = _parse(["process-eve"])
         self.assertEqual(args.command, "process-eve")
 
+    def test_process_health_command(self):
+        args, extras = _parse_known(
+            ["process-health", "--dataset", "otbr_cli_networkdiag_fetch_all"]
+        )
+        self.assertEqual(args.command, "process-health")
+        self.assertEqual(extras, ["--dataset", "otbr_cli_networkdiag_fetch_all"])
+
     def test_merge_dataset_command(self):
         args = _parse(["merge-dataset"])
         self.assertEqual(args.command, "merge-dataset")
@@ -656,6 +663,18 @@ class TestDispatchOtherCommands(unittest.TestCase):
         with patch.object(td_cli.eve_process, "main", return_value=0) as m:
             rc = self._dispatch(argv)
         m.assert_called_once_with(["--input", "layout.evethreadlayout"])
+        self.assertEqual(rc, 0)
+
+    def test_process_health_forwards_datadir_and_extras(self):
+        argv = [
+            "--datadir", "/tmp/td", "process-health",
+            "--dataset", "otbr_cli_networkdiag_fetch_all", "--json",
+        ]
+        with patch.object(td_cli.td_health_cli, "main", return_value=0) as mocked_main:
+            rc = self._dispatch(argv)
+        mocked_main.assert_called_once_with(
+            ["--datadir", "/tmp/td", "--dataset", "otbr_cli_networkdiag_fetch_all", "--json"]
+        )
         self.assertEqual(rc, 0)
 
     def test_merge_dataset_forwards_extras(self):

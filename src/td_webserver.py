@@ -16,6 +16,16 @@ from collections.abc import Callable
 import aiohttp.web
 import aiohttp_cors
 
+from td_health_manifest import HealthManifestError
+from td_health_read import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    HealthBusyError,
+    HealthCorruptStoreError,
+    HealthUnavailableError,
+    TDHealthReadService,
+)
+
 from util_data import (
     create_checkpoint_filename,
     data_file_path,
@@ -1073,6 +1083,144 @@ async def handle_device_patch_api(request: aiohttp.web.Request) -> aiohttp.web.R
     return _device_json_response(result, status=201 if inserted else 200)
 
 
+def _health_json_response(payload: object) -> aiohttp.web.Response:
+    return aiohttp.web.json_response(payload, headers={"Cache-Control": "no-store"})
+
+
+def _health_page_value(raw: str | None, *, name: str, default: int) -> int:
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise aiohttp.web.HTTPBadRequest(reason=f"{name} must be an integer") from exc
+    maximum = MAX_PAGE_SIZE if name == "limit" else 1000000
+    minimum = 1 if name == "limit" else 0
+    if value < minimum or value > maximum:
+        raise aiohttp.web.HTTPBadRequest(
+            reason=f"{name} must be between {minimum} and {maximum}"
+        )
+    return value
+
+
+async def _health_service_call(request: aiohttp.web.Request, method: str, **kwargs):
+    data_dir = request.app[TD_DATA_DIR_APP_KEY]
+    try:
+        service = await asyncio.to_thread(TDHealthReadService, data_dir)
+        return await asyncio.to_thread(getattr(service, method), **kwargs)
+    except HealthUnavailableError as exc:
+        raise aiohttp.web.HTTPServiceUnavailable(reason=str(exc)) from exc
+    except HealthBusyError as exc:
+        raise aiohttp.web.HTTPServiceUnavailable(
+            reason=str(exc), headers={"Retry-After": "5"}
+        ) from exc
+    except HealthCorruptStoreError as exc:
+        raise aiohttp.web.HTTPInternalServerError(reason=str(exc)) from exc
+    except HealthManifestError as exc:
+        raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
+
+
+async def handle_health_summary_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    dataset_id = request.query.get("dataset")
+    if not dataset_id:
+        raise aiohttp.web.HTTPBadRequest(reason="dataset is required")
+    result = await _health_service_call(
+        request,
+        "assessment",
+        dataset_id=dataset_id,
+        network_id=request.query.get("network"),
+        assessment_id=request.query.get("assessment"),
+        grouped=True,
+    )
+    if result is None:
+        raise aiohttp.web.HTTPNotFound(reason="Health assessment not found")
+    return _health_json_response(result)
+
+
+async def handle_health_findings_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    assessment_id = request.query.get("assessment")
+    if not assessment_id:
+        raise aiohttp.web.HTTPBadRequest(reason="assessment is required")
+    status = request.query.get("status")
+    if status is not None and status not in {"strong", "moderate", "poor", "unknown"}:
+        raise aiohttp.web.HTTPBadRequest(reason="invalid status")
+    scope = request.query.get("scope")
+    if scope is not None and scope not in {"network", "device", "relationship"}:
+        raise aiohttp.web.HTTPBadRequest(reason="invalid scope")
+    device_id = request.query.get("device")
+    if device_id is not None and not device_id.startswith("extaddr:"):
+        raise aiohttp.web.HTTPBadRequest(reason="device must be a canonical extaddr identity")
+    limit = _health_page_value(request.query.get("limit"), name="limit", default=MAX_PAGE_SIZE)
+    offset = _health_page_value(request.query.get("offset"), name="offset", default=0)
+    grouped = request.query.get("grouped", "true").lower() != "false"
+    result = await _health_service_call(
+        request,
+        "assessment",
+        assessment_id=assessment_id,
+        grouped=grouped,
+        status=status,
+        scope=scope,
+        device_id=device_id,
+        limit=limit,
+        offset=offset,
+    )
+    if result is None:
+        raise aiohttp.web.HTTPNotFound(reason="Health assessment not found")
+    return _health_json_response(result)
+
+
+async def handle_health_device_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    assessment_id = request.query.get("assessment")
+    if not assessment_id:
+        raise aiohttp.web.HTTPBadRequest(reason="assessment is required")
+    device_id = request.match_info.get("device_id", "")
+    if not device_id.startswith("extaddr:"):
+        raise aiohttp.web.HTTPBadRequest(reason="device_id must be canonical extaddr identity")
+    result = await _health_service_call(
+        request, "device", assessment_id=assessment_id, device_id=device_id
+    )
+    if result is None:
+        raise aiohttp.web.HTTPNotFound(reason="Device assessment not found")
+    return _health_json_response(result)
+
+
+async def handle_health_observations_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    limit = _health_page_value(
+        request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE
+    )
+    offset = _health_page_value(
+        request.query.get("offset"), name="offset", default=0
+    )
+    result = await _health_service_call(
+        request,
+        "observations",
+        network_id=request.query.get("network"),
+        limit=limit,
+        offset=offset,
+    )
+    return _health_json_response(result)
+
+
+async def handle_health_latest_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    result = await _health_service_call(
+        request,
+        "assessment",
+        dataset_id=request.query.get("dataset"),
+        network_id=request.query.get("network"),
+        assessment_id=None,
+        grouped=True,
+    )
+    if result is None:
+        raise aiohttp.web.HTTPNotFound(reason="Health assessment not found")
+    return _health_json_response(result)
+
+
+async def handle_health_capabilities_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    return _health_json_response(
+        await _health_service_call(request, "capabilities")
+    )
+
+
 # ---------------------------------------------------------------------------
 # R1c — pure file-read / response builder (no asyncio, no shared state)
 # ---------------------------------------------------------------------------
@@ -1433,6 +1581,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     cors.add(app.router.add_delete("/api/job/{job_id}", handle_job_cancel_api))
     cors.add(app.router.add_get("/api/device/{extAddress}", handle_device_get_api))
     cors.add(app.router.add_patch("/api/device/{extAddress}", handle_device_patch_api))
+    cors.add(app.router.add_get("/api/health/summary", handle_health_summary_api))
+    cors.add(app.router.add_get("/api/health/findings", handle_health_findings_api))
+    cors.add(app.router.add_get("/api/health/devices/{device_id}", handle_health_device_api))
+    cors.add(app.router.add_get("/api/health/observations", handle_health_observations_api))
+    cors.add(app.router.add_get("/api/health/latest", handle_health_latest_api))
+    cors.add(app.router.add_get("/api/health/capabilities", handle_health_capabilities_api))
     # Serve all static assets (HTML, JS, CSS, …) from the src/ directory.
     app.router.add_static(
         "/", static_root, show_index=False, follow_symlinks=False)

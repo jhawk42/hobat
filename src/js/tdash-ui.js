@@ -70,6 +70,15 @@ import {
   configureViewStatusPresenter,
   supersedeViewStatus,
 } from "./tdash-view-status.js";
+import {
+  exportHealthAssessment,
+  fetchHealthAssessment,
+  fetchHealthDevice,
+  fetchHealthSupport,
+  renderDeviceHealth,
+  renderHealthInsights,
+  renderHealthStatus,
+} from "./tdash-health.js";
 
 configureViewStatusPresenter((status) => {
   const statusEl = document.getElementById("view-status-line-content");
@@ -155,6 +164,19 @@ let _currentSearchQuery = "";
 let _fetchInProgress = false;
 const WORKSPACE_ACTIVITY_LIMIT = 100;
 const workspaceActivity = [];
+const healthInsightsState = {
+  assessment: null,
+  datasetId: null,
+  error: "",
+  loading: false,
+  assessmentRequestVersion: 0,
+  device: null,
+  deviceError: "",
+  deviceLoading: false,
+  deviceRequestVersion: 0,
+  capabilities: null,
+  observations: null,
+};
 
 function renderWorkspaceLogs() {
   const contentEl = document.getElementById("workspace-log-content");
@@ -925,6 +947,15 @@ function renderNetworkInsightCondition(parent, condition, eligibleDeviceCount) {
 function renderNetworkInsights() {
   const contentEl = document.getElementById("network-insights-content");
   if (!contentEl) return;
+  const healthEligible = currentDataset?.entry?.healthEligible === true;
+  document.getElementById("health-insights-filters")?.toggleAttribute("hidden", !healthEligible);
+  if (healthEligible) {
+    renderHealthInsights(contentEl, healthInsightsState, {
+      status: document.getElementById("health-status-filter")?.value ?? "all",
+      scope: document.getElementById("health-scope-filter")?.value ?? "all",
+    });
+    return;
+  }
   contentEl.replaceChildren();
 
   if (!currentDataset) {
@@ -1000,6 +1031,14 @@ function appendDeviceInsightElement(parent, tagName, text, className = "") {
 function renderDeviceInsights(record) {
   const contentEl = document.getElementById("device-insights-panel-content");
   if (!contentEl) return;
+  if (currentDataset?.entry?.healthEligible === true) {
+    renderDeviceHealth(contentEl, {
+      device: healthInsightsState.device,
+      error: healthInsightsState.deviceError,
+      loading: healthInsightsState.deviceLoading,
+    });
+    return;
+  }
   contentEl.replaceChildren();
 
   if (!record) {
@@ -1074,9 +1113,95 @@ function initDeviceInsights() {
   renderDeviceInsights(null);
   document.addEventListener(DEVICE_SELECTION_EVENT, (event) => {
     deviceInsightsState.record = event.detail?.record ?? null;
-    renderDeviceInsights(deviceInsightsState.record);
+    void refreshSelectedDeviceHealth(deviceInsightsState.record);
   });
 }
+
+async function refreshSelectedDeviceHealth(record) {
+  const projection = projectSelectedDevice(record);
+  const requestVersion = ++healthInsightsState.deviceRequestVersion;
+  healthInsightsState.device = null;
+  healthInsightsState.deviceError = "";
+  healthInsightsState.capabilities = null;
+  healthInsightsState.observations = null;
+  healthInsightsState.deviceLoading = false;
+  if (currentDataset?.entry?.healthEligible !== true) {
+    renderDeviceInsights(record);
+    return;
+  }
+  if (!projection?.hasValidExtAddress || !healthInsightsState.assessment) {
+    renderDeviceInsights(record);
+    return;
+  }
+  healthInsightsState.deviceLoading = true;
+  renderDeviceInsights(record);
+  try {
+    const deviceId = `extaddr:${projection.extAddress}`;
+    const device = await fetchHealthDevice(
+      healthInsightsState.assessment.assessmentId,
+      deviceId,
+    );
+    if (requestVersion !== healthInsightsState.deviceRequestVersion) return;
+    healthInsightsState.device = device;
+  } catch (error) {
+    if (requestVersion !== healthInsightsState.deviceRequestVersion) return;
+    healthInsightsState.deviceError = error.message;
+  } finally {
+    if (requestVersion === healthInsightsState.deviceRequestVersion) {
+      healthInsightsState.deviceLoading = false;
+      renderDeviceInsights(record);
+    }
+  }
+}
+
+async function refreshHealthAssessment() {
+  const entry = currentDataset?.entry;
+  healthInsightsState.assessment = null;
+  healthInsightsState.datasetId = entry?.value ?? null;
+  healthInsightsState.error = "";
+  healthInsightsState.device = null;
+  healthInsightsState.deviceError = "";
+  const statusEl = document.getElementById("health-status-summary");
+  if (entry?.healthEligible !== true) {
+    healthInsightsState.loading = false;
+    renderHealthStatus(statusEl, healthInsightsState);
+    renderNetworkInsights();
+    return;
+  }
+
+  const requestVersion = ++healthInsightsState.assessmentRequestVersion;
+  healthInsightsState.loading = true;
+  renderHealthStatus(statusEl, healthInsightsState);
+  renderNetworkInsights();
+  try {
+    const assessment = await fetchHealthAssessment(entry.value);
+    if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    healthInsightsState.assessment = assessment;
+    try {
+      const support = await fetchHealthSupport(assessment.networkId);
+      if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+      healthInsightsState.capabilities = support.capabilities;
+      healthInsightsState.observations = support.observations;
+    } catch (error) {
+      console.warn("Health history metadata is unavailable:", error);
+    }
+  } catch (error) {
+    if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    healthInsightsState.error = error.message;
+  } finally {
+    if (requestVersion === healthInsightsState.assessmentRequestVersion) {
+      healthInsightsState.loading = false;
+      renderHealthStatus(statusEl, healthInsightsState);
+      renderNetworkInsights();
+    }
+  }
+}
+
+document.getElementById("health-status-filter")?.addEventListener("change", renderNetworkInsights);
+document.getElementById("health-scope-filter")?.addEventListener("change", renderNetworkInsights);
+document.getElementById("btn-health-export")?.addEventListener("click", () => {
+  exportHealthAssessment(healthInsightsState.assessment);
+});
 
 const DEVICE_DETAILS_PANEL_TABS = [
   {
@@ -1608,6 +1733,7 @@ async function doFetchDataset({ userInitiated = false } = {}) {
   // Final reconciliation render: all files settled, isPartial is false.
   resetDeviceDetailsPanelTabsToDefault();
   renderCurrentView();
+  void refreshHealthAssessment();
   updateFetchStatusBar(_lastFetchStartedAt);
   if (currentDataset?.fetchMetrics) {
     const fetchMetricsPayload = {

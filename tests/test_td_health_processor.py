@@ -1,0 +1,325 @@
+"""Safety tests for cache-only health processing and evaluation."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+
+import pytest
+
+from td_health_observation_model import Completeness, HealthStatus
+from td_health_policy import load_health_policy
+from td_health_processor import HealthProcessingError, build_processing_result, process_health
+from td_health_sqlite import SQLiteHealthStore
+
+
+def _write_seed(data_dir, devices, *, extpan="78b9775b001c1cbe"):
+    (data_dir / "td-otbr-cli-thread-network-info.json").write_text(
+        json.dumps({"extPanId": extpan, "networkName": "mutable-name"}),
+        encoding="utf-8",
+    )
+    (data_dir / "td-otbr-cli-networkdiag-fetch-all.json").write_text(
+        json.dumps(devices), encoding="utf-8"
+    )
+
+
+def test_missing_final_is_rejected_without_allow_partial(tmp_path) -> None:
+    (tmp_path / "td-otbr-cli-thread-network-info.json").write_text(
+        json.dumps({"extPanId": "78b9775b001c1cbe"}), encoding="utf-8"
+    )
+    with pytest.raises(HealthProcessingError, match="missing or invalid"):
+        build_processing_result(
+            data_dir=tmp_path,
+            dataset_id="otbr_cli_networkdiag_fetch_all",
+            policy=load_health_policy(),
+        )
+
+
+def test_processor_uses_extpan_identity_and_normalizes_devices(tmp_path) -> None:
+    _write_seed(
+        tmp_path,
+        [{"extaddr": "86:72:76:6A:E0:57:81:87", "role": "router"}],
+    )
+    result = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        processing_time=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    assert result.observation.network_id == "extpan:78b9775b001c1cbe"
+    assert result.observation.devices[0].device_id == "extaddr:8672766ae0578187"
+    assert result.observation.completeness is Completeness.COMPLETE
+    assert result.assessment.status is HealthStatus.UNKNOWN
+    assert result.assessment.confidence.value == "medium"
+    assert result.assessment.coverage["pillars"]["resilience"] == "missing"
+    assert not any(
+        finding.rule_id in {
+            "network.current-path-redundancy",
+            "network.border-router-redundancy",
+        }
+        for finding in result.assessment.findings
+    )
+
+
+def test_partial_observation_cannot_make_expected_device_offline(tmp_path) -> None:
+    _write_seed(tmp_path, [])
+    store = SQLiteHealthStore(tmp_path / "td-health.db")
+    network_id = "extpan:78b9775b001c1cbe"
+    store.upsert_expected_device(network_id, "extaddr:8672766ae0578187", "expected")
+    complete = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+    )
+    assert not any(f.rule_id == "device.offline" for f in complete.assessment.findings)
+
+    (tmp_path / "td-otbr-cli-networkdiag-fetch-all.partial.json").write_text("[]", encoding="utf-8")
+    partial_path = tmp_path / "td-otbr-cli-networkdiag-fetch-all.partial.json"
+    partial_path.touch()
+    partial = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+        allow_partial=True,
+    )
+    assert partial.observation.completeness is Completeness.PARTIAL
+    assert not any(f.rule_id == "device.offline" for f in partial.assessment.findings)
+
+
+def test_second_complete_absence_establishes_offline(tmp_path) -> None:
+    _write_seed(tmp_path, [])
+    store = SQLiteHealthStore(tmp_path / "td-health.db")
+    device_id = "extaddr:8672766ae0578187"
+    store.upsert_expected_device("extpan:78b9775b001c1cbe", device_id, "expected")
+    first = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+        processing_time=datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    assert not any(f.rule_id == "device.offline" for f in first.assessment.findings)
+
+    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
+    snapshot.write_text("[]\n", encoding="utf-8")
+    second = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+        processing_time=datetime(2026, 9, 1, 0, 1, tzinfo=timezone.utc),
+    )
+    assert any(f.rule_id == "device.offline" for f in second.assessment.findings)
+
+
+def _write_rest_seed(data_dir, outcome):
+    (data_dir / "td-otbr-restapi-dataset-active.json").write_text(
+        json.dumps(
+            {
+                "extPanId": "78b9775b001c1cbe",
+                "networkName": "safe-label",
+                "networkKey": "SECRET_NETWORK_KEY",
+                "pskc": "SECRET_PSKC",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (data_dir / "td-otbr-restapi-diagnostics-fetch-all.json").write_text(
+        json.dumps([{"extAddress": "8672766ae0578187", "role": "child"}]),
+        encoding="utf-8",
+    )
+    (data_dir / "td-otbr-restapi-diagnostics-fetch-all.outcome.json").write_text(
+        json.dumps(outcome), encoding="utf-8"
+    )
+
+
+def test_rest_outcome_completeness_contract_and_secret_exclusion(tmp_path) -> None:
+    _write_rest_seed(
+        tmp_path,
+        {
+            "items": [],
+            "deviceResults": [{"deviceId": "8672766ae0578187", "status": "completed"}],
+            "partial": False,
+            "completedAt": "2026-09-01T00:00:00+00:00",
+        },
+    )
+    store = SQLiteHealthStore(tmp_path / "td-health.db")
+    complete = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_restapi_diagnostics_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+    )
+    assert complete.observation.completeness is Completeness.COMPLETE
+    database_bytes = (tmp_path / "td-health.db").read_bytes()
+    assert b"SECRET_NETWORK_KEY" not in database_bytes
+    assert b"SECRET_PSKC" not in database_bytes
+
+
+def test_rest_legacy_outcome_is_degraded_and_explicit_failure_is_partial(tmp_path) -> None:
+    _write_rest_seed(tmp_path, {"items": []})
+    degraded = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_restapi_diagnostics_fetch_all",
+        policy=load_health_policy(),
+    )
+    assert degraded.observation.completeness is Completeness.DEGRADED
+
+    _write_rest_seed(
+        tmp_path,
+        {
+            "items": [],
+            "deviceResults": [{"deviceId": "8672766ae0578187", "status": "failed"}],
+            "partial": True,
+            "completedAt": "2026-09-01T00:00:00+00:00",
+        },
+    )
+    with pytest.raises(HealthProcessingError, match="partial"):
+        build_processing_result(
+            data_dir=tmp_path,
+            dataset_id="otbr_restapi_diagnostics_fetch_all",
+            policy=load_health_policy(),
+        )
+
+
+def test_complete_rest_topology_mdns_profile_reports_border_router_redundancy(tmp_path) -> None:
+    dataset_id = (
+        "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all_"
+        "mdns_scopes_thread_health"
+    )
+    (tmp_path / "td-otbr-restapi-dataset-active.json").write_text(
+        json.dumps({"extPanId": "78b9775b001c1cbe", "networkName": "test"}),
+        encoding="utf-8",
+    )
+    border_routers = [
+        {"extAddress": "1111111111111111", "isBorderRouter": True, "role": "router"},
+        {"extAddress": "2222222222222222", "isBorderRouter": True, "role": "router"},
+    ]
+    for filename in (
+        "td-otbr-restapi-devices-fetch.json",
+        "td-otbr-restapi-diagnostics-fetch-all.json",
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+        "td-mdns-scopes-thread.json",
+    ):
+        (tmp_path / filename).write_text(json.dumps(border_routers), encoding="utf-8")
+    completed_outcome = {
+        "deviceResults": [{"deviceId": "1111111111111111", "status": "completed"}],
+        "partial": False,
+        "completedAt": "2026-09-01T00:00:00+00:00",
+    }
+    for filename in (
+        "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
+    ):
+        (tmp_path / filename).write_text(json.dumps(completed_outcome), encoding="utf-8")
+
+    complete = build_processing_result(
+        data_dir=tmp_path, dataset_id=dataset_id, policy=load_health_policy()
+    )
+    finding = next(
+        finding
+        for finding in complete.assessment.findings
+        if finding.rule_id == "network.border-router-redundancy"
+    )
+
+    assert complete.observation.completeness is Completeness.COMPLETE
+    assert finding.status is HealthStatus.STRONG
+    assert finding.evidence["observedBorderRouterCount"] == 2
+
+    completed_outcome["partial"] = True
+    (tmp_path / "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json").write_text(
+        json.dumps(completed_outcome), encoding="utf-8"
+    )
+    partial = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id=dataset_id,
+        policy=load_health_policy(),
+        allow_partial=True,
+    )
+
+    assert partial.observation.completeness is Completeness.PARTIAL
+    assert not any(
+        finding.rule_id == "network.border-router-redundancy"
+        for finding in partial.assessment.findings
+    )
+
+
+@pytest.mark.parametrize(
+    ("dataset_id", "identity_file", "final_files", "outcome_files"),
+    [
+        (
+            "otbr_cli_meshdiag_topology_networkdiag_fetch_all_mdns_scopes_thread",
+            "td-otbr-cli-thread-network-info.json",
+            (
+                "td-otbr-cli-meshdiag-topology.json",
+                "td-otbr-cli-networkdiag-fetch-all.json",
+                "td-mdns-scopes-thread.json",
+            ),
+            (),
+        ),
+        (
+            "otbr_restapi_devices_fetch_diagnostics_fetch_all",
+            "td-otbr-restapi-dataset-active.json",
+            (
+                "td-otbr-restapi-devices-fetch.json",
+                "td-otbr-restapi-diagnostics-fetch-all.json",
+            ),
+            ("td-otbr-restapi-diagnostics-fetch-all.outcome.json",),
+        ),
+        (
+            "otbr_restapi_mesh_diagnostics_fetch_all",
+            "td-otbr-restapi-dataset-active.json",
+            ("td-otbr-restapi-mesh-diagnostics-fetch-all.json",),
+            ("td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",),
+        ),
+        (
+            "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all",
+            "td-otbr-restapi-dataset-active.json",
+            (
+                "td-otbr-restapi-devices-fetch.json",
+                "td-otbr-restapi-diagnostics-fetch-all.json",
+                "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+            ),
+            (
+                "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
+                "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
+            ),
+        ),
+    ],
+)
+def test_additional_health_datasets_use_source_identity(
+    tmp_path, dataset_id, identity_file, final_files, outcome_files
+) -> None:
+    (tmp_path / identity_file).write_text(
+        json.dumps({"extPanId": "78b9775b001c1cbe", "networkName": "shared-source-name"}),
+        encoding="utf-8",
+    )
+    for filename in final_files:
+        (tmp_path / filename).write_text(
+            json.dumps([{"extAddress": "8672766ae0578187", "role": "router"}]),
+            encoding="utf-8",
+        )
+    for filename in outcome_files:
+        (tmp_path / filename).write_text(
+            json.dumps(
+                {
+                    "deviceResults": [{"deviceId": "8672766ae0578187", "status": "completed"}],
+                    "partial": False,
+                    "completedAt": "2026-09-01T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id=dataset_id,
+        policy=load_health_policy(),
+    )
+
+    assert result.observation.network_id == "extpan:78b9775b001c1cbe"
+    assert result.observation.network_name == "shared-source-name"
+    assert result.observation.completeness is Completeness.COMPLETE
+    assert result.observation.devices[0].device_id == "extaddr:8672766ae0578187"

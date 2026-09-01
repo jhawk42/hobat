@@ -15,7 +15,8 @@ import { ADAPTOR_HANDLERS } from "../../src/js/tdash-adaptors.js";
 
 function entry(overrides = {}) {
   return {
-    value: "test-dataset",
+    source: "system",
+    value: "system_test_dataset",
     files: ["td-static-extaddr-device-label.json", "td-mdns-scopes-thread.json"],
     mergeStrategy: "none",
     rowExtractor: "raw-array",
@@ -77,7 +78,7 @@ assert.deepEqual(ROW_EXTRACTORS["otbr-restapi"]({ data: [{ id: 1 }] }), [{ id: 1
 assert.deepEqual(ROW_EXTRACTORS["otbr-restapi"]({ meta: { count: 1 } }), []);
 
 const detailedRestEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "restapi_devices_fetch_diagnostics_fetch_mesh-diagnostics-fetch_all",
+  (dataset) => dataset.value === "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all",
 );
 const detailedRestRows = buildDatasetRows(detailedRestEntry, [
   [{ extAddress: "AA", hostName: "Router A" }],
@@ -116,7 +117,7 @@ assert.ok(Array.isArray(canonicalResult.rows[0].route.routeData));
 assert.equal(Object.hasOwn(canonicalResult.rows[0].route, "route_data"), false);
 
 const processedEveEntry = DATASET_REGISTRY.find(
-  (dataset) => dataset.value === "eve_processed_topology",
+  (dataset) => dataset.value === "eve_topology_processed",
 );
 const cachedProcessedEve = JSON.parse(
   fs.readFileSync("data/td-eve-topology.json", "utf8"),
@@ -174,9 +175,9 @@ assert.deepEqual(
     .filter((entry) => entry.source === "ha-matter-ws")
     .map((entry) => entry.value),
   [
-    "ha_matter_ws_devices",
-    "ha_matter_ws_diagnostics",
-    "ha_matter_ws_mesh_diagnostics",
+    "ha_matter_ws_devices_fetch_all",
+    "ha_matter_ws_dashboard_diagnostics",
+    "ha_matter_ws_dashboard_mesh_diagnostics",
     "ha_matter_ws_topology",
   ],
 );
