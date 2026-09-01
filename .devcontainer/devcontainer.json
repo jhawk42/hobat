@@ -15,7 +15,7 @@
 		"vscode": {}
 	},
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y ripgrep && python -m pip install -r requirements.txt && python -m pip install -r requirements_test.txt",
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y ripgrep sqlite3 && python -m pip install -r requirements.txt && python -m pip install -r requirements_test.txt",
 	// Use docker container host network to allow access to services running on the host machine
 	"runArgs": [
 		"--network=host"
