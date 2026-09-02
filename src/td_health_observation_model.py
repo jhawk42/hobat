@@ -76,6 +76,7 @@ class RelationshipSample:
     message_error_rate: float | None
     reporter_device_id: str | None
     source_files: tuple[str, ...]
+    queued_message_count: float | None = None
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,7 @@ class Observation:
     devices: tuple[DeviceSample, ...]
     relationships: tuple[RelationshipSample, ...]
     metrics: tuple[MetricSample, ...] = ()
+    duplicate_relationship_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

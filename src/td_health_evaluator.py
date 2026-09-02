@@ -21,7 +21,18 @@ from td_health_policy import HealthPolicy
 from td_health_manifest import HealthProfile
 
 
-EVALUATOR_VERSION = "snapshot-v2"
+EVALUATOR_VERSION = "snapshot-v3"
+
+_LIFETIME_EVIDENCE_METRICS = frozenset(
+    {
+        "parentChanges",
+        "partitionIdChanges",
+        "betterPartitionAttachAttempts",
+        "totalParentPartitionChanges",
+        "routerRolePercent",
+        "detachedDisabledPercent",
+    }
+)
 
 
 def _stable_id(prefix: str, *parts: str) -> str:
@@ -99,6 +110,7 @@ def evaluate_observation(
     findings: list[Finding] = []
     observed_ids = frozenset(device.device_id for device in observation.devices)
     complete = observation.completeness is Completeness.COMPLETE
+    attachment_failed_device_ids: set[str] = set()
 
     for device in observation.devices:
         findings.append(
@@ -120,6 +132,7 @@ def evaluate_observation(
         )
         attachment = (device.state or device.role or "").lower()
         if attachment in {"detached", "disabled", "orphaned"}:
+            attachment_failed_device_ids.add(device.device_id)
             findings.append(
                 _finding(
                     observation,
@@ -268,28 +281,87 @@ def evaluate_observation(
 
     metric_sources: dict[str, set[str]] = {}
     lq_counts = {1: 0.0, 2: 0.0, 3: 0.0}
+    diagnostic_timeout_device_ids: set[str] = set()
     for metric in observation.metrics:
         metric_sources.setdefault(metric.metric, set()).add(metric.source_file)
         if metric.metric.startswith("observedLinkQuality"):
             quality = int(metric.metric.removeprefix("observedLinkQuality").removesuffix("Count"))
             lq_counts[quality] += metric.value
             continue
-        threshold = policy.thresholds.get(metric.metric)
-        if threshold is None or metric.value < threshold["unstable"]:
+        if metric.metric == "diagnosticTimeout":
+            diagnostic_timeout_device_ids.add(metric.device_id)
             continue
+        threshold = policy.thresholds.get(metric.metric)
+        if threshold is None:
+            continue
+        if metric.metric in _LIFETIME_EVIDENCE_METRICS:
+            lower_is_worse = "unstableBelow" in threshold
+            crossed = (
+                metric.value < threshold["unstableBelow"] if lower_is_worse
+                else metric.value >= threshold["unstable"]
+            )
+            if not crossed:
+                continue
+            high_key = "highBelow" if lower_is_worse else "high"
+            band = (
+                "high"
+                if high_key in threshold and (
+                    metric.value < threshold[high_key] if lower_is_worse
+                    else metric.value >= threshold[high_key]
+                )
+                else "moderate"
+            )
+            findings.append(
+                _finding(
+                    observation,
+                    rule_id=f"device.{metric.metric}",
+                    status=HealthStatus.UNKNOWN,
+                    scope=FindingScope.DEVICE,
+                    rank=FindingRank.INFO,
+                    title="Lifetime counter evidence",
+                    summary=f"{metric.metric} is {metric.value:g} ({band} band); lifetime/since-reset evidence only.",
+                    why="Cumulative counters cannot establish current instability without a comparable baseline.",
+                    evidence={
+                        "metric": metric.metric,
+                        "value": metric.value,
+                        "unit": metric.unit,
+                        "band": band,
+                        "thresholds": dict(threshold),
+                    },
+                    action="Compare against a future observation before treating this as a current failure.",
+                    verify="Process another complete observation and compare the delta or trend.",
+                    device_ids=(metric.device_id,),
+                    source_files=(metric.source_file,),
+                    confidence=Confidence.LOW,
+                )
+            )
+            continue
+        if metric.value < threshold["unstable"]:
+            continue
+        critical = threshold.get("critical")
+        escalate_poor = (
+            critical is not None
+            and metric.value >= critical
+            and metric.device_id in attachment_failed_device_ids
+        )
+        severity_tier = (
+            "critical" if critical is not None and metric.value >= critical
+            else "high" if metric.value >= threshold["high"]
+            else "moderate"
+        )
         findings.append(
             _finding(
                 observation,
                 rule_id=f"device.{metric.metric}",
-                status=HealthStatus.MODERATE,
+                status=HealthStatus.POOR if escalate_poor else HealthStatus.MODERATE,
                 scope=FindingScope.DEVICE,
-                rank=FindingRank.MODERATE,
+                rank=FindingRank.POOR if escalate_poor else FindingRank.MODERATE,
                 title=(
                     "MAC error ratio needs attention"
                     if metric.metric == "totalMacErrorRatio"
                     else "MAC discard ratio needs attention"
                 ),
-                summary=f"Current ratio is {metric.value:.1%}.",
+                summary=f"Current ratio is {metric.value:.1%} ({severity_tier} band).",
                 why="A valid packet denominator shows current delivery degradation.",
                 evidence={
                     "metric": metric.metric,
@@ -298,11 +370,55 @@ def evaluate_observation(
                     "denominator": metric.denominator,
                     "unstableThreshold": threshold["unstable"],
                     "highThreshold": threshold["high"],
+                    "criticalThreshold": critical,
+                    "severityTier": severity_tier,
+                    "escalatedByAttachmentFailure": escalate_poor,
                 },
                 action="Inspect link conditions and packet counters for this device.",
                 verify="Process another complete observation with a valid packet denominator.",
                 device_ids=(metric.device_id,),
                 source_files=(metric.source_file,),
+            )
+        )
+
+    for device_id in sorted(diagnostic_timeout_device_ids):
+        findings.append(
+            _finding(
+                observation,
+                rule_id="device.diagnostic-timeout",
+                status=HealthStatus.UNKNOWN,
+                scope=FindingScope.DEVICE,
+                rank=FindingRank.INFO,
+                title="Diagnostic query timed out",
+                summary="The device did not respond to a mesh diagnostic query in this observation.",
+                why="A non-responding device reduces coverage and may indicate overload, congestion, or unreachability.",
+                evidence={"responseTimeout": True},
+                action="Investigate load, sleep behavior, or connectivity if this persists across observations.",
+                verify="Process another complete observation and confirm whether the device responds.",
+                device_ids=(device_id,),
+                confidence=Confidence.LOW,
+            )
+        )
+
+    if observation.duplicate_relationship_ids:
+        findings.append(
+            _finding(
+                observation,
+                rule_id="observation.duplicate-source-entry",
+                status=HealthStatus.UNKNOWN,
+                scope=FindingScope.NETWORK,
+                rank=FindingRank.INFO,
+                title="Duplicate relationship entries in source data",
+                summary=(
+                    f"{len(observation.duplicate_relationship_ids)} relationship(s) appeared more than "
+                    "once within one source file."
+                ),
+                why="Duplicate entries are a collection artifact and should not be read as two relationships.",
+                evidence={"relationshipIds": observation.duplicate_relationship_ids},
+                action="No action required unless duplicates recur across many observations.",
+                verify="Confirm the relationship count is unaffected in the next complete observation.",
+                relationship_ids=observation.duplicate_relationship_ids,
+                confidence=Confidence.LOW,
             )
         )
 
@@ -344,6 +460,7 @@ def evaluate_observation(
             )
         )
 
+    neighbor_high_error_relationships: dict[str, set[str]] = {}
     for relationship in observation.relationships:
         child_relationship = relationship.relationship_type == "parent-child"
         frame_threshold = policy.thresholds[
@@ -392,6 +509,36 @@ def evaluate_observation(
             len(adjacency.get(relationship.from_device_id, set())) <= 1
             or len(adjacency.get(relationship.to_device_id, set())) <= 1
         )
+        if relationship.queued_message_count is not None and relationship.queued_message_count > 0:
+            findings.append(
+                _finding(
+                    observation,
+                    rule_id="relationship.queued-messages",
+                    status=HealthStatus.UNKNOWN,
+                    scope=FindingScope.RELATIONSHIP,
+                    rank=FindingRank.INFO,
+                    title="Lifetime counter evidence",
+                    summary=f"{relationship.queued_message_count:g} indirect message(s) queued for delivery.",
+                    why="Queued indirect messages are attributed evidence, not a current failure by themselves.",
+                    evidence={"queuedMessageCount": relationship.queued_message_count},
+                    action="Compare against a future observation before treating this as a current failure.",
+                    verify="Process another complete observation and confirm the queue clears.",
+                    device_ids=(relationship.from_device_id, relationship.to_device_id),
+                    relationship_ids=(relationship.relationship_id,),
+                    source_files=relationship.source_files,
+                    confidence=Confidence.LOW,
+                )
+            )
+        if frame_bad or message_bad:
+            neighbor_high_error_relationships.setdefault(relationship.to_device_id, set()).add(
+                relationship.relationship_id
+            )
+        error_uncorrelated_with_rss = (
+            (frame_bad or message_bad)
+            and not rssi_bad
+            and not margin_bad
+            and (relationship.last_rssi is not None or relationship.link_margin is not None)
+        )
         if weak or asymmetric or frame_bad or message_bad or rssi_bad or margin_bad:
             finding_status = (
                 HealthStatus.POOR if critical_delivery and sole_path
@@ -408,8 +555,17 @@ def evaluate_observation(
                         if finding_status is HealthStatus.POOR
                         else FindingRank.MODERATE
                     ),
-                    title="Directional link quality needs attention",
-                    summary="Current directional quality, delivery, or RF evidence crossed a snapshot threshold.",
+                    title=(
+                        "Delivery errors uncorrelated with signal strength"
+                        if error_uncorrelated_with_rss
+                        else "Directional link quality needs attention"
+                    ),
+                    summary=(
+                        "Frame or message errors are elevated despite adequate RSS/margin evidence; "
+                        "suspect interference or firmware rather than distance."
+                        if error_uncorrelated_with_rss
+                        else "Current directional quality, delivery, or RF evidence crossed a snapshot threshold."
+                    ),
                     why="Weak or asymmetric current evidence can reduce path reliability.",
                     evidence={
                         "linkQualityIn": relationship.link_quality_in,
@@ -421,8 +577,13 @@ def evaluate_observation(
                         "linkMargin": relationship.link_margin,
                         "relationshipType": relationship.relationship_type,
                         "solePath": sole_path,
+                        "errorUncorrelatedWithRss": error_uncorrelated_with_rss,
                     },
-                    action="Inspect both endpoints and nearby RF conditions; preserve alternate paths.",
+                    action=(
+                        "Investigate interference or firmware for this device before relocating it."
+                        if error_uncorrelated_with_rss
+                        else "Inspect both endpoints and nearby RF conditions; preserve alternate paths."
+                    ),
                     verify="Collect another complete observation and compare both directions.",
                     device_ids=(relationship.from_device_id, relationship.to_device_id),
                     relationship_ids=(relationship.relationship_id,),
@@ -448,6 +609,28 @@ def evaluate_observation(
                     source_files=relationship.source_files,
                 )
             )
+
+    for device_id, relationship_ids in sorted(neighbor_high_error_relationships.items()):
+        if len(relationship_ids) < 2:
+            continue
+        findings.append(
+            _finding(
+                observation,
+                rule_id="device.multiple-reporters-high-error",
+                status=HealthStatus.MODERATE,
+                scope=FindingScope.DEVICE,
+                rank=FindingRank.MODERATE,
+                title="Multiple reporters see high error rates toward this device",
+                summary=f"{len(relationship_ids)} distinct reporters recorded high frame or message error rates.",
+                why="Independent reporters agreeing on high error rates is stronger evidence than one link.",
+                evidence={"reporterRelationshipIds": tuple(sorted(relationship_ids))},
+                action="Investigate interference or firmware for this device rather than one specific link.",
+                verify="Process another complete observation and confirm whether multiple reporters still agree.",
+                device_ids=(device_id,),
+                relationship_ids=tuple(sorted(relationship_ids)),
+                confidence=Confidence.HIGH,
+            )
+        )
 
     material = [
         finding
@@ -494,6 +677,12 @@ def evaluate_observation(
         "relationshipCount": len(observation.relationships),
         "expectedRosterCount": len(expected_device_ids),
         "offlineEligible": complete and bool(expected_device_ids),
+        "diagnosticTimeoutDeviceCount": len(diagnostic_timeout_device_ids),
+        "diagnosticTimeoutRatio": (
+            len(diagnostic_timeout_device_ids) / len(observation.devices)
+            if observation.devices
+            else 0.0
+        ),
     }
     assessment_time = assessed_at or datetime.now(timezone.utc).isoformat()
     assessment_input_digest = _assessment_input_digest(policy, profile)

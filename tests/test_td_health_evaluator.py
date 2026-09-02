@@ -139,6 +139,156 @@ def test_critical_delivery_only_escalates_on_observed_sole_path() -> None:
     assert finding.evidence["solePath"] is True
 
 
+def test_lifetime_counter_metrics_are_evidence_only_and_do_not_change_status() -> None:
+    observation = _observation(_relationship())
+    observation = Observation(
+        **{
+            **observation.__dict__,
+            "metrics": (
+                MetricSample(
+                    "extaddr:1111111111111111", "parentChanges", 6, "count", None, "source.json"
+                ),
+                MetricSample(
+                    "extaddr:1111111111111111", "routerRolePercent", 40.0, "percent", None, "source.json"
+                ),
+            ),
+        }
+    )
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    parent_changes = next(f for f in assessment.findings if f.rule_id == "device.parentChanges")
+    router_pct = next(f for f in assessment.findings if f.rule_id == "device.routerRolePercent")
+
+    assert parent_changes.status is HealthStatus.UNKNOWN
+    assert parent_changes.evidence["band"] == "high"
+    assert router_pct.status is HealthStatus.UNKNOWN
+    assert router_pct.evidence["band"] == "high"
+    assert not any(
+        finding.rule_id in {"device.parentChanges", "device.routerRolePercent"}
+        and finding.status in {HealthStatus.MODERATE, HealthStatus.POOR}
+        for finding in assessment.findings
+    )
+
+
+def test_diagnostic_timeout_produces_evidence_only_finding_and_coverage() -> None:
+    observation = _observation(_relationship())
+    observation = Observation(
+        **{
+            **observation.__dict__,
+            "metrics": (
+                MetricSample(
+                    "extaddr:1111111111111111", "diagnosticTimeout", 1.0, "flag", None, "source.json"
+                ),
+            ),
+        }
+    )
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    finding = next(f for f in assessment.findings if f.rule_id == "device.diagnostic-timeout")
+
+    assert finding.status is HealthStatus.UNKNOWN
+    assert finding.device_ids == ("extaddr:1111111111111111",)
+    assert assessment.coverage["diagnosticTimeoutDeviceCount"] == 1
+    assert assessment.coverage["diagnosticTimeoutRatio"] == 0.5
+
+
+def test_mac_discard_ratio_escalates_to_poor_only_with_attachment_failure() -> None:
+    observation = _observation(_relationship())
+    observation = replace(
+        observation,
+        devices=tuple(
+            replace(device, state="detached") if device.device_id == "extaddr:1111111111111111" else device
+            for device in observation.devices
+        ),
+        metrics=(
+            MetricSample(
+                "extaddr:1111111111111111", "totalMacDiscardRatio", 1.5, "ratio", 100, "source.json"
+            ),
+        ),
+    )
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    finding = next(f for f in assessment.findings if f.rule_id == "device.totalMacDiscardRatio")
+
+    assert finding.status is HealthStatus.POOR
+    assert finding.evidence["severityTier"] == "critical"
+    assert finding.evidence["escalatedByAttachmentFailure"] is True
+
+
+def test_mac_discard_ratio_stays_moderate_without_attachment_failure() -> None:
+    observation = _observation(_relationship())
+    observation = replace(
+        observation,
+        metrics=(
+            MetricSample(
+                "extaddr:1111111111111111", "totalMacDiscardRatio", 1.5, "ratio", 100, "source.json"
+            ),
+        ),
+    )
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    finding = next(f for f in assessment.findings if f.rule_id == "device.totalMacDiscardRatio")
+
+    assert finding.status is HealthStatus.MODERATE
+    assert finding.evidence["severityTier"] == "critical"
+    assert finding.evidence["escalatedByAttachmentFailure"] is False
+
+
+def test_error_uncorrelated_with_rss_is_tagged_on_relationship_finding() -> None:
+    relationship = _relationship(frame_error_rate=0.20, last_rssi=-50.0, link_margin=40.0)
+    assessment = evaluate_observation(
+        _observation(relationship), load_health_policy(), profile=PROFILE
+    )
+    finding = next(f for f in assessment.findings if f.rule_id == "relationship.directional-quality")
+
+    assert finding.evidence["errorUncorrelatedWithRss"] is True
+    assert finding.title == "Delivery errors uncorrelated with signal strength"
+
+
+def test_multiple_reporters_high_error_aggregates_across_relationships() -> None:
+    observation = _observation(_relationship())
+    observation = replace(
+        observation,
+        devices=observation.devices
+        + (DeviceSample("extaddr:3333333333333333", "3333333333333333", "router", None, False, ("source.json",)),),
+        relationships=(
+            _relationship(frame_error_rate=0.20),
+            _relationship(
+                relationship_id="link:test-2",
+                from_device_id="extaddr:3333333333333333",
+                frame_error_rate=0.20,
+            ),
+        ),
+    )
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    finding = next(
+        f for f in assessment.findings if f.rule_id == "device.multiple-reporters-high-error"
+    )
+
+    assert finding.device_ids == ("extaddr:2222222222222222",)
+    assert len(finding.relationship_ids) == 2
+    assert finding.confidence.value == "high"
+
+
+def test_queued_messages_are_evidence_only() -> None:
+    relationship = _relationship(queued_message_count=3)
+    assessment = evaluate_observation(
+        _observation(relationship), load_health_policy(), profile=PROFILE
+    )
+    finding = next(f for f in assessment.findings if f.rule_id == "relationship.queued-messages")
+
+    assert finding.status is HealthStatus.UNKNOWN
+    assert finding.evidence["queuedMessageCount"] == 3
+
+
+def test_duplicate_relationship_ids_produce_network_scope_finding() -> None:
+    observation = _observation(_relationship())
+    observation = replace(observation, duplicate_relationship_ids=("link:test",))
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    finding = next(
+        f for f in assessment.findings if f.rule_id == "observation.duplicate-source-entry"
+    )
+
+    assert finding.status is HealthStatus.UNKNOWN
+    assert finding.relationship_ids == ("link:test",)
+
+
 def test_mac_ratio_requires_denominator_backed_metric_and_lq_excludes_unknown() -> None:
     observation = _observation(_relationship())
     observation = Observation(

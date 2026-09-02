@@ -323,3 +323,87 @@ def test_additional_health_datasets_use_source_identity(
     assert result.observation.network_name == "shared-source-name"
     assert result.observation.completeness is Completeness.COMPLETE
     assert result.observation.devices[0].device_id == "extaddr:8672766ae0578187"
+
+
+def test_mle_and_time_statistics_are_extracted_as_metric_samples(tmp_path) -> None:
+    _write_seed(
+        tmp_path,
+        [
+            {
+                "extaddr": "86:72:76:6A:E0:57:81:87",
+                "role": "router",
+                "mleCounters": {
+                    "parentChanges": 6,
+                    "partitionIdChanges": 4,
+                    "betterPartitionAttachAttempts": 1,
+                    "totalParentPartitionChangesCount": 11,
+                },
+                "timeStatistics": {"routerPct": 40.0, "detachedDisabledPct": 3.0},
+            }
+        ],
+    )
+    result = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        allow_partial=True,
+    )
+    metrics_by_name = {metric.metric: metric for metric in result.observation.metrics}
+    assert metrics_by_name["parentChanges"].value == 6
+    assert metrics_by_name["partitionIdChanges"].value == 4
+    assert metrics_by_name["betterPartitionAttachAttempts"].value == 1
+    assert metrics_by_name["totalParentPartitionChanges"].value == 11
+    assert metrics_by_name["routerRolePercent"].value == 40.0
+    assert metrics_by_name["detachedDisabledPercent"].value == 3.0
+
+
+def test_response_timeout_record_is_captured_without_ext_address(tmp_path) -> None:
+    _write_seed(
+        tmp_path,
+        [
+            {
+                "extaddr": "86:72:76:6A:E0:57:81:87",
+                "role": "router",
+                "rloc16": "0x1000",
+            },
+            {
+                "rloc16": "0x1000",
+                "device_label": "Timed Out Router",
+                "error": {"type": "ResponseTimeout"},
+            },
+        ],
+    )
+    result = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        allow_partial=True,
+    )
+    timeout_metrics = [m for m in result.observation.metrics if m.metric == "diagnosticTimeout"]
+    assert len(timeout_metrics) == 1
+    assert timeout_metrics[0].device_id == "extaddr:8672766ae0578187"
+
+
+def test_duplicate_child_table_entries_are_flagged(tmp_path) -> None:
+    _write_seed(
+        tmp_path,
+        [
+            {
+                "extaddr": "86:72:76:6A:E0:57:81:87",
+                "role": "router",
+                "childTable": [
+                    {"extAddress": "2222222222222222", "linkQuality": 3, "queuedMessageCount": 2},
+                    {"extAddress": "2222222222222222", "linkQuality": 3, "queuedMessageCount": 2},
+                ],
+            }
+        ],
+    )
+    result = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        allow_partial=True,
+    )
+    assert len(result.observation.duplicate_relationship_ids) == 1
+    relationship = result.observation.relationships[0]
+    assert relationship.queued_message_count == 2

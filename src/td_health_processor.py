@@ -109,6 +109,7 @@ def _normalize_samples(
     tuple[DeviceSample, ...],
     tuple[RelationshipSample, ...],
     tuple[MetricSample, ...],
+    tuple[str, ...],
 ]:
     devices: dict[str, dict[str, Any]] = {}
     rloc_devices: dict[str, str] = {}
@@ -148,7 +149,9 @@ def _normalize_samples(
 
     relationships: dict[str, RelationshipSample] = {}
     metrics: dict[tuple[str, str, str], MetricSample] = {}
+    duplicate_relationship_ids: set[str] = set()
     for filename, records in normalized_by_file.items():
+        seen_in_file: set[str] = set()
         for record in records:
             reporter_id: str | None = None
             try:
@@ -171,6 +174,40 @@ def _normalize_samples(
                         metrics[(reporter_id, metric_name, filename)] = MetricSample(
                             reporter_id, metric_name, value / 100.0, "ratio", denominator, filename
                         )
+            mle_counters = record.get("mleCounters")
+            if isinstance(mle_counters, dict):
+                for field, metric_name in (
+                    ("newParentCount", "parentChanges"),
+                    ("partIdChangesCount", "partitionIdChanges"),
+                    ("betterPartIdAttachAttemptsCount", "betterPartitionAttachAttempts"),
+                    ("totalParentPartitionChangesCount", "totalParentPartitionChanges"),
+                ):
+                    value = _number(mle_counters.get(field))
+                    if value is not None:
+                        metrics[(reporter_id, metric_name, filename)] = MetricSample(
+                            reporter_id, metric_name, value, "count", None, filename
+                        )
+            time_statistics = record.get("timeStatistics")
+            if isinstance(time_statistics, dict):
+                detached_disabled = _number(time_statistics.get("detachedDisabledPct"))
+                if detached_disabled is None:
+                    detached = _number(time_statistics.get("detachedPct"))
+                    disabled = _number(time_statistics.get("disabledPct"))
+                    if detached is not None or disabled is not None:
+                        detached_disabled = (detached or 0.0) + (disabled or 0.0)
+                for value, metric_name in (
+                    (_number(time_statistics.get("routerPct")), "routerRolePercent"),
+                    (detached_disabled, "detachedDisabledPercent"),
+                ):
+                    if value is not None:
+                        metrics[(reporter_id, metric_name, filename)] = MetricSample(
+                            reporter_id, metric_name, value, "percent", None, filename
+                        )
+            error = record.get("error")
+            if isinstance(error, dict) and error.get("type") == "ResponseTimeout":
+                metrics[(reporter_id, "diagnosticTimeout", filename)] = MetricSample(
+                    reporter_id, "diagnosticTimeout", 1.0, "flag", None, filename
+                )
             for field, metric_name in (
                 ("totalLink1", "observedLinkQuality1Count"),
                 ("totalLink2", "observedLinkQuality2Count"),
@@ -205,6 +242,9 @@ def _normalize_samples(
                             "sourceFiles": {filename},
                         }
                     link_id = relationship_id(reporter_id, child_id)
+                    if link_id in seen_in_file:
+                        duplicate_relationship_ids.add(link_id)
+                    seen_in_file.add(link_id)
                     relationships[link_id] = RelationshipSample(
                         relationship_id=link_id,
                         relationship_type=(
@@ -221,6 +261,9 @@ def _normalize_samples(
                         message_error_rate=_percent_fraction(child.get("messageErrorRate"), dataset.datasource_id),
                         reporter_device_id=reporter_id,
                         source_files=(filename,),
+                        queued_message_count=_number(
+                            child.get("queuedMessageCount") or child.get("q_msg")
+                        ),
                     )
 
     device_samples = tuple(
@@ -238,6 +281,7 @@ def _normalize_samples(
         device_samples,
         tuple(relationships[key] for key in sorted(relationships)),
         tuple(metrics[key] for key in sorted(metrics)),
+        tuple(sorted(duplicate_relationship_ids)),
     )
 
 
@@ -320,7 +364,7 @@ def build_processing_result(
         for filename in dataset.files
         if filename in payloads
     }
-    devices, relationships, metrics = _normalize_samples(dataset, available_finals)
+    devices, relationships, metrics, duplicate_relationship_ids = _normalize_samples(dataset, available_finals)
     source_set_digest = hashlib.sha256(
         "\0".join(f"{source.filename}:{source.digest}" for source in sorted(sources, key=lambda item: item.filename)).encode("utf-8")
     ).hexdigest()
@@ -343,6 +387,7 @@ def build_processing_result(
         devices=devices,
         relationships=relationships,
         metrics=metrics,
+        duplicate_relationship_ids=duplicate_relationship_ids,
     )
     expected_ids = store.expected_device_ids(network_id) if store else frozenset()
     prior_absences = (

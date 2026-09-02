@@ -23,8 +23,8 @@ _SNAPSHOT_V1_RAW: dict[str, Any] = {
         "version": "snapshot-v1",
         "offlineConsecutiveCompleteObservations": 2,
         "thresholds": {
-            "totalMacErrorRatio": {"unstable": 0.01, "high": 0.05},
-            "totalMacDiscardRatio": {"unstable": 0.02, "high": 0.08},
+            "totalMacErrorRatio": {"unstable": 0.01, "high": 0.05, "critical": 1.0},
+            "totalMacDiscardRatio": {"unstable": 0.02, "high": 0.08, "critical": 1.0},
             "routerNeighborFrameErrorRate": {
                 "unstable": 0.05,
                 "high": 0.10,
@@ -44,6 +44,12 @@ _SNAPSHOT_V1_RAW: dict[str, Any] = {
             "childLinkMargin": {"unstableBelow": 20.0},
             "borderRouterCount": {"unstableAtOrBelow": 1},
             "routerCount": {"unstableAtOrBelow": 1},
+            "parentChanges": {"unstable": 2, "high": 5},
+            "partitionIdChanges": {"unstable": 2, "high": 5},
+            "betterPartitionAttachAttempts": {"unstable": 2, "high": 5},
+            "totalParentPartitionChanges": {"unstable": 3, "high": 8},
+            "routerRolePercent": {"unstableBelow": 80.0, "highBelow": 50.0},
+            "detachedDisabledPercent": {"unstable": 1.0, "high": 5.0},
         },
     }
 SNAPSHOT_V1: Mapping[str, Any] = _freeze(_SNAPSHOT_V1_RAW)
