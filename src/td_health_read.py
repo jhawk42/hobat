@@ -21,21 +21,22 @@ CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
 FINDING_GROUP_PRESENTATION = {
     "network.border-router-redundancy": (0, "Border Router Redundancy"),
     "network.router-redundancy": (1, "Router Redundancy"),
-    "network.current-path-redundancy": (2, "Router path redundancy"),
-    "device.observed": (3, "Observed Devices"),
-    "device.missing": (4, "Missing from latest observation"),
-    "device.offline": (5, "Offline Devices"),
-    "network.observed-link-quality-ratios": (6, "Observed link quality distribution"),
-    "relationship.bidirectional-lq3": (7, "Strong bidirectional link"),
-    "relationship.directional-quality": (8, "Directional link quality needs attention"),
-    "device.attachment-failure": (11, "Attachment failure"),
+    "network.external-routing": (2, "External Routing"),
+    "network.current-path-redundancy": (3, "Router path redundancy"),
+    "device.observed": (4, "Observed Devices"),
+    "device.missing": (5, "Missing from latest observation"),
+    "device.offline": (6, "Offline Devices"),
+    "network.observed-link-quality-ratios": (7, "Observed link quality distribution"),
+    "relationship.bidirectional-lq3": (8, "Strong bidirectional link"),
+    "relationship.directional-quality": (9, "Directional link quality needs attention"),
+    "device.attachment-failure": (12, "Attachment failure"),
 }
 
 
 def _finding_group_presentation(rule_id: str, title: str) -> tuple[int, str]:
     return FINDING_GROUP_PRESENTATION.get(
         rule_id,
-        (9 if "mac" in rule_id.lower() else 10 if "mle" in rule_id.lower() else 12, title),
+        (10 if "mac" in rule_id.lower() else 11 if "mle" in rule_id.lower() else 13, title),
     )
 
 

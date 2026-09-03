@@ -21,7 +21,7 @@ from td_health_policy import HealthPolicy
 from td_health_manifest import HealthProfile
 
 
-EVALUATOR_VERSION = "snapshot-v3"
+EVALUATOR_VERSION = "snapshot-v4"
 
 _LIFETIME_EVIDENCE_METRICS = frozenset(
     {
@@ -105,6 +105,8 @@ def evaluate_observation(
     expected_device_ids: frozenset[str] = frozenset(),
     prior_complete_absences: Mapping[str, int] | None = None,
     assessed_at: str | None = None,
+    omr_prefix: str | None = None,
+    device_ipv6_addresses: Mapping[str, tuple[str, ...]] | None = None,
 ) -> Assessment:
     absences = prior_complete_absences or {}
     findings: list[Finding] = []
@@ -237,6 +239,55 @@ def evaluate_observation(
                 for source in device.source_files
             })),
             confidence=Confidence.HIGH if border_router_count else Confidence.LOW,
+        ))
+
+    if profile.border_router_authority and complete and omr_prefix:
+        addresses = device_ipv6_addresses or {}
+        border_router_ids = tuple(sorted(
+            device.device_id for device in observation.devices if device.is_border_router
+        ))
+        omr_border_router_ids = tuple(sorted(
+            device_id for device_id in border_router_ids
+            if any(addr.startswith(omr_prefix) for addr in addresses.get(device_id, ()))
+        ))
+        findings.append(_finding(
+            observation,
+            rule_id="network.external-routing",
+            status=(
+                HealthStatus.STRONG if omr_border_router_ids
+                else HealthStatus.MODERATE if border_router_ids
+                else HealthStatus.UNKNOWN
+            ),
+            scope=FindingScope.EXTERNAL,
+            rank=(
+                FindingRank.INFO if omr_border_router_ids
+                else FindingRank.MODERATE if border_router_ids
+                else FindingRank.INFO
+            ),
+            title="External routing",
+            summary=(
+                f"{len(omr_border_router_ids)} Border Router{'s' if len(omr_border_router_ids) != 1 else ''} "
+                "advertise an address in the OMR prefix."
+                if omr_border_router_ids
+                else "No Border Router has an observed address within the OMR prefix."
+            ),
+            why="An OMR-prefixed address on a Border Router shows the mesh has a usable off-mesh-routable path.",
+            evidence={
+                "omrPrefix": omr_prefix,
+                "borderRouterCount": len(border_router_ids),
+                "omrBorderRouterIds": omr_border_router_ids,
+            },
+            action=(
+                "No action required." if omr_border_router_ids
+                else "Inspect Border Router backbone connectivity and OMR prefix advertisement."
+            ),
+            verify="Process a complete observation and confirm a Border Router address remains in the OMR prefix.",
+            device_ids=omr_border_router_ids or border_router_ids,
+            confidence=(
+                Confidence.HIGH if omr_border_router_ids
+                else Confidence.MEDIUM if border_router_ids
+                else Confidence.LOW
+            ),
         ))
 
     adjacency: dict[str, set[str]] = {device.device_id: set() for device in observation.devices}

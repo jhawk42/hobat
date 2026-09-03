@@ -103,6 +103,16 @@ def _integer(value: Any) -> int | None:
     return int(number) if number is not None else None
 
 
+def _omr_prefix_from_identity(identity: Mapping[str, Any]) -> str | None:
+    precomputed = identity.get("prefixOmrIpv6AddrPrefix")
+    if isinstance(precomputed, str) and precomputed:
+        return precomputed
+    prefix = identity.get("prefixOmr")
+    if isinstance(prefix, str) and prefix:
+        return prefix.split("/")[0].rstrip(":")
+    return None
+
+
 def _normalize_samples(
     dataset: HealthDataset, payloads: Mapping[str, Any]
 ) -> tuple[
@@ -110,6 +120,7 @@ def _normalize_samples(
     tuple[RelationshipSample, ...],
     tuple[MetricSample, ...],
     tuple[str, ...],
+    Mapping[str, tuple[str, ...]],
 ]:
     devices: dict[str, dict[str, Any]] = {}
     rloc_devices: dict[str, str] = {}
@@ -136,6 +147,7 @@ def _normalize_samples(
                     "state": None,
                     "isBorderRouter": False,
                     "sourceFiles": set(),
+                    "ipv6Addresses": set(),
                 },
             )
             current["sourceFiles"].add(filename)
@@ -143,6 +155,9 @@ def _normalize_samples(
                 if current[field] is None and isinstance(record.get(field), str):
                     current[field] = record[field]
             current["isBorderRouter"] = current["isBorderRouter"] or record.get("isBorderRouter") is True
+            addresses = record.get("ipv6Addresses")
+            if isinstance(addresses, list):
+                current["ipv6Addresses"].update(addr for addr in addresses if isinstance(addr, str))
             rloc = record.get("rloc16")
             if isinstance(rloc, str):
                 rloc_devices[rloc.lower()] = device_id
@@ -240,6 +255,7 @@ def _normalize_samples(
                             "state": None,
                             "isBorderRouter": False,
                             "sourceFiles": {filename},
+                            "ipv6Addresses": set(),
                         }
                     link_id = relationship_id(reporter_id, child_id)
                     if link_id in seen_in_file:
@@ -277,11 +293,17 @@ def _normalize_samples(
         )
         for device_id, value in sorted(devices.items())
     )
+    device_ipv6_addresses = {
+        device_id: tuple(sorted(value.get("ipv6Addresses", ())))
+        for device_id, value in devices.items()
+        if value.get("ipv6Addresses")
+    }
     return (
         device_samples,
         tuple(relationships[key] for key in sorted(relationships)),
         tuple(metrics[key] for key in sorted(metrics)),
         tuple(sorted(duplicate_relationship_ids)),
+        device_ipv6_addresses,
     )
 
 
@@ -364,7 +386,10 @@ def build_processing_result(
         for filename in dataset.files
         if filename in payloads
     }
-    devices, relationships, metrics, duplicate_relationship_ids = _normalize_samples(dataset, available_finals)
+    devices, relationships, metrics, duplicate_relationship_ids, device_ipv6_addresses = _normalize_samples(
+        dataset, available_finals
+    )
+    omr_prefix = _omr_prefix_from_identity(identity)
     source_set_digest = hashlib.sha256(
         "\0".join(f"{source.filename}:{source.digest}" for source in sorted(sources, key=lambda item: item.filename)).encode("utf-8")
     ).hexdigest()
@@ -405,6 +430,8 @@ def build_processing_result(
         expected_device_ids=expected_ids,
         prior_complete_absences=prior_absences,
         assessed_at=now.isoformat(),
+        omr_prefix=omr_prefix,
+        device_ipv6_addresses=device_ipv6_addresses,
     )
     return ProcessingResult(observation, assessment, None, None)
 

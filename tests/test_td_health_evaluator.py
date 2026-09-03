@@ -129,6 +129,97 @@ def test_profile_capability_changes_assessment_identity() -> None:
     assert changed.assessment_id != original.assessment_id
 
 
+def test_border_router_address_in_omr_prefix_is_strong_external_routing() -> None:
+    observation = _observation(_relationship())
+    source_files = (
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-mdns-scopes-thread.json",
+    )
+    observation = replace(
+        observation,
+        devices=(
+            DeviceSample(
+                "extaddr:1111111111111111",
+                "1111111111111111",
+                "router",
+                None,
+                True,
+                source_files,
+            ),
+            DeviceSample(
+                "extaddr:2222222222222222",
+                "2222222222222222",
+                "router",
+                None,
+                False,
+                source_files,
+            ),
+        ),
+    )
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=PROFILE,
+        omr_prefix="fd6b:32e0:d18:0",
+        device_ipv6_addresses={
+            "extaddr:1111111111111111": ("fd6b:32e0:d18:0:1234:5678:9abc:def0",),
+        },
+    )
+    finding = next(
+        finding for finding in assessment.findings if finding.rule_id == "network.external-routing"
+    )
+
+    assert finding.status is HealthStatus.STRONG
+    assert finding.evidence["omrBorderRouterIds"] == ("extaddr:1111111111111111",)
+
+
+def test_border_router_without_omr_address_is_moderate_external_routing() -> None:
+    observation = _observation(_relationship())
+    source_files = (
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-mdns-scopes-thread.json",
+    )
+    observation = replace(
+        observation,
+        devices=(
+            DeviceSample(
+                "extaddr:1111111111111111",
+                "1111111111111111",
+                "router",
+                None,
+                True,
+                source_files,
+            ),
+        ),
+    )
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=PROFILE,
+        omr_prefix="fd6b:32e0:d18:0",
+        device_ipv6_addresses={
+            "extaddr:1111111111111111": ("fd3b:a255:4aa6:5483:0:ff:fe00:1",),
+        },
+    )
+    finding = next(
+        finding for finding in assessment.findings if finding.rule_id == "network.external-routing"
+    )
+
+    assert finding.status is HealthStatus.MODERATE
+    assert finding.evidence["omrBorderRouterIds"] == ()
+
+
+def test_missing_omr_prefix_omits_external_routing_finding() -> None:
+    assessment = evaluate_observation(
+        _observation(_relationship()), load_health_policy(), profile=PROFILE
+    )
+    assert not any(finding.rule_id == "network.external-routing" for finding in assessment.findings)
+
+
 def test_critical_delivery_only_escalates_on_observed_sole_path() -> None:
     relationship = _relationship(frame_error_rate=0.35)
     assessment = evaluate_observation(

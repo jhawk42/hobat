@@ -246,6 +246,50 @@ def test_complete_rest_topology_mdns_profile_reports_border_router_redundancy(tm
     )
 
 
+def test_border_router_omr_address_reports_strong_external_routing(tmp_path) -> None:
+    dataset_id = (
+        "otbr_cli_meshdiag_topology_networkdiag_fetch_all_router_neighbortables_"
+        "router_childtables_mdns_scopes_thread_health"
+    )
+    (tmp_path / "td-otbr-cli-thread-network-info.json").write_text(
+        json.dumps({
+            "extPanId": "78b9775b001c1cbe",
+            "networkName": "test",
+            "prefixOmr": "fd6b:32e0:d18:0::/64",
+        }),
+        encoding="utf-8",
+    )
+    devices = [
+        {
+            "extAddress": "1111111111111111",
+            "isBorderRouter": True,
+            "role": "router",
+            "ipv6Addresses": ["fd6b:32e0:d18:0:1234:5678:9abc:def0"],
+        },
+        {"extAddress": "2222222222222222", "isBorderRouter": False, "role": "router"},
+    ]
+    for filename in (
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-otbr-cli-meshdiag-router-neighbortables.json",
+        "td-otbr-cli-meshdiag-router-childtables.json",
+        "td-mdns-scopes-thread.json",
+    ):
+        (tmp_path / filename).write_text(json.dumps(devices), encoding="utf-8")
+
+    result = build_processing_result(
+        data_dir=tmp_path, dataset_id=dataset_id, policy=load_health_policy()
+    )
+    finding = next(
+        finding
+        for finding in result.assessment.findings
+        if finding.rule_id == "network.external-routing"
+    )
+
+    assert finding.status is HealthStatus.STRONG
+    assert finding.evidence["omrBorderRouterIds"] == ("extaddr:1111111111111111",)
+
+
 @pytest.mark.parametrize(
     ("dataset_id", "identity_file", "final_files", "outcome_files"),
     [
