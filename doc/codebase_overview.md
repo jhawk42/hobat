@@ -28,7 +28,7 @@ Browser <---- aiohttp web server ----> td_cli subprocess
 | Collectors | `otbr_cli_*.py`, `otbr_restapi_*.py`, `ha_matter_ws_*.py`, `mdns_*.py`, `eve_process.py` | Live collection, parsing, normalization, checkpoints, final snapshots |
 | Processing | `merge_dataset.py`, `merge_extaddr_device_label_map.py`, `td_health_*.py` | Cross-source merge, label-map administration, and cache-only health assessment |
 | Shared contracts | `td_const.py`, `td_device_fields.py`, `td_device_merge.py`, `td_record_merge.py`, `td_json_key_normalizer.py`, `util_*.py` | Filenames, fields, merge policies, data paths, network and subprocess helpers |
-| Persistence | Effective data directory | Operator inputs, generated snapshots, and `td-health.db` observation history |
+| Persistence | Effective data directory | Operator inputs, generated snapshots, and the Hobat-wide `hobat_v1.db` SQLite store |
 
 Runtime dependencies include `aiohttp`, `websockets`, and `zeroconf`. The browser
 uses vendored vis-network and sortable table libraries.

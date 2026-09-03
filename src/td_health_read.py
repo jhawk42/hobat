@@ -11,7 +11,7 @@ from typing import Any
 from extaddr_device_label_map import load_extaddr_device_label_map
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from td_health_manifest import load_health_manifest
-from td_health_observation_store import HEALTH_DATABASE_FILENAME
+from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_sqlite import SQLiteHealthStore
 
 
@@ -90,7 +90,7 @@ def _decode_json(value: object, *, field: str) -> Any:
 
 class TDHealthReadService:
     def __init__(self, data_dir: Path):
-        database_path = data_dir / HEALTH_DATABASE_FILENAME
+        database_path = data_dir / HOBAT_DATABASE_FILENAME
         if not database_path.is_file():
             raise HealthUnavailableError("Health store is not available")
         self.data_dir = data_dir

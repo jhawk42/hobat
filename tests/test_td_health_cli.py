@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import td_cli
 import td_health_cli
+from td_health_observation_store import HOBAT_DATABASE_FILENAME
 
 
 def _seed(data_dir) -> None:
@@ -32,7 +33,7 @@ def test_dry_run_json_does_not_create_database(tmp_path) -> None:
     document = json.loads(output.getvalue())
     assert document["networkId"] == "extpan:78b9775b001c1cbe"
     assert document["assessmentCreated"] is None
-    assert not (tmp_path / "td-health.db").exists()
+    assert not (tmp_path / HOBAT_DATABASE_FILENAME).exists()
 
 
 def test_top_level_json_has_no_banner(tmp_path) -> None:

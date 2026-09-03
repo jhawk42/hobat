@@ -12,7 +12,7 @@ from typing import Any, Sequence
 from td_health_history import import_expected_roster_from_label_map, network_id_for_dataset
 from td_health_manifest import load_health_manifest
 from td_health_observation_model import device_id_from_ext_address
-from td_health_observation_store import HEALTH_DATABASE_FILENAME
+from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_policy import load_health_policy
 from td_health_processor import ProcessingResult, build_processing_result, process_health
 from td_health_sqlite import SQLiteHealthStore
@@ -141,7 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--dataset all cannot be combined with roster operations or --export-latest")
 
     if args.init_roster_from_label_map:
-        store = SQLiteHealthStore(data_dir / HEALTH_DATABASE_FILENAME)
+        store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
         imported = import_expected_roster_from_label_map(
             data_dir=data_dir, dataset_id=args.dataset, store=store
         )
@@ -157,7 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.roster_list or args.roster_device:
-        store = SQLiteHealthStore(data_dir / HEALTH_DATABASE_FILENAME)
+        store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
         network_id = network_id_for_dataset(data_dir=data_dir, dataset_id=args.dataset)
         if args.roster_device:
             try:
@@ -186,7 +186,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else [args.dataset]
     )
     documents = []
-    store = None if args.dry_run else SQLiteHealthStore(data_dir / HEALTH_DATABASE_FILENAME)
+    store = None if args.dry_run else SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
     for dataset_id in dataset_ids:
         kwargs = {
             "data_dir": data_dir,

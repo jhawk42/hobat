@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import os
 
+from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_read import TDHealthReadService
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
 
 
 def test_assessment_projection_groups_losslessly_and_resolves_labels(tmp_path) -> None:
-    store = SQLiteHealthStore(tmp_path / "td-health.db")
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     observation, assessment = _result()
     store.save_processing_result(observation, assessment)
     (tmp_path / "td-static-extaddr-device-label.json").write_text(
@@ -110,7 +111,7 @@ def test_finding_groups_follow_operator_presentation_order() -> None:
 
 
 def test_observation_page_is_bounded(tmp_path) -> None:
-    store = SQLiteHealthStore(tmp_path / "td-health.db")
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     for suffix in ("1", "2", "3"):
         store.save_processing_result(*_result(suffix))
 
@@ -123,7 +124,7 @@ def test_observation_page_is_bounded(tmp_path) -> None:
 
 
 def test_read_service_does_not_modify_or_initialize_store(tmp_path) -> None:
-    database_path = tmp_path / "td-health.db"
+    database_path = tmp_path / HOBAT_DATABASE_FILENAME
     SQLiteHealthStore(database_path).save_processing_result(*_result())
     before = (database_path.read_bytes(), os.stat(database_path).st_mtime_ns)
 
@@ -133,7 +134,7 @@ def test_read_service_does_not_modify_or_initialize_store(tmp_path) -> None:
 
 
 def test_assessment_findings_are_filtered_and_bounded(tmp_path) -> None:
-    SQLiteHealthStore(tmp_path / "td-health.db").save_processing_result(*_result())
+    SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME).save_processing_result(*_result())
 
     result = TDHealthReadService(tmp_path).assessment(
         assessment_id="assessment-1",

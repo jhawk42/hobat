@@ -8,7 +8,7 @@ from typing import Protocol
 from td_health_observation_model import Assessment, Observation
 
 
-HEALTH_DATABASE_FILENAME = "td-health.db"
+HOBAT_DATABASE_FILENAME = "hobat_v1.db"
 MAX_OBSERVATIONS = 2000
 
 

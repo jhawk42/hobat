@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import pytest
 
 from td_health_observation_model import Completeness, HealthStatus
+from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_policy import load_health_policy
 from td_health_processor import HealthProcessingError, build_processing_result, process_health
 from td_health_sqlite import SQLiteHealthStore
@@ -63,7 +64,7 @@ def test_processor_uses_extpan_identity_and_normalizes_devices(tmp_path) -> None
 
 def test_partial_observation_cannot_make_expected_device_offline(tmp_path) -> None:
     _write_seed(tmp_path, [])
-    store = SQLiteHealthStore(tmp_path / "td-health.db")
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     network_id = "extpan:78b9775b001c1cbe"
     store.upsert_expected_device(network_id, "extaddr:8672766ae0578187", "expected")
     complete = process_health(
@@ -90,7 +91,7 @@ def test_partial_observation_cannot_make_expected_device_offline(tmp_path) -> No
 
 def test_second_complete_absence_establishes_offline(tmp_path) -> None:
     _write_seed(tmp_path, [])
-    store = SQLiteHealthStore(tmp_path / "td-health.db")
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     device_id = "extaddr:8672766ae0578187"
     store.upsert_expected_device("extpan:78b9775b001c1cbe", device_id, "expected")
     first = process_health(
@@ -122,7 +123,7 @@ def test_complete_absences_below_roster_ratio_stay_missing(tmp_path) -> None:
         for device_id in device_ids[1:]
     ]
     _write_seed(tmp_path, observed_devices)
-    store = SQLiteHealthStore(tmp_path / "td-health.db")
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     network_id = "extpan:78b9775b001c1cbe"
     for device_id in device_ids:
         store.upsert_expected_device(network_id, device_id, "expected")
@@ -187,7 +188,7 @@ def test_rest_outcome_completeness_contract_and_secret_exclusion(tmp_path) -> No
             "completedAt": "2026-09-01T00:00:00+00:00",
         },
     )
-    store = SQLiteHealthStore(tmp_path / "td-health.db")
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     complete = process_health(
         data_dir=tmp_path,
         dataset_id="otbr_restapi_diagnostics_fetch_all",
@@ -195,7 +196,7 @@ def test_rest_outcome_completeness_contract_and_secret_exclusion(tmp_path) -> No
         store=store,
     )
     assert complete.observation.completeness is Completeness.COMPLETE
-    database_bytes = (tmp_path / "td-health.db").read_bytes()
+    database_bytes = (tmp_path / HOBAT_DATABASE_FILENAME).read_bytes()
     assert b"SECRET_NETWORK_KEY" not in database_bytes
     assert b"SECRET_PSKC" not in database_bytes
 

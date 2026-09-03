@@ -13,6 +13,7 @@ import aiohttp.web
 from aiohttp.test_utils import TestClient, TestServer
 
 import td_webserver
+from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
 
@@ -33,7 +34,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
 
             with tempfile.TemporaryDirectory() as directory:
                 data_dir = Path(directory)
-                SQLiteHealthStore(data_dir / "td-health.db").save_processing_result(
+                SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME).save_processing_result(
                     *_result()
                 )
                 response = await td_webserver.handle_health_summary_api(
@@ -84,7 +85,7 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
         self.data_dir = Path(self._tmpdir.name)
-        SQLiteHealthStore(self.data_dir / "td-health.db").save_processing_result(
+        SQLiteHealthStore(self.data_dir / HOBAT_DATABASE_FILENAME).save_processing_result(
             *_result()
         )
         with patch.object(td_webserver.aiohttp.web, "run_app") as run_app:

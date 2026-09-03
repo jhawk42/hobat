@@ -2,7 +2,7 @@
 
 The health subsystem provides a cache-only `health process-dataset` command. It reads approved JSON
 snapshots from the effective data directory, derives a deterministic assessment,
-and optionally stores immutable history in `td-health.db`. It never starts live
+and optionally stores immutable history in the Hobat-wide `hobat_v1.db`. It never starts live
 collection, probes devices, or rewrites collector files.
 
 ## Quick Start
@@ -139,11 +139,14 @@ text. Missing evidence remains Unknown.
 
 ## Storage Safety
 
-`td-health.db` uses SQLite WAL mode, foreign keys, a five-second busy timeout,
+`hobat_v1.db` uses SQLite WAL mode, foreign keys, a five-second busy timeout,
 and explicit transactions. Observation sources, normalized device and
 relationship samples, assessment, findings, and current pointer commit together.
 Any failure rolls back the whole operation. Reprocessing unchanged inputs and
 policy is idempotent.
+
+The filename promotes SQLite to a shared Hobat persistence boundary. The
+existing health tables and their contents are retained unchanged.
 
 The store retains at most 2,000 observations. Pruning occurs in the same write
 transaction and never deletes collector snapshots. Age/byte retention, backup,
