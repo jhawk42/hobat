@@ -19,7 +19,7 @@ from td_health_manifest import load_health_manifest
 
 
 PROFILE = load_health_manifest().dataset(
-    "otbr_cli_meshdiag_topology_networkdiag_fetch_all_router_neighbortables_router_childtables_mdns_scopes_thread_health"
+    "otbr_cli_topology_mdns_health"
 ).health_profile
 
 
@@ -31,7 +31,7 @@ def _observation(relationship: RelationshipSample) -> Observation:
     return Observation(
         "observation:test",
         "otbr-cli",
-        "otbr_cli_meshdiag_topology_networkdiag_fetch_all_router_neighbortables_router_childtables_mdns_scopes_thread_health",
+        "otbr_cli_topology_mdns_health",
         "extpan:78b9775b001c1cbe",
         "test",
         "2026-09-01T00:00:00+00:00",

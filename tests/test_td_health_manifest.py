@@ -14,12 +14,12 @@ from td_health_manifest import HealthManifestError, load_health_manifest
 EXPECTED_DATASETS = {
     "otbr_cli_networkdiag_fetch_all",
     "otbr_cli_meshdiag_topology_networkdiag_fetch_all_mdns_scopes_thread",
-    "otbr_cli_meshdiag_topology_networkdiag_fetch_all_router_neighbortables_router_childtables_mdns_scopes_thread_health",
+    "otbr_cli_topology_mdns_health",
     "otbr_restapi_diagnostics_fetch_all",
     "otbr_restapi_devices_fetch_diagnostics_fetch_all",
     "otbr_restapi_mesh_diagnostics_fetch_all",
     "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all",
-    "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all_mdns_scopes_thread_health",
+    "otbr_restapi_topology_mdns_health",
 }
 
 
@@ -46,7 +46,7 @@ def test_manifest_contains_only_approved_datasets() -> None:
     assert manifest.dataset(
         "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all"
     ).health_profile.coverage["externalRouting"] == "missing"
-    assert manifest.dataset("otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all_mdns_scopes_thread_health").health_profile.required_outcomes == (
+    assert manifest.dataset("otbr_restapi_topology_mdns_health").health_profile.required_outcomes == (
         "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
         "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
     )

@@ -18,26 +18,49 @@ from td_health_sqlite import SQLiteHealthStore
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 25
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
+# Scope-namespaced order bases leave room to insert new rule_ids without renumbering neighbors.
+NETWORK_ORDER_BASE = 1000
+DEVICE_ORDER_BASE = 2000
+RELATIONSHIP_ORDER_BASE = 3000
+UNKNOWN_ORDER_BASE = 9000
+_SCOPE_ORDER_BASE = {
+    "network": NETWORK_ORDER_BASE,
+    "observation": NETWORK_ORDER_BASE,
+    "device": DEVICE_ORDER_BASE,
+    "relationship": RELATIONSHIP_ORDER_BASE,
+}
 FINDING_GROUP_PRESENTATION = {
-    "network.border-router-redundancy": (0, "Border Router Redundancy"),
-    "network.router-redundancy": (1, "Router Redundancy"),
-    "network.external-routing": (2, "External Routing"),
-    "network.current-path-redundancy": (3, "Router path redundancy"),
-    "device.observed": (4, "Observed Devices"),
-    "device.missing": (5, "Missing from latest observation"),
-    "device.offline": (6, "Offline Devices"),
-    "network.observed-link-quality-ratios": (7, "Observed link quality distribution"),
-    "relationship.bidirectional-lq3": (8, "Strong bidirectional link"),
-    "relationship.directional-quality": (9, "Directional link quality needs attention"),
-    "device.attachment-failure": (12, "Attachment failure"),
+    "network.border-router-redundancy": (NETWORK_ORDER_BASE + 10, "Border Router Redundancy"),
+    "network.router-redundancy": (NETWORK_ORDER_BASE + 20, "Router Redundancy"),
+    "network.external-routing": (NETWORK_ORDER_BASE + 30, "External Routing"),
+    "network.current-path-redundancy": (NETWORK_ORDER_BASE + 40, "Router path redundancy"),
+    "network.observed-link-quality-ratios": (NETWORK_ORDER_BASE + 50, "Observed link quality distribution"),
+    "observation.duplicate-source-entry": (NETWORK_ORDER_BASE + 60, "Duplicate relationship entries in source data"),
+    "device.observed": (DEVICE_ORDER_BASE + 10, "Observed Devices"),
+    "device.missing": (DEVICE_ORDER_BASE + 20, "Missing from latest observation"),
+    "device.offline": (DEVICE_ORDER_BASE + 30, "Offline Devices"),
+    "device.diagnostic-timeout": (DEVICE_ORDER_BASE + 40, "Diagnostic query timed out"),
+    "device.multiple-reporters-high-error": (DEVICE_ORDER_BASE + 50, "Multiple reporters see high error rates"),
+    "device.parentChanges": (DEVICE_ORDER_BASE + 60, "Lifetime counter evidence"),
+    "device.partitionIdChanges": (DEVICE_ORDER_BASE + 70, "Lifetime counter evidence"),
+    "device.betterPartitionAttachAttempts": (DEVICE_ORDER_BASE + 80, "Lifetime counter evidence"),
+    "device.totalParentPartitionChanges": (DEVICE_ORDER_BASE + 90, "Lifetime counter evidence"),
+    "device.routerRolePercent": (DEVICE_ORDER_BASE + 100, "Lifetime counter evidence"),
+    "device.detachedDisabledPercent": (DEVICE_ORDER_BASE + 110, "Lifetime counter evidence"),
+    "device.totalMacErrorRatio": (DEVICE_ORDER_BASE + 800, "MAC error ratio needs attention"),
+    "device.totalMacDiscardRatio": (DEVICE_ORDER_BASE + 810, "MAC discard ratio needs attention"),
+    "device.attachment-failure": (DEVICE_ORDER_BASE + 900, "Attachment failure"),
+    "relationship.bidirectional-lq3": (RELATIONSHIP_ORDER_BASE + 10, "Strong bidirectional link"),
+    "relationship.directional-quality": (RELATIONSHIP_ORDER_BASE + 20, "Directional link quality needs attention"),
+    "relationship.queued-messages": (RELATIONSHIP_ORDER_BASE + 30, "Indirect messages queued for delivery"),
 }
 
 
 def _finding_group_presentation(rule_id: str, title: str) -> tuple[int, str]:
-    return FINDING_GROUP_PRESENTATION.get(
-        rule_id,
-        (10 if "mac" in rule_id.lower() else 11 if "mle" in rule_id.lower() else 13, title),
-    )
+    if rule_id in FINDING_GROUP_PRESENTATION:
+        return FINDING_GROUP_PRESENTATION[rule_id]
+    base = _SCOPE_ORDER_BASE.get(rule_id.split(".", 1)[0], UNKNOWN_ORDER_BASE)
+    return (base + 950, title)
 
 
 class HealthReadError(RuntimeError):

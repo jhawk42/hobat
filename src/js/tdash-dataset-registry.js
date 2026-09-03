@@ -246,7 +246,7 @@ export const DATASET_REGISTRY = [
 
   {
     source: "otbr-cli",
-    value: "otbr_cli_meshdiag_topology_networkdiag_fetch_all_router_neighbortables_router_childtables_mdns_scopes_thread_health",
+    value: "otbr_cli_topology_mdns_health",
     label: "Topology + mDNS⏱️",
     group: "Detailed: most time",
     files: [
@@ -468,7 +468,7 @@ export const DATASET_REGISTRY = [
  // ── Multi-file topology datasets (otbr-restapi) ────────────
   {
     source: "otbr-restapi",
-    value: "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all_mdns_scopes_thread_health",
+    value: "otbr_restapi_topology_mdns_health",
     label: "Topology + mDNS⏱️",
     group: "Detailed: most time",
     files: [

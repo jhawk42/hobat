@@ -39,12 +39,12 @@ The shared manifest currently permits these dataset IDs:
 |---|---|---|
 | OTBR CLI | `otbr_cli_networkdiag_fetch_all` | `otbr-cli-networkdiag-v1` |
 | OTBR CLI | `otbr_cli_meshdiag_topology_networkdiag_fetch_all_mdns_scopes_thread` | `otbr-cli-topology-networkdiag-mdns-v1` |
-| OTBR CLI | `otbr_cli_meshdiag_topology_networkdiag_fetch_all_router_neighbortables_router_childtables_mdns_scopes_thread_health` | `otbr-cli-topology-diagnostics-mdns-v1` |
+| OTBR CLI | `otbr_cli_topology_mdns_health` | `otbr-cli-topology-diagnostics-mdns-v1` |
 | OTBR REST | `otbr_restapi_diagnostics_fetch_all` | `otbr-restapi-diagnostics-v1` |
 | OTBR REST | `otbr_restapi_devices_fetch_diagnostics_fetch_all` | `otbr-restapi-devices-diagnostics-v1` |
 | OTBR REST | `otbr_restapi_mesh_diagnostics_fetch_all` | `otbr-restapi-mesh-diagnostics-v1` |
 | OTBR REST | `otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all` | `otbr-restapi-topology-diagnostics-v1` |
-| OTBR REST | `otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all_mdns_scopes_thread_health` | `otbr-restapi-topology-diagnostics-mdns-v1` |
+| OTBR REST | `otbr_restapi_topology_mdns_health` | `otbr-restapi-topology-diagnostics-mdns-v1` |
 
 All OTBR CLI profiles use `td-otbr-cli-thread-network-info.json` for source-wide
 network identity. All OTBR REST profiles use
