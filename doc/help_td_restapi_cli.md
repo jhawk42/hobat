@@ -164,6 +164,12 @@ node dataset active get [--text]
 |---|---|
 | `--text` | Request as `text/plain` TLV hex string instead of JSON |
 
+When output is written to a file, sensitive JSON fields such as `networkKey`
+and `pskc` are recursively replaced with `[Redacted]`. Because operational
+dataset TLV hex cannot be filtered field by field, `--text` file output is
+replaced entirely with `[Redacted]`. Output printed directly to the terminal is
+unchanged.
+
 **Examples:**
 
 ```bash

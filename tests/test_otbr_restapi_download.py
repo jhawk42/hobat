@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import json
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -151,6 +152,32 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
                 "td-otbr-restapi-diagnostics.json",
             ],
         )
+
+    def test_active_dataset_is_redacted_before_persistence(self) -> None:
+        mock_client = MagicMock()
+        mock_client.get_active_dataset.return_value = {
+            "networkKey": "SECRET-NETWORK-KEY",
+            "networkName": "test-network",
+            "nested": {"pskc": "SECRET-PSKC"},
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = script_module.Path(temp_dir)
+            exit_code = script_module._download_static_endpoints(
+                mock_client,
+                data_dir,
+                [("get_active_dataset", script_module.OTBR_RESTAPI_DATASET_ACTIVE_FILENAME)],
+            )
+            payload = json.loads(
+                (data_dir / script_module.OTBR_RESTAPI_DATASET_ACTIVE_FILENAME).read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["networkKey"], "[Redacted]")
+        self.assertEqual(payload["nested"]["pskc"], "[Redacted]")
+        self.assertEqual(payload["networkName"], "test-network")
 
     def test_static_download_saves_each_payload_before_collecting_the_next(self) -> None:
         events = []

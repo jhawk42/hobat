@@ -51,9 +51,41 @@ def test_node_active_dataset_text_uses_atomic_text_mode():
         "emit_rest_command_output",
         side_effect=lambda result, *_args, **_kwargs: result,
     ) as save:
-        assert node_module.dispatch_node(client, args, raw_arg=False, fields=None) == "0e0800"
+        assert (
+            node_module.dispatch_node(client, args, raw_arg=False, fields=None)
+            == "[Redacted]"
+        )
 
     assert save.call_args.kwargs["plain_text"] is True
+
+
+def test_node_active_dataset_json_redacts_file_output():
+    client = Mock()
+    client.get_active_dataset.return_value = {
+        "networkKey": "SECRET-NETWORK-KEY",
+        "networkName": "test-network",
+        "pskc": "SECRET-PSKC",
+    }
+    args = SimpleNamespace(
+        node_command="dataset",
+        dataset_kind="active",
+        dataset_command="get",
+        text=False,
+        resolved_output_path="/tmp/dataset.json",
+    )
+
+    with patch.object(
+        node_module,
+        "emit_rest_command_output",
+        side_effect=lambda result, *_args, **_kwargs: result,
+    ):
+        result = node_module.dispatch_node(client, args, raw_arg=False, fields=None)
+
+    assert result == {
+        "networkKey": "[Redacted]",
+        "networkName": "test-network",
+        "pskc": "[Redacted]",
+    }
 
 
 def test_node_dispatch_without_output_path_remains_side_effect_free():

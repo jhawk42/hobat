@@ -77,6 +77,29 @@ JSON_CONTENT_TYPES = {
     "application/json",
     "application/vnd.api+json",
 }
+SENSITIVE_VALUE_REDACTION = "[Redacted]"
+
+
+def redact_sensitive_payload(
+    payload: Any, *, replacement: str = SENSITIVE_VALUE_REDACTION
+) -> Any:
+    """Return a copy with values for sensitive keys recursively redacted."""
+    if isinstance(payload, dict):
+        redacted = {}
+        for key, value in payload.items():
+            normalized_key = str(key).replace("_", "").replace("-", "").lower()
+            redacted[key] = (
+                replacement
+                if any(marker in normalized_key for marker in SENSITIVE_BODY_KEY_MARKERS)
+                else redact_sensitive_payload(value, replacement=replacement)
+            )
+        return redacted
+    if isinstance(payload, list):
+        return [
+            redact_sensitive_payload(value, replacement=replacement)
+            for value in payload
+        ]
+    return payload
 
 
 def resolve_default_rest_host(env: Mapping[str, str] | None = None) -> str:
@@ -1903,22 +1926,9 @@ class OTBRRestApiClient:
         except (UnicodeDecodeError, json.JSONDecodeError):
             return "<unparseable JSON body>"
 
-        def redact(value: Any) -> Any:
-            if isinstance(value, dict):
-                redacted = {}
-                for key, item in value.items():
-                    normalized_key = str(key).replace("_", "").replace("-", "").lower()
-                    redacted[key] = (
-                        "<redacted>"
-                        if any(marker in normalized_key for marker in SENSITIVE_BODY_KEY_MARKERS)
-                        else redact(item)
-                    )
-                return redacted
-            if isinstance(value, list):
-                return [redact(item) for item in value]
-            return value
-
-        return json.dumps(redact(payload), sort_keys=True)
+        return json.dumps(
+            redact_sensitive_payload(payload, replacement="<redacted>"), sort_keys=True
+        )
 
     def _build_url(self, path: str, query: Mapping[str, str] | None = None) -> str:
         url = f"{self.base_url}{path}"

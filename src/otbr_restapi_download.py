@@ -26,6 +26,7 @@ from otbr_restapi_util import (
     OTBRActionTimeoutError,
     OTBRClientError,
     OTBRRestApiClient,
+    redact_sensitive_payload,
     resolve_default_rest_host,
     resolve_default_rest_port,
 )
@@ -167,6 +168,8 @@ def _download_static_endpoints(
         method = getattr(client, method_name)
         try:
             data = method(raw=True)
+            if filename == OTBR_RESTAPI_DATASET_ACTIVE_FILENAME:
+                data = redact_sensitive_payload(data)
             emit_rest_payload_output(data, output_file, logger)
             logging.info("OK: %s -> %s", method_name, output_file)
         except OTBRClientError as exc:
