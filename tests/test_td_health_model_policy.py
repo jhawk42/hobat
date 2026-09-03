@@ -36,6 +36,7 @@ def test_snapshot_v1_is_deterministic_and_conservative() -> None:
     assert first.version == "snapshot-v1"
     assert first.digest == second.digest
     assert first.offline_consecutive_complete_observations == 2
+    assert first.offline_poor_device_ratio_threshold == 0.15
     assert first.thresholds["routerNeighborFrameErrorRate"]["critical"] == 0.30
     with pytest.raises(TypeError):
         first.thresholds["rssi"]["unstableBelow"] = -60
@@ -55,3 +56,22 @@ def test_invalid_operator_policy_is_rejected(tmp_path) -> None:
 
     with pytest.raises(HealthPolicyError, match="at least 2"):
         load_health_policy(tmp_path)
+
+
+def test_operator_policy_without_offline_ratio_uses_default(tmp_path) -> None:
+    default = load_health_policy()
+    raw_policy = {
+        "version": "custom-v1",
+        "offlineConsecutiveCompleteObservations": 3,
+        "thresholds": {
+            metric: dict(bands)
+            for metric, bands in default.thresholds.items()
+        },
+    }
+    (tmp_path / "td-health-policy.json").write_text(
+        json.dumps(raw_policy), encoding="utf-8"
+    )
+
+    policy = load_health_policy(tmp_path)
+
+    assert policy.offline_poor_device_ratio_threshold == 0.15

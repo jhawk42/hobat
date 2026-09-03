@@ -114,6 +114,48 @@ def test_second_complete_absence_establishes_offline(tmp_path) -> None:
     assert any(f.rule_id == "device.offline" for f in second.assessment.findings)
 
 
+def test_complete_absences_below_roster_ratio_stay_missing(tmp_path) -> None:
+    device_ids = [f"extaddr:{index:016x}" for index in range(10)]
+    missing_device_id = device_ids[0]
+    observed_devices = [
+        {"extaddr": device_id.removeprefix("extaddr:"), "role": "child"}
+        for device_id in device_ids[1:]
+    ]
+    _write_seed(tmp_path, observed_devices)
+    store = SQLiteHealthStore(tmp_path / "td-health.db")
+    network_id = "extpan:78b9775b001c1cbe"
+    for device_id in device_ids:
+        store.upsert_expected_device(network_id, device_id, "expected")
+
+    first = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+        processing_time=datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    assert not any(f.rule_id == "device.offline" for f in first.assessment.findings)
+
+    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
+    snapshot.write_text(json.dumps(observed_devices), encoding="utf-8")
+    second = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+        processing_time=datetime(2026, 9, 1, 0, 1, tzinfo=timezone.utc),
+    )
+    missing = next(
+        finding for finding in second.assessment.findings
+        if missing_device_id in finding.device_ids
+    )
+
+    assert missing.rule_id == "device.missing"
+    assert missing.status is HealthStatus.UNKNOWN
+    assert missing.evidence["offlineDeviceRatio"] == 0.1
+    assert missing.evidence["offlinePoorThresholdMet"] is False
+
+
 def _write_rest_seed(data_dir, outcome):
     (data_dir / "td-otbr-restapi-dataset-active.json").write_text(
         json.dumps(
@@ -185,10 +227,7 @@ def test_rest_legacy_outcome_is_degraded_and_explicit_failure_is_partial(tmp_pat
 
 
 def test_complete_rest_topology_mdns_profile_reports_border_router_redundancy(tmp_path) -> None:
-    dataset_id = (
-        "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all_"
-        "mdns_scopes_thread_health"
-    )
+    dataset_id = "otbr_restapi_topology_mdns_health"
     (tmp_path / "td-otbr-restapi-dataset-active.json").write_text(
         json.dumps({"extPanId": "78b9775b001c1cbe", "networkName": "test"}),
         encoding="utf-8",
@@ -247,10 +286,7 @@ def test_complete_rest_topology_mdns_profile_reports_border_router_redundancy(tm
 
 
 def test_border_router_omr_address_reports_strong_external_routing(tmp_path) -> None:
-    dataset_id = (
-        "otbr_cli_meshdiag_topology_networkdiag_fetch_all_router_neighbortables_"
-        "router_childtables_mdns_scopes_thread_health"
-    )
+    dataset_id = "otbr_cli_topology_mdns_health"
     (tmp_path / "td-otbr-cli-thread-network-info.json").write_text(
         json.dumps({
             "extPanId": "78b9775b001c1cbe",

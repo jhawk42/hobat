@@ -89,8 +89,10 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data process-health \
 
 An expected device absent from one complete observation remains missing with
 Unknown status. Offline requires absence from two distinct eligible complete
-observations. Partial and degraded observations do not increment that count.
-Stage 1 reports observation counts, not wall-clock offline duration.
+observations and more than 15% of the expected roster meeting that absence
+threshold. This keeps occasional sleepy-device misses from making the network
+Poor. Partial and degraded observations do not increment that count. Stage 1
+reports observation counts, not wall-clock offline duration.
 
 List or update one network's roster through the CLI-only administration boundary:
 

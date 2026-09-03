@@ -22,6 +22,7 @@ def _freeze(value: Any) -> Any:
 _SNAPSHOT_V1_RAW: dict[str, Any] = {
         "version": "snapshot-v1",
         "offlineConsecutiveCompleteObservations": 2,
+    "offlinePoorDeviceRatioThreshold": 0.15,
         "thresholds": {
             "totalMacErrorRatio": {"unstable": 0.01, "high": 0.05, "critical": 1.0},
             "totalMacDiscardRatio": {"unstable": 0.02, "high": 0.08, "critical": 1.0},
@@ -68,6 +69,7 @@ class HealthPolicy:
     version: str
     digest: str
     offline_consecutive_complete_observations: int
+    offline_poor_device_ratio_threshold: float
     thresholds: Mapping[str, Mapping[str, float | int]]
 
 
@@ -81,12 +83,20 @@ def _validate_policy(raw: object) -> HealthPolicy:
         raise HealthPolicyError("Health policy must be a JSON object")
     version = raw.get("version")
     consecutive = raw.get("offlineConsecutiveCompleteObservations")
+    offline_ratio = raw.get(
+        "offlinePoorDeviceRatioThreshold",
+        _SNAPSHOT_V1_RAW["offlinePoorDeviceRatioThreshold"],
+    )
     thresholds = raw.get("thresholds")
     if not isinstance(version, str) or not version:
         raise HealthPolicyError("Health policy requires version")
     if not isinstance(consecutive, int) or consecutive < 2:
         raise HealthPolicyError(
             "offlineConsecutiveCompleteObservations must be at least 2"
+        )
+    if not isinstance(offline_ratio, (int, float)) or isinstance(offline_ratio, bool) or not 0 <= offline_ratio <= 1:
+        raise HealthPolicyError(
+            "offlinePoorDeviceRatioThreshold must be between 0 and 1"
         )
     if not isinstance(thresholds, dict) or not thresholds:
         raise HealthPolicyError("Health policy requires thresholds")
@@ -104,10 +114,15 @@ def _validate_policy(raw: object) -> HealthPolicy:
         if set(bands) != set(_REQUIRED_THRESHOLD_BANDS[metric]):
             raise HealthPolicyError(f"Invalid threshold bands: {metric}")
         normalized[metric] = MappingProxyType(dict(bands))
+    normalized_raw = {
+        **raw,
+        "offlinePoorDeviceRatioThreshold": float(offline_ratio),
+    }
     return HealthPolicy(
         version=version,
-        digest=_canonical_digest(raw),
+        digest=_canonical_digest(normalized_raw),
         offline_consecutive_complete_observations=consecutive,
+        offline_poor_device_ratio_threshold=float(offline_ratio),
         thresholds=MappingProxyType(normalized),
     )
 

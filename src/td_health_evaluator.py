@@ -21,7 +21,7 @@ from td_health_policy import HealthPolicy
 from td_health_manifest import HealthProfile
 
 
-EVALUATOR_VERSION = "snapshot-v4"
+EVALUATOR_VERSION = "snapshot-v5"
 
 _LIFETIME_EVIDENCE_METRICS = frozenset(
     {
@@ -153,9 +153,25 @@ def evaluate_observation(
                 )
             )
 
-    for device_id in sorted(expected_device_ids - observed_ids):
+    missing_expected_ids = tuple(sorted(expected_device_ids - observed_ids))
+    offline_candidate_ids = frozenset(
+        device_id
+        for device_id in missing_expected_ids
+        if complete
+        and absences.get(device_id, 0) + 1 >= policy.offline_consecutive_complete_observations
+    )
+    offline_device_ratio = (
+        len(offline_candidate_ids) / len(expected_device_ids)
+        if expected_device_ids
+        else 0.0
+    )
+    offline_poor_threshold_met = (
+        offline_device_ratio > policy.offline_poor_device_ratio_threshold
+    )
+
+    for device_id in missing_expected_ids:
         prior = absences.get(device_id, 0)
-        is_offline = complete and prior + 1 >= policy.offline_consecutive_complete_observations
+        is_offline = device_id in offline_candidate_ids and offline_poor_threshold_met
         findings.append(
             _finding(
                 observation,
@@ -175,6 +191,11 @@ def evaluate_observation(
                     "completeObservation": complete,
                     "consecutiveCompleteAbsences": prior + 1 if complete else prior,
                     "required": policy.offline_consecutive_complete_observations,
+                    "offlineCandidateCount": len(offline_candidate_ids),
+                    "expectedRosterCount": len(expected_device_ids),
+                    "offlineDeviceRatio": offline_device_ratio,
+                    "offlinePoorDeviceRatioThreshold": policy.offline_poor_device_ratio_threshold,
+                    "offlinePoorThresholdMet": offline_poor_threshold_met,
                 },
                 action="Check collection completeness, then inspect the expected device if absence persists.",
                 verify="Process another complete observation and confirm whether the device returns.",
