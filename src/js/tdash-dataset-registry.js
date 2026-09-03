@@ -562,7 +562,7 @@ export const DATASET_REGISTRY = [
     mergeStrategy: "none",
     rowExtractor: "raw-array",
     adaptor: "ha-matter-ws",
-    defaultPhysicsProfile: "mesh-compact",
+    defaultPhysicsProfile: "mesh-balanced",
     topologyMode: "ha-matter-ws",
     defaultView: "topology",
     defaultLinkFilter: "all_links",

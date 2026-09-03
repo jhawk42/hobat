@@ -280,6 +280,64 @@ assertResult(haMatterDashboard, {
 });
 assert.equal(haMatterDashboard.edgeData[0].isParentChild, false);
 
+const haMatterDiagnostics = runAdaptor({
+  entry: {
+    adaptor: "ha-matter-ws",
+    files: ["td-ha-matter-ws-dashboard.json"],
+    rowExtractor: "ha-matter-ws-diagnostics",
+  },
+  rawFiles: [{
+    diagnostics: [{ topologyId: "matter:diagnostic", rloc16: "0x1001" }],
+    topology: [{ topologyId: "matter:topology", rloc16: "0x1000" }],
+  }],
+  rows: [{ topologyId: "matter:diagnostic", rloc16: "0x1001" }],
+});
+assert.deepEqual(
+  haMatterDiagnostics.nodeData.map((node) => node.id),
+  ["matter:diagnostic"],
+);
+
+const haMatterMeshDiagnostics = runAdaptor({
+  entry: {
+    adaptor: "ha-matter-ws",
+    files: ["td-ha-matter-ws-dashboard.json"],
+    rowExtractor: "ha-matter-ws-mesh-diagnostics",
+  },
+  rawFiles: [{
+    meshDiagnostics: [{
+      topologyId: "matter:child",
+      rloc16: "0x1001",
+      routerNeighbors: [{
+        sourceId: "matter:child",
+        targetId: "thread:router",
+        lqi: 3,
+      }],
+    }],
+    topology: [{
+      topologyId: "thread:router",
+      rloc16: "0x1000",
+      relationshipOnly: true,
+    }],
+  }],
+  rows: [{
+    topologyId: "matter:child",
+    rloc16: "0x1001",
+    routerNeighbors: [{
+      sourceId: "matter:child",
+      targetId: "thread:router",
+      lqi: 3,
+    }],
+  }],
+});
+assert.deepEqual(
+  haMatterMeshDiagnostics.nodeData.map((node) => node.id),
+  ["matter:child", "thread:router"],
+);
+assert.deepEqual(
+  haMatterMeshDiagnostics.edgeData.map((edge) => [edge.from, edge.to]),
+  [["matter:child", "thread:router"]],
+);
+
 const haMatterDevices = run(
   "ha-matter-ws",
   ["td-ha-matter-ws-devices-fetch-all.json"],
