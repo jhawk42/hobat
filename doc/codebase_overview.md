@@ -30,8 +30,8 @@ Browser <---- aiohttp web server ----> td_cli subprocess
 | Shared contracts | `td_const.py`, `td_device_fields.py`, `td_device_merge.py`, `td_record_merge.py`, `td_json_key_normalizer.py`, `util_*.py` | Filenames, fields, merge policies, data paths, network and subprocess helpers |
 | Persistence | Effective data directory | Operator inputs, generated snapshots, and `td-health.db` observation history |
 
-Runtime dependencies include `aiohttp`, `aiohttp-cors`, `websockets`, and `zeroconf`. The
-browser uses vendored vis-network and sortable table libraries.
+Runtime dependencies include `aiohttp`, `websockets`, and `zeroconf`. The browser
+uses vendored vis-network and sortable table libraries.
 
 ## Python Modules
 
@@ -178,6 +178,11 @@ See [Merge Thread Device Information](merge_thread_device_info.md) and
 derived checkpoint filenames for dynamic entries. A `FileAction` contains the
 freshness limit, CLI action or `STATIC`, estimated cost, and an optional forced
 background flag.
+
+Browser API access is same-origin. API routes do not emit CORS authorization
+headers or handle cross-origin preflights. Changing the bind host or placing
+Hobat behind a reverse proxy does not create an origin allowlist; the proxy must
+serve the dashboard and API from the same browser origin.
 
 - Fresh dynamic files are served from disk.
 - Missing or stale dynamic files invoke `td_cli` unless Cache Only is requested.

@@ -75,6 +75,14 @@ Open `http://localhost:9165/`. The root redirects to `/tdash.html`.
 
 On startup the dashboard does not fetch a dataset until **Sync** is selected. Default is **Auto**. Enable **Cache Only** before Sync to not trigger live collection. **Force Refresh** requests regeneration. Long actions return a background job that the browser polls and can cancel.
 
+Dashboard API calls are same-origin and do not receive CORS authorization
+headers. When using a reverse proxy, serve the dashboard and `/api/*` through
+the same browser origin (and the same path prefix when one is used). Changing
+the bind host does not create an origin allowlist. This browser restriction is
+not authentication: direct clients such as `curl` or `wget` can call any API
+route they can reach, so use firewall or authenticated proxy controls when the
+API must be restricted.
+
 ## CLI Quick Start
 
 Run commands from the repository root with `PYTHONPATH=src`:

@@ -41,19 +41,19 @@ async function healthRequest(path, signal) {
 }
 
 export function fetchHealthAssessment(datasetId, signal) {
-  return healthRequest(`/api/health/summary?dataset=${encodeURIComponent(datasetId)}`, signal);
+  return healthRequest(`api/health/summary?dataset=${encodeURIComponent(datasetId)}`, signal);
 }
 
 export function fetchHealthDevice(assessmentId, deviceId, signal) {
   const query = new URLSearchParams({ assessment: assessmentId });
-  return healthRequest(`/api/health/devices/${encodeURIComponent(deviceId)}?${query}`, signal);
+  return healthRequest(`api/health/devices/${encodeURIComponent(deviceId)}?${query}`, signal);
 }
 
 export async function fetchHealthSupport(networkId, signal) {
   const query = new URLSearchParams({ network: networkId, limit: "5", offset: "0" });
   const [capabilities, observations] = await Promise.all([
-    healthRequest("/api/health/capabilities", signal),
-    healthRequest(`/api/health/observations?${query}`, signal),
+    healthRequest("api/health/capabilities", signal),
+    healthRequest(`api/health/observations?${query}`, signal),
   ]);
   return { capabilities, observations };
 }

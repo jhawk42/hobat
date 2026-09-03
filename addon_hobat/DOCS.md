@@ -24,6 +24,11 @@ diagnostics, and Matter collection does not replace OTBR network-wide data.
 Start Hobat, then select **Open Web UI**. Dashboard data is persisted in the
 app's `/data` directory and included in Home Assistant backups.
 
+The dashboard and API must remain on the same browser origin. Home Assistant or
+another reverse proxy must forward the dashboard's path-relative `/api/*`
+requests to Hobat; Hobat does not emit CORS authorization headers. This is not
+authentication and does not block direct HTTP clients that can reach port 9165.
+
 Select **Home Assistant Matter** to view Devices, Diagnostics, Mesh
 Diagnostics, or Topology. Enable **Cache Only** before Sync when the dashboard
 must not contact Matter Server. Refreshes are serialized under one Matter

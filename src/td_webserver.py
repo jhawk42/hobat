@@ -14,7 +14,6 @@ from typing import Sequence
 from collections.abc import Callable
 
 import aiohttp.web
-import aiohttp_cors
 
 from td_health_manifest import HealthManifestError
 from td_health_read import (
@@ -1560,33 +1559,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.on_shutdown.append(_on_shutdown)
     app.on_response_prepare.append(_set_static_cache_headers)
 
-    # Configure CORS before registering routes so OPTIONS preflights are handled
-    # automatically for all API endpoints.  Static assets and the root redirect
-    # are not CORS-wrapped (same-origin by design).
-    cors = aiohttp_cors.setup(
-        app,
-        defaults={
-            "*": aiohttp_cors.ResourceOptions(
-                allow_credentials=False,
-                expose_headers="*",
-                allow_headers="*",
-            )
-        },
-    )
-
     # Specific routes are registered before the static catch-all.
     app.router.add_get("/", handle_root)
-    cors.add(app.router.add_get("/api/data/{filename}", handle_data_api))
-    cors.add(app.router.add_get("/api/job/{job_id}", handle_job_api))
-    cors.add(app.router.add_delete("/api/job/{job_id}", handle_job_cancel_api))
-    cors.add(app.router.add_get("/api/device/{extAddress}", handle_device_get_api))
-    cors.add(app.router.add_patch("/api/device/{extAddress}", handle_device_patch_api))
-    cors.add(app.router.add_get("/api/health/summary", handle_health_summary_api))
-    cors.add(app.router.add_get("/api/health/findings", handle_health_findings_api))
-    cors.add(app.router.add_get("/api/health/devices/{device_id}", handle_health_device_api))
-    cors.add(app.router.add_get("/api/health/observations", handle_health_observations_api))
-    cors.add(app.router.add_get("/api/health/latest", handle_health_latest_api))
-    cors.add(app.router.add_get("/api/health/capabilities", handle_health_capabilities_api))
+    app.router.add_get("/api/data/{filename}", handle_data_api)
+    app.router.add_get("/api/job/{job_id}", handle_job_api)
+    app.router.add_delete("/api/job/{job_id}", handle_job_cancel_api)
+    app.router.add_get("/api/device/{extAddress}", handle_device_get_api)
+    app.router.add_patch("/api/device/{extAddress}", handle_device_patch_api)
+    app.router.add_get("/api/health/summary", handle_health_summary_api)
+    app.router.add_get("/api/health/findings", handle_health_findings_api)
+    app.router.add_get("/api/health/devices/{device_id}", handle_health_device_api)
+    app.router.add_get("/api/health/observations", handle_health_observations_api)
+    app.router.add_get("/api/health/latest", handle_health_latest_api)
+    app.router.add_get("/api/health/capabilities", handle_health_capabilities_api)
     # Serve all static assets (HTML, JS, CSS, …) from the src/ directory.
     app.router.add_static(
         "/", static_root, show_index=False, follow_symlinks=False)

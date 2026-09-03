@@ -41,6 +41,17 @@ directory through the server allowlist.
 | `PATCH /api/device/{extAddress}` | `handle_device_patch_api` | Atomically insert or update one device label |
 | `GET /**` | aiohttp static route | Serve `src/` assets |
 
+All browser API requests are same-origin. The server does not emit
+`Access-Control-Allow-*` headers and does not authorize CORS preflights. Health
+requests use document-relative URLs so a reverse proxy can mount the dashboard
+and API beneath one path prefix. The proxy must route that prefix to Hobat and
+preserve the dashboard/API origin.
+
+This removes cross-origin browser authorization; it is not authentication or a
+network-access boundary. Direct HTTP clients such as `curl` and `wget` can still
+call reachable API routes, including mutation routes. Use firewall or
+authenticated reverse-proxy controls when access must be restricted.
+
 ### Data Request Flow
 
 ```text

@@ -21,6 +21,13 @@ HTML, CSS, and JavaScript use `Cache-Control: no-cache`. Progressive
 Device labels are read and updated through `GET`/`PATCH
 /api/device/{extAddress}` and use `Cache-Control: no-store`.
 
+Browser API access is same-origin. API responses do not include CORS
+authorization headers, and cross-origin preflights for mutating methods are not
+handled. Changing `--host` or deploying behind a reverse proxy does not add an
+origin allowlist; serve the dashboard and API through the same browser origin.
+This policy is not authentication and does not prevent direct HTTP clients with
+network access from calling the API.
+
 
 ## Options
 
