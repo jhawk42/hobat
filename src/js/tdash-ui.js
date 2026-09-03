@@ -1328,6 +1328,12 @@ function refreshTopologyFiltersWithRestoredStyling() {
   return true;
 }
 
+// Reusable list of all status-bar span IDs for bulk updates.
+const _FETCH_STATUS_IDS = ["fetch-timetaken-value", "fetch-cache-age-value"];
+const _DEVICE_STATUS_IDS = ["device-count", "br-count", "router-count", "child-count",
+                             "link-count", "lq3-count", "lq2-count", "lq1-count"];
+const _CANCELLED_PARTIAL_STATUS_PIN_MS = 3000;
+
 document
   .getElementById("datasource-filter")
   .addEventListener("change", async (event) => {
@@ -1551,12 +1557,6 @@ function updateFetchStatusBar(fetchStartedAt) {
       ? formatAgo(currentDataset.fileLastModifiedAt)
       : "—";
 }
-
-// Reusable list of all status-bar span IDs for bulk updates.
-const _FETCH_STATUS_IDS = ["fetch-timetaken-value", "fetch-cache-age-value"];
-const _DEVICE_STATUS_IDS = ["device-count", "br-count", "router-count", "child-count",
-                             "link-count", "lq3-count", "lq2-count", "lq1-count"];
-const _CANCELLED_PARTIAL_STATUS_PIN_MS = 3000;
 
 function _pinFetchStatusLineMessage(message, pinDurationMs = _CANCELLED_PARTIAL_STATUS_PIN_MS) {
   const statusEl = document.getElementById("fetch-status-line-content");
