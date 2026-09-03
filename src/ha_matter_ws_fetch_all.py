@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from ha_matter_ws_client import DEFAULT_MATTER_WS_URI, NodeSnapshot, fetch_node_snapshot
+from ha_matter_ws_client import NodeSnapshot, fetch_node_snapshot
 from ha_matter_ws_extractor import dedupe_nodes, extract_node_info
 from ha_matter_ws_snapshots import build_device_snapshot, build_diagnostic_snapshot
 from ha_matter_ws_topology import (
@@ -54,7 +54,7 @@ def _build_collection(
 
 
 async def collect_devices(
-    uri: str = DEFAULT_MATTER_WS_URI,
+    uri: str | None = None,
     *,
     connect_timeout: float = 10.0,
     request_timeout: float = 5.0,

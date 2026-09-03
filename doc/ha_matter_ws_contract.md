@@ -19,7 +19,9 @@ server minimum supported schema <= 12
 
 A newer server remains usable while it supports schema 12. A server whose minimum
 has advanced beyond 12 is rejected before collection. The default endpoint is
-`ws://localhost:5580/ws`.
+assembled from `TD_HA_MATTER_WS_HOST` and `TD_HA_MATTER_WS_PORT`, falling back
+to `ws://localhost:5580/ws`. CLI `--host` and `--port` values override the
+environment, while `--uri` overrides the complete endpoint.
 
 The server sends an uncorrelated server-info object immediately after connection.
 Commands and replies use:

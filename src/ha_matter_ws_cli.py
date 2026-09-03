@@ -12,8 +12,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from ha_matter_ws_client import DEFAULT_MATTER_WS_URI, MatterWsTransportError
-from ha_matter_ws_contract import MatterWsContractError
+from ha_matter_ws_client import MatterWsTransportError
+from ha_matter_ws_contract import (
+    HA_MATTER_WS_HOST_DEFAULT,
+    HA_MATTER_WS_HOST_ENV,
+    HA_MATTER_WS_PORT_DEFAULT,
+    HA_MATTER_WS_PORT_ENV,
+    MatterWsContractError,
+    build_ha_matter_ws_uri,
+    resolve_default_ha_matter_ws_host,
+    resolve_default_ha_matter_ws_port,
+)
 from ha_matter_ws_extractor import MatterExtractionError
 from ha_matter_ws_fetch_all import MatterCollection, collect_devices
 from ha_matter_ws_snapshots import MatterSnapshotSecurityError
@@ -63,11 +72,34 @@ def _positive_float(value: str) -> float:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    default_host = resolve_default_ha_matter_ws_host()
+    default_port = resolve_default_ha_matter_ws_port()
     parser = argparse.ArgumentParser(
         prog="td_cli ha-matter-ws",
         description="Collect normalized snapshots from Home Assistant Matter Server",
     )
-    parser.add_argument("--uri", default=DEFAULT_MATTER_WS_URI)
+    parser.add_argument(
+        "--host",
+        default=default_host,
+        help=(
+            f"Matter WebSocket host (default: {default_host}; falls back to "
+            f"{HA_MATTER_WS_HOST_DEFAULT} when {HA_MATTER_WS_HOST_ENV} is unset)"
+        ),
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=default_port,
+        help=(
+            f"Matter WebSocket port (default: {default_port}; falls back to "
+            f"{HA_MATTER_WS_PORT_DEFAULT} when {HA_MATTER_WS_PORT_ENV} is unset/invalid)"
+        ),
+    )
+    parser.add_argument(
+        "--uri",
+        default=None,
+        help="Override host and port with a full Matter WebSocket URI",
+    )
     parser.add_argument("--connect-timeout", type=_positive_float, default=10.0)
     parser.add_argument("--request-timeout", type=_positive_float, default=5.0)
     parser.add_argument("--settle-timeout", type=_positive_float, default=0.25)
@@ -327,7 +359,7 @@ def _outcome(
 
 def _collection_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     return {
-        "uri": args.uri,
+        "uri": args.uri or build_ha_matter_ws_uri(args.host, args.port),
         "connect_timeout": args.connect_timeout,
         "request_timeout": args.request_timeout,
         "settle_timeout": args.settle_timeout,

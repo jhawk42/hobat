@@ -99,8 +99,9 @@ OTBR action API has no idempotency key; idempotent reads use bounded retries.
 | `ha_matter_ws_topology.py` | Directional neighbor, child, route, and placeholder topology derivation |
 | `ha_matter_ws_fetch_all.py`, `ha_matter_ws_cli.py` | One-snapshot orchestration, checkpoints, atomic files, outcome, and source CLI |
 
-The source is read-only and controller-scoped. Its default URI is
-`ws://localhost:5580/ws`; missing or unavailable node telemetry remains
+The source is read-only and controller-scoped. Its fallback URI is
+`ws://localhost:5580/ws`; environment variables and CLI endpoint options can
+override it. Missing or unavailable node telemetry remains
 explicitly absent. It does not replace OTBR network-wide collection.
 
 ### Other Sources and Processing

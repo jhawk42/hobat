@@ -107,6 +107,37 @@ def test_owner_parser_accepts_every_command_path(argv) -> None:
     assert build_parser().parse_args(argv)
 
 
+def test_owner_parser_resolves_endpoint_precedence(monkeypatch) -> None:
+    monkeypatch.setenv("TD_HA_MATTER_WS_HOST", "environment.test")
+    monkeypatch.setenv("TD_HA_MATTER_WS_PORT", "15580")
+
+    environment_args = build_parser().parse_args(["server-info"])
+    explicit_args = build_parser().parse_args(
+        ["--host", "explicit.test", "--port", "25580", "server-info"]
+    )
+    uri_args = build_parser().parse_args(
+        [
+            "--host",
+            "ignored.test",
+            "--port",
+            "35580",
+            "--uri",
+            "wss://matter.test/custom",
+            "server-info",
+        ]
+    )
+
+    assert ha_matter_ws_cli._collection_kwargs(environment_args)["uri"] == (
+        "ws://environment.test:15580/ws"
+    )
+    assert ha_matter_ws_cli._collection_kwargs(explicit_args)["uri"] == (
+        "ws://explicit.test:25580/ws"
+    )
+    assert ha_matter_ws_cli._collection_kwargs(uri_args)["uri"] == (
+        "wss://matter.test/custom"
+    )
+
+
 def test_snapshot_filenames_match_approved_contract() -> None:
     assert FINAL_FILENAMES == [
         "td-ha-matter-ws-server-info.json",
@@ -385,6 +416,10 @@ def test_td_cli_routes_family_options_and_nested_command(monkeypatch, tmp_path) 
             "--datadir",
             str(tmp_path),
             "ha-matter-ws",
+            "--host",
+            "matter-host.test",
+            "--port",
+            "15580",
             "--uri",
             "ws://matter.test/ws",
             "--connect-timeout",
@@ -409,6 +444,10 @@ def test_td_cli_routes_family_options_and_nested_command(monkeypatch, tmp_path) 
         [
             "--datadir",
             str(tmp_path),
+            "--host",
+            "matter-host.test",
+            "--port",
+            "15580",
             "--uri",
             "ws://matter.test/ws",
             "--connect-timeout",

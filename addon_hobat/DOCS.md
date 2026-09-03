@@ -15,6 +15,8 @@ its standard HAOS container name, `addon_core_openthread_border_router`.
 
 For Home Assistant Matter datasets, install and start Matter Server. Hobat uses
 host networking and connects read-only to `ws://localhost:5580/ws` by default.
+The `TD_HA_MATTER_WS_HOST` and `TD_HA_MATTER_WS_PORT` environment variables can
+override that endpoint.
 Only nodes commissioned to that Matter controller are visible. Unavailable or
 sleeping nodes may omit diagnostics, Wi-Fi Matter nodes do not expose Thread
 diagnostics, and Matter collection does not replace OTBR network-wide data.

@@ -63,9 +63,11 @@ td_cli otbr-restapi [global-forwarded-options] {download,node,devices,diagnostic
 td_cli ha-matter-ws [source-options] {server-info,devices,diagnostics,mesh-diagnostics,topology,all} ...
 ```
 
-Source options include `--uri`, `--connect-timeout`, `--request-timeout`,
-`--settle-timeout`, `--output`, and `--no-progress`. The default URI is
-`ws://localhost:5580/ws`. `devices`, `diagnostics`, and `mesh-diagnostics`
+Source options include `--host`, `--port`, `--uri`, `--connect-timeout`,
+`--request-timeout`, `--settle-timeout`, `--output`, and `--no-progress`.
+Host and port default to `TD_HA_MATTER_WS_HOST` and `TD_HA_MATTER_WS_PORT`, then
+`localhost` and `5580`; `--host`/`--port` override those values, and `--uri`
+overrides the complete endpoint. `devices`, `diagnostics`, and `mesh-diagnostics`
 provide `get` and `fetch-all` commands; `devices` also provides `list`.
 `topology` writes the canonical topology snapshot, while `all` performs one
 inventory transaction and writes every fixed snapshot plus the collection

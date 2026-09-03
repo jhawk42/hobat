@@ -143,8 +143,10 @@ Stop the web server and all writers before `system backups restore`; restore
 validates and stages the backup before replacing the data directory. Backups
 are unredacted and must be protected like the source data.
 
-`ha-matter-ws` connects to `ws://localhost:5580/ws` by default; use `--uri`
-when Matter Server is reachable elsewhere. It is read-only and
+`ha-matter-ws` connects to `ws://localhost:5580/ws` by default. Set
+`TD_HA_MATTER_WS_HOST` and `TD_HA_MATTER_WS_PORT`, or use `--host` and `--port`,
+when Matter Server is reachable elsewhere. `--uri` overrides both host and port
+with a complete WebSocket URI. It is read-only and
 controller-scoped: only commissioned Matter nodes are visible, sleeping or
 unavailable nodes may omit diagnostics, and Wi-Fi Matter nodes do not provide
 Thread telemetry. This source complements OTBR network-wide collection rather

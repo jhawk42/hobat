@@ -387,6 +387,8 @@ def _add_ha_matter_ws_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Collect snapshots from Home Assistant Matter Server",
         description="Collect snapshots from Home Assistant Matter Server",
     )
+    matter.add_argument("--host", default=None)
+    matter.add_argument("--port", type=int, default=None)
     matter.add_argument("--uri", default=None)
     matter.add_argument("--connect-timeout", type=float, default=None)
     matter.add_argument("--request-timeout", type=float, default=None)
@@ -927,6 +929,8 @@ def _dispatch_ha_matter_ws(
     if getattr(args, "datadir", None):
         forwarded += ["--datadir", str(args.datadir)]
     for attribute, option in (
+        ("host", "--host"),
+        ("port", "--port"),
         ("uri", "--uri"),
         ("connect_timeout", "--connect-timeout"),
         ("request_timeout", "--request-timeout"),

@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Iterable, Literal, Mapping
 
 
-DEFAULT_HA_MATTER_WS_URI = "ws://localhost:5580/ws"
+HA_MATTER_WS_HOST_ENV = "TD_HA_MATTER_WS_HOST"
+HA_MATTER_WS_HOST_DEFAULT = "localhost"
+HA_MATTER_WS_PORT_ENV = "TD_HA_MATTER_WS_PORT"
+HA_MATTER_WS_PORT_DEFAULT = 5580
+DEFAULT_HA_MATTER_WS_URI = (
+    f"ws://{HA_MATTER_WS_HOST_DEFAULT}:{HA_MATTER_WS_PORT_DEFAULT}/ws"
+)
 COLLECTOR_SCHEMA_VERSION = 12
 MIN_SUPPORTED_SERVER_SCHEMA_VERSION = 11
 
@@ -20,6 +28,50 @@ MATTER_MODEL_SOURCE = (
     "Matter cluster revisions Descriptor 3, BasicInformation 6, "
     "GeneralDiagnostics 3, ThreadNetworkDiagnostics 3, reviewed 2026-08-30"
 )
+
+
+def resolve_default_ha_matter_ws_host(
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve the Matter WebSocket host from the environment or default."""
+
+    env_map = os.environ if env is None else env
+    value = env_map.get(HA_MATTER_WS_HOST_ENV)
+    if value is None:
+        return HA_MATTER_WS_HOST_DEFAULT
+    return value.strip() or HA_MATTER_WS_HOST_DEFAULT
+
+
+def resolve_default_ha_matter_ws_port(
+    env: Mapping[str, str] | None = None,
+) -> int:
+    """Resolve the Matter WebSocket port from the environment or default."""
+
+    env_map = os.environ if env is None else env
+    value = env_map.get(HA_MATTER_WS_PORT_ENV)
+    if value is None or not value.strip():
+        return HA_MATTER_WS_PORT_DEFAULT
+    try:
+        return int(value.strip())
+    except ValueError:
+        return HA_MATTER_WS_PORT_DEFAULT
+
+
+def build_ha_matter_ws_uri(host: str, port: int) -> str:
+    """Build the standard Matter Server WebSocket URI."""
+
+    return f"ws://{host}:{port}/ws"
+
+
+def resolve_default_ha_matter_ws_uri(
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve the standard Matter WebSocket URI from host and port settings."""
+
+    return build_ha_matter_ws_uri(
+        resolve_default_ha_matter_ws_host(env),
+        resolve_default_ha_matter_ws_port(env),
+    )
 
 
 class MatterWsContractError(ValueError):

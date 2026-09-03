@@ -18,6 +18,7 @@ from ha_matter_ws_contract import (
     MatterWsContractError,
     MatterWsResponseCorrelationError,
     classify_frame,
+    resolve_default_ha_matter_ws_uri,
     validate_server_info,
 )
 
@@ -56,7 +57,7 @@ class HaMatterWsClient:
 
     def __init__(
         self,
-        uri: str = DEFAULT_MATTER_WS_URI,
+        uri: str | None = None,
         *,
         connect_timeout: float = 10.0,
         request_timeout: float = 5.0,
@@ -67,7 +68,7 @@ class HaMatterWsClient:
             raise ValueError("Matter WebSocket timeouts must be greater than zero")
         if max_frame_size <= 0 or max_frames <= 0:
             raise ValueError("Matter WebSocket frame limits must be greater than zero")
-        self.uri = uri
+        self.uri = resolve_default_ha_matter_ws_uri() if uri is None else uri
         self.connect_timeout = connect_timeout
         self.request_timeout = request_timeout
         self.max_frame_size = max_frame_size
@@ -304,7 +305,7 @@ def reconcile_nodes(
 
 
 async def fetch_node_snapshot(
-    uri: str = DEFAULT_MATTER_WS_URI,
+    uri: str | None = None,
     *,
     connect_timeout: float = 10.0,
     request_timeout: float = 5.0,
@@ -326,7 +327,7 @@ async def fetch_node_snapshot(
             raise MatterWsContractError("start_listening result must be a node array")
         await client.wait_for_event_settle(settle_timeout)
         return NodeSnapshot(
-            uri=uri,
+            uri=client.uri,
             server_info=client.server_info,
             frames=client.frames,
             events=client.events,
@@ -335,7 +336,7 @@ async def fetch_node_snapshot(
 
 
 async def fetch_all_nodes(
-    uri: str = DEFAULT_MATTER_WS_URI,
+    uri: str | None = None,
     *,
     idle_timeout: float = 0.25,
     recv_timeout: float = 5.0,
@@ -358,7 +359,7 @@ async def fetch_all_nodes(
     )
 
 
-async def access_matter_server(uri: str = DEFAULT_MATTER_WS_URI) -> None:
+async def access_matter_server(uri: str | None = None) -> None:
     result = await fetch_all_nodes(uri=uri)
     for message in result.messages:
         print(f"Received from server: {json.dumps(message, indent=2)}")

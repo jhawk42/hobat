@@ -8,6 +8,8 @@ import pytest
 from ha_matter_ws_contract import (
     COLLECTOR_SCHEMA_VERSION,
     GENERAL_DIAGNOSTICS_ATTRIBUTES,
+    HA_MATTER_WS_HOST_DEFAULT,
+    HA_MATTER_WS_PORT_DEFAULT,
     MIN_SUPPORTED_SERVER_SCHEMA_VERSION,
     NEIGHBOR_TABLE_FIELDS,
     NETWORK_INTERFACE_FIELDS,
@@ -18,6 +20,9 @@ from ha_matter_ws_contract import (
     MatterWsSchemaCompatibilityError,
     attribute_definition,
     correlate_response,
+    resolve_default_ha_matter_ws_host,
+    resolve_default_ha_matter_ws_port,
+    resolve_default_ha_matter_ws_uri,
     validate_server_info,
 )
 
@@ -27,6 +32,25 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 def _load_fixture(name: str) -> dict:
     return json.loads((FIXTURE_DIR / name).read_text(encoding="utf-8"))
+
+
+def test_default_matter_ws_endpoint_prefers_environment() -> None:
+    env = {
+        "TD_HA_MATTER_WS_HOST": " matter.test ",
+        "TD_HA_MATTER_WS_PORT": " 15580 ",
+    }
+
+    assert resolve_default_ha_matter_ws_host(env) == "matter.test"
+    assert resolve_default_ha_matter_ws_port(env) == 15580
+    assert resolve_default_ha_matter_ws_uri(env) == "ws://matter.test:15580/ws"
+
+
+@pytest.mark.parametrize("port", ["", "invalid"])
+def test_default_matter_ws_endpoint_falls_back_for_invalid_environment(port) -> None:
+    env = {"TD_HA_MATTER_WS_HOST": " ", "TD_HA_MATTER_WS_PORT": port}
+
+    assert resolve_default_ha_matter_ws_host(env) == HA_MATTER_WS_HOST_DEFAULT
+    assert resolve_default_ha_matter_ws_port(env) == HA_MATTER_WS_PORT_DEFAULT
 
 
 def test_protocol_fixture_correlates_out_of_order_response_and_retains_events() -> None:
