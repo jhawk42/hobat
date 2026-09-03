@@ -122,6 +122,33 @@ function appendRouterNames(details, group) {
   details.appendChild(names);
 }
 
+function appendRedundancyDevices(details, group, deviceType) {
+  appendText(
+    details,
+    "summary",
+    `Show ${group.endpoints.length} ${deviceType}${group.endpoints.length === 1 ? "" : "s"}`,
+  );
+  const devices = document.createElement("ol");
+  group.endpoints.forEach((endpoint) => appendText(devices, "li", numberedEndpointLabel(endpoint)));
+  details.appendChild(devices);
+}
+
+function appendAttributedFindings(details, group) {
+  appendText(details, "summary", `Show ${group.count} attributed finding${group.count === 1 ? "" : "s"}`);
+  const findings = document.createElement("ol");
+  group.findings.forEach((finding) => {
+    const child = document.createElement("li");
+    if (finding.endpoints.length > 0) {
+      appendText(child, "strong", finding.endpoints.map(numberedEndpointLabel).join(", "));
+      appendText(child, "span", finding.summary);
+    } else {
+      appendText(child, "strong", finding.summary);
+    }
+    findings.appendChild(child);
+  });
+  details.appendChild(findings);
+}
+
 function renderFindingGroup(group) {
   const item = document.createElement("li");
   item.className = `health-finding-group state-${group.status.toLowerCase()}`;
@@ -142,17 +169,17 @@ function renderFindingGroup(group) {
     item.appendChild(details);
     return item;
   }
-  appendText(details, "summary", `Show ${group.count} attributed finding${group.count === 1 ? "" : "s"}`);
-  const children = document.createElement("ol");
-  group.findings.forEach((finding) => {
-    const child = document.createElement("li");
-    appendText(child, "strong", finding.summary);
-    if (finding.endpoints.length > 0) {
-      appendText(child, "span", finding.endpoints.map(numberedEndpointLabel).join(", "));
-    }
-    children.appendChild(child);
-  });
-  details.appendChild(children);
+  if (group.ruleId === "network.router-redundancy") {
+    appendRedundancyDevices(details, group, "Router");
+    item.appendChild(details);
+    return item;
+  }
+  if (group.ruleId === "network.border-router-redundancy") {
+    appendRedundancyDevices(details, group, "Border Router");
+    item.appendChild(details);
+    return item;
+  }
+  appendAttributedFindings(details, group);
   item.appendChild(details);
   return item;
 }

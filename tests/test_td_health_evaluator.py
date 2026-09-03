@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import MappingProxyType
 
-from td_health_evaluator import evaluate_observation
+from td_health_evaluator import EVALUATOR_VERSION, evaluate_observation
 from td_health_observation_model import (
     Completeness,
     DeviceSample,
@@ -94,6 +94,14 @@ def test_complete_topology_profile_reports_border_router_redundancy() -> None:
                 "2222222222222222",
                 "router",
                 None,
+                False,
+                source_files,
+            ),
+            DeviceSample(
+                "extaddr:3333333333333333",
+                "3333333333333333",
+                "child",
+                None,
                 True,
                 source_files,
             ),
@@ -103,17 +111,31 @@ def test_complete_topology_profile_reports_border_router_redundancy() -> None:
     assessment = evaluate_observation(
         observation, load_health_policy(), profile=PROFILE
     )
-    finding = next(
+    border_router_finding = next(
         finding
         for finding in assessment.findings
         if finding.rule_id == "network.border-router-redundancy"
     )
+    router_finding = next(
+        finding
+        for finding in assessment.findings
+        if finding.rule_id == "network.router-redundancy"
+    )
 
     assert PROFILE.border_router_authority is True
-    assert finding.status is HealthStatus.STRONG
-    assert finding.evidence["observedBorderRouterCount"] == 2
-    assert finding.evidence["moreThanOne"] is True
-    assert finding.source_files == tuple(sorted(source_files))
+    assert EVALUATOR_VERSION == "snapshot-v6"
+    assert border_router_finding.status is HealthStatus.STRONG
+    assert border_router_finding.evidence["observedBorderRouterCount"] == 2
+    assert border_router_finding.evidence["moreThanOne"] is True
+    assert border_router_finding.device_ids == (
+        "extaddr:1111111111111111",
+        "extaddr:3333333333333333",
+    )
+    assert border_router_finding.source_files == tuple(sorted(source_files))
+    assert router_finding.device_ids == (
+        "extaddr:1111111111111111",
+        "extaddr:2222222222222222",
+    )
 
 
 def test_profile_capability_changes_assessment_identity() -> None:

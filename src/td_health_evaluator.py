@@ -21,7 +21,7 @@ from td_health_policy import HealthPolicy
 from td_health_manifest import HealthProfile
 
 
-EVALUATOR_VERSION = "snapshot-v5"
+EVALUATOR_VERSION = "snapshot-v6"
 
 _LIFETIME_EVIDENCE_METRICS = frozenset(
     {
@@ -204,12 +204,16 @@ def evaluate_observation(
             )
         )
 
-    router_count = sum(
-        1
+    router_ids = tuple(sorted(
+        device.device_id
         for device in observation.devices
         if (device.role or "").lower() in {"router", "leader"}
-    )
-    border_router_count = sum(device.is_border_router for device in observation.devices)
+    ))
+    border_router_ids = tuple(sorted(
+        device.device_id for device in observation.devices if device.is_border_router
+    ))
+    router_count = len(router_ids)
+    border_router_count = len(border_router_ids)
     if profile.coverage["resilience"] == "sufficient":
         findings.append(_finding(
             observation,
@@ -230,6 +234,7 @@ def evaluate_observation(
                 else "Add or restore Router-capable devices if resilience is required."
             ),
             verify="Process a complete topology observation and compare the Router count.",
+            device_ids=router_ids,
             source_files=tuple(sorted({source for device in observation.devices for source in device.source_files})),
             confidence=Confidence.HIGH if router_count else Confidence.LOW,
         ))
@@ -253,6 +258,7 @@ def evaluate_observation(
                 else "Add or restore a second Border Router if resilience is required."
             ),
             verify="Process a complete Border-Router-bearing observation.",
+            device_ids=border_router_ids,
             source_files=tuple(sorted({
                 source
                 for device in observation.devices
@@ -264,9 +270,6 @@ def evaluate_observation(
 
     if profile.border_router_authority and complete and omr_prefix:
         addresses = device_ipv6_addresses or {}
-        border_router_ids = tuple(sorted(
-            device.device_id for device in observation.devices if device.is_border_router
-        ))
         omr_border_router_ids = tuple(sorted(
             device_id for device_id in border_router_ids
             if any(addr.startswith(omr_prefix) for addr in addresses.get(device_id, ()))
@@ -315,11 +318,6 @@ def evaluate_observation(
     for relationship in observation.relationships:
         adjacency.setdefault(relationship.from_device_id, set()).add(relationship.to_device_id)
         adjacency.setdefault(relationship.to_device_id, set()).add(relationship.from_device_id)
-    router_ids = {
-        device.device_id
-        for device in observation.devices
-        if (device.role or "").lower() in {"router", "leader"}
-    }
     sole_path_router_ids = tuple(sorted(
         device_id for device_id in router_ids if len(adjacency.get(device_id, set())) == 1
     ))
