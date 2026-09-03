@@ -1,3 +1,3 @@
 aiohttp>=3.14.3
 websockets>=16.0,<17
-zeroconf==0.150.0
+zeroconf==0.151.3
