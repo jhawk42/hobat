@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -11,11 +12,25 @@ from td_health_observation_model import Assessment, Observation
 from td_health_observation_store import (
     MAX_OBSERVATIONS,
     HealthStoreFutureSchemaError,
+    PurgeResult,
     StoreResult,
 )
 
 
 SCHEMA_VERSION = 2
+_PURGE_TABLES = (
+    "observations",
+    "observation_sources",
+    "device_samples",
+    "relationship_samples",
+    "metric_samples",
+    "assessments",
+    "findings",
+    "current_assessments",
+    "devices",
+    "relationships",
+    "expected_devices",
+)
 
 
 _SCHEMA = """
@@ -369,6 +384,214 @@ class SQLiteHealthStore:
                )""",
             (self.max_observations,),
         )
+
+    @staticmethod
+    def _table_counts(connection: sqlite3.Connection) -> dict[str, int]:
+        return {
+            table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            for table in _PURGE_TABLES
+        }
+
+    @staticmethod
+    def _repair_current_assessments(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """INSERT INTO current_assessments(network_id, dataset_id, assessment_id)
+               SELECT o.network_id, o.dataset_id, a.assessment_id
+               FROM assessments a
+               JOIN observations o ON o.observation_id=a.observation_id
+               WHERE a.assessment_id=(
+                   SELECT a2.assessment_id
+                   FROM assessments a2
+                   JOIN observations o2 ON o2.observation_id=a2.observation_id
+                   WHERE o2.network_id=o.network_id AND o2.dataset_id=o.dataset_id
+                   ORDER BY o2.observed_at DESC, a2.assessed_at DESC,
+                            a2.assessment_id DESC LIMIT 1
+               )
+               ON CONFLICT(network_id, dataset_id) DO NOTHING"""
+        )
+
+    @staticmethod
+    def _delete_orphans(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """DELETE FROM relationships
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM relationship_samples rs
+                   WHERE rs.relationship_id=relationships.relationship_id
+               )"""
+        )
+        connection.execute(
+            """DELETE FROM devices
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM device_samples ds WHERE ds.device_id=devices.device_id
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM metric_samples ms WHERE ms.device_id=devices.device_id
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM relationships r
+                   WHERE r.from_device_id=devices.device_id
+                      OR r.to_device_id=devices.device_id
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM expected_devices e WHERE e.device_id=devices.device_id
+               )"""
+        )
+
+    def purge_before(self, cutoff: datetime, *, dry_run: bool = False) -> PurgeResult:
+        if cutoff.tzinfo is None:
+            raise ValueError("Purge cutoff must include a timezone")
+        cutoff_text = cutoff.astimezone(timezone.utc).isoformat()
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            before = self._table_counts(connection)
+            connection.execute(
+                "DELETE FROM observations WHERE julianday(observed_at) < julianday(?)",
+                (cutoff_text,),
+            )
+            self._repair_current_assessments(connection)
+            self._delete_orphans(connection)
+            after = self._table_counts(connection)
+            deleted = {table: before[table] - after[table] for table in _PURGE_TABLES}
+            if dry_run:
+                connection.rollback()
+            else:
+                connection.commit()
+            return PurgeResult(cutoff=cutoff_text, deleted=deleted, dry_run=dry_run)
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def purge_all(self, *, dry_run: bool = False) -> PurgeResult:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            before = self._table_counts(connection)
+            connection.execute("DELETE FROM observations")
+            connection.execute("DELETE FROM expected_devices")
+            self._delete_orphans(connection)
+            after = self._table_counts(connection)
+            deleted = {table: before[table] - after[table] for table in _PURGE_TABLES}
+            if dry_run:
+                connection.rollback()
+            else:
+                connection.commit()
+            return PurgeResult(cutoff=None, deleted=deleted, dry_run=dry_run)
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def purge_device(
+        self,
+        device_id: str,
+        *,
+        network_id: str | None = None,
+        dry_run: bool = False,
+    ) -> PurgeResult:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            networks = {
+                row[0]
+                for row in connection.execute(
+                    """SELECT DISTINCT o.network_id
+                       FROM observations o
+                       JOIN device_samples ds ON ds.observation_id=o.observation_id
+                       WHERE ds.device_id=?
+                       UNION
+                       SELECT network_id FROM expected_devices WHERE device_id=?""",
+                    (device_id, device_id),
+                )
+            }
+            if network_id is None and len(networks) > 1:
+                raise ValueError(
+                    "Device exists in multiple networks; specify --network"
+                )
+            selected_network = network_id or (next(iter(networks)) if networks else None)
+            before = self._table_counts(connection)
+            values: tuple[object, ...]
+            network_clause = ""
+            if selected_network is None:
+                values = (device_id,)
+            else:
+                network_clause = " AND o.network_id=?"
+                values = (device_id, selected_network)
+            affected_observations = [
+                row[0]
+                for row in connection.execute(
+                    f"""SELECT DISTINCT o.observation_id
+                        FROM observations o
+                        WHERE (
+                            EXISTS (SELECT 1 FROM device_samples ds
+                                    WHERE ds.observation_id=o.observation_id
+                                      AND ds.device_id=?)
+                            OR EXISTS (SELECT 1 FROM metric_samples ms
+                                       WHERE ms.observation_id=o.observation_id
+                                         AND ms.device_id=?)
+                            OR EXISTS (
+                                SELECT 1 FROM relationship_samples rs
+                                JOIN relationships r
+                                  ON r.relationship_id=rs.relationship_id
+                                WHERE rs.observation_id=o.observation_id
+                                  AND (r.from_device_id=? OR r.to_device_id=?)
+                            )
+                        ){network_clause}""",
+                    (device_id, device_id, device_id, device_id, *values[1:]),
+                )
+            ]
+            if affected_observations:
+                placeholders = ",".join("?" for _ in affected_observations)
+                connection.execute(
+                    f"DELETE FROM assessments WHERE observation_id IN ({placeholders})",
+                    affected_observations,
+                )
+                connection.execute(
+                    f"DELETE FROM metric_samples WHERE device_id=? AND observation_id IN ({placeholders})",
+                    (device_id, *affected_observations),
+                )
+                relationship_ids = [
+                    row[0]
+                    for row in connection.execute(
+                        """SELECT relationship_id FROM relationships
+                           WHERE from_device_id=? OR to_device_id=?""",
+                        (device_id, device_id),
+                    )
+                ]
+                if relationship_ids:
+                    relationship_placeholders = ",".join("?" for _ in relationship_ids)
+                    connection.execute(
+                        f"DELETE FROM relationship_samples WHERE relationship_id IN ({relationship_placeholders}) "
+                        f"AND observation_id IN ({placeholders})",
+                        (*relationship_ids, *affected_observations),
+                    )
+                connection.execute(
+                    f"DELETE FROM device_samples WHERE device_id=? AND observation_id IN ({placeholders})",
+                    (device_id, *affected_observations),
+                )
+            if selected_network is None:
+                connection.execute(
+                    "DELETE FROM expected_devices WHERE device_id=?", (device_id,)
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM expected_devices WHERE device_id=? AND network_id=?",
+                    (device_id, selected_network),
+                )
+            self._repair_current_assessments(connection)
+            self._delete_orphans(connection)
+            after = self._table_counts(connection)
+            deleted = {table: before[table] - after[table] for table in _PURGE_TABLES}
+            if dry_run:
+                connection.rollback()
+            else:
+                connection.commit()
+            return PurgeResult(cutoff=None, deleted=deleted, dry_run=dry_run)
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def expected_device_ids(self, network_id: str) -> frozenset[str]:
         with self._connect() as connection:

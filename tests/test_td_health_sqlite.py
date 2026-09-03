@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 
@@ -149,3 +150,124 @@ def test_observation_retention_is_bounded(tmp_path) -> None:
             "SELECT observation_id FROM observations ORDER BY observed_at"
         ).fetchall()
     assert rows == [("observation-2",), ("observation-3",)]
+
+
+def test_age_purge_is_exclusive_preserves_roster_and_supports_dry_run(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    for suffix in ("1", "2", "3"):
+        store.save_processing_result(*_result(suffix))
+    store.upsert_expected_device(
+        "extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187", "Router"
+    )
+    cutoff = datetime(2026, 9, 1, 0, 0, 3, tzinfo=timezone.utc)
+
+    preview = store.purge_before(cutoff, dry_run=True)
+    assert preview.deleted["observations"] == 2
+    assert store.store_capabilities()["observationCount"] == 3
+
+    result = store.purge_before(cutoff)
+    assert result.cutoff == "2026-09-01T00:00:03+00:00"
+    assert result.deleted["observations"] == 2
+    assert result.deleted["expected_devices"] == 0
+    assert store.store_capabilities()["observationCount"] == 1
+    assert store.latest_assessment(
+        "extpan:78b9775b001c1cbe", "otbr_cli_networkdiag_fetch_all"
+    )["assessment_id"] == "assessment-3"
+
+
+def test_purge_all_removes_health_records_but_preserves_other_tables(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    store.save_processing_result(*_result())
+    store.upsert_expected_device(
+        "extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187", "Router"
+    )
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("CREATE TABLE other_hobat_data(value TEXT)")
+        connection.execute("INSERT INTO other_hobat_data VALUES ('keep')")
+
+    preview = store.purge_all(dry_run=True)
+    assert preview.deleted["observations"] == 1
+    assert store.store_capabilities()["observationCount"] == 1
+
+    result = store.purge_all()
+    assert result.deleted["observations"] == 1
+    assert result.deleted["expected_devices"] == 1
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT value FROM other_hobat_data").fetchone() == ("keep",)
+        assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] > 0
+    repeated = store.purge_all()
+    assert all(count == 0 for count in repeated.deleted.values())
+
+
+def test_purge_device_removes_identity_and_invalidates_affected_assessment(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    store.save_processing_result(*_result())
+    store.upsert_expected_device(
+        "extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187", "Router"
+    )
+
+    preview = store.purge_device("extaddr:8672766ae0578187", dry_run=True)
+    assert preview.deleted["assessments"] == 1
+    assert store.store_capabilities()["assessmentCount"] == 1
+
+    result = store.purge_device("extaddr:8672766ae0578187")
+    assert result.deleted["assessments"] == 1
+    assert result.deleted["device_samples"] == 1
+    assert result.deleted["expected_devices"] == 1
+    assert store.store_capabilities()["observationCount"] == 1
+    assert store.store_capabilities()["assessmentCount"] == 0
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM current_assessments").fetchone()[0] == 0
+
+
+def test_purge_device_removes_relationship_but_preserves_other_endpoint(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    store.save_processing_result(*_result())
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            "INSERT INTO devices VALUES (?, ?)",
+            ("extaddr:0011223344556677", "0011223344556677"),
+        )
+        connection.execute(
+            "INSERT INTO device_samples VALUES (?, ?, ?, ?, ?, ?)",
+            ("observation-1", "extaddr:0011223344556677", "child", None, 0, "[]"),
+        )
+        connection.execute(
+            "INSERT INTO relationships VALUES (?, ?, ?)",
+            (
+                "relationship-1",
+                "extaddr:8672766ae0578187",
+                "extaddr:0011223344556677",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO relationship_samples VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "observation-1", "relationship-1", "neighbor", 3, 3,
+                None, None, None, None, None, "extaddr:8672766ae0578187", "[]",
+            ),
+        )
+
+    result = store.purge_device("extaddr:8672766ae0578187")
+    assert result.deleted["relationship_samples"] == 1
+    assert result.deleted["relationships"] == 1
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT device_id FROM devices"
+        ).fetchall() == [("extaddr:0011223344556677",)]
+
+
+def test_purge_rolls_back_completely_on_failure(tmp_path, monkeypatch) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    store.save_processing_result(*_result())
+
+    def fail(_connection):
+        raise RuntimeError("injected purge failure")
+
+    monkeypatch.setattr(store, "_delete_orphans", fail)
+    with pytest.raises(RuntimeError, match="injected purge failure"):
+        store.purge_all()
+    assert store.store_capabilities()["observationCount"] == 1
+    assert store.store_capabilities()["assessmentCount"] == 1

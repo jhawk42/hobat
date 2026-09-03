@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from datetime import datetime
+from typing import Mapping, Protocol
 
 from td_health_observation_model import Assessment, Observation
 
@@ -26,6 +27,13 @@ class StoreResult:
     assessment_created: bool
 
 
+@dataclass(frozen=True)
+class PurgeResult:
+    cutoff: str | None
+    deleted: Mapping[str, int]
+    dry_run: bool
+
+
 class HealthObservationStore(Protocol):
     def save_processing_result(
         self, observation: Observation, assessment: Assessment
@@ -36,3 +44,17 @@ class HealthObservationStore(Protocol):
     def upsert_expected_device(
         self, network_id: str, device_id: str, label: str | None
     ) -> None: ...
+
+    def purge_before(
+        self, cutoff: datetime, *, dry_run: bool = False
+    ) -> PurgeResult: ...
+
+    def purge_all(self, *, dry_run: bool = False) -> PurgeResult: ...
+
+    def purge_device(
+        self,
+        device_id: str,
+        *,
+        network_id: str | None = None,
+        dry_run: bool = False,
+    ) -> PurgeResult: ...

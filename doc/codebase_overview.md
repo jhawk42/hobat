@@ -39,7 +39,7 @@ uses vendored vis-network and sortable table libraries.
 
 | File | Responsibility |
 |---|---|
-| `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `health`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
+| `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `health`, `system`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
 | `td_webserver.py` | aiohttp application, file action registry, HTTP caching, background jobs, cancellation, and device-label API |
 | `td_const.py` | Authoritative Python cache filenames, data-directory constants, and Thread multicast addresses |
 | `td_device_fields.py` | Python field definitions, preferred names, aliases, identities, and placeholders |
@@ -117,6 +117,7 @@ explicitly absent. It does not replace OTBR network-wide collection.
 | `td_health_observation_model.py`, `td_health_policy.py` | Frozen domain contracts and validated `snapshot-v1` policy |
 | `td_health_sqlite.py`, `td_health_history.py` | Atomic observation history, current assessment, bounded retention, and explicit roster operations |
 | `td_health_read.py`, `td_webserver.py` health routes | Query-only SQLite projections, assessment pinning, grouped findings, bounded history, and no-store HTTP responses |
+| `td_system_backups.py`, `td_system_cli.py` | Versioned full-data-directory backup, manifest validation, and staged restore |
 | `util_data.py` | Data-directory resolution and atomic JSON/text writes |
 | `util_network.py`, `util_convert.py`, `util_mac_counters.py` | Network, address conversion, and counter helpers |
 | `profile_wrapper_td_cli.py`, `profile_wrapper_td_webserver.py` | Development profiling wrappers |

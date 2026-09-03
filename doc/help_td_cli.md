@@ -31,6 +31,8 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 | `ha-matter-ws` | Read commissioned nodes from Home Assistant Matter Server |
 | `mdns` | Scan Thread-related mDNS scopes |
 | `process-eve` | Parse and enhance an Eve Thread layout file |
+| `health` | Process, inspect, or purge health history |
+| `system` | Create or restore complete Hobat data-directory backups |
 | `merge-dataset` (`merge-data`) | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file; `merge-data` is a compatibility alias |
 | `merge-extaddr` | Read or upsert one device label, or bulk-merge missing extaddr entries into the static map |
 
@@ -89,6 +91,36 @@ The owning mDNS parser uses a 3-second idle timeout unless
 ```text
 td_cli process-eve ...
 ```
+
+### `health`
+
+```text
+td_cli health purge [--keep-days DAYS] [--dry-run] [--yes] [--json]
+td_cli health purge-all [--dry-run] [--yes] [--json]
+td_cli health purge-by-device --device EXTADDR [--network NETWORK_ID]
+                              [--dry-run] [--yes] [--json]
+```
+
+Age purge defaults to 180 retained days and uses an exclusive UTC cutoff.
+`purge-all` removes health-domain records and roster entries but preserves the
+shared database, migrations, and non-health tables. Per-device purge preserves
+shared observations but invalidates assessments derived from affected
+observations. Purge does not remove identities from collector snapshots,
+exports, or existing backups.
+
+### `system backups`
+
+```text
+td_cli system backups create --output DIRECTORY [--json]
+td_cli system backups restore --input BACKUP [--yes] [--json]
+```
+
+Create writes a versioned, checksummed copy of the complete effective data
+directory and snapshots `hobat_v1.db` through SQLite's backup API. The output
+must not already exist or be inside the active data directory. Restore requires
+confirmation, validates checksums and database integrity, stages the complete
+replacement, and refuses an active database writer. Stop the web server and all
+writers before restore. Backups are unredacted and can contain credentials.
 
 ### `merge-dataset`
 

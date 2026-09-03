@@ -116,6 +116,10 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data process-eve
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_networkdiag_fetch_all --dry-run
 PYTHONPATH=src python3 -m td_cli --datadir ./data merge-dataset
+
+# Health maintenance and complete data-directory backups
+PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 180 --dry-run
+PYTHONPATH=src python3 -m td_cli --datadir ./data system backups create --output ./hobat-backup
 ```
 
 `otbr-cli topology` runs the complete CLI collection sequence. Detailed
@@ -131,6 +135,13 @@ observations. See [Thread Network Health](doc/thread_network_health.md).
 For health-eligible datasets, the dashboard reads the current stored assessment
 through bounded, read-only `/api/health/*` routes. Run `health process-dataset`
 after a successful cache collection to refresh the assessment shown by the browser.
+
+Health purge commands support dry-run previews and require confirmation unless
+`--yes` is supplied. `system backups create` uses SQLite's backup API and writes
+a checksummed full-data-directory backup outside the active data directory.
+Stop the web server and all writers before `system backups restore`; restore
+validates and stages the backup before replacing the data directory. Backups
+are unredacted and must be protected like the source data.
 
 `ha-matter-ws` connects to `ws://localhost:5580/ws` by default; use `--uri`
 when Matter Server is reachable elsewhere. It is read-only and

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Sequence
@@ -69,6 +70,20 @@ def build_parser() -> argparse.ArgumentParser:
         default="expected",
         help="State to store with --roster-device.",
     )
+    for name, help_text in (
+        ("purge", "Delete health records older than a UTC cutoff"),
+        ("purge-all", "Delete all health-domain records"),
+        ("purge-by-device", "Delete health records for one device"),
+    ):
+        purge = commands.add_parser(name, description=help_text)
+        purge.add_argument("--dry-run", action="store_true")
+        purge.add_argument("--yes", action="store_true")
+        purge.add_argument("--json", action="store_true", dest="json_output")
+        if name == "purge":
+            purge.add_argument("--keep-days", type=int, default=180)
+        if name == "purge-by-device":
+            purge.add_argument("--device", required=True, metavar="EXTADDR")
+            purge.add_argument("--network", dest="network_id")
     return parser
 
 
@@ -122,10 +137,53 @@ def _print_human(document: dict[str, Any], *, dry_run: bool) -> None:
             print(f"- {finding['status'].title()}: {finding['title']} - {finding['summary']}")
 
 
+def _confirm_purge(args: argparse.Namespace) -> bool:
+    if args.dry_run or args.yes:
+        return True
+    return input("Permanently delete matching health records? [y/N] ").strip().lower() == "y"
+
+
+def _run_purge(args: argparse.Namespace, data_dir: Path) -> int:
+    if not _confirm_purge(args):
+        print("Purge cancelled.")
+        return 0
+    store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+    if args.health_command == "purge":
+        if args.keep_days < 0:
+            raise ValueError("--keep-days must be zero or greater")
+        cutoff = datetime.now(timezone.utc) - timedelta(days=args.keep_days)
+        result = store.purge_before(cutoff, dry_run=args.dry_run)
+    elif args.health_command == "purge-all":
+        result = store.purge_all(dry_run=args.dry_run)
+    else:
+        device_id = device_id_from_ext_address(args.device)
+        result = store.purge_device(
+            device_id, network_id=args.network_id, dry_run=args.dry_run
+        )
+    document = {
+        "command": args.health_command,
+        "cutoff": result.cutoff,
+        "dryRun": result.dry_run,
+        "deleted": dict(result.deleted),
+    }
+    if args.json_output:
+        print(json.dumps(document, sort_keys=True))
+    else:
+        mode = "Would delete" if result.dry_run else "Deleted"
+        print(f"{mode} health records:")
+        for table, count in result.deleted.items():
+            print(f"- {table}: {count}")
+        if result.cutoff:
+            print(f"Cutoff (exclusive): {result.cutoff}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     data_dir = resolve_data_dir(args.datadir)
+    if args.health_command in {"purge", "purge-all", "purge-by-device"}:
+        return _run_purge(args, data_dir)
     policy = load_health_policy(args.policy_config_dir or Path.cwd() / "config")
     if args.dry_run and args.export_latest:
         parser.error("--dry-run cannot be combined with --export-latest")

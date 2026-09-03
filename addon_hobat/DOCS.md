@@ -29,6 +29,12 @@ another reverse proxy must forward the dashboard's path-relative `/api/*`
 requests to Hobat; Hobat does not emit CORS authorization headers. This is not
 authentication and does not block direct HTTP clients that can reach port 9165.
 
+The app's `/data` directory can also be backed up with `td_cli system backups
+create`. These backups are unredacted and may contain network credentials and
+device identities. Stop Hobat before restoring one with `td_cli system backups
+restore`; validation and staging complete before the active data directory is
+replaced.
+
 Select **Home Assistant Matter** to view Devices, Diagnostics, Mesh
 Diagnostics, or Topology. Enable **Cache Only** before Sync when the dashboard
 must not contact Matter Server. Refreshes are serialized under one Matter

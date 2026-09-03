@@ -23,6 +23,7 @@ import extaddr_device_label_map
 import mdns_thread_scopes
 import eve_process
 import td_health_cli
+import td_system_cli
 
 import otbr_cli_thread_network_info
 import otbr_cli_router_table
@@ -360,6 +361,22 @@ def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Assess approved cached Thread datasets",
         add_help=False,
     )
+    health_commands.add_parser("purge", help="Delete old health records", add_help=False)
+    health_commands.add_parser("purge-all", help="Delete all health records", add_help=False)
+    health_commands.add_parser(
+        "purge-by-device", help="Delete one device's health records", add_help=False
+    )
+
+
+# type: ignore[type-arg]
+def _add_system_commands(subparsers: argparse._SubParsersAction) -> None:
+    """Build routing-only system administration commands."""
+    system = subparsers.add_parser("system", help="Hobat system administration")
+    system_commands = system.add_subparsers(dest="system_command", required=True)
+    backups = system_commands.add_parser("backups", help="Create or restore backups")
+    backup_actions = backups.add_subparsers(dest="backup_action", required=True)
+    backup_actions.add_parser("create", help="Create a data-directory backup", add_help=False)
+    backup_actions.add_parser("restore", help="Restore a data-directory backup", add_help=False)
 
 
 # type: ignore[type-arg]
@@ -463,6 +480,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_otbr_restapi_commands(subparsers)
     _add_ha_matter_ws_commands(subparsers)
     _add_process_commands(subparsers)
+    _add_system_commands(subparsers)
     _add_merge_commands(subparsers)
 
     # --- hand-crafted "Commands usage:" epilog ---
@@ -483,7 +501,10 @@ def build_parser() -> argparse.ArgumentParser:
         usage: td_cli process-eve [-h] ...
 
     health
-        usage: td_cli health [-h] {process-dataset} ...
+        usage: td_cli health [-h] {process-dataset,purge,purge-all,purge-by-device} ...
+
+    system
+        usage: td_cli system [-h] backups {create,restore} ...
 
     merge-dataset
         usage: td_cli merge-dataset [-h] ...
@@ -500,6 +521,7 @@ def build_parser() -> argparse.ArgumentParser:
         "ha-matter-ws": subparsers._name_parser_map["ha-matter-ws"],
         "process-eve": subparsers._name_parser_map["process-eve"],
         "health": subparsers._name_parser_map["health"],
+        "system": subparsers._name_parser_map["system"],
         "merge-dataset": subparsers._name_parser_map["merge-dataset"],
         "merge-extaddr": subparsers._name_parser_map["merge-extaddr"]
     }
@@ -870,6 +892,20 @@ def _dispatch_health(
     )
 
 
+def _dispatch_system(
+    args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
+) -> int:
+    del parser
+    return _normalize_module_rc(
+        td_system_cli.main(
+            _forward_with_datadir(
+                args, [args.system_command, args.backup_action] + extra_args
+            )
+        ),
+        "td_system_cli.main",
+    )
+
+
 def _dispatch_ha_matter_ws(
     args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
 ) -> int:
@@ -939,6 +975,7 @@ _FAMILY_DISPATCHERS = {
     "ha-matter-ws": _dispatch_ha_matter_ws,
     "process-eve": _dispatch_process_eve,
     "health": _dispatch_health,
+    "system": _dispatch_system,
     "merge-dataset": _dispatch_merge,
     "merge-data": _dispatch_merge,
     "merge-extaddr": _dispatch_merge,
@@ -992,7 +1029,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     single_record_json_output = (
         args.command == "merge-extaddr"
         and any(option in extras for option in ("--read-extaddr", "--update-extaddr"))
-    ) or (args.command == "health" and "--json" in extras)
+    ) or (args.command in {"health", "system"} and "--json" in extras)
 
     if not single_record_json_output:
         print("Thread Network Topology CLI")
@@ -1012,6 +1049,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "ha_matter_diagnostics_command",
         "ha_matter_mesh_diagnostics_command",
         "health_command",
+        "system_command",
+        "backup_action",
     ):
         value = getattr(args, attr, None)
         if value:

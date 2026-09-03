@@ -46,6 +46,35 @@ def test_top_level_json_has_no_banner(tmp_path) -> None:
     assert json.loads(output.getvalue())["datasetId"] == "otbr_cli_networkdiag_fetch_all"
 
 
+def test_top_level_age_purge_dry_run_is_json_and_does_not_mutate(tmp_path) -> None:
+    _seed(tmp_path)
+    assert td_health_cli.main([
+        "--datadir", str(tmp_path), "process-dataset",
+        "--dataset", "otbr_cli_networkdiag_fetch_all",
+    ]) == 0
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert td_cli.main([
+            "--datadir", str(tmp_path), "health", "purge",
+            "--keep-days", "0", "--dry-run", "--json",
+        ]) == 0
+    document = json.loads(output.getvalue())
+    assert document["command"] == "purge"
+    assert document["dryRun"] is True
+    assert document["deleted"]["observations"] == 1
+
+
+def test_purge_by_device_requires_confirmation(tmp_path) -> None:
+    output = io.StringIO()
+    with patch("builtins.input", return_value="n"), redirect_stdout(output):
+        assert td_health_cli.main([
+            "--datadir", str(tmp_path), "purge-by-device",
+            "--device", "8672766ae0578187",
+        ]) == 0
+    assert "cancelled" in output.getvalue().lower()
+    assert not (tmp_path / HOBAT_DATABASE_FILENAME).exists()
+
+
 def test_roster_upsert_state_change_and_list_are_cli_only(tmp_path) -> None:
     _seed(tmp_path)
     output = io.StringIO()

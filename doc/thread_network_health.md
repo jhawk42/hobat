@@ -149,9 +149,51 @@ The filename promotes SQLite to a shared Hobat persistence boundary. The
 existing health tables and their contents are retained unchanged.
 
 The store retains at most 2,000 observations. Pruning occurs in the same write
-transaction and never deletes collector snapshots. Age/byte retention, backup,
-purge, redaction, scheduling, probes, duration, rates, trends, and firmware
-compliance are not implemented.
+transaction and never deletes collector snapshots. Automatic byte retention,
+redaction, scheduling, probes, duration, rates, trends, and firmware compliance
+are not implemented.
+
+## Purge and Backup
+
+Preview or apply age-based health retention; the default is 180 days:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --dry-run
+PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 180 --yes
+```
+
+`observedAt` values strictly older than the UTC cutoff are removed. Cascading
+health rows and stale current pointers are removed in the same transaction;
+roster records are preserved. `purge-all` removes all health-domain records,
+including roster records, while preserving `hobat_v1.db`, schema migrations,
+and non-health tables. `purge-by-device --device EXTADDR` removes that identity's
+health samples, relationships, and roster entry and deletes assessments derived
+from affected observations. Shared observation/source records remain. None of
+these commands removes data from collector snapshots, exports, or backups.
+
+All purge commands support `--dry-run` and `--json`. Mutation requires an
+interactive confirmation or `--yes`.
+
+Create and restore a complete data-directory backup:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data system backups create \
+  --output ./hobat-backup
+PYTHONPATH=src python3 -m td_cli --datadir ./data system backups restore \
+  --input ./hobat-backup --yes
+```
+
+Creation uses SQLite's backup API, excludes SQLite sidecars and transient lock
+files, and writes a versioned manifest with checksums and schema version. The
+output must be outside the active data directory. Restore validates all paths,
+checksums, schema compatibility, and SQLite integrity before staging and
+activating the replacement. Stop the web server and all writers first; restore
+also refuses a database with an active writer. If validation or activation
+fails, the original data directory is retained or restored.
+
+Backups are unredacted and may contain device identifiers, topology, labels,
+network credentials from collector snapshots, and configuration. Restrict
+filesystem access and treat Home Assistant backup inclusion as sensitive.
 
 ## Read API and Dashboard
 
