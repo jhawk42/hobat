@@ -1,9 +1,46 @@
-from unittest import case
-
+import ipaddress
 import util_ot_ctl
 import logging
 
 THREAD_RLOC16_ADDRESS_PREFIX = ":0:ff:fe00:"
+
+
+def extract_rloc16_from_ipv6_address(addr):
+    """Extracts an RLOC16 from an IPv6 address with the Thread RLOC IID."""
+    if not isinstance(addr, str):
+        return None
+    try:
+        address = ipaddress.IPv6Address(addr)
+    except ValueError:
+        return None
+    if address.packed[8:14] != b"\x00\x00\x00\xff\xfe\x00":
+        return None
+    rloc16 = int.from_bytes(address.packed[-2:], "big")
+    if rloc16 >= 0xFFFE:
+        return None
+    return f"0x{rloc16:04x}"
+
+
+def find_rloc16_in_ipv6_addresses(ipv6_addrs):
+    """Returns the first RLOC16 encoded in a list of Thread IPv6 addresses."""
+    if not isinstance(ipv6_addrs, list):
+        return None
+    for addr in ipv6_addrs:
+        rloc16 = extract_rloc16_from_ipv6_address(addr)
+        if rloc16 is not None:
+            return rloc16
+    return None
+
+
+def _rloc16_value(rloc16):
+    if isinstance(rloc16, bool):
+        return None
+    try:
+        value = int(rloc16, 0) if isinstance(rloc16, str) else int(rloc16)
+    except (TypeError, ValueError):
+        return None
+    return value if 0 <= value < 0xFFFE else None
+
 
 def is_router(rloc16):
     """
@@ -17,7 +54,25 @@ def is_router(rloc16):
     Returns:
         True if the rloc16 value indicates a router (ends with "00"), False otherwise.
     """
-    return rloc16.lower().endswith("00")
+    value = _rloc16_value(rloc16)
+    return value is not None and value & 0x03FF == 0
+
+
+def derive_parent_rloc16(child_rloc16):
+    """Derives the parent router RLOC16 by clearing the 10-bit Child ID."""
+    value = _rloc16_value(child_rloc16)
+    if value is None or is_router(value):
+        return None
+    return f"0x{value & 0xFC00:04x}"
+
+
+def is_child_rloc16_of_parent(child_rloc16, parent_rloc16):
+    """Checks whether two RLOC16 values encode a Thread child/parent pair."""
+    parent_value = _rloc16_value(parent_rloc16)
+    if parent_value is None or not is_router(parent_value):
+        return False
+    derived_parent = derive_parent_rloc16(child_rloc16)
+    return derived_parent == f"0x{parent_value:04x}"
 
 def decode_short_thread_version(version):
     """

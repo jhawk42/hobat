@@ -550,7 +550,7 @@ export const DATASET_REGISTRY = [
     defaultPhysicsProfile: "mesh-compact",
     topologyMode: "ha-matter-ws",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 60
   },
   {
@@ -565,7 +565,7 @@ export const DATASET_REGISTRY = [
     defaultPhysicsProfile: "mesh-compact",
     topologyMode: "ha-matter-ws",
     defaultView: "topology",
-    defaultLinkFilter: "default_links",
+    defaultLinkFilter: "all_links",
     estimateActionCostSecs: 60
   },
 

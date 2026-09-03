@@ -181,6 +181,14 @@ assert.deepEqual(
     "ha_matter_ws_topology",
   ],
 );
+assert.ok(
+  DATASET_REGISTRY
+    .filter((entry) => [
+      "ha_matter_ws_dashboard_mesh_diagnostics",
+      "ha_matter_ws_topology",
+    ].includes(entry.value))
+    .every((entry) => entry.defaultLinkFilter === "all_links"),
+);
 assert.ok(DATASET_REGISTRY.every((dataset) => ADAPTOR_HANDLERS[dataset.adaptor]));
 for (const dataset of DATASET_REGISTRY) {
   const finalRawFiles = dataset.files.map((_, index) =>

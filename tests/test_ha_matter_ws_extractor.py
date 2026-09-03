@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import ipaddress
 import json
 from pathlib import Path
 
@@ -79,6 +81,34 @@ def test_exact_thread_paths_do_not_invent_child_table_or_local_neighbor_identity
     assert thread["neighborTable"][0]["isChild"] is True
     assert thread["routeTable"] == []
     assert "childTable" not in thread
+
+
+def test_thread_rloc16_falls_back_to_interface_ipv6_without_overriding_reported_value() -> None:
+    rloc_address = base64.b64encode(
+        ipaddress.IPv6Address("fd3b:a255:4aa6:5483:0:ff:fe00:1c05").packed
+    ).decode()
+    hardware_address = base64.b64encode(bytes.fromhex("1122334455667788")).decode()
+    attributes = {
+        "0/51/0": [
+            {
+                "0": "thread0",
+                "1": True,
+                "4": hardware_address,
+                "5": [],
+                "6": [rloc_address],
+                "7": 4,
+            }
+        ],
+        "0/53/64": None,
+    }
+
+    derived = extract_nodes_info([{"node_id": 1, "attributes": attributes}])[0]
+    reported = extract_nodes_info(
+        [{"node_id": 2, "attributes": {**attributes, "0/53/64": 0x2400}}]
+    )[0]
+
+    assert derived["thread"]["rloc16"] == "0x1c05"
+    assert reported["thread"]["rloc16"] == "0x2400"
 
 
 def test_normalized_records_do_not_retain_sensitive_clusters() -> None:

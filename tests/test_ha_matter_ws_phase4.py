@@ -88,7 +88,7 @@ def test_missing_reporter_identity_and_zero_link_network_remain_valid() -> None:
     validate_topology(topology)
 
 
-def test_reporter_rloc16_is_derived_only_from_mesh_local_rloc_address() -> None:
+def test_reporter_rloc16_is_derived_from_thread_rloc_address() -> None:
     diagnostics = [
         {
             "nodeId": 9,
@@ -112,6 +112,45 @@ def test_reporter_rloc16_is_derived_only_from_mesh_local_rloc_address() -> None:
     }
     assert reporter["topologyId"].endswith(":rloc:0x2401")
     assert reporter["matterId"] == "FABRIC-9"
+
+
+def test_topology_infers_router_and_child_relationships_from_rloc16() -> None:
+    diagnostics = [
+        {
+            "nodeId": 20,
+            "matterId": "FABRIC-20",
+            "extPanId": "0x1111222233334444",
+            "rloc16": "0x4c00",
+            "neighborTable": [],
+            "routeTable": [],
+        },
+        {
+            "nodeId": 21,
+            "matterId": "FABRIC-21",
+            "extPanId": "0x1111222233334444",
+            "rloc16": "0x4c92",
+            "neighborTable": [],
+            "routeTable": [],
+        },
+        {
+            "nodeId": 22,
+            "matterId": "FABRIC-22",
+            "extPanId": "0x9999000011112222",
+            "rloc16": "0x4c93",
+            "neighborTable": [],
+            "routeTable": [],
+        },
+    ]
+
+    topology = build_topology_snapshot(diagnostics)
+    parent = _by_node_id(topology, 20)
+    child = _by_node_id(topology, 21)
+
+    assert parent["isRouter"] is True
+    assert child["isRouter"] is False
+    assert parent["totalChildren"] == 1
+    assert parent["children"][0]["targetId"] == child["topologyId"]
+    assert parent["children"][0]["observations"][0]["source"] == "Rloc16Hierarchy"
 
 
 def test_mesh_snapshot_excludes_relationship_only_nodes_but_topology_keeps_them() -> None:
