@@ -24,41 +24,46 @@ LATEST_REPORT_FILENAME = "td-health-latest.json"
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="td_cli process-health",
-        description="Assess approved cached Thread datasets without live collection.",
-    )
-    parser.add_argument(
-        "--dataset",
-        required=True,
-        choices=sorted(load_health_manifest().datasets),
-        help="Approved health-eligible dataset ID.",
+        prog="td_cli health",
+        description="Thread network health commands.",
     )
     parser.add_argument("--datadir", default=None)
-    parser.add_argument("--allow-partial", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--json", action="store_true", dest="json_output")
-    parser.add_argument(
+    commands = parser.add_subparsers(dest="health_command", required=True)
+    process_dataset = commands.add_parser(
+        "process-dataset",
+        description="Assess approved cached Thread datasets without live collection.",
+    )
+    process_dataset.add_argument(
+        "--dataset",
+        required=True,
+        choices=["all", *sorted(load_health_manifest().datasets)],
+        help="Approved health-eligible dataset ID, or 'all'.",
+    )
+    process_dataset.add_argument("--allow-partial", action="store_true")
+    process_dataset.add_argument("--dry-run", action="store_true")
+    process_dataset.add_argument("--json", action="store_true", dest="json_output")
+    process_dataset.add_argument(
         "--export-latest",
         nargs="?",
         const=LATEST_REPORT_FILENAME,
         metavar="FILE",
         help="Write a non-authoritative latest report under the data directory.",
     )
-    parser.add_argument(
+    process_dataset.add_argument(
         "--policy-config-dir",
         type=Path,
         default=None,
         help="Directory containing td-health-policy.json.",
     )
-    parser.add_argument(
+    process_dataset.add_argument(
         "--init-roster-from-label-map",
         action="store_true",
         help="Explicitly import expected extAddress entries from the static label map.",
     )
-    parser.add_argument("--roster-list", action="store_true", help="List roster records for this network.")
-    parser.add_argument("--roster-device", metavar="EXTADDR", help="Upsert this roster device identity.")
-    parser.add_argument("--roster-label", help="Label to store with --roster-device.")
-    parser.add_argument(
+    process_dataset.add_argument("--roster-list", action="store_true", help="List roster records for this network.")
+    process_dataset.add_argument("--roster-device", metavar="EXTADDR", help="Upsert this roster device identity.")
+    process_dataset.add_argument("--roster-label", help="Label to store with --roster-device.")
+    process_dataset.add_argument(
         "--roster-state",
         choices=("expected", "retired", "intentionally-offline", "intermittent"),
         default="expected",
@@ -132,6 +137,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("roster operations are mutually exclusive")
     if (args.roster_label or args.roster_state != "expected") and not args.roster_device:
         parser.error("--roster-label and --roster-state require --roster-device")
+    if args.dataset == "all" and (roster_actions or args.export_latest):
+        parser.error("--dataset all cannot be combined with roster operations or --export-latest")
 
     if args.init_roster_from_label_map:
         store = SQLiteHealthStore(data_dir / HEALTH_DATABASE_FILENAME)
@@ -173,27 +180,38 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"{record['device_id']} {record['roster_state']}{label}")
         return 0
 
-    kwargs = {
-        "data_dir": data_dir,
-        "dataset_id": args.dataset,
-        "policy": policy,
-        "allow_partial": args.allow_partial,
-    }
-    if args.dry_run:
-        result = build_processing_result(**kwargs)
-    else:
-        store = SQLiteHealthStore(data_dir / HEALTH_DATABASE_FILENAME)
-        result = process_health(**kwargs, store=store)
-    document = result_document(result)
+    dataset_ids = (
+        sorted(load_health_manifest().datasets)
+        if args.dataset == "all"
+        else [args.dataset]
+    )
+    documents = []
+    store = None if args.dry_run else SQLiteHealthStore(data_dir / HEALTH_DATABASE_FILENAME)
+    for dataset_id in dataset_ids:
+        kwargs = {
+            "data_dir": data_dir,
+            "dataset_id": dataset_id,
+            "policy": policy,
+            "allow_partial": args.allow_partial,
+        }
+        if args.dry_run:
+            result = build_processing_result(**kwargs)
+        else:
+            result = process_health(**kwargs, store=store)
+        documents.append(result_document(result))
+    document = documents[0]
     if args.export_latest:
         export_path = Path(args.export_latest)
         if export_path.is_absolute() or export_path.parent != Path("."):
             parser.error("--export-latest must be a leaf filename under --datadir")
         save_json_atomic(document, data_dir / export_path, add_trailing_newline=True)
     if args.json_output:
-        print(json.dumps(document, sort_keys=True))
+        print(json.dumps(documents if args.dataset == "all" else document, sort_keys=True))
     else:
-        _print_human(document, dry_run=args.dry_run)
+        for index, item in enumerate(documents):
+            if index:
+                print()
+            _print_human(item, dry_run=args.dry_run)
     return 0
 
 

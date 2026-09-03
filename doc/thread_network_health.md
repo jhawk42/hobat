@@ -1,6 +1,6 @@
 # Thread Network Health
 
-The health subsystem provides a cache-only `process-health` command. It reads approved JSON
+The health subsystem provides a cache-only `health process-dataset` command. It reads approved JSON
 snapshots from the effective data directory, derives a deterministic assessment,
 and optionally stores immutable history in `td-health.db`. It never starts live
 collection, probes devices, or rewrites collector files.
@@ -10,26 +10,36 @@ collection, probes devices, or rewrites collector files.
 Preview an assessment without creating the database:
 
 ```bash
-PYTHONPATH=src python3 -m td_cli --datadir ./data process-health \
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_networkdiag_fetch_all --dry-run
 ```
 
 Store it atomically and emit one JSON document:
 
 ```bash
-PYTHONPATH=src python3 -m td_cli --datadir ./data process-health \
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_networkdiag_fetch_all --json
 ```
 
 Write a non-authoritative support export after the database commit:
 
 ```bash
-PYTHONPATH=src python3 -m td_cli --datadir ./data process-health \
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_networkdiag_fetch_all --export-latest
 ```
 
 `--export-latest FILE` accepts only a leaf filename under the data directory.
 It cannot be combined with `--dry-run`.
+
+Process every health-eligible dataset in manifest order:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
+  --dataset all --json
+```
+
+For `--dataset all`, JSON output is an array of result documents. Roster
+operations and `--export-latest` require one concrete dataset ID.
 
 ## Eligible Datasets
 
@@ -83,7 +93,7 @@ Expected devices are never enrolled automatically. Import valid `extAddress`
 entries from the static label map explicitly:
 
 ```bash
-PYTHONPATH=src python3 -m td_cli --datadir ./data process-health \
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_networkdiag_fetch_all --init-roster-from-label-map
 ```
 
@@ -97,9 +107,9 @@ reports observation counts, not wall-clock offline duration.
 List or update one network's roster through the CLI-only administration boundary:
 
 ```bash
-PYTHONPATH=src python3 -m td_cli --datadir ./data process-health \
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_networkdiag_fetch_all --roster-list
-PYTHONPATH=src python3 -m td_cli --datadir ./data process-health \
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_networkdiag_fetch_all --roster-device 0011223344556677 \
   --roster-label "Office Router" --roster-state expected
 ```

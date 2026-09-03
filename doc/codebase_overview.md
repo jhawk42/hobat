@@ -39,7 +39,7 @@ browser uses vendored vis-network and sortable table libraries.
 
 | File | Responsibility |
 |---|---|
-| `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `process-health`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
+| `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `health`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
 | `td_webserver.py` | aiohttp application, file action registry, HTTP caching, background jobs, cancellation, and device-label API |
 | `td_const.py` | Authoritative Python cache filenames, data-directory constants, and Thread multicast addresses |
 | `td_device_fields.py` | Python field definitions, preferred names, aliases, identities, and placeholders |

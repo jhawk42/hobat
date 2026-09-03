@@ -105,7 +105,7 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data ha-matter-ws all
 # Other sources and processing
 PYTHONPATH=src python3 -m td_cli --datadir ./data mdns thread
 PYTHONPATH=src python3 -m td_cli --datadir ./data process-eve
-PYTHONPATH=src python3 -m td_cli --datadir ./data process-health \
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_networkdiag_fetch_all --dry-run
 PYTHONPATH=src python3 -m td_cli --datadir ./data merge-dataset
 ```
@@ -114,14 +114,15 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data merge-dataset
 `networkdiag fetch-all` and REST diagnostic sweeps are the highest-impact
 commands; use cached snapshots for repeated analysis.
 
-`process-health` is cache-only: it never invokes a collector or modifies source
+`health process-dataset` is cache-only: it never invokes a collector or modifies source
 snapshots. Remove `--dry-run` to atomically store the observation and assessment
-in `td-health.db`; add `--json` for machine-readable output. Offline assessment
+in `td-health.db`; add `--json` for machine-readable output. Use `--dataset all`
+to process every health-eligible dataset in the manifest. Offline assessment
 requires an explicitly imported expected-device roster and two distinct complete
 observations. See [Thread Network Health](doc/thread_network_health.md).
 For health-eligible datasets, the dashboard reads the current stored assessment
-through bounded, read-only `/api/health/*` routes. Run `process-health` after a
-successful cache collection to refresh the assessment shown by the browser.
+through bounded, read-only `/api/health/*` routes. Run `health process-dataset`
+after a successful cache collection to refresh the assessment shown by the browser.
 
 `ha-matter-ws` connects to `ws://localhost:5580/ws` by default; use `--uri`
 when Matter Server is reachable elsewhere. It is read-only and
