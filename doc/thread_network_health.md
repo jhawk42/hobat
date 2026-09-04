@@ -84,7 +84,9 @@ logged, included in findings, or exported.
 
 Partial evidence is rejected unless `--allow-partial` is supplied. Degraded and
 partial observations cannot become Strong and cannot advance Offline history.
-Their findings remain provisional and confidence is reduced.
+Their findings remain provisional and confidence is reduced. For profiles with
+Border Router authority, Border Router redundancy still renders for partial or
+degraded observations as Unknown instead of Strong or Moderate.
 
 ## Expected Devices and Offline
 
@@ -120,7 +122,9 @@ Supported states are `expected`, `retired`, `intentionally-offline`, and
 
 Python owns all verdicts. Built-in `snapshot-v1` thresholds cover current MAC
 delivery ratios, router-neighbor and child error rates, directional link quality,
-RSS, link margin, attachment, and Router/Border Router resilience. RSS alone is
+RSS, link margin, attachment, and Router/Border Router resilience. Border Router
+redundancy is emitted only for profiles whose evidence can identify Border
+Routers; incomplete observations keep that finding provisional. RSS alone is
 supporting evidence and cannot produce Poor. Critical delivery evidence
 escalates only when direct current evidence also identifies an observed sole
 path.
