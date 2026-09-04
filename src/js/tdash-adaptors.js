@@ -1452,9 +1452,16 @@ export function adaptMergedDetailed(fileMap) {
       const toRloc16 = buildMainRouterRloc16(route.routeId);
       const toId = ensureNodeForLink({ rloc16: toRloc16, id: toRloc16, device_label: toRloc16 }, toRloc16);
       if (!toId) return;
+      const lqiIn = toFiniteNumber(route.linkQualityIn ?? route.inLinkQuality);
+      const lqiOut = toFiniteNumber(route.linkQualityOut ?? route.outLinkQuality);
+      const lqi = Math.max(lqiOut || 0, lqiIn || 0);
+      const lqStyle = lqStyleFromAvgLqi(lqi, 3);
       const toNodeEnriched = nodeMap.get(toId);
       addEdge(edgeMap, edgeData, fromId, toId, {
-        width: 1.5,
+        ...lqStyle,
+        lqiIn,
+        lqiOut,
+        routeCost: toFiniteNumber(route.routeCost),
         ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
         linkCategories: routeCategories,
         edgeKeySuffix: 'merged-otbr-route'
@@ -1483,10 +1490,21 @@ export function adaptMergedDetailed(fileMap) {
         shape: NODE_SHAPES.child,
         color: NODE_COLORS.child,
       });
+      const childLq = toFiniteNumber(child.linkQuality ?? child.incomingLinkQuality ?? child.lq);
+      const linkMargin = toFiniteNumber(child.rss_margin ?? child.linkMargin);
+      const lqStyle = Number.isFinite(childLq)
+        ? lqStyleFromAvgLqi(childLq, 3)
+        : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
         isParentChild: true,
+        ...lqStyle,
+        linkMargin,
+        averageRssi: toFiniteNumber(child.rss_ave ?? child.averageRssi),
+        lastRssi: toFiniteNumber(child.rss_last ?? child.lastRssi),
+        frameErrorRate: toFiniteNumber(child.err_rate_frame_pct ?? child.frameErrorRate),
+        messageErrorRate: toFiniteNumber(child.err_rate_msg_pct ?? child.messageErrorRate),
         ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
         linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
         edgeKeySuffix: 'merged-otbr-child'
@@ -1499,10 +1517,21 @@ export function adaptMergedDetailed(fileMap) {
       if (!toText(childNode.rloc16) && !toText(childNode.extaddr)) return; // skip object refs without Thread identity
       const childId = ensureNodeForLink(childNode, `${fromId}-child-${ci + 1}`);
       if (!childId) return;
+      const childLq = toFiniteNumber(childNode.linkQuality ?? childNode.incomingLinkQuality ?? childNode.lq);
+      const linkMargin = toFiniteNumber(childNode.rss_margin ?? childNode.linkMargin);
+      const lqStyle = Number.isFinite(linkMargin)
+        ? lqStyleFromLinkMargin(linkMargin)
+        : (Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {});
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
         isParentChild: true,
+        ...lqStyle,
+        linkMargin,
+        averageRssi: toFiniteNumber(childNode.rss_ave ?? childNode.averageRssi),
+        lastRssi: toFiniteNumber(childNode.rss_last ?? childNode.lastRssi),
+        frameErrorRate: toFiniteNumber(childNode.err_rate_frame_pct ?? childNode.frameErrorRate),
+        messageErrorRate: toFiniteNumber(childNode.err_rate_msg_pct ?? childNode.messageErrorRate),
         ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
         linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN],
         edgeKeySuffix: 'merged-default-child'
