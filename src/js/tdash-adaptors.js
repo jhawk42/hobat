@@ -1859,6 +1859,7 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
         upsertOtbrRestApiNode(childId, { rloc16: childRloc16, id: childId, mode: child.mode },
           { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
       }
+      if (childRloc16) rloc16ToNodeId.set(childRloc16.toLowerCase(), childId);
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
@@ -1884,6 +1885,13 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
         || childRloc16
         || `${fromId}-children-${ci + 1}`;
       if (!nodeMap.has(childId)) {
+        upsertOtbrRestApiNode(childId, {
+          id: childId,
+          rloc16: childRloc16,
+          extAddress: childExtaddr,
+          mode: { deviceTypeFTD: child.deviceTypeFTD },
+        }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
+      } else if (childExtaddr || childRloc16) {
         upsertOtbrRestApiNode(childId, {
           id: childId,
           rloc16: childRloc16,
