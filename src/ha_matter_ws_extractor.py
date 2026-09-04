@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from util_network import find_rloc16_in_ipv6_addresses
+
 from ha_matter_ws_contract import (
     BASIC_INFORMATION_ATTRIBUTES,
     GENERAL_DIAGNOSTICS_ATTRIBUTES,
@@ -510,9 +512,14 @@ def _extract_thread(
         for path, value in attributes.items()
         if re.fullmatch(r"0/53/\d+", path) and path not in known_paths
     }
+    ipv6_addresses = thread_interface["ipv6Addresses"] if thread_interface else []
+    rloc16 = _rloc16(values.get("Rloc16"))
+    if rloc16 is None:
+        rloc16 = find_rloc16_in_ipv6_addresses(ipv6_addresses)
+
     return {
         "extAddress": ext_address,
-        "rloc16": _rloc16(values.get("Rloc16")),
+        "rloc16": rloc16,
         "channel": values.get("Channel"),
         "routingRole": ROUTING_ROLE_ENUM.get(role, f"Unknown ({role})") if role is not None else None,
         "networkName": values.get("NetworkName"),
@@ -521,7 +528,7 @@ def _extract_thread(
         "meshLocalPrefix": values.get("MeshLocalPrefix"),
         "partitionId": values.get("PartitionId"),
         "clusterRevision": values.get("ClusterRevision"),
-        "ipv6Addresses": thread_interface["ipv6Addresses"] if thread_interface else [],
+        "ipv6Addresses": ipv6_addresses,
         "neighborTable": _decode_struct_list(values.get("NeighborTable"), NEIGHBOR_TABLE_FIELDS),
         "routeTable": _decode_struct_list(values.get("RouteTable"), ROUTE_TABLE_FIELDS),
         "macCounters": mac_counters,

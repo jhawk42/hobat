@@ -44,6 +44,20 @@ def test_load_dataset_has_stale_session_guards() -> None:
     )
 
 
+def test_completed_job_fetches_the_new_snapshot_without_redispatching() -> None:
+    text = _read_text(DATASET_JS)
+
+    completed_fetch = text.find('finalResponse = await fetch(`/api/data/${filename}`')
+    cache_header = text.find(
+        '"Cache-Control": `max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`',
+        completed_fetch,
+    )
+    redispatch_guard = text.find("if (finalResponse.status === 202)", completed_fetch)
+
+    assert completed_fetch != -1
+    assert completed_fetch < cache_header < redispatch_guard
+
+
 
 def test_ui_cancel_path_keeps_current_view_on_cancellation() -> None:
     """Regression guard: cancellation must keep existing rendered view (no partial overwrite)."""

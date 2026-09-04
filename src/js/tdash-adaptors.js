@@ -1992,9 +1992,16 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
 
 // ── Adaptor 7: Home Assistant Matter WebSocket canonical snapshots ──────────
 
-export function adaptHaMatterWs(fileMap) {
+export function adaptHaMatterWs(fileMap, extractedRows, rowExtractor = '') {
   const payload = fileMap.values().next().value;
-  const rows = Array.isArray(payload) ? payload : asArray(payload?.topology);
+  const rows = rowExtractor
+    ? [
+        ...asArray(extractedRows),
+        ...(rowExtractor === 'ha-matter-ws-mesh-diagnostics'
+          ? asArray(payload?.topology).filter((row) => row?.relationshipOnly === true)
+          : []),
+      ]
+    : (Array.isArray(payload) ? payload : asArray(payload?.topology));
   const model = createAdaptorModel(['ha-matter-ws']);
   const topologyIdToDeviceId = new Map();
   const relationships = new Map();
@@ -2149,7 +2156,11 @@ export const ADAPTOR_HANDLERS = Object.freeze({
   'thread-tools-native': (fileMap) => adaptThreadToolsNative(fileMap),
   'router-table': (fileMap) => adaptRouterTable(fileMap),
   'otbr-restapi': (fileMap, rows) => adaptOtbrRestApi(fileMap, rows),
-  'ha-matter-ws': (fileMap) => adaptHaMatterWs(fileMap),
+  'ha-matter-ws': (fileMap, rows, entry) => adaptHaMatterWs(
+    fileMap,
+    rows,
+    entry?.rowExtractor,
+  ),
   'raw-array': (fileMap) => adaptRawArray(fileMap),
 });
 
@@ -2158,5 +2169,5 @@ export function runAdaptor(dataset) {
   const fileMap = buildFileMap(entry.files || [], rawFiles);
   const handler = ADAPTOR_HANDLERS[entry.adaptor];
   if (!handler) throw new Error(`Unknown adaptor: ${entry.adaptor}`);
-  return handler(fileMap, rows);
+  return handler(fileMap, rows, entry);
 }

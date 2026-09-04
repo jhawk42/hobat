@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import ipaddress
 import re
 
 from copy import deepcopy
@@ -11,6 +10,11 @@ from typing import Any, Iterable, Mapping
 
 from ha_matter_ws_snapshots import assert_snapshot_safe
 from td_device_fields import normalize_input_record
+from util_network import (
+    extract_rloc16_from_ipv6_address,
+    is_child_rloc16_of_parent,
+    is_router,
+)
 
 
 class TopologyValidationError(ValueError):
@@ -69,26 +73,13 @@ def _topology_id(record: Mapping[str, Any]) -> str:
 
 
 def _derive_rloc16(record: Mapping[str, Any]) -> tuple[str | None, str | None]:
-    prefix_value = record.get("meshLocalPrefix")
     addresses = record.get("ipv6Addresses")
-    if not isinstance(prefix_value, str) or not isinstance(addresses, list):
-        return None, None
-    try:
-        prefix = ipaddress.IPv6Network(prefix_value, strict=False)
-    except ValueError:
+    if not isinstance(addresses, list):
         return None, None
     for value in addresses:
-        if not isinstance(value, str):
-            continue
-        try:
-            address = ipaddress.IPv6Address(value)
-        except ValueError:
-            continue
-        if address not in prefix or address.packed[8:14] != b"\x00\x00\x00\xff\xfe\x00":
-            continue
-        rloc16 = _rloc16(f"0x{int.from_bytes(address.packed[-2:], 'big'):04x}")
+        rloc16 = extract_rloc16_from_ipv6_address(value)
         if rloc16 is not None:
-            return rloc16, str(address)
+            return rloc16, value
     return None, None
 
 
@@ -109,6 +100,7 @@ def _initialize_node(record: Mapping[str, Any]) -> dict[str, Any]:
         node.pop("extAddress", None)
     if rloc16 is not None:
         node["rloc16"] = rloc16
+        node["isRouter"] = is_router(rloc16)
     else:
         node.pop("rloc16", None)
     node["topologyId"] = _topology_id(node)
@@ -204,6 +196,7 @@ class _TopologyIndex:
             placeholder["extAddress"] = ext_address
         if rloc16 is not None:
             placeholder["rloc16"] = rloc16
+            placeholder["isRouter"] = is_router(rloc16)
         placeholder["topologyId"] = _topology_id(placeholder)
         self.nodes.append(placeholder)
         self._index(placeholder)
@@ -299,6 +292,43 @@ def _derive_reporter_relationships(
             )
 
 
+def _infer_rloc16_children(nodes: list[dict[str, Any]]) -> None:
+    for parent in nodes:
+        parent_rloc16 = parent.get("rloc16")
+        if not is_router(parent_rloc16):
+            continue
+        for child in nodes:
+            if (
+                child is parent
+                or child.get("relationshipOnly")
+                or _network_key(child) != _network_key(parent)
+            ):
+                continue
+            child_rloc16 = child.get("rloc16")
+            if not is_child_rloc16_of_parent(child_rloc16, parent_rloc16):
+                continue
+            relationship = {
+                "sourceId": parent["topologyId"],
+                "targetId": child["topologyId"],
+                "direction": "outbound",
+                "extAddress": child.get("extAddress"),
+                "rloc16": child_rloc16,
+                "observations": [
+                    {
+                        "source": "Rloc16Hierarchy",
+                        "reporterMatterId": parent.get("matterId"),
+                        "sourceId": parent["topologyId"],
+                        "targetId": child["topologyId"],
+                        "entry": {
+                            "parentRloc16": parent_rloc16,
+                            "childRloc16": child_rloc16,
+                        },
+                    }
+                ],
+            }
+            _merge_relationship(parent["children"], relationship)
+
+
 def _set_totals(node: dict[str, Any]) -> None:
     node["totalLinks"] = len(node["routerNeighbors"])
     node["totalChildren"] = len(node["children"])
@@ -345,6 +375,7 @@ def build_topology_snapshot(
     index = _TopologyIndex(nodes)
     for reporter in reporters:
         _derive_reporter_relationships(reporter, index)
+    _infer_rloc16_children(nodes)
     for node in nodes:
         _set_totals(node)
     nodes.sort(

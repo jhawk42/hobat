@@ -36,13 +36,33 @@ def test_network_helpers_cover_prefix_identity_and_address_selection(monkeypatch
     assert util_network.fetch_meshlocal_prefix() == "fd00:1234::/64"
     assert util_network.build_rloc_ipv6_address_prefix("fd00:1234::/64") == "fd00:1234:0:ff:fe00:"
     assert util_network.build_omr_ipv6_address_prefix("fd00:abcd::/64") == "fd00:abcd"
-    assert util_network.is_router("0x4A00") is True
+    assert util_network.is_router("0x4C00") is True
     assert util_network.is_router("0x4a01") is False
+    assert util_network.is_router("invalid") is False
+    assert util_network.derive_parent_rloc16("0x4c92") == "0x4c00"
+    assert util_network.derive_parent_rloc16("0x4c00") is None
+    assert util_network.is_child_rloc16_of_parent("0x4c92", "0x4c00") is True
+    assert util_network.is_child_rloc16_of_parent("0x5092", "0x4c00") is False
+    assert util_network.is_child_rloc16_of_parent("0x4c92", "0x4c01") is False
     assert util_network.find_omr_address_in_list(
         ["fd00:1234::1", "fd00:abcd::2"],
         "fd00:abcd",
     ) == "fd00:abcd::2"
     assert util_network.find_omr_address_in_list([], "fd00:abcd") is None
+
+
+def test_network_helpers_extract_rloc16_from_thread_ipv6_addresses() -> None:
+    assert util_network.extract_rloc16_from_ipv6_address(
+        "fd3b:a255:4aa6:5483:0:ff:fe00:1c05"
+    ) == "0x1c05"
+    assert util_network.extract_rloc16_from_ipv6_address(
+        "FD3B:A255:4AA6:5483:0000:00FF:FE00:4C00"
+    ) == "0x4c00"
+    assert util_network.find_rloc16_in_ipv6_addresses(
+        ["fe80::1", "fd3b:a255:4aa6:5483:0:ff:fe00:1c05"]
+    ) == "0x1c05"
+    assert util_network.extract_rloc16_from_ipv6_address("fd3b:a255::1c05") is None
+    assert util_network.find_rloc16_in_ipv6_addresses(None) is None
 
 
 def test_ot_ctl_dispatch_selects_container_command_and_timeout(monkeypatch) -> None:

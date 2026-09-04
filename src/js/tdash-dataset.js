@@ -33,6 +33,7 @@ const fileMaxAgeCache = new Map();
 let _forceFresh = false;
 // Only cache mode — send max-age = 365 days to use only cached files
 let _onlyCache = false;
+const _CACHE_ONLY_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 // delay after job completion before fetching file (for filesystem sync)
 const _JOB_COMPLETION_WAIT_MS = 1000; // 1 second
 
@@ -553,10 +554,15 @@ async function pollJobUntilDone(
       // hasn't been completely written to disk yet (especially on slower I/O).
       await new Promise((resolve) => setTimeout(resolve, _JOB_COMPLETION_WAIT_MS));
 
-      // Fetch the completed file directly (no force headers — it's now cached).
+      // Read the snapshot just written by the completed job without dispatching again.
       let finalResponse;
       try {
-        finalResponse = await fetch(`/api/data/${filename}`, { signal });
+        finalResponse = await fetch(`/api/data/${filename}`, {
+          headers: {
+            "Cache-Control": `max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`,
+          },
+          signal,
+        });
       } catch (err) {
         if (_isAbortError(err)) {
           throw new FetchCancelledError(
@@ -568,6 +574,11 @@ async function pollJobUntilDone(
       if (!finalResponse.ok) {
         throw new Error(
           `/api/data/${filename} returned HTTP ${finalResponse.status} after job done`,
+        );
+      }
+      if (finalResponse.status === 202) {
+        throw new Error(
+          `/api/data/${filename} dispatched another job after job done`,
         );
       }
       _emitDatasetActivity("api-response", {
@@ -734,8 +745,8 @@ export async function loadDataset(entryValue, options = {}) {
         if (_forceFresh) {
           reqHeaders["Cache-Control"] = "no-cache";
         } else if (_onlyCache) {
-          // 365 days in seconds: 365 * 24 * 60 * 60 = 31536000
-          reqHeaders["Cache-Control"] = "max-age=31536000";
+          reqHeaders["Cache-Control"] =
+            `max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`;
         } else {
           const cached = fileMaxAgeCache.get(f);
           if (cached) reqHeaders["Cache-Control"] = `max-age=${cached.maxAge}`;
