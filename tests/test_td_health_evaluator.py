@@ -172,6 +172,42 @@ def test_complete_topology_profile_reports_border_router_redundancy() -> None:
     )
 
 
+def test_partial_authoritative_profile_reports_provisional_border_router_redundancy() -> None:
+    observation = replace(
+        _observation(_relationship()),
+        completeness=Completeness.PARTIAL,
+        devices=(
+            DeviceSample(
+                "extaddr:1111111111111111",
+                "1111111111111111",
+                "router",
+                None,
+                True,
+                ("source.json",),
+            ),
+            DeviceSample(
+                "extaddr:2222222222222222",
+                "2222222222222222",
+                "router",
+                None,
+                True,
+                ("source.json",),
+            ),
+        ),
+    )
+
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    finding = next(
+        finding
+        for finding in assessment.findings
+        if finding.rule_id == "network.border-router-redundancy"
+    )
+
+    assert finding.status is HealthStatus.UNKNOWN
+    assert finding.evidence["observedBorderRouterCount"] == 2
+    assert "provisional" in finding.summary
+
+
 def test_profile_capability_changes_assessment_identity() -> None:
     observation = _observation(_relationship())
     policy = load_health_policy()

@@ -52,12 +52,13 @@ def test_processor_uses_extpan_identity_and_normalizes_devices(tmp_path) -> None
     assert result.observation.completeness is Completeness.COMPLETE
     assert result.assessment.status is HealthStatus.UNKNOWN
     assert result.assessment.confidence.value == "medium"
-    assert result.assessment.coverage["pillars"]["resilience"] == "missing"
+    assert result.assessment.coverage["pillars"]["resilience"] == "limited"
     assert not any(
-        finding.rule_id in {
-            "network.current-path-redundancy",
-            "network.border-router-redundancy",
-        }
+        finding.rule_id == "network.current-path-redundancy"
+        for finding in result.assessment.findings
+    )
+    assert any(
+        finding.rule_id == "network.border-router-redundancy"
         for finding in result.assessment.findings
     )
 
@@ -282,12 +283,15 @@ def test_complete_rest_topology_mdns_profile_reports_border_router_redundancy(tm
         policy=load_health_policy(),
         allow_partial=True,
     )
+    partial_finding = next(
+        finding
+        for finding in partial.assessment.findings
+        if finding.rule_id == "network.border-router-redundancy"
+    )
 
     assert partial.observation.completeness is Completeness.PARTIAL
-    assert not any(
-        finding.rule_id == "network.border-router-redundancy"
-        for finding in partial.assessment.findings
-    )
+    assert partial_finding.status is HealthStatus.UNKNOWN
+    assert "provisional" in partial_finding.summary
 
 
 def test_border_router_omr_address_reports_strong_external_routing(tmp_path) -> None:

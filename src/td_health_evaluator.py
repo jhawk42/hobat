@@ -239,23 +239,26 @@ def evaluate_observation(
             source_files=tuple(sorted({source for device in observation.devices for source in device.source_files})),
             confidence=Confidence.HIGH if router_count else Confidence.LOW,
         ))
-    if profile.border_router_authority and complete:
+    if profile.border_router_authority:
+        border_router_summary = f"Observed {border_router_count} Border Router{'s' if border_router_count != 1 else ''}."
+        if not complete:
+            border_router_summary += f" Source completeness is {observation.completeness.value}, so redundancy is provisional."
         findings.append(_finding(
             observation,
             rule_id="network.border-router-redundancy",
             status=(
-                HealthStatus.UNKNOWN if border_router_count == 0
+                HealthStatus.UNKNOWN if not complete or border_router_count == 0
                 else HealthStatus.MODERATE if border_router_count == 1
                 else HealthStatus.STRONG
             ),
             scope=FindingScope.NETWORK,
-            rank=FindingRank.MODERATE if border_router_count == 1 else FindingRank.INFO,
+            rank=FindingRank.MODERATE if complete and border_router_count == 1 else FindingRank.INFO,
             title="Border Router redundancy",
-            summary=f"Observed {border_router_count} Border Router{'s' if border_router_count != 1 else ''}.",
+            summary=border_router_summary,
             why="One Border Router is a resilience warning; zero is not failure unless absence is authoritative.",
             evidence={"observedBorderRouterCount": border_router_count, "moreThanOne": border_router_count > 1},
             action=(
-                "Collect Border-Router-bearing evidence." if border_router_count == 0
+                "Collect complete Border-Router-bearing evidence." if not complete or border_router_count == 0
                 else "Add or restore a second Border Router if resilience is required."
             ),
             verify="Process a complete Border-Router-bearing observation.",
@@ -266,7 +269,7 @@ def evaluate_observation(
                 if device.is_border_router
                 for source in device.source_files
             })),
-            confidence=Confidence.HIGH if border_router_count else Confidence.LOW,
+            confidence=Confidence.HIGH if complete and border_router_count else Confidence.LOW,
         ))
 
     if profile.border_router_authority and complete and omr_prefix:

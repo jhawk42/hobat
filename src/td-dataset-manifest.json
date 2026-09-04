@@ -113,11 +113,11 @@
         "availability": "sufficient",
         "connectivity": "limited",
         "delivery": "sufficient",
-        "resilience": "missing",
-        "externalRouting": "missing"
+        "resilience": "limited",
+        "externalRouting": "limited"
       },
       "topologyAuthority": false,
-      "borderRouterAuthority": false
+      "borderRouterAuthority": true
     },
     "otbr-cli-topology-diagnostics-v1": {
       "identityFile": "td-otbr-cli-thread-network-info.json",
@@ -127,10 +127,10 @@
         "connectivity": "sufficient",
         "delivery": "sufficient",
         "resilience": "sufficient",
-        "externalRouting": "missing"
+        "externalRouting": "limited"
       },
       "topologyAuthority": true,
-      "borderRouterAuthority": false
+      "borderRouterAuthority": true
     },
     "otbr-cli-topology-diagnostics-mdns-v1": {
       "identityFile": "td-otbr-cli-thread-network-info.json",
@@ -154,11 +154,11 @@
         "availability": "sufficient",
         "connectivity": "limited",
         "delivery": "sufficient",
-        "resilience": "missing",
-        "externalRouting": "missing"
+        "resilience": "limited",
+        "externalRouting": "limited"
       },
       "topologyAuthority": false,
-      "borderRouterAuthority": false
+      "borderRouterAuthority": true
     },
     "otbr-restapi-topology-diagnostics-v1": {
       "identityFile": "td-otbr-restapi-dataset-active.json",
@@ -171,10 +171,10 @@
         "connectivity": "sufficient",
         "delivery": "sufficient",
         "resilience": "sufficient",
-        "externalRouting": "missing"
+        "externalRouting": "limited"
       },
       "topologyAuthority": true,
-      "borderRouterAuthority": false
+      "borderRouterAuthority": true
     },
     "otbr-restapi-topology-diagnostics-mdns-v1": {
       "identityFile": "td-otbr-restapi-dataset-active.json",

@@ -31,17 +31,18 @@ def test_manifest_contains_only_approved_datasets() -> None:
         "td-otbr-cli-networkdiag-fetch-all.json",
     )
     networkdiag_profile = manifest.dataset("otbr_cli_networkdiag_fetch_all").health_profile
-    assert networkdiag_profile.coverage["resilience"] == "missing"
+    assert networkdiag_profile.coverage["resilience"] == "limited"
     assert not networkdiag_profile.topology_authority
+    assert networkdiag_profile.border_router_authority
     assert manifest.dataset(
         "otbr_cli_topology_health"
-    ).health_profile.coverage["externalRouting"] == "missing"
+    ).health_profile.border_router_authority
     assert manifest.dataset(
         "otbr_restapi_devices_fetch_diagnostics_fetch_all"
-    ).health_profile.coverage["resilience"] == "missing"
+    ).health_profile.border_router_authority
     assert manifest.dataset(
         "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all"
-    ).health_profile.coverage["externalRouting"] == "missing"
+    ).health_profile.border_router_authority
     assert manifest.dataset("otbr_restapi_topology_mdns_health").health_profile.required_outcomes == (
         "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
         "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
