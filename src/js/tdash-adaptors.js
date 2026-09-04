@@ -1136,6 +1136,14 @@ export function adaptThreadToolsNative(fileMap) {
           mode: { ...childObj.mode, ftd: childObj.isDeviceTypeFtd },
           type: childObj.isDeviceTypeFtd === false ? 'child' : '',
         }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
+      } else if (childExtaddr || childRloc16) {
+        upsertThreadToolsNode(childId, {
+          id: childId,
+          rloc16: childRloc16,
+          extAddress: childExtaddr,
+          mode: { ...childObj.mode, ftd: childObj.isDeviceTypeFtd },
+          type: childObj.isDeviceTypeFtd === false ? 'child' : '',
+        }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
       }
 
       const linkMargin = toFiniteNumber(childObj.linkMargin);
