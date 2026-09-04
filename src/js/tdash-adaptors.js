@@ -1370,8 +1370,12 @@ export function adaptMergedDetailed(fileMap) {
     if (!candidateId) return '';
     if (!nodeMap.has(candidateId)) {
       upsertMergedNode(candidateId, {
-        rloc16: toText(linkNode.rloc16), id: toText(linkNode.id) || candidateId,
-        device_label: toText(linkNode.device_label), name: toText(linkNode.name)
+        ...linkNode,
+        rloc16: toText(linkNode.rloc16),
+        id: toText(linkNode.id) || candidateId,
+        extaddr: getCanonicalExtaddr(linkNode),
+        device_label: toText(linkNode.device_label) || toText(linkNode.deviceLabel),
+        name: toText(linkNode.name),
       }, { source: 'merged-detailed', shape: NODE_SHAPES.router, color: NODE_COLORS.eve });
     }
     return candidateId;
@@ -1457,12 +1461,28 @@ export function adaptMergedDetailed(fileMap) {
       });
     });
     (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
-      const childRloc16 = buildChildRloc16(node.rloc16, child.childId);
+      const childRloc16 = toText(child.rloc16) || buildChildRloc16(node.rloc16, child.childId);
+      const childExtaddr = getCanonicalExtaddr(child);
+      const childFallbackId = `${fromId}-rest-child-${ci + 1}`;
+      const childLabel = toText(child.device_label) || toText(child.deviceLabel);
+      const childRecord = {
+        ...child,
+        rloc16: childRloc16,
+        extaddr: childExtaddr,
+        id: toText(child.id) || childRloc16 || childExtaddr || childFallbackId,
+        device_label: childLabel
+          || (!childRloc16 && child.childId !== undefined ? `${fromId} child ${child.childId}` : ''),
+      };
       const childId = ensureNodeForLink(
-        { rloc16: childRloc16, id: childRloc16 || `${fromId}-rest-child-${ci + 1}`, device_label: childRloc16 || `${fromId} child ${child.childId}` },
-        childRloc16 || `${fromId}-rest-child-${ci + 1}`
+        childRecord,
+        childRloc16 || childExtaddr || childFallbackId
       );
       if (!childId) return;
+      upsertMergedNode(childId, childRecord, {
+        source: 'merged-detailed',
+        shape: NODE_SHAPES.child,
+        color: NODE_COLORS.child,
+      });
       const childNodeEnriched = nodeMap.get(childId);
       addEdge(edgeMap, edgeData, fromId, childId, {
         dashes: false,
