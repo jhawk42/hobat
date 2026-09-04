@@ -74,10 +74,11 @@ def _finding(
     verify: str,
     device_ids: tuple[str, ...] = (),
     relationship_ids: tuple[str, ...] = (),
+    target_parts: tuple[str, ...] = (),
     source_files: tuple[str, ...] = (),
     confidence: Confidence = Confidence.HIGH,
 ) -> Finding:
-    target = ",".join((*device_ids, *relationship_ids)) or observation.network_id
+    target = ",".join((*device_ids, *relationship_ids, *target_parts)) or observation.network_id
     return Finding(
         finding_id=_stable_id("finding", observation.observation_id, rule_id, target),
         rule_id=rule_id,
@@ -401,6 +402,7 @@ def evaluate_observation(
                     action="Compare against a future observation before treating this as a current failure.",
                     verify="Process another complete observation and compare the delta or trend.",
                     device_ids=(metric.device_id,),
+                    target_parts=(metric.source_file,),
                     source_files=(metric.source_file,),
                     confidence=Confidence.LOW,
                 )
@@ -447,6 +449,7 @@ def evaluate_observation(
                 action="Inspect link conditions and packet counters for this device.",
                 verify="Process another complete observation with a valid packet denominator.",
                 device_ids=(metric.device_id,),
+                target_parts=(metric.source_file,),
                 source_files=(metric.source_file,),
             )
         )

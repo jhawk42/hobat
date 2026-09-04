@@ -180,9 +180,9 @@ strategy, row extractor, adaptor, default view, link filter, physics profile,
 and estimated action cost.
 
 Health datasets declare `healthEligible` and `healthProfile`. A cross-language
-contract test keeps their source, files,
-merge strategy, extractor, adaptor, and profile aligned with
-`td-dataset-manifest.json`. For eligible datasets, `tdash-health.js` reads a
+contract test keeps active browser entries marked `healthEligible: true` aligned
+with `td-dataset-manifest.json`, including their source, files, merge strategy,
+extractor, adaptor, and profile. For eligible datasets, `tdash-health.js` reads a
 pinned assessment from the query-only `/api/health/*` routes and renders its
 status, five-pillar coverage, grouped findings, bounded history metadata, and
 device-attributed findings. Python remains the only verdict owner.

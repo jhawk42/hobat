@@ -13,13 +13,12 @@ from td_health_manifest import HealthManifestError, load_health_manifest
 
 EXPECTED_DATASETS = {
     "otbr_cli_networkdiag_fetch_all",
-    "otbr_cli_meshdiag_topology_networkdiag_fetch_all_mdns_scopes_thread",
+    "otbr_cli_topology_health",
     "otbr_cli_topology_mdns_health",
-    "otbr_restapi_diagnostics_fetch_all",
     "otbr_restapi_devices_fetch_diagnostics_fetch_all",
-    "otbr_restapi_mesh_diagnostics_fetch_all",
     "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all",
     "otbr_restapi_topology_mdns_health",
+    "merged_otbr_topology_mdns_health",
 }
 
 
@@ -35,14 +34,11 @@ def test_manifest_contains_only_approved_datasets() -> None:
     assert networkdiag_profile.coverage["resilience"] == "missing"
     assert not networkdiag_profile.topology_authority
     assert manifest.dataset(
-        "otbr_cli_meshdiag_topology_networkdiag_fetch_all_mdns_scopes_thread"
-    ).health_profile.identity_file == "td-otbr-cli-thread-network-info.json"
+        "otbr_cli_topology_health"
+    ).health_profile.coverage["externalRouting"] == "missing"
     assert manifest.dataset(
         "otbr_restapi_devices_fetch_diagnostics_fetch_all"
     ).health_profile.coverage["resilience"] == "missing"
-    assert not manifest.dataset(
-        "otbr_restapi_mesh_diagnostics_fetch_all"
-    ).health_profile.topology_authority
     assert manifest.dataset(
         "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all"
     ).health_profile.coverage["externalRouting"] == "missing"
@@ -50,6 +46,9 @@ def test_manifest_contains_only_approved_datasets() -> None:
         "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
         "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
     )
+    merged_profile = manifest.dataset("merged_otbr_topology_mdns_health").health_profile
+    assert merged_profile.identity_file == "td-otbr-cli-thread-network-info.json"
+    assert merged_profile.profile_id == "merged-otbr-topology-diagnostics-mdns-v1"
 
 
 def test_manifest_rejects_unknown_dataset() -> None:

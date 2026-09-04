@@ -71,6 +71,40 @@ def test_bidirectional_lq3_is_positive_evidence() -> None:
     assert any(f.rule_id == "relationship.bidirectional-lq3" for f in assessment.findings)
 
 
+def test_same_device_metric_from_multiple_sources_has_unique_finding_ids() -> None:
+    observation = replace(
+        _observation(_relationship()),
+        metrics=(
+            MetricSample(
+                "extaddr:1111111111111111",
+                "parentChanges",
+                9.0,
+                "count",
+                None,
+                "source-a.json",
+            ),
+            MetricSample(
+                "extaddr:1111111111111111",
+                "parentChanges",
+                12.0,
+                "count",
+                None,
+                "source-b.json",
+            ),
+        ),
+    )
+
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    metric_findings = [
+        finding
+        for finding in assessment.findings
+        if finding.rule_id == "device.parentChanges"
+    ]
+
+    assert len(metric_findings) == 2
+    assert len({finding.finding_id for finding in metric_findings}) == 2
+
+
 def test_complete_topology_profile_reports_border_router_redundancy() -> None:
     observation = _observation(_relationship())
     source_files = (

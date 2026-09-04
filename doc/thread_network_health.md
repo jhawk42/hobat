@@ -48,18 +48,17 @@ The shared manifest currently permits these dataset IDs:
 | Source | Dataset ID | Health profile |
 |---|---|---|
 | OTBR CLI | `otbr_cli_networkdiag_fetch_all` | `otbr-cli-networkdiag-v1` |
-| OTBR CLI | `otbr_cli_meshdiag_topology_networkdiag_fetch_all_mdns_scopes_thread` | `otbr-cli-topology-networkdiag-mdns-v1` |
+| OTBR CLI | `otbr_cli_topology_health` | `otbr-cli-topology-diagnostics-v1` |
 | OTBR CLI | `otbr_cli_topology_mdns_health` | `otbr-cli-topology-diagnostics-mdns-v1` |
-| OTBR REST | `otbr_restapi_diagnostics_fetch_all` | `otbr-restapi-diagnostics-v1` |
 | OTBR REST | `otbr_restapi_devices_fetch_diagnostics_fetch_all` | `otbr-restapi-devices-diagnostics-v1` |
-| OTBR REST | `otbr_restapi_mesh_diagnostics_fetch_all` | `otbr-restapi-mesh-diagnostics-v1` |
 | OTBR REST | `otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all` | `otbr-restapi-topology-diagnostics-v1` |
 | OTBR REST | `otbr_restapi_topology_mdns_health` | `otbr-restapi-topology-diagnostics-mdns-v1` |
+| Merged | `merged_otbr_topology_mdns_health` | `merged-otbr-topology-diagnostics-mdns-v1` |
 
-All OTBR CLI profiles use `td-otbr-cli-thread-network-info.json` for source-wide
-network identity. All OTBR REST profiles use
-`td-otbr-restapi-dataset-active.json`. Both identity files provide `extPanId`
-and `networkName` independently of the selected evidence recipe.
+OTBR CLI profiles and the merged OTBR profile use
+`td-otbr-cli-thread-network-info.json` for source-wide network identity. OTBR REST
+profiles use `td-otbr-restapi-dataset-active.json`. Both identity files provide
+`extPanId` and `networkName` independently of the selected evidence recipe.
 
 Arbitrary dataset IDs and file paths are rejected. Required final, identity,
 and outcome filenames are versioned in `src/td-dataset-manifest.json`.

@@ -173,6 +173,10 @@ def _write_rest_seed(data_dir, outcome):
         json.dumps([{"extAddress": "8672766ae0578187", "role": "child"}]),
         encoding="utf-8",
     )
+    (data_dir / "td-otbr-restapi-devices-fetch.json").write_text(
+        json.dumps([{"extAddress": "8672766ae0578187", "role": "child"}]),
+        encoding="utf-8",
+    )
     (data_dir / "td-otbr-restapi-diagnostics-fetch-all.outcome.json").write_text(
         json.dumps(outcome), encoding="utf-8"
     )
@@ -191,7 +195,7 @@ def test_rest_outcome_completeness_contract_and_secret_exclusion(tmp_path) -> No
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     complete = process_health(
         data_dir=tmp_path,
-        dataset_id="otbr_restapi_diagnostics_fetch_all",
+        dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
         policy=load_health_policy(),
         store=store,
     )
@@ -205,7 +209,7 @@ def test_rest_legacy_outcome_is_degraded_and_explicit_failure_is_partial(tmp_pat
     _write_rest_seed(tmp_path, {"items": []})
     degraded = build_processing_result(
         data_dir=tmp_path,
-        dataset_id="otbr_restapi_diagnostics_fetch_all",
+        dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
         policy=load_health_policy(),
     )
     assert degraded.observation.completeness is Completeness.DEGRADED
@@ -222,7 +226,7 @@ def test_rest_legacy_outcome_is_degraded_and_explicit_failure_is_partial(tmp_pat
     with pytest.raises(HealthProcessingError, match="partial"):
         build_processing_result(
             data_dir=tmp_path,
-            dataset_id="otbr_restapi_diagnostics_fetch_all",
+            dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
             policy=load_health_policy(),
         )
 
@@ -331,14 +335,34 @@ def test_border_router_omr_address_reports_strong_external_routing(tmp_path) -> 
     ("dataset_id", "identity_file", "final_files", "outcome_files"),
     [
         (
-            "otbr_cli_meshdiag_topology_networkdiag_fetch_all_mdns_scopes_thread",
+            "otbr_cli_topology_health",
             "td-otbr-cli-thread-network-info.json",
             (
                 "td-otbr-cli-meshdiag-topology.json",
                 "td-otbr-cli-networkdiag-fetch-all.json",
-                "td-mdns-scopes-thread.json",
+                "td-otbr-cli-meshdiag-router-neighbortables.json",
+                "td-otbr-cli-meshdiag-router-childtables.json",
             ),
             (),
+        ),
+        (
+            "merged_otbr_topology_mdns_health",
+            "td-otbr-cli-thread-network-info.json",
+            (
+                "td-static-extaddr-device-label.json",
+                "td-otbr-cli-meshdiag-topology.json",
+                "td-otbr-cli-networkdiag-fetch-all.json",
+                "td-otbr-cli-meshdiag-router-neighbortables.json",
+                "td-otbr-cli-meshdiag-router-childtables.json",
+                "td-otbr-restapi-devices-fetch.json",
+                "td-otbr-restapi-diagnostics-fetch-all.json",
+                "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+                "td-mdns-scopes-thread.json",
+            ),
+            (
+                "td-otbr-restapi-diagnostics-fetch-all.outcome.json",
+                "td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",
+            ),
         ),
         (
             "otbr_restapi_devices_fetch_diagnostics_fetch_all",
@@ -348,12 +372,6 @@ def test_border_router_omr_address_reports_strong_external_routing(tmp_path) -> 
                 "td-otbr-restapi-diagnostics-fetch-all.json",
             ),
             ("td-otbr-restapi-diagnostics-fetch-all.outcome.json",),
-        ),
-        (
-            "otbr_restapi_mesh_diagnostics_fetch_all",
-            "td-otbr-restapi-dataset-active.json",
-            ("td-otbr-restapi-mesh-diagnostics-fetch-all.json",),
-            ("td-otbr-restapi-mesh-diagnostics-fetch-all.outcome.json",),
         ),
         (
             "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all",

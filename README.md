@@ -129,7 +129,8 @@ commands; use cached snapshots for repeated analysis.
 `health process-dataset` is cache-only: it never invokes a collector or modifies source
 snapshots. Remove `--dry-run` to atomically store the observation and assessment
 in the Hobat-wide `hobat_v1.db`; add `--json` for machine-readable output. Use `--dataset all`
-to process every health-eligible dataset in the manifest. Offline assessment
+to process every active browser dataset marked `healthEligible: true`; the shared
+manifest is kept in lockstep with that registry contract. Offline assessment
 requires an explicitly imported expected-device roster and two distinct complete
 observations. See [Thread Network Health](doc/thread_network_health.md).
 For health-eligible datasets, the dashboard reads the current stored assessment
