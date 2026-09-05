@@ -226,6 +226,17 @@ python3 -m pytest -q --cov
 The live suite requires a configured OTBR environment. The default suite does
 not require OTBR, mDNS network access, Docker, or internet access.
 
+If `data/` is empty (for example, a fresh clone before any collection has run),
+skip the small subset of tests that read checked-in snapshots from that
+directory with the `requires_data_dir` marker:
+
+```bash
+python3 -m pytest -q -m "not requires_data_dir"
+```
+
+Everything else builds its own isolated data directory with `tmp_path` and
+`--datadir`/`TD_DATA_DIR`, so it does not depend on the contents of `data/`.
+
 ## Documentation
 
 - [Codebase Overview](doc/codebase_overview.md)

@@ -8,6 +8,8 @@ import subprocess
 import pytest
 
 
+pytestmark = pytest.mark.requires_data_dir
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNNER = REPO_ROOT / "tests" / "js" / "run-dataset-row-assembly.mjs"
 
