@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from td_health_policy import POLICY_THRESHOLD_KEYS
+from td_health_evaluator import EVALUATOR_THRESHOLD_OWNERS
 from td_health_rules import (
     HEALTH_RULE_CATALOG,
     HealthRuleCatalogError,
@@ -25,6 +26,13 @@ def test_catalog_has_unique_stable_order_and_complete_policy_ownership():
     assert len({rule.rule_id for rule in rules}) == len(rules)
     assert len({rule.order for rule in rules}) == len(rules)
     assert HEALTH_RULE_CATALOG.threshold_keys == POLICY_THRESHOLD_KEYS
+    assert frozenset(EVALUATOR_THRESHOLD_OWNERS) == POLICY_THRESHOLD_KEYS
+    for threshold_key, rule_ids in EVALUATOR_THRESHOLD_OWNERS.items():
+        assert rule_ids
+        assert all(
+            threshold_key in HEALTH_RULE_CATALOG.rule(rule_id).threshold_keys
+            for rule_id in rule_ids
+        )
 
 
 def test_catalog_covers_every_evaluator_rule_id():
@@ -59,6 +67,18 @@ def test_catalog_resolves_presentation_variant():
         rule.title_for("missing")
 
 
+def test_catalog_exposes_effective_source_and_denominator_requirements():
+    observed = HEALTH_RULE_CATALOG.rule("device.observed")
+    mac = HEALTH_RULE_CATALOG.rule("device.totalMacErrorRatio")
+    mle = HEALTH_RULE_CATALOG.rule("device.parentChanges")
+
+    assert observed.source_requirements == frozenset()
+    assert observed.requires_denominator is False
+    assert mac.source_requirements == frozenset({"macCounters"})
+    assert mac.requires_denominator is True
+    assert mle.source_requirements == frozenset({"mleCounters"})
+
+
 def test_operator_documentation_lists_every_catalog_rule():
     documentation = (
         Path(__file__).parents[1] / "doc" / "thread_network_health.md"
@@ -85,7 +105,15 @@ def test_catalog_rejects_duplicate_rule_ids(tmp_path):
         "verify": "Collect again."
     }
     path = _write_catalog(
-        tmp_path, {"schemaVersion": 1, "rules": [rule, {**rule, "order": 2}]}
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "defaults": {
+                "sourceRequirements": [],
+                "requiresDenominator": False,
+            },
+            "rules": [rule, {**rule, "order": 2}],
+        },
     )
 
     with pytest.raises(HealthRuleCatalogError, match="Duplicate health rule"):

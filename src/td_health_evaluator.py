@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
-from typing import Mapping
+from typing import Any, Mapping
 
 from td_health_observation_model import (
     Assessment,
@@ -23,7 +23,33 @@ from td_health_graph import GraphEdge, analyze_undirected_graph
 from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
-EVALUATOR_VERSION = "snapshot-v8"
+EVALUATOR_VERSION = "snapshot-v9"
+
+EVALUATOR_THRESHOLD_OWNERS = {
+    "offlineConsecutiveCompleteObservations": frozenset({"device.offline", "device.missing"}),
+    "offlinePoorDeviceRatioThreshold": frozenset({"network.offline-impact"}),
+    "thresholds.totalMacErrorRatio": frozenset({"device.totalMacErrorRatio"}),
+    "thresholds.totalMacDiscardRatio": frozenset({"device.totalMacDiscardRatio"}),
+    "thresholds.routerNeighborFrameErrorRate": frozenset({"relationship.directional-quality"}),
+    "thresholds.routerNeighborMessageErrorRate": frozenset({"relationship.directional-quality"}),
+    "thresholds.childFrameErrorRate": frozenset({"relationship.directional-quality"}),
+    "thresholds.childMessageErrorRate": frozenset({"relationship.directional-quality"}),
+    "thresholds.observedLq3Ratio": frozenset({"network.observed-link-quality-ratios"}),
+    "thresholds.observedLq1Ratio": frozenset({"network.observed-link-quality-ratios"}),
+    "thresholds.childLinkQuality": frozenset({"relationship.directional-quality"}),
+    "thresholds.routerLinkQuality": frozenset({"relationship.directional-quality"}),
+    "thresholds.rssi": frozenset({"relationship.directional-quality"}),
+    "thresholds.childLinkMargin": frozenset({"relationship.directional-quality"}),
+    "thresholds.multipleReporterCount": frozenset({"device.multiple-reporters-high-error"}),
+    "thresholds.borderRouterCount": frozenset({"network.border-router-redundancy"}),
+    "thresholds.routerCount": frozenset({"network.router-redundancy"}),
+    "thresholds.parentChanges": frozenset({"device.parentChanges"}),
+    "thresholds.partitionIdChanges": frozenset({"device.partitionIdChanges"}),
+    "thresholds.betterPartitionAttachAttempts": frozenset({"device.betterPartitionAttachAttempts"}),
+    "thresholds.totalParentPartitionChanges": frozenset({"device.totalParentPartitionChanges"}),
+    "thresholds.routerRolePercent": frozenset({"device.routerRolePercent"}),
+    "thresholds.detachedDisabledPercent": frozenset({"device.detachedDisabledPercent"}),
+}
 
 _LIFETIME_EVIDENCE_METRICS = frozenset(
     {
@@ -94,6 +120,68 @@ def _assessment_input_digest(policy: HealthPolicy, profile: HealthProfile) -> st
     ).hexdigest()
 
 
+def _policy_value(policy: HealthPolicy, rule_id: str, key: str) -> Any:
+    if rule_id not in EVALUATOR_THRESHOLD_OWNERS.get(key, ()):
+        raise HealthRuleCatalogError(
+            f"Rule {rule_id} does not own policy key {key}"
+        )
+    if key not in HEALTH_RULE_CATALOG.rule(rule_id).threshold_keys:
+        raise HealthRuleCatalogError(
+            f"Rule {rule_id} does not declare policy key {key}"
+        )
+    if key == "offlineConsecutiveCompleteObservations":
+        return policy.offline_consecutive_complete_observations
+    if key == "offlinePoorDeviceRatioThreshold":
+        return policy.offline_poor_device_ratio_threshold
+    return policy.thresholds[key.removeprefix("thresholds.")]
+
+
+def _device_role_tags(observation: Observation) -> dict[str, frozenset[str]]:
+    return {
+        device.device_id: frozenset({
+            *((device.role or "").lower(),),
+            *({"border-router"} if device.is_border_router else set()),
+        } - {""})
+        for device in observation.devices
+    }
+
+
+def _profile_supports_rule(profile: HealthProfile, rule_id: str) -> bool:
+    capability = HEALTH_RULE_CATALOG.rule(rule_id).required_capability
+    return capability is None or profile.coverage[capability] != "missing"
+
+
+def _validate_finding_applicability(
+    finding: Finding, observation: Observation, profile: HealthProfile
+) -> None:
+    rule = HEALTH_RULE_CATALOG.rule(finding.rule_id)
+    if (
+        rule.required_capability is not None
+        and profile.coverage[rule.required_capability] == "missing"
+    ):
+        raise HealthRuleCatalogError(
+            f"Rule {rule.rule_id} requires missing capability {rule.required_capability}"
+        )
+    relationship_types = {
+        relationship.relationship_id: relationship.relationship_type
+        for relationship in observation.relationships
+    }
+    if rule.relationship_types:
+        for relationship_id in finding.relationship_ids:
+            relationship_type = relationship_types.get(relationship_id)
+            if relationship_type not in rule.relationship_types:
+                raise HealthRuleCatalogError(
+                    f"Rule {rule.rule_id} does not apply to relationship {relationship_type!r}"
+                )
+    role_tags = _device_role_tags(observation)
+    if rule.roles:
+        for device_id in finding.device_ids:
+            if device_id in role_tags and not role_tags[device_id] & rule.roles:
+                raise HealthRuleCatalogError(
+                    f"Rule {rule.rule_id} does not apply to roles {sorted(role_tags[device_id])}"
+                )
+
+
 def _finding(
     observation: Observation,
     *,
@@ -111,6 +199,7 @@ def _finding(
     relationship_ids: tuple[str, ...] = (),
     target_parts: tuple[str, ...] = (),
     source_files: tuple[str, ...] = (),
+    source_requirement: str | None = None,
     confidence: Confidence = Confidence.HIGH,
 ) -> Finding:
     rule = HEALTH_RULE_CATALOG.rule(rule_id)
@@ -131,6 +220,20 @@ def _finding(
             f"Title {title!r} is not cataloged for {rule_id}"
         )
     catalog_evidence = dict(evidence)
+    if rule.source_requirements:
+        if source_requirement not in rule.source_requirements or not any(source_files):
+            raise HealthRuleCatalogError(
+                f"Rule {rule_id} requires source evidence from {sorted(rule.source_requirements)}"
+            )
+        catalog_evidence["sourceRequirement"] = source_requirement
+    if rule.requires_denominator:
+        denominator = catalog_evidence.get("denominator")
+        if not isinstance(denominator, (int, float)) or denominator <= 0:
+            raise HealthRuleCatalogError(
+                f"Rule {rule_id} requires a positive denominator"
+            )
+    catalog_evidence["evidenceKind"] = rule.evidence_kind
+    catalog_evidence["materiality"] = rule.materiality
     if presentation_variant is not None:
         catalog_evidence["presentationVariant"] = presentation_variant
     target = ",".join((*device_ids, *relationship_ids, *target_parts)) or observation.network_id
@@ -212,20 +315,24 @@ def evaluate_observation(
             )
 
     missing_expected_ids = tuple(sorted(expected_device_ids - observed_ids))
+    offline_required = _policy_value(
+        policy, "device.offline", "offlineConsecutiveCompleteObservations"
+    )
     offline_candidate_ids = frozenset(
         device_id
         for device_id in missing_expected_ids
         if complete
-        and absences.get(device_id, 0) + 1 >= policy.offline_consecutive_complete_observations
+        and absences.get(device_id, 0) + 1 >= offline_required
     )
     offline_device_ratio = (
         len(offline_candidate_ids) / len(expected_device_ids)
         if expected_device_ids
         else 0.0
     )
-    offline_poor_threshold_met = (
-        offline_device_ratio > policy.offline_poor_device_ratio_threshold
+    offline_ratio_threshold = _policy_value(
+        policy, "network.offline-impact", "offlinePoorDeviceRatioThreshold"
     )
+    offline_poor_threshold_met = offline_device_ratio > offline_ratio_threshold
 
     for device_id in missing_expected_ids:
         prior = absences.get(device_id, 0)
@@ -254,11 +361,11 @@ def evaluate_observation(
                     "present": False,
                     "completeObservation": complete,
                     "consecutiveCompleteAbsences": prior + 1 if complete else prior,
-                    "required": policy.offline_consecutive_complete_observations,
+                    "required": offline_required,
                     "offlineCandidateCount": len(offline_candidate_ids),
                     "expectedRosterCount": len(expected_device_ids),
                     "offlineDeviceRatio": offline_device_ratio,
-                    "offlinePoorDeviceRatioThreshold": policy.offline_poor_device_ratio_threshold,
+                    "offlinePoorDeviceRatioThreshold": offline_ratio_threshold,
                     "offlinePoorThresholdMet": offline_poor_threshold_met,
                 },
                 action="Check collection completeness, then inspect the expected device if absence persists.",
@@ -288,7 +395,7 @@ def evaluate_observation(
                     "offlineDeviceCount": len(offline_candidate_ids),
                     "expectedRosterCount": len(expected_device_ids),
                     "offlineDeviceRatio": offline_device_ratio,
-                    "threshold": policy.offline_poor_device_ratio_threshold,
+                    "threshold": offline_ratio_threshold,
                     "availableMaterialityInputs": ("configuredRosterRatio",),
                     "unavailableMaterialityInputs": (
                         "deviceRole",
@@ -314,7 +421,9 @@ def evaluate_observation(
     router_count = len(router_ids)
     border_router_count = len(border_router_ids)
     if profile.coverage["resilience"] == "sufficient":
-        router_count_threshold = policy.thresholds["routerCount"]["unstableAtOrBelow"]
+        router_count_threshold = _policy_value(
+            policy, "network.router-redundancy", "thresholds.routerCount"
+        )["unstableAtOrBelow"]
         findings.append(_finding(
             observation,
             rule_id="network.router-redundancy",
@@ -345,7 +454,11 @@ def evaluate_observation(
             confidence=Confidence.HIGH if router_count else Confidence.LOW,
         ))
     if profile.border_router_authority:
-        border_router_count_threshold = policy.thresholds["borderRouterCount"]["unstableAtOrBelow"]
+        border_router_count_threshold = _policy_value(
+            policy,
+            "network.border-router-redundancy",
+            "thresholds.borderRouterCount",
+        )["unstableAtOrBelow"]
         border_router_summary = f"Observed {border_router_count} Border Router{'s' if border_router_count != 1 else ''}."
         if not complete:
             border_router_summary += f" Source completeness is {observation.completeness.value}, so redundancy is provisional."
@@ -388,7 +501,13 @@ def evaluate_observation(
             confidence=Confidence.HIGH if complete and border_router_count else Confidence.LOW,
         ))
 
-    if profile.border_router_authority and complete and omr_prefix:
+    omr_border_router_ids: tuple[str, ...] = ()
+    if (
+        profile.border_router_authority
+        and complete
+        and omr_prefix
+        and _profile_supports_rule(profile, "network.external-routing")
+    ):
         addresses = device_ipv6_addresses or {}
         omr_border_router_ids = tuple(sorted(
             device_id for device_id in border_router_ids
@@ -468,6 +587,21 @@ def evaluate_observation(
         *bridge_device_ids,
         *graph_analysis.articulation_device_ids,
     }))
+    router_neighbor_degrees = {
+        device_id: len({
+            endpoint
+            for relationship in router_relationships
+            for endpoint in (
+                relationship.to_device_id
+                if relationship.from_device_id == device_id
+                else relationship.from_device_id
+                if relationship.to_device_id == device_id
+                else None,
+            )
+            if endpoint is not None
+        })
+        for device_id in router_ids
+    }
     if profile.topology_authority:
         path_status = (
             HealthStatus.UNKNOWN
@@ -495,6 +629,7 @@ def evaluate_observation(
                 evidence={
                     "routerCount": router_count,
                     "routerNeighborEdgeCount": graph_analysis.edge_count,
+                    "routerNeighborDegrees": router_neighbor_degrees,
                     "bridgeRelationshipIds": graph_analysis.bridge_relationship_ids,
                     "bridgeDeviceIds": bridge_device_ids,
                     "bridgeComponents": graph_analysis.bridge_components,
@@ -524,14 +659,22 @@ def evaluate_observation(
         if metric.metric == "diagnosticTimeout":
             diagnostic_timeout_device_ids.add(metric.device_id)
             continue
-        threshold = policy.thresholds.get(metric.metric)
-        if threshold is None:
+        metric_rule_id = f"device.{metric.metric}"
+        if metric_rule_id not in HEALTH_RULE_CATALOG.rule_ids:
             continue
-        if metric.metric == "routerRolePercent" and device_roles.get(metric.device_id) not in {
-            "router",
-            "leader",
-        }:
+        metric_rule = HEALTH_RULE_CATALOG.rule(metric_rule_id)
+        if not _profile_supports_rule(profile, metric_rule_id):
             continue
+        if metric_rule.roles and device_roles.get(metric.device_id) not in metric_rule.roles:
+            continue
+        if metric_rule.requires_denominator and (
+            metric.denominator is None or metric.denominator <= 0
+        ):
+            continue
+        threshold_key = f"thresholds.{metric.metric}"
+        if threshold_key not in metric_rule.threshold_keys:
+            continue
+        threshold = _policy_value(policy, metric_rule_id, threshold_key)
         if metric.metric in _LIFETIME_EVIDENCE_METRICS:
             metric_title, metric_description = _HISTORICAL_METRIC_PRESENTATION[metric.metric]
             lower_is_worse = "unstableBelow" in threshold
@@ -572,6 +715,11 @@ def evaluate_observation(
                     device_ids=(metric.device_id,),
                     target_parts=(metric.source_file,),
                     source_files=(metric.source_file,),
+                    source_requirement=(
+                        "timeStatistics"
+                        if metric.metric in {"routerRolePercent", "detachedDisabledPercent"}
+                        else "mleCounters"
+                    ),
                     confidence=Confidence.LOW,
                 )
             )
@@ -625,6 +773,7 @@ def evaluate_observation(
                 device_ids=(metric.device_id,),
                 target_parts=(metric.source_file,),
                 source_files=(metric.source_file,),
+                source_requirement="macCounters",
             )
         )
 
@@ -671,12 +820,24 @@ def evaluate_observation(
         )
 
     observed_lq_total = sum(lq_counts.values())
-    if observed_lq_total > 0:
+    if observed_lq_total > 0 and _profile_supports_rule(
+        profile, "network.observed-link-quality-ratios"
+    ):
         lq3_ratio = lq_counts[3] / observed_lq_total
         lq2_ratio = lq_counts[2] / observed_lq_total
         lq1_ratio = lq_counts[1] / observed_lq_total
-        lq3_bad = lq3_ratio < policy.thresholds["observedLq3Ratio"]["unstableBelow"]
-        lq1_bad = lq1_ratio >= policy.thresholds["observedLq1Ratio"]["unstable"]
+        lq3_threshold = _policy_value(
+            policy,
+            "network.observed-link-quality-ratios",
+            "thresholds.observedLq3Ratio",
+        )
+        lq1_threshold = _policy_value(
+            policy,
+            "network.observed-link-quality-ratios",
+            "thresholds.observedLq1Ratio",
+        )
+        lq3_bad = lq3_ratio < lq3_threshold["unstableBelow"]
+        lq1_bad = lq1_ratio >= lq1_threshold["unstable"]
         findings.append(
             _finding(
                 observation,
@@ -695,8 +856,8 @@ def evaluate_observation(
                     "lq3Ratio": lq3_ratio,
                     "lq2Ratio": lq2_ratio,
                     "lq1Ratio": lq1_ratio,
-                    "lq3UnstableBelow": policy.thresholds["observedLq3Ratio"]["unstableBelow"],
-                    "lq1UnstableAtOrAbove": policy.thresholds["observedLq1Ratio"]["unstable"],
+                    "lq3UnstableBelow": lq3_threshold["unstableBelow"],
+                    "lq1UnstableAtOrAbove": lq1_threshold["unstable"],
                 },
                 action="Inspect weak relationships and preserve strong alternate paths.",
                 verify="Process another complete topology observation and compare the distribution.",
@@ -724,12 +885,14 @@ def evaluate_observation(
         router_relationship = relationship.relationship_type == "router-neighbor"
         if not child_relationship and not router_relationship:
             continue
-        frame_threshold = policy.thresholds[
-            "childFrameErrorRate" if child_relationship else "routerNeighborFrameErrorRate"
-        ]
-        message_threshold = policy.thresholds[
-            "childMessageErrorRate" if child_relationship else "routerNeighborMessageErrorRate"
-        ]
+        frame_key = "childFrameErrorRate" if child_relationship else "routerNeighborFrameErrorRate"
+        message_key = "childMessageErrorRate" if child_relationship else "routerNeighborMessageErrorRate"
+        frame_threshold = _policy_value(
+            policy, "relationship.directional-quality", f"thresholds.{frame_key}"
+        )
+        message_threshold = _policy_value(
+            policy, "relationship.directional-quality", f"thresholds.{message_key}"
+        )
         quality_values = tuple(
             value
             for value in (relationship.link_quality_in, relationship.link_quality_out)
@@ -740,9 +903,16 @@ def evaluate_observation(
             and relationship.link_quality_out is not None
             and relationship.link_quality_in != relationship.link_quality_out
         )
-        link_quality_threshold = policy.thresholds[
-            "childLinkQuality" if child_relationship else "routerLinkQuality"
-        ]
+        link_quality_key = "childLinkQuality" if child_relationship else "routerLinkQuality"
+        link_quality_threshold = _policy_value(
+            policy, "relationship.directional-quality", f"thresholds.{link_quality_key}"
+        )
+        rssi_threshold = _policy_value(
+            policy, "relationship.directional-quality", "thresholds.rssi"
+        )
+        margin_threshold = _policy_value(
+            policy, "relationship.directional-quality", "thresholds.childLinkMargin"
+        )
         weak = bool(quality_values) and min(quality_values) <= link_quality_threshold[
             "unstableAtOrBelow"
         ]
@@ -756,13 +926,13 @@ def evaluate_observation(
         )
         rssi_bad = (
             relationship.last_rssi is not None
-            and relationship.last_rssi < policy.thresholds["rssi"]["unstableBelow"]
+            and relationship.last_rssi < rssi_threshold["unstableBelow"]
         )
         margin_bad = (
             child_relationship
             and
             relationship.link_margin is not None
-            and relationship.link_margin < policy.thresholds["childLinkMargin"]["unstableBelow"]
+            and relationship.link_margin < margin_threshold["unstableBelow"]
         )
         lq3_agreement = (
             relationship.link_quality_in == 3 and relationship.link_quality_out == 3
@@ -788,6 +958,7 @@ def evaluate_observation(
             child_relationship
             and relationship.queued_message_count is not None
             and relationship.queued_message_count > 0
+            and _profile_supports_rule(profile, "relationship.queued-messages")
         ):
             findings.append(
                 _finding(
@@ -819,7 +990,9 @@ def evaluate_observation(
             and not margin_bad
             and (relationship.last_rssi is not None or relationship.link_margin is not None)
         )
-        if weak or asymmetric or frame_bad or message_bad or rssi_bad or margin_bad:
+        if (
+            weak or asymmetric or frame_bad or message_bad or rssi_bad or margin_bad
+        ) and _profile_supports_rule(profile, "relationship.directional-quality"):
             finding_status = (
                 HealthStatus.POOR if critical_delivery and sole_path
                 else HealthStatus.MODERATE
@@ -897,7 +1070,9 @@ def evaluate_observation(
                     source_files=relationship.source_files,
                 )
             )
-        elif lq3_agreement:
+        elif lq3_agreement and _profile_supports_rule(
+            profile, "relationship.bidirectional-lq3"
+        ):
             findings.append(
                 _finding(
                     observation,
@@ -919,7 +1094,16 @@ def evaluate_observation(
             )
 
     for device_id, relationship_ids in sorted(neighbor_high_error_relationships.items()):
-        if len(relationship_ids) < 2:
+        if not _profile_supports_rule(
+            profile, "device.multiple-reporters-high-error"
+        ):
+            continue
+        multiple_reporter_threshold = _policy_value(
+            policy,
+            "device.multiple-reporters-high-error",
+            "thresholds.multipleReporterCount",
+        )["unstableAtOrAbove"]
+        if len(relationship_ids) < multiple_reporter_threshold:
             continue
         findings.append(
             _finding(
@@ -941,11 +1125,15 @@ def evaluate_observation(
             )
         )
 
+    for finding in findings:
+        _validate_finding_applicability(finding, observation, profile)
+
     material = [
         finding
         for finding in findings
         if finding.status in {HealthStatus.MODERATE, HealthStatus.POOR}
-        and finding.rule_id != "device.offline"
+        and HEALTH_RULE_CATALOG.rule(finding.rule_id).materiality
+        in {"network", "relationship"}
     ]
     if any(finding.status is HealthStatus.POOR for finding in material):
         status = HealthStatus.POOR
@@ -998,6 +1186,8 @@ def evaluate_observation(
             "routerNeighborEdges": graph_analysis.edge_count,
             "bridges": len(graph_analysis.bridge_relationship_ids),
             "articulationPoints": len(graph_analysis.articulation_device_ids),
+            "topologyAuthority": int(profile.topology_authority),
+            "borderRouterAuthority": int(profile.border_router_authority),
         },
         "externalRouting": {
             "omrPrefixAvailable": int(bool(omr_prefix)),

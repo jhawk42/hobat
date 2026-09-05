@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from types import MappingProxyType
 
+import pytest
+
 from td_health_evaluator import EVALUATOR_VERSION, evaluate_observation
 from td_health_observation_model import (
     Completeness,
@@ -16,6 +18,7 @@ from td_health_observation_model import (
 )
 from td_health_policy import load_health_policy
 from td_health_manifest import load_health_manifest
+from td_health_rules import HealthRuleCatalogError
 
 
 PROFILE = load_health_manifest().dataset(
@@ -157,7 +160,7 @@ def test_complete_topology_profile_reports_border_router_redundancy() -> None:
     )
 
     assert PROFILE.border_router_authority is True
-    assert EVALUATOR_VERSION == "snapshot-v8"
+    assert EVALUATOR_VERSION == "snapshot-v9"
     assert border_router_finding.status is HealthStatus.STRONG
     assert border_router_finding.evidence["observedBorderRouterCount"] == 2
     assert border_router_finding.evidence["moreThanOne"] is True
@@ -322,6 +325,31 @@ def test_critical_delivery_only_escalates_on_observed_sole_path() -> None:
     assert finding.evidence["solePath"] is True
 
 
+def test_critical_child_delivery_escalates_on_one_observed_parent() -> None:
+    relationship = _relationship(
+        relationship_type="parent-child",
+        frame_error_rate=0.30,
+    )
+    observation = replace(
+        _observation(relationship),
+        devices=(
+            DeviceSample("extaddr:1111111111111111", "1" * 16, "router", None, False, ("source.json",)),
+            DeviceSample("extaddr:2222222222222222", "2" * 16, "child", None, False, ("source.json",)),
+        ),
+    )
+
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    finding = next(
+        finding
+        for finding in assessment.findings
+        if finding.rule_id == "relationship.directional-quality"
+    )
+
+    assert finding.status is HealthStatus.POOR
+    assert finding.evidence["pathBasis"] == "sole-parent"
+    assert finding.evidence["observedParentCount"] == 1
+
+
 def test_critical_router_delivery_stays_moderate_with_alternate_path() -> None:
     devices = tuple(
         DeviceSample(
@@ -428,6 +456,10 @@ def test_child_relationship_does_not_count_as_alternate_router_path() -> None:
     assert finding.status is HealthStatus.MODERATE
     assert finding.evidence["bridgeRelationshipIds"] == ("link:test",)
     assert finding.evidence["articulationDeviceIds"] == ()
+    assert finding.evidence["routerNeighborDegrees"] == {
+        "extaddr:1111111111111111": 1,
+        "extaddr:2222222222222222": 1,
+    }
     assert "link:child" not in finding.evidence["bridgeRelationshipIds"]
 
 
@@ -459,6 +491,48 @@ def test_lifetime_counter_metrics_are_evidence_only_and_do_not_change_status() -
         and finding.status in {HealthStatus.MODERATE, HealthStatus.POOR}
         for finding in assessment.findings
     )
+
+
+def test_role_specific_metric_is_omitted_for_unknown_role() -> None:
+    observation = replace(
+        _observation(_relationship()),
+        devices=tuple(replace(device, role=None) for device in _observation(_relationship()).devices),
+        metrics=(
+            MetricSample(
+                "extaddr:1111111111111111",
+                "parentChanges",
+                9,
+                "count",
+                None,
+                "source.json",
+            ),
+        ),
+    )
+
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+
+    assert not any(
+        finding.rule_id == "device.parentChanges" for finding in assessment.findings
+    )
+
+
+def test_source_required_metric_rejects_missing_source_attribution() -> None:
+    observation = replace(
+        _observation(_relationship()),
+        metrics=(
+            MetricSample(
+                "extaddr:1111111111111111",
+                "parentChanges",
+                9,
+                "count",
+                None,
+                "",
+            ),
+        ),
+    )
+
+    with pytest.raises(HealthRuleCatalogError, match="requires source evidence"):
+        evaluate_observation(observation, load_health_policy(), profile=PROFILE)
 
 
 def test_diagnostic_timeout_produces_evidence_only_finding_and_coverage() -> None:
@@ -531,6 +605,8 @@ def test_error_uncorrelated_with_rss_is_tagged_on_relationship_finding() -> None
 
     assert finding.evidence["errorUncorrelatedWithRss"] is True
     assert finding.title == "High Delivery Errors Despite Acceptable Signal"
+    assert finding.evidence["evidenceKind"] == "current"
+    assert finding.evidence["materiality"] == "relationship"
 
 
 def test_multiple_reporters_high_error_aggregates_across_relationships() -> None:
@@ -615,6 +691,63 @@ def test_device_offline_is_independent_of_network_impact_ratio() -> None:
         for finding in assessment.findings
     )
     assert assessment.status is not HealthStatus.POOR
+
+
+def test_one_device_roster_offline_emits_device_and_network_findings() -> None:
+    absent_id = "extaddr:3333333333333333"
+    observation = replace(_observation(_relationship()), devices=(), relationships=())
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=PROFILE,
+        expected_device_ids=frozenset({absent_id}),
+        prior_complete_absences={absent_id: 1},
+    )
+
+    assert {finding.rule_id for finding in assessment.findings} >= {
+        "device.offline",
+        "network.offline-impact",
+    }
+
+
+def test_offline_ratio_at_policy_boundary_does_not_emit_network_impact() -> None:
+    policy = replace(load_health_policy(), offline_poor_device_ratio_threshold=1 / 3)
+    observation = _observation(_relationship())
+    absent_id = "extaddr:3333333333333333"
+
+    assessment = evaluate_observation(
+        observation,
+        policy,
+        profile=PROFILE,
+        expected_device_ids=frozenset(
+            {*(device.device_id for device in observation.devices), absent_id}
+        ),
+        prior_complete_absences={absent_id: 1},
+    )
+
+    assert any(finding.rule_id == "device.offline" for finding in assessment.findings)
+    assert not any(
+        finding.rule_id == "network.offline-impact" for finding in assessment.findings
+    )
+
+
+def test_recovered_expected_device_is_not_missing_or_offline() -> None:
+    observation = _observation(_relationship())
+    recovered_id = observation.devices[0].device_id
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=PROFILE,
+        expected_device_ids=frozenset({recovered_id}),
+        prior_complete_absences={recovered_id: 12},
+    )
+
+    assert not any(
+        finding.rule_id in {"device.missing", "device.offline"}
+        for finding in assessment.findings
+    )
 
 
 def test_offline_ratio_emits_separate_network_impact() -> None:
@@ -722,3 +855,108 @@ def test_mac_ratio_requires_denominator_backed_metric_and_lq_excludes_unknown() 
     assert lq.evidence["observedCount"] == 12
     assert lq.evidence["lq2Ratio"] == 1 / 6
     assert lq.summary == "LQ3 is 50.0%; LQ2 is 16.7%; LQ1 is 33.3% of observed links."
+
+
+def test_mac_ratio_without_positive_denominator_emits_no_finding() -> None:
+    observation = replace(
+        _observation(_relationship()),
+        metrics=(
+            MetricSample(
+                "extaddr:1111111111111111",
+                "totalMacErrorRatio",
+                0.5,
+                "ratio",
+                None,
+                "source.json",
+            ),
+        ),
+    )
+
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+
+    assert not any(
+        finding.rule_id == "device.totalMacErrorRatio"
+        for finding in assessment.findings
+    )
+    assert (
+        assessment.coverage["observedPillars"]["delivery"]["evidenceCounts"][
+            "validMacRatios"
+        ]
+        == 0
+    )
+
+
+def test_complete_full_evidence_observation_has_sufficient_observed_coverage() -> None:
+    relationships = (
+        _relationship(),
+        _relationship(
+            relationship_id="link:2-3",
+            from_device_id="extaddr:2222222222222222",
+            to_device_id="extaddr:3333333333333333",
+        ),
+        _relationship(
+            relationship_id="link:3-1",
+            from_device_id="extaddr:3333333333333333",
+            to_device_id="extaddr:1111111111111111",
+        ),
+    )
+    devices = (
+        DeviceSample("extaddr:1111111111111111", "1" * 16, "router", None, True, ("source.json",)),
+        DeviceSample("extaddr:2222222222222222", "2" * 16, "router", None, False, ("source.json",)),
+        DeviceSample("extaddr:3333333333333333", "3" * 16, "router", None, False, ("source.json",)),
+    )
+    observation = replace(
+        _observation(relationships[0]),
+        devices=devices,
+        relationships=relationships,
+        metrics=(
+            MetricSample(devices[0].device_id, "totalMacErrorRatio", 0, "ratio", 100, "source.json"),
+        ),
+    )
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=PROFILE,
+        expected_device_ids=frozenset(device.device_id for device in devices),
+        omr_prefix="fd00:1",
+        device_ipv6_addresses={devices[0].device_id: ("fd00:1::1",)},
+    )
+
+    assert all(
+        pillar["state"] == PROFILE.coverage[pillar_name]
+        for pillar_name, pillar in assessment.coverage["observedPillars"].items()
+    )
+    assert assessment.coverage["observedPillars"]["resilience"]["evidenceCounts"][
+        "topologyAuthority"
+    ] == 1
+    assert assessment.coverage["observedPillars"]["resilience"]["evidenceCounts"][
+        "borderRouterAuthority"
+    ] == 1
+
+
+def test_missing_capability_omits_inapplicable_external_routing_rule() -> None:
+    profile = replace(
+        PROFILE,
+        coverage=MappingProxyType({**PROFILE.coverage, "externalRouting": "missing"}),
+    )
+    observation = replace(
+        _observation(_relationship()),
+        devices=tuple(
+            replace(device, is_border_router=True)
+            for device in _observation(_relationship()).devices
+        ),
+    )
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=profile,
+        omr_prefix="fd00:1",
+        device_ipv6_addresses={observation.devices[0].device_id: ("fd00:1::1",)},
+    )
+
+    assert not any(
+        finding.rule_id == "network.external-routing"
+        for finding in assessment.findings
+    )

@@ -124,12 +124,13 @@ Supported states are `expected`, `retired`, `intentionally-offline`, and
 
 Python owns all verdicts. Built-in `snapshot-v1` thresholds cover current MAC
 delivery ratios, router-neighbor and child error rates, directional link quality,
-RSS, link margin, attachment, and Router/Border Router resilience. Border Router
-redundancy is emitted only for profiles whose evidence can identify Border
-Routers; incomplete observations keep that finding provisional. RSS alone is
-supporting evidence and cannot produce Poor. Critical delivery evidence
-escalates only when direct current evidence also identifies an observed sole
-path.
+RSS, link margin, multiple-reporter correlation, attachment, and Router/Border
+Router resilience. Child and router-neighbor delivery policies have explicit
+critical bands. Border Router redundancy is emitted only for profiles whose
+evidence can identify Border Routers; incomplete observations keep that finding
+provisional. RSS alone is supporting evidence and cannot produce Poor. Critical
+delivery evidence escalates only when direct current evidence also identifies
+an observed sole path.
 
 An optional `config/td-health-policy.json` replaces the defaults after strict
 validation. It must include the complete `snapshot-v1` threshold contract and
@@ -141,7 +142,11 @@ assessment over the same observation.
 
 Every finding has a stable ID, scope, status, confidence, affected device or
 relationship IDs, structured evidence, source files, action, and verification
-text. Missing evidence remains Unknown.
+text. The rule catalog declares and the evaluator enforces role, relationship,
+capability, source, denominator, evidence-kind, materiality, and threshold-owner
+contracts. Device-only findings do not automatically determine aggregate
+network status; network and relationship materiality do. Missing evidence
+remains Unknown.
 
 ## Coverage Pillars
 

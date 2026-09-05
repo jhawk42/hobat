@@ -26,6 +26,8 @@ class HealthRule:
     variants: Mapping[str, str]
     description: str
     evidence_kind: str
+    source_requirements: frozenset[str]
+    requires_denominator: bool
     scopes: frozenset[str]
     roles: frozenset[str]
     relationship_types: frozenset[str]
@@ -94,6 +96,13 @@ def load_health_rule_catalog(path: Path = RULE_CATALOG_PATH) -> HealthRuleCatalo
     if not isinstance(document, dict) or document.get("schemaVersion") != 1:
         raise HealthRuleCatalogError("Health rule catalog requires schemaVersion 1")
     raw_rules = document.get("rules")
+    defaults = document.get("defaults")
+    if not isinstance(defaults, dict):
+        raise HealthRuleCatalogError("Health rule catalog requires defaults")
+    default_source_requirements = _strings(defaults, "sourceRequirements")
+    default_requires_denominator = defaults.get("requiresDenominator")
+    if not isinstance(default_requires_denominator, bool):
+        raise HealthRuleCatalogError("Catalog default requiresDenominator must be boolean")
     if not isinstance(raw_rules, list) or not raw_rules:
         raise HealthRuleCatalogError("Health rule catalog requires rules")
     rules: list[HealthRule] = []
@@ -125,6 +134,18 @@ def load_health_rule_catalog(path: Path = RULE_CATALOG_PATH) -> HealthRuleCatalo
         required_capability = raw.get("requiredCapability")
         if required_capability is not None and not isinstance(required_capability, str):
             raise HealthRuleCatalogError(f"Invalid requiredCapability for {rule_id}")
+        source_requirements = (
+            _strings(raw, "sourceRequirements")
+            if "sourceRequirements" in raw
+            else default_source_requirements
+        )
+        requires_denominator = raw.get(
+            "requiresDenominator", default_requires_denominator
+        )
+        if not isinstance(requires_denominator, bool):
+            raise HealthRuleCatalogError(
+                f"Invalid requiresDenominator for {rule_id}"
+            )
         rules.append(
             HealthRule(
                 rule_id=rule_id,
@@ -133,6 +154,8 @@ def load_health_rule_catalog(path: Path = RULE_CATALOG_PATH) -> HealthRuleCatalo
                 variants=MappingProxyType(dict(variants)),
                 description=_string(raw, "description"),
                 evidence_kind=_string(raw, "evidenceKind"),
+                source_requirements=source_requirements,
+                requires_denominator=requires_denominator,
                 scopes=scopes,
                 roles=_strings(raw, "roles"),
                 relationship_types=_strings(raw, "relationshipTypes"),
