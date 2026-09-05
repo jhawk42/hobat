@@ -266,6 +266,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             result = process_health(**kwargs, store=store)
         documents.append(result_document(result))
+    if args.dataset == "all" and not args.dry_run:
+        store.reconcile_current_assessments(tuple(dataset_ids))
     document = documents[0]
     if args.export_latest:
         export_path = Path(args.export_latest)

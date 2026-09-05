@@ -25,6 +25,7 @@ import {
   getTopologyFilterHandlers,
   getTopologyNodeData,
   getTopologyDatasetCounts,
+  setTopologyHealthFindings,
   setAutoZoomEnabled,
   setAnimationEnabled,
   isAutoZoomEnabled,
@@ -34,6 +35,7 @@ import {
 import {
   renderTableForDataset,
   applyTableFilters,
+  setTableHealthFindings,
   setMoreInfoEnabled,
   isMoreInfoEnabled,
 } from "./tdash-table-renderer.js";
@@ -177,6 +179,7 @@ const healthInsightsState = {
   capabilities: null,
   observations: null,
 };
+let healthNavigationContext = null;
 
 function renderWorkspaceLogs() {
   const contentEl = document.getElementById("workspace-log-content");
@@ -950,9 +953,28 @@ function renderNetworkInsights() {
   const healthEligible = currentDataset?.entry?.healthEligible === true;
   document.getElementById("health-insights-filters")?.toggleAttribute("hidden", !healthEligible);
   if (healthEligible) {
+    const assessment = healthInsightsState.assessment;
+    if (assessment) {
+      const findings = (assessment.findingGroups || []).flatMap(
+        (group) => group.findings || [],
+      );
+      setTopologyHealthFindings(findings);
+      setTableHealthFindings(findings, assessment.observedAt);
+      if (currentDataset?.entry?.value === assessment.datasetId) {
+        currentDataset.healthAssessment = assessment;
+      }
+    }
     renderHealthInsights(contentEl, healthInsightsState, {
       status: document.getElementById("health-status-filter")?.value ?? "all",
       scope: document.getElementById("health-scope-filter")?.value ?? "all",
+      evidenceKind: document.getElementById("health-evidence-filter")?.value ?? "all",
+    }, {
+      availableTargets: countAvailableHealthTargets,
+      showTopology: (group) => navigateToHealthTargets("topology", group),
+      showTable: (group) => navigateToHealthTargets("table", group),
+      inspectDevice: (group) => inspectHealthDevice(group.deviceIds[0]),
+      compareEndpoints: (group) => compareHealthEndpoints(group),
+      applyFilter: applyHealthGroupFilter,
     });
     return;
   }
@@ -1016,6 +1038,110 @@ function renderNetworkInsights() {
   });
 }
 
+function findCurrentDeviceRecord(deviceId) {
+  const extAddress = deviceId?.replace(/^extaddr:/, "").toLowerCase();
+  return currentDataset?.rows?.find(
+    (record) => projectSelectedDevice(record)?.extAddress === extAddress,
+  ) ?? null;
+}
+
+function countAvailableHealthTargets(group) {
+  return (group?.deviceIds || []).filter((deviceId) => findCurrentDeviceRecord(deviceId)).length;
+}
+
+function rememberHealthNavigationContext() {
+  if (healthNavigationContext) return;
+  healthNavigationContext = {
+    view: currentView,
+    search: document.getElementById("search-input")?.value ?? "",
+    nodeFilter: document.getElementById("node-filter")?.value ?? "all",
+    linkFilter: document.getElementById("link-filter")?.value ?? "default_links",
+    diagnosticFilter: document.getElementById("diagnostic-filter")?.value ?? "all",
+    selectedRecord: deviceInsightsState.record,
+  };
+  document.getElementById("btn-health-return")?.removeAttribute("hidden");
+}
+
+function selectTopologyHealthTargets(deviceIds) {
+  const targetAddresses = new Set(deviceIds.map((deviceId) => deviceId.replace(/^extaddr:/, "")));
+  const nodeIds = (getTopologyNodeData() || [])
+    .filter((node) => targetAddresses.has(projectSelectedDevice(node)?.extAddress))
+    .map((node) => node.id);
+  const network = getVisNetwork();
+  if (!network || nodeIds.length === 0) return;
+  const edges = nodeIds.length === 2
+    ? network.getConnectedEdges(nodeIds[0]).filter(
+      (edgeId) => network.getConnectedEdges(nodeIds[1]).includes(edgeId),
+    )
+    : [];
+  network.setSelection({ nodes: nodeIds, edges }, { highlightEdges: false });
+  network.fit({ nodes: nodeIds, animation: { duration: 300, easingFunction: "easeInOutQuad" } });
+}
+
+function navigateToHealthTargets(view, group, { compare = false } = {}) {
+  if (!group?.deviceIds?.length) return;
+  rememberHealthNavigationContext();
+  document.getElementById("node-filter").value = "all";
+  document.getElementById("diagnostic-filter").value = "all";
+  if (view === "topology") document.getElementById("link-filter").value = "all_links";
+  const search = compare ? "" : group.deviceIds[0].replace(/^extaddr:/, "");
+  document.getElementById("search-input").value = search;
+  _currentSearchQuery = parseSearchQuery(search);
+  switchView(view);
+  applySearch();
+  if (view === "topology") selectTopologyHealthTargets(group.deviceIds);
+}
+
+function inspectHealthDevice(deviceId) {
+  const record = findCurrentDeviceRecord(deviceId);
+  if (!record) return;
+  rememberHealthNavigationContext();
+  publishDeviceSelection(record);
+  setActiveDeviceDetailsPanel("device-insights-panel");
+}
+
+function compareHealthEndpoints(group) {
+  navigateToHealthTargets("topology", group, { compare: true });
+}
+
+function applyHealthGroupFilter(group) {
+  document.getElementById("health-status-filter").value = group.status;
+  document.getElementById("health-scope-filter").value =
+    group.scope === "observation" ? "network" : group.scope;
+  const evidenceKinds = new Set(group.findings.map((finding) => finding.evidenceKind));
+  document.getElementById("health-evidence-filter").value =
+    evidenceKinds.size === 1 ? [...evidenceKinds][0] : "all";
+  renderNetworkInsights();
+}
+
+function restoreHealthNavigationContext() {
+  if (!healthNavigationContext) return;
+  const context = healthNavigationContext;
+  healthNavigationContext = null;
+  document.getElementById("node-filter").value = context.nodeFilter;
+  document.getElementById("link-filter").value = context.linkFilter;
+  document.getElementById("diagnostic-filter").value = context.diagnosticFilter;
+  document.getElementById("search-input").value = context.search;
+  _currentSearchQuery = parseSearchQuery(context.search);
+  lastRenderedDatasetByView.delete("topology");
+  lastRenderedDatasetByView.delete("table");
+  switchView(context.view);
+  renderCurrentView({ force: true });
+  publishDeviceSelection(context.selectedRecord);
+  document.getElementById("btn-health-return")?.setAttribute("hidden", "");
+}
+
+function resetHealthWorkflow() {
+  healthNavigationContext = null;
+  for (const id of ["health-status-filter", "health-scope-filter", "health-evidence-filter"]) {
+    const element = document.getElementById(id);
+    if (element) element.value = "all";
+  }
+  document.getElementById("btn-health-return")?.setAttribute("hidden", "");
+  switchView("insights");
+  renderNetworkInsights();
+}
+
 const deviceInsightsState = {
   record: null,
 };
@@ -1034,8 +1160,14 @@ function renderDeviceInsights(record) {
   if (currentDataset?.entry?.healthEligible === true) {
     renderDeviceHealth(contentEl, {
       device: healthInsightsState.device,
+      assessment: healthInsightsState.assessment,
       error: healthInsightsState.deviceError,
       loading: healthInsightsState.deviceLoading,
+    }, {
+      availableTargets: countAvailableHealthTargets,
+      showTopology: (group) => navigateToHealthTargets("topology", group),
+      showTable: (group) => navigateToHealthTargets("table", group),
+      compareEndpoints: (group) => compareHealthEndpoints(group),
     });
     return;
   }
@@ -1161,6 +1293,8 @@ async function refreshHealthAssessment() {
   healthInsightsState.error = "";
   healthInsightsState.device = null;
   healthInsightsState.deviceError = "";
+  setTopologyHealthFindings([]);
+  setTableHealthFindings([]);
   const statusEl = document.getElementById("health-status-summary");
   if (entry?.healthEligible !== true) {
     healthInsightsState.loading = false;
@@ -1177,6 +1311,15 @@ async function refreshHealthAssessment() {
     const assessment = await fetchHealthAssessment(entry.value);
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
     healthInsightsState.assessment = assessment;
+    if (currentDataset?.entry?.value === assessment.datasetId) {
+      currentDataset.healthAssessment = assessment;
+    }
+    const attributedFindings = (assessment.findingGroups || [])
+      .flatMap((group) => group.findings || []);
+    setTopologyHealthFindings(attributedFindings);
+    setTableHealthFindings(attributedFindings, assessment.observedAt);
+    lastRenderedDatasetByView.delete("table");
+    if (currentView === "table") renderCurrentView({ force: true });
     try {
       const support = await fetchHealthSupport(assessment.networkId);
       if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
@@ -1199,6 +1342,9 @@ async function refreshHealthAssessment() {
 
 document.getElementById("health-status-filter")?.addEventListener("change", renderNetworkInsights);
 document.getElementById("health-scope-filter")?.addEventListener("change", renderNetworkInsights);
+document.getElementById("health-evidence-filter")?.addEventListener("change", renderNetworkInsights);
+document.getElementById("btn-health-return")?.addEventListener("click", restoreHealthNavigationContext);
+document.getElementById("btn-health-reset")?.addEventListener("click", resetHealthWorkflow);
 document.getElementById("btn-health-export")?.addEventListener("click", () => {
   exportHealthAssessment(healthInsightsState.assessment);
 });

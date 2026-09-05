@@ -239,6 +239,7 @@
 
         <div id="view-status-line-panel" class="status-bar">
           <div id="view-status-line-content" role="status" aria-live="polite">Select a dataset to load.</div>
+          <button id="btn-health-return" type="button" title="Return to the view and filters used before following a finding" hidden>Return to Insights</button>
         </div>
 
         <div id="view-topology" class="workspace-view" role="tabpanel" aria-labelledby="btn-topology">
@@ -312,6 +313,17 @@
                 <option value="relationship">Relationship</option>
               </select>
             </label>
+            <label title="Filter findings by the kind of evidence used.">Evidence
+              <select id="health-evidence-filter" title="Show findings backed by the selected evidence kind.">
+                <option value="all">All</option>
+                <option value="snapshot">Snapshot</option>
+                <option value="since-reset">Since reset</option>
+                <option value="historical">Historical</option>
+                <option value="expected-state">Expected state</option>
+                <option value="active-probe">Active probe</option>
+              </select>
+            </label>
+            <button id="btn-health-reset" type="button" title="Clear health filters and navigation state">Reset</button>
             <button id="btn-health-export" type="button" title="Download the pinned health assessment">Export JSON</button>
           </div>
           <div id="network-insights-content" role="status" aria-live="polite"></div>

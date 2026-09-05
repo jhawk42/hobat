@@ -1217,7 +1217,7 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 
 .health-coverage-pillars {
   display: grid;
-  grid-template-columns: repeat(5, minmax(90px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
   gap: 3px 12px;
   margin: 12px 0 16px;
 }
@@ -1225,7 +1225,7 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .health-coverage-pillars dt,
 .health-coverage-pillars dd { margin: 0; }
 .health-coverage-pillars dt { color: var(--muted); font-size: 12px; }
-.health-coverage-pillars dd { grid-row: 2; font-weight: 600; }
+.health-coverage-pillars dd { font-weight: 600; overflow-wrap: anywhere; }
 
 .health-finding-groups {
   display: grid;
@@ -1233,6 +1233,13 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.health-finding-section + .health-finding-section { margin-top: 20px; }
+.health-finding-section > h2,
+.device-health-section > h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
 }
 
 .health-finding-group {
@@ -1252,6 +1259,40 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .health-finding-meta,
 .health-finding-endpoints { margin-top: 3px !important; color: var(--muted); }
 
+.health-coverage-reason {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.health-finding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.health-finding-actions button {
+  min-height: 30px;
+  padding: 4px 8px;
+}
+
+.health-finding-impact,
+.health-finding-action-copy,
+.health-finding-verify-copy,
+.health-finding-sources { margin-top: 6px !important; }
+
+.health-finding-evidence {
+  display: grid;
+  grid-template-columns: minmax(110px, max-content) minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 8px 0;
+}
+
+.health-finding-evidence dt { color: var(--muted); }
+.health-finding-evidence dd { margin: 0; overflow-wrap: anywhere; }
+
 .health-history-summary {
   margin: 0 0 14px;
   color: var(--muted);
@@ -1262,9 +1303,17 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .health-finding-details ol { display: grid; gap: 5px; margin: 7px 0 0; padding-left: 22px; }
 .health-finding-details li span { display: block; color: var(--muted); }
 
+.table-health-status { font-weight: 700; }
+.table-health-status.state-poor { color: #b42318; }
+.table-health-status.state-moderate { color: #a15c00; }
+.table-health-status.state-strong { color: #067647; }
+.table-health-status.state-unknown,
+.table-health-status.state-not-assessed { color: var(--muted); }
+
 @media (max-width: 760px) {
-  .health-coverage-pillars { grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr); }
-  .health-coverage-pillars dd { grid-row: auto; }
+  .health-coverage-pillars { grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr)); }
+  .health-finding-evidence { grid-template-columns: 1fr; }
+  .health-finding-evidence dd { margin-bottom: 5px; }
 }
 
 .network-insights-coverage,

@@ -261,6 +261,25 @@ class SQLiteHealthStore:
         finally:
             connection.close()
 
+    def reconcile_current_assessments(self, active_dataset_ids: tuple[str, ...]) -> int:
+        if not active_dataset_ids:
+            raise ValueError("At least one active dataset ID is required")
+        placeholders = ", ".join("?" for _ in active_dataset_ids)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                f"DELETE FROM current_assessments WHERE dataset_id NOT IN ({placeholders})",
+                active_dataset_ids,
+            )
+            connection.commit()
+            return cursor.rowcount
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def _insert_observation(
         self, connection: sqlite3.Connection, observation: Observation
     ) -> bool:

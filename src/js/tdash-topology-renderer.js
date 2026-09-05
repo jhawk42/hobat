@@ -27,6 +27,7 @@ import {
   normalizeLinkCategories,
 } from "./tdash-filters.js";
 import { runAdaptor } from "./tdash-adaptors.js";
+import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
 import {
   applyTopologyTransition,
   buildTopologyDetails,
@@ -60,6 +61,14 @@ let _topologyDatasetCounts = null;  // Counts derived from last topology render
 let _originalNodeStyling = null;  // Map<nodeId, {color, borderWidth, font}> — original styling for search restore
 let _onPhysicsDisabledCallback = null;  // Callback invoked when physics is auto-disabled after stabilization
 let _topologyRenderOwner = null;
+let _healthStatusByDeviceId = new Map();
+
+const HEALTH_BORDER_COLORS = Object.freeze({
+  poor: "#b42318",
+  moderate: "#a15c00",
+  strong: "#067647",
+  unknown: "#667085",
+});
 
 const MESH_COMPACT_LAYOUT = Object.freeze({
   ftdMinEdgeLength: 280,
@@ -100,6 +109,19 @@ export function getTopologyNodeData() {
 }
 export function getTopologyDatasetCounts() {
   return _topologyDatasetCounts;
+}
+export function setTopologyHealthFindings(findings = []) {
+  _healthStatusByDeviceId = new Map();
+  const severity = { unknown: 0, strong: 1, moderate: 2, poor: 3 };
+  findings.forEach((finding) => {
+    (finding.deviceIds || []).forEach((deviceId) => {
+      const current = _healthStatusByDeviceId.get(deviceId);
+      if (!current || severity[finding.status] > severity[current]) {
+        _healthStatusByDeviceId.set(deviceId, finding.status);
+      }
+    });
+  });
+  _topologyFilterHandlers?.applyHealthOverlay?.();
 }
 export function setAutoZoomEnabled(val) {
   _autoZoomEnabled = val;
@@ -481,6 +503,20 @@ export function renderTopologyForDataset(
       createTopologySearchState("", false, viewModel),
     );
     nodesDataset.update(restore.nodeUpdates);
+    const healthUpdates = [];
+    viewModel.nodeMap.forEach((_node, nodeId) => {
+      const record = viewModel.rawByIdForDetails.get(nodeId);
+      const identityKey = getDeviceIdentityKeys(record).find((key) => key.startsWith("extAddress:"));
+      const deviceId = identityKey?.replace(/^extAddress:/, "extaddr:");
+      const status = _healthStatusByDeviceId.get(deviceId);
+      if (!status) return;
+      healthUpdates.push({
+        id: nodeId,
+        borderWidth: status === "poor" ? 5 : 4,
+        color: { border: HEALTH_BORDER_COLORS[status] },
+      });
+    });
+    if (healthUpdates.length > 0) nodesDataset.update(healthUpdates);
   }
 
   // ── Search highlight ─────────────────────────────────────────────────────
@@ -627,6 +663,9 @@ export function renderTopologyForDataset(
     applyFilters: (...args) => owner.isActive() ? applyFilters(...args) : null,
     applySearchHighlight: (...args) => owner.isActive() ? applySearchHighlight(...args) : null,
     restoreOriginalNodeStyling: () => {
+      if (owner.isActive()) restoreOriginalNodeStyling();
+    },
+    applyHealthOverlay: () => {
       if (owner.isActive()) restoreOriginalNodeStyling();
     },
     updateStatus: (...args) => {

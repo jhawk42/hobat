@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -90,6 +91,25 @@ def test_atomic_save_rolls_back_when_assessment_insert_fails(tmp_path, monkeypat
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 0
+
+
+def test_reconcile_current_assessments_removes_only_stale_pointers(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    active_observation, active_assessment = _result("1")
+    stale_observation, stale_assessment = _result("2")
+    stale_observation = replace(stale_observation, dataset_id="retired-dataset")
+    store.save_processing_result(active_observation, active_assessment)
+    store.save_processing_result(stale_observation, stale_assessment)
+
+    assert store.reconcile_current_assessments(
+        (active_observation.dataset_id,)
+    ) == 1
+
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT dataset_id FROM current_assessments"
+        ).fetchall() == [(active_observation.dataset_id,)]
+        assert connection.execute("SELECT COUNT(*) FROM assessments").fetchone() == (2,)
 
 
 def test_future_schema_is_rejected(tmp_path) -> None:

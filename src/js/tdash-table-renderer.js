@@ -18,6 +18,7 @@ import {
   isRowVisibleByDiagnosticFilter,
 } from "./tdash-filters.js";
 import { publishViewStatus } from "./tdash-view-status.js";
+import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
 
 // ── Module-level table state ──────────────────────────────────────────────────
 
@@ -27,14 +28,48 @@ let _tableDatasetLabel = "";
 let _tableDatasetToken = null;
 let _moreInfoEnabled = false;
 let _lastFilteredRows = [];
+let _tableHealthByDeviceId = new Map();
+let _tableHealthObservedAt = "";
 const MORE_INFO_CELL_MAX_LINES = 6;
 const MORE_INFO_CELL_MAX_CHARACTERS = 60;
+const HEALTH_COLUMNS = ["Health Status", "Health Reason", "Health Observed"];
 
 export function setMoreInfoEnabled(val) {
   _moreInfoEnabled = val;
 }
 export function isMoreInfoEnabled() {
   return _moreInfoEnabled;
+}
+
+export function setTableHealthFindings(findings = [], observedAt = "") {
+  _tableHealthByDeviceId = new Map();
+  _tableHealthObservedAt = observedAt;
+  const severity = { unknown: 0, strong: 1, moderate: 2, poor: 3 };
+  findings.forEach((finding) => {
+    (finding.deviceIds || []).forEach((deviceId) => {
+      const current = _tableHealthByDeviceId.get(deviceId);
+      if (!current || severity[finding.status] > severity[current.status]) {
+        _tableHealthByDeviceId.set(deviceId, {
+          status: finding.status,
+          reason: finding.title,
+        });
+      }
+    });
+  });
+}
+
+function healthForRow(row) {
+  const identityKey = getDeviceIdentityKeys(row).find((key) => key.startsWith("extAddress:"));
+  const deviceId = identityKey?.replace(/^extAddress:/, "extaddr:");
+  return _tableHealthByDeviceId.get(deviceId);
+}
+
+function tableCellValue(row, column) {
+  const health = healthForRow(row);
+  if (column === "Health Status") return health?.status ?? "Not assessed";
+  if (column === "Health Reason") return health?.reason ?? "No attributed finding";
+  if (column === "Health Observed") return _tableHealthObservedAt || "Not assessed";
+  return getColumnValue(row, column);
 }
 
 // ── Cell formatting ───────────────────────────────────────────────────────────
@@ -235,11 +270,12 @@ function collectColumns(rows) {
       }
     });
   });
+  const healthColumns = _tableHealthByDeviceId.size > 0 ? HEALTH_COLUMNS : [];
   const pinned = TABLE_PRIORITY_COLUMNS.filter(
     (col) => seen.has(col) || rows.some((row) => hasNestedPath(row, col)),
   );
   const remaining = columns.filter((col) => !pinned.includes(col));
-  return [...pinned, ...remaining];
+  return [...healthColumns, ...pinned, ...remaining];
 }
 
 // ── Column width calculation ──────────────────────────────────────────────────
@@ -247,7 +283,7 @@ function collectColumns(rows) {
 function calculateColumnMaxLength(rows, column) {
   let max = column.length;
   rows.forEach((row) => {
-    const val = formatCellValue(getColumnValue(row, column), column);
+    const val = formatCellValue(tableCellValue(row, column), column);
     if (val) {
       val.split("\n").forEach((line) => {
         max = Math.max(max, line.length);
@@ -299,7 +335,11 @@ function renderTableRows(rows, columns, isSearchActive = false) {
     if (isSearchActive) tr.classList.add("search-match");
     columns.forEach((col) => {
       const td = document.createElement("td");
-      renderTdContent(td, getColumnValue(row, col), col);
+      renderTdContent(td, tableCellValue(row, col), col);
+      if (col === "Health Status") {
+        const statusClass = String(tableCellValue(row, col)).toLowerCase().replaceAll(" ", "-");
+        td.className = `table-health-status state-${statusClass}`;
+      }
       Object.assign(td.style, columnWidths.get(col));
       tr.appendChild(td);
     });
@@ -372,7 +412,8 @@ export function applyTableFilters() {
   _lastFilteredRows = matchingRows;
   const activeColumns = _moreInfoEnabled
     ? _tableColumns
-    : TABLE_PRIORITY_COLUMNS.filter((col) => _tableColumns.includes(col));
+    : [...HEALTH_COLUMNS, ...TABLE_PRIORITY_COLUMNS]
+      .filter((col) => _tableColumns.includes(col));
   const detailsListEl = document.getElementById("details-list");
   if (detailsListEl) detailsListEl.innerHTML = "";
   const summaryListEl = document.getElementById("summary-list");
@@ -404,6 +445,14 @@ export function applyTableFilters() {
 }
 
 export function renderTableForDataset(dataset, statusDatasetToken = dataset) {
+  if (dataset.healthAssessment) {
+    setTableHealthFindings(
+      (dataset.healthAssessment.findingGroups || []).flatMap(
+        (group) => group.findings || [],
+      ),
+      dataset.healthAssessment.observedAt,
+    );
+  }
   const rows = dataset.rows;
   const columns = collectColumns(rows);
 

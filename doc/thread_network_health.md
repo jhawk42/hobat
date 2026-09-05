@@ -230,6 +230,11 @@ fallback keys without rewriting history.
 The filename promotes SQLite to a shared Hobat persistence boundary. The
 existing health tables and their contents are retained unchanged.
 
+After a successful non-dry-run `health process --dataset all`, current
+assessment pointers for dataset IDs no longer present in the manifest are
+removed transactionally. Their immutable observations and assessments remain
+available as history.
+
 The store retains at most 2,000 observations. Pruning occurs in the same write
 transaction and never deletes collector snapshots. Automatic byte retention,
 redaction, scheduling, probes, duration, rates, trends, and firmware compliance
@@ -287,7 +292,18 @@ invalid or future schema data does not produce a best-effort verdict.
 
 For health-eligible datasets, the dashboard pins one assessment after
 Sync and reuses that ID for device drill-down. The status bar shows verdict,
-completeness, and evidence age. Insights show five-pillar coverage, grouped
-findings with lossless expansion, status/scope filters, recent observation and
-expected-roster counts, and JSON export. Unsupported datasets show health as
-unavailable and retain the existing diagnostic insights view.
+completeness, and evidence age. Insights organize stored findings into Needs
+Work, Needs Attention, and Going Well without reclassifying them in the
+browser. Status, scope, and evidence-kind filters narrow the grouped findings;
+each expanded finding includes structured evidence, materiality, confidence,
+impact, action, verification, and source provenance.
+
+Available finding actions can select attributed devices or relationships in
+Topology, filter matching rows in Table, inspect one device, compare two
+endpoints, or apply the related Insights filters. Return to Insights restores
+the prior view, search, filters, and selection; Reset clears the health
+workflow. Topology borders project the pinned finding status, and Table adds
+`Health Status`, `Health Reason`, and `Health Observed` columns. Actions are not
+offered when their target is absent from the loaded dataset. Unsupported
+datasets show health as unavailable and retain the existing diagnostic
+insights view.
