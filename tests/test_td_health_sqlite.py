@@ -48,6 +48,8 @@ def _result(suffix: str = "1") -> tuple[Observation, Assessment]:
         observation_id=observation.observation_id,
         policy_version="snapshot-v1",
         policy_digest="policy-digest",
+        evaluator_version="snapshot-test",
+        profile_id="profile-test",
         status=HealthStatus.STRONG,
         confidence=Confidence.HIGH,
         coverage={"devices": True},
@@ -69,6 +71,9 @@ def test_atomic_save_is_idempotent_and_sets_sqlite_guards(tmp_path) -> None:
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT evaluator_version, profile_id FROM assessments"
+        ).fetchone() == ("snapshot-test", "profile-test")
 
 
 def test_atomic_save_rolls_back_when_assessment_insert_fails(tmp_path, monkeypatch) -> None:
@@ -138,6 +143,58 @@ def test_status_vocabulary_migrates_from_schema_version_one(tmp_path) -> None:
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT status FROM assessments").fetchone() == ("strong",)
         assert connection.execute("SELECT status FROM findings").fetchone() == ("poor",)
+
+
+def test_schema_three_records_explicit_assessment_provenance(tmp_path) -> None:
+    path = tmp_path / "health.db"
+    store = SQLiteHealthStore(path)
+    store.save_processing_result(*_result())
+
+    with sqlite3.connect(path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(assessments)")
+        }
+        versions = {
+            row[0] for row in connection.execute("SELECT version FROM schema_migrations")
+        }
+
+    assert {"evaluator_version", "profile_id"} <= columns
+    assert 3 in versions
+
+
+def test_schema_two_assessments_migrate_with_unknown_legacy_provenance(tmp_path) -> None:
+    path = tmp_path / "health.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations VALUES (2, CURRENT_TIMESTAMP)"
+        )
+        connection.execute(
+            """CREATE TABLE assessments (
+                assessment_id TEXT PRIMARY KEY,
+                observation_id TEXT NOT NULL,
+                policy_version TEXT NOT NULL,
+                policy_digest TEXT NOT NULL,
+                status TEXT NOT NULL,
+                confidence TEXT NOT NULL,
+                coverage_json TEXT NOT NULL,
+                assessed_at TEXT NOT NULL,
+                UNIQUE (observation_id, policy_digest)
+            )"""
+        )
+        connection.execute(
+            "INSERT INTO assessments VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("a", "o", "p", "d", "strong", "high", "{}", "now"),
+        )
+
+    SQLiteHealthStore(path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT evaluator_version, profile_id FROM assessments"
+        ).fetchone() == ("legacy-unknown", "legacy-unknown")
 
 
 def test_observation_retention_is_bounded(tmp_path) -> None:

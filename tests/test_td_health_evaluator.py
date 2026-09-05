@@ -157,7 +157,7 @@ def test_complete_topology_profile_reports_border_router_redundancy() -> None:
     )
 
     assert PROFILE.border_router_authority is True
-    assert EVALUATOR_VERSION == "snapshot-v7"
+    assert EVALUATOR_VERSION == "snapshot-v8"
     assert border_router_finding.status is HealthStatus.STRONG
     assert border_router_finding.evidence["observedBorderRouterCount"] == 2
     assert border_router_finding.evidence["moreThanOne"] is True
@@ -322,6 +322,78 @@ def test_critical_delivery_only_escalates_on_observed_sole_path() -> None:
     assert finding.evidence["solePath"] is True
 
 
+def test_critical_router_delivery_stays_moderate_with_alternate_path() -> None:
+    devices = tuple(
+        DeviceSample(
+            f"extaddr:{value * 16}", value * 16, "router", None, False, ("source.json",)
+        )
+        for value in ("1", "2", "3")
+    )
+    relationships = (
+        _relationship(frame_error_rate=0.35),
+        _relationship(
+            relationship_id="link:2-3",
+            from_device_id=devices[1].device_id,
+            to_device_id=devices[2].device_id,
+        ),
+        _relationship(
+            relationship_id="link:3-1",
+            from_device_id=devices[2].device_id,
+            to_device_id=devices[0].device_id,
+        ),
+    )
+    observation = replace(_observation(relationships[0]), devices=devices, relationships=relationships)
+
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    finding = next(
+        finding
+        for finding in assessment.findings
+        if finding.rule_id == "relationship.directional-quality"
+        and finding.relationship_ids == ("link:test",)
+    )
+
+    assert finding.status is HealthStatus.MODERATE
+    assert finding.evidence["pathBasis"] == "router-bridge"
+    assert finding.evidence["bridge"] is False
+
+
+def test_child_with_two_observed_parents_is_not_a_sole_path() -> None:
+    child_id = "extaddr:3333333333333333"
+    first = _relationship(
+        relationship_id="link:parent-1",
+        relationship_type="parent-child",
+        to_device_id=child_id,
+        frame_error_rate=0.30,
+    )
+    second = _relationship(
+        relationship_id="link:parent-2",
+        relationship_type="parent-child",
+        from_device_id="extaddr:4444444444444444",
+        to_device_id=child_id,
+    )
+    observation = replace(
+        _observation(first),
+        devices=(
+            DeviceSample("extaddr:1111111111111111", "1" * 16, "router", None, False, ("source.json",)),
+            DeviceSample("extaddr:4444444444444444", "4" * 16, "router", None, False, ("source.json",)),
+            DeviceSample(child_id, "3" * 16, "child", None, False, ("source.json",)),
+        ),
+        relationships=(first, second),
+    )
+
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    finding = next(
+        finding
+        for finding in assessment.findings
+        if finding.rule_id == "relationship.directional-quality"
+    )
+
+    assert finding.status is HealthStatus.MODERATE
+    assert finding.evidence["pathBasis"] == "sole-parent"
+    assert finding.evidence["observedParentCount"] == 2
+    assert finding.evidence["solePath"] is False
+
+
 def test_child_relationship_does_not_count_as_alternate_router_path() -> None:
     router_relationship = _relationship()
     child_relationship = _relationship(
@@ -354,11 +426,9 @@ def test_child_relationship_does_not_count_as_alternate_router_path() -> None:
     )
 
     assert finding.status is HealthStatus.MODERATE
-    assert finding.evidence["solePathRouterIds"] == (
-        "extaddr:1111111111111111",
-        "extaddr:2222222222222222",
-    )
-    assert finding.evidence["alternatePathRouterIds"] == ()
+    assert finding.evidence["bridgeRelationshipIds"] == ("link:test",)
+    assert finding.evidence["articulationDeviceIds"] == ()
+    assert "link:child" not in finding.evidence["bridgeRelationshipIds"]
 
 
 def test_lifetime_counter_metrics_are_evidence_only_and_do_not_change_status() -> None:
@@ -489,7 +559,9 @@ def test_multiple_reporters_high_error_aggregates_across_relationships() -> None
 
 
 def test_queued_messages_are_evidence_only() -> None:
-    relationship = _relationship(queued_message_count=3)
+    relationship = _relationship(
+        relationship_type="parent-child", queued_message_count=3
+    )
     assessment = evaluate_observation(
         _observation(relationship), load_health_policy(), profile=PROFILE
     )
@@ -497,6 +569,116 @@ def test_queued_messages_are_evidence_only() -> None:
 
     assert finding.status is HealthStatus.UNKNOWN
     assert finding.evidence["queuedMessageCount"] == 3
+
+
+def test_router_neighbor_queue_depth_is_not_applicable() -> None:
+    assessment = evaluate_observation(
+        _observation(_relationship(queued_message_count=3)),
+        load_health_policy(),
+        profile=PROFILE,
+    )
+
+    assert not any(
+        finding.rule_id == "relationship.queued-messages"
+        for finding in assessment.findings
+    )
+
+
+def test_device_offline_is_independent_of_network_impact_ratio() -> None:
+    observation = _observation(_relationship())
+    absent_id = "extaddr:3333333333333333"
+    expected_ids = frozenset(
+        {
+            *(device.device_id for device in observation.devices),
+            absent_id,
+            *(f"extaddr:{value:016x}" for value in range(4, 11)),
+        }
+    )
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=PROFILE,
+        expected_device_ids=expected_ids,
+        prior_complete_absences={absent_id: 1},
+    )
+
+    offline = next(
+        finding
+        for finding in assessment.findings
+        if finding.rule_id == "device.offline"
+    )
+    assert offline.device_ids == (absent_id,)
+    assert offline.status is HealthStatus.POOR
+    assert not any(
+        finding.rule_id == "network.offline-impact"
+        for finding in assessment.findings
+    )
+    assert assessment.status is not HealthStatus.POOR
+
+
+def test_offline_ratio_emits_separate_network_impact() -> None:
+    observation = _observation(_relationship())
+    absent_id = "extaddr:3333333333333333"
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=PROFILE,
+        expected_device_ids=frozenset(
+            {*(device.device_id for device in observation.devices), absent_id}
+        ),
+        prior_complete_absences={absent_id: 1},
+    )
+
+    impact = next(
+        finding
+        for finding in assessment.findings
+        if finding.rule_id == "network.offline-impact"
+    )
+    assert impact.status is HealthStatus.POOR
+    assert impact.evidence["offlineDeviceIds"] == (absent_id,)
+    assert assessment.status is HealthStatus.POOR
+
+
+def test_partial_observation_cannot_establish_offline() -> None:
+    observation = replace(
+        _observation(_relationship()), completeness=Completeness.PARTIAL
+    )
+    absent_id = "extaddr:3333333333333333"
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=PROFILE,
+        expected_device_ids=frozenset({absent_id}),
+        prior_complete_absences={absent_id: 10},
+    )
+
+    assert any(
+        finding.rule_id == "device.missing" for finding in assessment.findings
+    )
+    assert not any(
+        finding.rule_id in {"device.offline", "network.offline-impact"}
+        for finding in assessment.findings
+    )
+
+
+def test_observed_coverage_is_distinct_from_profile_capability() -> None:
+    assessment = evaluate_observation(
+        replace(_observation(_relationship()), completeness=Completeness.PARTIAL),
+        load_health_policy(),
+        profile=PROFILE,
+    )
+
+    assert assessment.coverage["pillars"] == dict(PROFILE.coverage)
+    assert assessment.coverage["observedPillars"]["connectivity"]["state"] == "limited"
+    assert (
+        assessment.coverage["observedPillars"]["connectivity"]["evidenceCounts"][
+            "routerNeighborRelationships"
+        ]
+        == 1
+    )
 
 
 def test_duplicate_relationship_ids_produce_network_scope_finding() -> None:

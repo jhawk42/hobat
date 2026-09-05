@@ -13,6 +13,7 @@ from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from td_health_manifest import load_health_manifest
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_sqlite import SQLiteHealthStore
+from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
 MAX_PAGE_SIZE = 100
@@ -29,60 +30,14 @@ _SCOPE_ORDER_BASE = {
     "device": DEVICE_ORDER_BASE,
     "relationship": RELATIONSHIP_ORDER_BASE,
 }
-FINDING_GROUP_PRESENTATION = {
-    "network.border-router-redundancy": (NETWORK_ORDER_BASE + 10, "Border Router Redundancy"),
-    "network.router-redundancy": (NETWORK_ORDER_BASE + 20, "Router Redundancy"),
-    "network.external-routing": (NETWORK_ORDER_BASE + 30, "Border Router OMR Addressing"),
-    "network.current-path-redundancy": (NETWORK_ORDER_BASE + 40, "Router Path Redundancy"),
-    "network.observed-link-quality-ratios": (NETWORK_ORDER_BASE + 50, "Network Link Quality Distribution"),
-    "observation.duplicate-source-entry": (NETWORK_ORDER_BASE + 60, "Duplicate Relationships in Source Data"),
-    "device.observed": (DEVICE_ORDER_BASE + 10, "Observed Devices"),
-    "device.missing": (DEVICE_ORDER_BASE + 20, "Expected Device Missing"),
-    "device.offline": (DEVICE_ORDER_BASE + 30, "Offline Devices"),
-    "device.diagnostic-timeout": (DEVICE_ORDER_BASE + 40, "Mesh Diagnostic Query Timed Out"),
-    "device.multiple-reporters-high-error": (
-        DEVICE_ORDER_BASE + 50,
-        "High Link Errors Reported by Multiple Neighbors",
-    ),
-    "device.parentChanges": (DEVICE_ORDER_BASE + 60, "Parent Changes Since Counter Reset"),
-    "device.partitionIdChanges": (
-        DEVICE_ORDER_BASE + 70,
-        "Partition ID Changes Since Counter Reset",
-    ),
-    "device.betterPartitionAttachAttempts": (
-        DEVICE_ORDER_BASE + 80,
-        "Better-Partition Attach Attempts Since Counter Reset",
-    ),
-    "device.totalParentPartitionChanges": (
-        DEVICE_ORDER_BASE + 90,
-        "Parent and Partition Changes Since Counter Reset",
-    ),
-    "device.routerRolePercent": (DEVICE_ORDER_BASE + 100, "Low Router-Role Time Since Reset"),
-    "device.detachedDisabledPercent": (
-        DEVICE_ORDER_BASE + 110,
-        "Detached or Disabled Time Since Reset",
-    ),
-    "device.totalMacErrorRatio": (DEVICE_ORDER_BASE + 800, "High Device MAC Error Ratio"),
-    "device.totalMacDiscardRatio": (DEVICE_ORDER_BASE + 810, "High Device MAC Discard Ratio"),
-    "device.attachment-failure": (DEVICE_ORDER_BASE + 900, "Device Not Attached to Mesh"),
-    "relationship.bidirectional-lq3": (
-        RELATIONSHIP_ORDER_BASE + 10,
-        "Strong Bidirectional Link (LQ3)",
-    ),
-    "relationship.directional-quality": (
-        RELATIONSHIP_ORDER_BASE + 20,
-        "Link Quality or Delivery Degradation",
-    ),
-    "relationship.queued-messages": (
-        RELATIONSHIP_ORDER_BASE + 30,
-        "Indirect Messages Queued for Child",
-    ),
-}
-
-
-def _finding_group_presentation(rule_id: str, title: str) -> tuple[int, str]:
-    if rule_id in FINDING_GROUP_PRESENTATION:
-        return FINDING_GROUP_PRESENTATION[rule_id]
+def _finding_group_presentation(
+    rule_id: str, title: str, variant: str | None = None
+) -> tuple[int, str]:
+    try:
+        rule = HEALTH_RULE_CATALOG.rule(rule_id)
+        return (rule.order, rule.title_for(variant))
+    except HealthRuleCatalogError:
+        pass
     base = _SCOPE_ORDER_BASE.get(rule_id.split(".", 1)[0], UNKNOWN_ORDER_BASE)
     return (base + 950, title)
 
@@ -153,6 +108,8 @@ class TDHealthReadService:
         router_ids = ()
         if row["rule_id"] == "network.current-path-redundancy":
             router_ids = tuple(sorted({
+                *evidence.get("bridgeDeviceIds", ()),
+                *evidence.get("articulationDeviceIds", ()),
                 *evidence.get("solePathRouterIds", ()),
                 *evidence.get("alternatePathRouterIds", ()),
             }))
@@ -166,6 +123,7 @@ class TDHealthReadService:
             "summary": row["summary"],
             "whyItMatters": row["why_it_matters"],
             "evidence": evidence,
+            "presentationVariant": evidence.get("presentationVariant"),
             "confidence": row["confidence"],
             "action": row["action"],
             "verify": row["verify"],
@@ -184,9 +142,14 @@ class TDHealthReadService:
 
     @staticmethod
     def _group_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+        grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
         for finding in findings:
-            key = (finding["ruleId"], finding["status"], finding["scope"])
+            key = (
+                finding["ruleId"],
+                finding["status"],
+                finding["scope"],
+                finding.get("presentationVariant") or "",
+            )
             grouped.setdefault(key, []).append(finding)
         result: list[dict[str, Any]] = []
         for key, children in grouped.items():
@@ -200,13 +163,17 @@ class TDHealthReadService:
                 for endpoint in child["endpoints"]
             }
             digest = hashlib.sha256("\0".join(key).encode("utf-8")).hexdigest()[:20]
-            _, title = _finding_group_presentation(key[0], children[0]["title"])
+            variant = key[3] or None
+            _, title = _finding_group_presentation(
+                key[0], children[0]["title"], variant
+            )
             result.append(
                 {
                     "groupId": f"finding-group:{digest}",
                     "ruleId": key[0],
                     "status": key[1],
                     "scope": key[2],
+                    "presentationVariant": variant,
                     "title": title,
                     "summary": children[0]["summary"],
                     "confidence": min(
@@ -223,7 +190,11 @@ class TDHealthReadService:
         return sorted(
             result,
             key=lambda group: (
-                _finding_group_presentation(group["ruleId"], group["title"])[0],
+                _finding_group_presentation(
+                    group["ruleId"],
+                    group["title"],
+                    group.get("presentationVariant"),
+                )[0],
                 -max(child["rank"] for child in group["findings"]),
                 group["groupId"],
             ),
@@ -267,7 +238,7 @@ class TDHealthReadService:
             row["assessment_id"], status=status, scope=scope, device_id=device_id
         )
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "assessmentId": row["assessment_id"],
             "observationId": row["observation_id"],
             "datasourceId": row["datasource_id"],
@@ -281,6 +252,8 @@ class TDHealthReadService:
             "assessedAt": row["assessed_at"],
             "policyVersion": row["policy_version"],
             "policyDigest": row["policy_digest"],
+            "evaluatorVersion": row["evaluator_version"],
+            "profileId": row["profile_id"],
             "coverage": _decode_json(row["coverage_json"], field="coverage"),
             "findingCount": finding_count,
             "limit": limit,

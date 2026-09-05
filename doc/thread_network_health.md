@@ -99,11 +99,13 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
 ```
 
 An expected device absent from one complete observation remains missing with
-Unknown status. Offline requires absence from two distinct eligible complete
-observations and more than 15% of the expected roster meeting that absence
-threshold. This keeps occasional sleepy-device misses from making the network
-Poor. Partial and degraded observations do not increment that count. Stage 1
-reports observation counts, not wall-clock offline duration.
+Unknown status. A device becomes Offline after absence from two distinct
+eligible complete observations, independent of other roster devices. Offline is
+a device-level Poor finding and does not by itself make the network Poor. The
+separate `network.offline-impact` rule makes the network Poor when more than 15%
+of the expected roster is Offline. Partial and degraded observations do not
+increment absence history. Stage 1 reports observation counts, not wall-clock
+offline duration.
 
 List or update one network's roster through the CLI-only administration boundary:
 
@@ -132,9 +134,10 @@ path.
 An optional `config/td-health-policy.json` replaces the defaults after strict
 validation. It must include the complete `snapshot-v1` threshold contract and
 an Offline requirement of at least two complete observations. The applied
-policy version and digest are stored with every assessment. Policy and profile
-capability digests participate in assessment identity, so either kind of change
-creates a new assessment over the same observation.
+policy version and digest, evaluator version, and health profile ID are stored
+with every assessment. Policy, evaluator, and profile capability digests
+participate in assessment identity, so any semantic change creates a new
+assessment over the same observation.
 
 Every finding has a stable ID, scope, status, confidence, affected device or
 relationship IDs, structured evidence, source files, action, and verification
@@ -142,9 +145,10 @@ text. Missing evidence remains Unknown.
 
 ## Coverage Pillars
 
-Each health profile in `td-dataset-manifest.json` declares a coverage state for
+Each health profile in `td-dataset-manifest.json` declares static capability for
 five fixed pillars, checked against `ALLOWED_COVERAGE_STATES` in
-`td_health_manifest.py`:
+`td_health_manifest.py`. Every assessment also records `observedPillars`, which
+applies the same states to evidence actually present in that observation:
 
 | Pillar | Covers |
 |---|---|
@@ -160,29 +164,29 @@ Each pillar is assigned one of three coverage states:
 - `limited`: some useful evidence is available, but coverage is incomplete.
 - `missing`: the assessment does not have the evidence required for this pillar.
 
-A `limited` or `missing` pillar can still contribute findings, but with reduced
-confidence, consistent with the `complete`/`degraded`/`partial` completeness
-levels above. The dashboard renders these states in the Insights five-pillar
-coverage grid.
+A `limited` or `missing` observed pillar can still contribute findings, but with
+reduced confidence. Observed coverage cannot exceed static capability, and a
+partial or degraded observation cannot have `sufficient` observed coverage.
+The dashboard renders observed state with static capability as context.
 
 ## Finding Catalog
 
-Finding titles below are the grouped display titles from
-`FINDING_GROUP_PRESENTATION` in `td_health_read.py`, in dashboard presentation
-order. Descriptions summarize the implemented finding logic in
-`td_health_evaluator.py`.
+Finding metadata and dashboard order are owned by the machine-readable
+`src/td-health-rules.json` catalog and validated by `td_health_rules.py`.
+Descriptions below summarize the implemented evaluator behavior.
 
 | ruleId | title | description |
 |---|---|---|
 | `network.border-router-redundancy` | Border Router Redundancy | Counts observed Border Routers. One means there is no Border Router failover; an incomplete observation or no authoritative count remains Unknown. |
 | `network.router-redundancy` | Router Redundancy | Counts observed routing devices, including the Leader. One leaves mesh routing dependent on a single active Router; no observed Routers remains Unknown. |
 | `network.external-routing` | Border Router OMR Addressing | Checks whether an identified Border Router has an address in the current OMR prefix. This supports OMR configuration but does not verify backbone, default-route, or Internet reachability. |
-| `network.current-path-redundancy` | Router Path Redundancy | Identifies Routers with only one observed router-neighbor relationship versus multiple router-neighbor relationships. Child relationships do not establish alternate router paths. |
+| `network.current-path-redundancy` | Router Path Redundancy | Identifies bridge relationships and articulation Routers in the undirected router-neighbor graph. Child relationships do not establish alternate router paths. |
 | `network.observed-link-quality-ratios` | Network Link Quality Distribution | Shows the proportion of observed link-quality reports at LQ3, LQ2, and LQ1. Missing and unknown quality reports are excluded rather than treated as healthy. |
+| `network.offline-impact` | Offline Device Network Impact | Separately makes aggregate network health Poor when the share of individually Offline expected devices exceeds policy. Evidence records unavailable materiality dimensions rather than inferring them. |
 | `observation.duplicate-source-entry` | Duplicate Relationships in Source Data | The same relationship appeared more than once in one source snapshot. It is treated as a collection artifact, not as multiple links. |
 | `device.observed` | Observed Devices | Device is present in this cached observation. Presence does not prove application reachability or continued availability. |
 | `device.missing` | Expected Device Missing | An expected device is absent from the latest observation but has not met the history and completeness requirements for Offline status. |
-| `device.offline` | Offline Devices | An expected device has been absent for the required consecutive complete observations, and the policy's missing-roster threshold has also been exceeded. |
+| `device.offline` | Offline Devices | An expected device has been absent for the required consecutive complete observations. Aggregate network impact is assessed separately. |
 | `device.diagnostic-timeout` | Mesh Diagnostic Query Timed Out | The device did not answer a mesh diagnostic query in this observation. This reduces evidence coverage and may reflect sleep behavior, congestion, overload, or loss of connectivity. |
 | `device.multiple-reporters-high-error` | High Link Errors Reported by Multiple Neighbors | Two or more observed relationships report elevated frame or message error rates toward this device, providing stronger evidence than one reporter alone. |
 | `device.parentChanges` | Parent Changes Since Counter Reset | The cumulative parent-change count crossed its threshold. It may indicate earlier attachment instability, but a later comparable observation is required to establish current churn. |
@@ -195,7 +199,7 @@ order. Descriptions summarize the implemented finding logic in
 | `device.totalMacDiscardRatio` | High Device MAC Discard Ratio | The current device-wide MAC discard ratio crossed a policy threshold using a valid packet denominator, indicating packet loss before successful delivery. |
 | `device.attachment-failure` | Device Not Attached to Mesh | The device currently reports a detached, disabled, or orphaned state and is therefore not attached to the Thread mesh. |
 | `relationship.bidirectional-lq3` | Strong Bidirectional Link (LQ3) | Both observed directions report LQ3, providing current evidence of a strong usable relationship. |
-| `relationship.directional-quality` | Link Quality or Delivery Degradation | Directional LQ, asymmetry, delivery errors, RSS, or link margin crossed a current-snapshot threshold. Critical delivery errors become Poor only when an endpoint has no observed alternate relationship. An attributed finding uses **High Delivery Errors Despite Acceptable Signal** when errors are elevated despite acceptable RSS or link margin. |
+| `relationship.directional-quality` | Link Quality or Delivery Degradation | Directional LQ, asymmetry, delivery errors, RSS, or link margin crossed a current-snapshot threshold. Critical delivery errors become Poor only for a sole parent-child attachment or a router-neighbor bridge. An attributed finding uses **High Delivery Errors Despite Acceptable Signal** when errors are elevated despite acceptable RSS or link margin. |
 | `relationship.queued-messages` | Indirect Messages Queued for Child | One or more indirect messages were waiting at the parent for this child in the current observation. This can be normal for a sleepy child; persistence or growth across observations is more significant. |
 
 ## Storage Safety
@@ -205,6 +209,10 @@ and explicit transactions. Observation sources, normalized device and
 relationship samples, assessment, findings, and current pointer commit together.
 Any failure rolls back the whole operation. Reprocessing unchanged inputs and
 policy is idempotent.
+
+Schema version 3 stores evaluator version and health profile ID as explicit
+assessment provenance. Older assessments migrate with `legacy-unknown` values;
+their immutable finding and evidence rows are not rewritten.
 
 The filename promotes SQLite to a shared Hobat persistence boundary. The
 existing health tables and their contents are retained unchanged.

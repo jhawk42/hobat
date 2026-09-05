@@ -27,6 +27,9 @@ def test_assessment_projection_groups_losslessly_and_resolves_labels(tmp_path) -
     )
 
     assert result is not None
+    assert result["schemaVersion"] == 2
+    assert result["evaluatorVersion"] == "snapshot-test"
+    assert result["profileId"] == "profile-test"
     assert result["assessmentId"] == assessment.assessment_id
     assert result["findingCount"] == len(assessment.findings)
     assert sum(group["count"] for group in result["findingGroups"]) == len(
@@ -108,6 +111,34 @@ def test_finding_groups_follow_operator_presentation_order() -> None:
         "Network Link Quality Distribution",
         "Duplicate Relationships in Source Data",
     ]
+
+
+def test_directional_quality_variants_form_distinct_groups() -> None:
+    base = {
+        "ruleId": "relationship.directional-quality",
+        "status": "moderate",
+        "scope": "relationship",
+        "rank": 20,
+        "title": "Link Quality or Delivery Degradation",
+        "summary": "summary",
+        "confidence": "high",
+        "deviceIds": [],
+        "relationshipIds": [],
+        "endpoints": [],
+    }
+
+    groups = TDHealthReadService._group_findings(
+        [
+            {**base, "presentationVariant": None},
+            {**base, "presentationVariant": "delivery-errors-adequate-signal"},
+        ]
+    )
+
+    assert len(groups) == 2
+    assert {group["title"] for group in groups} == {
+        "Link Quality or Delivery Degradation",
+        "High Delivery Errors Despite Acceptable Signal",
+    }
 
 
 def test_observation_page_is_bounded(tmp_path) -> None:

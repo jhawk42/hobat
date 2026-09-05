@@ -19,9 +19,11 @@ from td_health_observation_model import (
 )
 from td_health_policy import HealthPolicy
 from td_health_manifest import HealthProfile
+from td_health_graph import GraphEdge, analyze_undirected_graph
+from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
-EVALUATOR_VERSION = "snapshot-v7"
+EVALUATOR_VERSION = "snapshot-v8"
 
 _LIFETIME_EVIDENCE_METRICS = frozenset(
     {
@@ -111,6 +113,26 @@ def _finding(
     source_files: tuple[str, ...] = (),
     confidence: Confidence = Confidence.HIGH,
 ) -> Finding:
+    rule = HEALTH_RULE_CATALOG.rule(rule_id)
+    if scope.value not in rule.scopes:
+        raise HealthRuleCatalogError(
+            f"Rule {rule_id} does not support scope {scope.value}"
+        )
+    matching_variants = tuple(
+        variant for variant, variant_title in rule.variants.items()
+        if variant_title == title
+    )
+    if title == rule.title:
+        presentation_variant = None
+    elif len(matching_variants) == 1:
+        presentation_variant = matching_variants[0]
+    else:
+        raise HealthRuleCatalogError(
+            f"Title {title!r} is not cataloged for {rule_id}"
+        )
+    catalog_evidence = dict(evidence)
+    if presentation_variant is not None:
+        catalog_evidence["presentationVariant"] = presentation_variant
     target = ",".join((*device_ids, *relationship_ids, *target_parts)) or observation.network_id
     return Finding(
         finding_id=_stable_id("finding", observation.observation_id, rule_id, target),
@@ -118,15 +140,15 @@ def _finding(
         status=status,
         scope=scope,
         rank=rank,
-        title=title,
+        title=rule.title_for(presentation_variant),
         summary=summary,
-        why_it_matters=why,
+        why_it_matters=rule.description,
         device_ids=device_ids,
         relationship_ids=relationship_ids,
-        evidence=evidence,
+        evidence=catalog_evidence,
         confidence=confidence,
-        action=action,
-        verify=verify,
+        action=rule.action,
+        verify=rule.verify,
         source_files=source_files,
     )
 
@@ -207,7 +229,7 @@ def evaluate_observation(
 
     for device_id in missing_expected_ids:
         prior = absences.get(device_id, 0)
-        is_offline = device_id in offline_candidate_ids and offline_poor_threshold_met
+        is_offline = device_id in offline_candidate_ids
         findings.append(
             _finding(
                 observation,
@@ -222,8 +244,8 @@ def evaluate_observation(
                     else "Expected device is not present, but Offline is not established."
                 ),
                 why=(
-                    "An expected device has been absent for the required consecutive complete observations, "
-                    "and the policy's missing-roster threshold has also been exceeded."
+                    "An expected device has been absent for the required consecutive complete observations. "
+                    "Network impact is assessed separately."
                     if is_offline
                     else "An expected device is absent from the latest observation but has not met the history "
                     "and completeness requirements for Offline status."
@@ -246,6 +268,41 @@ def evaluate_observation(
             )
         )
 
+    if offline_candidate_ids and offline_poor_threshold_met:
+        findings.append(
+            _finding(
+                observation,
+                rule_id="network.offline-impact",
+                status=HealthStatus.POOR,
+                scope=FindingScope.NETWORK,
+                rank=FindingRank.POOR,
+                title="Offline Device Network Impact",
+                summary=(
+                    f"{len(offline_candidate_ids)} of {len(expected_device_ids)} expected devices "
+                    f"are Offline ({offline_device_ratio:.1%})."
+                ),
+                why="The Offline share of the configured roster exceeds policy. Device role, operator "
+                "criticality, attached descendants, and required-service impact are not yet available.",
+                evidence={
+                    "offlineDeviceIds": tuple(sorted(offline_candidate_ids)),
+                    "offlineDeviceCount": len(offline_candidate_ids),
+                    "expectedRosterCount": len(expected_device_ids),
+                    "offlineDeviceRatio": offline_device_ratio,
+                    "threshold": policy.offline_poor_device_ratio_threshold,
+                    "availableMaterialityInputs": ("configuredRosterRatio",),
+                    "unavailableMaterialityInputs": (
+                        "deviceRole",
+                        "operatorCriticality",
+                        "attachedDescendants",
+                        "requiredServiceImpact",
+                    ),
+                },
+                action="Restore Offline devices or revise the expected roster after confirming their operational role.",
+                verify="Process another complete observation and confirm the Offline ratio falls below policy.",
+                device_ids=tuple(sorted(offline_candidate_ids)),
+            )
+        )
+
     router_ids = tuple(sorted(
         device.device_id
         for device in observation.devices
@@ -257,21 +314,27 @@ def evaluate_observation(
     router_count = len(router_ids)
     border_router_count = len(border_router_ids)
     if profile.coverage["resilience"] == "sufficient":
+        router_count_threshold = policy.thresholds["routerCount"]["unstableAtOrBelow"]
         findings.append(_finding(
             observation,
             rule_id="network.router-redundancy",
             status=(
                 HealthStatus.UNKNOWN if router_count == 0
-                else HealthStatus.MODERATE if router_count == 1
+                else HealthStatus.MODERATE if router_count <= router_count_threshold
                 else HealthStatus.STRONG
             ),
             scope=FindingScope.NETWORK,
-            rank=FindingRank.MODERATE if router_count == 1 else FindingRank.INFO,
+            rank=FindingRank.MODERATE if 0 < router_count <= router_count_threshold else FindingRank.INFO,
             title="Router Redundancy",
             summary=f"Observed {router_count} Router{'s' if router_count != 1 else ''}.",
             why="One observed routing device leaves mesh routing dependent on a single active Router; "
             "no observed Routers leaves redundancy Unknown.",
-            evidence={"observedRouterCount": router_count, "moreThanOne": router_count > 1},
+            evidence={
+                "observedRouterCount": router_count,
+                "unstableAtOrBelow": router_count_threshold,
+                "meetsPolicy": router_count > router_count_threshold,
+                "moreThanOne": router_count > 1,
+            },
             action=(
                 "Collect Router-bearing evidence." if router_count == 0
                 else "Add or restore Router-capable devices if resilience is required."
@@ -282,6 +345,7 @@ def evaluate_observation(
             confidence=Confidence.HIGH if router_count else Confidence.LOW,
         ))
     if profile.border_router_authority:
+        border_router_count_threshold = policy.thresholds["borderRouterCount"]["unstableAtOrBelow"]
         border_router_summary = f"Observed {border_router_count} Border Router{'s' if border_router_count != 1 else ''}."
         if not complete:
             border_router_summary += f" Source completeness is {observation.completeness.value}, so redundancy is provisional."
@@ -290,16 +354,25 @@ def evaluate_observation(
             rule_id="network.border-router-redundancy",
             status=(
                 HealthStatus.UNKNOWN if not complete or border_router_count == 0
-                else HealthStatus.MODERATE if border_router_count == 1
+                else HealthStatus.MODERATE if border_router_count <= border_router_count_threshold
                 else HealthStatus.STRONG
             ),
             scope=FindingScope.NETWORK,
-            rank=FindingRank.MODERATE if complete and border_router_count == 1 else FindingRank.INFO,
+            rank=(
+                FindingRank.MODERATE
+                if complete and 0 < border_router_count <= border_router_count_threshold
+                else FindingRank.INFO
+            ),
             title="Border Router Redundancy",
             summary=border_router_summary,
             why="One observed Border Router provides no Border Router failover; an incomplete observation "
             "or no authoritative count leaves redundancy Unknown.",
-            evidence={"observedBorderRouterCount": border_router_count, "moreThanOne": border_router_count > 1},
+            evidence={
+                "observedBorderRouterCount": border_router_count,
+                "unstableAtOrBelow": border_router_count_threshold,
+                "meetsPolicy": border_router_count > border_router_count_threshold,
+                "moreThanOne": border_router_count > 1,
+            },
             action=(
                 "Collect complete Border-Router-bearing evidence." if not complete or border_router_count == 0
                 else "Add or restore a second Border Router if resilience is required."
@@ -362,51 +435,84 @@ def evaluate_observation(
             ),
         ))
 
-    adjacency: dict[str, set[str]] = {device.device_id: set() for device in observation.devices}
-    router_adjacency: dict[str, set[str]] = {device_id: set() for device_id in router_ids}
-    for relationship in observation.relationships:
-        adjacency.setdefault(relationship.from_device_id, set()).add(relationship.to_device_id)
-        adjacency.setdefault(relationship.to_device_id, set()).add(relationship.from_device_id)
-        if relationship.relationship_type == "router-neighbor":
-            router_adjacency.setdefault(relationship.from_device_id, set()).add(
-                relationship.to_device_id
+    router_id_set = frozenset(router_ids)
+    router_relationships = tuple(
+        relationship
+        for relationship in observation.relationships
+        if relationship.relationship_type == "router-neighbor"
+        and relationship.from_device_id in router_id_set
+        and relationship.to_device_id in router_id_set
+    )
+    graph_analysis = analyze_undirected_graph(
+        router_ids,
+        (
+            GraphEdge(
+                relationship.relationship_id,
+                relationship.from_device_id,
+                relationship.to_device_id,
             )
-            router_adjacency.setdefault(relationship.to_device_id, set()).add(
-                relationship.from_device_id
-            )
-    sole_path_router_ids = tuple(sorted(
-        device_id for device_id in router_ids if len(router_adjacency.get(device_id, set())) == 1
-    ))
-    alternate_path_router_ids = tuple(sorted(
-        device_id for device_id in router_ids if len(router_adjacency.get(device_id, set())) > 1
-    ))
-    if observation.relationships and profile.topology_authority:
+            for relationship in router_relationships
+        ),
+    )
+    bridge_relationship_ids = frozenset(graph_analysis.bridge_relationship_ids)
+    bridge_device_ids = tuple(sorted({
+        device_id
+        for relationship in router_relationships
+        if relationship.relationship_id in bridge_relationship_ids
+        for device_id in (
+            relationship.from_device_id,
+            relationship.to_device_id,
+        )
+    }))
+    affected_router_ids = tuple(sorted({
+        *bridge_device_ids,
+        *graph_analysis.articulation_device_ids,
+    }))
+    if profile.topology_authority:
+        path_status = (
+            HealthStatus.UNKNOWN
+            if router_count < 2 or graph_analysis.edge_count == 0
+            else HealthStatus.MODERATE
+            if graph_analysis.bridge_relationship_ids or graph_analysis.articulation_device_ids
+            else HealthStatus.STRONG
+        )
         findings.append(
             _finding(
                 observation,
                 rule_id="network.current-path-redundancy",
-                status=HealthStatus.MODERATE if sole_path_router_ids else HealthStatus.STRONG,
+                status=path_status,
                 scope=FindingScope.NETWORK,
-                rank=FindingRank.MODERATE if sole_path_router_ids else FindingRank.INFO,
+                rank=FindingRank.MODERATE if path_status is HealthStatus.MODERATE else FindingRank.INFO,
                 title="Router Path Redundancy",
                 summary=(
-                    f"Observed {len(sole_path_router_ids)} Router(s) with one current relationship."
-                    if sole_path_router_ids
-                    else f"Observed alternate relationships for {len(alternate_path_router_ids)} Router(s)."
+                    f"Observed {len(graph_analysis.bridge_relationship_ids)} bridge relationship(s) and "
+                    f"{len(graph_analysis.articulation_device_ids)} articulation Router(s)."
+                    if path_status is not HealthStatus.UNKNOWN
+                    else "Current router path redundancy is not established by this observation."
                 ),
-                why="A Router with only one observed router-neighbor relationship may be a current single "
-                "point of failure; child relationships do not establish alternate router paths.",
+                why="Router-neighbor bridges and articulation Routers are current single points of failure; "
+                "child relationships do not establish alternate router paths.",
                 evidence={
-                    "solePathRouterIds": sole_path_router_ids,
-                    "alternatePathRouterIds": alternate_path_router_ids,
+                    "routerCount": router_count,
+                    "routerNeighborEdgeCount": graph_analysis.edge_count,
+                    "bridgeRelationshipIds": graph_analysis.bridge_relationship_ids,
+                    "bridgeDeviceIds": bridge_device_ids,
+                    "bridgeComponents": graph_analysis.bridge_components,
+                    "articulationDeviceIds": graph_analysis.articulation_device_ids,
+                    "articulationComponents": graph_analysis.articulation_components,
                 },
-                action="Inspect sole-path Routers and preserve an alternate usable relationship.",
-                verify="Process another complete topology observation and compare current relationships.",
-                device_ids=sole_path_router_ids,
+                action="Inspect single points of failure and preserve alternate usable router paths.",
+                verify="Process another complete topology observation and compare bridges and articulation Routers.",
+                device_ids=affected_router_ids,
+                relationship_ids=graph_analysis.bridge_relationship_ids,
+                confidence=Confidence.LOW if path_status is HealthStatus.UNKNOWN else Confidence.HIGH,
             )
         )
 
     metric_sources: dict[str, set[str]] = {}
+    device_roles = {
+        device.device_id: (device.role or "").lower() for device in observation.devices
+    }
     lq_counts = {1: 0.0, 2: 0.0, 3: 0.0}
     diagnostic_timeout_device_ids: set[str] = set()
     for metric in observation.metrics:
@@ -420,6 +526,11 @@ def evaluate_observation(
             continue
         threshold = policy.thresholds.get(metric.metric)
         if threshold is None:
+            continue
+        if metric.metric == "routerRolePercent" and device_roles.get(metric.device_id) not in {
+            "router",
+            "leader",
+        }:
             continue
         if metric.metric in _LIFETIME_EVIDENCE_METRICS:
             metric_title, metric_description = _HISTORICAL_METRIC_PRESENTATION[metric.metric]
@@ -598,8 +709,21 @@ def evaluate_observation(
         )
 
     neighbor_high_error_relationships: dict[str, set[str]] = {}
+    child_parent_counts: dict[str, int] = {}
+    for relationship in observation.relationships:
+        if relationship.relationship_type != "parent-child":
+            continue
+        child_id = (
+            relationship.from_device_id
+            if device_roles.get(relationship.from_device_id) == "child"
+            else relationship.to_device_id
+        )
+        child_parent_counts[child_id] = child_parent_counts.get(child_id, 0) + 1
     for relationship in observation.relationships:
         child_relationship = relationship.relationship_type == "parent-child"
+        router_relationship = relationship.relationship_type == "router-neighbor"
+        if not child_relationship and not router_relationship:
+            continue
         frame_threshold = policy.thresholds[
             "childFrameErrorRate" if child_relationship else "routerNeighborFrameErrorRate"
         ]
@@ -616,7 +740,12 @@ def evaluate_observation(
             and relationship.link_quality_out is not None
             and relationship.link_quality_in != relationship.link_quality_out
         )
-        weak = bool(quality_values) and min(quality_values) <= 2
+        link_quality_threshold = policy.thresholds[
+            "childLinkQuality" if child_relationship else "routerLinkQuality"
+        ]
+        weak = bool(quality_values) and min(quality_values) <= link_quality_threshold[
+            "unstableAtOrBelow"
+        ]
         frame_bad = (
             relationship.frame_error_rate is not None
             and relationship.frame_error_rate >= frame_threshold["unstable"]
@@ -630,6 +759,8 @@ def evaluate_observation(
             and relationship.last_rssi < policy.thresholds["rssi"]["unstableBelow"]
         )
         margin_bad = (
+            child_relationship
+            and
             relationship.link_margin is not None
             and relationship.link_margin < policy.thresholds["childLinkMargin"]["unstableBelow"]
         )
@@ -642,11 +773,22 @@ def evaluate_observation(
             or (relationship.message_error_rate is not None
                 and relationship.message_error_rate >= message_threshold.get("critical", float("inf")))
         )
-        sole_path = (
-            len(adjacency.get(relationship.from_device_id, set())) <= 1
-            or len(adjacency.get(relationship.to_device_id, set())) <= 1
+        child_id = (
+            relationship.from_device_id
+            if device_roles.get(relationship.from_device_id) == "child"
+            else relationship.to_device_id
         )
-        if relationship.queued_message_count is not None and relationship.queued_message_count > 0:
+        sole_path = (
+            child_parent_counts.get(child_id, 0) == 1
+            if child_relationship
+            else relationship.relationship_id in bridge_relationship_ids
+        )
+        path_basis = "sole-parent" if child_relationship else "router-bridge"
+        if (
+            child_relationship
+            and relationship.queued_message_count is not None
+            and relationship.queued_message_count > 0
+        ):
             findings.append(
                 _finding(
                     observation,
@@ -723,7 +865,26 @@ def evaluate_observation(
                         "linkMargin": relationship.link_margin,
                         "relationshipType": relationship.relationship_type,
                         "solePath": sole_path,
+                        "pathBasis": path_basis,
+                        "observedParentCount": (
+                            child_parent_counts.get(child_id, 0) if child_relationship else None
+                        ),
+                        "bridge": (
+                            relationship.relationship_id in bridge_relationship_ids
+                            if router_relationship
+                            else None
+                        ),
+                        "affectedComponents": (
+                            graph_analysis.bridge_components.get(relationship.relationship_id, ())
+                            if router_relationship
+                            else ()
+                        ),
                         "errorUncorrelatedWithRss": error_uncorrelated_with_rss,
+                        "presentationVariant": (
+                            "delivery-errors-adequate-signal"
+                            if error_uncorrelated_with_rss
+                            else None
+                        ),
                     },
                     action=(
                         "Investigate interference or firmware for this device before relocating it."
@@ -784,21 +945,99 @@ def evaluate_observation(
         finding
         for finding in findings
         if finding.status in {HealthStatus.MODERATE, HealthStatus.POOR}
+        and finding.rule_id != "device.offline"
     ]
     if any(finding.status is HealthStatus.POOR for finding in material):
         status = HealthStatus.POOR
     elif any(finding.status is HealthStatus.MODERATE for finding in material):
         status = HealthStatus.MODERATE
-    elif (
-        complete
-        and observation.devices
-        and all(state == "sufficient" for state in profile.coverage.values())
+    valid_mac_metrics = sum(
+        metric.metric in {"totalMacErrorRatio", "totalMacDiscardRatio"}
+        and metric.denominator is not None
+        and metric.denominator > 0
+        for metric in observation.metrics
+    )
+    complete_lq_pairs = sum(
+        relationship.link_quality_in is not None
+        and relationship.link_quality_out is not None
+        for relationship in observation.relationships
+    )
+    observed_counts = {
+        "availability": {
+            "observedDevices": len(observation.devices),
+            "expectedRosterEntries": len(expected_device_ids),
+            "expectedDevicesPresent": len(expected_device_ids & observed_ids),
+            "attachmentStates": sum(bool(device.state or device.role) for device in observation.devices),
+            "offlineEligible": int(complete and bool(expected_device_ids)),
+        },
+        "connectivity": {
+            "relationships": len(observation.relationships),
+            "parentChildRelationships": sum(
+                relationship.relationship_type == "parent-child"
+                for relationship in observation.relationships
+            ),
+            "routerNeighborRelationships": len(router_relationships),
+            "completeDirectionalLqPairs": complete_lq_pairs,
+        },
+        "delivery": {
+            "validMacRatios": valid_mac_metrics,
+            "relationshipRates": sum(
+                relationship.frame_error_rate is not None
+                or relationship.message_error_rate is not None
+                for relationship in observation.relationships
+            ),
+            "queueDepths": sum(
+                relationship.queued_message_count is not None
+                for relationship in observation.relationships
+            ),
+            "diagnosticTimeouts": len(diagnostic_timeout_device_ids),
+        },
+        "resilience": {
+            "routers": router_count,
+            "borderRouters": border_router_count,
+            "routerNeighborEdges": graph_analysis.edge_count,
+            "bridges": len(graph_analysis.bridge_relationship_ids),
+            "articulationPoints": len(graph_analysis.articulation_device_ids),
+        },
+        "externalRouting": {
+            "omrPrefixAvailable": int(bool(omr_prefix)),
+            "borderRouters": border_router_count,
+            "borderRoutersWithOmrAddress": len(omr_border_router_ids) if profile.border_router_authority and complete and omr_prefix else 0,
+        },
+    }
+    observed_pillars: dict[str, dict[str, object]] = {}
+    for pillar, static_state in profile.coverage.items():
+        counts = observed_counts[pillar]
+        evidence_present = any(value > 0 for value in counts.values())
+        reasons: list[str] = []
+        if static_state == "missing":
+            observed_state = "missing"
+            reasons.append("dataset profile does not support this pillar")
+        elif not evidence_present:
+            observed_state = "missing"
+            reasons.append("no usable evidence in this observation")
+        elif static_state == "limited" or not complete:
+            observed_state = "limited"
+            if static_state == "limited":
+                reasons.append("dataset profile capability is limited")
+            if not complete:
+                reasons.append(f"source completeness is {observation.completeness.value}")
+        else:
+            observed_state = "sufficient"
+            reasons.append("supported evidence is present in a complete observation")
+        observed_pillars[pillar] = {
+            "state": observed_state,
+            "evidenceCounts": counts,
+            "reasons": reasons,
+        }
+    if not material and complete and observation.devices and all(
+        pillar["state"] == "sufficient" for pillar in observed_pillars.values()
     ):
         status = HealthStatus.STRONG
-    else:
+    elif not material:
         status = HealthStatus.UNKNOWN
     sufficient_pillars = sum(
-        state == "sufficient" for state in profile.coverage.values()
+        pillar["state"] == "sufficient" for pillar in observed_pillars.values()
     )
     if not complete:
         confidence = (
@@ -815,6 +1054,7 @@ def evaluate_observation(
     coverage = {
         "completeness": observation.completeness.value,
         "pillars": dict(profile.coverage),
+        "observedPillars": observed_pillars,
         "confidenceReasons": [
             f"{sufficient_pillars} of {len(profile.coverage)} pillars sufficient",
             f"source completeness is {observation.completeness.value}",
@@ -842,6 +1082,8 @@ def evaluate_observation(
         observation_id=observation.observation_id,
         policy_version=policy.version,
         policy_digest=assessment_input_digest,
+        evaluator_version=EVALUATOR_VERSION,
+        profile_id=profile.profile_id,
         status=status,
         confidence=confidence,
         coverage=coverage,

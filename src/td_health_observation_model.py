@@ -132,6 +132,8 @@ class Assessment:
     observation_id: str
     policy_version: str
     policy_digest: str
+    evaluator_version: str
+    profile_id: str
     status: HealthStatus
     confidence: Confidence
     coverage: Mapping[str, Any]

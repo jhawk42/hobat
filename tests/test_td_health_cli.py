@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import io
 import json
+import hashlib
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import td_cli
 import td_health_cli
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
+from td_health_sqlite import SQLiteHealthStore
 
 
 def _seed(data_dir) -> None:
@@ -34,6 +36,36 @@ def test_dry_run_json_does_not_create_database(tmp_path) -> None:
     assert document["networkId"] == "extpan:78b9775b001c1cbe"
     assert document["assessmentCreated"] is None
     assert not (tmp_path / HOBAT_DATABASE_FILENAME).exists()
+
+
+def test_dry_run_uses_existing_roster_history_without_mutating_store(tmp_path) -> None:
+    _seed(tmp_path)
+    database_path = tmp_path / HOBAT_DATABASE_FILENAME
+    store = SQLiteHealthStore(database_path)
+    store.upsert_expected_device(
+        "extpan:78b9775b001c1cbe", "extaddr:1111111111111111", "Missing"
+    )
+    assert td_health_cli.main([
+        "--datadir", str(tmp_path), "process-dataset",
+        "--dataset", "otbr_cli_networkdiag_fetch_all",
+    ]) == 0
+    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
+    snapshot.write_text(snapshot.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    before = hashlib.sha256(database_path.read_bytes()).hexdigest()
+
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert td_health_cli.main([
+            "--datadir", str(tmp_path), "process-dataset",
+            "--dataset", "otbr_cli_networkdiag_fetch_all", "--dry-run", "--json",
+        ]) == 0
+
+    document = json.loads(output.getvalue())
+    assert any(
+        finding["rule_id"] == "device.offline"
+        for finding in document["findings"]
+    )
+    assert hashlib.sha256(database_path.read_bytes()).hexdigest() == before
 
 
 def test_top_level_json_has_no_banner(tmp_path) -> None:

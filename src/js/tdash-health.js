@@ -210,9 +210,16 @@ export function renderHealthInsights(container, model, filters = { status: "all"
   Object.entries(PILLAR_LABELS).forEach(([pillar, label]) => {
     const name = appendText(pillars, "dt", label);
     name.title = PILLAR_TOOLTIPS[pillar];
-    const status = assessment.coverage?.pillars?.[pillar] ?? "missing";
-    const value = appendText(pillars, "dd", status);
-    value.title = COVERAGE_STATUS_TOOLTIPS[status] ?? `Coverage status: ${status}.`;
+    const capability = assessment.coverage?.pillars?.[pillar] ?? "missing";
+    const observed = assessment.coverage?.observedPillars?.[pillar];
+    const status = observed?.state ?? capability;
+    const value = appendText(pillars, "dd", `${status} · capability ${capability}`);
+    const reasons = Array.isArray(observed?.reasons) ? observed.reasons.join(" ") : "";
+    value.title = [
+      COVERAGE_STATUS_TOOLTIPS[status] ?? `Coverage status: ${status}.`,
+      `Dataset capability: ${capability}.`,
+      reasons,
+    ].filter(Boolean).join(" ");
   });
   container.appendChild(pillars);
 

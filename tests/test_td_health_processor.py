@@ -51,7 +51,15 @@ def test_processor_uses_extpan_identity_and_normalizes_devices(tmp_path) -> None
     assert result.observation.devices[0].device_id == "extaddr:8672766ae0578187"
     assert result.observation.completeness is Completeness.COMPLETE
     assert result.assessment.status is HealthStatus.UNKNOWN
-    assert result.assessment.confidence.value == "medium"
+    assert result.assessment.confidence.value == "low"
+    assert (
+        result.assessment.coverage["observedPillars"]["availability"]["state"]
+        == "sufficient"
+    )
+    assert (
+        result.assessment.coverage["observedPillars"]["connectivity"]["state"]
+        == "missing"
+    )
     assert result.assessment.coverage["pillars"]["resilience"] == "limited"
     assert not any(
         finding.rule_id == "network.current-path-redundancy"
@@ -116,7 +124,7 @@ def test_second_complete_absence_establishes_offline(tmp_path) -> None:
     assert any(f.rule_id == "device.offline" for f in second.assessment.findings)
 
 
-def test_complete_absences_below_roster_ratio_stay_missing(tmp_path) -> None:
+def test_complete_absences_below_roster_ratio_are_offline_without_network_impact(tmp_path) -> None:
     device_ids = [f"extaddr:{index:016x}" for index in range(10)]
     missing_device_id = device_ids[0]
     observed_devices = [
@@ -152,10 +160,15 @@ def test_complete_absences_below_roster_ratio_stay_missing(tmp_path) -> None:
         if missing_device_id in finding.device_ids
     )
 
-    assert missing.rule_id == "device.missing"
-    assert missing.status is HealthStatus.UNKNOWN
+    assert missing.rule_id == "device.offline"
+    assert missing.status is HealthStatus.POOR
     assert missing.evidence["offlineDeviceRatio"] == 0.1
     assert missing.evidence["offlinePoorThresholdMet"] is False
+    assert not any(
+        finding.rule_id == "network.offline-impact"
+        for finding in second.assessment.findings
+    )
+    assert second.assessment.status is not HealthStatus.POOR
 
 
 def _write_rest_seed(data_dir, outcome):

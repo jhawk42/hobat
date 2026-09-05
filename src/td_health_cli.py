@@ -101,7 +101,7 @@ def result_document(result: ProcessingResult) -> dict[str, Any]:
     observation = result.observation
     assessment = result.assessment
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "manifestVersion": load_health_manifest().schema_version,
         "datasourceId": observation.datasource_id,
         "datasetId": observation.dataset_id,
@@ -115,6 +115,8 @@ def result_document(result: ProcessingResult) -> dict[str, Any]:
         "confidence": assessment.confidence.value,
         "policyVersion": assessment.policy_version,
         "policyDigest": assessment.policy_digest,
+        "evaluatorVersion": assessment.evaluator_version,
+        "profileId": assessment.profile_id,
         "coverage": _jsonable(assessment.coverage),
         "findings": [_jsonable(asdict(finding)) for finding in assessment.findings],
         "observationCreated": result.observation_created,
@@ -244,7 +246,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         else [args.dataset]
     )
     documents = []
-    store = None if args.dry_run else SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+    database_path = data_dir / HOBAT_DATABASE_FILENAME
+    store = (
+        SQLiteHealthStore(database_path, read_only=True)
+        if args.dry_run and database_path.is_file()
+        else None
+        if args.dry_run
+        else SQLiteHealthStore(database_path)
+    )
     for dataset_id in dataset_ids:
         kwargs = {
             "data_dir": data_dir,
@@ -253,7 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "allow_partial": args.allow_partial,
         }
         if args.dry_run:
-            result = build_processing_result(**kwargs)
+            result = build_processing_result(**kwargs, store=store)
         else:
             result = process_health(**kwargs, store=store)
         documents.append(result_document(result))

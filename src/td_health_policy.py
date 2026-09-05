@@ -41,6 +41,7 @@ _SNAPSHOT_V1_RAW: dict[str, Any] = {
             "observedLq3Ratio": {"unstableBelow": 0.60, "highBelow": 0.35},
             "observedLq1Ratio": {"unstable": 0.20, "high": 0.35},
             "childLinkQuality": {"unstableAtOrBelow": 2, "highAtOrBelow": 1},
+            "routerLinkQuality": {"unstableAtOrBelow": 2, "highAtOrBelow": 1},
             "rssi": {"unstableBelow": -70.0, "highBelow": -80.0},
             "childLinkMargin": {"unstableBelow": 20.0},
             "borderRouterCount": {"unstableAtOrBelow": 1},
@@ -58,6 +59,13 @@ _REQUIRED_THRESHOLD_BANDS = {
     metric: frozenset(bands)
     for metric, bands in _SNAPSHOT_V1_RAW["thresholds"].items()
 }
+POLICY_THRESHOLD_KEYS = frozenset(
+    {
+        "offlineConsecutiveCompleteObservations",
+        "offlinePoorDeviceRatioThreshold",
+        *(f"thresholds.{metric}" for metric in _REQUIRED_THRESHOLD_BANDS),
+    }
+)
 
 
 class HealthPolicyError(ValueError):

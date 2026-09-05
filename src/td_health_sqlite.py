@@ -17,7 +17,7 @@ from td_health_observation_store import (
 )
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _PURGE_TABLES = (
     "observations",
     "observation_sources",
@@ -107,6 +107,8 @@ CREATE TABLE IF NOT EXISTS assessments (
     observation_id TEXT NOT NULL REFERENCES observations(observation_id) ON DELETE CASCADE,
     policy_version TEXT NOT NULL,
     policy_digest TEXT NOT NULL,
+    evaluator_version TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
     status TEXT NOT NULL,
     confidence TEXT NOT NULL,
     coverage_json TEXT NOT NULL,
@@ -213,6 +215,25 @@ class SQLiteHealthStore:
                 connection.execute(
                     "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
                     (2,),
+                )
+            if 3 not in applied_versions:
+                assessment_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(assessments)")
+                }
+                if "evaluator_version" not in assessment_columns:
+                    connection.execute(
+                        "ALTER TABLE assessments ADD COLUMN evaluator_version "
+                        "TEXT NOT NULL DEFAULT 'legacy-unknown'"
+                    )
+                if "profile_id" not in assessment_columns:
+                    connection.execute(
+                        "ALTER TABLE assessments ADD COLUMN profile_id "
+                        "TEXT NOT NULL DEFAULT 'legacy-unknown'"
+                    )
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
+                    (3,),
                 )
 
     def save_processing_result(
@@ -336,12 +357,17 @@ class SQLiteHealthStore:
     ) -> bool:
         cursor = connection.execute(
             """INSERT OR IGNORE INTO assessments
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (assessment_id, observation_id, policy_version, policy_digest,
+                evaluator_version, profile_id, status, confidence, coverage_json,
+                assessed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 assessment.assessment_id,
                 assessment.observation_id,
                 assessment.policy_version,
                 assessment.policy_digest,
+                assessment.evaluator_version,
+                assessment.profile_id,
                 assessment.status.value,
                 assessment.confidence.value,
                 json.dumps(assessment.coverage, sort_keys=True),
