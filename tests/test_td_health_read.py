@@ -104,9 +104,9 @@ def test_finding_groups_follow_operator_presentation_order() -> None:
     assert [group["title"] for group in groups[:5]] == [
         "Border Router Redundancy",
         "Router Redundancy",
-        "Router path redundancy",
-        "Observed link quality distribution",
-        "Duplicate relationship entries in source data",
+        "Router Path Redundancy",
+        "Network Link Quality Distribution",
+        "Duplicate Relationships in Source Data",
     ]
 
 

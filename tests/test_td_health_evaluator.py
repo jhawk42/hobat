@@ -157,7 +157,7 @@ def test_complete_topology_profile_reports_border_router_redundancy() -> None:
     )
 
     assert PROFILE.border_router_authority is True
-    assert EVALUATOR_VERSION == "snapshot-v6"
+    assert EVALUATOR_VERSION == "snapshot-v7"
     assert border_router_finding.status is HealthStatus.STRONG
     assert border_router_finding.evidence["observedBorderRouterCount"] == 2
     assert border_router_finding.evidence["moreThanOne"] is True
@@ -322,6 +322,45 @@ def test_critical_delivery_only_escalates_on_observed_sole_path() -> None:
     assert finding.evidence["solePath"] is True
 
 
+def test_child_relationship_does_not_count_as_alternate_router_path() -> None:
+    router_relationship = _relationship()
+    child_relationship = _relationship(
+        relationship_id="link:child",
+        relationship_type="parent-child",
+        to_device_id="extaddr:3333333333333333",
+    )
+    observation = _observation(router_relationship)
+    observation = replace(
+        observation,
+        devices=observation.devices
+        + (
+            DeviceSample(
+                "extaddr:3333333333333333",
+                "3333333333333333",
+                "child",
+                None,
+                False,
+                ("source.json",),
+            ),
+        ),
+        relationships=(router_relationship, child_relationship),
+    )
+
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    finding = next(
+        finding
+        for finding in assessment.findings
+        if finding.rule_id == "network.current-path-redundancy"
+    )
+
+    assert finding.status is HealthStatus.MODERATE
+    assert finding.evidence["solePathRouterIds"] == (
+        "extaddr:1111111111111111",
+        "extaddr:2222222222222222",
+    )
+    assert finding.evidence["alternatePathRouterIds"] == ()
+
+
 def test_lifetime_counter_metrics_are_evidence_only_and_do_not_change_status() -> None:
     observation = _observation(_relationship())
     observation = Observation(
@@ -421,7 +460,7 @@ def test_error_uncorrelated_with_rss_is_tagged_on_relationship_finding() -> None
     finding = next(f for f in assessment.findings if f.rule_id == "relationship.directional-quality")
 
     assert finding.evidence["errorUncorrelatedWithRss"] is True
-    assert finding.title == "Delivery errors uncorrelated with signal strength"
+    assert finding.title == "High Delivery Errors Despite Acceptable Signal"
 
 
 def test_multiple_reporters_high_error_aggregates_across_relationships() -> None:
