@@ -20,6 +20,7 @@ import pytest
 
 from merge_dataset import main as merge_dataset_main
 
+pytestmark = pytest.mark.requires_data_dir
 
 # Test data directory
 DATA_DIR = Path(__file__).parent.parent / "data"

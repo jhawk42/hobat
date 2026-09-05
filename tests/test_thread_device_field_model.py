@@ -16,6 +16,8 @@ from td_device_fields import (
 )
 
 
+pytestmark = pytest.mark.requires_data_dir
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = REPO_ROOT / "tests" / "fixtures" / "thread_device_field_model.json"
 MODEL = json.loads(MODEL_PATH.read_text(encoding="utf-8"))

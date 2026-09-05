@@ -25,6 +25,8 @@ from td_const import (
 )
 from td_webserver import FILE_ACTION_MAP
 
+pytestmark = pytest.mark.requires_data_dir
+
 
 def _build(input_files, input_data):
     return build_merged_records(
