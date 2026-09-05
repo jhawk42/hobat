@@ -1,3 +1,4 @@
+import ast
 import json
 import re
 from pathlib import Path
@@ -55,6 +56,21 @@ def test_catalog_covers_every_evaluator_rule_id():
     assert literal_rule_ids | metric_rule_ids == HEALTH_RULE_CATALOG.rule_ids
 
 
+def test_evaluator_finding_calls_do_not_duplicate_catalog_copy():
+    source = (Path(__file__).parents[1] / "src" / "td_health_evaluator.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    forbidden = {"title", "why", "action", "verify"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id == "_finding":
+                assert forbidden.isdisjoint(
+                    keyword.arg for keyword in node.keywords if keyword.arg
+                )
+
+
 def test_catalog_resolves_presentation_variant():
     rule = HEALTH_RULE_CATALOG.rule("relationship.directional-quality")
 
@@ -77,15 +93,38 @@ def test_catalog_exposes_effective_source_and_denominator_requirements():
     assert mac.source_requirements == frozenset({"macCounters"})
     assert mac.requires_denominator is True
     assert mle.source_requirements == frozenset({"mleCounters"})
+    assert observed.evidence_kind == "snapshot"
+    assert mle.evidence_kind == "since-reset"
+    assert mac.required_evidence == (
+        "metric",
+        "value",
+        "denominator",
+        "unstableThreshold",
+    )
+    assert mac.action_key == "health.device.totalMacErrorRatio.action"
+    assert mac.verification_key == "health.device.totalMacErrorRatio.verify"
 
 
-def test_operator_documentation_lists_every_catalog_rule():
+def test_operator_documentation_matches_catalog_metadata():
     documentation = (
         Path(__file__).parents[1] / "doc" / "thread_network_health.md"
     ).read_text(encoding="utf-8")
+    catalog_section = documentation.split("## Finding Catalog", 1)[1].split(
+        "\n## ", 1
+    )[0]
+    documented_rules = {
+        rule_id: (title.strip(), description.strip())
+        for rule_id, title, description in re.findall(
+            r"^\| `([^`]+)` \| ([^|]+) \| ([^|]+) \|$",
+            catalog_section,
+            flags=re.MULTILINE,
+        )
+    }
 
-    for rule_id in HEALTH_RULE_CATALOG.rule_ids:
-        assert f"`{rule_id}`" in documentation
+    assert documented_rules == {
+        rule.rule_id: (rule.title, rule.description)
+        for rule in HEALTH_RULE_CATALOG.rules
+    }
 
 
 def test_catalog_rejects_duplicate_rule_ids(tmp_path):
@@ -94,7 +133,7 @@ def test_catalog_rejects_duplicate_rule_ids(tmp_path):
         "order": 1,
         "title": "Test",
         "description": "Test rule.",
-        "evidenceKind": "current",
+        "evidenceKind": "snapshot",
         "scopes": ["device"],
         "roles": [],
         "relationshipTypes": [],
@@ -111,7 +150,10 @@ def test_catalog_rejects_duplicate_rule_ids(tmp_path):
             "defaults": {
                 "sourceRequirements": [],
                 "requiresDenominator": False,
+                    "actionKeyTemplate": "health.{ruleId}.action",
+                    "verificationKeyTemplate": "health.{ruleId}.verify",
             },
+                "requiredEvidence": {"device.test": ["value"]},
             "rules": [rule, {**rule, "order": 2}],
         },
     )

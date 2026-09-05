@@ -23,7 +23,7 @@ from td_health_graph import GraphEdge, analyze_undirected_graph
 from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
-EVALUATOR_VERSION = "snapshot-v9"
+EVALUATOR_VERSION = "snapshot-v10"
 
 EVALUATOR_THRESHOLD_OWNERS = {
     "offlineConsecutiveCompleteObservations": frozenset({"device.offline", "device.missing"}),
@@ -61,40 +61,6 @@ _LIFETIME_EVIDENCE_METRICS = frozenset(
         "detachedDisabledPercent",
     }
 )
-
-_HISTORICAL_METRIC_PRESENTATION = {
-    "parentChanges": (
-        "Parent Changes Since Counter Reset",
-        "The cumulative parent-change count crossed its threshold. It may indicate earlier attachment "
-        "instability, but a later comparable observation is required to establish current churn.",
-    ),
-    "partitionIdChanges": (
-        "Partition ID Changes Since Counter Reset",
-        "The cumulative partition-ID-change count crossed its threshold. Compare its change over time "
-        "before concluding that partition instability is current.",
-    ),
-    "betterPartitionAttachAttempts": (
-        "Better-Partition Attach Attempts Since Counter Reset",
-        "The cumulative number of attempts to attach to a better partition crossed its threshold. "
-        "A future delta is needed to determine whether attempts are continuing.",
-    ),
-    "totalParentPartitionChanges": (
-        "Parent and Partition Changes Since Counter Reset",
-        "The cumulative combined parent and partition change count crossed its threshold. "
-        "It is historical evidence, not proof of current instability.",
-    ),
-    "routerRolePercent": (
-        "Low Router-Role Time Since Reset",
-        "The device has spent less than the configured proportion of its recorded uptime in the Router "
-        "role. Interpret this against its intended role and compare future observations.",
-    ),
-    "detachedDisabledPercent": (
-        "Detached or Disabled Time Since Reset",
-        "The proportion of recorded uptime spent detached or disabled crossed its threshold. "
-        "It does not establish that the device is currently detached.",
-    ),
-}
-
 
 def _stable_id(prefix: str, *parts: str) -> str:
     digest = hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()[:24]
@@ -189,12 +155,9 @@ def _finding(
     status: HealthStatus,
     scope: FindingScope,
     rank: FindingRank,
-    title: str,
     summary: str,
-    why: str,
     evidence: Mapping[str, object],
-    action: str,
-    verify: str,
+    presentation_variant: str | None = None,
     device_ids: tuple[str, ...] = (),
     relationship_ids: tuple[str, ...] = (),
     target_parts: tuple[str, ...] = (),
@@ -207,19 +170,15 @@ def _finding(
         raise HealthRuleCatalogError(
             f"Rule {rule_id} does not support scope {scope.value}"
         )
-    matching_variants = tuple(
-        variant for variant, variant_title in rule.variants.items()
-        if variant_title == title
-    )
-    if title == rule.title:
-        presentation_variant = None
-    elif len(matching_variants) == 1:
-        presentation_variant = matching_variants[0]
-    else:
-        raise HealthRuleCatalogError(
-            f"Title {title!r} is not cataloged for {rule_id}"
-        )
+    rule.title_for(presentation_variant)
     catalog_evidence = dict(evidence)
+    missing_evidence = [
+        path for path in rule.required_evidence if path not in catalog_evidence
+    ]
+    if missing_evidence:
+        raise HealthRuleCatalogError(
+            f"Rule {rule_id} requires evidence {missing_evidence}"
+        )
     if rule.source_requirements:
         if source_requirement not in rule.source_requirements or not any(source_files):
             raise HealthRuleCatalogError(
@@ -252,6 +211,8 @@ def _finding(
         confidence=confidence,
         action=rule.action,
         verify=rule.verify,
+        action_key=rule.action_key,
+        verification_key=rule.verification_key,
         source_files=source_files,
     )
 
@@ -281,13 +242,8 @@ def evaluate_observation(
                 status=HealthStatus.STRONG,
                 scope=FindingScope.DEVICE,
                 rank=FindingRank.INFO,
-                title="Observed Devices",
                 summary="Device is present in this observation.",
-                why="Device is present in this cached observation. Presence does not prove application "
-                "reachability or continued availability.",
                 evidence={"present": True, "completeness": observation.completeness.value},
-                action="No action required.",
-                verify="Process another complete cached observation to confirm continued presence.",
                 device_ids=(device.device_id,),
                 source_files=device.source_files,
             )
@@ -302,13 +258,8 @@ def evaluate_observation(
                     status=HealthStatus.POOR,
                     scope=FindingScope.DEVICE,
                     rank=FindingRank.POOR,
-                    title="Device Not Attached to Mesh",
                     summary=f"Device reports current state {attachment}.",
-                    why="The device currently reports a detached, disabled, or orphaned state and is "
-                    "therefore not attached to the Thread mesh.",
                     evidence={"attachment": attachment},
-                    action="Inspect the device and its parent or commissioning state.",
-                    verify="Collect and process a new complete observation after remediation.",
                     device_ids=(device.device_id,),
                     source_files=device.source_files,
                 )
@@ -344,18 +295,10 @@ def evaluate_observation(
                 status=HealthStatus.POOR if is_offline else HealthStatus.UNKNOWN,
                 scope=FindingScope.DEVICE,
                 rank=FindingRank.POOR if is_offline else FindingRank.INFO,
-                title="Offline Devices" if is_offline else "Expected Device Missing",
                 summary=(
                     f"Expected device is absent from {prior + 1} consecutive complete observations."
                     if is_offline
                     else "Expected device is not present, but Offline is not established."
-                ),
-                why=(
-                    "An expected device has been absent for the required consecutive complete observations. "
-                    "Network impact is assessed separately."
-                    if is_offline
-                    else "An expected device is absent from the latest observation but has not met the history "
-                    "and completeness requirements for Offline status."
                 ),
                 evidence={
                     "present": False,
@@ -368,8 +311,6 @@ def evaluate_observation(
                     "offlinePoorDeviceRatioThreshold": offline_ratio_threshold,
                     "offlinePoorThresholdMet": offline_poor_threshold_met,
                 },
-                action="Check collection completeness, then inspect the expected device if absence persists.",
-                verify="Process another complete observation and confirm whether the device returns.",
                 device_ids=(device_id,),
                 confidence=Confidence.HIGH if is_offline else Confidence.LOW,
             )
@@ -383,13 +324,10 @@ def evaluate_observation(
                 status=HealthStatus.POOR,
                 scope=FindingScope.NETWORK,
                 rank=FindingRank.POOR,
-                title="Offline Device Network Impact",
                 summary=(
                     f"{len(offline_candidate_ids)} of {len(expected_device_ids)} expected devices "
                     f"are Offline ({offline_device_ratio:.1%})."
                 ),
-                why="The Offline share of the configured roster exceeds policy. Device role, operator "
-                "criticality, attached descendants, and required-service impact are not yet available.",
                 evidence={
                     "offlineDeviceIds": tuple(sorted(offline_candidate_ids)),
                     "offlineDeviceCount": len(offline_candidate_ids),
@@ -404,8 +342,6 @@ def evaluate_observation(
                         "requiredServiceImpact",
                     ),
                 },
-                action="Restore Offline devices or revise the expected roster after confirming their operational role.",
-                verify="Process another complete observation and confirm the Offline ratio falls below policy.",
                 device_ids=tuple(sorted(offline_candidate_ids)),
             )
         )
@@ -434,21 +370,13 @@ def evaluate_observation(
             ),
             scope=FindingScope.NETWORK,
             rank=FindingRank.MODERATE if 0 < router_count <= router_count_threshold else FindingRank.INFO,
-            title="Router Redundancy",
             summary=f"Observed {router_count} Router{'s' if router_count != 1 else ''}.",
-            why="One observed routing device leaves mesh routing dependent on a single active Router; "
-            "no observed Routers leaves redundancy Unknown.",
             evidence={
                 "observedRouterCount": router_count,
                 "unstableAtOrBelow": router_count_threshold,
                 "meetsPolicy": router_count > router_count_threshold,
                 "moreThanOne": router_count > 1,
             },
-            action=(
-                "Collect Router-bearing evidence." if router_count == 0
-                else "Add or restore Router-capable devices if resilience is required."
-            ),
-            verify="Process a complete topology observation and compare the Router count.",
             device_ids=router_ids,
             source_files=tuple(sorted({source for device in observation.devices for source in device.source_files})),
             confidence=Confidence.HIGH if router_count else Confidence.LOW,
@@ -476,21 +404,13 @@ def evaluate_observation(
                 if complete and 0 < border_router_count <= border_router_count_threshold
                 else FindingRank.INFO
             ),
-            title="Border Router Redundancy",
             summary=border_router_summary,
-            why="One observed Border Router provides no Border Router failover; an incomplete observation "
-            "or no authoritative count leaves redundancy Unknown.",
             evidence={
                 "observedBorderRouterCount": border_router_count,
                 "unstableAtOrBelow": border_router_count_threshold,
                 "meetsPolicy": border_router_count > border_router_count_threshold,
                 "moreThanOne": border_router_count > 1,
             },
-            action=(
-                "Collect complete Border-Router-bearing evidence." if not complete or border_router_count == 0
-                else "Add or restore a second Border Router if resilience is required."
-            ),
-            verify="Process a complete Border-Router-bearing observation.",
             device_ids=border_router_ids,
             source_files=tuple(sorted({
                 source
@@ -527,25 +447,17 @@ def evaluate_observation(
                 else FindingRank.MODERATE if border_router_ids
                 else FindingRank.INFO
             ),
-            title="Border Router OMR Addressing",
             summary=(
                 f"{len(omr_border_router_ids)} Border Router{'s' if len(omr_border_router_ids) != 1 else ''} "
                 "advertise an address in the OMR prefix."
                 if omr_border_router_ids
                 else "No Border Router has an observed address within the OMR prefix."
             ),
-            why="An OMR-prefixed address supports Border Router OMR configuration but does not verify "
-            "backbone, default-route, or Internet reachability.",
             evidence={
                 "omrPrefix": omr_prefix,
                 "borderRouterCount": len(border_router_ids),
                 "omrBorderRouterIds": omr_border_router_ids,
             },
-            action=(
-                "No action required." if omr_border_router_ids
-                else "Inspect Border Router backbone connectivity and OMR prefix advertisement."
-            ),
-            verify="Process a complete observation and confirm a Border Router address remains in the OMR prefix.",
             device_ids=omr_border_router_ids or border_router_ids,
             confidence=(
                 Confidence.HIGH if omr_border_router_ids
@@ -617,15 +529,12 @@ def evaluate_observation(
                 status=path_status,
                 scope=FindingScope.NETWORK,
                 rank=FindingRank.MODERATE if path_status is HealthStatus.MODERATE else FindingRank.INFO,
-                title="Router Path Redundancy",
                 summary=(
                     f"Observed {len(graph_analysis.bridge_relationship_ids)} bridge relationship(s) and "
                     f"{len(graph_analysis.articulation_device_ids)} articulation Router(s)."
                     if path_status is not HealthStatus.UNKNOWN
                     else "Current router path redundancy is not established by this observation."
                 ),
-                why="Router-neighbor bridges and articulation Routers are current single points of failure; "
-                "child relationships do not establish alternate router paths.",
                 evidence={
                     "routerCount": router_count,
                     "routerNeighborEdgeCount": graph_analysis.edge_count,
@@ -636,8 +545,6 @@ def evaluate_observation(
                     "articulationDeviceIds": graph_analysis.articulation_device_ids,
                     "articulationComponents": graph_analysis.articulation_components,
                 },
-                action="Inspect single points of failure and preserve alternate usable router paths.",
-                verify="Process another complete topology observation and compare bridges and articulation Routers.",
                 device_ids=affected_router_ids,
                 relationship_ids=graph_analysis.bridge_relationship_ids,
                 confidence=Confidence.LOW if path_status is HealthStatus.UNKNOWN else Confidence.HIGH,
@@ -676,7 +583,6 @@ def evaluate_observation(
             continue
         threshold = _policy_value(policy, metric_rule_id, threshold_key)
         if metric.metric in _LIFETIME_EVIDENCE_METRICS:
-            metric_title, metric_description = _HISTORICAL_METRIC_PRESENTATION[metric.metric]
             lower_is_worse = "unstableBelow" in threshold
             crossed = (
                 metric.value < threshold["unstableBelow"] if lower_is_worse
@@ -700,9 +606,7 @@ def evaluate_observation(
                     status=HealthStatus.UNKNOWN,
                     scope=FindingScope.DEVICE,
                     rank=FindingRank.INFO,
-                    title=metric_title,
                     summary=f"{metric.metric} is {metric.value:g} ({band} band); lifetime/since-reset evidence only.",
-                    why=metric_description,
                     evidence={
                         "metric": metric.metric,
                         "value": metric.value,
@@ -710,8 +614,6 @@ def evaluate_observation(
                         "band": band,
                         "thresholds": dict(threshold),
                     },
-                    action="Compare against a future observation before treating this as a current failure.",
-                    verify="Process another complete observation and compare the delta or trend.",
                     device_ids=(metric.device_id,),
                     target_parts=(metric.source_file,),
                     source_files=(metric.source_file,),
@@ -744,19 +646,7 @@ def evaluate_observation(
                 status=HealthStatus.POOR if escalate_poor else HealthStatus.MODERATE,
                 scope=FindingScope.DEVICE,
                 rank=FindingRank.POOR if escalate_poor else FindingRank.MODERATE,
-                title=(
-                    "High Device MAC Error Ratio"
-                    if metric.metric == "totalMacErrorRatio"
-                    else "High Device MAC Discard Ratio"
-                ),
                 summary=f"Current ratio is {metric.value:.1%} ({severity_tier} band).",
-                why=(
-                    "The current device-wide MAC error ratio crossed a policy threshold using a valid packet "
-                    "denominator, indicating degraded delivery in this observation."
-                    if metric.metric == "totalMacErrorRatio"
-                    else "The current device-wide MAC discard ratio crossed a policy threshold using a valid "
-                    "packet denominator, indicating packet loss before successful delivery."
-                ),
                 evidence={
                     "metric": metric.metric,
                     "value": metric.value,
@@ -768,8 +658,6 @@ def evaluate_observation(
                     "severityTier": severity_tier,
                     "escalatedByAttachmentFailure": escalate_poor,
                 },
-                action="Inspect link conditions and packet counters for this device.",
-                verify="Process another complete observation with a valid packet denominator.",
                 device_ids=(metric.device_id,),
                 target_parts=(metric.source_file,),
                 source_files=(metric.source_file,),
@@ -785,13 +673,8 @@ def evaluate_observation(
                 status=HealthStatus.UNKNOWN,
                 scope=FindingScope.DEVICE,
                 rank=FindingRank.INFO,
-                title="Mesh Diagnostic Query Timed Out",
                 summary="The device did not respond to a mesh diagnostic query in this observation.",
-                why="A timeout reduces evidence coverage and may reflect sleep behavior, congestion, overload, "
-                "or loss of connectivity.",
                 evidence={"responseTimeout": True},
-                action="Investigate load, sleep behavior, or connectivity if this persists across observations.",
-                verify="Process another complete observation and confirm whether the device responds.",
                 device_ids=(device_id,),
                 confidence=Confidence.LOW,
             )
@@ -805,15 +688,11 @@ def evaluate_observation(
                 status=HealthStatus.UNKNOWN,
                 scope=FindingScope.NETWORK,
                 rank=FindingRank.INFO,
-                title="Duplicate Relationships in Source Data",
                 summary=(
                     f"{len(observation.duplicate_relationship_ids)} relationship(s) appeared more than "
                     "once within one source file."
                 ),
-                why="The duplicate is treated as a collection artifact, not as a separate relationship.",
                 evidence={"relationshipIds": observation.duplicate_relationship_ids},
-                action="No action required unless duplicates recur across many observations.",
-                verify="Confirm the relationship count is unaffected in the next complete observation.",
                 relationship_ids=observation.duplicate_relationship_ids,
                 confidence=Confidence.LOW,
             )
@@ -845,12 +724,10 @@ def evaluate_observation(
                 status=HealthStatus.MODERATE if lq3_bad or lq1_bad else HealthStatus.STRONG,
                 scope=FindingScope.NETWORK,
                 rank=FindingRank.MODERATE if lq3_bad or lq1_bad else FindingRank.INFO,
-                title="Network Link Quality Distribution",
                 summary=(
                     f"LQ3 is {lq3_ratio:.1%}; LQ2 is {lq2_ratio:.1%}; "
                     f"LQ1 is {lq1_ratio:.1%} of observed links."
                 ),
-                why="Missing and unknown quality reports are excluded rather than treated as healthy.",
                 evidence={
                     "observedCount": observed_lq_total,
                     "lq3Ratio": lq3_ratio,
@@ -859,8 +736,6 @@ def evaluate_observation(
                     "lq3UnstableBelow": lq3_threshold["unstableBelow"],
                     "lq1UnstableAtOrAbove": lq1_threshold["unstable"],
                 },
-                action="Inspect weak relationships and preserve strong alternate paths.",
-                verify="Process another complete topology observation and compare the distribution.",
                 source_files=tuple(sorted(
                     metric_sources.get("observedLinkQuality1Count", set())
                     | metric_sources.get("observedLinkQuality2Count", set())
@@ -967,13 +842,8 @@ def evaluate_observation(
                     status=HealthStatus.UNKNOWN,
                     scope=FindingScope.RELATIONSHIP,
                     rank=FindingRank.INFO,
-                    title="Indirect Messages Queued for Child",
                     summary=f"{relationship.queued_message_count:g} indirect message(s) queued for delivery.",
-                    why="Queued indirect messages can be normal for a sleepy child; persistence or growth "
-                    "across observations is more significant than one current queue depth.",
                     evidence={"queuedMessageCount": relationship.queued_message_count},
-                    action="Compare against a future observation before treating this as a current failure.",
-                    verify="Process another complete observation and confirm the queue clears.",
                     device_ids=(relationship.from_device_id, relationship.to_device_id),
                     relationship_ids=(relationship.relationship_id,),
                     source_files=relationship.source_files,
@@ -1008,25 +878,16 @@ def evaluate_observation(
                         if finding_status is HealthStatus.POOR
                         else FindingRank.MODERATE
                     ),
-                    title=(
-                        "High Delivery Errors Despite Acceptable Signal"
+                    presentation_variant=(
+                        "delivery-errors-adequate-signal"
                         if error_uncorrelated_with_rss
-                        else "Link Quality or Delivery Degradation"
+                        else None
                     ),
                     summary=(
                         "Frame or message errors are elevated despite adequate RSS/margin evidence; "
                         "suspect interference or firmware rather than distance."
                         if error_uncorrelated_with_rss
                         else "Current directional quality, delivery, or RF evidence crossed a snapshot threshold."
-                    ),
-                    why=(
-                        "Frame or message errors are elevated even though observed RSS or link margin is not "
-                        "weak. Investigate interference, congestion, or implementation issues before assuming "
-                        "distance is the cause."
-                        if error_uncorrelated_with_rss
-                        else "Directional LQ, asymmetry, delivery errors, RSS, or link margin crossed a "
-                        "current-snapshot threshold. Critical delivery errors become Poor only when an endpoint "
-                        "has no observed alternate relationship."
                     ),
                     evidence={
                         "linkQualityIn": relationship.link_quality_in,
@@ -1059,12 +920,6 @@ def evaluate_observation(
                             else None
                         ),
                     },
-                    action=(
-                        "Investigate interference or firmware for this device before relocating it."
-                        if error_uncorrelated_with_rss
-                        else "Inspect both endpoints and nearby RF conditions; preserve alternate paths."
-                    ),
-                    verify="Collect another complete observation and compare both directions.",
                     device_ids=(relationship.from_device_id, relationship.to_device_id),
                     relationship_ids=(relationship.relationship_id,),
                     source_files=relationship.source_files,
@@ -1080,13 +935,8 @@ def evaluate_observation(
                     status=HealthStatus.STRONG,
                     scope=FindingScope.RELATIONSHIP,
                     rank=FindingRank.INFO,
-                    title="Strong Bidirectional Link (LQ3)",
                     summary="Both observed directions report LQ3.",
-                    why="Both observed directions report LQ3, providing current evidence of a strong usable "
-                    "relationship.",
                     evidence={"linkQualityIn": 3, "linkQualityOut": 3},
-                    action="No action required.",
-                    verify="Compare both directions in the next complete observation.",
                     device_ids=(relationship.from_device_id, relationship.to_device_id),
                     relationship_ids=(relationship.relationship_id,),
                     source_files=relationship.source_files,
@@ -1112,13 +962,8 @@ def evaluate_observation(
                 status=HealthStatus.MODERATE,
                 scope=FindingScope.DEVICE,
                 rank=FindingRank.MODERATE,
-                title="High Link Errors Reported by Multiple Neighbors",
                 summary=f"{len(relationship_ids)} distinct reporters recorded high frame or message error rates.",
-                why="Two or more observed relationships report elevated frame or message error rates toward "
-                "this device, providing stronger evidence than one reporter alone.",
                 evidence={"reporterRelationshipIds": tuple(sorted(relationship_ids))},
-                action="Investigate interference or firmware for this device rather than one specific link.",
-                verify="Process another complete observation and confirm whether multiple reporters still agree.",
                 device_ids=(device_id,),
                 relationship_ids=tuple(sorted(relationship_ids)),
                 confidence=Confidence.HIGH,

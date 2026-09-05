@@ -160,7 +160,7 @@ def test_complete_topology_profile_reports_border_router_redundancy() -> None:
     )
 
     assert PROFILE.border_router_authority is True
-    assert EVALUATOR_VERSION == "snapshot-v9"
+    assert EVALUATOR_VERSION == "snapshot-v10"
     assert border_router_finding.status is HealthStatus.STRONG
     assert border_router_finding.evidence["observedBorderRouterCount"] == 2
     assert border_router_finding.evidence["moreThanOne"] is True
@@ -605,7 +605,7 @@ def test_error_uncorrelated_with_rss_is_tagged_on_relationship_finding() -> None
 
     assert finding.evidence["errorUncorrelatedWithRss"] is True
     assert finding.title == "High Delivery Errors Despite Acceptable Signal"
-    assert finding.evidence["evidenceKind"] == "current"
+    assert finding.evidence["evidenceKind"] == "snapshot"
     assert finding.evidence["materiality"] == "relationship"
 
 

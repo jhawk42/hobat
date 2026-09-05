@@ -30,6 +30,26 @@ _SCOPE_ORDER_BASE = {
     "device": DEVICE_ORDER_BASE,
     "relationship": RELATIONSHIP_ORDER_BASE,
 }
+
+_NORMALIZED_EVIDENCE_KINDS = frozenset(
+    {"snapshot", "since-reset", "historical", "expected-state", "active-probe"}
+)
+_LEGACY_EVIDENCE_KIND_MAP = {
+    "current": "snapshot",
+    "cumulative": "since-reset",
+    "lifetime": "since-reset",
+}
+
+
+def _uses_catalog_contract(evaluator_version: object) -> bool:
+    if not isinstance(evaluator_version, str) or not evaluator_version.startswith("snapshot-v"):
+        return False
+    try:
+        return int(evaluator_version.removeprefix("snapshot-v")) >= 10
+    except ValueError:
+        return False
+
+
 def _finding_group_presentation(
     rule_id: str, title: str, variant: str | None = None
 ) -> tuple[int, str]:
@@ -99,12 +119,76 @@ class TDHealthReadService:
         ext_address = device_id.removeprefix("extaddr:").lower()
         return labels.get(ext_address) or f"…{ext_address[-8:]}"
 
-    def _finding(self, row: dict, labels: dict[str, str]) -> dict[str, Any]:
+    def _finding(
+        self, row: dict, labels: dict[str, str], *, evaluator_version: str
+    ) -> dict[str, Any]:
         device_ids = _decode_json(row["device_ids_json"], field="device IDs")
         relationship_ids = _decode_json(
             row["relationship_ids_json"], field="relationship IDs"
         )
         evidence = _decode_json(row["evidence_json"], field="evidence")
+        if not isinstance(evidence, dict):
+            raise HealthCorruptStoreError("Invalid stored evidence")
+        evidence = dict(evidence)
+        legacy = not _uses_catalog_contract(evaluator_version)
+        try:
+            rule = HEALTH_RULE_CATALOG.rule(row["rule_id"])
+        except HealthRuleCatalogError:
+            rule = None
+
+        variant = evidence.get("presentationVariant")
+        if variant is not None and not isinstance(variant, str):
+            if not legacy:
+                raise HealthCorruptStoreError("Invalid stored presentation variant")
+            variant = None
+        if rule is not None and variant is None and legacy:
+            variant = next(
+                (
+                    name
+                    for name, title in rule.variants.items()
+                    if title == row["title"]
+                ),
+                None,
+            )
+        if rule is not None:
+            try:
+                title = rule.title_for(variant)
+            except HealthRuleCatalogError as exc:
+                if not legacy:
+                    raise HealthCorruptStoreError(
+                        "Invalid stored presentation variant"
+                    ) from exc
+                variant = None
+                title = rule.title
+            why_it_matters = rule.description
+            action = rule.action
+            verify = rule.verify
+            evidence_kind = rule.evidence_kind
+            materiality = rule.materiality
+            action_key = rule.action_key
+            verification_key = rule.verification_key
+        else:
+            title = row["title"]
+            why_it_matters = row["why_it_matters"]
+            action = row["action"]
+            verify = row["verify"]
+            stored_kind = evidence.get("evidenceKind")
+            evidence_kind = _LEGACY_EVIDENCE_KIND_MAP.get(stored_kind, stored_kind)
+            if evidence_kind not in _NORMALIZED_EVIDENCE_KINDS:
+                evidence_kind = "historical"
+            stored_materiality = evidence.get("materiality")
+            materiality = (
+                stored_materiality
+                if stored_materiality in {"informational", "device", "relationship", "network"}
+                else "informational"
+            )
+            action_key = f"health.{row['rule_id']}.action"
+            verification_key = f"health.{row['rule_id']}.verify"
+
+        evidence["evidenceKind"] = evidence_kind
+        evidence["materiality"] = materiality
+        if variant is not None:
+            evidence["presentationVariant"] = variant
         router_ids = ()
         if row["rule_id"] == "network.current-path-redundancy":
             router_ids = tuple(sorted({
@@ -119,14 +203,18 @@ class TDHealthReadService:
             "status": row["status"],
             "scope": row["scope"],
             "rank": row["rank"],
-            "title": row["title"],
+            "title": title,
             "summary": row["summary"],
-            "whyItMatters": row["why_it_matters"],
+            "whyItMatters": why_it_matters,
             "evidence": evidence,
-            "presentationVariant": evidence.get("presentationVariant"),
+            "presentationVariant": variant,
+            "evidenceKind": evidence_kind,
+            "materiality": materiality,
             "confidence": row["confidence"],
-            "action": row["action"],
-            "verify": row["verify"],
+            "action": action,
+            "verify": verify,
+            "actionKey": action_key,
+            "verificationKey": verification_key,
             "sourceFiles": _decode_json(row["source_files_json"], field="source files"),
             "deviceIds": device_ids,
             "relationshipIds": relationship_ids,
@@ -224,7 +312,9 @@ class TDHealthReadService:
             return None
         labels = self._labels()
         findings = [
-            self._finding(item, labels)
+            self._finding(
+                item, labels, evaluator_version=row["evaluator_version"]
+            )
             for item in self.store.finding_records(
                 row["assessment_id"],
                 status=status,

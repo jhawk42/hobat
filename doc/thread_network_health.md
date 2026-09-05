@@ -178,34 +178,36 @@ The dashboard renders observed state with static capability as context.
 
 Finding metadata and dashboard order are owned by the machine-readable
 `src/td-health-rules.json` catalog and validated by `td_health_rules.py`.
-Descriptions below summarize the implemented evaluator behavior.
+Descriptions below are validated exactly against the catalog. Public findings
+also project catalog-owned `evidenceKind`, `materiality`, `actionKey`, and
+`verificationKey` metadata plus an optional `presentationVariant`.
 
 | ruleId | title | description |
 |---|---|---|
-| `network.border-router-redundancy` | Border Router Redundancy | Counts observed Border Routers. One means there is no Border Router failover; an incomplete observation or no authoritative count remains Unknown. |
-| `network.router-redundancy` | Router Redundancy | Counts observed routing devices, including the Leader. One leaves mesh routing dependent on a single active Router; no observed Routers remains Unknown. |
-| `network.external-routing` | Border Router OMR Addressing | Checks whether an identified Border Router has an address in the current OMR prefix. This supports OMR configuration but does not verify backbone, default-route, or Internet reachability. |
-| `network.current-path-redundancy` | Router Path Redundancy | Identifies bridge relationships and articulation Routers in the undirected router-neighbor graph. Child relationships do not establish alternate router paths. |
-| `network.observed-link-quality-ratios` | Network Link Quality Distribution | Shows the proportion of observed link-quality reports at LQ3, LQ2, and LQ1. Missing and unknown quality reports are excluded rather than treated as healthy. |
-| `network.offline-impact` | Offline Device Network Impact | Separately makes aggregate network health Poor when the share of individually Offline expected devices exceeds policy. Evidence records unavailable materiality dimensions rather than inferring them. |
-| `observation.duplicate-source-entry` | Duplicate Relationships in Source Data | The same relationship appeared more than once in one source snapshot. It is treated as a collection artifact, not as multiple links. |
-| `device.observed` | Observed Devices | Device is present in this cached observation. Presence does not prove application reachability or continued availability. |
-| `device.missing` | Expected Device Missing | An expected device is absent from the latest observation but has not met the history and completeness requirements for Offline status. |
-| `device.offline` | Offline Devices | An expected device has been absent for the required consecutive complete observations. Aggregate network impact is assessed separately. |
-| `device.diagnostic-timeout` | Mesh Diagnostic Query Timed Out | The device did not answer a mesh diagnostic query in this observation. This reduces evidence coverage and may reflect sleep behavior, congestion, overload, or loss of connectivity. |
-| `device.multiple-reporters-high-error` | High Link Errors Reported by Multiple Neighbors | Two or more observed relationships report elevated frame or message error rates toward this device, providing stronger evidence than one reporter alone. |
-| `device.parentChanges` | Parent Changes Since Counter Reset | The cumulative parent-change count crossed its threshold. It may indicate earlier attachment instability, but a later comparable observation is required to establish current churn. |
-| `device.partitionIdChanges` | Partition ID Changes Since Counter Reset | The cumulative partition-ID-change count crossed its threshold. Compare its change over time before concluding that partition instability is current. |
-| `device.betterPartitionAttachAttempts` | Better-Partition Attach Attempts Since Counter Reset | The cumulative number of attempts to attach to a better partition crossed its threshold. A future delta is needed to determine whether attempts are continuing. |
-| `device.totalParentPartitionChanges` | Parent and Partition Changes Since Counter Reset | The cumulative combined parent and partition change count crossed its threshold. It is historical evidence, not proof of current instability. |
-| `device.routerRolePercent` | Low Router-Role Time Since Reset | The device has spent less than the configured proportion of its recorded uptime in the Router role. Interpret this against its intended role and compare future observations. |
-| `device.detachedDisabledPercent` | Detached or Disabled Time Since Reset | The proportion of recorded uptime spent detached or disabled crossed its threshold. It does not establish that the device is currently detached. |
-| `device.totalMacErrorRatio` | High Device MAC Error Ratio | The current device-wide MAC error ratio crossed a policy threshold using a valid packet denominator, indicating degraded delivery in this observation. |
-| `device.totalMacDiscardRatio` | High Device MAC Discard Ratio | The current device-wide MAC discard ratio crossed a policy threshold using a valid packet denominator, indicating packet loss before successful delivery. |
-| `device.attachment-failure` | Device Not Attached to Mesh | The device currently reports a detached, disabled, or orphaned state and is therefore not attached to the Thread mesh. |
-| `relationship.bidirectional-lq3` | Strong Bidirectional Link (LQ3) | Both observed directions report LQ3, providing current evidence of a strong usable relationship. |
-| `relationship.directional-quality` | Link Quality or Delivery Degradation | Directional LQ, asymmetry, delivery errors, RSS, or link margin crossed a current-snapshot threshold. Critical delivery errors become Poor only for a sole parent-child attachment or a router-neighbor bridge. An attributed finding uses **High Delivery Errors Despite Acceptable Signal** when errors are elevated despite acceptable RSS or link margin. |
-| `relationship.queued-messages` | Indirect Messages Queued for Child | One or more indirect messages were waiting at the parent for this child in the current observation. This can be normal for a sleepy child; persistence or growth across observations is more significant. |
+| `network.border-router-redundancy` | Border Router Redundancy | Assesses whether authoritative current evidence contains enough Border Routers for failover. |
+| `network.router-redundancy` | Router Redundancy | Assesses whether current topology evidence contains enough routing devices for redundancy. |
+| `network.external-routing` | Border Router OMR Addressing | Reports whether an observed Border Router has an address in the OMR prefix without claiming tested external reachability. |
+| `network.current-path-redundancy` | Router Path Redundancy | Identifies router-neighbor bridges and articulation Routers in the currently observed routing graph. |
+| `network.observed-link-quality-ratios` | Network Link Quality Distribution | Summarizes the distribution of observed non-missing link-quality reports. |
+| `network.offline-impact` | Offline Device Network Impact | Separately assesses whether individually Offline devices are material to network health. |
+| `observation.duplicate-source-entry` | Duplicate Relationships in Source Data | Reports duplicate source relationships as a collection artifact. |
+| `device.observed` | Observed Devices | Records device presence in the current cached observation. |
+| `device.missing` | Expected Device Missing | Reports an expected device absent without enough eligible history to establish Offline. |
+| `device.offline` | Offline Devices | Reports an expected device absent for the configured consecutive complete observations. |
+| `device.diagnostic-timeout` | Mesh Diagnostic Query Timed Out | Reports attributed missing diagnostic evidence for a device. |
+| `device.multiple-reporters-high-error` | High Link Errors Reported by Multiple Neighbors | Correlates elevated delivery errors reported by multiple observed relationships. |
+| `device.parentChanges` | Parent Changes Since Counter Reset | Reports a cumulative parent-change counter that requires a later delta to establish current churn. |
+| `device.partitionIdChanges` | Partition ID Changes Since Counter Reset | Reports a cumulative partition-change counter that requires a later delta to establish current instability. |
+| `device.betterPartitionAttachAttempts` | Better-Partition Attach Attempts Since Counter Reset | Reports cumulative attempts to attach to a better partition. |
+| `device.totalParentPartitionChanges` | Parent and Partition Changes Since Counter Reset | Reports a cumulative combined parent and partition change counter. |
+| `device.routerRolePercent` | Low Router-Role Time Since Reset | Reports low cumulative Router-role time for an observed Router or Leader. |
+| `device.detachedDisabledPercent` | Detached or Disabled Time Since Reset | Reports cumulative detached or disabled uptime without claiming current detachment. |
+| `device.totalMacErrorRatio` | High Device MAC Error Ratio | Reports a current device-wide MAC error ratio with a valid packet denominator. |
+| `device.totalMacDiscardRatio` | High Device MAC Discard Ratio | Reports a current device-wide MAC discard ratio with a valid packet denominator. |
+| `device.attachment-failure` | Device Not Attached to Mesh | Reports a current detached, disabled, or orphaned attachment state. |
+| `relationship.bidirectional-lq3` | Strong Bidirectional Link (LQ3) | Reports a relationship where both observed directions have LQ3. |
+| `relationship.directional-quality` | Link Quality or Delivery Degradation | Reports current directional LQ, delivery, RSS, or margin degradation using relationship-specific policy and path evidence. |
+| `relationship.queued-messages` | Indirect Messages Queued for Child | Reports current indirect messages queued on a parent-child relationship as trend evidence. |
 
 ## Storage Safety
 
@@ -218,6 +220,12 @@ policy is idempotent.
 Schema version 3 stores evaluator version and health profile ID as explicit
 assessment provenance. Older assessments migrate with `legacy-unknown` values;
 their immutable finding and evidence rows are not rewritten.
+
+The `snapshot-v10` read projection resolves known-rule titles, descriptions,
+actions, verification text, evidence kinds, materiality, and template keys from
+the catalog. Legacy findings receive version-aware metadata defaults at read
+time; unknown legacy rules retain their stored operator copy and deterministic
+fallback keys without rewriting history.
 
 The filename promotes SQLite to a shared Hobat persistence boundary. The
 existing health tables and their contents are retained unchanged.

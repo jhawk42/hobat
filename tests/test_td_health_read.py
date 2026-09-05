@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_read import TDHealthReadService
@@ -139,6 +140,57 @@ def test_directional_quality_variants_form_distinct_groups() -> None:
         "Link Quality or Delivery Degradation",
         "High Delivery Errors Despite Acceptable Signal",
     }
+
+
+def test_legacy_assessment_projects_catalog_metadata_and_unknown_fallback(tmp_path) -> None:
+    database_path = tmp_path / HOBAT_DATABASE_FILENAME
+    store = SQLiteHealthStore(database_path)
+    store.save_processing_result(*_result())
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "UPDATE assessments SET evaluator_version='legacy-unknown', profile_id='legacy-unknown'"
+        )
+        connection.executemany(
+            "INSERT INTO findings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                (
+                    "assessment-1", "known-legacy", "relationship.directional-quality",
+                    "moderate", "relationship", 20,
+                    "High Delivery Errors Despite Acceptable Signal", "Legacy summary",
+                    "Legacy description", '{"evidenceKind":"current"}', "medium",
+                    "Legacy action", "Legacy verify", "[]", "[]", "[]",
+                ),
+                (
+                    "assessment-1", "unknown-legacy", "legacy.rule", "unknown",
+                    "device", 10, "Legacy title", "Legacy summary", "Legacy description",
+                    "{}", "low", "Legacy action", "Legacy verify", "[]", "[]", "[]",
+                ),
+            ),
+        )
+
+    result = TDHealthReadService(tmp_path).assessment(
+        assessment_id="assessment-1", grouped=False
+    )
+
+    assert result is not None
+    assert result["evaluatorVersion"] == "legacy-unknown"
+    findings = {finding["findingId"]: finding for finding in result["findings"]}
+    known = findings["known-legacy"]
+    assert known["presentationVariant"] == "delivery-errors-adequate-signal"
+    assert known["title"] == "High Delivery Errors Despite Acceptable Signal"
+    assert known["evidenceKind"] == known["evidence"]["evidenceKind"] == "snapshot"
+    assert known["materiality"] == known["evidence"]["materiality"] == "relationship"
+    assert known["actionKey"] == "health.relationship.directional-quality.action"
+    assert known["verificationKey"] == "health.relationship.directional-quality.verify"
+    assert known["whyItMatters"] != "Legacy description"
+
+    unknown = findings["unknown-legacy"]
+    assert unknown["title"] == "Legacy title"
+    assert unknown["whyItMatters"] == "Legacy description"
+    assert unknown["evidenceKind"] == "historical"
+    assert unknown["materiality"] == "informational"
+    assert unknown["actionKey"] == "health.legacy.rule.action"
+    assert unknown["verificationKey"] == "health.legacy.rule.verify"
 
 
 def test_observation_page_is_bounded(tmp_path) -> None:

@@ -12,6 +12,9 @@ from typing import Mapping
 RULE_CATALOG_PATH = Path(__file__).with_name("td-health-rules.json")
 _SCOPES = frozenset({"network", "device", "relationship", "external"})
 _MATERIALITY = frozenset({"informational", "device", "relationship", "network"})
+_EVIDENCE_KINDS = frozenset(
+    {"snapshot", "since-reset", "historical", "expected-state", "active-probe"}
+)
 
 
 class HealthRuleCatalogError(ValueError):
@@ -26,6 +29,9 @@ class HealthRule:
     variants: Mapping[str, str]
     description: str
     evidence_kind: str
+    required_evidence: tuple[str, ...]
+    action_key: str
+    verification_key: str
     source_requirements: frozenset[str]
     requires_denominator: bool
     scopes: frozenset[str]
@@ -103,6 +109,13 @@ def load_health_rule_catalog(path: Path = RULE_CATALOG_PATH) -> HealthRuleCatalo
     default_requires_denominator = defaults.get("requiresDenominator")
     if not isinstance(default_requires_denominator, bool):
         raise HealthRuleCatalogError("Catalog default requiresDenominator must be boolean")
+    action_key_template = _string(defaults, "actionKeyTemplate")
+    verification_key_template = _string(defaults, "verificationKeyTemplate")
+    if "{ruleId}" not in action_key_template or "{ruleId}" not in verification_key_template:
+        raise HealthRuleCatalogError("Catalog template keys must contain {ruleId}")
+    required_evidence_by_rule = document.get("requiredEvidence")
+    if not isinstance(required_evidence_by_rule, dict):
+        raise HealthRuleCatalogError("Health rule catalog requires requiredEvidence")
     if not isinstance(raw_rules, list) or not raw_rules:
         raise HealthRuleCatalogError("Health rule catalog requires rules")
     rules: list[HealthRule] = []
@@ -127,10 +140,20 @@ def load_health_rule_catalog(path: Path = RULE_CATALOG_PATH) -> HealthRuleCatalo
             raise HealthRuleCatalogError(f"Invalid variants for {rule_id}")
         scopes = _strings(raw, "scopes")
         materiality = _string(raw, "materiality")
+        evidence_kind = _string(raw, "evidenceKind")
         if not scopes or not scopes <= _SCOPES:
             raise HealthRuleCatalogError(f"Invalid scopes for {rule_id}")
         if materiality not in _MATERIALITY:
             raise HealthRuleCatalogError(f"Invalid materiality for {rule_id}")
+        if evidence_kind not in _EVIDENCE_KINDS:
+            raise HealthRuleCatalogError(f"Invalid evidenceKind for {rule_id}")
+        required_evidence_raw = required_evidence_by_rule.get(rule_id)
+        if not isinstance(required_evidence_raw, list) or not required_evidence_raw or not all(
+            isinstance(path, str) and path for path in required_evidence_raw
+        ):
+            raise HealthRuleCatalogError(f"Invalid requiredEvidence for {rule_id}")
+        if len(required_evidence_raw) != len(set(required_evidence_raw)):
+            raise HealthRuleCatalogError(f"Duplicate requiredEvidence for {rule_id}")
         required_capability = raw.get("requiredCapability")
         if required_capability is not None and not isinstance(required_capability, str):
             raise HealthRuleCatalogError(f"Invalid requiredCapability for {rule_id}")
@@ -153,7 +176,10 @@ def load_health_rule_catalog(path: Path = RULE_CATALOG_PATH) -> HealthRuleCatalo
                 title=_string(raw, "title"),
                 variants=MappingProxyType(dict(variants)),
                 description=_string(raw, "description"),
-                evidence_kind=_string(raw, "evidenceKind"),
+                evidence_kind=evidence_kind,
+                required_evidence=tuple(required_evidence_raw),
+                action_key=action_key_template.format(ruleId=rule_id),
+                verification_key=verification_key_template.format(ruleId=rule_id),
                 source_requirements=source_requirements,
                 requires_denominator=requires_denominator,
                 scopes=scopes,
@@ -168,6 +194,10 @@ def load_health_rule_catalog(path: Path = RULE_CATALOG_PATH) -> HealthRuleCatalo
         )
         seen_ids.add(rule_id)
         seen_orders.add(order)
+    if set(required_evidence_by_rule) != seen_ids:
+        raise HealthRuleCatalogError(
+            "requiredEvidence must define exactly every health rule"
+        )
     return HealthRuleCatalog(tuple(sorted(rules, key=lambda rule: rule.order)))
 
 

@@ -105,6 +105,8 @@ class Finding:
     confidence: Confidence
     action: str
     verify: str
+    action_key: str
+    verification_key: str
     source_files: tuple[str, ...]
 
 
