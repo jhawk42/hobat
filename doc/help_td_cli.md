@@ -43,13 +43,33 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 ### `otbr-cli`
 
 ```text
-td_cli otbr-cli {thread-network-info,router-table,topology,meshdiag,networkdiag} ...
+td_cli otbr-cli {thread-network-info,router-table,topology,meshdiag,networkdiag,device} ...
 ```
 
 `otbr-cli topology` runs seven steps in order: thread network info, router
 table, meshdiag topology, networkdiag multicast-network, networkdiag fetch-all,
 meshdiag router-neighbor tables, and meshdiag child tables. It attempts every
 step and returns the first non-zero step result.
+
+### `otbr-cli device`
+
+```text
+td_cli otbr-cli device ping IPV6 [--source IPV6] [--size BYTES] [--count COUNT]
+                           [--interval SECONDS] [--hop-limit HOPS] [--timeout SECONDS]
+                           [--allow-sed] [--json]
+td_cli otbr-cli device reset-counters IPV6 --counters {mac,mle,both} --confirm [--json]
+```
+
+These are explicit active operations and never run during collection, Sync, or
+`health process-dataset`. Both accept only unicast IPv6 addresses without zone
+identifiers. Ping is blocking and bounded below the 30-second OTBR command
+ceiling; omitted values use documented positional defaults. `--allow-sed`
+acknowledges active traffic to a sleepy end device.
+
+Counter reset is destructive. It maps `mac`, `mle`, and `both` exactly to TLVs
+`9`, `34`, and `9 34`. Terminal `Done` means OTBR accepted the request for
+transmission; it does not prove the remote device applied the reset. A response
+that reports unsupported TLVs fails without fallback.
 
 ### `otbr-restapi`
 

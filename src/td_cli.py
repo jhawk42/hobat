@@ -33,6 +33,7 @@ import otbr_cli_meshdiag_childip6
 import otbr_cli_meshdiag_routerneighbortable
 
 import otbr_cli_networkdiag_topology
+import otbr_cli_device
 
 import otbr_restapi_download
 import otbr_restapi_cli
@@ -76,6 +77,8 @@ class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
 #   td_cli.py otbr-cli networkdiag fetch-all
 #   td_cli.py otbr-cli networkdiag multicast-network
 #   td_cli.py otbr-cli networkdiag multicast-neighbors
+#   td_cli.py otbr-cli device ping 2001:db8::1
+#   td_cli.py otbr-cli device reset-counters 2001:db8::1 --counters mac --confirm
 #   td_cli.py otbr-cli topology
 #
 # mdns examples:
@@ -221,6 +224,18 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
     networkdiag_sub.add_parser(
         "multicast-neighbors",
         help="Scan networkdiag topology via multicast to one-hop neighbors (ff02::1)",
+    )
+    device_p = otbr_cli_sub.add_parser(
+        "device",
+        help="Run explicit active Thread device commands",
+        formatter_class=TDHelpFormatter,
+    )
+    device_sub = device_p.add_subparsers(dest="device_command", required=False)
+    device_sub.add_parser(
+        "ping", help="Send bounded active Thread ICMPv6 traffic", add_help=False
+    )
+    device_sub.add_parser(
+        "reset-counters", help="Request destructive remote counter reset", add_help=False
     )
     otbr_cli_sub.add_parser(
         "topology",
@@ -488,7 +503,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- hand-crafted "Commands usage:" epilog ---
     parser.epilog = """Commands usage:
     otbr-cli
-        usage: td_cli otbr-cli [-h] {thread-network-info,router-table,meshdiag,networkdiag,topology} ...
+        usage: td_cli otbr-cli [-h] {thread-network-info,router-table,meshdiag,networkdiag,device,topology} ...
 
     otbr-restapi
         usage: td_cli otbr-restapi [-h] {node,devices,diagnostics,actions,mesh-diagnostics,topology,download} ...
@@ -811,6 +826,16 @@ def _dispatch_otbr_cli(
                 _forward_with_datadir(args, networkdiag_argv)
             ),
             "otbr_cli_networkdiag_topology.main",
+        )
+
+    if cli_command == "device":
+        if not getattr(args, "device_command", None):
+            if not _print_child_subparser_help(sub_parser, "device"):
+                sub_parser.print_help()
+            return 0
+        return _normalize_module_rc(
+            otbr_cli_device.main([args.device_command] + list(extra_args)),
+            "otbr_cli_device.main",
         )
 
     raise ValueError(f"Unhandled otbr-cli command: {cli_command}")

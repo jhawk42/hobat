@@ -99,6 +99,11 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag multicast
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag fetch-all
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli topology
 
+# Explicit active device operations; neither runs as part of collection or health processing
+PYTHONPATH=src python3 -m td_cli otbr-cli device ping 2001:db8::1 --json
+PYTHONPATH=src python3 -m td_cli otbr-cli device reset-counters 2001:db8::1 \
+  --counters mac --confirm --json
+
 # OTBR REST snapshots
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi devices list
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi devices fetch
@@ -125,6 +130,12 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data system backups create --output
 `otbr-cli topology` runs the complete CLI collection sequence. Detailed
 `networkdiag fetch-all` and REST diagnostic sweeps are the highest-impact
 commands; use cached snapshots for repeated analysis.
+
+`otbr-cli device ping` sends bounded active Thread traffic and returns one
+complete result. `otbr-cli device reset-counters` is destructive, requires an
+explicit counter selection and `--confirm`, and only reports `Done` as local
+acceptance for transmission, not remote confirmation. These commands are not
+run by sync or health processing.
 
 `health process-dataset` is cache-only: it never invokes a collector or modifies source
 snapshots. Remove `--dry-run` to atomically store the observation and assessment
