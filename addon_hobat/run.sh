@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 # Define application variables
 APP_DIR="${APP_DIR:-/app}"
-SCRIPT_NAME="${SCRIPT_NAME:-foo.py}"
+SCRIPT_NAME="${SCRIPT_NAME:-td_webserver.py}"
 HOST="${HOST:-0.0.0.0}"
 
 # Navigate to the application directory
