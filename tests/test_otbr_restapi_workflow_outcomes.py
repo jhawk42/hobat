@@ -5,8 +5,12 @@ from unittest.mock import MagicMock
 import pytest
 
 import otbr_restapi_cli as cli_module
+from otbr_restapi_diagnostics import use_progressive_fallback
 from otbr_restapi_util import (
     ActionStatus,
+    BASIC_DIAGNOSTIC_TLVS,
+    CHILD_DETAILED_DIAGNOSTIC_TLVS,
+    CHILD_MEDIUM_DIAGNOSTIC_TLVS,
     OTBRActionFailedError,
     OTBRActionTimeoutError,
     OTBRHTTPError,
@@ -14,6 +18,8 @@ from otbr_restapi_util import (
     OTBRInvalidResponseError,
     OTBRRestApiClient,
     OTBRUsageError,
+    RECOMMENDED_DIAGNOSTIC_TLVS,
+    ROUTER_MEDIUM_DIAGNOSTIC_TLVS,
 )
 
 
@@ -243,7 +249,8 @@ def test_terminal_diagnostic_failure_retries_only_with_explicit_fallback(monkeyp
         fallback_types=["extAddress"],
     )
 
-    assert outcome["partial"] is False
+    assert outcome["partial"] is True
+    assert outcome["deviceResults"][0]["status"] == "partial"
     assert outcome["deviceResults"][0]["attempts"] == 2
     assert fetch.call_count == 2
 
@@ -267,10 +274,66 @@ def test_completed_diagnostic_without_result_retries_with_explicit_fallback(monk
         fallback_types=["extAddress"],
     )
 
-    assert outcome["partial"] is False
+    assert outcome["partial"] is True
+    assert outcome["deviceResults"][0]["status"] == "partial"
     assert outcome["deviceResults"][0]["attempts"] == 2
     assert fetch.call_count == 2
     assert fetch.call_args_list[1].kwargs["types"] == ["extAddress"]
+
+
+@pytest.mark.parametrize(
+    ("role", "expected_type_sets"),
+    [
+        (
+            "router",
+            [
+                RECOMMENDED_DIAGNOSTIC_TLVS,
+                ROUTER_MEDIUM_DIAGNOSTIC_TLVS,
+                BASIC_DIAGNOSTIC_TLVS,
+            ],
+        ),
+        (
+            "child",
+            [
+                CHILD_DETAILED_DIAGNOSTIC_TLVS,
+                CHILD_MEDIUM_DIAGNOSTIC_TLVS,
+                BASIC_DIAGNOSTIC_TLVS,
+            ],
+        ),
+    ],
+)
+def test_progressive_diagnostic_fallback_recovers_with_role_specific_basic_tlvs(
+    monkeypatch, role, expected_type_sets
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fetch = MagicMock(
+        side_effect=[
+            OTBRInvalidResponseError("first set returned no result"),
+            OTBRActionFailedError(
+                "second set failed", action_id="action-medium", status="failed"
+            ),
+            {
+                "item": {"id": "diag-basic"},
+                "action": completed_action("action-basic", "diag-basic"),
+                "diagnosticId": "diag-basic",
+            },
+        ]
+    )
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [{"id": "1111111111111111", "role": role}],
+        progressive_fallback=True,
+    )
+
+    result = outcome["deviceResults"][0]
+    assert outcome["partial"] is True
+    assert result["status"] == "partial"
+    assert result["attempts"] == 3
+    assert result["attemptedTypes"] == expected_type_sets
+    assert result["successfulTypes"] == BASIC_DIAGNOSTIC_TLVS
+    assert result["fallbackRecovered"] is True
+    assert [call.kwargs["types"] for call in fetch.call_args_list] == expected_type_sets
 
 
 def test_diagnostic_timeout_never_starts_fallback_action(monkeypatch) -> None:
@@ -314,6 +377,122 @@ def test_mesh_sweep_uses_structured_serialized_core(monkeypatch) -> None:
         "childIpv6Addresses",
         "routerNeighbors",
     }
+
+
+def test_mesh_progressive_fallback_merges_split_tlvs(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fetch = MagicMock(
+        side_effect=[
+            OTBRInvalidResponseError("combined request returned no result"),
+            {
+                "item": {"id": "diag-children", "children": [{"rloc16": "0x0401"}]},
+                "action": completed_action("action-children", "diag-children"),
+                "diagnosticId": "diag-children",
+            },
+            OTBRInvalidResponseError("child addresses returned no result"),
+            {
+                "item": {"id": "diag-neighbors", "routerNeighbors": [{"rloc16": "0x0800"}]},
+                "action": completed_action("action-neighbors", "diag-neighbors"),
+                "diagnosticId": "diag-neighbors",
+            },
+        ]
+    )
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_mesh_diagnostics_all_devices(
+        ["1111111111111111"], progressive_fallback=True
+    )
+
+    result = outcome["deviceResults"][0]
+    assert outcome["partial"] is True
+    assert result["status"] == "partial"
+    assert result["responsive"] is True
+    assert result["basicResponsive"] is False
+    assert result["meshCoverage"] == ["children", "routerNeighbors"]
+    assert outcome["items"] == [
+        {
+            "id": "diag-children",
+            "children": [{"rloc16": "0x0401"}],
+            "routerNeighbors": [{"rloc16": "0x0800"}],
+        }
+    ]
+
+
+def test_mesh_progressive_fallback_records_basic_only_responsiveness(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    failures = [
+        OTBRInvalidResponseError("no mesh result") for _ in range(4)
+    ]
+    basic_context = {
+        "item": {"id": "diag-basic", "extAddress": "1111111111111111"},
+        "action": completed_action("action-basic", "diag-basic"),
+        "diagnosticId": "diag-basic",
+    }
+    fetch = MagicMock(side_effect=[*failures, basic_context])
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_mesh_diagnostics_all_devices(
+        ["1111111111111111"], progressive_fallback=True
+    )
+
+    result = outcome["deviceResults"][0]
+    assert outcome["items"] == []
+    assert outcome["partial"] is True
+    assert result["status"] == "partial"
+    assert result["meshCoverage"] == []
+    assert result["responsive"] is True
+    assert result["basicResponsive"] is True
+    assert fetch.call_args_list[-1].kwargs["types"] == BASIC_DIAGNOSTIC_TLVS
+
+
+def test_mesh_timeout_does_not_start_split_or_basic_fallback(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    timeout = OTBRActionTimeoutError(
+        "timed out",
+        action_id="action-mesh",
+        status="active",
+        action={"id": "action-mesh", "status": "active"},
+    )
+    fetch = MagicMock(side_effect=timeout)
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_mesh_diagnostics_all_devices(
+        ["1111111111111111"], progressive_fallback=True
+    )
+
+    result = outcome["deviceResults"][0]
+    assert result["status"] == "failed"
+    assert result["attempts"] == 1
+    assert result["responsive"] is False
+    assert fetch.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("preset", "types", "fallback_preset", "no_fallback", "expected"),
+    [
+        (None, None, None, False, True),
+        ("recommended", None, None, False, True),
+        ("full", None, None, False, False),
+        (None, ["extAddress"], None, False, False),
+        ("recommended", None, "basic", False, False),
+        ("recommended", None, None, True, False),
+    ],
+)
+def test_progressive_fallback_only_applies_to_default_recommended_sweeps(
+    preset, types, fallback_preset, no_fallback, expected
+) -> None:
+    args = type(
+        "Args",
+        (),
+        {
+            "preset": preset,
+            "types": types,
+            "fallback_preset": fallback_preset,
+            "no_fallback": no_fallback,
+        },
+    )()
+
+    assert use_progressive_fallback(args) is expected
 
 
 def test_cli_discovery_forwards_safe_attempts_and_structured_mode() -> None:

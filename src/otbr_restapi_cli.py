@@ -391,7 +391,7 @@ def _add_diagnostics_commands(
         "--fallback-preset",
         choices=["medium", "minimal", "basic"],
         default=None,
-        help="Opt in to one terminal-action retry with a smaller TLV preset",
+        help="Replace automatic progressive fallback with one explicit retry preset",
     )
     diagnostics_fetch_all.add_argument(
         "--preserve-diagnostics",
@@ -667,6 +667,12 @@ def _add_mesh_diagnostics_commands(
         help="Do not clear the diagnostic collection before this full sweep",
     )
     mesh_fetch_all_p.add_argument(
+        "--no-fallback",
+        action="store_true",
+        default=False,
+        help="Disable split mesh-TLV and basic responsiveness fallback",
+    )
+    mesh_fetch_all_p.add_argument(
         "--items-only",
         action="store_true",
         help="Return only diagnostic items instead of the structured sweep outcome",
@@ -740,7 +746,7 @@ def _add_topology_commands(
         "--fallback-preset",
         choices=["medium", "minimal", "basic"],
         default=None,
-        help="Opt in to one terminal-action retry with a smaller TLV preset",
+        help="Replace automatic progressive fallback with one explicit retry preset",
     )
     topo_p.add_argument(
         "--preserve-diagnostics",

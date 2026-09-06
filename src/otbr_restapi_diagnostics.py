@@ -192,6 +192,15 @@ def resolve_fallback_types(args: argparse.Namespace) -> list[str | int] | None:
     return list(MINIMAL_DIAGNOSTIC_TLVS)
 
 
+def use_progressive_fallback(args: argparse.Namespace) -> bool:
+    return (
+        not getattr(args, "no_fallback", False)
+        and getattr(args, "fallback_preset", None) is None
+        and getattr(args, "types", None) is None
+        and getattr(args, "preset", None) in (None, "recommended")
+    )
+
+
 def fetch_device_with_fallback(
     client: OTBRRestApiClient,
     device_id: str,
@@ -395,6 +404,7 @@ def dispatch_diagnostics(
             poll_timeout=args.poll_timeout,
             clear_diagnostics=not getattr(args, "preserve_diagnostics", False),
             fallback_types=fallback_types,
+            progressive_fallback=use_progressive_fallback(args),
             raw=raw_arg,
             on_progress=progress_fn,
             on_checkpoint=_on_checkpoint,

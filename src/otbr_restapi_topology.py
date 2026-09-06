@@ -17,10 +17,10 @@ from otbr_restapi_diagnostics import (
     _apply_border_router_enrichment,
     _apply_mac_enrichment,
     _apply_time_stats_enrichment,
-    fetch_all_with_fallback,
     make_progress_fn,
     resolve_fallback_types,
     resolve_types,
+    use_progressive_fallback,
 )
 from otbr_restapi_mesh_diagnostics import filter_router_device_ids
 from otbr_restapi_util import DestinationType, MESH_DIAGNOSTIC_TLVS, OTBRRestApiClient, emit_rest_payload_output
@@ -83,6 +83,7 @@ def dispatch_topology(
             poll_timeout=args.poll_timeout,
             clear_diagnostics=not getattr(args, "preserve_diagnostics", False),
             fallback_types=fallback_types,
+            progressive_fallback=use_progressive_fallback(args),
             raw=raw_arg,
             on_progress=progress_fn,
         )
@@ -123,6 +124,7 @@ def dispatch_topology(
             poll_interval=args.poll_interval,
             poll_timeout=args.poll_timeout,
             clear_diagnostics=False,
+            progressive_fallback=not getattr(args, "no_fallback", False),
             on_progress=mesh_progress_fn,
         )
         mesh_results = mesh_outcome["items"]

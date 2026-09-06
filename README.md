@@ -131,6 +131,15 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data system backups create --output
 `networkdiag fetch-all` and REST diagnostic sweeps are the highest-impact
 commands; use cached snapshots for repeated analysis.
 
+Default OTBR REST `diagnostics fetch-all` and `topology` sweeps retry known
+terminal or no-result responses with progressively smaller, role-aware TLV
+sets. Mesh sweeps retry failed combined requests as individual mesh TLVs and
+may use a basic diagnostic to record responsiveness. Reduced-TLV recovery stays
+partial when required detailed evidence is absent. Polling timeouts are never
+retried because the original action may still be active. Use `--no-fallback`
+to disable these additional bounded actions, or `--fallback-preset` to replace
+the generic progression with one explicit fallback preset.
+
 `otbr-cli device ping` sends bounded active Thread traffic and returns one
 complete result. `otbr-cli device reset-counters` is destructive, requires an
 explicit counter selection and `--confirm`, and only reports `Done` as local

@@ -171,6 +171,7 @@ def dispatch_mesh_diagnostics(
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             clear_diagnostics=not getattr(args, "preserve_diagnostics", False),
+            progressive_fallback=not getattr(args, "no_fallback", False),
             on_progress=progress_fn,
             on_checkpoint=_on_checkpoint,
             raw=raw_arg,

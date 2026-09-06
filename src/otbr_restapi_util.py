@@ -319,7 +319,7 @@ FULL_DIAGNOSTIC_TLVS: list[str] = RECOMMENDED_DIAGNOSTIC_TLVS + [
     DIAG_TLV_ROUTER_NEIGHBORS,
 ]
 
-# Minimal lightweight set for quick enumeration
+# Lightweight set that retains optional implementation identity.
 MINIMAL_DIAGNOSTIC_TLVS: list[str] = [
     DIAG_TLV_EXT_ADDRESS,
     DIAG_TLV_RLOC16,
@@ -329,13 +329,39 @@ MINIMAL_DIAGNOSTIC_TLVS: list[str] = [
     DIAG_TLV_THREAD_STACK_VER,
 ]
 
-# Minimal lightweight set for quick enumeration
+# Lowest-risk response check, aligned with the OTBR CLI basic bucket.
 BASIC_DIAGNOSTIC_TLVS: list[str] = [
     DIAG_TLV_EXT_ADDRESS,
     DIAG_TLV_RLOC16,
     DIAG_TLV_MODE,
     DIAG_TLV_IPV6_ADDRESSES,
-    DIAG_TLV_EUI64
+]
+
+ROUTER_MEDIUM_DIAGNOSTIC_TLVS: list[str] = [
+    DIAG_TLV_EXT_ADDRESS,
+    DIAG_TLV_RLOC16,
+    DIAG_TLV_MODE,
+    DIAG_TLV_IPV6_ADDRESSES,
+    DIAG_TLV_CHILD_TABLE,
+    DIAG_TLV_MAC_COUNTERS,
+]
+
+CHILD_DETAILED_DIAGNOSTIC_TLVS: list[str] = [
+    DIAG_TLV_EXT_ADDRESS,
+    DIAG_TLV_RLOC16,
+    DIAG_TLV_MODE,
+    DIAG_TLV_IPV6_ADDRESSES,
+    DIAG_TLV_MAC_COUNTERS,
+    DIAG_TLV_THREAD_STACK_VER,
+    DIAG_TLV_MLE_COUNTERS,
+]
+
+CHILD_MEDIUM_DIAGNOSTIC_TLVS: list[str] = [
+    DIAG_TLV_EXT_ADDRESS,
+    DIAG_TLV_RLOC16,
+    DIAG_TLV_MODE,
+    DIAG_TLV_IPV6_ADDRESSES,
+    DIAG_TLV_MAC_COUNTERS,
 ]
 
 # Mesh-diagnostic TLVs as a frozenset for validation
@@ -1297,6 +1323,7 @@ class OTBRRestApiClient:
         clear_diagnostics: bool = False,
         items_only: bool = False,
         fallback_types: Sequence[str | int] | None = None,
+        progressive_fallback: bool = False,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
         on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None = None,
         raw: object = _RAW_UNSET,
@@ -1366,42 +1393,73 @@ class OTBRRestApiClient:
         for idx, (device_id, role) in enumerate(normalized_devices, start=1):
             t_start = time.monotonic()
             status = "completed"
-            action_attempts = 1
+            attempted_types: list[list[str | int]] = []
+            attempt_errors: list[dict[str, Any]] = []
             try:
-                logging.debug("Fetching diagnostics for device %s (%d/%d) types: %s", device_id, idx, total, " ".join(map(str, types)))
                 is_child = role == "child"
                 selected_task_timeout = child_task_timeout if is_child else task_timeout
                 selected_poll_timeout = child_poll_timeout if is_child else poll_timeout
-                try:
-                    context = self.fetch_device_diagnostics(
-                        device_id,
-                        types=types,
-                        destination_type=destination_type,
-                        task_timeout=selected_task_timeout,
-                        poll_interval=poll_interval,
-                        poll_timeout=selected_poll_timeout,
-                        return_context=True,
-                        raw=raw,
+                primary_types = (
+                    CHILD_DETAILED_DIAGNOSTIC_TLVS
+                    if progressive_fallback and is_child
+                    else types
+                )
+                fallback_sets: list[Sequence[str | int]] = []
+                if progressive_fallback:
+                    fallback_sets.extend(
+                        (CHILD_MEDIUM_DIAGNOSTIC_TLVS, BASIC_DIAGNOSTIC_TLVS)
+                        if is_child
+                        else (ROUTER_MEDIUM_DIAGNOSTIC_TLVS, BASIC_DIAGNOSTIC_TLVS)
                     )
-                except (OTBRActionFailedError, OTBRInvalidResponseError):
-                    if not fallback_types:
-                        raise
-                    action_attempts = 2
-                    logging.warning(
-                        "Device %s terminal diagnostic attempt failed or returned no result; "
-                        "retrying with explicitly configured fallback TLVs",
+                elif fallback_types:
+                    fallback_sets.append(fallback_types)
+                type_sets = [primary_types, *fallback_sets]
+                context = None
+                for attempt_index, attempt_types in enumerate(type_sets):
+                    attempted_types.append(list(attempt_types))
+                    logging.debug(
+                        "Fetching diagnostics for device %s (%d/%d) attempt %d/%d types: %s",
                         device_id,
+                        idx,
+                        total,
+                        attempt_index + 1,
+                        len(type_sets),
+                        " ".join(map(str, attempt_types)),
                     )
-                    context = self.fetch_device_diagnostics(
-                        device_id,
-                        types=fallback_types,
-                        destination_type=destination_type,
-                        task_timeout=selected_task_timeout,
-                        poll_interval=poll_interval,
-                        poll_timeout=selected_poll_timeout,
-                        return_context=True,
-                        raw=raw,
+                    try:
+                        context = self.fetch_device_diagnostics(
+                            device_id,
+                            types=attempt_types,
+                            destination_type=destination_type,
+                            task_timeout=selected_task_timeout,
+                            poll_interval=poll_interval,
+                            poll_timeout=selected_poll_timeout,
+                            return_context=True,
+                            raw=raw,
+                        )
+                        break
+                    except (OTBRActionFailedError, OTBRInvalidResponseError) as exc:
+                        attempt_errors.append(
+                            {
+                                "type": type(exc).__name__,
+                                "message": str(exc),
+                                "actionId": getattr(exc, "action_id", None),
+                                "actionStatus": getattr(exc, "status", None),
+                            }
+                        )
+                        if attempt_index + 1 >= len(type_sets):
+                            raise
+                        logging.warning(
+                            "Device %s attempt %d failed or returned no result; retrying with fewer TLVs",
+                            device_id,
+                            attempt_index + 1,
+                        )
+                if context is None:
+                    raise OTBRInvalidResponseError(
+                        f"No diagnostic result returned for device {device_id}"
                     )
+                if len(attempted_types) > 1:
+                    status = "partial"
                 diagnostic = context["item"]
                 results.append(diagnostic)
                 device_results.append(
@@ -1411,7 +1469,11 @@ class OTBRRestApiClient:
                         "status": status,
                         "diagnosticId": context["diagnosticId"],
                         "action": context["action"],
-                        "attempts": action_attempts,
+                        "attempts": len(attempted_types),
+                        "attemptedTypes": attempted_types,
+                        "successfulTypes": attempted_types[-1],
+                        "fallbackRecovered": len(attempted_types) > 1,
+                        "attemptErrors": attempt_errors,
                         "created": (
                             diagnostic.get("created")
                             if isinstance(diagnostic, dict)
@@ -1433,7 +1495,10 @@ class OTBRRestApiClient:
                             "actionId": getattr(exc, "action_id", None),
                             "actionStatus": getattr(exc, "status", None),
                         },
-                        "attempts": action_attempts,
+                        "attempts": len(attempted_types),
+                        "attemptedTypes": attempted_types,
+                        "fallbackRecovered": False,
+                        "attemptErrors": attempt_errors,
                         "elapsed": time.monotonic() - t_start,
                     }
                 )
@@ -1606,6 +1671,7 @@ class OTBRRestApiClient:
         skip_on_failure: bool = True,
         clear_diagnostics: bool = False,
         items_only: bool = False,
+        progressive_fallback: bool = False,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
         on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None = None,
         raw: object = _RAW_UNSET,
@@ -1613,8 +1679,9 @@ class OTBRRestApiClient:
         """
         Fetch mesh diagnostics for a list of device IDs, one device at a time.
 
-        Thin wrapper: iterates device_ids and calls fetch_mesh_diagnostics() for each.
-        Same skip_on_failure semantics as fetch_all_devices_diagnostics().
+        When progressive_fallback is enabled, a failed combined request is
+        retried as individual mesh TLVs. A final basic diagnostic can establish
+        responsiveness, but does not satisfy mesh coverage.
         """
         invalid = [diagnostic_type for diagnostic_type in types if diagnostic_type not in MESH_DIAGNOSTIC_TLVS]
         if invalid or not types:
@@ -1622,6 +1689,220 @@ class OTBRRestApiClient:
                 f"Invalid mesh-diagnostic TLV(s): {invalid!r}. "
                 f"Allowed: {sorted(MESH_DIAGNOSTIC_TLVS)!r}"
             )
+        if progressive_fallback and not self._resolve_raw(raw):
+            started_at = datetime.now(timezone.utc).isoformat()
+            results: list[Any] = []
+            device_results: list[dict[str, Any]] = []
+            normalized_devices: list[tuple[str, str | None]] = []
+            seen_ids: set[str] = set()
+            for device in device_ids:
+                if isinstance(device, Mapping):
+                    device_id = device.get("id") or device.get("extAddress")
+                    role = device.get("role")
+                else:
+                    device_id = device
+                    role = None
+                if not isinstance(device_id, str) or not re.fullmatch(
+                    r"[0-9a-fA-F]{16}", device_id
+                ):
+                    device_results.append(
+                        {
+                            "deviceId": device_id,
+                            "role": role,
+                            "status": "malformed",
+                            "error": "device ID must be a 16-character hexadecimal extAddress",
+                        }
+                    )
+                    continue
+                normalized_id = device_id.lower()
+                if normalized_id in seen_ids:
+                    device_results.append(
+                        {
+                            "deviceId": device_id,
+                            "role": role,
+                            "status": "skipped",
+                            "error": "duplicate device ID",
+                        }
+                    )
+                    continue
+                seen_ids.add(normalized_id)
+                normalized_devices.append((device_id, str(role).lower() if role else None))
+
+            if clear_diagnostics:
+                self.delete_all_diagnostics()
+
+            total = len(normalized_devices)
+            required_types = list(types)
+            for index, (device_id, role) in enumerate(normalized_devices, start=1):
+                started = time.monotonic()
+                attempted_types: list[list[str | int]] = []
+                successful_types: list[list[str | int]] = []
+                attempt_errors: list[dict[str, Any]] = []
+                diagnostic_ids: list[str] = []
+                actions: list[Any] = []
+                merged: dict[str, Any] | None = None
+                responsive = False
+                basic_responsive = False
+                status = "failed"
+                fallback_allowed = True
+                split_types: list[str] = []
+
+                def record_error(exc: OTBRClientError) -> None:
+                    attempt_errors.append(
+                        {
+                            "type": type(exc).__name__,
+                            "message": str(exc),
+                            "actionId": getattr(exc, "action_id", None),
+                            "actionStatus": getattr(exc, "status", None),
+                        }
+                    )
+
+                def merge_context(context: Mapping[str, Any], attempt: list[str | int]) -> None:
+                    nonlocal merged, responsive
+                    item = context.get("item")
+                    if not isinstance(item, Mapping):
+                        raise OTBRInvalidResponseError(
+                            f"Diagnostic result for device {device_id} is not an object"
+                        )
+                    responsive = True
+                    successful_types.append(attempt)
+                    diagnostic_id = context.get("diagnosticId")
+                    if isinstance(diagnostic_id, str):
+                        diagnostic_ids.append(diagnostic_id)
+                    actions.append(context.get("action"))
+                    if merged is None:
+                        merged = dict(item)
+                    else:
+                        for key, value in item.items():
+                            if key not in {"id", "created", "type"} or key not in merged:
+                                merged[key] = value
+
+                attempted_types.append(required_types)
+                try:
+                    context = self.fetch_device_diagnostics(
+                        device_id,
+                        types=required_types,
+                        destination_type=destination_type,
+                        task_timeout=task_timeout,
+                        poll_interval=poll_interval,
+                        poll_timeout=poll_timeout,
+                        return_context=True,
+                        raw=False,
+                    )
+                    merge_context(context, required_types)
+                    split_types = [
+                        diagnostic_type
+                        for diagnostic_type in required_types
+                        if merged is None or diagnostic_type not in merged
+                    ]
+                except (OTBRActionFailedError, OTBRInvalidResponseError) as exc:
+                    record_error(exc)
+                    split_types = required_types
+                except OTBRClientError as exc:
+                    record_error(exc)
+                    fallback_allowed = False
+
+                for diagnostic_type in split_types:
+                    attempt = [diagnostic_type]
+                    attempted_types.append(attempt)
+                    try:
+                        context = self.fetch_device_diagnostics(
+                            device_id,
+                            types=attempt,
+                            destination_type=destination_type,
+                            task_timeout=task_timeout,
+                            poll_interval=poll_interval,
+                            poll_timeout=poll_timeout,
+                            return_context=True,
+                            raw=False,
+                        )
+                        merge_context(context, attempt)
+                    except (OTBRActionFailedError, OTBRInvalidResponseError) as split_exc:
+                        record_error(split_exc)
+                    except OTBRClientError as split_exc:
+                        record_error(split_exc)
+                        fallback_allowed = False
+                        break
+
+                mesh_coverage = [
+                    diagnostic_type
+                    for diagnostic_type in required_types
+                    if merged is not None and diagnostic_type in merged
+                ]
+                if (
+                    fallback_allowed
+                    and len(mesh_coverage) < len(required_types)
+                    and not responsive
+                ):
+                    attempted_types.append(list(BASIC_DIAGNOSTIC_TLVS))
+                    try:
+                        context = self.fetch_device_diagnostics(
+                            device_id,
+                            types=BASIC_DIAGNOSTIC_TLVS,
+                            destination_type=destination_type,
+                            task_timeout=task_timeout,
+                            poll_interval=poll_interval,
+                            poll_timeout=poll_timeout,
+                            return_context=True,
+                            raw=False,
+                        )
+                        responsive = True
+                        basic_responsive = True
+                        successful_types.append(list(BASIC_DIAGNOSTIC_TLVS))
+                        diagnostic_id = context.get("diagnosticId")
+                        if isinstance(diagnostic_id, str):
+                            diagnostic_ids.append(diagnostic_id)
+                        actions.append(context.get("action"))
+                    except OTBRClientError as exc:
+                        record_error(exc)
+
+                if len(mesh_coverage) == len(required_types):
+                    status = "completed"
+                elif mesh_coverage or responsive:
+                    status = "partial"
+                if merged is not None and mesh_coverage:
+                    results.append(merged)
+
+                record: dict[str, Any] = {
+                    "deviceId": device_id,
+                    "role": role,
+                    "status": status,
+                    "attempts": len(attempted_types),
+                    "attemptedTypes": attempted_types,
+                    "successfulTypes": successful_types,
+                    "fallbackRecovered": len(successful_types) > 0 and len(attempted_types) > 1,
+                    "meshCoverage": mesh_coverage,
+                    "responsive": responsive,
+                    "basicResponsive": basic_responsive,
+                    "diagnosticIds": diagnostic_ids,
+                    "actions": actions,
+                    "attemptErrors": attempt_errors,
+                    "elapsed": time.monotonic() - started,
+                }
+                if status == "failed" and attempt_errors:
+                    record["error"] = attempt_errors[-1]
+                device_results.append(record)
+                if status == "failed" and not skip_on_failure:
+                    raise OTBRInvalidResponseError(
+                        f"No mesh diagnostic result returned for device {device_id}"
+                    )
+                if on_progress is not None:
+                    on_progress(index, total, device_id, time.monotonic() - started, status)
+                if on_checkpoint is not None:
+                    on_checkpoint(results, index, total, device_id, status)
+
+            if items_only:
+                return results
+            return {
+                "items": results,
+                "deviceResults": device_results,
+                "partial": any(item["status"] != "completed" for item in device_results),
+                "clearedDiagnostics": clear_diagnostics,
+                "startedAt": started_at,
+                "completedAt": datetime.now(timezone.utc).isoformat(),
+                "inputCount": len(device_ids),
+                "queriedCount": len(normalized_devices),
+            }
         return self.fetch_all_devices_diagnostics(
             device_ids,
             types=types,
