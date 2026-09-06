@@ -116,8 +116,8 @@ export function chooseNodeId(node, fallbackPrefix, index) {
 
 export function buildLabel(node) {
   const nodeName =
-    toText(node.deviceLabel) || toText(node.device_label) || toText(node.name) || "Unknown node";
-  const rloc16 = toText(node.rloc16) || "rloc16:n/a";
+    toText(node.deviceLabel) || toText(node.device_label) || toText(node.name) || "found node";
+  const rloc16 = toText(node.rloc16) || "rloc16:not_found";
   return `${nodeName}\n${rloc16}`;
 }
 
