@@ -166,7 +166,12 @@ def _is_valid_label(value):
     return isinstance(value, str) and bool(value.strip())
 
 
-def merge_extaddr_files(extaddr_json_path, merge_input_file_path, merge_name_override=False):
+def merge_extaddr_files(
+    extaddr_json_path,
+    merge_input_file_path,
+    merge_name_override=False,
+    fallback_device_label_prefix=None,
+):
     """
     Merge missing extaddr entries from merge input file into static extaddr file.
     
@@ -174,6 +179,7 @@ def merge_extaddr_files(extaddr_json_path, merge_input_file_path, merge_name_ove
         extaddr_json_path: Path to td-static-extaddr-device-label.json
         merge_input_file_path: Path to thread-networkdiagnostic-topology-rloc16-extaddr-device_label.json
         merge_name_override: If True, replace static Unknown labels with merge input name when available
+        fallback_device_label_prefix: Optional prefix for labels generated from extaddr
     
     Returns:
         Tuple of (num_added, added_entries, num_overridden, overridden_entries)
@@ -222,7 +228,7 @@ def merge_extaddr_files(extaddr_json_path, merge_input_file_path, merge_name_ove
         return 0, [], 0, []
     
     # Build merge input entries dict, skipping items without required fields.
-    # Prefer device_label; fall back to name when device_label is not usable.
+    # Prefer a source label, then name, then the optional generated fallback.
     merge_input_entries = {}
     merge_input_names_by_extaddr = {}
     for i, item in enumerate(merge_input_data):
@@ -250,7 +256,7 @@ def merge_extaddr_files(extaddr_json_path, merge_input_file_path, merge_name_ove
             )
             continue
 
-        device_label = item.get('device_label')
+        device_label = item.get('deviceLabel') or item.get('device_label')
         name = item.get('name')
 
         if _is_valid_label(name):
@@ -261,6 +267,10 @@ def merge_extaddr_files(extaddr_json_path, merge_input_file_path, merge_name_ove
             continue
         if _is_valid_label(name):
             merge_input_entries[extaddr] = merge_input_names_by_extaddr[extaddr]
+            continue
+
+        if fallback_device_label_prefix is not None:
+            merge_input_entries[extaddr] = f"{fallback_device_label_prefix}-{extaddr}"
             continue
 
         logging.warning(
@@ -382,6 +392,13 @@ def main(argv=None):
             'for matching extaddr entries'
         ),
     )
+    parser.add_argument(
+        '--fallback-device-label-prefix',
+        help=(
+            'Generate PREFIX-extaddr labels for merge records with no usable '
+            'deviceLabel, device_label, or name'
+        ),
+    )
     parser.add_argument('--datadir', default=None, help=TD_DATA_DIR_ARG_HELP)
     args = parser.parse_args(argv)
 
@@ -391,6 +408,7 @@ def main(argv=None):
         or args.merge_topology_all
         or args.merge_input_file != OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
         or args.merge_name_override
+        or args.fallback_device_label_prefix is not None
     )
     if single_record_operation and bulk_options_used:
         parser.error('single-record operations cannot be combined with bulk merge options')
@@ -400,6 +418,13 @@ def main(argv=None):
         parser.error('--update-extaddr requires --device-label')
     if args.device_label is not None and args.update_extaddr is None:
         parser.error('--device-label requires --update-extaddr')
+    if args.fallback_device_label_prefix is not None:
+        try:
+            normalize_valid_device_label(
+                f"{args.fallback_device_label_prefix}-0000000000000000"
+            )
+        except ValueError as exc:
+            parser.error(f'--fallback-device-label-prefix is invalid: {exc}')
     
     # Use datadir
     td_data_dir = resolve_data_dir(data_dir=args.datadir)
@@ -467,6 +492,7 @@ def main(argv=None):
             extaddr_json_filename,
             merge_input_file,
             merge_name_override=args.merge_name_override,
+            fallback_device_label_prefix=args.fallback_device_label_prefix,
         )
         
         if num_added == 0 and num_overridden == 0:

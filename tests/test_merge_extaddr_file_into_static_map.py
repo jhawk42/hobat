@@ -331,6 +331,61 @@ class MergeExtaddrFilesTests(unittest.TestCase):
                 ],
             )
 
+    def test_merge_uses_camel_case_device_label(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            static_path = temp_path / "td-static-extaddr-device-label.json"
+            topology_path = temp_path / "topology.json"
+            self._write_json(static_path, [])
+            self._write_json(
+                topology_path,
+                [{"extAddress": "2000000000000000", "deviceLabel": "Unknown-0x0800"}],
+            )
+
+            num_added, added_entries, _, _ = merge_extaddr_files(
+                static_path,
+                topology_path,
+            )
+
+            self.assertEqual(num_added, 1)
+            self.assertEqual(
+                added_entries,
+                [{"extaddr": "2000000000000000", "device_label": "Unknown-0x0800"}],
+            )
+
+    def test_main_generates_fallback_labels_for_unlabeled_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            self._write_json(
+                data_dir / "topology.json",
+                [{"extAddress": "2000000000000000"}],
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                rc = main(
+                    [
+                        "--datadir",
+                        temp_dir,
+                        "--merge-input-file",
+                        "topology.json",
+                        "--fallback-device-label-prefix",
+                        "found",
+                    ]
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertIn("Added 1 new extaddr entry", stdout.getvalue())
+            self.assertEqual(
+                self._read_json(data_dir / "td-static-extaddr-device-label.json"),
+                [
+                    {
+                        "extaddr": "2000000000000000",
+                        "device_label": "found-2000000000000000",
+                    }
+                ],
+            )
+
     def test_merge_name_override_off_does_not_replace_unknown_label(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
