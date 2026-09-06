@@ -122,7 +122,18 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert 'replace(/^extAddress:/, "extaddr:")' in topology_js
     assert "viewModel.rawByIdForDetails.get(nodeId)" in topology_js
     assert '[...HEALTH_COLUMNS, ...TABLE_PRIORITY_COLUMNS]' in table_js
+    assert '"Dataset Evidence Pillars"' in health_js
+    assert "COVERAGE_STATUS_GLYPHS" in health_js
+    assert 'sufficient: "\\u2713"' in health_js
+    assert 'limited: "!"' in health_js
+    assert 'missing: "\\u00d7"' in health_js
+    assert 'if (capability !== status)' in health_js
+    assert 'Dataset capability: ${capability}.' in health_js
+    assert ".health-coverage-heading" in css
     assert ".health-finding-evidence" in css
     assert ".health-coverage-pillar" in css
+    assert ".health-coverage-state.state-sufficient" in css
+    assert ".health-coverage-state.state-limited" in css
+    assert ".health-coverage-state.state-missing" in css
     assert "overflow-wrap: anywhere" in css
     assert "@media (max-width: 760px)" in css

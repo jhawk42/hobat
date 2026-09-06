@@ -172,7 +172,9 @@ Each pillar is assigned one of three coverage states:
 A `limited` or `missing` observed pillar can still contribute findings, but with
 reduced confidence. Observed coverage cannot exceed static capability, and a
 partial or degraded observation cannot have `sufficient` observed coverage.
-The dashboard renders observed state with static capability as context.
+The dashboard presents each observed state as a labeled status indicator; its
+tooltip includes the static capability and evaluator reasons. Static capability
+is also displayed inline when it differs from the observed state.
 
 ## Finding Catalog
 

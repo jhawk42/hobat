@@ -20,6 +20,12 @@ const COVERAGE_STATUS_TOOLTIPS = Object.freeze({
   missing: "Missing: the assessment does not have the evidence required for this pillar.",
 });
 
+const COVERAGE_STATUS_GLYPHS = Object.freeze({
+  sufficient: "\u2713",
+  limited: "!",
+  missing: "\u00d7",
+});
+
 const FINDING_SECTIONS = Object.freeze([
   { id: "needs-work", title: "Needs Work", statuses: new Set(["poor"]) },
   { id: "needs-attention", title: "Needs Attention", statuses: new Set(["moderate", "unknown"]) },
@@ -300,8 +306,10 @@ export function renderHealthInsights(container, model, filters = {}, actions = {
   );
   container.appendChild(header);
 
+  const pillarHeading = appendText(container, "h2", "Dataset Evidence Pillars", "health-coverage-heading");
   const pillars = document.createElement("dl");
   pillars.className = "health-coverage-pillars";
+  pillars.setAttribute("aria-labelledby", pillarHeading.id = "health-coverage-heading");
   Object.entries(PILLAR_LABELS).forEach(([pillar, label]) => {
     const item = document.createElement("div");
     item.className = "health-coverage-pillar";
@@ -310,14 +318,18 @@ export function renderHealthInsights(container, model, filters = {}, actions = {
     const capability = assessment.coverage?.pillars?.[pillar] ?? "missing";
     const observed = assessment.coverage?.observedPillars?.[pillar];
     const status = observed?.state ?? capability;
-    const value = appendText(item, "dd", `${status} · capability ${capability}`);
+    const value = appendText(item, "dd", "", `health-coverage-state state-${status}`);
+    appendText(value, "span", COVERAGE_STATUS_GLYPHS[status] ?? "?", "health-coverage-glyph");
+    appendText(value, "span", status.replace(/^./, (letter) => letter.toUpperCase()), "health-coverage-state-label");
+    if (capability !== status) {
+      appendText(value, "small", `Dataset: ${capability}`, "health-coverage-capability");
+    }
     const reasons = Array.isArray(observed?.reasons) ? observed.reasons.join(" ") : "";
     value.title = [
       COVERAGE_STATUS_TOOLTIPS[status] ?? `Coverage status: ${status}.`,
       `Dataset capability: ${capability}.`,
       reasons,
     ].filter(Boolean).join(" ");
-    if (reasons) appendText(value, "small", reasons, "health-coverage-reason");
     pillars.appendChild(item);
   });
   container.appendChild(pillars);

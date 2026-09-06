@@ -1222,10 +1222,34 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   margin: 12px 0 16px;
 }
 
+.health-coverage-heading {
+  margin: 12px 0 0;
+  font-size: 15px;
+}
+
 .health-coverage-pillars dt,
 .health-coverage-pillars dd { margin: 0; }
 .health-coverage-pillars dt { color: var(--muted); font-size: 12px; }
+.health-coverage-pillar {
+  min-width: 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--line);
+}
 .health-coverage-pillars dd { font-weight: 600; overflow-wrap: anywhere; }
+.health-coverage-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+}
+.health-coverage-glyph { width: 1em; text-align: center; }
+.health-coverage-state.state-sufficient { color: #067647; }
+.health-coverage-pillar:has(.state-sufficient) { border-left-color: #067647; }
+.health-coverage-state.state-limited { color: #a15c00; }
+.health-coverage-pillar:has(.state-limited) { border-left-color: #a15c00; }
+.health-coverage-state.state-missing { color: #b42318; }
+.health-coverage-pillar:has(.state-missing) { border-left-color: #b42318; }
+.health-coverage-capability { color: var(--muted); font-weight: 400; }
 
 .health-finding-groups {
   display: grid;
