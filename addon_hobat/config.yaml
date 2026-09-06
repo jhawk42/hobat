@@ -1,5 +1,5 @@
 name: hobat
-version: "0.1.0"
+version: "0.9.0"
 slug: hobat
 description: Hobat - thread mesh dashboard and diagnostics toolkit
 url: "https://github.com/jhawk42/hobat"
