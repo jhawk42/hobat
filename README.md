@@ -12,15 +12,15 @@ run them deliberately or schedule them for quiet periods.
 ## Capabilities
 
 - Interactive topology and sortable table views.
-- Multiple physics profiles for topology layout: mesh compact, mesh ring, mesh tree horizontal, mesh tree vertical and hub spoke.
-- OTBR CLI, OTBR REST, Home Assistant Matter, mDNS, Eve, Thread Tools, and merged datasets.
-- Search and capability-driven node, link, and diagnostic filters.
+- Multiple physics visualization profiles for topology layout: mesh compact, mesh ring, mesh tree horizontal, mesh tree vertical and hub spoke.
+- Datasets supported: OTBR CLI, OTBR REST, Home Assistant Matter, mDNS, Eve, Thread Tools and merged datasets.
 - Canonical identity and field normalization across source formats.
-- Progressive rendering from `.partial.json` checkpoints during long jobs.
-- Cache-only and force-refresh browser modes.
-- Cancellable background collection jobs.
-- Editable device labels stored in the configured data directory.
 - Atomic snapshot writes and source-level collection serialization.
+- Progressive rendering from `.partial.json` checkpoints during long jobs.
+- Cache-only and direct-refresh browser modes.
+- Cancellable background collection jobs.
+- Search and capability-driven node, link, and diagnostic filters.
+- Editable device labels stored in the configured data directory.
 
 See [Codebase Overview](doc/codebase_overview.md), [Webpage and Server Data
 Flow](doc/codebase_webpage_web_server_data_flow.md), and the [CLI Reference](doc/help_td_cli.md).
