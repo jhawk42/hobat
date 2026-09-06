@@ -32,7 +32,7 @@ from util_data import (
     resolve_data_dir,
     save_json_atomic,
 )
-from extaddr_device_label_map import load_extaddr_device_label_map
+from extaddr_device_label_map import EXTADDR_FIELD_ALIASES, load_extaddr_device_label_map
 
 EXTADDR_PATTERN = re.compile(r"^[0-9a-fA-F]{16}$")
 DEVICE_LABEL_MAX_LENGTH = 128
@@ -229,12 +229,25 @@ def merge_extaddr_files(extaddr_json_path, merge_input_file_path, merge_name_ove
         if item.get('scope') == '_trel._udp.local.':
             continue
 
-        if 'extaddr' not in item:
-            logging.warning(f"Merge input entry {i} missing 'extaddr' field: {item} %s", json.dumps(item, indent=4))
+        raw_extaddr = next(
+            (item[field_name] for field_name in EXTADDR_FIELD_ALIASES if item.get(field_name)),
+            None,
+        )
+        if raw_extaddr is None:
+            logging.warning(
+                "Merge input entry %s missing an extended-address field: %s",
+                i,
+                json.dumps(item, indent=4),
+            )
             continue
-        extaddr = item['extaddr']
-        if not _is_valid_label(extaddr):
-            logging.warning(f"Merge input entry {i} has invalid 'extaddr' value: {item.get('extaddr')!r}")
+        try:
+            extaddr = normalize_valid_extaddr(raw_extaddr)
+        except ValueError:
+            logging.warning(
+                "Merge input entry %s has invalid extended address: %r",
+                i,
+                raw_extaddr,
+            )
             continue
 
         device_label = item.get('device_label')

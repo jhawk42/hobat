@@ -301,6 +301,36 @@ class MergeExtaddrFilesTests(unittest.TestCase):
                 updated_static,
             )
 
+    def test_main_merge_mdns_br_creates_map_from_ext_address_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            self._write_json(
+                data_dir / "td-mdns-scopes-br.json",
+                [
+                    {
+                        "scope": "_meshcop._udp.local.",
+                        "extAddress": "8AE5E52D91217AEC",
+                        "name": "Dining Room HomePod._meshcop._udp.local.",
+                    }
+                ],
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                rc = main(["--datadir", temp_dir, "--merge-mdns-br"])
+
+            self.assertEqual(rc, 0)
+            self.assertIn("Added 1 new extaddr entry", stdout.getvalue())
+            self.assertEqual(
+                self._read_json(data_dir / "td-static-extaddr-device-label.json"),
+                [
+                    {
+                        "extaddr": "8ae5e52d91217aec",
+                        "device_label": "Dining Room HomePod._meshcop._udp.local.",
+                    }
+                ],
+            )
+
     def test_merge_name_override_off_does_not_replace_unknown_label(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
