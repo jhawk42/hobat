@@ -5,6 +5,8 @@ set -Eeuo pipefail
 APP_DIR="${APP_DIR:-/app}"
 SCRIPT_NAME="${SCRIPT_NAME:-td_webserver.py}"
 HOST="${HOST:-0.0.0.0}"
+export OT_REST_LISTEN_ADDR="$(bashio::config 'ot_rest_listen_addr')"
+export OT_REST_LISTEN_PORT="$(bashio::config 'ot_rest_listen_port')"
 
 # Navigate to the application directory
 cd "$APP_DIR"

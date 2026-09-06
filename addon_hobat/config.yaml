@@ -14,5 +14,11 @@ host_network: true
 docker_api: true
 environment:
   TD_OTBR_CONTAINER_NAME: addon_core_openthread_border_router
+options:
+  ot_rest_listen_addr: 127.0.0.1
+  ot_rest_listen_port: 8081
+schema:
+  ot_rest_listen_addr: str
+  ot_rest_listen_port: port
 webui: "http://[HOST]:[PORT:9165]/"
 watchdog: "tcp://[HOST]:[PORT:9165]"
