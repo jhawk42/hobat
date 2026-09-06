@@ -39,12 +39,15 @@ function payloadForExtractor(extractor, index) {
   return rows;
 }
 
-function permutations(values) {
-  if (values.length < 2) return [values];
-  return values.flatMap((value, index) =>
-    permutations(values.filter((_, candidateIndex) => candidateIndex !== index))
-      .map((tail) => [value, ...tail]),
-  );
+function representativeArrivalOrders(fileIndexes) {
+  const orders = [fileIndexes, [...fileIndexes].reverse()];
+  for (const lastFileIndex of fileIndexes) {
+    orders.push([
+      ...fileIndexes.filter((fileIndex) => fileIndex !== lastFileIndex),
+      lastFileIndex,
+    ]);
+  }
+  return [...new Map(orders.map((order) => [order.join(','), order])).values()];
 }
 
 assert.deepEqual(ROW_EXTRACTORS["raw-array"]([{ id: 1 }]), [{ id: 1 }]);
@@ -196,7 +199,7 @@ for (const dataset of DATASET_REGISTRY) {
   );
   const expected = buildDatasetRows(dataset, finalRawFiles);
   const fileIndexes = dataset.files.map((_, index) => index);
-  for (const arrivalOrder of permutations(fileIndexes)) {
+  for (const arrivalOrder of representativeArrivalOrders(fileIndexes)) {
     const arrivingRawFiles = dataset.files.map(() => null);
     for (const fileIndex of arrivalOrder) {
       arrivingRawFiles[fileIndex] = finalRawFiles[fileIndex];

@@ -113,10 +113,10 @@ def fetch_network_diag_for_device(
     if not extaddr_match:
         return None
 
-    # Try resolve device_label from extaddr_map, if not found use "Unknown-{rloc16}"
+    # Try resolve device_label from extaddr_map, if not found use "found-{rloc16}".
     device_label = extaddr_map.get(extaddr_match.group(1))
     if not device_label:
-        device_label = f"Unknown-{rloc16}"
+        device_label = f"found-{rloc16}"
 
     # Extract Rloc16 (TLV 1)
     rloc16_match = re.search(r"Rloc16: (0x[0-9a-fA-F]{4})", output)
@@ -737,7 +737,7 @@ def fetch_network_diag_topology_router_table(
             network_topology_map_routers[rloc16] = {
                 "extaddr": extaddr,
                 "rloc16": rloc16,
-                "device_label": extaddr_map.get(router.get("extaddr"), f"Unknown-{rloc16}"),
+                "device_label": extaddr_map.get(router.get("extaddr"), f"found-{rloc16}"),
                 "role": "router",
                 "is_router": True,
                 "router_id": router.get("router_id"),
@@ -803,7 +803,7 @@ def fetch_network_diag_topology_meshdiag_topology(
                 network_topology_map_meshdiag_routers[rloc16] = {
                     "extaddr": extaddr,
                     "rloc16": rloc16,
-                    "device_label": extaddr_map.get(extaddr, f"Unknown-{rloc16}"),
+                    "device_label": extaddr_map.get(extaddr, f"found-{rloc16}"),
                     "thread_version": router.get("thread_version"),
                     "ver": router.get("ver"),
                     "role": "router",
@@ -1217,7 +1217,9 @@ def reconcile_child_fetch_outcome(
         known = (
             isinstance(existing, dict)
             and existing.get("extaddr")
-            and not str(existing["extaddr"]).startswith(("Unknown-", "Offline-"))
+            and not str(existing["extaddr"]).startswith(
+                ("found-", "Unknown-", "Offline-")
+            )
         )
         if not known:
             fallback = _build_unknown_device_record(
@@ -1532,7 +1534,7 @@ def save_topology_to_json_file(
             "rloc16": rloc,
             "extaddr": data["extaddr"],
             "omr_ipv6_addr": data.get("omr_ipv6_addr"),
-            "device_label": data.get("device_label", f"Unknown-{rloc}"),
+            "device_label": data.get("device_label", f"found-{rloc}"),
             "tlv_values": data.get("tlv_values", []),
             "eui64": data.get("eui64"),
             "thread_stack_version": data.get("thread_stack_version", "Unknown"),

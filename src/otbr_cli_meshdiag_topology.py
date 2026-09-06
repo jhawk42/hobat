@@ -307,7 +307,7 @@ def enrich_topology_routers(
             if child.get("device_label"):
                 child["device_label"] = child.get("device_label")
             else:
-                child["device_label"] = f"Unknown-{child_rloc16}"  # default label if not found in extaddr_map
+                child["device_label"] = f"found-{child_rloc16}"  # default label if not found in extaddr_map
            
             child["link_quality"] = child.get("lq", 0)  # default lq if not found
 

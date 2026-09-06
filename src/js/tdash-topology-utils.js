@@ -122,7 +122,8 @@ export function buildLabel(node) {
 }
 
 export function isUnknownNodeName(nodeName) {
-  return toText(nodeName).toLowerCase().startsWith("unknown");
+  const normalizedName = toText(nodeName).toLowerCase();
+  return normalizedName.startsWith("unknown") || normalizedName.startsWith("found-");
 }
 
 // ── Link Quality style helpers ───────────────────────────────────────────────

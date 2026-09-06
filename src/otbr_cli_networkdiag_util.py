@@ -159,7 +159,7 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     Merge rules (field by field):
         - extaddr: Keep existing (should be identical, it's the key)
         - rloc16: Keep existing if not "Unknown", else take new
-        - device_label: Keep existing if not starting with "Unknown-", else take new
+        - device_label: Keep existing label, unless it is a discovered placeholder
         - tlv_values: Take new if new is non-empty dict and existing is empty, else keep existing
         - thread_stack_version: Keep existing if not "Unknown", else take new
         - mode: Take new if new mode is non-empty and existing is empty, else keep existing
@@ -184,8 +184,12 @@ def merge_device_record(existing: dict, new: dict) -> dict:
     if existing.get("rloc16") == "Unknown" and new.get("rloc16") != "Unknown":
         existing["rloc16"] = new["rloc16"]
 
-    # device_label: keep existing if not starting with "Unknown-", else take new
-    if existing.get("device_label", "").startswith("Unknown-") and not new.get("device_label", "").startswith("Unknown-"):
+    # Retain support for legacy Unknown- placeholders in cached snapshots.
+    existing_label = existing.get("device_label", "")
+    new_label = new.get("device_label", "")
+    existing_is_placeholder = existing_label.startswith(("found-", "Unknown-"))
+    new_is_placeholder = new_label.startswith(("found-", "Unknown-"))
+    if existing_is_placeholder and not new_is_placeholder:
         existing["device_label"] = new["device_label"]
 
     # Keep highest attempt/detail metadata, including 0 values from first-attempt success.

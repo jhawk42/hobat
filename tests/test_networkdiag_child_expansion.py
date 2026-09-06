@@ -217,7 +217,7 @@ def test_exhausted_child_inserts_one_fallback_but_retains_known_record(monkeypat
     assert len(checkpoints) == 1
 
 
-def test_reconciliation_reports_unchanged_and_replaces_unknown_placeholder() -> None:
+def test_reconciliation_reports_unchanged_and_replaces_found_placeholder() -> None:
     target = _target()
     unchanged = topology.ChildFetchOutcome(target, "detail", (), (), "already-satisfied")
     topology_map = {"0x1001": {"rloc16": "0x1001", "extaddr": "known"}}
@@ -227,15 +227,15 @@ def test_reconciliation_reports_unchanged_and_replaces_unknown_placeholder() -> 
     assert mutation == topology.ChildMutation(False, "unchanged", "0x1001")
 
     exhausted = topology.ChildFetchOutcome(target, "fast", (), (), "exhausted")
-    unknown_map = {
-        "0x1001": {"rloc16": "0x1001", "extaddr": "Unknown-0x1001"}
+    found_map = {
+        "0x1001": {"rloc16": "0x1001", "extaddr": "found-0x1001"}
     }
     mutation = topology.reconcile_child_fetch_outcome(
-        exhausted, unknown_map, {}, {}, None, None
+        exhausted, found_map, {}, {}, None, None
     )
     assert mutation.kind == "fallback"
-    assert unknown_map["0x1001"]["extaddr"] == "Unknown-0x1001"
-    assert unknown_map["0x1001"]["role"] == "child"
+    assert found_map["0x1001"]["extaddr"] == "found-0x1001"
+    assert found_map["0x1001"]["role"] == "child"
 
 
 def test_checkpoint_notifier_serializes_full_partial_topology(tmp_path) -> None:

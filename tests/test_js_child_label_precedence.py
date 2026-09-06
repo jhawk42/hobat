@@ -10,21 +10,26 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_meshdiag_unknown_child_label_does_not_replace_networkdiag_label() -> None:
+def test_meshdiag_found_child_label_does_not_replace_networkdiag_label() -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is required for the JavaScript adaptor regression")
 
     script = r"""
 import { adaptMeshdiagNetworkdiag } from './src/js/tdash-adaptors.js';
+import { isUnknownNodeName } from './src/js/tdash-topology-utils.js';
 import { normalizeDatasetPayload } from './src/js/tdash-utils.js';
+
+if (!isUnknownNodeName('found-0x2808')) {
+  throw new Error('Found discovery labels must retain unknown-node styling');
+}
 
 const meshdiag = normalizeDatasetPayload([{
   rloc16: '0x2800',
   deviceLabel: 'Parent router',
   children: [{
     rloc16: '0x2808',
-    deviceLabel: 'Unknown-0x2808',
+    deviceLabel: 'found-0x2808',
     lq: '3',
     mode: { device: 'MTD' },
   }],

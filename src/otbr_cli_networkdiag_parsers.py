@@ -722,7 +722,7 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
         {
             "extaddr": str,               # from TLV 0, used as dict key
             "rloc16": str,                # from TLV 1, e.g. "0x2000"
-            "device_label": str,          # from extaddr_map or f"Unknown-{rloc16}"
+            "device_label": str,          # from extaddr_map or f"found-{rloc16}"
             "eui64": str,                 # from TLV 23, factory-assigned global ID
             "thread_stack_version": str,  # from TLV 28 or "Unknown"
             "mode": dict,                 # from TLV 2, parse_mode_flags()
@@ -785,7 +785,7 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
             1).strip() if thread_version_match else "Unknown"
 
         # Resolve device label from extaddr_map
-        device_label = extaddr_map.get(extaddr, f"Unknown-{rloc16}")
+        device_label = extaddr_map.get(extaddr, f"found-{rloc16}")
 
         # Parse mode flags and IPv6 addresses (always present in request)
         mode = parse_mode_flags(block)
