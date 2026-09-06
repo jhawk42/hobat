@@ -14,6 +14,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
       - name: Create release from main
         env:
           GH_TOKEN: ${{ github.token }}
