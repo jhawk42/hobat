@@ -1,4 +1,4 @@
-# Home Assistant App: Hobat
+# Hobat: Home Assistant App
 
 ## Installation
 
@@ -10,8 +10,9 @@ installation; it cannot be disabled from `config.yaml`.
 Disabling Protection mode grants Hobat access to the host Docker socket. Only
 enable this for a trusted image.
 
-The OpenThread Border Router app must be installed and running. Hobat targets
-its standard HAOS container name, `addon_core_openthread_border_router`.
+For OTBR datasets, the OpenThread Border Router app must be installed and running. 
+Hobat can target both its standard HAOS container name, `addon_core_openthread_border_router` 
+and the OTBR REST API.
 
 For Home Assistant Matter datasets, install and start Matter Server. Hobat uses
 host networking and connects read-only to `ws://localhost:5580/ws` by default.
@@ -42,18 +43,3 @@ Diagnostics, or Topology. Enable **Cache Only** before Sync when the dashboard
 must not contact Matter Server. Refreshes are serialized under one Matter
 source lock and expensive collections run as cancellable background jobs.
 
-## Local Image Testing
-
-The published app uses `ghcr.io/jhawk42/hobat-ha-app`, configured in
-`config.yaml`. This package is separate from the regular
-`ghcr.io/jhawk42/hobat` image. To force Supervisor to build the app locally,
-temporarily comment out the `image` key.
-
-Published app versions must use the version from `config.yaml` as their image
-tag, for example `ghcr.io/jhawk42/hobat-ha-app:0.1.0`.
-
-For a standalone build from the Hobat repository root, run:
-
-```bash
-docker build -f addon_hobat/Dockerfile -t local/hobat-ha-app .
-```
