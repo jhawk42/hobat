@@ -244,11 +244,11 @@ are not implemented.
 
 ## Purge and Backup
 
-Preview or apply age-based health retention; the default is 180 days:
+Preview or apply age-based health retention; the default is 30 days:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --dry-run
-PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 180 --yes
+PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 30 --yes
 ```
 
 `observedAt` values strictly older than the UTC cutoff are removed. Cascading

@@ -123,7 +123,7 @@ td_cli health purge-by-device --device EXTADDR [--network NETWORK_ID]
                               [--dry-run] [--yes] [--json]
 ```
 
-Age purge defaults to 180 retained days and uses an exclusive UTC cutoff.
+Age purge defaults to 30 retained days and uses an exclusive UTC cutoff.
 `purge-all` removes health-domain records and roster entries but preserves the
 shared database, migrations, and non-health tables. Per-device purge preserves
 shared observations but invalidates assessments derived from affected

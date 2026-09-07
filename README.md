@@ -123,7 +123,7 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
 PYTHONPATH=src python3 -m td_cli --datadir ./data merge-dataset
 
 # Health maintenance and complete data-directory backups
-PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 180 --dry-run
+PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 30 --dry-run
 PYTHONPATH=src python3 -m td_cli --datadir ./data system backups create --output ./hobat-backup
 ```
 

@@ -21,6 +21,7 @@ from util_data import resolve_data_dir, save_json_atomic
 
 
 LATEST_REPORT_FILENAME = "td-health-latest.json"
+DEFAULT_HEALTH_PURGE_KEEP_DAYS = 30
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
         purge.add_argument("--yes", action="store_true")
         purge.add_argument("--json", action="store_true", dest="json_output")
         if name == "purge":
-            purge.add_argument("--keep-days", type=int, default=180)
+            purge.add_argument("--keep-days", type=int, default=DEFAULT_HEALTH_PURGE_KEEP_DAYS)
         if name == "purge-by-device":
             purge.add_argument("--device", required=True, metavar="EXTADDR")
             purge.add_argument("--network", dest="network_id")

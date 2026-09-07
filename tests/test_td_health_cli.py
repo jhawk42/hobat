@@ -96,6 +96,12 @@ def test_top_level_age_purge_dry_run_is_json_and_does_not_mutate(tmp_path) -> No
     assert document["deleted"]["observations"] == 1
 
 
+def test_age_purge_defaults_to_configured_retention() -> None:
+    args = td_health_cli.build_parser().parse_args(["purge"])
+
+    assert args.keep_days == td_health_cli.DEFAULT_HEALTH_PURGE_KEEP_DAYS == 30
+
+
 def test_purge_by_device_requires_confirmation(tmp_path) -> None:
     output = io.StringIO()
     with patch("builtins.input", return_value="n"), redirect_stdout(output):
