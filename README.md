@@ -1,23 +1,23 @@
 # Hobat - Thread mesh dashboard and tools
 
 Hobat is a cache-first Thread network dashboard and command-line toolkit. It
-collects data from OTBR `ot-ctl`, the OTBR REST API, Home Assistant Matter
+collects data from dataset sources like OTBR `ot-ctl`, the OTBR REST API, Home Assistant Matter
 Server, mDNS, Eve exports, and Thread Tools exports, then presents topology and
 table views in a browser.
 
 The cache-first model keeps routine analysis off the live mesh. Long diagnostic
 collections can consume time and battery, especially on sleepy end devices, so
-run them deliberately or schedule them for quiet periods.
+run them deliberately or schedule them (cron) for quiet periods.
 
 ## Capabilities
 
 - Interactive topology and sortable table views.
 - Multiple physics visualization profiles for topology layout: mesh compact, mesh ring, mesh tree horizontal, mesh tree vertical and hub spoke.
-- Datasets supported: OTBR CLI, OTBR REST, Home Assistant Matter, mDNS, Eve, Thread Tools and merged datasets.
-- Canonical identity and field normalization across source formats.
+- Datasets sources supported: OTBR CLI, OTBR REST, Home Assistant Matter, mDNS, Eve, Thread Tools and merged datasets.
+- Canonical identity (rloc16, extAddress) and field normalization across source formats.
 - Atomic snapshot writes and source-level collection serialization.
 - Progressive rendering from `.partial.json` checkpoints during long jobs.
-- Cache-only and direct-refresh browser modes.
+- Cache-only, Direct-Refresh and Auto browser modes.
 - Cancellable background collection jobs.
 - Search and capability-driven node, link, and diagnostic filters.
 - Editable device labels stored in the configured data directory.
@@ -27,11 +27,18 @@ Flow](doc/codebase_webpage_web_server_data_flow.md), and the [CLI Reference](doc
 
 ## Requirements
 
-- Python 3.10 or newer.
+- Python 3.11 or newer. Also tested on Python 3.14. Tested on Debian.
 - Dependencies from `requirements.txt`.
 - An OTBR instance for live OTBR collection for `otbr-cli` and `otbr-restapi` collection.
 - Optional Home Assistant Matter Server for `ha-matter-ws` collection.
 - Docker access when using the default container-based `ot-ctl` path.
+
+Optional operator-managed inputs in data directory include:
+
+- `Eve Thread Network Layout.evethreadlayout` from Eve app
+- `diagnostics.json` from Thread Tools
+- `td-static-extaddr-device-label.json`
+
 
 Install development and test dependencies from the repository root:
 
@@ -56,12 +63,6 @@ The local default is created when needed. See [Data Directory Model](doc/codebas
 mkdir -p "$PWD/data"
 export TD_DATA_DIR="$PWD/data"
 ```
-
-Optional operator-managed inputs include:
-
-- `Eve Thread Network Layout.evethreadlayout`
-- `diagnostics.json` from Thread Tools
-- `td-static-extaddr-device-label.json`
 
 ## Start the Dashboard
 
@@ -100,8 +101,8 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag fetch-all
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli topology
 
 # Explicit active device operations; neither runs as part of collection or health processing
-PYTHONPATH=src python3 -m td_cli otbr-cli device ping 2001:db8::1 --json
-PYTHONPATH=src python3 -m td_cli otbr-cli device reset-counters 2001:db8::1 \
+PYTHONPATH=src python3 -m td_cli otbr-cli device ping <thread device ipv6address> --json
+PYTHONPATH=src python3 -m td_cli otbr-cli device reset-counters <thread device ipv6address> \
   --counters mac --confirm --json
 
 # OTBR REST snapshots
