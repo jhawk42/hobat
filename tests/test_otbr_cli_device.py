@@ -42,6 +42,25 @@ def test_ping_source_and_later_options_preserve_open_thread_positions() -> None:
     exec_ot_ctl.assert_called_once_with("ping -I 2001:db8::2 2001:db8::1 56 1 1 64 7")
 
 
+def test_ping_allow_sed_uses_longer_default_but_honors_explicit_timeout() -> None:
+    output = "1 packets transmitted, 0 packets received. Packet loss = 100.0%.\nDone"
+    with patch.object(
+        otbr_cli_device.util_ot_ctl, "exec_ot_ctl", return_value=output
+    ) as exec_ot_ctl:
+        assert otbr_cli_device.main([
+            "ping", "2001:db8::1", "--allow-sed"
+        ]) == 0
+    exec_ot_ctl.assert_called_once_with("ping 2001:db8::1 56 1 1 64 10")
+
+    with patch.object(
+        otbr_cli_device.util_ot_ctl, "exec_ot_ctl", return_value=output
+    ) as exec_ot_ctl:
+        assert otbr_cli_device.main([
+            "ping", "2001:db8::1", "--allow-sed", "--timeout", "8"
+        ]) == 0
+    exec_ot_ctl.assert_called_once_with("ping 2001:db8::1 56 1 1 64 8")
+
+
 def test_ping_device_uses_summary_counts_and_classifies_incomplete_output() -> None:
     request = otbr_cli_device.PingRequest(target="2001:db8::1")
 

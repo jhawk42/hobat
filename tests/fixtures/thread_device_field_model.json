@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "modelVersion": "1.0.0",
+  "modelVersion": "1.1.0",
   "snapshotFiles": [
     "td-otbr-cli-networkdiag-fetch-all.json",
     "td-otbr-cli-meshdiag-topology.json",
@@ -60,6 +60,11 @@
     {"path":"networkName","category":"device","jsonTypes":["string"],"sources":["rest"],"aliases":["network_name"],"transform":"identity","mergePolicy":"scalar"},
     {"path":"deviceLabel","category":"extension","jsonTypes":["string"],"sources":["cli","eve"],"aliases":["device_label"],"transform":"identity","mergePolicy":"scalar"},
     {"path":"tlvValues","category":"extension","jsonTypes":["object","array"],"sources":["cli"],"aliases":["tlv_values"],"transform":"identity","mergePolicy":"object"},
+    {"path":"lastAttemptResponded","category":"metadata","jsonTypes":["number"],"sources":["cli"],"aliases":["last_attempt_responded"],"transform":"number","mergePolicy":"maximum"},
+    {"path":"lastAttemptTlvDetailLevel","category":"metadata","jsonTypes":["number"],"sources":["cli"],"aliases":["last_attempt_tlv_detail_level"],"transform":"number","mergePolicy":"maximum"},
+    {"path":"networkDiagnosticStatus","category":"extension","jsonTypes":["string"],"sources":["cli"],"aliases":["network_diagnostic_status"],"transform":"identity","mergePolicy":"scalar"},
+    {"path":"reachability","category":"derived","jsonTypes":["string"],"sources":["cli"],"aliases":[],"transform":"identity","mergePolicy":"scalar"},
+    {"path":"ping","category":"extension","jsonTypes":["object"],"sources":["cli"],"aliases":[],"transform":"identity","mergePolicy":"object"},
     {"path":"totalChildren","category":"derived","jsonTypes":["number"],"sources":["cli"],"aliases":["total_children"],"transform":"number","mergePolicy":"scalar"},
     {"path":"totalLinks","category":"derived","jsonTypes":["number"],"sources":["cli"],"aliases":["total_links"],"transform":"number","mergePolicy":"scalar"},
     {"path":"totalLink1","category":"derived","jsonTypes":["number"],"sources":["cli"],"aliases":["total_link_1"],"transform":"number","mergePolicy":"scalar"},

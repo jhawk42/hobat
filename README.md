@@ -145,16 +145,19 @@ the generic progression with one explicit fallback preset.
 
 `networkdiag fetch-all --children-ping-fallback` is disabled by default. When
 enabled, it sends one bounded ping to the derived RLOC address of each child
-that did not answer any enabled Network Diagnostic policy. An Echo Reply records
+that did not answer any enabled Network Diagnostic policy. The child probe waits
+up to 10 seconds to accommodate sleepy-device polling. An Echo Reply records
 positive reachability, while no reply remains unknown and does not mark a sleepy
 child offline. The same option is available on `otbr-cli topology` and applies
 only to its `networkdiag fetch-all` step.
 
 `otbr-cli device ping` sends bounded active Thread traffic and returns one
-complete result. `otbr-cli device reset-counters` is destructive, requires an
-explicit counter selection and `--confirm`, and only reports `Done` as local
-acceptance for transmission, not remote confirmation. Health processing does
-not run these active operations.
+complete result. Its default timeout is 3 seconds, or 10 seconds with
+`--allow-sed`; an explicit `--timeout` overrides either default.
+`otbr-cli device reset-counters` is destructive, requires an explicit counter
+selection and `--confirm`, and only reports `Done` as local acceptance for
+transmission, not remote confirmation. Health processing does not run these
+active operations.
 
 `health process-dataset` is cache-only: it never invokes a collector or modifies source
 snapshots. Remove `--dry-run` to atomically store the observation and assessment

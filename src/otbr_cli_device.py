@@ -24,6 +24,7 @@ PING_MAX_SIZE = 1024
 PING_MAX_COUNT = 10
 PING_MAX_INTERVAL = 5
 PING_MAX_TIMEOUT = 10
+PING_SED_DEFAULT_TIMEOUT = 10
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
     ping.add_argument("--count", type=_bounded_int(1, PING_MAX_COUNT), default=PING_DEFAULT_COUNT)
     ping.add_argument("--interval", type=_bounded_int(1, PING_MAX_INTERVAL), default=PING_DEFAULT_INTERVAL)
     ping.add_argument("--hop-limit", type=_bounded_int(1, 64), default=PING_DEFAULT_HOP_LIMIT)
-    ping.add_argument("--timeout", type=_bounded_int(1, PING_MAX_TIMEOUT), default=PING_DEFAULT_TIMEOUT)
+    ping.add_argument("--timeout", type=_bounded_int(1, PING_MAX_TIMEOUT), default=None)
     ping.add_argument(
         "--allow-sed",
         action="store_true",
@@ -198,6 +199,11 @@ def _emit(result: dict[str, object], as_json: bool) -> None:
 def _run_ping(args: argparse.Namespace) -> int:
     if args.allow_sed:
         logging.warning("Active traffic override requested for a sleepy end device.")
+    timeout_seconds = (
+        args.timeout
+        if args.timeout is not None
+        else PING_SED_DEFAULT_TIMEOUT if args.allow_sed else PING_DEFAULT_TIMEOUT
+    )
     result = ping_device(PingRequest(
         target=args.target,
         source=args.source,
@@ -205,7 +211,7 @@ def _run_ping(args: argparse.Namespace) -> int:
         count=args.count,
         interval_seconds=args.interval,
         hop_limit=args.hop_limit,
-        timeout_seconds=args.timeout,
+        timeout_seconds=timeout_seconds,
     ))
     _emit(result.as_json_dict(), args.json)
     return 3 if result.error_category == "local-dispatch" else 0

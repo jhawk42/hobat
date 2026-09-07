@@ -290,7 +290,7 @@ def test_child_ping_runs_once_after_all_diagnostic_policies_exhaust(monkeypatch)
                 loss=0.0,
                 round_trip_samples_ms=(12.0,),
                 round_trip_summary_ms={"min": 12.0, "average": 12.0, "max": 12.0},
-                timeout_seconds=3,
+                timeout_seconds=request.timeout_seconds,
                 observed_at="2026-09-07T00:00:00+00:00",
                 error_category="none",
                 output="",
@@ -318,6 +318,7 @@ def test_child_ping_runs_once_after_all_diagnostic_policies_exhaust(monkeypatch)
     assert [request.target for request in ping_requests] == [
         "fd3b:a255:4aa6:5483:0:ff:fe00:4c92"
     ]
+    assert ping_requests[0].timeout_seconds == 10
     child = topology_map["0x4c92"]
     assert child["network_diagnostic_status"] == "no-response"
     assert child["reachability"] == "reachable"

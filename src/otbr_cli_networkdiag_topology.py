@@ -1214,7 +1214,11 @@ def ping_child_after_diagnostic_exhaustion(
 
     try:
         result = (ping or otbr_cli_device.ping_device)(
-            otbr_cli_device.PingRequest(target=target_address, count=1)
+            otbr_cli_device.PingRequest(
+                target=target_address,
+                count=1,
+                timeout_seconds=otbr_cli_device.PING_SED_DEFAULT_TIMEOUT,
+            )
         )
     except Exception as exc:
         logging.warning(
@@ -1685,12 +1689,16 @@ def save_topology_to_json_file(
             "mac_counters": data.get("mac_counters", {}),
             "mle_counters": data.get("mle_counters", {}),
             "time_statistics": data.get("time_statistics", {}),
-            "last_attempt_responded": data.get("last_attempt_responded"),
-            "last_attempt_tlv_detail_level": data.get("last_attempt_tlv_detail_level"),
-            "network_diagnostic_status": data.get("network_diagnostic_status"),
-            "reachability": data.get("reachability"),
-            "ping": data.get("ping"),
         }
+        for evidence_field in (
+            "last_attempt_responded",
+            "last_attempt_tlv_detail_level",
+            "network_diagnostic_status",
+            "reachability",
+            "ping",
+        ):
+            if evidence_field in data:
+                network_node[evidence_field] = data[evidence_field]
 
         network_map.append(network_node)
 
