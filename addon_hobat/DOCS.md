@@ -33,7 +33,8 @@ requests to Hobat; Hobat does not emit CORS authorization headers. This is not
 authentication and does not block direct HTTP clients that can reach port 9165.
 
 The app's `/data` directory can also be backed up with `td_cli system backups
-create`. These backups are unredacted and may contain network credentials and
+create`. Collector-generated network credentials, including `networkKey` and
+`pskc`, are redacted before persistence, and backups may contain
 device identities. Stop Hobat before restoring one with `td_cli system backups
 restore`; validation and staging complete before the active data directory is
 replaced.
