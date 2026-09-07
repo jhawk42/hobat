@@ -1,0 +1,24 @@
+services:
+  hobat:
+    container_name: hobat
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: hobat:latest
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      HOST: ${HOST:-0.0.0.0}
+      PORT: ${PORT:-9165}
+      # Keep hobat data files outside the container.
+      TD_DATA_DIR: ${TD_DATA_DIR:-/data}
+      # OTBR REST API defaults (override as needed).
+      OT_REST_LISTEN_ADDR: ${OT_REST_LISTEN_ADDR:-127.0.0.1}
+      OT_REST_LISTEN_PORT: ${OT_REST_LISTEN_PORT:-8081}
+      # OTBR docker exec defaults used by td_cli.
+      TD_OTBR_CONTAINER_NAME: ${TD_OTBR_CONTAINER_NAME:-otbr}
+      TD_OTBR_CONTAINER_USE: ${TD_OTBR_CONTAINER_USE:-1}
+    volumes:
+      - ../data:/data
+      # Allows hobat container Docker CLI to call into OTBR container.
+      - /var/run/docker.sock:/var/run/docker.sock

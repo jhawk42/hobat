@@ -1,6 +1,6 @@
 
 # Stage 1: Build stage for Python packages
-FROM alpine:3.20 AS builder
+FROM alpine:3.24 AS builder
 
 # Install system build dependencies
 RUN apk add --no-cache python3 python3-dev gcc musl-dev libffi-dev py3-pip
@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Stage 2: Final lightweight runner stage
-FROM alpine:3.20
+FROM alpine:3.24
 
 # Install runtime Python, Bash for /init, and the Docker CLI
 RUN apk add --no-cache python3 bash docker-cli
@@ -33,7 +33,7 @@ WORKDIR /app
 COPY rootfs /
 
 # Copy the application code
-COPY . .
+COPY src /app/src
 
 # Set the working directory to where td_cli.py is located
 WORKDIR /app/src
