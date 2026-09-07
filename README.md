@@ -23,7 +23,7 @@ run them deliberately or schedule them (cron) for quiet periods.
 - Editable device labels stored in the configured data directory.
 
 See [Codebase Overview](doc/codebase_overview.md), [Webpage and Server Data
-Flow](doc/codebase_webpage_web_server_data_flow.md), and the [CLI Reference](doc/help_td_cli.md).
+Flow](doc/codebase_webpage_web_server_data_flow.md), [CLI Reference](doc/help_td_cli.md) and [Screenshots](https://github.com/jhawk42/smarthome/blob/main/hobat/images/image1.jpg)
 
 ## Requirements
 
