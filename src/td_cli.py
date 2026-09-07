@@ -216,6 +216,12 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_false",
         help="Disable detailed child fetching",
     )
+    networkdiag_topology_p.add_argument(
+        "--children-ping-fallback",
+        action="store_true",
+        default=False,
+        help="Ping a child once after all enabled diagnostic policies receive no response",
+    )
 
     networkdiag_sub.add_parser(
         "multicast-network",
@@ -237,13 +243,19 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
     device_sub.add_parser(
         "reset-counters", help="Request destructive remote counter reset", add_help=False
     )
-    otbr_cli_sub.add_parser(
+    otbr_cli_topology_p = otbr_cli_sub.add_parser(
         "topology",
         help=(
             "Run full otbr-cli topology sweep: thread-network-info, "
             "router-table, meshdiag topology, networkdiag multicast-network, "
             "networkdiag fetch-all, meshdiag routerneighbortable, meshdiag childtable"
         ),
+    )
+    otbr_cli_topology_p.add_argument(
+        "--children-ping-fallback",
+        action="store_true",
+        default=False,
+        help="Enable one child ping after networkdiag diagnostic policies receive no response",
     )
 
     # mdns
@@ -758,12 +770,15 @@ def _dispatch_otbr_cli(
         )
 
     if cli_command == "topology":
+        fetch_all_argv = ["fetch-all"]
+        if getattr(args, "children_ping_fallback", False):
+            fetch_all_argv.append("--children-ping-fallback")
         step_calls = [
             ("otbr_cli_thread_network_info.main", otbr_cli_thread_network_info.main, None),
             ("otbr_cli_router_table.main", otbr_cli_router_table.main, None),
             ("otbr_cli_meshdiag_topology.main", otbr_cli_meshdiag_topology.main, None),
             ("otbr_cli_networkdiag_topology.main", otbr_cli_networkdiag_topology.main, ["multicast-network"]),
-            ("otbr_cli_networkdiag_topology.main", otbr_cli_networkdiag_topology.main, ["fetch-all"]),
+            ("otbr_cli_networkdiag_topology.main", otbr_cli_networkdiag_topology.main, fetch_all_argv),
             ("otbr_cli_meshdiag_routerneighbortable.main", otbr_cli_meshdiag_routerneighbortable.main, None),
             ("otbr_cli_meshdiag_childtable.main", otbr_cli_meshdiag_childtable.main, None),
         ]
@@ -821,6 +836,8 @@ def _dispatch_otbr_cli(
                 if getattr(args, "child_fetch_detail_mode_default", False)
                 else "--children-fetch-detail-no"
             )
+            if getattr(args, "children_ping_fallback", False):
+                networkdiag_argv.append("--children-ping-fallback")
         return _normalize_module_rc(
             otbr_cli_networkdiag_topology.main(
                 _forward_with_datadir(args, networkdiag_argv)

@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Sequence
 
@@ -23,6 +24,50 @@ PING_MAX_SIZE = 1024
 PING_MAX_COUNT = 10
 PING_MAX_INTERVAL = 5
 PING_MAX_TIMEOUT = 10
+
+
+@dataclass(frozen=True)
+class PingRequest:
+    target: str
+    source: str | None = None
+    size: int = PING_DEFAULT_SIZE
+    count: int = PING_DEFAULT_COUNT
+    interval_seconds: int = PING_DEFAULT_INTERVAL
+    hop_limit: int = PING_DEFAULT_HOP_LIMIT
+    timeout_seconds: int = PING_DEFAULT_TIMEOUT
+
+
+@dataclass(frozen=True)
+class PingResult:
+    target: str
+    source: str | None
+    container: str
+    sent: int
+    received: int
+    loss: float
+    round_trip_samples_ms: tuple[float, ...]
+    round_trip_summary_ms: dict[str, float] | None
+    timeout_seconds: int
+    observed_at: str
+    error_category: str
+    output: str
+
+    def as_json_dict(self) -> dict[str, object]:
+        result = asdict(self)
+        return {
+            "target": result["target"],
+            "source": result["source"],
+            "container": result["container"],
+            "sent": result["sent"],
+            "received": result["received"],
+            "loss": result["loss"],
+            "roundTripSamplesMs": list(result["round_trip_samples_ms"]),
+            "roundTripSummaryMs": result["round_trip_summary_ms"],
+            "timeoutSeconds": result["timeout_seconds"],
+            "observedAt": result["observed_at"],
+            "errorCategory": result["error_category"],
+            "output": result["output"],
+        }
 
 
 def _unicast_ipv6(value: str) -> str:
@@ -92,46 +137,55 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _ping_command(args: argparse.Namespace) -> str:
+def _ping_command(request: PingRequest) -> str:
     # Materialize each positional default so later values retain their OpenThread meaning.
-    source = f"-I {args.source} " if args.source else ""
+    source = f"-I {request.source} " if request.source else ""
     return (
-        f"ping {source}{args.target} {args.size} {args.count} {args.interval} "
-        f"{args.hop_limit} {args.timeout}"
+        f"ping {source}{request.target} {request.size} {request.count} "
+        f"{request.interval_seconds} {request.hop_limit} {request.timeout_seconds}"
     )
 
 
-def _ping_result(output: str, args: argparse.Namespace) -> dict[str, object]:
+def _ping_result(output: str, request: PingRequest) -> PingResult:
     samples = [float(value) for value in re.findall(r"(?:time|rtt)=([0-9.]+) ?ms", output)]
-    received = len(samples)
-    sent = args.count
-    error_category = "none"
+    summary = re.search(r"(\d+) packets transmitted, (\d+) packets received\.", output)
+    sent = int(summary.group(1)) if summary else request.count
+    received = int(summary.group(2)) if summary else 0
     if output.startswith("Error:"):
         error_category = "local-dispatch"
+    elif summary is None:
+        error_category = "incomplete-output"
     elif received == 0:
         error_category = "timeout"
-    result: dict[str, object] = {
-        "target": args.target,
-        "source": args.source,
-        "container": os.getenv(
+    else:
+        error_category = "none"
+    return PingResult(
+        target=request.target,
+        source=request.source,
+        container=os.getenv(
             util_ot_ctl.TD_OTBR_CONTAINER_NAME_ENV,
             util_ot_ctl.TD_OTBR_CONTAINER_NAME_DEFAULT,
         ),
-        "sent": sent,
-        "received": received,
-        "loss": (sent - received) / sent,
-        "roundTripSamplesMs": samples,
-        "roundTripSummaryMs": (
+        sent=sent,
+        received=received,
+        loss=(sent - received) / sent if sent else 0.0,
+        round_trip_samples_ms=tuple(samples),
+        round_trip_summary_ms=(
             {"min": min(samples), "max": max(samples), "average": sum(samples) / received}
-            if samples
+            if samples and received
             else None
         ),
-        "timeoutSeconds": args.timeout,
-        "observedAt": datetime.now(timezone.utc).isoformat(),
-        "errorCategory": error_category,
-        "output": output,
-    }
-    return result
+        timeout_seconds=request.timeout_seconds,
+        observed_at=datetime.now(timezone.utc).isoformat(),
+        error_category=error_category,
+        output=output,
+    )
+
+
+def ping_device(request: PingRequest) -> PingResult:
+    if request.count * request.interval_seconds + request.timeout_seconds > util_ot_ctl.TD_OT_CTL_TIMEOUT_DEFAULT:
+        raise ValueError("ping duration exceeds the 30-second OTBR command limit")
+    return _ping_result(util_ot_ctl.exec_ot_ctl(_ping_command(request)), request)
 
 
 def _emit(result: dict[str, object], as_json: bool) -> None:
@@ -142,13 +196,19 @@ def _emit(result: dict[str, object], as_json: bool) -> None:
 
 
 def _run_ping(args: argparse.Namespace) -> int:
-    if args.count * args.interval + args.timeout > util_ot_ctl.TD_OT_CTL_TIMEOUT_DEFAULT:
-        raise ValueError("ping duration exceeds the 30-second OTBR command limit")
     if args.allow_sed:
         logging.warning("Active traffic override requested for a sleepy end device.")
-    output = util_ot_ctl.exec_ot_ctl(_ping_command(args))
-    _emit(_ping_result(output, args), args.json)
-    return 3 if output.startswith("Error:") else 0
+    result = ping_device(PingRequest(
+        target=args.target,
+        source=args.source,
+        size=args.size,
+        count=args.count,
+        interval_seconds=args.interval,
+        hop_limit=args.hop_limit,
+        timeout_seconds=args.timeout,
+    ))
+    _emit(result.as_json_dict(), args.json)
+    return 3 if result.error_category == "local-dispatch" else 0
 
 
 def _run_reset(args: argparse.Namespace) -> int:

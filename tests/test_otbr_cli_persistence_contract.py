@@ -360,6 +360,7 @@ def test_networkdiag_fetch_all_main_delegates_both_output_paths(monkeypatch, tmp
     assert Path(captured["final_output_path"]) == (
         tmp_path / OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
     )
+    assert captured["children_ping_fallback"] is False
 
     monkeypatch.setattr(
         networkdiag,

@@ -65,6 +65,29 @@ def test_network_helpers_extract_rloc16_from_thread_ipv6_addresses() -> None:
     assert util_network.find_rloc16_in_ipv6_addresses(None) is None
 
 
+def test_network_helpers_derive_child_rloc_from_parent_address() -> None:
+    assert util_network.derive_child_rloc_ipv6_address(
+        [
+            "fd00:abcd::1",
+            "FD3B:A255:4AA6:5483:0000:00FF:FE00:4C00",
+        ],
+        "0x4c00",
+        "0x4c92",
+    ) == "fd3b:a255:4aa6:5483:0:ff:fe00:4c92"
+
+
+def test_network_helpers_reject_invalid_or_ambiguous_child_rloc_derivation() -> None:
+    parent = "fd3b:a255:4aa6:5483:0:ff:fe00:4c00"
+    assert util_network.derive_child_rloc_ipv6_address([parent], "0x4c00", "0x5092") is None
+    assert util_network.derive_child_rloc_ipv6_address(["fd3b:a255::4c00"], "0x4c00", "0x4c92") is None
+    assert util_network.derive_child_rloc_ipv6_address(
+        [parent, "fd4b:a255:4aa6:5483:0:ff:fe00:4c00"],
+        "0x4c00",
+        "0x4c92",
+    ) is None
+    assert util_network.derive_child_rloc_ipv6_address(None, "0x4c00", "0x4c92") is None
+
+
 def test_ot_ctl_dispatch_selects_container_command_and_timeout(monkeypatch) -> None:
     completed = Mock(stdout=" response\n")
     run = Mock(return_value=completed)

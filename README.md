@@ -98,6 +98,8 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag multicast
 
 # Detailed OTBR CLI collection; may take minutes and reach sleepy devices
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag fetch-all
+PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag fetch-all \
+  --children-ping-fallback
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli topology
 
 # Explicit active device operations; neither runs as part of collection or health processing
@@ -141,11 +143,18 @@ retried because the original action may still be active. Use `--no-fallback`
 to disable these additional bounded actions, or `--fallback-preset` to replace
 the generic progression with one explicit fallback preset.
 
+`networkdiag fetch-all --children-ping-fallback` is disabled by default. When
+enabled, it sends one bounded ping to the derived RLOC address of each child
+that did not answer any enabled Network Diagnostic policy. An Echo Reply records
+positive reachability, while no reply remains unknown and does not mark a sleepy
+child offline. The same option is available on `otbr-cli topology` and applies
+only to its `networkdiag fetch-all` step.
+
 `otbr-cli device ping` sends bounded active Thread traffic and returns one
 complete result. `otbr-cli device reset-counters` is destructive, requires an
 explicit counter selection and `--confirm`, and only reports `Done` as local
-acceptance for transmission, not remote confirmation. These commands are not
-run by sync or health processing.
+acceptance for transmission, not remote confirmation. Health processing does
+not run these active operations.
 
 `health process-dataset` is cache-only: it never invokes a collector or modifies source
 snapshots. Remove `--dry-run` to atomically store the observation and assessment

@@ -74,6 +74,36 @@ def is_child_rloc16_of_parent(child_rloc16, parent_rloc16):
     derived_parent = derive_parent_rloc16(child_rloc16)
     return derived_parent == f"0x{parent_value:04x}"
 
+
+def derive_child_rloc_ipv6_address(ipv6_addrs, parent_rloc16, child_rloc16):
+    """Derives a child's RLOC address from its parent's observed RLOC address."""
+    parent_value = _rloc16_value(parent_rloc16)
+    child_value = _rloc16_value(child_rloc16)
+    if (
+        not isinstance(ipv6_addrs, list)
+        or parent_value is None
+        or child_value is None
+        or not is_child_rloc16_of_parent(child_value, parent_value)
+    ):
+        return None
+
+    parent_addresses = set()
+    expected_parent = f"0x{parent_value:04x}"
+    for candidate in ipv6_addrs:
+        if extract_rloc16_from_ipv6_address(candidate) != expected_parent:
+            continue
+        address = ipaddress.IPv6Address(candidate)
+        if address.is_multicast or address.is_link_local:
+            continue
+        parent_addresses.add(address)
+
+    if len(parent_addresses) != 1:
+        return None
+
+    packed = bytearray(next(iter(parent_addresses)).packed)
+    packed[-2:] = child_value.to_bytes(2, "big")
+    return str(ipaddress.IPv6Address(bytes(packed)))
+
 def decode_short_thread_version(version):
     """
     Decodes a short Thread version number into a human-readable format.

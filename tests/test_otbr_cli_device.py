@@ -11,7 +11,13 @@ import td_cli
 
 def test_ping_materializes_positional_defaults_and_reports_json(capsys) -> None:
     with patch.object(
-        otbr_cli_device.util_ot_ctl, "exec_ot_ctl", return_value="16 bytes: time=4.5 ms\nDone"
+        otbr_cli_device.util_ot_ctl,
+        "exec_ot_ctl",
+        return_value=(
+            "16 bytes from 2001:db8::1: icmp_seq=1 hlim=64 time=4ms\n"
+            "1 packets transmitted, 1 packets received. "
+            "Packet loss = 0.0%. Round-trip min/avg/max = 4/4.000/4 ms.\nDone"
+        ),
     ) as exec_ot_ctl:
         assert otbr_cli_device.main(["ping", "2001:db8::1", "--json"]) == 0
 
@@ -19,17 +25,39 @@ def test_ping_materializes_positional_defaults_and_reports_json(capsys) -> None:
     result = json.loads(capsys.readouterr().out)
     assert result["sent"] == 1
     assert result["received"] == 1
-    assert result["roundTripSamplesMs"] == [4.5]
+    assert result["roundTripSamplesMs"] == [4.0]
     assert result["errorCategory"] == "none"
 
 
 def test_ping_source_and_later_options_preserve_open_thread_positions() -> None:
-    with patch.object(otbr_cli_device.util_ot_ctl, "exec_ot_ctl", return_value="Done") as exec_ot_ctl:
+    with patch.object(
+        otbr_cli_device.util_ot_ctl,
+        "exec_ot_ctl",
+        return_value="1 packets transmitted, 0 packets received. Packet loss = 100.0%.\nDone",
+    ) as exec_ot_ctl:
         assert otbr_cli_device.main(
             ["ping", "2001:db8::1", "--source", "2001:db8::2", "--timeout", "7"]
         ) == 0
 
     exec_ot_ctl.assert_called_once_with("ping -I 2001:db8::2 2001:db8::1 56 1 1 64 7")
+
+
+def test_ping_device_uses_summary_counts_and_classifies_incomplete_output() -> None:
+    request = otbr_cli_device.PingRequest(target="2001:db8::1")
+
+    with patch.object(
+        otbr_cli_device.util_ot_ctl,
+        "exec_ot_ctl",
+        return_value="1 packets transmitted, 0 packets received. Packet loss = 100.0%.\nDone",
+    ):
+        no_reply = otbr_cli_device.ping_device(request)
+    assert no_reply.sent == 1
+    assert no_reply.received == 0
+    assert no_reply.error_category == "timeout"
+
+    with patch.object(otbr_cli_device.util_ot_ctl, "exec_ot_ctl", return_value="Done"):
+        incomplete = otbr_cli_device.ping_device(request)
+    assert incomplete.error_category == "incomplete-output"
 
 
 @pytest.mark.parametrize("target", ["ff03::1", "::", "::1", "fe80::1", "::ffff:192.0.2.1", "2001:db8::1%eth0", "2001:db8::1;state"])

@@ -177,19 +177,31 @@ def merge_device_record(existing: dict, new: dict) -> dict:
         - vendor_sw_version: Keep existing if present, else take new
         - route: Take new if new is non-empty dict and existing is empty, else keep existing
     """
-    # extaddr: keep existing (it's the key, should be identical)
-    # (no update needed)
+    # Replace discovery placeholders when a later diagnostic returns a real identity.
+    placeholder_prefixes = ("found-", "Unknown-", "Offline-")
+    existing_extaddr = existing.get("extaddr", "")
+    new_extaddr = new.get("extaddr", "")
+    if (
+        isinstance(existing_extaddr, str)
+        and existing_extaddr.startswith(placeholder_prefixes)
+        and isinstance(new_extaddr, str)
+        and new_extaddr
+        and not new_extaddr.startswith(placeholder_prefixes)
+    ):
+        existing["extaddr"] = new_extaddr
 
     # rloc16: keep existing if not "Unknown", else take new
     if existing.get("rloc16") == "Unknown" and new.get("rloc16") != "Unknown":
         existing["rloc16"] = new["rloc16"]
 
-    # Retain support for legacy Unknown- placeholders in cached snapshots.
+    # Retain support for legacy Unknown- and Offline- cached placeholders.
     existing_label = existing.get("device_label", "")
     new_label = new.get("device_label", "")
-    existing_is_placeholder = existing_label.startswith(("found-", "Unknown-"))
-    new_is_placeholder = new_label.startswith(("found-", "Unknown-"))
-    if existing_is_placeholder and not new_is_placeholder:
+    existing_is_placeholder = existing_label.startswith(placeholder_prefixes)
+    new_is_placeholder = new_label.startswith(placeholder_prefixes)
+    if not existing_label and new_label:
+        existing["device_label"] = new_label
+    elif existing_is_placeholder and new_label and not new_is_placeholder:
         existing["device_label"] = new["device_label"]
 
     # Keep highest attempt/detail metadata, including 0 values from first-attempt success.

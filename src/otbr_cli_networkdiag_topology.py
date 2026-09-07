@@ -23,6 +23,7 @@ from td_const import (
 )
 import util_ot_ctl
 import util_network
+import otbr_cli_device
 from util_data import data_file_path, resolve_data_dir, save_json_atomic, create_checkpoint_filename
 from td_json_key_normalizer import convert_keys_to_camel_case
 from td_device_fields import get_canonical_rloc16
@@ -446,10 +447,11 @@ def _build_unknown_device_record(
     )
 
     # Base record structure (common to both routers and children)
+    placeholder = f"found-{rloc16}" if role == "child" else f"Offline-{rloc16}"
     record = {
-        "extaddr": f"Offline-{rloc16}",
+        "extaddr": placeholder,
         "rloc16": rloc16,
-        "device_label": f"Offline-{rloc16}",
+        "device_label": placeholder,
         "mode": {},
         "ipv6_addrs": ipv6_addrs,
         "omr_ipv6_addr": omr_ipv6_addr,
@@ -645,8 +647,8 @@ def _upsert_device_record(
     if not rloc16:
         return
 
-    # Skip unknown or placeholder extaddrs (they start with "Unknown-")
-    if extaddr and not extaddr.startswith("Unknown-"):
+    # Placeholder identities must not participate in EXTADDR move detection.
+    if extaddr and not extaddr.startswith(("found-", "Unknown-", "Offline-")):
         # Check if this extaddr already exists with a different rloc16
         existing_rloc16 = extaddr_to_rloc.get(extaddr)
 
@@ -1094,6 +1096,14 @@ class ChildMutation:
     rloc16: str
 
 
+@dataclass(frozen=True)
+class ChildPingOutcome:
+    target: ChildFetchTarget
+    status: Literal["reply", "no-reply", "unavailable", "error", "not-attempted"]
+    target_address: str | None = None
+    result: otbr_cli_device.PingResult | None = None
+
+
 def build_child_fetch_policies(
     fast_enabled: bool,
     detail_enabled: bool,
@@ -1187,6 +1197,74 @@ def fetch_child_with_retries(
     return ChildFetchOutcome(target, policy.mode, tuple(observations), tuple(attempted), "responded")
 
 
+def ping_child_after_diagnostic_exhaustion(
+    target: ChildFetchTarget,
+    topology_map: dict,
+    ping: Callable[[otbr_cli_device.PingRequest], otbr_cli_device.PingResult] | None = None,
+) -> ChildPingOutcome:
+    parent = topology_map.get(target.parent_rloc16)
+    parent_addresses = parent.get("ipv6_addrs", []) if isinstance(parent, dict) else []
+    target_address = util_network.derive_child_rloc_ipv6_address(
+        parent_addresses,
+        target.parent_rloc16,
+        target.child_rloc16,
+    )
+    if target_address is None:
+        return ChildPingOutcome(target, "unavailable")
+
+    try:
+        result = (ping or otbr_cli_device.ping_device)(
+            otbr_cli_device.PingRequest(target=target_address, count=1)
+        )
+    except Exception as exc:
+        logging.warning(
+            "Child ping failed for child %s via parent %s at %s: %s",
+            target.child_rloc16,
+            target.parent_rloc16,
+            target_address,
+            exc,
+        )
+        return ChildPingOutcome(target, "error", target_address)
+
+    if result.error_category == "none" and result.received > 0:
+        status = "reply"
+    elif result.error_category == "timeout":
+        status = "no-reply"
+    else:
+        status = "error"
+    logging.info(
+        "Child ping child=%s parent=%s target=%s status=%s",
+        target.child_rloc16,
+        target.parent_rloc16,
+        target_address,
+        status,
+    )
+    return ChildPingOutcome(target, status, target_address, result)
+
+
+def _child_ping_evidence(outcome: ChildPingOutcome | None) -> dict[str, Any]:
+    if outcome is None:
+        return {"status": "not-attempted"}
+    evidence: dict[str, Any] = {"status": outcome.status}
+    if outcome.target_address is not None:
+        evidence["target"] = outcome.target_address
+    if outcome.result is not None:
+        evidence.update({
+            "sent": outcome.result.sent,
+            "received": outcome.result.received,
+            "round_trip_samples_ms": list(outcome.result.round_trip_samples_ms),
+            "round_trip_summary_ms": outcome.result.round_trip_summary_ms,
+            "timeout_seconds": outcome.result.timeout_seconds,
+            "observed_at": outcome.result.observed_at,
+            "error_category": outcome.result.error_category,
+        })
+    elif outcome.status == "unavailable":
+        evidence["error_category"] = "target-unavailable"
+    elif outcome.status == "error":
+        evidence["error_category"] = "local-dispatch"
+    return evidence
+
+
 def reconcile_child_fetch_outcome(
     outcome: ChildFetchOutcome,
     topology_map: dict,
@@ -1194,6 +1272,7 @@ def reconcile_child_fetch_outcome(
     ipv6_addresses: dict,
     omr_ipv6addr_prefix: str | None,
     meshlocal_prefix: str | None,
+    ping_outcome: ChildPingOutcome | None = None,
 ) -> ChildMutation:
     before = deepcopy(topology_map)
     prior_extaddr_rlocs = dict(extaddr_to_rloc)
@@ -1212,6 +1291,13 @@ def reconcile_child_fetch_outcome(
             mutation_kind = "updated"
         _upsert_device_record(topology_map, child_node, extaddr_to_rloc)
 
+    if outcome.observations:
+        record = topology_map.get(outcome.target.child_rloc16)
+        if isinstance(record, dict):
+            record["network_diagnostic_status"] = "responded"
+            record["reachability"] = "reachable"
+            record["ping"] = {"status": "not-attempted"}
+
     if not outcome.observations and outcome.terminal_reason == "exhausted":
         existing = topology_map.get(outcome.target.child_rloc16)
         known = (
@@ -1229,7 +1315,19 @@ def reconcile_child_fetch_outcome(
             _upsert_device_record(topology_map, fallback, extaddr_to_rloc)
             mutation_kind = "fallback"
 
+        record = topology_map.get(outcome.target.child_rloc16)
+        if isinstance(record, dict):
+            record["network_diagnostic_status"] = "no-response"
+            record["reachability"] = (
+                "reachable"
+                if ping_outcome is not None and ping_outcome.status == "reply"
+                else "unknown"
+            )
+            record["ping"] = _child_ping_evidence(ping_outcome)
+
     changed = before != topology_map
+    if changed and mutation_kind == "unchanged":
+        mutation_kind = "updated"
     return ChildMutation(changed, mutation_kind if changed else "unchanged", outcome.target.child_rloc16)
 
 
@@ -1256,6 +1354,7 @@ def fetch_network_diag_topology_expand_children(
     checkpoint_filepath: str | None,
     child_fetch_fast_mode_default: bool = True,
     child_fetch_detail_mode_default: bool = False,
+    children_ping_fallback: bool = False,
 ) -> None:
     """Expands child-node diagnostics and merges child records into the topology map."""
     if not expand_children:
@@ -1266,12 +1365,13 @@ def fetch_network_diag_topology_expand_children(
     )
     targets = collect_child_fetch_targets(router_rlocs, network_topology_map)
 
-    for policy in policies:
-        for target in targets:
+    for target in targets:
+        final_outcome = None
+        for policy in policies:
             prior_state = network_topology_map.get(target.child_rloc16, {})
             if not isinstance(prior_state, dict):
                 logging.warning("Child node %s in topology map is not a dict. Skipping.", target.child_rloc16)
-                continue
+                break
 
             outcome = fetch_child_with_retries(
                 target,
@@ -1287,6 +1387,9 @@ def fetch_network_diag_topology_expand_children(
                 ),
                 time.sleep,
             )
+            final_outcome = outcome
+            if outcome.terminal_reason == "exhausted":
+                continue
             mutation = reconcile_child_fetch_outcome(
                 outcome,
                 network_topology_map,
@@ -1300,6 +1403,27 @@ def fetch_network_diag_topology_expand_children(
                 save_topology_to_json_file,
             )
 
+        if final_outcome is None or final_outcome.terminal_reason != "exhausted":
+            continue
+        ping_outcome = (
+            ping_child_after_diagnostic_exhaustion(target, network_topology_map)
+            if children_ping_fallback
+            else None
+        )
+        mutation = reconcile_child_fetch_outcome(
+            final_outcome,
+            network_topology_map,
+            extaddr_to_rloc,
+            ipv6_addresses,
+            omr_ipv6addr_prefix,
+            meshlocal_prefix,
+            ping_outcome,
+        )
+        notify_child_checkpoint(
+            mutation, network_topology_map, checkpoint_filepath,
+            save_topology_to_json_file,
+        )
+
 
 def fetch_network_diag_topology(
     extaddr_map=None,
@@ -1308,6 +1432,7 @@ def fetch_network_diag_topology(
     td_data_dir=None,
     child_fetch_fast_mode_default: bool = True,
     child_fetch_detail_mode_default: bool = False,
+    children_ping_fallback: bool = False,
     checkpoint_filepath=None,
     final_output_path=None,
 ):
@@ -1432,6 +1557,7 @@ def fetch_network_diag_topology(
         checkpoint_filepath,
         child_fetch_fast_mode_default,
         child_fetch_detail_mode_default,
+        children_ping_fallback,
     )
 
     logging.info(
@@ -1559,6 +1685,11 @@ def save_topology_to_json_file(
             "mac_counters": data.get("mac_counters", {}),
             "mle_counters": data.get("mle_counters", {}),
             "time_statistics": data.get("time_statistics", {}),
+            "last_attempt_responded": data.get("last_attempt_responded"),
+            "last_attempt_tlv_detail_level": data.get("last_attempt_tlv_detail_level"),
+            "network_diagnostic_status": data.get("network_diagnostic_status"),
+            "reachability": data.get("reachability"),
+            "ping": data.get("ping"),
         }
 
         network_map.append(network_node)
@@ -1755,6 +1886,12 @@ def main_fetch_all(argv: Sequence[str] | None = None) -> int:
         action="store_false",
         help="Disable detailed child fetching",
     )
+    parser.add_argument(
+        "--children-ping-fallback",
+        action="store_true",
+        default=False,
+        help="Ping a child once after all enabled diagnostic policies receive no response",
+    )
 
     args = parser.parse_args(argv)
     td_data_dir = resolve_data_dir(data_dir=args.datadir)
@@ -1792,6 +1929,7 @@ def main_fetch_all(argv: Sequence[str] | None = None) -> int:
             td_data_dir=td_data_dir,
             child_fetch_fast_mode_default=args.child_fetch_fast_mode_default,
             child_fetch_detail_mode_default=args.child_fetch_detail_mode_default,
+            children_ping_fallback=args.children_ping_fallback,
             checkpoint_filepath=checkpoint_filepath,
             final_output_path=save_json_filepath,
         )

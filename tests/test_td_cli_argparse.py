@@ -152,6 +152,7 @@ class TestOtbrCliParser(unittest.TestCase):
         self.assertEqual(args.cli_command, "networkdiag")
         self.assertEqual(args.networkdiag_command, "fetch-all")
         self.assertTrue(args.expand_children)
+        self.assertFalse(args.children_ping_fallback)
 
     def test_networkdiag_topology_children_no(self):
         args = _parse(["otbr-cli", "networkdiag",
@@ -180,6 +181,7 @@ class TestOtbrCliParser(unittest.TestCase):
         args = _parse(["otbr-cli", "topology"])
         self.assertEqual(args.command, "otbr-cli")
         self.assertEqual(args.cli_command, "topology")
+        self.assertFalse(args.children_ping_fallback)
 
 
 class TestForwardingParsers(unittest.TestCase):
@@ -273,6 +275,19 @@ class TestDispatchOtbrCli(unittest.TestCase):
                 "--children-fetch-detail-no",
             ]
         )
+        self.assertEqual(rc, 0)
+
+    def test_networkdiag_children_ping_fallback_is_forwarded_when_enabled(self):
+        with patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
+        ) as handler:
+            rc = self._dispatch([
+                "otbr-cli",
+                "networkdiag",
+                "fetch-all",
+                "--children-ping-fallback",
+            ])
+        self.assertIn("--children-ping-fallback", handler.call_args.args[0])
         self.assertEqual(rc, 0)
 
     def test_router_table_none_return_keeps_compat_success(self):
@@ -460,6 +475,33 @@ class TestDispatchOtbrCli(unittest.TestCase):
             [
                 call(["--datadir", "/tmp/td", "multicast-network"]),
                 call(["--datadir", "/tmp/td", "fetch-all"]),
+            ],
+        )
+
+    def test_topology_forwards_child_ping_fallback_only_to_fetch_all(self):
+        with patch.object(
+            td_cli.otbr_cli_thread_network_info, "main", return_value=0
+        ), patch.object(
+            td_cli.otbr_cli_router_table, "main", return_value=0
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_topology, "main", return_value=0
+        ), patch.object(
+            td_cli.otbr_cli_networkdiag_topology, "main", return_value=0
+        ) as networkdiag, patch.object(
+            td_cli.otbr_cli_meshdiag_routerneighbortable, "main", return_value=0
+        ), patch.object(
+            td_cli.otbr_cli_meshdiag_childtable, "main", return_value=0
+        ):
+            rc = self._dispatch([
+                "otbr-cli", "topology", "--children-ping-fallback"
+            ])
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            networkdiag.call_args_list,
+            [
+                call(["multicast-network"]),
+                call(["fetch-all", "--children-ping-fallback"]),
             ],
         )
 
