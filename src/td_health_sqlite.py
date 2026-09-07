@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
@@ -183,7 +184,7 @@ class SQLiteHealthStore:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             table = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
             ).fetchone()
@@ -639,7 +640,7 @@ class SQLiteHealthStore:
             connection.close()
 
     def expected_device_ids(self, network_id: str) -> frozenset[str]:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 """SELECT device_id FROM expected_devices
                    WHERE network_id=? AND roster_state='expected'""",
@@ -654,7 +655,7 @@ class SQLiteHealthStore:
         label: str | None,
         roster_state: str = "expected",
     ) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
                    VALUES (?, ?, ?, ?)
@@ -666,7 +667,7 @@ class SQLiteHealthStore:
             )
 
     def expected_device_records(self, network_id: str) -> list[dict]:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             return [
                 dict(row)
                 for row in connection.execute(
@@ -680,7 +681,7 @@ class SQLiteHealthStore:
     def consecutive_complete_absences(
         self, network_id: str, device_id: str, before_observation_id: str
     ) -> int:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows: Iterator[sqlite3.Row] = iter(
                 connection.execute(
                     """SELECT o.observation_id,
@@ -702,7 +703,7 @@ class SQLiteHealthStore:
             return count
 
     def latest_assessment(self, network_id: str, dataset_id: str) -> dict | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 """SELECT a.*, o.network_id, o.network_name, o.datasource_id,
                           o.dataset_id, o.completeness, o.observed_at
@@ -733,7 +734,7 @@ class SQLiteHealthStore:
             clauses.append("o.network_id=?")
             values.append(network_id)
         where = " AND ".join(clauses) if clauses else "1=1"
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 f"""SELECT a.*, o.network_id, o.network_name, o.datasource_id,
                            o.dataset_id, o.completeness, o.observed_at,
@@ -791,7 +792,7 @@ class SQLiteHealthStore:
         if limit is not None:
             page = " LIMIT ? OFFSET ?"
             values.extend((limit, offset))
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 f"""SELECT * FROM findings WHERE {where}
                     ORDER BY rank DESC, finding_id ASC{page}""",
@@ -813,7 +814,7 @@ class SQLiteHealthStore:
             scope=scope,
             device_id=device_id,
         )
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             return int(
                 connection.execute(
                     f"SELECT COUNT(*) FROM findings WHERE {where}", values
@@ -826,7 +827,7 @@ class SQLiteHealthStore:
         where = "WHERE network_id=?" if network_id else ""
         values: list[object] = [network_id] if network_id else []
         values.extend((limit, offset))
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 f"""SELECT observation_id, datasource_id, dataset_id, network_id,
                            network_name, observed_at, ingested_at, completeness,
@@ -841,7 +842,7 @@ class SQLiteHealthStore:
     def device_record(
         self, *, assessment_id: str, device_id: str
     ) -> dict | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 """SELECT d.device_id, d.ext_address, ds.role, ds.state,
                           ds.is_border_router, ds.source_files_json,
@@ -856,7 +857,7 @@ class SQLiteHealthStore:
             return dict(row) if row else None
 
     def store_capabilities(self) -> dict:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             schema_version = connection.execute(
                 "SELECT MAX(version) FROM schema_migrations"
             ).fetchone()[0]
