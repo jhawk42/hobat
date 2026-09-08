@@ -744,22 +744,78 @@ export function routerChildRowMatchesDiagnosticFilter(row, mode) {
 
 // ── Row visibility predicates (table) ─────────────────────────────────────────
 
+function isExplicitTrue(value) {
+  return value === true || toText(value).toLowerCase() === "true";
+}
+
+function normalizeRowRole(value) {
+  return toText(value).toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+export function getRowRoleProjection(row) {
+  const modeDevice = toText(getColumnValue(row, "mode.device")).toUpperCase();
+  const rloc16 = toText(getColumnValue(row, "rloc16")).toLowerCase();
+  const roleValues = [getColumnValue(row, "role"), getColumnValue(row, "type")]
+    .map(normalizeRowRole);
+  const isBorderRouter = isExplicitTrue(getColumnValue(row, "isBorderRouter"))
+    || isExplicitTrue(getColumnValue(row, "br"))
+    || roleValues.includes("borderrouter");
+  const isRouter = isBorderRouter
+    || isExplicitTrue(getColumnValue(row, "isRouter"))
+    || roleValues.includes("router")
+    || roleValues.includes("leader")
+    || (rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6);
+  const isChild = roleValues.some((value) =>
+    ["child", "sleepychild", "enddevice", "sleepyenddevice", "reed"].includes(value),
+  );
+  const isReedRouter = rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6;
+  const hasThreadClassification = Boolean(
+    rloc16 || getColumnValue(row, "br") != null || getColumnValue(row, "isRouter") != null
+    || getColumnValue(row, "isBorderRouter") != null || getColumnValue(row, "type") != null
+    || getColumnValue(row, "role") != null,
+  );
+  return { modeDevice, isRouter, isBorderRouter, isChild, isReedRouter, hasThreadClassification };
+}
+
+export function computeRowCounts(rows) {
+  const hasThreadClassification = rows.some((row) => getRowRoleProjection(row).hasThreadClassification);
+  if (!hasThreadClassification) {
+    return {
+      devices: rows.length,
+      borderRouters: null, routers: null, children: null,
+      links: null, lq3: null, lq2: null, lq1: null,
+    };
+  }
+  let totalLink3 = 0, totalLink2 = 0, totalLink1 = 0, totalLinks = 0, hasLinkFields = false;
+  const routerRows = rows.filter((row) => !getRowRoleProjection(row).isChild);
+  routerRows.forEach((row) => {
+    const link3 = toFiniteNumber(getColumnValue(row, "totalLink3") ?? getColumnValue(row, "total_link_3"));
+    const link2 = toFiniteNumber(getColumnValue(row, "totalLink2") ?? getColumnValue(row, "total_link_2"));
+    const link1 = toFiniteNumber(getColumnValue(row, "totalLink1") ?? getColumnValue(row, "total_link_1"));
+    const links = toFiniteNumber(getColumnValue(row, "totalLinks") ?? getColumnValue(row, "total_links"));
+    if (Number.isFinite(link3)) { totalLink3 += link3; hasLinkFields = true; }
+    if (Number.isFinite(link2)) { totalLink2 += link2; hasLinkFields = true; }
+    if (Number.isFinite(link1)) { totalLink1 += link1; hasLinkFields = true; }
+    if (Number.isFinite(links)) { totalLinks += links; hasLinkFields = true; }
+  });
+  return {
+    devices: rows.length,
+    borderRouters: rows.filter((row) => getRowRoleProjection(row).isBorderRouter).length,
+    routers: routerRows.filter((row) => {
+      const role = getRowRoleProjection(row);
+      return !role.isBorderRouter && role.isRouter;
+    }).length,
+    children: rows.filter((row) => getRowRoleProjection(row).isChild).length,
+    links: hasLinkFields ? Math.round(totalLinks / 2) : null,
+    lq3: hasLinkFields ? Math.round(totalLink3 / 2) : null,
+    lq2: hasLinkFields ? Math.round(totalLink2 / 2) : null,
+    lq1: hasLinkFields ? Math.round(totalLink1 / 2) : null,
+  };
+}
+
 export function isRowVisibleByNodeFilter(row, filterMode) {
   if (filterMode === "all") return true;
-  const modeDevice = toText(getColumnValue(row, "mode.device")).toUpperCase();
-  const rloc16Text = toText(getColumnValue(row, "rloc16")).toLowerCase();
-  const isRouter = rloc16Text.endsWith("00");
-  const isReedRouter =
-    rloc16Text.startsWith("0x") &&
-    rloc16Text.endsWith("00") &&
-    rloc16Text.length === 6;
-  const brValue = getColumnValue(row, "br");
-  const isBorderRouter =
-    isRouter &&
-    (brValue === true || toText(brValue).toLowerCase() === "true");
-  const isReedBorderRouter =
-    isReedRouter &&
-    (brValue === true || toText(brValue).toLowerCase() === "true");
+  const { modeDevice, isRouter, isReedRouter, isBorderRouter } = getRowRoleProjection(row);
   const totalChildren = toFiniteNumber(getColumnValue(row, "total_children"));
   const childrenValue = getColumnValue(row, "children");
   const childrenCount = Array.isArray(childrenValue)
@@ -776,7 +832,7 @@ export function isRowVisibleByNodeFilter(row, filterMode) {
       modeDevice,
       getColumnValue(row, "role"),
       isReedRouter,
-      isReedBorderRouter,
+      isBorderRouter,
     );
   if (filterMode === "main-routers") return isRouter;
   if (filterMode === "border-routers") return isBorderRouter;
@@ -876,7 +932,9 @@ export function evaluateDiagnosticOption(record, view, option) {
     matchedRecords = measured
       .filter(({ metric: value }) => metricMatchesOption(value, option))
       .map(({ item }) => item);
-    const metrics = measured.map(({ metric: value }) => value);
+    const metrics = measured
+      .filter(({ metric: value }) => metricMatchesOption(value, option))
+      .map(({ metric: value }) => value);
     if (metrics.length > 0) {
       metric = option.aggregation === "min" ? Math.min(...metrics) : Math.max(...metrics);
     }

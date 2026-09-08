@@ -66,6 +66,8 @@ import {
   aggregateNetworkDiagnosticsForRows,
   evaluateDiagnosticsForRecord,
   selectHighestQualifyingDiagnosticEvaluations,
+  getRowRoleProjection,
+  computeRowCounts,
 } from "./tdash-filters.js";
 import { parseSearchQuery, filterRowsBySearch } from "./tdash-search.js";
 import {
@@ -648,7 +650,7 @@ function resetNodeDetailsLists() {
     "<li>Click a node to view its properties.</li>";
   document
     .querySelectorAll(
-      "#identity-list, #highlights-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
+      "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
     )
     .forEach((list) => {
       list.innerHTML = "";
@@ -1635,8 +1637,7 @@ function updateCacheCheckboxes(changedCheckbox) {
 // Mirrors isChildNode() in tdash-topology-utils.js but operates on row objects.
 // Comparison is case-insensitive because some sources emit "Child" (capitalised).
 function isChildRow(r) {
-  const t = toText(getColumnValue(r, "type")).toLowerCase();
-  return t === "child" || t === "sleepy-child";
+  return getRowRoleProjection(r).isChild;
 }
 
 // Derives device and link counts from a flat rows array (table-view path).
@@ -1644,41 +1645,6 @@ function isChildRow(r) {
 // Returns null for link fields when no row carries the link-count fields.
 // Returns null for classification fields when no row carries Thread topology fields
 // (rloc16 / br / type), which is the case for non-Thread sources such as mDNS.
-function computeRowCounts(rows) {
-  const hasThreadClassification = rows.some(
-    (r) => getColumnValue(r, "rloc16") != null || getColumnValue(r, "br") != null || getColumnValue(r, "type") != null,
-  );
-  if (!hasThreadClassification) {
-    return {
-      devices: rows.length,
-      borderRouters: null, routers: null, children: null,
-      links: null, lq3: null, lq2: null, lq1: null,
-    };
-  }
-  let tl3 = 0, tl2 = 0, tl1 = 0, tl = 0, hasLinkFields = false;
-  const routerRows = rows.filter((r) => !isChildRow(r));
-  routerRows.forEach((r) => {
-    const v3 = toFiniteNumber(getColumnValue(r, "totalLink3") ?? getColumnValue(r, "total_link_3"));
-    const v2 = toFiniteNumber(getColumnValue(r, "totalLink2") ?? getColumnValue(r, "total_link_2"));
-    const v1 = toFiniteNumber(getColumnValue(r, "totalLink1") ?? getColumnValue(r, "total_link_1"));
-    const vt = toFiniteNumber(getColumnValue(r, "totalLinks") ?? getColumnValue(r, "total_links"));
-    if (Number.isFinite(v3)) { tl3 += v3; hasLinkFields = true; }
-    if (Number.isFinite(v2)) { tl2 += v2; hasLinkFields = true; }
-    if (Number.isFinite(v1)) { tl1 += v1; hasLinkFields = true; }
-    if (Number.isFinite(vt)) { tl  += vt; hasLinkFields = true; }
-  });
-  return {
-    devices:       rows.length,
-    borderRouters: rows.filter((r) => getColumnValue(r, "br") === true).length,
-    routers:       routerRows.filter((r) => getColumnValue(r, "br") !== true).length,
-    children:      rows.filter((r) => isChildRow(r)).length,
-    links: hasLinkFields ? Math.round(tl  / 2) : null,
-    lq3:   hasLinkFields ? Math.round(tl3 / 2) : null,
-    lq2:   hasLinkFields ? Math.round(tl2 / 2) : null,
-    lq1:   hasLinkFields ? Math.round(tl1 / 2) : null,
-  };
-}
-
 function updateDeviceStatusBar(counts) {
   const set = (id, val) => {
     const el = document.getElementById(id);

@@ -70,8 +70,9 @@ export async function fetchHealthSupport(networkId, signal) {
   return { capabilities, observations };
 }
 
-function formatAge(timestamp) {
-  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(timestamp)) / 1000));
+export function formatAge(timestamp, parsedTimestamp = Date.parse(timestamp)) {
+  if (!Number.isFinite(parsedTimestamp)) return "unknown";
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - parsedTimestamp) / 1000));
   if (elapsedSeconds < 60) return "just now";
   const units = [
     [86400, "day"],
@@ -98,9 +99,12 @@ export function renderHealthStatus(container, model) {
   appendText(container, "span", `Health: ${assessment.status}`,
     `health-status-state state-${assessment.status.toLowerCase()}`);
   appendText(container, "span", assessment.completeness, "health-status-detail");
-  const time = appendText(container, "time", formatAge(assessment.observedAt), "health-status-detail");
-  time.dateTime = assessment.observedAt;
-  time.title = new Date(assessment.observedAt).toLocaleString();
+  const parsedObservedAt = Date.parse(assessment.observedAt);
+  const time = appendText(container, "time", formatAge(assessment.observedAt, parsedObservedAt), "health-status-detail");
+  if (Number.isFinite(parsedObservedAt)) {
+    time.dateTime = assessment.observedAt;
+    time.title = new Date(parsedObservedAt).toLocaleString();
+  }
 }
 
 function findingMatches(group, filters) {

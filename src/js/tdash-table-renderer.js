@@ -259,7 +259,7 @@ function renderTdContent(td, value, columnName) {
 
 // ── Column collection ─────────────────────────────────────────────────────────
 
-function collectColumns(rows) {
+export function collectColumns(rows) {
   const columns = [];
   const seen = new Set();
   rows.forEach((row) => {
@@ -271,7 +271,7 @@ function collectColumns(rows) {
     });
   });
   const healthColumns = _tableHealthByDeviceId.size > 0 ? HEALTH_COLUMNS : [];
-  const pinned = TABLE_PRIORITY_COLUMNS.filter(
+  const pinned = [...new Set(TABLE_PRIORITY_COLUMNS)].filter(
     (col) => seen.has(col) || rows.some((row) => hasNestedPath(row, col)),
   );
   const remaining = columns.filter((col) => !pinned.includes(col));
@@ -376,11 +376,15 @@ function renderTableRows(rows, columns, isSearchActive = false) {
 
 // ── Filter + render pipeline ──────────────────────────────────────────────────
 
+export function getTableFilterLabel(select, fallback) {
+  return select?.selectedOptions?.[0]?.text ?? fallback;
+}
+
 function updateTableStatus(visibleRowCount, columnCount, totalFilteredCount, searchQuery) {
   const nodeFilterEl = document.getElementById("node-filter");
   const diagFilterEl = document.getElementById("diagnostic-filter");
-  const nodeLabel = nodeFilterEl.options[nodeFilterEl.selectedIndex].text;
-  const diagLabel = diagFilterEl.options[diagFilterEl.selectedIndex].text;
+  const nodeLabel = getTableFilterLabel(nodeFilterEl, "All nodes");
+  const diagLabel = getTableFilterLabel(diagFilterEl, "All diagnostics");
   const fetchStatusEl = document.getElementById("fetch-status-line-content");
   const fetchStatusPinnedUntil = window.tdashDebug?.fetchStatusPinnedUntil ?? 0;
   const isFetchStatusPinned = Date.now() < fetchStatusPinnedUntil;
@@ -438,7 +442,7 @@ export function applyTableFilters() {
       );
       if (details.length > 0) {
         if (summaryListEl) summaryListEl.innerHTML = "";
-        populateNodeDetailsLists(details, "table-");
+        populateNodeDetailsLists(details);
       }
     }
   }

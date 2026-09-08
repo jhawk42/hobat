@@ -1458,7 +1458,6 @@ export const TABLE_PRIORITY_COLUMNS = [
   "version",
   "threadVersion",
   "threadStackVersion",
-  "room",
   "icon",
   
   // === TIER 4: Topology & Connectivity ===
