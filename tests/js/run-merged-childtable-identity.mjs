@@ -5,6 +5,7 @@ import { runAdaptor } from "../../src/js/tdash-adaptors.js";
 
 const rows = [{
   rloc16: "0x8c00",
+  deviceLabel: "Office Router",
   role: "router",
   mode: { device: "FTD" },
   route: { routeData: [{ routeId: 1, linkQualityIn: 2, linkQualityOut: 3, routeCost: 1 }] },
@@ -36,6 +37,7 @@ const result = runAdaptor({
 });
 
 assert.deepEqual(result.nodeData.map((node) => node.id), ["0x8c00", "0x8c31", "0x0400", "0x8c32"]);
+assert.equal(result.nodeMap.get("0x8c00")?.deviceLabel, "Office Router");
 assert.equal(result.nodeMap.get("0x8c31")?.extAddress, "9e829c2b32bc4050");
 assert.equal(result.nodeMap.get("0x8c31")?.deviceLabel, "Wine Cellar Ikea Leak Sensor");
 assert.equal(result.nodeData.some((node) => String(node.id).includes("rest-child")), false);

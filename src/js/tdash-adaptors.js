@@ -663,7 +663,8 @@ export function adaptEve(fileMap) {
     const merged = {
       id: nodeId,
       name: toText(rawNode.name) || (existing ? existing.name : ''),
-      deviceLabel: toText(rawNode.device_label) || (existing ? existing.deviceLabel || existing.device_label : ''),
+      deviceLabel: toText(rawNode.deviceLabel) || toText(rawNode.device_label)
+        || (existing ? existing.deviceLabel || existing.device_label : ''),
       rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
       sourceId: toText(rawNode.id) || (existing ? existing.sourceId || existing.source_id : ''),
       extAddress: toText(rawNode.extaddr) || (existing ? existing.extAddress || existing.extaddr : ''),
@@ -1318,7 +1319,8 @@ export function adaptMergedDetailed(fileMap) {
     const merged = {
       id: nodeId,
       name: toText(rawNode.name) || (existing ? existing.name : ''),
-      deviceLabel: toText(rawNode.device_label) || (existing ? existing.deviceLabel || existing.device_label : ''),
+      deviceLabel: toText(rawNode.deviceLabel) || toText(rawNode.device_label)
+        || (existing ? existing.deviceLabel || existing.device_label : ''),
       rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
       sourceId: toText(rawNode.id) || (existing ? existing.sourceId || existing.source_id : ''),
       extAddress: toText(rawNode.extaddr) || (existing ? existing.extAddress || existing.extaddr : ''),
