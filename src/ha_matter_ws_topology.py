@@ -259,8 +259,13 @@ def _derive_reporter_relationships(
             target, conflicts = index.resolve(reporter, entry)
             if target is None:
                 continue
-            relationship = _merge_relationship(
-                reporter["routerNeighbors"],
+            relationships = (
+                reporter["children"]
+                if entry.get("isChild") is True
+                else reporter["routerNeighbors"]
+            )
+            _merge_relationship(
+                relationships,
                 _relationship(
                     reporter,
                     target,
@@ -269,8 +274,6 @@ def _derive_reporter_relationships(
                     conflicts,
                 ),
             )
-            if entry.get("isChild") is True and relationship not in reporter["children"]:
-                reporter["children"].append(relationship)
 
     raw_routes = reporter.pop("routeTable", [])
     if isinstance(raw_routes, list):

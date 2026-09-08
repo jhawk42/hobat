@@ -29,9 +29,8 @@ def test_topology_preserves_one_way_and_reciprocal_neighbor_observations() -> No
     second = _by_node_id(topology, 2)
     child = next(node for node in topology if node.get("relationshipOnly"))
 
-    assert {link["targetId"] for link in first["routerNeighbors"]} == {
-        second["topologyId"], child["topologyId"]
-    }
+    assert [link["targetId"] for link in first["routerNeighbors"]] == [second["topologyId"]]
+    assert [link["targetId"] for link in first["children"]] == [child["topologyId"]]
     assert [link["targetId"] for link in second["routerNeighbors"]] == [first["topologyId"]]
     assert child["routerNeighbors"] == []
     assert first["routerNeighbors"][0]["observations"][0]["reporterMatterId"] == "FABRIC-1"
@@ -48,9 +47,8 @@ def test_children_placeholders_duplicates_and_conflicting_ids_are_deterministic(
     assert child["extAddress"] == "cc00000000000003"
     assert child["rloc16"] == "0x3001"
     assert child.get("matterId") is None
-    assert first["children"] == [
-        next(link for link in first["routerNeighbors"] if link["targetId"] == child["topologyId"])
-    ]
+    assert first["children"][0]["targetId"] == child["topologyId"]
+    assert first["children"][0]["observations"][0]["entry"]["isChild"] is True
     link_to_second = next(link for link in first["routerNeighbors"] if link["targetId"] == second["topologyId"])
     assert len(link_to_second["observations"]) == 2
     assert [
