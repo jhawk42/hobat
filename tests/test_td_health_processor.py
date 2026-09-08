@@ -473,6 +473,43 @@ def test_mle_and_time_statistics_are_extracted_as_metric_samples(tmp_path) -> No
     assert metrics_by_name["detachedDisabledPercent"].value == 3.0
 
 
+def test_mac_counter_ratios_remain_unit_ratios(tmp_path) -> None:
+    _write_seed(
+        tmp_path,
+        [
+            {
+                "extaddr": "0000000000000001",
+                "macCounters": {"ifTotalPkts": 10, "ifTotalErrorsTotalPktsRatio": 0.0},
+            },
+            {
+                "extaddr": "0000000000000002",
+                "macCounters": {"ifTotalPkts": 10, "ifTotalErrorsTotalPktsRatio": 0.1},
+            },
+            {
+                "extaddr": "0000000000000003",
+                "macCounters": {"ifTotalPkts": 10, "ifTotalErrorsTotalPktsRatio": 0.5},
+            },
+        ],
+    )
+
+    result = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+    )
+
+    metrics = {
+        metric.device_id: metric.value
+        for metric in result.observation.metrics
+        if metric.metric == "totalMacErrorRatio"
+    }
+    assert metrics == {
+        "extaddr:0000000000000001": 0.0,
+        "extaddr:0000000000000002": 0.1,
+        "extaddr:0000000000000003": 0.5,
+    }
+
+
 def test_response_timeout_record_is_captured_without_ext_address(tmp_path) -> None:
     _write_seed(
         tmp_path,

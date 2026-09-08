@@ -187,7 +187,7 @@ def _normalize_samples(
                     value = _number(mac_counters.get(field))
                     if value is not None and denominator is not None and denominator > 0:
                         metrics[(reporter_id, metric_name, filename)] = MetricSample(
-                            reporter_id, metric_name, value / 100.0, "ratio", denominator, filename
+                            reporter_id, metric_name, value, "ratio", denominator, filename
                         )
             mle_counters = record.get("mleCounters")
             if isinstance(mle_counters, dict):
