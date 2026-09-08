@@ -113,9 +113,12 @@ def parse_child_table(output, parent_rloc16):
     current_child = None
 
     # Get parent prefix for child rloc16s
-    parent_rloc16_int = int(
-        parent_rloc16, 0
-    )  # Auto-detect base (handles both 0xNNNN and decimal)
+    try:
+        parent_rloc16_int = int(
+            parent_rloc16, 0
+        )  # Auto-detect base (handles both 0xNNNN and decimal)
+    except (TypeError, ValueError):
+        return children
 
     for i, line in enumerate(lines):
         if "Child Table:" in line:

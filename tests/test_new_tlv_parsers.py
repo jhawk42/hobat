@@ -261,6 +261,26 @@ def test_multicast_integration():
     assert device.get("eui64") == "f434f0fffe1e1774"
     assert device.get("vendor_name") == "Apple"
     assert device.get("rloc16") == "0x7c00"
+
+
+def test_multicast_missing_rloc16_does_not_discard_later_responder() -> None:
+    output = """DIAG_GET.rsp/ans from fd00::1: 0011
+Ext Address: 0011223344556677
+Child Table:
+ ChildId: 0x01
+DIAG_GET.rsp/ans from fd00::2: 0022
+Ext Address: 8899aabbccddeeff
+Rloc16: 0x2400
+Child Table:
+ ChildId: 0x02
+"""
+
+    parsed = parse_multicast_diag_output(output, extaddr_map={})
+
+    assert set(parsed) == {"0011223344556677", "8899aabbccddeeff"}
+    assert parsed["0011223344556677"]["rloc16"] == "Unknown"
+    assert parsed["0011223344556677"]["children"] == []
+    assert parsed["8899aabbccddeeff"]["children"][0]["rloc16"] == "0x2402"
 # Run this module through the repository pytest entry point.
 
 
