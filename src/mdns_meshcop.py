@@ -3,8 +3,8 @@
 Provides decode/format helpers, TXT field enrichers, and a console print
 function for meshcop service records discovered by MDNSDumpListener.
 """
+import ipaddress
 import logging
-import socket
 
 from mdns_thread_util import (
     FIELD_METADATA,
@@ -302,9 +302,15 @@ def print_meshcop_service_info(name: str, info, props: dict) -> None:
     logging.debug("\n[ THREAD BORDER ROUTER FOUND ]")
     logging.debug("  Instance Name: %s", name)
     logging.debug("  Hostname:      %s", info.server)
+    address = "Unknown"
+    if info.addresses:
+        try:
+            address = str(ipaddress.ip_address(info.addresses[0]))
+        except ValueError:
+            pass
     logging.debug(
         "  Address:       %s:%s",
-        socket.inet_ntoa(info.addresses[0]) if info.addresses else "Unknown",
+        address,
         info.port,
     )
 

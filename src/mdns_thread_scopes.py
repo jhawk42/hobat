@@ -1,4 +1,5 @@
 import argparse
+import ipaddress
 import json
 import os
 from platform import node
@@ -350,9 +351,15 @@ class MDNSDumpListener(ServiceListener):
         if info:
             logging.debug("\n[ SCOPE: %s ]", type_)
             logging.debug("  Name:    %s", name)
+            address = "Unknown"
+            if info.addresses:
+                try:
+                    address = str(ipaddress.ip_address(info.addresses[0]))
+                except ValueError:
+                    pass
             logging.debug(
                 "  Address: %s:%s",
-                socket.inet_ntoa(info.addresses[0]) if info.addresses else "Unknown",
+                address,
                 info.port,
             )
             if hasattr(info, "parsed_addresses"):

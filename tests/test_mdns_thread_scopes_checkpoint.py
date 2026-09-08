@@ -59,6 +59,47 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
         self.assertEqual(written_payload[0]["name"], "test.local.")
         self.assertEqual(written_payload[0]["event"], "add")
 
+    def test_add_service_handles_packed_address_variants(self) -> None:
+        address_cases = {
+            "ipv4": [b"\x7f\x00\x00\x01"],
+            "ipv6": [bytes.fromhex("fd001234000000000000000000000001")],
+            "empty": [],
+            "malformed": [b"\x01\x02"],
+        }
+
+        for case_name, addresses in address_cases.items():
+            with self.subTest(case_name=case_name):
+                checkpoint_path = self.data_dir / f"{case_name}.json"
+                listener = mdns.MDNSDumpListener(
+                    checkpoint_output_file=checkpoint_path)
+                info = SimpleNamespace(
+                    addresses=addresses,
+                    properties={b"xa": bytes.fromhex("0011223344556677")},
+                    parsed_addresses=lambda: ["fd00::1"],
+                    name="test.local.",
+                    type="_meshcop._udp.local.",
+                    server="test.local.",
+                    port=1234,
+                    priority=0,
+                    weight=0,
+                    interface_index=0,
+                    host_ttl=120,
+                    other_ttl=120,
+                    key="test",
+                    text=None,
+                )
+                zc = MagicMock()
+                zc.get_service_info.return_value = info
+
+                with patch.object(mdns, "save_json_atomic") as save_mock:
+                    listener.add_service(zc, "_meshcop._udp.local.", "test.local.")
+
+                self.assertEqual(save_mock.call_count, 1)
+                self.assertEqual(
+                    save_mock.call_args.args[0][0]["recordKey"],
+                    "_meshcop._udp.local.|test.local.",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
