@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 
 from contextlib import suppress
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from ha_matter_ws_contract import (
 
 
 DEFAULT_MATTER_WS_URI = DEFAULT_HA_MATTER_WS_URI
+_MAX_LATE_RESPONSE_IDS = 100
 
 
 class MatterWsTransportError(RuntimeError):
@@ -77,6 +79,7 @@ class HaMatterWsClient:
         self._message_id = 0
         self._reader_task: asyncio.Task[None] | None = None
         self._pending: dict[str, asyncio.Future[Any]] = {}
+        self._late_response_ids: dict[str, None] = {}
         self._frames: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
         self._event_received = asyncio.Event()
@@ -154,6 +157,7 @@ class HaMatterWsClient:
         message_id = self._next_message_id()
         future = asyncio.get_running_loop().create_future()
         self._pending[message_id] = future
+        may_receive_late_response = False
         payload: dict[str, Any] = {"message_id": message_id, "command": command}
         if args is not None:
             payload["args"] = dict(args)
@@ -164,10 +168,12 @@ class HaMatterWsClient:
                 timeout=self.request_timeout if timeout is None else timeout,
             )
         except asyncio.TimeoutError as exc:
+            may_receive_late_response = True
             raise MatterWsRequestTimeoutError(
                 f"Matter command {command!r} timed out (message_id={message_id!r})"
             ) from exc
         except asyncio.CancelledError:
+            may_receive_late_response = True
             raise
         except websockets.WebSocketException as exc:
             raise MatterWsTransportError(
@@ -177,6 +183,10 @@ class HaMatterWsClient:
             pending = self._pending.pop(message_id, None)
             if pending is not None and not pending.done():
                 pending.cancel()
+            if may_receive_late_response:
+                self._late_response_ids[message_id] = None
+                while len(self._late_response_ids) > _MAX_LATE_RESPONSE_IDS:
+                    self._late_response_ids.pop(next(iter(self._late_response_ids)))
 
     async def wait_for_event_settle(self, settle_timeout: float) -> None:
         if settle_timeout < 0:
@@ -230,6 +240,12 @@ class HaMatterWsClient:
                 message_id = frame["message_id"]
                 future = self._pending.get(message_id)
                 if future is None:
+                    if message_id in self._late_response_ids:
+                        self._late_response_ids.pop(message_id)
+                        logging.debug(
+                            "Ignoring late Matter response for message_id %r", message_id
+                        )
+                        continue
                     raise MatterWsResponseCorrelationError(
                         f"Response for unknown message_id {message_id!r}"
                     )

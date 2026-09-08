@@ -12,9 +12,11 @@ import ha_matter_ws_client
 
 from ha_matter_ws_client import (
     HaMatterWsClient,
+    MatterWsRequestTimeoutError,
     MatterWsTransportError,
     fetch_node_snapshot,
 )
+from ha_matter_ws_contract import MatterWsResponseCorrelationError
 from ha_matter_ws_extractor import extract_nodes_info
 from ha_matter_ws_fetch_all import collect_devices, save_collection
 
@@ -91,6 +93,46 @@ def test_client_cancellation_cleans_pending_request(monkeypatch) -> None:
             with pytest.raises(asyncio.CancelledError):
                 await request
             assert client._pending == {}
+
+    asyncio.run(scenario())
+
+
+def test_client_ignores_late_timeout_response_without_disrupting_request(monkeypatch) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+
+        async def on_send(message: dict[str, Any]) -> None:
+            if message["command"] == "second":
+                socket.queue({"message_id": "1", "result": "late"})
+                socket.queue({"message_id": message["message_id"], "result": "second"})
+
+        socket.on_send = on_send
+        monkeypatch.setattr(ha_matter_ws_client.websockets, "connect", lambda *args, **kwargs: socket)
+
+        async with HaMatterWsClient(request_timeout=0.01) as client:
+            with pytest.raises(MatterWsRequestTimeoutError):
+                await client.request("first")
+            assert await client.request("second") == "second"
+            assert client._reader_task is not None
+            assert client._reader_task.done() is False
+            assert client._late_response_ids == {}
+
+    asyncio.run(scenario())
+
+
+def test_client_rejects_response_for_never_issued_message_id(monkeypatch) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+
+        async def on_send(message: dict[str, Any]) -> None:
+            socket.queue({"message_id": "never-issued", "result": "invalid"})
+
+        socket.on_send = on_send
+        monkeypatch.setattr(ha_matter_ws_client.websockets, "connect", lambda *args, **kwargs: socket)
+
+        async with HaMatterWsClient(request_timeout=0.2) as client:
+            with pytest.raises(MatterWsResponseCorrelationError, match="never-issued"):
+                await client.request("first")
 
     asyncio.run(scenario())
 
