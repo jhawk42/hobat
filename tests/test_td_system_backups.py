@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -123,3 +124,48 @@ def test_interrupted_restore_reinstates_original_data_directory(
     with pytest.raises(OSError, match="injected activation failure"):
         restore_backup(data_dir, backup_dir)
     assert (data_dir / "snapshot.json").read_text(encoding="utf-8") == "current\n"
+
+
+def test_restore_mount_root_replaces_contents_without_replacing_root(
+    tmp_path, monkeypatch
+) -> None:
+    data_dir = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    create_backup(data_dir, backup_dir)
+    (data_dir / "snapshot.json").write_text("current\n", encoding="utf-8")
+    (data_dir / "stale").mkdir()
+    (data_dir / "stale" / "value.txt").write_text("stale\n", encoding="utf-8")
+    monkeypatch.setattr(td_system_backups.os.path, "ismount", lambda path: path == data_dir)
+
+    restore_backup(data_dir, backup_dir)
+
+    assert data_dir.is_dir()
+    assert (data_dir / "snapshot.json").read_text(encoding="utf-8") == '{"value": 1}\n'
+    assert (data_dir / "config" / "policy.json").read_text(encoding="utf-8") == "{}\n"
+    assert not (data_dir / "stale").exists()
+
+
+def test_restore_mount_root_reinstates_contents_after_activation_failure(
+    tmp_path, monkeypatch
+) -> None:
+    data_dir = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    create_backup(data_dir, backup_dir)
+    (data_dir / "snapshot.json").write_text("current\n", encoding="utf-8")
+    (data_dir / "current").mkdir()
+    (data_dir / "current" / "value.txt").write_text("current\n", encoding="utf-8")
+    real_replace = os.replace
+
+    def fail_snapshot_activation(source, destination):
+        if ".restore-" in str(source) and Path(source).name == "snapshot.json":
+            raise OSError("injected mount activation failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(td_system_backups.os.path, "ismount", lambda path: path == data_dir)
+    monkeypatch.setattr(td_system_backups.os, "replace", fail_snapshot_activation)
+
+    with pytest.raises(OSError, match="injected mount activation failure"):
+        restore_backup(data_dir, backup_dir)
+    assert data_dir.is_dir()
+    assert (data_dir / "snapshot.json").read_text(encoding="utf-8") == "current\n"
+    assert (data_dir / "current" / "value.txt").read_text(encoding="utf-8") == "current\n"

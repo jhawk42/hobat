@@ -187,6 +187,36 @@ def _assert_database_available_for_restore(data_dir: Path) -> None:
         connection.close()
 
 
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def _restore_mount_contents(data_dir: Path, staging: Path, previous: Path) -> None:
+    previous.mkdir()
+    moved_previous: list[Path] = []
+    activated: list[Path] = []
+    try:
+        for child in data_dir.iterdir():
+            os.replace(child, previous / child.name)
+            moved_previous.append(child)
+        for child in staging.iterdir():
+            target = data_dir / child.name
+            os.replace(child, target)
+            activated.append(target)
+    except Exception:
+        for child in activated:
+            if child.exists():
+                _remove_path(child)
+        for child in moved_previous:
+            previous_child = previous / child.name
+            if previous_child.exists():
+                os.replace(previous_child, child)
+        raise
+
+
 def restore_backup(data_dir: Path, input_dir: Path) -> dict[str, Any]:
     data_dir = data_dir.resolve()
     input_dir = input_dir.resolve()
@@ -207,19 +237,23 @@ def restore_backup(data_dir: Path, input_dir: Path) -> dict[str, Any]:
         _database_schema_version(staging / HOBAT_DATABASE_FILENAME)
         _assert_database_available_for_restore(data_dir)
         had_existing = data_dir.exists()
-        if had_existing:
+        mounted_data_dir = had_existing and os.path.ismount(data_dir)
+        if mounted_data_dir:
+            _restore_mount_contents(data_dir, staging, previous)
+        elif had_existing:
             os.replace(data_dir, previous)
-        try:
-            os.replace(staging, data_dir)
-        except Exception:
-            if had_existing:
-                os.replace(previous, data_dir)
-            raise
+        if not mounted_data_dir:
+            try:
+                os.replace(staging, data_dir)
+            except Exception:
+                if had_existing:
+                    os.replace(previous, data_dir)
+                raise
         if had_existing:
             shutil.rmtree(previous)
         return manifest
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
-        if previous.exists() and not data_dir.exists():
+        if not os.path.ismount(data_dir) and previous.exists() and not data_dir.exists():
             os.replace(previous, data_dir)
         raise
