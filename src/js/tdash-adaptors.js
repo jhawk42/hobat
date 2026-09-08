@@ -1416,17 +1416,22 @@ export function adaptMergedDetailed(fileMap) {
     if (isMergedRowEveOnly(node)) return;
     const fromId = chooseMergedId(node, index);
     const routeCategories = getOtbrRouteCategories(node);
-    ['3_links', '2_links', '1_links'].forEach((key) => {
-      const lqStyle = lqStyleFromField(key);
-      (Array.isArray(node[key]) ? node[key] : []).forEach((link) => {
+    [
+      { canonical: 'links3', legacy: '3_links' },
+      { canonical: 'links2', legacy: '2_links' },
+      { canonical: 'links1', legacy: '1_links' },
+    ].forEach(({ canonical, legacy }) => {
+      const lqStyle = lqStyleFromField(legacy);
+      const links = Array.isArray(node[canonical]) ? node[canonical] : node[legacy];
+      (Array.isArray(links) ? links : []).forEach((link) => {
         const toId = ensureNodeForLink(link, link.rloc16 || link.id);
         if (!toId) return;
         const toNodeEnriched = nodeMap.get(toId);
         addEdge(edgeMap, edgeData, fromId, toId, {
           ...lqStyle,
           ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-          linkCategories: [key === '3_links' ? EDGE_CATEGORY_DEFAULT_3 : key === '2_links' ? EDGE_CATEGORY_DEFAULT_2 : EDGE_CATEGORY_DEFAULT_1],
-          edgeKeySuffix: `merged-${key}`
+          linkCategories: [legacy === '3_links' ? EDGE_CATEGORY_DEFAULT_3 : legacy === '2_links' ? EDGE_CATEGORY_DEFAULT_2 : EDGE_CATEGORY_DEFAULT_1],
+          edgeKeySuffix: `merged-${legacy}`
         });
       });
     });

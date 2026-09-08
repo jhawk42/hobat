@@ -96,6 +96,32 @@ export function isSecondaryRouterRouteEdge(linkCategories) {
     && !categories.includes(EDGE_CATEGORY_OTBR_ROUTE_FTD_CHILD);
 }
 
+export function assignParallelEdgeCurves(edgeData, nodeData) {
+  const nodeById = new Map(nodeData.map((node) => [node.id, node]));
+  const groups = new Map();
+  edgeData.forEach((edge) => {
+    if (edge.baseHidden === true) return;
+    const fromNode = nodeById.get(edge.from);
+    const toNode = nodeById.get(edge.to);
+    if (edge.isParentChild !== true && (fromNode?.isRouter !== true || toNode?.isRouter !== true)) return;
+    const pairKey = [String(edge.from), String(edge.to)].sort().join("|");
+    const group = groups.get(pairKey) ?? [];
+    group.push(edge);
+    groups.set(pairKey, group);
+  });
+  groups.forEach((group) => {
+    group.sort((left, right) => String(left.id).localeCompare(String(right.id)));
+    const baseRoundness = group.length === 1 && group[0].isParentChild !== true ? 0.26 : 0.2;
+    group.forEach((edge, index) => {
+      edge.smooth = {
+        enabled: true,
+        type: index % 2 === 0 ? "curvedCW" : "curvedCCW",
+        roundness: baseRoundness + Math.floor(index / 2) * 0.08,
+      };
+    });
+  });
+}
+
 // ── Exported accessors / setters ──────────────────────────────────────────────
 
 export function getVisNetwork() {
@@ -295,30 +321,7 @@ export function renderTopologyForDataset(
     applyExtractedMeshTreeVerticalSeedLayout(nodeData, edgeData);
   }
 
-  // Apply curved parent-child edges across all profiles to reduce overlap.
-  // Profile-specific branches below can still override roundness/length/physics.
-  edgeData.forEach((edge) => {
-    if (edge.baseHidden === true) return;
-    if (edge.isParentChild !== true) return;
-    const hashSeed = `${edge.from}|${edge.to}`;
-    const curveType = (hashSeed.length % 2 === 0) ? "curvedCW" : "curvedCCW";
-    edge.smooth = { enabled: true, type: curveType, roundness: 0.2 };
-  });
-
-  // Curve router-to-router edges so overlapping links become individually visible.
-  {
-    const nodeByIdForCurves = new Map(nodeData.map((n) => [n.id, n]));
-    edgeData.forEach((edge) => {
-      if (edge.baseHidden === true) return;
-      if (edge.isParentChild === true) return;
-      const fromNode = nodeByIdForCurves.get(edge.from);
-      const toNode = nodeByIdForCurves.get(edge.to);
-      if (fromNode?.isRouter !== true || toNode?.isRouter !== true) return;
-      const hashSeed = `${edge.from}|${edge.to}`;
-      const curveType = (hashSeed.length % 2 === 0) ? "curvedCW" : "curvedCCW";
-      edge.smooth = { enabled: true, type: curveType, roundness: 0.26 };
-    });
-  }
+  assignParallelEdgeCurves(edgeData, nodeData);
 
   const isMeshTreeProfile =
     physicsProfileName === PHYSICS_PROFILE_MESH_TREE_HORIZONTAL ||

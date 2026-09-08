@@ -380,17 +380,26 @@ export function resolveLayoutCollisions(nodes, options = {}) {
         const right = nodes[rightIndex];
         const deltaX = (right.x || 0) - (left.x || 0);
         const deltaY = (right.y || 0) - (left.y || 0);
-        const distance = Math.hypot(deltaX, deltaY) || 0.01;
+        const actualDistance = Math.hypot(deltaX, deltaY);
+        const distance = actualDistance || 0.01;
         const minimum = separation(left, right);
         if (distance >= minimum) continue;
         const overlap = (minimum - distance) * damping;
-        const unitX = deltaX / distance;
-        const unitY = deltaY / distance;
-        left.x = Math.round((left.x || 0) - unitX * overlap * 0.5);
-        left.y = Math.round((left.y || 0) - unitY * overlap * 0.5);
-        right.x = Math.round((right.x || 0) + unitX * overlap * 0.5);
-        right.y = Math.round((right.y || 0) + unitY * overlap * 0.5);
-        moved = true;
+        const pairText = [String(left.id), String(right.id)].sort().join("|");
+        const angle = [...pairText].reduce((hash, character) => ((hash * 31) + character.charCodeAt(0)) >>> 0, 0)
+          % 360 * (Math.PI / 180);
+        const direction = String(left.id).localeCompare(String(right.id)) <= 0 ? 1 : -1;
+        const unitX = actualDistance ? deltaX / distance : Math.cos(angle) * direction;
+        const unitY = actualDistance ? deltaY / distance : Math.sin(angle) * direction;
+        const leftX = Math.round((left.x || 0) - unitX * overlap * 0.5);
+        const leftY = Math.round((left.y || 0) - unitY * overlap * 0.5);
+        const rightX = Math.round((right.x || 0) + unitX * overlap * 0.5);
+        const rightY = Math.round((right.y || 0) + unitY * overlap * 0.5);
+        if (left.x !== leftX || left.y !== leftY || right.x !== rightX || right.y !== rightY) moved = true;
+        left.x = leftX;
+        left.y = leftY;
+        right.x = rightX;
+        right.y = rightY;
       }
     }
     if (afterIteration?.() === true) moved = true;
