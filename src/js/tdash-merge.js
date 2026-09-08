@@ -1,5 +1,5 @@
 import { MERGE_STRATEGIES, SOURCE_PRECEDENCE } from "./tdash-constants.js";
-import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
+import { getDeviceIdentityKeys, isPlaceholderExtAddress } from "./tdash-device-fields.js";
 import {
   toText,
   isPlainObject,
@@ -470,13 +470,13 @@ function mergeRouteObjects(existing, incoming, context) {
 export const MERGE_FIELD_HANDLERS = Object.freeze({
   route: (existing, incoming, context) => mergeRouteObjects(existing, incoming, context),
   children: (existing, incoming, context) =>
-    mergeChildrenArray(context.ownerRloc16, Array.isArray(existing) ? existing : [], incoming),
+    mergeChildrenArray(context.ownerRloc16, Array.isArray(existing) ? existing : [], incoming, context),
   childTable: (existing, incoming, context) =>
-    mergeChildrenArray(context.ownerRloc16, Array.isArray(existing) ? existing : [], incoming),
+    mergeChildrenArray(context.ownerRloc16, Array.isArray(existing) ? existing : [], incoming, context),
   childIpv6Addresses: (existing, incoming) =>
     mergeStringArrays(Array.isArray(existing) ? existing : [], incoming),
-  routerNeighbors: (existing, incoming) =>
-    mergeRouterNeighbors(Array.isArray(existing) ? existing : [], incoming),
+  routerNeighbors: (existing, incoming, context) =>
+    mergeRouterNeighbors(Array.isArray(existing) ? existing : [], incoming, context),
 });
 
 export function mergeRowFields(target, source, context = {}) {
@@ -704,36 +704,75 @@ export function mergeRouteData(ownerRloc16, baseRoutes, incomingRoutes, ctx = {}
  * @param {Array}  incomingChildren
  * @returns {Array}
  */
-export function mergeChildrenArray(parentRloc16, baseChildren, incomingChildren) {
-  const index = new Map();
-  const childKey = (child) => {
-    const ext = canonicalIdText(child.extAddress ?? child.extaddr);
-    if (ext) return `ext:${ext}`;
-    const r = canonicalIdText(child.rloc16);
-    if (r) return `rloc16:${r}`;
-    return null;
+function mergeRelationshipArrays(baseRecords, incomingRecords, context = {}) {
+  const records = [];
+  const byExtAddress = new Map();
+  const byRloc16 = new Map();
+
+  const mergeRecord = (target, source) => {
+    Object.keys(source).forEach((field) => {
+      const replacesPlaceholderExtAddress =
+        (field === "extAddress" || field === "extaddr")
+        && isPlaceholderExtAddress(target[field])
+        && !isPlaceholderExtAddress(source[field]);
+      if ((isEmptyMergeValue(target[field]) || replacesPlaceholderExtAddress) && !isEmptyMergeValue(source[field])) {
+        target[field] = source[field];
+      }
+    });
   };
-  baseChildren.forEach((child) => {
-    if (!isPlainObject(child)) return;
-    const k = childKey(child);
-    if (k) index.set(k, { ...child });
-  });
-  incomingChildren.forEach((child) => {
-    if (!isPlainObject(child)) return;
-    const k = childKey(child);
-    if (!k) return;
-    const existing = index.get(k);
-    if (!existing) {
-      index.set(k, { ...child });
-    } else {
-      Object.keys(child).forEach((f) => {
-        if (isEmptyMergeValue(existing[f]) && !isEmptyMergeValue(child[f])) {
-          existing[f] = child[f];
-        }
-      });
+  const indexRecord = (record, extAddress, rloc16) => {
+    if (extAddress) byExtAddress.set(extAddress, record);
+    if (rloc16) {
+      const matches = byRloc16.get(rloc16) ?? new Set();
+      matches.add(record);
+      byRloc16.set(rloc16, matches);
     }
-  });
-  return Array.from(index.values());
+  };
+  const addRecord = (source) => {
+    if (!isPlainObject(source)) return;
+    const extAddress = canonicalIdText(source.extAddress ?? source.extaddr);
+    const concreteExtAddress = extAddress && !isPlaceholderExtAddress(extAddress) ? extAddress : "";
+    const rloc16 = canonicalIdText(source.rloc16);
+    const extMatch = concreteExtAddress ? byExtAddress.get(concreteExtAddress) : undefined;
+    const rlocMatches = rloc16 ? byRloc16.get(rloc16) : undefined;
+    const rlocMatch = rlocMatches?.size === 1 ? [...rlocMatches][0] : undefined;
+
+    if (extMatch) {
+      mergeRecord(extMatch, source);
+      indexRecord(extMatch, concreteExtAddress, rloc16);
+      return;
+    }
+    if (rlocMatch) {
+      const matchedExtAddress = canonicalIdText(rlocMatch.extAddress ?? rlocMatch.extaddr);
+      const matchedConcreteExtAddress = matchedExtAddress && !isPlaceholderExtAddress(matchedExtAddress)
+        ? matchedExtAddress
+        : "";
+      if (!concreteExtAddress || !matchedConcreteExtAddress) {
+        mergeRecord(rlocMatch, source);
+        indexRecord(rlocMatch, concreteExtAddress, rloc16);
+        return;
+      }
+      appendRowConflict(
+        context.conflictTarget ?? rlocMatch,
+        `${context.fieldPath || "relationship"}[rloc16:${rloc16}].extAddress`,
+        matchedConcreteExtAddress,
+        concreteExtAddress,
+        context.conflictLimit ?? 20,
+      );
+    }
+
+    const record = { ...source };
+    records.push(record);
+    indexRecord(record, concreteExtAddress, rloc16);
+  };
+
+  [...(Array.isArray(baseRecords) ? baseRecords : []), ...(Array.isArray(incomingRecords) ? incomingRecords : [])]
+    .forEach(addRecord);
+  return records;
+}
+
+export function mergeChildrenArray(parentRloc16, baseChildren, incomingChildren, context = {}) {
+  return mergeRelationshipArrays(baseChildren, incomingChildren, context);
 }
 
 /**
@@ -744,36 +783,8 @@ export function mergeChildrenArray(parentRloc16, baseChildren, incomingChildren)
  * @param {Array} incomingNeighbors
  * @returns {Array}
  */
-export function mergeRouterNeighbors(baseNeighbors, incomingNeighbors) {
-  const index = new Map();
-  const neighborKey = (n) => {
-    const ext = canonicalIdText(n.extAddress ?? n.extaddr);
-    if (ext) return `ext:${ext}`;
-    const r = canonicalIdText(n.rloc16);
-    if (r) return `rloc16:${r}`;
-    return null;
-  };
-  baseNeighbors.forEach((n) => {
-    if (!isPlainObject(n)) return;
-    const k = neighborKey(n);
-    if (k) index.set(k, { ...n });
-  });
-  incomingNeighbors.forEach((n) => {
-    if (!isPlainObject(n)) return;
-    const k = neighborKey(n);
-    if (!k) return;
-    const existing = index.get(k);
-    if (!existing) {
-      index.set(k, { ...n });
-    } else {
-      Object.keys(n).forEach((f) => {
-        if (isEmptyMergeValue(existing[f]) && !isEmptyMergeValue(n[f])) {
-          existing[f] = n[f];
-        }
-      });
-    }
-  });
-  return Array.from(index.values());
+export function mergeRouterNeighbors(baseNeighbors, incomingNeighbors, context = {}) {
+  return mergeRelationshipArrays(baseNeighbors, incomingNeighbors, context);
 }
 
 // ── Source precedence sorting (#1) ────────────────────────────────────────────

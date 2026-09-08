@@ -58,6 +58,7 @@ import {
   DEVICE_SELECTION_EVENT,
   publishDeviceSelection,
 } from "./tdash-utils.js";
+import { canonicalizeExtAddress } from "./tdash-device-fields.js";
 import {
   populateFilterSelects,
   populateDiagnosticFilterBySource,
@@ -678,10 +679,10 @@ function getSelectedValue(record, paths) {
 
 function projectSelectedDevice(record) {
   if (!record || typeof record !== "object") return null;
-  const extAddress = getSelectedValue(record, [
+  const extAddress = canonicalizeExtAddress(getSelectedValue(record, [
     "extAddress", "extaddr", "Extended MAC",
     "attributes.extAddress", "attributes.extaddr",
-  ]).trim().toLowerCase();
+  ]));
   return {
     rloc16: getSelectedValue(record, ["rloc16", "attributes.rloc16"]),
     extAddress,

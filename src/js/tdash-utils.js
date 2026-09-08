@@ -18,6 +18,7 @@ export function toText(value) {
 
 export function toFiniteNumber(value) {
   if (Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }

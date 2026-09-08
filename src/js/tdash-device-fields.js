@@ -133,7 +133,17 @@ export function getCanonicalRloc16(record) {
 
 export function isPlaceholderExtAddress(value) {
   const normalized = normalizeIdentifierText(value);
-  return normalized === "" || PLACEHOLDER_EXT_ADDRESSES.has(normalized);
+  if (!normalized || /^(found|offline|unknown)-/.test(normalized)) return true;
+  return PLACEHOLDER_EXT_ADDRESSES.has(normalized.replace(/[:.-]/g, ""));
+}
+
+export function canonicalizeExtAddress(value) {
+  const normalized = normalizeIdentifierText(value);
+  if (/^[0-9a-f]{16}$/.test(normalized)) return normalized;
+  const separator = normalized.match(/[:.-]/)?.[0];
+  const octets = separator ? normalized.split(separator) : [];
+  if (octets.length === 8 && octets.every((octet) => /^[0-9a-f]{2}$/.test(octet))) return octets.join("");
+  return "";
 }
 
 function getPath(record, path) {
