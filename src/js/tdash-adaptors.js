@@ -917,6 +917,7 @@ export function adaptThreadToolsNative(fileMap) {
 
   function normalizeThreadToolsChild(child) {
     if (!isPlainObject(child) || typeof child.isDeviceTypeMtd !== 'boolean') return child;
+    // Thread Tools exports FTD status under the misnamed isDeviceTypeMtd field.
     return { ...child, isDeviceTypeFtd: child.isDeviceTypeMtd };
   }
 

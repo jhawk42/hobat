@@ -855,6 +855,12 @@ async def _dispatch_long_cost(
                     if not j.detail:
                         j.detail = _JOB_CANCEL_GRACE_DETAIL
                 raise
+            except Exception as exc:
+                j = _job_registry.get(jid)
+                if j is not None:
+                    j.status = JOB_STATUS_ERROR
+                    j.detail = f"{type(exc).__name__}: {exc}"[:512]
+                return
 
             j = _job_registry.get(jid)
             if j is None:

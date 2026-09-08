@@ -403,6 +403,36 @@ class TestDispatchLongCost(unittest.IsolatedAsyncioTestCase):
         jobs = list(td_webserver._job_registry.values())
         self.assertEqual(jobs[0].status, "error")
 
+    async def test_job_status_transitions_to_error_on_timeout(self) -> None:
+        filename = "td-otbr-cli-networkdiag-fetch-all.json"
+        fa = _make_file_action(action_cost_s=480)
+
+        async def timed_out_td_cli(args, data_dir, *, timeout_s=None):
+            raise asyncio.TimeoutError("collector timed out")
+
+        with patch.object(td_webserver, "run_td_cli", side_effect=timed_out_td_cli):
+            await _dispatch_long_cost(filename, fa.action, self.data_dir, fa)
+            await asyncio.gather(*list(td_webserver._background_tasks))
+
+        jobs = list(td_webserver._job_registry.values())
+        self.assertEqual(jobs[0].status, "error")
+        self.assertIn("TimeoutError: collector timed out", jobs[0].detail)
+
+    async def test_job_status_transitions_to_error_on_os_failure(self) -> None:
+        filename = "td-otbr-cli-networkdiag-fetch-all.json"
+        fa = _make_file_action(action_cost_s=480)
+
+        async def unavailable_td_cli(args, data_dir, *, timeout_s=None):
+            raise OSError("executable unavailable")
+
+        with patch.object(td_webserver, "run_td_cli", side_effect=unavailable_td_cli):
+            await _dispatch_long_cost(filename, fa.action, self.data_dir, fa)
+            await asyncio.gather(*list(td_webserver._background_tasks))
+
+        jobs = list(td_webserver._job_registry.values())
+        self.assertEqual(jobs[0].status, "error")
+        self.assertIn("OSError: executable unavailable", jobs[0].detail)
+
 
 # ---------------------------------------------------------------------------
 # R4e — _dispatch_short_cost
