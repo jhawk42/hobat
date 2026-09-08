@@ -127,6 +127,15 @@ export function getCanonicalOmrAddress(record) {
   return firstIdentifier(record, OMR_ADDRESS_ALIASES);
 }
 
+export function isPlaceholderOmrAddress(value) {
+  const normalized = normalizeIdentifierText(value);
+  const halves = normalized.split("::");
+  if (halves.length > 2 || !normalized.includes(":")) return false;
+  const groups = halves.flatMap((half) => half ? half.split(":") : []);
+  if (!groups.every((group) => /^0{1,4}$/.test(group))) return false;
+  return halves.length === 2 ? groups.length < 8 : groups.length === 8;
+}
+
 export function getCanonicalRloc16(record) {
   return firstIdentifier(record, RLOC16_ALIASES);
 }
@@ -296,7 +305,7 @@ export function getDeviceIdentityKeys(record, strategy = "by-identity", options 
     const extAddress = getCanonicalExtAddress(record);
     if (extAddress && !isPlaceholderExtAddress(extAddress)) keys.push(`extAddress:${extAddress}`);
     const omrAddress = getCanonicalOmrAddress(record);
-    if (omrAddress) keys.push(`omrIpv6Address:${omrAddress}`);
+    if (omrAddress && !isPlaceholderOmrAddress(omrAddress)) keys.push(`omrIpv6Address:${omrAddress}`);
     const matterIdentity = matterCompositeIdentity(record);
     if (matterIdentity) keys.push(`matterFabricNode:${matterIdentity}`);
   }

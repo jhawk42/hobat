@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from copy import deepcopy
 from typing import Any, Mapping
 
@@ -120,6 +121,16 @@ def get_canonical_ext_address(record: Mapping[str, Any]) -> str:
 
 def get_canonical_omr_address(record: Mapping[str, Any]) -> str:
     return _first_identifier(record, OMR_ADDRESS_ALIASES)
+
+
+def is_placeholder_omr_address(value: Any) -> bool:
+    normalized = normalize_identifier_text(value)
+    if not normalized:
+        return False
+    try:
+        return ipaddress.IPv6Address(normalized).is_unspecified
+    except ipaddress.AddressValueError:
+        return False
 
 
 def get_canonical_rloc16(record: Mapping[str, Any]) -> str:
@@ -279,7 +290,7 @@ def get_device_identity_keys(
         if ext_address and not is_placeholder_ext_address(ext_address):
             keys.append(f"extAddress:{ext_address}")
         omr_address = get_canonical_omr_address(record)
-        if omr_address:
+        if omr_address and not is_placeholder_omr_address(omr_address):
             keys.append(f"omrIpv6Address:{omr_address}")
     rloc16 = get_canonical_rloc16(record)
     if rloc16:

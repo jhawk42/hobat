@@ -26,6 +26,7 @@ from td_device_fields import (
     get_canonical_ext_address,
     get_canonical_omr_address,
     is_placeholder_ext_address,
+    is_placeholder_omr_address,
     normalize_identifier_text as normalize_device_identifier_text,
     normalize_input_record,
 )
@@ -1387,7 +1388,7 @@ def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
         identities["extAddress"] = extaddr
 
     omr = get_canonical_omr(record)
-    if omr:
+    if omr and not is_placeholder_omr_address(omr):
         identities["omrIpv6Address"] = omr
 
     rloc16 = normalize_identifier_text(
@@ -2087,7 +2088,11 @@ def evaluate_merge_viability(
         extaddr = get_canonical_extaddr(node)
         rloc16 = normalize_identifier_text(node.get("rloc16"))
         omr_addr = get_canonical_omr(node)
-        if (extaddr and not is_placeholder_extaddr(extaddr)) or rloc16 or omr_addr:
+        if (
+            (extaddr and not is_placeholder_extaddr(extaddr))
+            or rloc16
+            or (omr_addr and not is_placeholder_omr_address(omr_addr))
+        ):
             identity_seed_record_count += 1
 
     viable = identity_seed_record_count > 0

@@ -39,6 +39,7 @@ import {
   getCanonicalExtaddr,
   getCanonicalOmrIpv6Address,
 } from "./tdash-utils.js";
+import { isPlaceholderOmrAddress } from "./tdash-device-fields.js";
 
 // ── Link-category normalisation ───────────────────────────────────────────────
 
@@ -1041,7 +1042,9 @@ function getNetworkInsightIdentity(record, rowIndex) {
   const extAddress = getCanonicalExtaddr(record);
   if (extAddress) return `extAddress:${extAddress}`;
   const omrIpv6Address = getCanonicalOmrIpv6Address(record);
-  if (omrIpv6Address) return `omrIpv6Address:${omrIpv6Address}`;
+  if (omrIpv6Address && !isPlaceholderOmrAddress(omrIpv6Address)) {
+    return `omrIpv6Address:${omrIpv6Address}`;
+  }
   const rowId = toText(record?.id) || toText(record?.recordKey);
   return rowId ? `row:${rowId.toLowerCase()}` : `row-index:${rowIndex}`;
 }

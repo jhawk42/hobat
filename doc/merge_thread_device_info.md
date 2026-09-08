@@ -19,7 +19,10 @@ source precedence, conflicts, and idempotence across the two runtimes.
 ## Identity
 
 Canonical identity values are normalized as trimmed, lowercase text. Empty
-values and the all-zero extended-address placeholder are not valid identities.
+values, the all-zero extended-address placeholder, and the IPv6 unspecified
+address (`::`, including equivalent expanded forms) are not valid identities.
+Unspecified OMR values remain visible in source data but are not indexed for
+device correlation.
 
 The principal identities are:
 

@@ -15,6 +15,7 @@ import {
   mergeRowsByRloc16,
   mergeRowsByIdentity,
 } from "./tdash-merge.js";
+import { isPlaceholderOmrAddress } from "./tdash-device-fields.js";
 
 // ── Module-level state ────────────────────────────────────────────────────────
 
@@ -107,9 +108,10 @@ function extractProcessedEveRows(payload) {
     if (!isPlainObject(value)) return [];
     const row = { ...value };
     const keyIsRloc16 = /^0x[0-9a-f]{4}$/i.test(key);
+    const omrIpv6Address = getCanonicalOmrIpv6Address(row);
     const hasCanonicalIdentity = getCanonicalRloc16(row)
       || getCanonicalExtaddr(row)
-      || getCanonicalOmrIpv6Address(row);
+      || (omrIpv6Address && !isPlaceholderOmrAddress(omrIpv6Address));
     const keyMatchesEveId = canonicalIdText(row.id) === canonicalIdText(key);
     if (!keyIsRloc16 && !hasCanonicalIdentity && !keyMatchesEveId) return [];
     if (!hasCanonicalIdentity && keyIsRloc16) row.rloc16 = key;

@@ -22,6 +22,7 @@ import {
   addEdge, buildEdgeTitle, groupIsolatedUnknownNodes, buildVisNodeData, buildNodeLabelFont,
   lqStyleFromField, lqStyleFromAvgLqi, lqStyleFromLinkMargin
 } from './tdash-topology-utils.js';
+import { isPlaceholderOmrAddress } from './tdash-device-fields.js';
 import {
   createAdaptorModel,
   createAdaptorModelFromResult,
@@ -145,7 +146,7 @@ function applyMergedRowLabels(nodeMap, mergedRows) {
     const omr = getCanonicalOmrIpv6Address(node);
     if (rloc16) nodeIdByRloc16.set(rloc16, nodeId);
     if (extaddr) nodeIdByExtaddr.set(extaddr, nodeId);
-    if (omr) nodeIdByOmr.set(omr, nodeId);
+    if (omr && !isPlaceholderOmrAddress(omr)) nodeIdByOmr.set(omr, nodeId);
   });
 
   mergedRows.forEach((row) => {
@@ -155,7 +156,7 @@ function applyMergedRowLabels(nodeMap, mergedRows) {
     const omr = getCanonicalOmrIpv6Address(row);
     const nodeId =
       (extaddr && nodeIdByExtaddr.get(extaddr))
-      || (omr && nodeIdByOmr.get(omr))
+      || (omr && !isPlaceholderOmrAddress(omr) && nodeIdByOmr.get(omr))
       || (rloc16 && nodeIdByRloc16.get(rloc16));
     if (!nodeId) return;
 
@@ -605,13 +606,13 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
   const extaddrToNodeId = new Map();
   rawByIdForDetails.forEach((raw, id) => {
     const omr = getCanonicalOmrIpv6Address(raw);
-    if (omr) omrToNodeId.set(omr, id);
+    if (omr && !isPlaceholderOmrAddress(omr)) omrToNodeId.set(omr, id);
     const ea = getCanonicalExtaddr(raw);
     if (ea) extaddrToNodeId.set(ea, id);
   });
   nodeMap.forEach((node, id) => {
     const omr = getCanonicalOmrIpv6Address(node);
-    if (omr && !omrToNodeId.has(omr)) omrToNodeId.set(omr, id);
+    if (omr && !isPlaceholderOmrAddress(omr) && !omrToNodeId.has(omr)) omrToNodeId.set(omr, id);
     const ea = getCanonicalExtaddr(node);
     if (ea && !extaddrToNodeId.has(ea)) extaddrToNodeId.set(ea, id);
   });
@@ -622,7 +623,8 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
       if (!isPlainObject(record)) return;
       const omr = getCanonicalOmrIpv6Address(record);
       const ea = getCanonicalExtaddr(record);
-      const nodeId = (omr && omrToNodeId.get(omr)) || (ea && extaddrToNodeId.get(ea));
+      const nodeId = (omr && !isPlaceholderOmrAddress(omr) && omrToNodeId.get(omr))
+        || (ea && extaddrToNodeId.get(ea));
       if (!nodeId) return;
       const existing = rawByIdForDetails.get(nodeId) || {};
         // Supplementary files (e.g. mdns) should enrich missing fields but not

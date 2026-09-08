@@ -461,6 +461,26 @@
       }
     },
     {
+      "id": "unspecified-omr-does-not-merge-devices",
+      "area": "identity",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "The IPv6 unspecified address is retained as source data but cannot correlate distinct devices.",
+      "inputs": {
+        "strategy": "by-identity",
+        "sources": [
+          {"name":"alpha.json","records":[{"extAddress":"0011223344556677","omrIpv6Address":"::","name":"alpha"}]},
+          {"name":"beta.json","records":[{"extAddress":"8899aabbccddeeff","omrIpv6Address":"0:0:0:0:0:0:0:0","name":"beta"}]}
+        ]
+      },
+      "expected": {
+        "contract": [
+          {"extAddress":"0011223344556677","omrIpv6Address":"::","name":"alpha","_source_files":["alpha.json"]},
+          {"extAddress":"8899aabbccddeeff","omrIpv6Address":"0:0:0:0:0:0:0:0","name":"beta","_source_files":["beta.json"]}
+        ]
+      }
+    },
+    {
       "id": "matter-composite-guard-separates-shared-omr",
       "area": "matter",
       "operation": "merge",
