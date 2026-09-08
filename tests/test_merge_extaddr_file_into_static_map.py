@@ -452,6 +452,56 @@ class MergeExtaddrFilesTests(unittest.TestCase):
             updated_static = self._read_json(static_path)
             self.assertEqual(updated_static[0]["device_label"], "Garage HomePod")
 
+    def test_merge_preserves_existing_record_keys_and_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            static_path = temp_path / "td-static-extaddr-device-label.json"
+            topology_path = temp_path / "topology.json"
+            self._write_json(
+                static_path,
+                [
+                    {
+                        "extAddress": "4000000000000000",
+                        "deviceLabel": "Unknown Device",
+                        "eui": "eui-1",
+                        "rloc16": "0x4000",
+                        "notes": {"source": "manual"},
+                    }
+                ],
+            )
+            self._write_json(
+                topology_path,
+                [
+                    {"extaddr": "4000000000000000", "name": "Garage HomePod"},
+                    {"extaddr": "5000000000000000", "device_label": "Kitchen Sensor"},
+                ],
+            )
+
+            result = merge_extaddr_files(
+                static_path,
+                topology_path,
+                merge_name_override=True,
+            )
+
+            self.assertEqual(result[0], 1)
+            self.assertEqual(result[2], 1)
+            self.assertEqual(
+                self._read_json(static_path),
+                [
+                    {
+                        "extAddress": "4000000000000000",
+                        "deviceLabel": "Garage HomePod",
+                        "eui": "eui-1",
+                        "rloc16": "0x4000",
+                        "notes": {"source": "manual"},
+                    },
+                    {
+                        "extaddr": "5000000000000000",
+                        "device_label": "Kitchen Sensor",
+                    },
+                ],
+            )
+
     def test_duplicate_extaddr_in_topology_uses_last_usable_value(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

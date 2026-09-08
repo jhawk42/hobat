@@ -184,34 +184,26 @@ def merge_extaddr_files(
     Returns:
         Tuple of (num_added, added_entries, num_overridden, overridden_entries)
     """
-    # Load static extaddr file
-
-#   with open(extaddr_json_path, 'r') as f:
-#         static_data = json.load(f)
-#     logging.info(f"Loaded {len(static_data)} entries from static extaddr file: {extaddr_json_path}")
-
-#     # Extract extaddr values
-#     static_extaddrs = {item['extaddr'] for item in static_data}
-
-    # Check if file exists before parsing
-    if os.path.exists(extaddr_json_path):
+    static_data = _load_static_records_strict(extaddr_json_path, allow_missing=True)
+    if static_data:
         logging.info(
-            f"Loading extended address to node name mapping from {extaddr_json_path}..."
+            "Loaded %d entries from static extaddr file: %s",
+            len(static_data),
+            extaddr_json_path,
         )
-        extaddr_map = load_extaddr_device_label_map(
-            extaddr_json_path)
     else:
-        extaddr_map = {}
-        logging.warning(f"Static extaddr file does not exist: {extaddr_json_path}. Starting with empty mapping.")
+        logging.warning(
+            "No valid entries found in static extaddr file: %s", extaddr_json_path)
 
-    if not extaddr_map:
-        logging.warning(f"No valid entries found in static extaddr file: {extaddr_json_path}")  
-        static_data = []
-        static_extaddrs = set()
-    else:
-        logging.info(f"Loaded {len(extaddr_map)} entries from static extaddr file: {extaddr_json_path}")
-        static_data = [{'extaddr': extaddr, 'device_label': label} for extaddr, label in extaddr_map.items()]
-        static_extaddrs = {item['extaddr'] for item in static_data}
+    static_records_by_extaddr = {
+        normalize_valid_extaddr(
+            record.get("extAddress")
+            or record.get("extaddr")
+            or record.get("Extended MAC")
+        ): record
+        for record in static_data
+    }
+    static_extaddrs = set(static_records_by_extaddr)
 
     try:
         # Short circuit if merge input file does not exist
@@ -285,14 +277,9 @@ def merge_extaddr_files(
     # Optionally replace static Unknown labels with merge input name for matching extaddr entries.
     overridden_entries = []
     if merge_name_override:
-        for item in static_data:
-            extaddr = item.get('extaddr')
-            if not _is_valid_label(extaddr):
-                continue
-
-            static_label = item.get('device_label', '')
-            if not isinstance(static_label, str):
-                continue
+        for extaddr, item in static_records_by_extaddr.items():
+            label_key = "deviceLabel" if "deviceLabel" in item else "device_label"
+            static_label = item.get(label_key, "")
             if 'unknown' not in static_label.lower():
                 continue
 
@@ -301,9 +288,9 @@ def merge_extaddr_files(
                 continue
 
             name = name.strip()
-            if item['device_label'] != name:
-                old_label = item['device_label']
-                item['device_label'] = name
+            if static_label != name:
+                old_label = static_label
+                item[label_key] = name
                 overridden_entries.append(
                     {
                         "extaddr": extaddr,
@@ -324,15 +311,14 @@ def merge_extaddr_files(
         }
         added_entries.append(new_entry)
     
-    # Add entries to static_data in sorted order
-    for new_entry in added_entries:
-        insert_pos = 0
-        for i, item in enumerate(static_data):
-            if new_entry['extaddr'] < item['extaddr']:
-                insert_pos = i
-                break
-            insert_pos = i + 1
-        static_data.insert(insert_pos, new_entry)
+    static_data.extend(added_entries)
+    static_data.sort(
+        key=lambda item: normalize_valid_extaddr(
+            item.get("extAddress")
+            or item.get("extaddr")
+            or item.get("Extended MAC")
+        )
+    )
     
     # Write updated data back to static file
     save_json_atomic(static_data, extaddr_json_path)
