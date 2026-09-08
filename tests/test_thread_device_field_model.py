@@ -231,4 +231,7 @@ def test_python_field_model_normalization(case: dict[str, Any]) -> None:
 def test_ext_address_placeholder_policy() -> None:
     assert is_placeholder_ext_address("")
     assert is_placeholder_ext_address("0000000000000000")
+    assert is_placeholder_ext_address("found-0x5002")
+    assert is_placeholder_ext_address("Unknown-0x5002")
+    assert is_placeholder_ext_address("OFFLINE-0x5002")
     assert not is_placeholder_ext_address("0011223344556677")

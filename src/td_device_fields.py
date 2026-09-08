@@ -128,7 +128,11 @@ def get_canonical_rloc16(record: Mapping[str, Any]) -> str:
 
 def is_placeholder_ext_address(value: Any) -> bool:
     normalized = normalize_identifier_text(value)
-    return normalized in PLACEHOLDER_EXT_ADDRESSES or normalized == ""
+    return (
+        normalized in PLACEHOLDER_EXT_ADDRESSES
+        or normalized == ""
+        or normalized.startswith(("found-", "unknown-", "offline-"))
+    )
 
 
 def _get_path(record: Mapping[str, Any], path: str) -> tuple[bool, Any]:

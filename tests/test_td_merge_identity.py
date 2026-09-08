@@ -76,6 +76,32 @@ class BuildMergedRecordsIdentityTests(unittest.TestCase):
             self.assertCountEqual(record["_source_files"], ["one.json", "two.json"])
             self.assertEqual(report["multi_source_nodes_total"], 1)
 
+    def test_merges_generated_extaddr_placeholder_with_concrete_rloc_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            self.write_json(
+                base_dir,
+                "placeholder.json",
+                [{"extaddr": "found-0x5002", "rloc16": "0x5002"}],
+            )
+            self.write_json(
+                base_dir,
+                "concrete.json",
+                [{"extaddr": "0011223344556677", "rloc16": "0x5002"}],
+            )
+
+            merged_records, report = build_merged_records(
+                base_dir,
+                "fd00:1234::",
+                ["placeholder.json", "concrete.json"],
+                {},
+            )
+
+            self.assertEqual(len(merged_records), 1)
+            self.assertEqual(merged_records[0]["extAddress"], "0011223344556677")
+            self.assertEqual(merged_records[0]["rloc16"], "0x5002")
+            self.assertEqual(report["multi_source_nodes_total"], 1)
+
     def test_merges_omr_ipv6_address_camelcase_alias(self) -> None:
         """Test that omrIpv6Address (REST API camelCase) merges with omr_ipv6_addr (CLI snake_case)."""
         with tempfile.TemporaryDirectory() as temp_dir:

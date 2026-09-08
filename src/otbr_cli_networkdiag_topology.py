@@ -26,7 +26,7 @@ import util_network
 import otbr_cli_device
 from util_data import data_file_path, resolve_data_dir, save_json_atomic, create_checkpoint_filename
 from td_json_key_normalizer import convert_keys_to_camel_case
-from td_device_fields import get_canonical_rloc16
+from td_device_fields import get_canonical_rloc16, is_placeholder_ext_address
 from extaddr_device_label_map import load_extaddr_device_label_map
 from otbr_cli_router_table import fetch_and_parse_router_table
 
@@ -648,7 +648,7 @@ def _upsert_device_record(
         return
 
     # Placeholder identities must not participate in EXTADDR move detection.
-    if extaddr and not extaddr.startswith(("found-", "Unknown-", "Offline-")):
+    if extaddr and not is_placeholder_ext_address(extaddr):
         # Check if this extaddr already exists with a different rloc16
         existing_rloc16 = extaddr_to_rloc.get(extaddr)
 
@@ -1307,9 +1307,7 @@ def reconcile_child_fetch_outcome(
         known = (
             isinstance(existing, dict)
             and existing.get("extaddr")
-            and not str(existing["extaddr"]).startswith(
-                ("found-", "Unknown-", "Offline-")
-            )
+            and not is_placeholder_ext_address(existing["extaddr"])
         )
         if not known:
             fallback = _build_unknown_device_record(

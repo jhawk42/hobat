@@ -19,12 +19,12 @@ from typing import Any
 import pytest
 
 from merge_dataset import main as merge_dataset_main
+from td_device_fields import is_placeholder_ext_address
 
 pytestmark = pytest.mark.requires_data_dir
 
 # Test data directory
 DATA_DIR = Path(__file__).parent.parent / "data"
-PLACEHOLDER_EXTADDRS = {"0000000000000000"}
 
 
 # =============================================================================
@@ -258,14 +258,14 @@ def test_data_loss_detection(merged_data: list[dict[str, Any]], isolated_data_di
                             extaddr = record.get("extaddr") or record.get("extAddress")
                             if extaddr:
                                 normalized = str(extaddr).strip().lower()
-                                if normalized and normalized not in PLACEHOLDER_EXTADDRS:
+                                if normalized and not is_placeholder_ext_address(normalized):
                                     input_extaddrs.add(normalized)
                 elif isinstance(data, dict):
                     total_input_records += 1
                     extaddr = data.get("extaddr") or data.get("extAddress")
                     if extaddr:
                         normalized = str(extaddr).strip().lower()
-                        if normalized and normalized not in PLACEHOLDER_EXTADDRS:
+                        if normalized and not is_placeholder_ext_address(normalized):
                             input_extaddrs.add(normalized)
             except json.JSONDecodeError as exc:
                 pytest.fail(f"Required Phase 5 fixture is malformed: {filename}: {exc}")
@@ -279,7 +279,7 @@ def test_data_loss_detection(merged_data: list[dict[str, Any]], isolated_data_di
             extaddr = node.get("extaddr") or node.get("extAddress")
             if extaddr:
                 normalized = str(extaddr).strip().lower()
-                if normalized and normalized not in PLACEHOLDER_EXTADDRS:
+                if normalized and not is_placeholder_ext_address(normalized):
                     merged_extaddrs.add(normalized)
     
     print(f"  Merged output nodes: {len(merged_data)}")
