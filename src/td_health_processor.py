@@ -83,11 +83,11 @@ def _outcome_state(payload: Any) -> Completeness:
     return Completeness.DEGRADED
 
 
-def _percent_fraction(value: Any, datasource_id: str) -> float | None:
+def _percent_fraction(value: Any, filename: str) -> float | None:
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         return None
     number = float(value)
-    if datasource_id == "otbr-cli":
+    if filename.startswith("td-otbr-cli-meshdiag-"):
         return number / 100.0
     return number
 
@@ -273,8 +273,8 @@ def _normalize_samples(
                         average_rssi=_number(child.get("averageRssi")),
                         last_rssi=_number(child.get("lastRssi")),
                         link_margin=_number(child.get("linkMargin")),
-                        frame_error_rate=_percent_fraction(child.get("frameErrorRate"), dataset.datasource_id),
-                        message_error_rate=_percent_fraction(child.get("messageErrorRate"), dataset.datasource_id),
+                        frame_error_rate=_percent_fraction(child.get("frameErrorRate"), filename),
+                        message_error_rate=_percent_fraction(child.get("messageErrorRate"), filename),
                         reporter_device_id=reporter_id,
                         source_files=(filename,),
                         queued_message_count=_number(

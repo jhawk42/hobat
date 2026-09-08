@@ -10,7 +10,13 @@ import pytest
 from td_health_observation_model import Completeness, HealthStatus
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_policy import load_health_policy
-from td_health_processor import HealthProcessingError, build_processing_result, process_health
+from td_health_processor import (
+    HealthProcessingError,
+    _normalize_samples,
+    build_processing_result,
+    process_health,
+)
+from td_health_manifest import load_health_manifest
 from td_health_sqlite import SQLiteHealthStore
 
 
@@ -507,6 +513,45 @@ def test_mac_counter_ratios_remain_unit_ratios(tmp_path) -> None:
         "extaddr:0000000000000001": 0.0,
         "extaddr:0000000000000002": 0.1,
         "extaddr:0000000000000003": 0.5,
+    }
+
+
+def test_merged_dataset_normalizes_relationship_error_rates_by_file_source() -> None:
+    dataset = load_health_manifest().dataset("merged_otbr_topology_mdns_health")
+    payloads = {filename: [] for filename in dataset.files}
+    payloads["td-otbr-cli-meshdiag-router-neighbortables.json"] = [
+        {
+            "extAddress": "0000000000000001",
+            "routerNeighbors": [
+                {"extAddress": "0000000000000002", "frameErrorRate": 0.5}
+            ],
+        },
+        {
+            "extAddress": "0000000000000003",
+            "routerNeighbors": [
+                {"extAddress": "0000000000000004", "frameErrorRate": 15}
+            ],
+        },
+    ]
+    payloads["td-otbr-restapi-mesh-diagnostics-fetch-all.json"] = [
+        {
+            "extAddress": "0000000000000005",
+            "routerNeighbors": [
+                {"extAddress": "0000000000000006", "frameErrorRate": 0.5}
+            ],
+        }
+    ]
+
+    _, relationships, _, _, _ = _normalize_samples(dataset, payloads)
+
+    rates = {
+        relationship.from_device_id: relationship.frame_error_rate
+        for relationship in relationships
+    }
+    assert rates == {
+        "extaddr:0000000000000001": 0.005,
+        "extaddr:0000000000000003": 0.15,
+        "extaddr:0000000000000005": 0.5,
     }
 
 
