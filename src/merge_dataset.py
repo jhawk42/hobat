@@ -700,14 +700,14 @@ def merge_route_data(
     for route in base_routes:
         if isinstance(route, dict):
             route_id = route.get("routeId")
-            if route_id:
+            if route_id is not None:
                 identity = (owner_rloc16, str(route_id))
                 merged_routes[identity] = deepcopy(route)
     
     for route in incoming_routes:
         if isinstance(route, dict):
             route_id = route.get("routeId")
-            if route_id:
+            if route_id is not None:
                 identity = (owner_rloc16, str(route_id))
                 # If already exists, prefer non-zero link quality values
                 if identity in merged_routes:

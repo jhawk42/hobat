@@ -143,6 +143,31 @@ def test_route_data_merge_no_duplicates():
     print(f"✅ PASS: Route merge prevents duplicates (1 route, not 2)")
 
 
+def test_route_data_merge_preserves_numeric_router_id_zero() -> None:
+    result = merge_route_data(
+        "0x1400",
+        {
+            "idSequence": 100,
+            "routeData": [
+                {"routeId": 0, "linkQualityOut": 0},
+                {"linkQualityOut": 3},
+            ],
+        },
+        {
+            "idSequence": 100,
+            "routeData": [
+                {"routeId": 0, "linkQualityIn": 3},
+                {"routeCost": 2},
+            ],
+        },
+        "0x12345678",
+    )
+
+    assert result["routeData"] == [
+        {"routeId": 0, "linkQualityOut": 0, "linkQualityIn": 3}
+    ]
+
+
 def test_route_data_sequence_precedence():
     """Test route data respects sequence number precedence."""
     print("\n=== Test: Route Data Sequence Precedence ===")
