@@ -742,6 +742,64 @@ def merge_route_data(
 # Phase 2: Children Array Merge (Composite Identity)
 # ============================================================================
 
+def _merge_relationship_records(
+    base_records: list[Any],
+    incoming_records: list[Any],
+    *,
+    parent_rloc16: str | None = None,
+    prefer_incoming_values: bool = False,
+) -> list[dict[str, Any]]:
+    merged: dict[int | str, dict[str, Any]] = {}
+    by_extaddr: dict[tuple[str | None, str], int] = {}
+    by_rloc16: dict[tuple[str | None, str], set[int]] = defaultdict(set)
+    next_id = 0
+
+    for record in base_records + incoming_records:
+        if not isinstance(record, dict):
+            continue
+
+        extaddr = normalize_identifier_text(record.get("extAddress"))
+        rloc16 = normalize_identifier_text(record.get("rloc16"))
+        if not extaddr and not rloc16:
+            merged[next_id] = deepcopy(record)
+            next_id += 1
+            continue
+
+        extaddr_key = (parent_rloc16, extaddr)
+        rloc16_key = (parent_rloc16, rloc16)
+        existing_id = by_extaddr.get(extaddr_key) if extaddr else None
+        rloc_candidates = by_rloc16[rloc16_key] if rloc16 else set()
+        if existing_id is None and len(rloc_candidates) == 1:
+            candidate_id = next(iter(rloc_candidates))
+            candidate_extaddr = normalize_identifier_text(
+                merged[candidate_id].get("extAddress"))
+            if not extaddr or not candidate_extaddr or candidate_extaddr == extaddr:
+                existing_id = candidate_id
+
+        if existing_id is None:
+            existing_id = next_id
+            next_id += 1
+            merged[existing_id] = deepcopy(record)
+        else:
+            existing = merged[existing_id]
+            for key, value in record.items():
+                if key not in existing or value_is_empty(existing.get(key)):
+                    existing[key] = value
+                elif (
+                    prefer_incoming_values
+                    and not value_is_empty(value)
+                    and existing.get(key) != value
+                ):
+                    existing[key] = value
+
+        if extaddr:
+            by_extaddr[extaddr_key] = existing_id
+        if rloc16:
+            by_rloc16[rloc16_key].add(existing_id)
+
+    return list(merged.values())
+
+
 def merge_children_array(
     parent_rloc16: str,
     base_children: list[Any],
@@ -760,39 +818,12 @@ def merge_children_array(
     Returns:
         Merged children array
     """
-    merged = {}
-    
-    for child in base_children + incoming_children:
-        if not isinstance(child, dict):
-            continue
-        
-        # Get child extaddr (globally unique)
-        child_extaddr = child.get("extAddress")
-        child_rloc16 = child.get("rloc16")
-        if not child_extaddr and not child_rloc16:
-            # No extaddr - can't create composite identity
-            # Add as-is (might be duplicate, but can't determine)
-            temp_key = json.dumps(child, sort_keys=True)
-            merged[temp_key] = child
-            continue
-        
-        identity_kind = "extAddress" if child_extaddr else "rloc16"
-        identity_value = normalize_identifier_text(child_extaddr or child_rloc16)
-        identity = (parent_rloc16, identity_kind, identity_value)
-        
-        if identity not in merged:
-            merged[identity] = deepcopy(child)
-        else:
-            # Merge additional fields (preserve more complete data)
-            existing = merged[identity]
-            for key, value in child.items():
-                if key not in existing or value_is_empty(existing.get(key)):
-                    existing[key] = value
-                elif not value_is_empty(value) and existing.get(key) != value:
-                    # Prefer newer data (e.g., updated age, RSSI)
-                    existing[key] = value
-    
-    return list(merged.values())
+    return _merge_relationship_records(
+        base_children,
+        incoming_children,
+        parent_rloc16=normalize_identifier_text(parent_rloc16),
+        prefer_incoming_values=True,
+    )
 
 
 # ============================================================================
@@ -813,36 +844,7 @@ def merge_router_neighbors(
     Returns:
         Merged routerNeighbors array
     """
-    merged = {}
-    
-    for neighbor in base_neighbors + incoming_neighbors:
-        if not isinstance(neighbor, dict):
-            continue
-        
-        # Identity by extaddr (preferred) or rloc16
-        extaddr = neighbor.get("extAddress")
-        rloc16 = neighbor.get("rloc16")
-        
-        if extaddr:
-            identity = ("extAddress", normalize_identifier_text(extaddr))
-        elif rloc16:
-            identity = ("rloc16", normalize_identifier_text(rloc16))
-        else:
-            # No identity - add as-is
-            temp_key = json.dumps(neighbor, sort_keys=True)
-            merged[temp_key] = neighbor
-            continue
-        
-        if identity not in merged:
-            merged[identity] = deepcopy(neighbor)
-        else:
-            # Merge additional fields
-            existing = merged[identity]
-            for key, value in neighbor.items():
-                if key not in existing or value_is_empty(existing.get(key)):
-                    existing[key] = value
-    
-    return list(merged.values())
+    return _merge_relationship_records(base_neighbors, incoming_neighbors)
 
 
 # ============================================================================

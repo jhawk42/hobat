@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from copy import deepcopy
 
+import pytest
+
 # Add src directory to path
 from merge_dataset import (
     get_canonical_field_name,
@@ -366,6 +368,50 @@ def test_router_neighbors_merge():
     assert result[0]["linkQualityOut"] == 2
     
     print("✅ PASS: Router neighbors merge correctly by identity")
+
+
+@pytest.mark.parametrize("reverse_order", [False, True])
+def test_relationship_merges_join_rloc_and_extaddr_identities(reverse_order):
+    rloc_only = {"rloc16": "0x1400", "linkQualityIn": 3}
+    identified = {
+        "extAddress": "0011223344556677",
+        "rloc16": "0x1400",
+        "linkQualityOut": 2,
+    }
+    base, incoming = (identified, rloc_only) if reverse_order else (rloc_only, identified)
+
+    children = merge_children_array("0x2000", [base], [incoming])
+    neighbors = merge_router_neighbors([base], [incoming])
+
+    for records in (children, neighbors):
+        assert len(records) == 1
+        assert records[0]["extAddress"] == "0011223344556677"
+        assert records[0]["rloc16"] == "0x1400"
+
+
+def test_relationship_merges_preserve_conflicting_and_ambiguous_identities():
+    first = {"extAddress": "0011223344556677", "rloc16": "0x1400"}
+    conflicting = {"extAddress": "8899aabbccddeeff", "rloc16": "0x1400"}
+    rloc_only = {"rloc16": "0x1400"}
+
+    children = merge_children_array("0x2000", [first], [conflicting, rloc_only])
+    neighbors = merge_router_neighbors([first], [conflicting, rloc_only])
+
+    for records in (children, neighbors):
+        assert len(records) == 3
+        assert {record.get("extAddress") for record in records} == {
+            "0011223344556677", "8899aabbccddeeff", None
+        }
+
+
+def test_children_relationship_identity_is_scoped_to_parent_and_keeps_anonymous_records():
+    child = {"rloc16": "0x1400"}
+    anonymous = {"age": 20}
+
+    assert len(
+        merge_children_array("0x2000", [child, anonymous], [child, anonymous])
+    ) == 3
+    assert len(merge_children_array("0x3000", [child], [child])) == 1
 
 
 def test_deep_merge_with_route_data():
