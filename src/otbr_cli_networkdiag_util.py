@@ -4,8 +4,9 @@ Provides TLV value sets, fetch utilities, device-type classification,
 device record merging, and TLV detail-level mapping used by
 otbr_cli_networkdiag_topology.py and otbr_cli_networkdiag_parsers.py.
 """
-import re
+import ipaddress
 import logging
+import re
 
 import util_ot_ctl
 
@@ -84,6 +85,34 @@ def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
             return TLV_VALUES_BASIC
 
 
+def _parse_meshdiag_ipv6_addresses(output: str) -> dict[str, list[str]]:
+    ipv6_map = {}
+    current_rloc16 = None
+
+    for line in output.splitlines():
+        rloc16_match = re.search(r"\brloc16:\s*(0x[0-9a-fA-F]{4})\b", line)
+        if rloc16_match:
+            current_rloc16 = rloc16_match.group(1).lower()
+            ipv6_map.setdefault(current_rloc16, [])
+            continue
+        if line.lstrip().startswith("id:"):
+            current_rloc16 = None
+            continue
+        if current_rloc16 is None:
+            continue
+        for candidate in re.findall(r"[0-9a-fA-F:]+", line):
+            if ":" not in candidate:
+                continue
+            try:
+                address = str(ipaddress.IPv6Address(candidate))
+            except ValueError:
+                continue
+            if address not in ipv6_map[current_rloc16]:
+                ipv6_map[current_rloc16].append(address)
+
+    return ipv6_map
+
+
 def fetch_ipv6_addresses():
     """
     Queries Thread network for IPv6 addresses of all routers.
@@ -94,33 +123,11 @@ def fetch_ipv6_addresses():
     logging.debug(
         f"[DEBUG] Output of 'meshdiag topology ip6-addrs':\n{output}\n")
 
-    ipv6_map = {}
+    if not isinstance(output, str) or output.lstrip().lower().startswith("error"):
+        logging.warning("Could not fetch meshdiag IPv6 addresses: %s", output)
+        return {}
 
-    # Parse output to extract RLOC16 and IPv6 address pairs
-    # Expected format: "RLOC:0x5000 => ffxx::0200:x:x:x" or similar
-    lines = output.split("\n")
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        # Match patterns like "RLOC16: 0x5000" or "RLOC: 0x5000" followed by IPv6
-        rloc_match = re.search(r"0x[0-9a-fA-F]{4}", line)
-
-        # Match IPv6 addresses (simplified pattern)
-        ipv6_match = re.search(
-            r"([0-9a-fA-F]{0,4}:){2,}[0-9a-fA-F]{0,4}", line)
-
-        if rloc_match and ipv6_match:
-            rloc = rloc_match.group(0)
-            ipv6 = ipv6_match.group(0)
-
-            if rloc not in ipv6_map:
-                ipv6_map[rloc] = []
-            ipv6_map[rloc].append(ipv6)
-
-    return ipv6_map
+    return _parse_meshdiag_ipv6_addresses(output)
 
 
 # TLV 2: Mode TLV to get more detailed info about the node's capabilities and role (e.g., if it's a sleepy end device, router-eligible end device, or full router) which can help better understand the topology and identify potential issues with devices that are not behaving as expected. This will also help enrich the topology map with more detailed information about each node's role and capabilities in the network.
