@@ -5,6 +5,10 @@ import logging
 THREAD_RLOC16_ADDRESS_PREFIX = ":0:ff:fe00:"
 
 
+class PrefixFetchError(ValueError):
+    """Raised when ot-ctl does not return a valid IPv6 prefix."""
+
+
 def extract_rloc16_from_ipv6_address(addr):
     """Extracts an RLOC16 from an IPv6 address with the Thread RLOC IID."""
     if not isinstance(addr, str):
@@ -138,8 +142,13 @@ def _fetch_prefix_via_ot_ctl(command, label):
     command_output = util_ot_ctl.exec_ot_ctl(command)
     logging.debug(f"[DEBUG] Output of 'ot-ctl {command}':\n{command_output}\n")
 
-    # extract the prefix token from the command output and print it for debugging
     prefix = _parse_prefix_token(command_output)
+    try:
+        ipaddress.IPv6Network(prefix, strict=False)
+    except ValueError as exc:
+        raise PrefixFetchError(
+            f"Invalid {label.lower()} from ot-ctl: {prefix or 'empty output'}"
+        ) from exc
     logging.debug((f"[DEBUG] {label}: {prefix}\n"))
     return prefix
 

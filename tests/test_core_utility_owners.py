@@ -3,6 +3,8 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import Mock
 
+import pytest
+
 import util_network
 import util_ot_ctl
 from td_json_key_normalizer import canonical_camel_key, convert_keys_to_camel_case
@@ -49,6 +51,37 @@ def test_network_helpers_cover_prefix_identity_and_address_selection(monkeypatch
         "fd00:abcd",
     ) == "fd00:abcd::2"
     assert util_network.find_omr_address_in_list([], "fd00:abcd") is None
+
+
+@pytest.mark.parametrize(
+    ("fetcher", "command", "output", "expected"),
+    [
+        (util_network.fetch_meshlocal_prefix, "prefix meshlocal", "fd00::/64 done", "fd00::/64"),
+        (util_network.fetch_omr_prefix, "br omrprefix favored", "fd12:3456::/56", "fd12:3456::/56"),
+    ],
+)
+def test_network_prefix_fetchers_accept_valid_ipv6_networks(
+    monkeypatch, fetcher, command, output, expected
+) -> None:
+    monkeypatch.setattr(
+        util_network.util_ot_ctl,
+        "exec_ot_ctl",
+        lambda actual_command: output if actual_command == command else None,
+    )
+
+    assert fetcher() == expected
+
+
+@pytest.mark.parametrize(
+    "output",
+    ["Error: command timed out after 30s", "", "not-a-prefix", "fd00::/129"],
+)
+@pytest.mark.parametrize("fetcher", [util_network.fetch_meshlocal_prefix, util_network.fetch_omr_prefix])
+def test_network_prefix_fetchers_reject_invalid_ot_ctl_output(monkeypatch, fetcher, output) -> None:
+    monkeypatch.setattr(util_network.util_ot_ctl, "exec_ot_ctl", lambda command: output)
+
+    with pytest.raises(util_network.PrefixFetchError):
+        fetcher()
 
 
 def test_network_helpers_extract_rloc16_from_thread_ipv6_addresses() -> None:
