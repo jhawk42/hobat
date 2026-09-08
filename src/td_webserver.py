@@ -923,10 +923,14 @@ async def _dispatch_short_cost(
         # spawning a second subprocess.
         logging.info("Awaiting existing td_cli task for %s", filename)
         try:
-            await _active_processes[filename]
+            exit_code = await _active_processes[filename]
         except Exception as exc:
             logging.warning("In-flight task for %s failed: %s", filename, exc)
             raise
+        if exit_code != 0:
+            raise aiohttp.web.HTTPBadGateway(
+                reason=f"td_cli failed for {filename} (exit {exit_code})"
+            )
         if not file_path.is_file():
             raise aiohttp.web.HTTPBadGateway(
                 reason=f"td_cli failed for {filename}")

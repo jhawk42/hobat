@@ -528,33 +528,33 @@ class TestDispatchShortCost(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(call_count, 1, "run_td_cli must be called exactly once")
 
-    async def test_join_existing_in_flight_task_failure_re_raises(self) -> None:
-        """When the originating task raises, the joining call also raises."""
+    async def test_join_existing_in_flight_task_failure_rejects_stale_file(self) -> None:
+        """Joined callers must receive a failed task result despite stale output."""
         filename = "td-otbr-cli-router-table.json"
         fa = _make_file_action(action_cost_s=1)
         barrier = asyncio.Event()
+        call_count = 0
+        (self.data_dir / filename).write_bytes(b"stale")
 
         async def failing_slow_td_cli(args, data_dir, *, timeout_s=None):
+            nonlocal call_count
+            call_count += 1
             await barrier.wait()
-            return 1  # non-zero → HTTPBadGateway in the originating call
+            return 1
 
         with patch.object(td_webserver, "run_td_cli", side_effect=failing_slow_td_cli):
             t1 = asyncio.ensure_future(
-                _dispatch_short_cost(filename, fa.action, self.data_dir, fa, no_cache=False)
+                _dispatch_short_cost(filename, fa.action, self.data_dir, fa, no_cache=True)
             )
             await asyncio.sleep(0)  # let t1 register
             t2 = asyncio.ensure_future(
-                _dispatch_short_cost(filename, fa.action, self.data_dir, fa, no_cache=False)
+                _dispatch_short_cost(filename, fa.action, self.data_dir, fa, no_cache=True)
             )
             barrier.set()
             results = await asyncio.gather(t1, t2, return_exceptions=True)
 
-        # t1 raises HTTPBadGateway; t2 joins t1's task and the exit code is 1.
-        # t2 then checks file_path.is_file() (False) → raises HTTPBadGateway too.
-        self.assertTrue(
-            any(isinstance(r, aiohttp.web.HTTPBadGateway) for r in results),
-            "At least one of the two calls must raise HTTPBadGateway",
-        )
+        self.assertEqual(call_count, 1)
+        self.assertTrue(all(isinstance(r, aiohttp.web.HTTPBadGateway) for r in results))
 
     async def test_post_lock_freshness_recheck_skips_regen(self) -> None:
         """If file becomes fresh while waiting on the lock, td_cli is not called."""
