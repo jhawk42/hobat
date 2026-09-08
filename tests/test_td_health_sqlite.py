@@ -15,6 +15,7 @@ from td_health_observation_model import (
     DeviceSample,
     HealthStatus,
     Observation,
+    RelationshipSample,
 )
 from td_health_observation_store import HealthStoreFutureSchemaError
 from td_health_sqlite import SCHEMA_VERSION, SQLiteHealthStore
@@ -227,6 +228,70 @@ def test_observation_retention_is_bounded(tmp_path) -> None:
             "SELECT observation_id FROM observations ORDER BY observed_at"
         ).fetchall()
     assert rows == [("observation-2",), ("observation-3",)]
+
+
+def test_observation_retention_prunes_orphaned_identities(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db", max_observations=1)
+    expired_observation, expired_assessment = _result("1")
+    expired_device = expired_observation.devices[0]
+    orphaned_device = DeviceSample(
+        "extaddr:8899aabbccddeeff",
+        "8899aabbccddeeff",
+        "child",
+        None,
+        False,
+        ("snapshot.json",),
+    )
+    expired_observation = replace(
+        expired_observation,
+        devices=(expired_device, orphaned_device),
+    )
+    retained_device = DeviceSample(
+        "extaddr:0011223344556677",
+        "0011223344556677",
+        "child",
+        None,
+        False,
+        ("snapshot.json",),
+    )
+    retained_observation, retained_assessment = _result("2")
+    retained_observation = replace(
+        retained_observation,
+        devices=(retained_device,),
+        relationships=(
+            RelationshipSample(
+                "relationship-retained",
+                "neighbor",
+                retained_device.device_id,
+                expired_device.device_id,
+                3,
+                3,
+                None,
+                None,
+                None,
+                None,
+                None,
+                retained_device.device_id,
+                ("snapshot.json",),
+            ),
+        ),
+    )
+
+    store.save_processing_result(expired_observation, expired_assessment)
+    store.upsert_expected_device(
+        expired_observation.network_id, expired_device.device_id, "Retained roster"
+    )
+    store.save_processing_result(retained_observation, retained_assessment)
+
+    with sqlite3.connect(store.path) as connection:
+        device_ids = {
+            row[0] for row in connection.execute("SELECT device_id FROM devices")
+        }
+        assert device_ids == {expired_device.device_id, retained_device.device_id}
+        assert orphaned_device.device_id not in device_ids
+        assert connection.execute(
+            "SELECT relationship_id FROM relationships"
+        ).fetchall() == [("relationship-retained",)]
 
 
 def test_age_purge_is_exclusive_preserves_roster_and_supports_dry_run(tmp_path) -> None:

@@ -430,6 +430,7 @@ class SQLiteHealthStore:
                )""",
             (self.max_observations,),
         )
+        self._delete_orphans(connection)
 
     @staticmethod
     def _table_counts(connection: sqlite3.Connection) -> dict[str, int]:
