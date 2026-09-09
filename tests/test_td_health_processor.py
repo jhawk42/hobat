@@ -130,6 +130,49 @@ def test_second_complete_absence_establishes_offline(tmp_path) -> None:
     assert any(f.rule_id == "device.offline" for f in second.assessment.findings)
 
 
+def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tmp_path) -> None:
+    _write_seed(tmp_path, [])
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    network_id = "extpan:78b9775b001c1cbe"
+    device_id = "extaddr:8672766ae0578187"
+    store.upsert_expected_device(network_id, device_id, "expected")
+    process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+        processing_time=datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
+    snapshot.write_text("[]\n", encoding="utf-8")
+    offline = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+        processing_time=datetime(2026, 9, 1, 0, 1, tzinfo=timezone.utc),
+    )
+    assert any(f.rule_id == "device.offline" for f in offline.assessment.findings)
+
+    store.upsert_expected_device(
+        network_id, device_id, "expected", "intentionally-offline"
+    )
+    updated = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+        processing_time=datetime(2026, 9, 1, 0, 2, tzinfo=timezone.utc),
+    )
+
+    assert not updated.observation_created
+    assert updated.assessment_created
+    assert updated.assessment.assessment_id != offline.assessment.assessment_id
+    assert not any(
+        finding.rule_id == "device.offline" for finding in updated.assessment.findings
+    )
+
+
 def test_complete_absences_below_roster_ratio_are_offline_without_network_impact(tmp_path) -> None:
     device_ids = [f"extaddr:{index:016x}" for index in range(10)]
     missing_device_id = device_ids[0]

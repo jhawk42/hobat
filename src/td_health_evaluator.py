@@ -80,9 +80,21 @@ def _profile_digest(profile: HealthProfile) -> str:
     ).hexdigest()
 
 
-def _assessment_input_digest(policy: HealthPolicy, profile: HealthProfile) -> str:
+def _assessment_input_digest(
+    policy: HealthPolicy,
+    profile: HealthProfile,
+    expected_device_ids: frozenset[str],
+    prior_complete_absences: Mapping[str, int],
+) -> str:
+    roster_payload = {
+        "expectedDeviceIds": sorted(expected_device_ids),
+        "priorCompleteAbsences": sorted(prior_complete_absences.items()),
+    }
     return hashlib.sha256(
-        f"{policy.digest}\0{_profile_digest(profile)}".encode("utf-8")
+        (
+            f"{policy.digest}\0{_profile_digest(profile)}\0"
+            f"{json.dumps(roster_payload, sort_keys=True, separators=(',', ':'))}"
+        ).encode("utf-8")
     ).hexdigest()
 
 
@@ -1108,7 +1120,9 @@ def evaluate_observation(
         ),
     }
     assessment_time = assessed_at or datetime.now(timezone.utc).isoformat()
-    assessment_input_digest = _assessment_input_digest(policy, profile)
+    assessment_input_digest = _assessment_input_digest(
+        policy, profile, expected_device_ids, absences
+    )
     assessment_id = _stable_id(
         "assessment", observation.observation_id, assessment_input_digest
     )

@@ -90,6 +90,33 @@ degraded observations as Unknown instead of Strong or Moderate.
 
 ## Expected Devices and Offline
 
+The evaluator reports these device states and related device findings:
+
+- `observed`: the device identity was present in the current cached
+  observation. This is informational evidence, not a claim that the device is
+  healthy or reachable; the finding records observation completeness and
+  source files. A device can be observed while also having attachment, counter,
+  delivery, or relationship findings.
+- `attachment-failure`: the current snapshot reports the device as
+  `detached`, `disabled`, or `orphaned` (from its normalized `state`, or its
+  `role` when no state is available). This is a current snapshot finding with
+  network materiality. It does not establish Offline, which requires absence
+  from complete observations.
+- `missing`: a device explicitly in the active `expected` roster is absent from
+  the current observation, but the configured consecutive-complete-observation
+  requirement has not been met. The finding is device-scoped, Unknown, and low
+  confidence. A complete observation increments the absence count; a degraded
+  or partial observation reports the absence without advancing that history.
+- `offline`: an active expected-roster device is absent for the configured
+  number of consecutive complete observations. The default and minimum policy
+  requirement is two complete observations. This is a device-scoped Poor
+  finding with high confidence. It is independent of the aggregate network
+  result: one Offline device can be Poor without making the network Poor.
+- `recovered`: a previously absent expected device is present again in the
+  current observation. The evaluator emits `observed` and does not emit
+  `missing` or `offline`; prior absence history is not itself reported as a
+  current device finding.
+
 Expected devices are never enrolled automatically. Import valid `extAddress`
 entries from the static label map explicitly:
 
@@ -117,8 +144,22 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --roster-label "Office Router" --roster-state expected
 ```
 
-Supported states are `expected`, `retired`, `intentionally-offline`, and
-`intermittent`. There are no roster mutation HTTP routes.
+Supported roster states are:
+
+- `expected`: active for presence and consecutive-complete-absence evaluation.
+- `retired`: retained for administration and history, but excluded from the
+  active expected roster and therefore not reported as missing or Offline.
+- `intentionally-offline`: retained as an operator designation and excluded
+  from missing and Offline evaluation.
+- `intermittent`: retained as an operator designation and excluded from missing
+  and Offline evaluation; the state does not change observation completeness or
+  suppress current findings when the device is observed.
+
+There are no roster mutation HTTP routes. Partial or degraded observations do
+not increment absence history, and an Offline device contributes to the
+separate `network.offline-impact` finding only when the Offline ratio is above
+the configured threshold (15% by default), not merely because one device is
+Offline. Stage 1 reports observation counts rather than wall-clock duration.
 
 ## Policy and Findings
 
