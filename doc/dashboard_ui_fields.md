@@ -60,6 +60,33 @@ Details, Device Settings, and Device Insights consume that shared selection.
 Details sections and field bindings come from `DEVICE_DETAILS_SECTIONS`; section
 containers are declared in `tdash.html`.
 
+### Matter Device Details
+
+The **Matter** section is immediately before **MDNS**. It is populated from the
+selected HA Matter WebSocket record and does not trigger collection. A field is
+shown only when its source value is present; `null`, missing, and unsupported
+attributes do not create placeholder rows. Selecting another topology node or
+table row replaces the section with that record's available values; clearing the
+selection clears the section.
+
+| Source field | Display label | Selection behavior |
+|---|---|---|
+| `matter.deviceLabel` | `matter.deviceLabel` | Controller-provided Matter node label; separate from the operator-overridable `deviceLabel` in Keys. |
+| `matter.nodeId` | `matter.nodeId` | Decimal Matter node ID for the selected record. |
+| `matter.matterId` | `matter.matterId` | Uppercase hexadecimal compressed-fabric/node identifier for the selected record. |
+| `matter.fabricId`, `matter.compressedFabricId`, `matter.fabricIndex` | Corresponding field name | Matter fabric context for the selected record. |
+| `matter.vendorName`, `matter.vendorId`, `matter.vendorModel`, `matter.productId`, `matter.productLabel` | Corresponding field name | Basic Information manufacturer and product attributes for the selected record. |
+| `matter.vendorSwVersion`, `matter.vendorSwVersionNumber` | Corresponding field name | Matter software version string and numeric version for the selected record. |
+| `matter.vendorHwVersion`, `matter.vendorHwVersionNumber` | Corresponding field name | Matter hardware version string and numeric version for the selected record. |
+| `matter.available`, `matter.isBridge`, `matter.dateCommissioned` | Corresponding field name | HA Matter controller availability, bridge state, and commissioning timestamp for the selected record. No interview timestamp is currently collected. |
+| `deviceTypes` | `deviceTypes` | Endpoint device types and revisions observed for the selected record. |
+| `networkInterfaces` | `networkInterfaces` | Matter General Diagnostics interfaces, including reported IP addresses and MAC addresses. |
+| `generalDiagnostics` | `generalDiagnostics` | Reported Matter General Diagnostics values for the selected record. |
+
+Thread network name, Thread IPv6 addresses, and neighbor RSSI/LQI remain in
+Network and Neighbors because they are Thread Network Diagnostics observations,
+not Matter Basic Information fields.
+
 ## Search
 
 Normal search is case-insensitive and checks the curated

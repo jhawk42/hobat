@@ -1006,6 +1006,7 @@ export function populateNodeDetailsLists(details, listIdPrefix = "") {
     `${listIdPrefix}highlights-list`,
     `${listIdPrefix}network-list`,
     `${listIdPrefix}connections-list`,
+    `${listIdPrefix}matter-list`,
     `${listIdPrefix}mdns-list`,
     `${listIdPrefix}routes-links-list`,
     `${listIdPrefix}neighbors-list`,

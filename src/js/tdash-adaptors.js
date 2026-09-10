@@ -51,6 +51,13 @@ const FILE_RESTAPI_DIAGNOSTICS_FETCH_ALL = 'td-otbr-restapi-diagnostics-fetch-al
 const FILE_ROUTER_CHILDIP6               = 'td-otbr-cli-meshdiag-router-childip6.json';
 const FILE_NETWORKDIAG_MULTICAST_NEIGHBORS = 'td-otbr-cli-networkdiag-multicast-neighbors.json';
 const FILE_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL = 'td-otbr-restapi-mesh-diagnostics-fetch-all.json';
+const MATTER_FIELDS = Object.freeze([
+  'deviceLabel', 'nodeId', 'matterId', 'fabricId', 'compressedFabricId',
+  'fabricIndex', 'vendorName', 'vendorId', 'vendorModel', 'productId',
+  'productLabel', 'vendorSwVersion', 'vendorSwVersionNumber',
+  'vendorHwVersion', 'vendorHwVersionNumber', 'available', 'isBridge',
+  'dateCommissioned',
+]);
 
 // Files consumed as named primary slots in adaptMeshdiagNetworkdiag;
 // anything not in this set is treated as supplementary (e.g. mdns, eve).
@@ -2083,11 +2090,18 @@ export function adaptHaMatterWs(fileMap, extractedRows, rowExtractor = '') {
 
   rows.forEach((row, index) => {
     if (!isPlainObject(row)) return;
+    const matter = isPlainObject(row.matter)
+      ? row.matter
+      : Object.fromEntries(
+        MATTER_FIELDS.flatMap((field) => (
+          row[field] === undefined ? [] : [[field, row[field]]]
+        )),
+      );
     const canonicalRow = {
       ...row,
-      ...(isPlainObject(row.matter) ? row.matter : {}),
+      ...matter,
       ...(isPlainObject(row.thread) ? row.thread : {}),
-      matter: row.matter,
+      matter,
     };
     const explicitId = toText(canonicalRow.topologyId)
       || toText(canonicalRow.id)
@@ -2116,7 +2130,7 @@ export function adaptHaMatterWs(fileMap, extractedRows, rowExtractor = '') {
       },
     });
     topologyIdToDeviceId.set(explicitId, deviceId);
-    registerDetails(model, deviceId, row, 'replace');
+    registerDetails(model, deviceId, canonicalRow, 'replace');
     registerRouterNeighborRows(model, row.rloc16, row.routerNeighbors);
     registerRouterChildRows(model, row.rloc16, row.children);
   });

@@ -60,6 +60,11 @@ OTBR CLI profiles and the merged OTBR profile use
 profiles use `td-otbr-restapi-dataset-active.json`. Both identity files provide
 `extPanId` and `networkName` independently of the selected evidence recipe.
 
+Future workitems:
+Add Source: thread-panid-merged 
+Sources: otbr-cli and otbr-restapi 
+Based on panid 
+
 Arbitrary dataset IDs and file paths are rejected. Required final, identity,
 and outcome filenames are versioned in `src/td-dataset-manifest.json`.
 

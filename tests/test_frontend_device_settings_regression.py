@@ -11,6 +11,7 @@ TABLE_JS = REPO_ROOT / "src" / "js" / "tdash-table-renderer.js"
 DATASET_JS = REPO_ROOT / "src" / "js" / "tdash-dataset.js"
 UI_JS = REPO_ROOT / "src" / "js" / "tdash-ui.js"
 HTML = REPO_ROOT / "src" / "tdash.html"
+CONSTANTS_JS = REPO_ROOT / "src" / "js" / "tdash-constants.js"
 
 
 def _read_text(path: Path) -> str:
@@ -89,6 +90,27 @@ def test_settings_markup_starts_empty_and_disabled() -> None:
     assert 'role="status" aria-live="polite"' in html
     assert "0xa800" not in html
     assert "4e866ce96501b9ed" not in html
+
+
+def test_matter_details_section_precedes_mdns_and_uses_source_fields() -> None:
+    html = _read_text(HTML)
+    constants_text = _read_text(CONSTANTS_JS)
+    utils_text = _read_text(UTILS_JS)
+
+    assert html.index('id="matter-list"') < html.index('id="mdns-list"')
+    assert 'sectionId: "matter-list"' in constants_text
+    for field in (
+        "matter.deviceLabel",
+        "matter.nodeId",
+        "matter.matterId",
+        "matter.vendorName",
+        "matter.vendorModel",
+        "matter.dateCommissioned",
+        "deviceTypes",
+        "networkInterfaces",
+    ):
+        assert f'"{field}"' in constants_text
+    assert '`${listIdPrefix}matter-list`,' in utils_text
 
 
 def test_insights_panel_uses_shared_selection_and_evaluator() -> None:
