@@ -5,15 +5,15 @@ collects data from dataset sources like OTBR `ot-ctl`, the OTBR REST API, Home A
 Server, mDNS, Eve exports, and Thread Tools exports, then presents topology and
 table views in a browser.
 
-The cache-first model keeps routine analysis off the live mesh. Long diagnostic
-collections can consume time and battery, especially on sleepy end devices, so
-run them deliberately or schedule them (cron) for quiet periods.
 
 ## Capabilities
 
 - Interactive topology and sortable table views.
-- Multiple physics visualization profiles for topology layout: mesh compact, mesh ring, mesh tree horizontal, mesh tree vertical and hub spoke.
+- Multiple visualization physics profiles for topology layout: mesh compact, mesh ring, mesh tree horizontal, mesh tree vertical and hub spoke.
 - Datasets sources supported: OTBR CLI, OTBR REST, Home Assistant Matter, mDNS, Eve, Thread Tools and merged datasets.
+- Cache-first model keeps routine analysis off the live mesh. Long diagnostic
+collections can consume time and battery, especially on sleepy end devices, so
+run them deliberately or schedule them (cron) for quiet periods.
 - Canonical identity (rloc16, extAddress) and field normalization across source formats.
 - Atomic snapshot writes and source-level collection serialization.
 - Progressive rendering from `.partial.json` checkpoints during long jobs.
