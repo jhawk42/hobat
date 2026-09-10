@@ -12,6 +12,7 @@ import td_cli
 
 from ha_matter_ws_cli import (
     DASHBOARD_SCHEMA_VERSION,
+    EXIT_ARGUMENT,
     EXIT_CANCELLED,
     EXIT_CONNECTION,
     EXIT_EXTRACTION,
@@ -23,7 +24,12 @@ from ha_matter_ws_cli import (
     build_parser,
     main,
 )
-from ha_matter_ws_client import MatterWsTransportError
+from ha_matter_ws_client import (
+    MatterWsCommandError,
+    MatterWsContractError,
+    MatterWsRequestTimeoutError,
+    MatterWsTransportError,
+)
 from ha_matter_ws_contract import MatterWsSchemaCompatibilityError
 from ha_matter_ws_extractor import MatterExtractionError
 from ha_matter_ws_fetch_all import MatterCollection
@@ -98,6 +104,7 @@ def _collection() -> MatterCollection:
         ["diagnostics", "fetch-all"],
         ["mesh-diagnostics", "get", "--node-id", "1"],
         ["mesh-diagnostics", "fetch-all"],
+        ["device", "ping", "--node-id", "1"],
         ["topology"],
         ["dashboard"],
         ["all"],
@@ -230,6 +237,104 @@ def test_list_and_get_emit_concise_or_selected_json(monkeypatch, capsys) -> None
     assert main(["diagnostics", "get", "--node-id", "1"]) == 0
     selected = json.loads(capsys.readouterr().out)
     assert selected["nodeId"] == 1
+
+
+@pytest.mark.parametrize(
+    ("results", "outcome"),
+    [
+        ({}, "no-addresses"),
+        ({"192.0.2.10": True}, "success"),
+        ({"192.0.2.10": False}, "all-address-failure"),
+        ({"192.0.2.10": True, "2001:db8::10": False}, "partial-success"),
+    ],
+)
+def test_device_ping_emits_structured_outcome_without_persistence(
+    monkeypatch, tmp_path, capsys, results, outcome
+) -> None:
+    calls = []
+
+    async def fake_ping(uri, node_id, attempts, **kwargs):
+        calls.append((uri, node_id, attempts, kwargs))
+        return results
+
+    monkeypatch.setattr(ha_matter_ws_cli, "_ping_node", fake_ping)
+    data_dir = tmp_path / "new-data-dir"
+
+    assert (
+        main(
+            [
+                "--datadir",
+                str(data_dir),
+                "--uri",
+                "ws://matter.test/ws",
+                "device",
+                "ping",
+                "--node-id",
+                "0x2a",
+                "--attempts",
+                "3",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["nodeId"] == 42
+    assert payload["uri"] == "ws://matter.test/ws"
+    assert payload["attempts"] == 3
+    assert payload["addresses"] == list(results)
+    assert payload["results"] == results
+    assert payload["outcome"] == outcome
+    assert calls == [
+        (
+            "ws://matter.test/ws",
+            42,
+            3,
+            {"connect_timeout": 10.0, "request_timeout": 5.0},
+        )
+    ]
+    assert not data_dir.exists()
+
+
+def test_device_ping_rejects_invalid_node_and_attempts_without_connecting(
+    monkeypatch,
+) -> None:
+    async def unexpected_ping(*args, **kwargs):
+        raise AssertionError("ping should not start")
+
+    monkeypatch.setattr(ha_matter_ws_cli, "_ping_node", unexpected_ping)
+    assert main(["device", "ping", "--node-id", str(1 << 64)]) == EXIT_ARGUMENT
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["device", "ping", "--node-id", "1", "--attempts", "6"])
+
+
+@pytest.mark.parametrize(
+    ("error", "outcome", "expected_rc"),
+    [
+        (MatterWsRequestTimeoutError("slow"), "request-timeout", EXIT_CONNECTION),
+        (MatterWsTransportError("offline"), "transport-failure", EXIT_CONNECTION),
+        (
+            MatterWsCommandError("1", 9, "Invalid command: ping_node"),
+            "command-unsupported",
+            EXIT_PROTOCOL,
+        ),
+        (MatterWsContractError("malformed"), "protocol-error", EXIT_PROTOCOL),
+    ],
+)
+def test_device_ping_emits_structured_failure(
+    monkeypatch, capsys, error, outcome, expected_rc
+) -> None:
+    async def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(ha_matter_ws_cli, "_ping_node", fail)
+
+    assert main(["device", "ping", "--node-id", "7"]) == expected_rc
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["nodeId"] == 7
+    assert payload["outcome"] == outcome
+    assert payload["addresses"] == []
+    assert payload["results"] == {}
 
 
 def test_checkpoint_payload_identifies_partial_completeness(monkeypatch, tmp_path) -> None:
@@ -465,6 +570,24 @@ def test_td_cli_routes_family_options_and_nested_command(monkeypatch, tmp_path) 
             "--node-id",
             "7",
         ]
+    ]
+
+
+def test_td_cli_routes_device_ping_and_attempts(monkeypatch) -> None:
+    forwarded = []
+    monkeypatch.setattr(
+        td_cli.ha_matter_ws_cli,
+        "main",
+        lambda argv: forwarded.append(argv) or 0,
+    )
+    parser = td_cli.build_parser()
+    args, extras = parser.parse_known_args(
+        ["ha-matter-ws", "device", "ping", "--node-id", "7", "--attempts", "3"]
+    )
+
+    assert td_cli.dispatch(args, extras, parser) == 0
+    assert forwarded == [
+        ["device", "ping", "--node-id", "7", "--attempts", "3"]
     ]
 
 

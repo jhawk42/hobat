@@ -16,7 +16,7 @@ from ha_matter_ws_client import (
     MatterWsTransportError,
     fetch_node_snapshot,
 )
-from ha_matter_ws_contract import MatterWsResponseCorrelationError
+from ha_matter_ws_contract import MatterWsContractError, MatterWsResponseCorrelationError
 from ha_matter_ws_extractor import extract_nodes_info
 from ha_matter_ws_fetch_all import collect_devices, save_collection
 
@@ -93,6 +93,85 @@ def test_client_cancellation_cleans_pending_request(monkeypatch) -> None:
             with pytest.raises(asyncio.CancelledError):
                 await request
             assert client._pending == {}
+
+    asyncio.run(scenario())
+
+
+def test_client_ping_node_sends_one_request_and_returns_address_results(monkeypatch) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+
+        async def on_send(message: dict[str, Any]) -> None:
+            socket.queue(
+                {
+                    "message_id": message["message_id"],
+                    "result": {"192.0.2.10": True, "2001:db8::10": False},
+                }
+            )
+
+        socket.on_send = on_send
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        async with HaMatterWsClient(request_timeout=0.2) as client:
+            assert await client.ping_node(7, attempts=2) == {
+                "192.0.2.10": True,
+                "2001:db8::10": False,
+            }
+
+        assert [message["command"] for message in socket.sent] == ["ping_node"]
+        assert socket.sent[0]["args"] == {"node_id": 7, "attempts": 2}
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("result", [[], {"192.0.2.10": 1}, {"": True}])
+def test_client_ping_node_rejects_malformed_results(monkeypatch, result) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+
+        async def on_send(message: dict[str, Any]) -> None:
+            socket.queue({"message_id": message["message_id"], "result": result})
+
+        socket.on_send = on_send
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        async with HaMatterWsClient(request_timeout=0.2) as client:
+            with pytest.raises(MatterWsContractError, match="ping_node result"):
+                await client.ping_node(7)
+
+    asyncio.run(scenario())
+
+
+def test_client_ping_node_rejects_oversized_address_maps(monkeypatch) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+
+        async def on_send(message: dict[str, Any]) -> None:
+            socket.queue(
+                {
+                    "message_id": message["message_id"],
+                    "result": {f"192.0.2.{index}": True for index in range(257)},
+                }
+            )
+
+        socket.on_send = on_send
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        async with HaMatterWsClient(request_timeout=0.2) as client:
+            with pytest.raises(MatterWsContractError, match="exceeds"):
+                await client.ping_node(7)
 
     asyncio.run(scenario())
 

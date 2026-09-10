@@ -12,7 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from ha_matter_ws_client import MatterWsTransportError
+from ha_matter_ws_client import (
+    HaMatterWsClient,
+    MatterWsCommandError,
+    MatterWsRequestTimeoutError,
+    MatterWsTransportError,
+)
 from ha_matter_ws_contract import (
     HA_MATTER_WS_HOST_DEFAULT,
     HA_MATTER_WS_HOST_ENV,
@@ -54,6 +59,7 @@ EXIT_EXTRACTION = 6
 EXIT_PERSISTENCE = 7
 EXIT_CANCELLED = 130
 DASHBOARD_SCHEMA_VERSION = "1.0.0"
+PING_MAX_ATTEMPTS = 5
 
 
 class MatterPartialCollectionError(RuntimeError):
@@ -69,6 +75,21 @@ def _positive_float(value: str) -> float:
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be greater than zero")
     return parsed
+
+
+def _bounded_int(minimum: int, maximum: int) -> Callable[[str], int]:
+    def parse(value: str) -> int:
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError("must be an integer") from exc
+        if not minimum <= parsed <= maximum:
+            raise argparse.ArgumentTypeError(
+                f"must be between {minimum} and {maximum}"
+            )
+        return parsed
+
+    return parse
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -117,6 +138,19 @@ def build_parser() -> argparse.ArgumentParser:
     device_get = device_commands.add_parser("get", help="Print one normalized node")
     device_get.add_argument("--node-id", required=True)
     device_commands.add_parser("fetch-all", help="Save all normalized nodes")
+
+    device = commands.add_parser(
+        "device", help="Run an active diagnostic against one Matter node"
+    )
+    device_commands = device.add_subparsers(dest="device_command", required=True)
+    ping = device_commands.add_parser("ping", help="Ping one Matter node")
+    ping.add_argument("--node-id", required=True)
+    ping.add_argument(
+        "--attempts",
+        type=_bounded_int(1, PING_MAX_ATTEMPTS),
+        default=1,
+        help=f"Ping attempts per address (default: 1, max: {PING_MAX_ATTEMPTS})",
+    )
 
     diagnostics = commands.add_parser("diagnostics", help="Read Thread diagnostics")
     diagnostic_commands = diagnostics.add_subparsers(
@@ -170,6 +204,13 @@ def _node_number(value: Any) -> int | None:
         return int(value, 0)
     except ValueError:
         return None
+
+
+def _validated_node_id(value: str) -> int:
+    node_id = _node_number(value)
+    if node_id is None or not 0 <= node_id < 1 << 64:
+        raise MatterArgumentError(f"invalid Matter node id: {value}")
+    return node_id
 
 
 def _record_node_number(record: Mapping[str, Any]) -> int | None:
@@ -366,10 +407,175 @@ def _collection_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _ping_payload(
+    *,
+    uri: str,
+    node_id: int,
+    attempts: int,
+    results: Mapping[str, bool],
+) -> dict[str, Any]:
+    if not results:
+        outcome = "no-addresses"
+    elif all(results.values()):
+        outcome = "success"
+    elif any(results.values()):
+        outcome = "partial-success"
+    else:
+        outcome = "all-address-failure"
+    return {
+        "nodeId": node_id,
+        "uri": uri,
+        "attempts": attempts,
+        "addresses": list(results),
+        "results": dict(results),
+        "observedAt": datetime.now(timezone.utc).isoformat(),
+        "outcome": outcome,
+    }
+
+
+def _ping_error_payload(
+    *,
+    uri: str,
+    node_id: int,
+    attempts: int,
+    outcome: str,
+    error: str,
+) -> dict[str, Any]:
+    return {
+        "nodeId": node_id,
+        "uri": uri,
+        "attempts": attempts,
+        "addresses": [],
+        "results": {},
+        "observedAt": datetime.now(timezone.utc).isoformat(),
+        "outcome": outcome,
+        "error": error,
+    }
+
+
+def _print_ping_error(
+    *,
+    uri: str,
+    node_id: int,
+    attempts: int,
+    outcome: str,
+    error: Exception,
+) -> None:
+    print(
+        json.dumps(
+            _ping_error_payload(
+                uri=uri,
+                node_id=node_id,
+                attempts=attempts,
+                outcome=outcome,
+                error=str(error),
+            ),
+            indent=2,
+        )
+    )
+
+
+async def _ping_node(
+    uri: str,
+    node_id: int,
+    attempts: int,
+    *,
+    connect_timeout: float,
+    request_timeout: float,
+) -> dict[str, bool]:
+    async with HaMatterWsClient(
+        uri,
+        connect_timeout=connect_timeout,
+        request_timeout=request_timeout,
+    ) as client:
+        return await client.ping_node(node_id, attempts)
+
+
+def _run_device_ping(args: argparse.Namespace) -> int:
+    node_id = _validated_node_id(args.node_id)
+    uri = args.uri or build_ha_matter_ws_uri(args.host, args.port)
+    try:
+        results = asyncio.run(
+            _ping_node(
+                uri,
+                node_id,
+                args.attempts,
+                connect_timeout=args.connect_timeout,
+                request_timeout=args.request_timeout,
+            )
+        )
+    except MatterWsRequestTimeoutError as exc:
+        _print_ping_error(
+            uri=uri,
+            node_id=node_id,
+            attempts=args.attempts,
+            outcome="request-timeout",
+            error=exc,
+        )
+        logging.error("Matter device ping timed out: %s", exc)
+        return EXIT_CONNECTION
+    except MatterWsCommandError as exc:
+        details = (exc.details or "").lower()
+        outcome = (
+            "command-unsupported"
+            if exc.error_code == 9
+            or "unsupported" in details
+            or "not supported" in details
+            or "unknown command" in details
+            else "command-error"
+        )
+        _print_ping_error(
+            uri=uri,
+            node_id=node_id,
+            attempts=args.attempts,
+            outcome=outcome,
+            error=exc,
+        )
+        logging.error("Matter device ping command failed: %s", exc)
+        return EXIT_PROTOCOL
+    except MatterWsTransportError as exc:
+        _print_ping_error(
+            uri=uri,
+            node_id=node_id,
+            attempts=args.attempts,
+            outcome="transport-failure",
+            error=exc,
+        )
+        logging.error("Matter device ping transport failed: %s", exc)
+        return EXIT_CONNECTION
+    except MatterWsContractError as exc:
+        _print_ping_error(
+            uri=uri,
+            node_id=node_id,
+            attempts=args.attempts,
+            outcome="protocol-error",
+            error=exc,
+        )
+        logging.error("Matter device ping protocol failed: %s", exc)
+        return EXIT_PROTOCOL
+    print(
+        json.dumps(
+            _ping_payload(
+                uri=uri,
+                node_id=node_id,
+                attempts=args.attempts,
+                results=results,
+            ),
+            indent=2,
+        )
+    )
+    return EXIT_OK
+
+
 def _run(args: argparse.Namespace) -> int:
+    path = _command_path(args)
+    if path == ("device", "ping"):
+        if args.output:
+            raise MatterArgumentError("device ping does not support --output")
+        return _run_device_ping(args)
+
     started_at = datetime.now(timezone.utc).isoformat()
     data_dir = ensure_data_dir_exists(resolve_data_dir(args.datadir))
-    path = _command_path(args)
     if path == ("all",) and args.output:
         raise MatterArgumentError("--output is not supported by the all command")
     node_id = getattr(args, "node_id", None)

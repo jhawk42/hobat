@@ -428,6 +428,12 @@ def _add_ha_matter_ws_commands(subparsers: argparse._SubParsersAction) -> None:
     commands = matter.add_subparsers(dest="ha_matter_command", required=False)
     commands.add_parser("server-info")
 
+    device = commands.add_parser("device")
+    device_commands = device.add_subparsers(dest="ha_matter_device_command")
+    device_ping = device_commands.add_parser("ping")
+    device_ping.add_argument("--node-id", required=True)
+    device_ping.add_argument("--attempts", type=int, default=1)
+
     devices = commands.add_parser("devices")
     device_commands = devices.add_subparsers(dest="ha_matter_devices_command")
     device_commands.add_parser("list")
@@ -521,7 +527,7 @@ def build_parser() -> argparse.ArgumentParser:
         usage: td_cli otbr-restapi [-h] {node,devices,diagnostics,actions,mesh-diagnostics,topology,download} ...
 
     ha-matter-ws
-        usage: td_cli ha-matter-ws [-h] {server-info,devices,diagnostics,mesh-diagnostics,topology,all} ...
+        usage: td_cli ha-matter-ws [-h] {server-info,device,devices,diagnostics,mesh-diagnostics,topology,all} ...
 
     mdns
         usage: td_cli mdns [-h] [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
@@ -961,7 +967,7 @@ def _dispatch_ha_matter_ws(
 
     nested_attribute = f"ha_matter_{command.replace('-', '_')}_command"
     nested = getattr(args, nested_attribute, None)
-    if command in {"devices", "diagnostics", "mesh-diagnostics"} and not nested:
+    if command in {"device", "devices", "diagnostics", "mesh-diagnostics"} and not nested:
         return _normalize_module_rc(
             ha_matter_ws_cli.main([command, "--help"]),
             "ha_matter_ws_cli.main",
@@ -993,6 +999,9 @@ def _dispatch_ha_matter_ws(
     node_id = getattr(args, "node_id", None)
     if node_id is not None:
         forwarded += ["--node-id", str(node_id)]
+    attempts = getattr(args, "attempts", None)
+    if attempts is not None:
+        forwarded += ["--attempts", str(attempts)]
     forwarded += extra_args
     return _normalize_module_rc(
         ha_matter_ws_cli.main(forwarded), "ha_matter_ws_cli.main"

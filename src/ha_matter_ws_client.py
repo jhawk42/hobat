@@ -26,6 +26,7 @@ from ha_matter_ws_contract import (
 
 DEFAULT_MATTER_WS_URI = DEFAULT_HA_MATTER_WS_URI
 _MAX_LATE_RESPONSE_IDS = 100
+_MAX_PING_ADDRESSES = 256
 
 
 class MatterWsTransportError(RuntimeError):
@@ -187,6 +188,31 @@ class HaMatterWsClient:
                 self._late_response_ids[message_id] = None
                 while len(self._late_response_ids) > _MAX_LATE_RESPONSE_IDS:
                     self._late_response_ids.pop(next(iter(self._late_response_ids)))
+
+    async def ping_node(self, node_id: int, attempts: int = 1) -> dict[str, bool]:
+        """Ping one Matter node and validate its per-address response."""
+        result = await self.request(
+            "ping_node",
+            args={"node_id": node_id, "attempts": attempts},
+        )
+        if not isinstance(result, dict):
+            raise MatterWsContractError("ping_node result must be an address map")
+        if len(result) > _MAX_PING_ADDRESSES:
+            raise MatterWsContractError(
+                f"ping_node result exceeds {_MAX_PING_ADDRESSES} addresses"
+            )
+        validated: dict[str, bool] = {}
+        for address, success in result.items():
+            if not isinstance(address, str) or not address:
+                raise MatterWsContractError(
+                    "ping_node result addresses must be non-empty strings"
+                )
+            if type(success) is not bool:
+                raise MatterWsContractError(
+                    "ping_node result values must be boolean"
+                )
+            validated[address] = success
+        return validated
 
     async def wait_for_event_settle(self, settle_timeout: float) -> None:
         if settle_timeout < 0:
