@@ -240,7 +240,20 @@ docker run --name hobat -d \
 Set `TD_OTBR_CONTAINER_USE=0` to run `ot-ctl` locally instead of through
 `docker exec`. 
 
-Home Assistant add-on configuration is under `addon_hobat/`.
+## Home Assistant OS App
+
+To install Hobat on Home Assistant OS (HAOS):
+
+1. In Home Assistant, go to **Settings > Apps > Install app**.
+2. Open the three-dot menu, select **Repositories**, and add
+  `https://github.com/jhawk42/hobat`.
+3. Select **Hobat** from the added repository and select **Install**.
+4. Follow the [Home Assistant app documentation](addon_hobat/DOCS.md) to
+  configure Protection mode and optional OpenThread Border Router and Matter
+  Server access, then start the app and select **Open Web UI**.
+
+Home Assistant labels add-ons as "apps" in current UI releases. The app is
+supported on `amd64` and `aarch64` HAOS installations.
 
 The Matter WebSocket default requires the container to share the host network;
 otherwise run the CLI with a reachable `--uri`.
