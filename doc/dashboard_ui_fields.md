@@ -55,9 +55,10 @@ The table renderer discovers fields from the loaded rows, places priority
 columns first, and formats nested values for inspection. **More Info** expands
 the displayed column set. The **Categories** selector immediately before it is
 derived from `DEVICE_DETAILS_SECTIONS`: **All** restores the default table
-column set exactly, while a category shows only its registry fields that are
-present in the loaded rows. Changing category preserves rows, search, sorting,
-and the selected device and its detail panel.
+column set exactly, while another category shows the available `identity-list`
+fields followed by its own available registry fields. Fields use registry
+order, canonical preferred names, and appear only once. Changing category
+preserves rows, search, sorting, and the selected device and its detail panel.
 
 Selecting a topology node or table row publishes `tdash:device-selected`.
 Details, Device Settings, and Device Insights consume that shared selection.

@@ -4,6 +4,7 @@ import {
   isPlainObject,
   hasNestedPath,
   getColumnValue,
+  getPreferredFieldName,
   formatValue,
   flattenObjectEntries,
   shouldExcludeDetailPath,
@@ -72,7 +73,12 @@ export function setTableColumnCategory(category) {
 export function getTableColumnsForCategory(rows, category) {
   const section = DEVICE_DETAILS_SECTIONS.find(({ sectionId }) => sectionId === category);
   if (!section || section.fields.includes("*")) return [];
-  return section.fields.filter((field) => rows.some((row) => hasNestedPath(row, field)));
+  const identitySection = DEVICE_DETAILS_SECTIONS.find(
+    ({ sectionId }) => sectionId === "identity-list",
+  );
+  const fields = [...(identitySection?.fields ?? []), ...section.fields]
+    .map((field) => getPreferredFieldName(field));
+  return [...new Set(fields)].filter((field) => rows.some((row) => hasNestedPath(row, field)));
 }
 
 export function setTableHealthFindings(findings = [], observedAt = "") {
