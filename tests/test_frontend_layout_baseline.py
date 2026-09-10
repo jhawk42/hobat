@@ -235,6 +235,9 @@ def test_navigation_panel_supports_expanded_and_icon_only_states() -> None:
     ui_text = _read_text(UI_JS)
 
     assert 'id="btn-navigation-panel-toggle"' in html
+    assert 'class="page dashboard-shell navigation-panel-collapsed"' in html
+    assert 'title="Show icons and labels"' in html
+    assert 'aria-expanded="false">▶</button>' in html
     assert html.count('class="workspace-navigation-tab-icon"') == 5
     assert html.count('class="workspace-navigation-tab-label"') == 5
     assert "setNavigationPanelCollapsed" in ui_text
