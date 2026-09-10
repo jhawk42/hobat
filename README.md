@@ -106,6 +106,8 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli topology
 PYTHONPATH=src python3 -m td_cli otbr-cli device ping <thread device ipv6address> --json
 PYTHONPATH=src python3 -m td_cli otbr-cli device reset-counters <thread device ipv6address> \
   --counters mac --confirm --json
+# Host ICMP probe of one literal address; this does not determine Thread or Matter reachability
+PYTHONPATH=src python3 -m td_cli system device ping --address 2001:db8::1 --attempts 2
 
 # OTBR REST snapshots
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi devices list
@@ -129,6 +131,10 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data merge-dataset
 PYTHONPATH=src python3 -m td_cli --datadir ./data health purge --keep-days 30 --dry-run
 PYTHONPATH=src python3 -m td_cli --datadir ./data system backups create --output ./hobat-backup
 ```
+
+`system device ping` accepts only literal unicast IPv4 or IPv6 addresses. IPv6
+link-local targets and zone identifiers require a later interface-aware design;
+this command does not resolve names or change cached snapshots.
 
 `otbr-cli topology` runs the complete CLI collection sequence. Detailed
 `networkdiag fetch-all` and REST diagnostic sweeps are the highest-impact

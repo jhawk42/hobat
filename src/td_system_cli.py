@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from td_system_backups import create_backup, restore_backup
+from td_system_ping import run_ping
 from util_data import resolve_data_dir
 
 
@@ -26,12 +27,26 @@ def build_parser() -> argparse.ArgumentParser:
     restore.add_argument("--input", required=True, type=Path, metavar="BACKUP")
     restore.add_argument("--yes", action="store_true")
     restore.add_argument("--json", action="store_true", dest="json_output")
+    device = commands.add_parser("device", description="Host device diagnostic commands.")
+    device_actions = device.add_subparsers(dest="device_action", required=True)
+    ping = device_actions.add_parser("ping", description="Probe one literal IP address.")
+    ping.add_argument("--address", required=True, metavar="IP")
+    ping.add_argument("--family", choices=("auto", "ipv4", "ipv6"), default="auto")
+    ping.add_argument("--attempts", type=int, default=1)
+    ping.add_argument("--timeout", type=float, default=5.0, metavar="SECONDS")
+    ping.add_argument("--deadline", type=float, default=30.0, metavar="SECONDS")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.system_command == "device" and args.device_action == "ping":
+        document, exit_code = run_ping(
+            args.address, args.family, args.attempts, args.timeout, args.deadline
+        )
+        print(json.dumps(document, sort_keys=True))
+        return exit_code
     data_dir = resolve_data_dir(args.datadir)
     if args.backup_action == "create":
         manifest = create_backup(data_dir, args.output)

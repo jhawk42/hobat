@@ -404,6 +404,9 @@ def _add_system_commands(subparsers: argparse._SubParsersAction) -> None:
     backup_actions = backups.add_subparsers(dest="backup_action", required=True)
     backup_actions.add_parser("create", help="Create a data-directory backup", add_help=False)
     backup_actions.add_parser("restore", help="Restore a data-directory backup", add_help=False)
+    device = system_commands.add_parser("device", help="Host device diagnostic commands")
+    device_actions = device.add_subparsers(dest="device_action", required=True)
+    device_actions.add_parser("ping", help="Probe one literal IP address", add_help=False)
 
 
 # type: ignore[type-arg]
@@ -946,12 +949,13 @@ def _dispatch_system(
     args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
 ) -> int:
     del parser
+    action = (
+        [args.system_command, args.device_action]
+        if args.system_command == "device"
+        else [args.system_command, args.backup_action]
+    )
     return _normalize_module_rc(
-        td_system_cli.main(
-            _forward_with_datadir(
-                args, [args.system_command, args.backup_action] + extra_args
-            )
-        ),
+        td_system_cli.main(_forward_with_datadir(args, action + extra_args)),
         "td_system_cli.main",
     )
 
@@ -1084,7 +1088,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     single_record_json_output = (
         args.command == "merge-extaddr"
         and any(option in extras for option in ("--read-extaddr", "--update-extaddr"))
-    ) or (args.command in {"health", "system"} and "--json" in extras)
+    ) or (args.command in {"health", "system"} and "--json" in extras) or (
+        args.command == "system"
+        and args.system_command == "device"
+        and args.device_action == "ping"
+    )
 
     if not single_record_json_output:
         print("Thread Network Topology CLI")
@@ -1106,6 +1114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "health_command",
         "system_command",
         "backup_action",
+        "device_action",
     ):
         value = getattr(args, attr, None)
         if value:
