@@ -1247,7 +1247,7 @@ export const VIS_OPTIONS = {
 
 export const PHYSICS_PROFILE_MESH_BASELINE = "mesh-baseline";
 export const PHYSICS_PROFILE_MESH_DENSE = "mesh-dense";
-export const PHYSICS_PROFILE_MESH_BALANCED = "mesh-balanced";
+export const PHYSICS_PROFILE_MESH_BALANCED_HUB_SPOKE = "mesh-balanced";
 export const PHYSICS_PROFILE_MESH_SPARSE = "mesh-sparse";
 export const PHYSICS_PROFILE_MESH_RING = "mesh-ring";
 export const PHYSICS_PROFILE_MESH_COMPACT = "mesh-compact";
@@ -1279,7 +1279,7 @@ export const PHYSICS_PROFILES = Object.freeze({
     }),
     stabilization: Object.freeze({ enabled: true, iterations: 2200, updateInterval: 25 }),
   }),
-  [PHYSICS_PROFILE_MESH_BALANCED]: Object.freeze({
+  [PHYSICS_PROFILE_MESH_BALANCED_HUB_SPOKE]: Object.freeze({
     label: "Hub Spoke",
     barnesHut: Object.freeze({
       gravitationalConstant: -10000,
