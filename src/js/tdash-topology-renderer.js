@@ -2,7 +2,7 @@ import {
   VIS_OPTIONS,
   getPhysicsProfile,
   getPhysicsProfileLabel,
-  PHYSICS_PROFILE_MESH_BALANCED,
+  PHYSICS_PROFILE_MESH_BALANCED_HUB_SPOKE,
   PHYSICS_PROFILE_MESH_RING,
   PHYSICS_PROFILE_MESH_COMPACT,
   PHYSICS_PROFILE_MESH_TREE_HORIZONTAL,
@@ -402,7 +402,7 @@ export function renderTopologyForDataset(
     });
   }
 
-  if (physicsProfileName === PHYSICS_PROFILE_MESH_BALANCED) {
+  if (physicsProfileName === PHYSICS_PROFILE_MESH_BALANCED_HUB_SPOKE) {
     const nodeById = new Map(nodeData.map((n) => [n.id, n]));
     const isFtdChildNode = (node) => toText(node?.mode_device).toUpperCase() === "FTD";
     edgeData.forEach((edge) => {
