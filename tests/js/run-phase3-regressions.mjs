@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 
 import { computeRowCounts, evaluateDiagnosticOption, getRowRoleProjection, isRowVisibleByNodeFilter } from "../../src/js/tdash-filters.js";
 import { formatAge } from "../../src/js/tdash-health.js";
-import { collectColumns, getTableFilterLabel } from "../../src/js/tdash-table-renderer.js";
+import {
+  collectColumns,
+  getTableColumnCategories,
+  getTableColumnsForCategory,
+  getTableFilterLabel,
+} from "../../src/js/tdash-table-renderer.js";
 
 const explicitRouter = { isRouter: true, role: "Router", children: [{}] };
 const leader = { role: "leader" };
@@ -30,6 +35,14 @@ assert.deepEqual(collectColumns([{ rloc16: "0x1000", room: "Lab" }]).filter((col
 assert.equal(getTableFilterLabel(null, "All nodes"), "All nodes");
 assert.equal(getTableFilterLabel({ selectedOptions: [] }, "All diagnostics"), "All diagnostics");
 assert.equal(getTableFilterLabel({ selectedOptions: [{ text: "Routers" }] }, "All nodes"), "Routers");
+assert.equal(getTableColumnCategories().some(({ value }) => value === "matter-list"), true);
+assert.deepEqual(
+  getTableColumnsForCategory(
+    [{ matter: { nodeId: 123 }, deviceTypes: ["0x0302"], room: "Lab" }],
+    "matter-list",
+  ),
+  ["matter.nodeId", "deviceTypes"],
+);
 
 const counts = computeRowCounts([{ role: "Router", isRouter: true }, { role: "SleepyEndDevice" }, { isBorderRouter: true }]);
 assert.deepEqual([counts.borderRouters, counts.routers, counts.children], [1, 1, 1]);

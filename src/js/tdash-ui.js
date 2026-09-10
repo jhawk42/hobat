@@ -35,7 +35,9 @@ import {
 import {
   renderTableForDataset,
   applyTableFilters,
+  getTableColumnCategories,
   setTableHealthFindings,
+  setTableColumnCategory,
   setMoreInfoEnabled,
   isMoreInfoEnabled,
 } from "./tdash-table-renderer.js";
@@ -549,6 +551,10 @@ function switchView(newView) {
 
   const moreInfoButton = document.getElementById("btn-more-info");
   if (moreInfoButton) moreInfoButton.hidden = newView !== "table";
+  const tableCategoryLabel = document.getElementById("table-column-category-label");
+  const tableCategorySelect = document.getElementById("table-column-category");
+  if (tableCategoryLabel) tableCategoryLabel.hidden = newView !== "table";
+  if (tableCategorySelect) tableCategorySelect.hidden = newView !== "table";
 
   const linkFilterEl = document.getElementById("link-filter");
   linkFilterEl.classList.toggle("filter-disabled", newView !== "topology");
@@ -630,6 +636,22 @@ function setMoreInfo(enabled) {
 document
   .getElementById("btn-more-info")
   .addEventListener("click", () => setMoreInfo(!isMoreInfoEnabled()));
+
+const tableColumnCategoryEl = document.getElementById("table-column-category");
+if (tableColumnCategoryEl) {
+  getTableColumnCategories().forEach(({ value, label }) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    tableColumnCategoryEl.appendChild(option);
+  });
+  tableColumnCategoryEl.addEventListener("change", (event) => {
+    setTableColumnCategory(event.target.value);
+    if (currentDataset && currentView === "table") {
+      applyTableFilters({ preserveSelection: true });
+    }
+  });
+}
 
 // ── Legend toggle ────────────────────────────────────────────────────────────
 

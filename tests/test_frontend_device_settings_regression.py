@@ -113,6 +113,20 @@ def test_matter_details_section_precedes_mdns_and_uses_source_fields() -> None:
     assert '`${listIdPrefix}matter-list`,' in utils_text
 
 
+def test_table_category_control_is_registry_driven_and_precedes_more_info() -> None:
+    html = _read_text(HTML)
+    table_text = _read_text(TABLE_JS)
+    ui_text = _read_text(UI_JS)
+
+    assert html.index('id="table-column-category"') < html.index('id="btn-more-info"')
+    assert 'value="all">All</option>' in html
+    assert "getTableColumnCategories" in table_text
+    assert "DEVICE_DETAILS_SECTIONS" in table_text
+    assert 'applyTableFilters({ preserveSelection: true })' in ui_text
+    assert "let _tableSort = null;" in table_text
+    assert "function sortedTableRows(rows)" in table_text
+
+
 def test_insights_panel_uses_shared_selection_and_evaluator() -> None:
     ui_text = _read_text(UI_JS)
     html = _read_text(HTML)

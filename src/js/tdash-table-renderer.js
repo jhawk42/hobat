@@ -1,4 +1,4 @@
-import { TABLE_PRIORITY_COLUMNS } from "./tdash-constants.js";
+import { DEVICE_DETAILS_SECTIONS, TABLE_PRIORITY_COLUMNS } from "./tdash-constants.js";
 import { parseSearchQuery, filterRowsBySearch } from "./tdash-search.js";
 import {
   isPlainObject,
@@ -27,7 +27,10 @@ let _tableColumns = [];
 let _tableDatasetLabel = "";
 let _tableDatasetToken = null;
 let _moreInfoEnabled = false;
+let _tableColumnCategory = "all";
 let _lastFilteredRows = [];
+let _selectedTableRow = null;
+let _tableSort = null;
 let _tableHealthByDeviceId = new Map();
 let _tableHealthObservedAt = "";
 const MORE_INFO_CELL_MAX_LINES = 6;
@@ -39,6 +42,37 @@ export function setMoreInfoEnabled(val) {
 }
 export function isMoreInfoEnabled() {
   return _moreInfoEnabled;
+}
+
+function categoryLabel(sectionId) {
+  const specialLabels = {
+    "mdns-list": "mDNS",
+    "routes-links-list": "Routes & Links",
+  };
+  if (specialLabels[sectionId]) return specialLabels[sectionId];
+  return sectionId
+    .replace(/-list$/, "")
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+export function getTableColumnCategories() {
+  return DEVICE_DETAILS_SECTIONS
+    .filter((section) => !section.fields.includes("*"))
+    .map((section) => ({ value: section.sectionId, label: categoryLabel(section.sectionId) }));
+}
+
+export function setTableColumnCategory(category) {
+  _tableColumnCategory = getTableColumnCategories().some(({ value }) => value === category)
+    ? category
+    : "all";
+}
+
+export function getTableColumnsForCategory(rows, category) {
+  const section = DEVICE_DETAILS_SECTIONS.find(({ sectionId }) => sectionId === category);
+  if (!section || section.fields.includes("*")) return [];
+  return section.fields.filter((field) => rows.some((row) => hasNestedPath(row, field)));
 }
 
 export function setTableHealthFindings(findings = [], observedAt = "") {
@@ -303,9 +337,24 @@ function getColumnWidthStyle(maxLen) {
   return { width: `${width}px` };
 }
 
+function sortedTableRows(rows) {
+  if (!_tableSort) return rows;
+  const { column, direction } = _tableSort;
+  const multiplier = direction === "ascending" ? 1 : -1;
+  return [...rows].sort((left, right) => {
+    const leftText = formatCellValue(tableCellValue(left, column), column);
+    const rightText = formatCellValue(tableCellValue(right, column), column);
+    const numericDifference = Number(leftText) - Number(rightText);
+    const comparison = Number.isNaN(numericDifference)
+      ? leftText.localeCompare(rightText)
+      : numericDifference;
+    return comparison * multiplier;
+  });
+}
+
 // ── DOM table builder ─────────────────────────────────────────────────────────
 
-function renderTableRows(rows, columns, isSearchActive = false) {
+function renderTableRows(rows, columns, isSearchActive = false, selectedRow = null) {
   const theadEl = document.querySelector("#data-table thead");
   const tbodyEl = document.querySelector("#data-table tbody");
   theadEl.innerHTML = "";
@@ -323,6 +372,15 @@ function renderTableRows(rows, columns, isSearchActive = false) {
   columns.forEach((col) => {
     const th = document.createElement("th");
     th.textContent = col;
+    if (_tableSort?.column === col) th.setAttribute("aria-sort", _tableSort.direction);
+    th.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const direction = _tableSort?.column === col && _tableSort.direction === "ascending"
+        ? "descending"
+        : "ascending";
+      _tableSort = { column: col, direction };
+      applyTableFilters({ preserveSelection: true });
+    });
     Object.assign(th.style, columnWidths.get(col));
     headRow.appendChild(th);
   });
@@ -333,6 +391,7 @@ function renderTableRows(rows, columns, isSearchActive = false) {
     const tr = document.createElement("tr");
     tr.dataset.rowIndex = idx;
     if (isSearchActive) tr.classList.add("search-match");
+    if (row === selectedRow) tr.classList.add("selected-row");
     columns.forEach((col) => {
       const td = document.createElement("td");
       renderTdContent(td, tableCellValue(row, col), col);
@@ -349,6 +408,7 @@ function renderTableRows(rows, columns, isSearchActive = false) {
       tr.classList.add("selected-row");
       const summaryListEl = document.getElementById("summary-list");
       const rawRow = _lastFilteredRows[idx] ?? row;
+      _selectedTableRow = rawRow;
       publishDeviceSelection(rawRow);
       const details = sortDetailsWithPriority(
         flattenObjectEntries(rawRow).filter(
@@ -401,7 +461,7 @@ function updateTableStatus(visibleRowCount, columnCount, totalFilteredCount, sea
   publishViewStatus("table", statusText, _tableDatasetToken);
 }
 
-export function applyTableFilters() {
+export function applyTableFilters({ preserveSelection = false } = {}) {
   const nodeMode = document.getElementById("node-filter").value;
   const diagMode = document.getElementById("diagnostic-filter").value;
   const searchQuery = parseSearchQuery(
@@ -413,19 +473,40 @@ export function applyTableFilters() {
       isRowVisibleByDiagnosticFilter(row, diagMode),
   );
   const { matchingRows } = filterRowsBySearch(filtered, searchQuery, _moreInfoEnabled);
-  _lastFilteredRows = matchingRows;
-  const activeColumns = _moreInfoEnabled
-    ? _tableColumns
-    : [...HEALTH_COLUMNS, ...TABLE_PRIORITY_COLUMNS]
-      .filter((col) => _tableColumns.includes(col));
+  const sortedRows = sortedTableRows(matchingRows);
+  _lastFilteredRows = sortedRows;
+  const selectedRow = preserveSelection ? _selectedTableRow : null;
+  if (!preserveSelection) _selectedTableRow = null;
+  const activeColumns = _tableColumnCategory === "all"
+    ? (_moreInfoEnabled
+      ? _tableColumns
+      : [...HEALTH_COLUMNS, ...TABLE_PRIORITY_COLUMNS]
+        .filter((col) => _tableColumns.includes(col)))
+    : getTableColumnsForCategory(_tableRows, _tableColumnCategory);
   const detailsListEl = document.getElementById("details-list");
   if (detailsListEl) detailsListEl.innerHTML = "";
   const summaryListEl = document.getElementById("summary-list");
   if (summaryListEl)
     summaryListEl.innerHTML = "<li>Click a node or row to view its properties.</li>";
-  publishDeviceSelection(null);
-  renderTableRows(matchingRows, activeColumns, searchQuery !== "");
-  updateTableStatus(matchingRows.length, activeColumns.length, filtered.length, searchQuery);
+  if (preserveSelection) {
+    publishDeviceSelection(selectedRow);
+  } else {
+    publishDeviceSelection(null);
+  }
+  renderTableRows(sortedRows, activeColumns, searchQuery !== "", selectedRow);
+  updateTableStatus(sortedRows.length, activeColumns.length, filtered.length, searchQuery);
+
+  if (selectedRow && sortedRows.includes(selectedRow)) {
+    const details = sortDetailsWithPriority(
+      flattenObjectEntries(selectedRow).filter(
+        ([key]) => !shouldExcludeDetailPath(key, "table"),
+      ),
+    );
+    if (details.length > 0) {
+      if (summaryListEl) summaryListEl.innerHTML = "";
+      populateNodeDetailsLists(details);
+    }
+  }
 
   // Auto-select and populate device details when exactly one row matches the search
   if (searchQuery && matchingRows.length === 1) {
@@ -462,6 +543,8 @@ export function renderTableForDataset(dataset, statusDatasetToken = dataset) {
 
   _tableRows = rows;
   _tableColumns = columns;
+  _selectedTableRow = null;
+  _tableSort = null;
   _tableDatasetLabel = dataset.loadedFiles.join(", ");
   _tableDatasetToken = statusDatasetToken;
 

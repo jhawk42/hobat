@@ -53,7 +53,11 @@ placeholders are used only where the normalization contract requires them.
 
 The table renderer discovers fields from the loaded rows, places priority
 columns first, and formats nested values for inspection. **More Info** expands
-the displayed column set.
+the displayed column set. The **Categories** selector immediately before it is
+derived from `DEVICE_DETAILS_SECTIONS`: **All** restores the default table
+column set exactly, while a category shows only its registry fields that are
+present in the loaded rows. Changing category preserves rows, search, sorting,
+and the selected device and its detail panel.
 
 Selecting a topology node or table row publishes `tdash:device-selected`.
 Details, Device Settings, and Device Insights consume that shared selection.
