@@ -87,6 +87,14 @@ const NORMALIZE_OPTIONS_CANONICAL_OUTPUT = Object.freeze({
   dropLegacyRouteData: true,
 });
 
+const MATTER_FIELDS = Object.freeze([
+  "deviceLabel", "nodeId", "matterId", "fabricId", "compressedFabricId",
+  "fabricIndex", "vendorName", "vendorId", "vendorModel", "productId",
+  "productLabel", "vendorSwVersion", "vendorSwVersionNumber",
+  "vendorHwVersion", "vendorHwVersionNumber", "available", "isBridge",
+  "dateCommissioned",
+]);
+
 function extractRawRows(payload) {
   return Array.isArray(payload) ? payload : [];
 }
@@ -96,6 +104,17 @@ function extractEnvelopeRows(payload, property) {
   return isPlainObject(payload) && Array.isArray(payload[property])
     ? payload[property]
     : [];
+}
+
+function addMatterProjection(row) {
+  if (!isPlainObject(row)) return row;
+  const matter = isPlainObject(row.matter) ? { ...row.matter } : {};
+  MATTER_FIELDS.forEach((field) => {
+    if (matter[field] === undefined && row[field] !== undefined) {
+      matter[field] = row[field];
+    }
+  });
+  return { ...row, matter };
 }
 
 function extractProcessedEveRows(payload) {
@@ -162,9 +181,9 @@ export function buildDatasetRows(entry, rawFiles, options = {}) {
     );
   }
 
-  const rows = strategyHandler(groups, options).map((row) =>
-    normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
-  );
+  const rows = strategyHandler(groups, options)
+    .map((row) => normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT))
+    .map((row) => entry.source === "ha-matter-ws" ? addMatterProjection(row) : row);
   return { rows, loadedFiles, loadedFileIndexes };
 }
 

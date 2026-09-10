@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { computeRowCounts, evaluateDiagnosticOption, getRowRoleProjection, isRowVisibleByNodeFilter } from "../../src/js/tdash-filters.js";
+import { buildDatasetRows } from "../../src/js/tdash-dataset.js";
 import { formatAge } from "../../src/js/tdash-health.js";
 import {
   collectColumns,
@@ -43,6 +44,16 @@ assert.deepEqual(
   ),
   ["matter.nodeId", "deviceTypes"],
 );
+
+const haMatterRows = buildDatasetRows({
+  source: "ha-matter-ws",
+  mergeStrategy: "none",
+  rowExtractor: "raw-array",
+  files: ["ha-matter.json"],
+}, [[{ deviceLabel: "Desk Light", nodeId: 123, vendorName: "Example", networkInterfaces: [] }]]).rows;
+assert.deepEqual(haMatterRows[0].matter, {
+  deviceLabel: "Desk Light", nodeId: 123, vendorName: "Example",
+});
 
 const counts = computeRowCounts([{ role: "Router", isRouter: true }, { role: "SleepyEndDevice" }, { isBorderRouter: true }]);
 assert.deepEqual([counts.borderRouters, counts.routers, counts.children], [1, 1, 1]);
