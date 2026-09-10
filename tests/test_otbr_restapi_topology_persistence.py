@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import otbr_restapi_cli as cli_module
 import otbr_restapi_topology as topology_module
 from td_const import (
@@ -137,6 +139,41 @@ def test_topology_skip_devices_keeps_device_inputs_unsaved(tmp_path):
         OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
         OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
     ]
+
+
+@pytest.mark.parametrize(
+    ("command_args", "expected_updates"),
+    [
+        ([], 1),
+        (["--skip-devices"], 1),
+        (["--no-update-devices"], 1),
+        (["--skip-devices", "--no-update-devices"], 0),
+    ],
+)
+def test_topology_updates_device_collection_at_most_once(tmp_path, command_args, expected_updates):
+    args = cli_module.build_parser().parse_args(
+        ["--no-progress", "topology", "--no-enrich-mac-counters", *command_args]
+    )
+    args.td_data_dir = tmp_path
+    client = MagicMock()
+    devices = [{"id": "dev-1", "rloc16": "0x4000"}]
+    client.fetch_device_collection.return_value = devices
+    client.list_devices.return_value = devices
+    client.fetch_all_devices_diagnostics.return_value = {
+        "items": [],
+        "deviceResults": [],
+        "partial": False,
+    }
+    client.fetch_mesh_diagnostics_all_devices.return_value = {
+        "items": [],
+        "deviceResults": [],
+        "partial": False,
+    }
+
+    topology_module.dispatch_topology(client, args, raw_arg=False)
+
+    assert client.fetch_device_collection.call_count == expected_updates
+    assert client.fetch_device_collection.call_count <= 1
 
 
 def test_topology_run_cli_does_not_add_a_generic_final_write(tmp_path):
