@@ -2196,6 +2196,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = build_merge_output(command_inputs, supporting_data)
         if not result.viable:
             logging.error("merge-dataset: %s", result.viability_reason)
+            save_json_atomic(
+                result.records,
+                command_inputs.output_path,
+                indent=2,
+                add_trailing_newline=True,
+            )
+            if command_inputs.report_path is not None:
+                save_json_atomic(
+                    result.report,
+                    command_inputs.report_path,
+                    indent=2,
+                    add_trailing_newline=True,
+                )
+            logging.info("Wrote merge report to %s", command_inputs.report_path)
+            logging.info(
+                "Wrote %s merged records to %s",
+                len(result.records),
+                command_inputs.output_path,
+            )
             return 3
         write_merge_outputs(
             result,
