@@ -269,9 +269,23 @@ def _extract_matter(
         "vendorHwVersionNumber": values.get("HardwareVersion"),
         "vendorSwVersion": values.get("SoftwareVersionString"),
         "vendorSwVersionNumber": values.get("SoftwareVersion"),
+        "serialNumber": values.get("SerialNumber"),
+        "matterVersion": node.get("matter_version"),
+        "dataModelRevision": values.get("DataModelRevision"),
+        "specificationVersion": values.get("SpecificationVersion"),
+        "location": values.get("Location"),
+        "manufacturingDate": values.get("ManufacturingDate"),
+        "partNumber": values.get("PartNumber"),
+        "productUrl": values.get("ProductUrl"),
+        "localConfigDisabled": values.get("LocalConfigDisabled"),
+        "reachable": values.get("Reachable"),
+        "uniqueId": values.get("UniqueId"),
+        "configurationVersion": values.get("ConfigurationVersion"),
         "available": node.get("available"),
         "isBridge": node.get("is_bridge"),
         "dateCommissioned": node.get("date_commissioned"),
+        "lastInterview": node.get("last_interview"),
+        "interviewVersion": node.get("interview_version"),
     }
 
 

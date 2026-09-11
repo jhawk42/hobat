@@ -39,10 +39,10 @@ assert.equal(getTableFilterLabel({ selectedOptions: [{ text: "Routers" }] }, "Al
 assert.equal(getTableColumnCategories().some(({ value }) => value === "matter-list"), true);
 assert.deepEqual(
   getTableColumnsForCategory(
-    [{ rloc16: "0x1234", extAddress: "0011223344556677", deviceLabel: "Desk Light", matter: { nodeId: 123 }, deviceTypes: ["0x0302"], room: "Lab" }],
+    [{ rloc16: "0x1234", extAddress: "0011223344556677", deviceLabel: "Desk Light", matter: { nodeId: 123, serialNumber: "SN-1", matterVersion: "1.4.1", lastInterview: "2026-08-02T10:30:00Z" }, deviceTypes: ["0x0302"], room: "Lab" }],
     "matter-list",
   ),
-  ["rloc16", "extAddress", "deviceLabel", "matter.nodeId", "deviceTypes"],
+  ["rloc16", "extAddress", "deviceLabel", "matter.nodeId", "matter.serialNumber", "matter.matterVersion", "matter.lastInterview", "deviceTypes"],
 );
 assert.deepEqual(
   getTableColumnsForCategory([{ rloc16: "0x1234" }], "identity-list"),

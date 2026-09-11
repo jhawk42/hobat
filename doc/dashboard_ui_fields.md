@@ -83,7 +83,9 @@ selection clears the section.
 | `matter.vendorName`, `matter.vendorId`, `matter.vendorModel`, `matter.productId`, `matter.productLabel` | Corresponding field name | Basic Information manufacturer and product attributes for the selected record. |
 | `matter.vendorSwVersion`, `matter.vendorSwVersionNumber` | Corresponding field name | Matter software version string and numeric version for the selected record. |
 | `matter.vendorHwVersion`, `matter.vendorHwVersionNumber` | Corresponding field name | Matter hardware version string and numeric version for the selected record. |
-| `matter.available`, `matter.isBridge`, `matter.dateCommissioned` | Corresponding field name | HA Matter controller availability, bridge state, and commissioning timestamp for the selected record. No interview timestamp is currently collected. |
+| `matter.serialNumber`, `matter.matterVersion`, `matter.dataModelRevision`, `matter.specificationVersion` | Corresponding field name | Serial number; Matter.js-derived Matter version when provided; and raw Basic Information protocol revision values. |
+| `matter.location`, `matter.manufacturingDate`, `matter.partNumber`, `matter.productUrl`, `matter.localConfigDisabled`, `matter.reachable`, `matter.uniqueId`, `matter.configurationVersion` | Corresponding field name | Optional Basic Information values supplied by the commissioned device. |
+| `matter.available`, `matter.isBridge`, `matter.dateCommissioned`, `matter.lastInterview`, `matter.interviewVersion` | Corresponding field name | HA Matter controller availability, bridge state, commissioning timestamp, and Matter.js inventory interview metadata for the selected record. |
 | `deviceTypes` | `deviceTypes` | Endpoint device types and revisions observed for the selected record. |
 | `networkInterfaces` | `networkInterfaces` | Matter General Diagnostics interfaces, including reported IP addresses and MAC addresses. |
 | `generalDiagnostics` | `generalDiagnostics` | Reported Matter General Diagnostics values for the selected record. |

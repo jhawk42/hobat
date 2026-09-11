@@ -281,11 +281,28 @@ def test_device_inventory_decodes_endpoints_identity_and_optional_fields() -> No
     assert bridge["matter"]["vendorModel"] == "Bridge 2000"
     assert bridge["matter"]["vendorHwVersion"] == "rev-D"
     assert bridge["matter"]["vendorSwVersion"] == "1.2.3"
+    assert bridge["matter"]["serialNumber"] == "SN-REDACTED-001"
+    assert bridge["matter"]["matterVersion"] == "1.4.1"
+    assert bridge["matter"]["lastInterview"] == "2026-08-02T10:30:00Z"
+    assert bridge["matter"]["interviewVersion"] == 6
+    assert bridge["matter"]["dataModelRevision"] == 6
+    assert bridge["matter"]["specificationVersion"] == 65536
+    assert bridge["matter"]["location"] == "US"
+    assert bridge["matter"]["manufacturingDate"] == "20240115"
+    assert bridge["matter"]["partNumber"] == "BR-2000-BOARD"
+    assert bridge["matter"]["productUrl"] == "https://example.test/bridge-2000"
+    assert bridge["matter"]["localConfigDisabled"] is False
+    assert bridge["matter"]["reachable"] is True
+    assert bridge["matter"]["uniqueId"] == "bridge-unique-id"
+    assert bridge["matter"]["configurationVersion"] == 7
     assert [endpoint["endpointId"] for endpoint in bridge["endpoints"]] == [0, 1, 2]
     assert bridge["endpoints"][1]["deviceTypes"] == [{"deviceType": 256, "revision": 2}]
     assert bridge["endpoints"][2]["serverClusters"] == [6, 29, 1026]
     assert unavailable["matter"]["available"] is False
     assert unavailable["matter"]["deviceLabel"] is None
+    assert unavailable["matter"]["serialNumber"] is None
+    assert unavailable["matter"]["matterVersion"] is None
+    assert unavailable["matter"]["lastInterview"] is None
     assert unavailable["endpoints"] == []
 
 

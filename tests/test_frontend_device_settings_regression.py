@@ -106,7 +106,10 @@ def test_matter_details_section_precedes_mdns_and_uses_source_fields() -> None:
         "matter.matterId",
         "matter.vendorName",
         "matter.vendorModel",
+        "matter.serialNumber",
+        "matter.matterVersion",
         "matter.dateCommissioned",
+        "matter.lastInterview",
         "deviceTypes",
         "networkInterfaces",
     ):
