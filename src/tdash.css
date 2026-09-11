@@ -1770,6 +1770,11 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 /* ── Table view ───────────────────────────────────────────── */
 
 /* Complex value rendering inside table cells */
+td .td-cell-content {
+  max-height: calc(2 * 1.4em);
+  overflow: hidden;
+}
+
 td .td-value-list {
   margin: 0;
   padding-left: 0;
@@ -1938,10 +1943,10 @@ td .td-array-idx {
 }
 
 table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  min-width: 0;
 }
 
 thead th {

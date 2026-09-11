@@ -280,21 +280,26 @@ function renderTdContent(td, value, columnName) {
     td.textContent = truncateMoreInfoCellValue(value, columnName);
     return;
   }
+  const content = document.createElement("div");
+  content.className = "td-cell-content";
   if (columnName === "routes") {
-    td.textContent = formatCellValue(value, columnName);
+    content.textContent = formatCellValue(value, columnName);
+    td.appendChild(content);
     return;
   }
   if (_isTdScalar(value)) {
-    td.textContent =
+    content.textContent =
       value === null || value === undefined
         ? ""
         : typeof value === "boolean"
           ? value ? "true" : "false"
           : String(value);
+    td.appendChild(content);
     return;
   }
   const node = _createTdValueNode(value, 0);
-  if (node) td.appendChild(node);
+  if (node) content.appendChild(node);
+  td.appendChild(content);
 }
 
 // ── Column collection ─────────────────────────────────────────────────────────
