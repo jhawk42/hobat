@@ -86,6 +86,11 @@ import {
   renderHealthInsights,
   renderHealthStatus,
 } from "./tdash-health.js";
+import {
+  DEVICE_ACTIONS,
+  buildDeviceDiagnosticsModel,
+  deviceActionStatusLabel,
+} from "./tdash-device-diagnostics.js";
 
 configureViewStatusPresenter((status) => {
   const statusEl = document.getElementById("view-status-line-content");
@@ -894,6 +899,369 @@ function initDeviceSettings() {
   });
 }
 
+const deviceDiagnosticsState = {
+  capabilities: null,
+  record: null,
+  model: null,
+  invocationVersion: 0,
+  jobId: null,
+  startedAt: null,
+};
+
+function selectedDiagnosticTarget() {
+  const model = deviceDiagnosticsState.model;
+  if (!model || model.pingAction === DEVICE_ACTIONS.MATTER_PING) return null;
+  const selectEl = document.getElementById("device-diagnostics-target");
+  return model.targets.find(({ address }) => address === selectEl.value) ?? null;
+}
+
+function setDeviceDiagnosticsStatus(message = "", isError = false) {
+  const statusEl = document.getElementById("device-diagnostics-status");
+  statusEl.textContent = message;
+  statusEl.classList.toggle("error", isError);
+}
+
+function clearDeviceDiagnosticsResult() {
+  document.getElementById("device-diagnostics-result").replaceChildren();
+  setDeviceDiagnosticsStatus();
+}
+
+function setDeviceDiagnosticsPending(pending, cancelling = false) {
+  const model = deviceDiagnosticsState.model;
+  document.getElementById("device-diagnostics-target").disabled = pending;
+  document.getElementById("device-diagnostics-attempts").disabled = pending;
+  document.getElementById("device-diagnostics-timeout").disabled = pending;
+  document.getElementById("device-diagnostics-allow-sed").disabled = pending;
+  document.querySelectorAll('input[name="device-diagnostics-counters"]').forEach((input) => {
+    input.disabled = pending;
+  });
+  document.getElementById("btn-device-diagnostics-ping").disabled = pending ||
+    !model?.pingAction ||
+    (model.targets.length > 1 && !selectedDiagnosticTarget()) ||
+    (model.sleepy && !document.getElementById("device-diagnostics-allow-sed").checked);
+  document.getElementById("btn-device-diagnostics-reset").disabled = pending ||
+    !model?.resetSupported ||
+    !selectedDiagnosticTarget() ||
+    !document.querySelector('input[name="device-diagnostics-counters"]:checked');
+  const cancelEl = document.getElementById("btn-device-diagnostics-cancel");
+  cancelEl.hidden = !pending;
+  cancelEl.disabled = cancelling;
+}
+
+function renderDeviceDiagnosticsSelection() {
+  const model = deviceDiagnosticsState.model;
+  const tabEl = document.getElementById("btn-device-details-diagnostics");
+  tabEl.hidden = !model;
+  if (!model) {
+    if (!document.getElementById("device-diagnostics-panel").hidden) {
+      setActiveDeviceDetailsPanel("device-properties-panel");
+    }
+    return;
+  }
+
+  document.getElementById("device-diagnostics-title").textContent =
+    `Diagnostics: ${model.title}`;
+  const targetGroupEl = document.getElementById("device-diagnostics-target-group");
+  const targetSelectEl = document.getElementById("device-diagnostics-target");
+  const singleTargetEl = document.getElementById("device-diagnostics-single-target");
+  const hasAddressTarget = model.pingAction !== DEVICE_ACTIONS.MATTER_PING ||
+    model.resetSupported;
+  targetGroupEl.hidden = !hasAddressTarget;
+  targetSelectEl.replaceChildren();
+  singleTargetEl.textContent = "";
+  if (hasAddressTarget && model.targets.length === 1) {
+    targetSelectEl.hidden = true;
+    singleTargetEl.hidden = false;
+    singleTargetEl.textContent = `${model.targets[0].address} (${model.targets[0].family}, ${model.targets[0].provenance})`;
+    const optionEl = document.createElement("option");
+    optionEl.value = model.targets[0].address;
+    optionEl.selected = true;
+    targetSelectEl.appendChild(optionEl);
+  } else if (hasAddressTarget) {
+    targetSelectEl.hidden = false;
+    singleTargetEl.hidden = true;
+    const placeholderEl = document.createElement("option");
+    placeholderEl.value = "";
+    placeholderEl.textContent = "Select an address";
+    targetSelectEl.appendChild(placeholderEl);
+    model.targets.forEach(({ address, family, provenance }) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = address;
+      optionEl.textContent = `${address} (${family}, ${provenance})`;
+      targetSelectEl.appendChild(optionEl);
+    });
+  }
+
+  const attemptsEl = document.getElementById("device-diagnostics-attempts");
+  attemptsEl.max = model.pingAction === DEVICE_ACTIONS.MATTER_PING ? "5" : "10";
+  const timeoutEl = document.getElementById("device-diagnostics-timeout");
+  timeoutEl.max = model.pingAction === DEVICE_ACTIONS.OTBR_PING ? "10" : "60";
+  const timeoutLabelEl = document.querySelector(
+    'label[for="device-diagnostics-timeout"]',
+  );
+  const supportsTimeout = model.pingAction !== DEVICE_ACTIONS.MATTER_PING;
+  timeoutEl.hidden = !supportsTimeout;
+  timeoutLabelEl.hidden = !supportsTimeout;
+  document.getElementById("device-diagnostics-options").hidden = !model.pingAction;
+  document.getElementById("device-diagnostics-sed-row").hidden = !model.sleepy;
+  document.getElementById("device-diagnostics-allow-sed").checked = false;
+  document.getElementById("btn-device-diagnostics-ping").hidden = !model.pingAction;
+  document.getElementById("device-diagnostics-reset").hidden = !model.resetSupported;
+  document.querySelectorAll('input[name="device-diagnostics-counters"]').forEach((input) => {
+    input.checked = false;
+  });
+  setDeviceDiagnosticsPending(false);
+}
+
+function selectDeviceDiagnosticsRecord(record) {
+  const oldJobId = deviceDiagnosticsState.jobId;
+  deviceDiagnosticsState.invocationVersion += 1;
+  deviceDiagnosticsState.jobId = null;
+  deviceDiagnosticsState.record = record;
+  deviceDiagnosticsState.model = buildDeviceDiagnosticsModel(
+    record,
+    currentDataset?.entry,
+    deviceDiagnosticsState.capabilities,
+  );
+  clearDeviceDiagnosticsResult();
+  renderDeviceDiagnosticsSelection();
+  if (oldJobId) {
+    void fetch(`/api/device-action-jobs/${encodeURIComponent(oldJobId)}`, {
+      method: "DELETE",
+      cache: "no-store",
+    });
+  }
+}
+
+function appendDiagnosticResultRow(listEl, label, value) {
+  const termEl = document.createElement("dt");
+  termEl.textContent = label;
+  const valueEl = document.createElement("dd");
+  valueEl.textContent = value ?? "Not reported";
+  listEl.append(termEl, valueEl);
+}
+
+function renderDeviceDiagnosticResult(result, detail = "") {
+  const contentEl = document.getElementById("device-diagnostics-result");
+  contentEl.replaceChildren();
+  const listEl = document.createElement("dl");
+  appendDiagnosticResultRow(listEl, "Action", result.action);
+  appendDiagnosticResultRow(listEl, "Target kind", result.targetKind);
+  appendDiagnosticResultRow(listEl, "Target", String(result.target ?? "Not reported"));
+  appendDiagnosticResultRow(listEl, "Status", deviceActionStatusLabel(result.status));
+  appendDiagnosticResultRow(listEl, "Observed", result.observedAt
+    ? new Date(result.observedAt).toLocaleString()
+    : "Not reported");
+  appendDiagnosticResultRow(listEl, "Duration", Number.isFinite(result.durationSeconds)
+    ? formatDuration(result.durationSeconds * 1000)
+    : "Not reported");
+  if (result.sent !== undefined) {
+    appendDiagnosticResultRow(listEl, "Packets", `${result.received}/${result.sent} received`);
+    appendDiagnosticResultRow(listEl, "Loss", `${Math.round(Number(result.loss) * 100)}%`);
+    const summary = result.roundTripSummaryMs;
+    appendDiagnosticResultRow(listEl, "Latency", summary
+      ? `${summary.min} / ${summary.average} / ${summary.max} ms min/avg/max`
+      : "Not reported");
+  } else if (result.action === DEVICE_ACTIONS.MATTER_PING) {
+    appendDiagnosticResultRow(listEl, "Latency", "Not reported");
+  } else if (result.attemptsCompleted !== undefined) {
+    appendDiagnosticResultRow(
+      listEl,
+      "Attempts",
+      `${result.attemptsCompleted}/${result.attemptsRequested} completed`,
+    );
+  }
+  if (detail || result.detail) {
+    appendDiagnosticResultRow(listEl, "Detail", detail || result.detail);
+  }
+  contentEl.appendChild(listEl);
+
+  const rows = result.action === DEVICE_ACTIONS.MATTER_PING
+    ? Object.entries(result.results || {}).map(([address, success]) => ({
+      label: address,
+      status: success ? "Success" : "No response",
+      duration: "Not reported",
+    }))
+    : (result.attempts || []).map((attempt) => ({
+      label: `Attempt ${attempt.attempt}`,
+      status: deviceActionStatusLabel(attempt.outcome),
+      duration: Number.isFinite(attempt.durationSeconds)
+        ? formatDuration(attempt.durationSeconds * 1000)
+        : "Not reported",
+    }));
+  if (rows.length) {
+    const tableEl = document.createElement("table");
+    const headEl = document.createElement("thead");
+    headEl.innerHTML = "<tr><th>Address / attempt</th><th>Status</th><th>Attempt duration</th></tr>";
+    const bodyEl = document.createElement("tbody");
+    rows.forEach((row) => {
+      const trEl = document.createElement("tr");
+      [row.label, row.status, row.duration].forEach((value) => {
+        const cellEl = document.createElement("td");
+        cellEl.textContent = value;
+        trEl.appendChild(cellEl);
+      });
+      bodyEl.appendChild(trEl);
+    });
+    tableEl.append(headEl, bodyEl);
+    contentEl.appendChild(tableEl);
+  }
+}
+
+async function pollDeviceActionJob(jobId, invocationVersion) {
+  while (invocationVersion === deviceDiagnosticsState.invocationVersion) {
+    const response = await fetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (invocationVersion !== deviceDiagnosticsState.invocationVersion) return;
+    if (!response.ok) throw new Error(payload.error || `Action polling failed (HTTP ${response.status}).`);
+    if (["running", "cancelling"].includes(payload.status)) {
+      const elapsed = deviceDiagnosticsState.startedAt
+        ? formatDuration(Date.now() - deviceDiagnosticsState.startedAt)
+        : "";
+      setDeviceDiagnosticsStatus(
+        payload.status === "cancelling"
+          ? "Cancelling diagnostic action..."
+          : `Diagnostic running${elapsed ? ` (${elapsed})` : ""}...`,
+      );
+      setDeviceDiagnosticsPending(true, payload.status === "cancelling");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      continue;
+    }
+    const result = payload.result || {
+      action: payload.action,
+      status: payload.status === "cancelled" ? "cancelled" : "failed",
+    };
+    renderDeviceDiagnosticResult(result, payload.detail || "");
+    setDeviceDiagnosticsStatus(deviceActionStatusLabel(result.status), result.status === "failed");
+    deviceDiagnosticsState.jobId = null;
+    setDeviceDiagnosticsPending(false);
+    return;
+  }
+}
+
+async function invokeDeviceDiagnostic(action) {
+  const model = deviceDiagnosticsState.model;
+  if (!model || deviceDiagnosticsState.jobId) return;
+  const target = selectedDiagnosticTarget();
+  if (action !== DEVICE_ACTIONS.MATTER_PING && !target) return;
+  const invocationVersion = ++deviceDiagnosticsState.invocationVersion;
+  const invocationId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${invocationVersion}`;
+  clearDeviceDiagnosticsResult();
+  deviceDiagnosticsState.startedAt = Date.now();
+  setDeviceDiagnosticsStatus("Queueing diagnostic action...");
+  setDeviceDiagnosticsPending(true);
+  const attempts = Number(document.getElementById("device-diagnostics-attempts").value);
+  const timeoutSeconds = Number(document.getElementById("device-diagnostics-timeout").value);
+  const payload = {
+    action,
+    invocationId,
+    deviceId: model.deviceId,
+    source: model.source,
+    datasetFiles: model.datasetFiles,
+    attempts,
+    timeoutSeconds,
+    deadlineSeconds: Math.min(600, Math.max(30, attempts * timeoutSeconds + 5)),
+  };
+  if (action === DEVICE_ACTIONS.MATTER_PING) {
+    payload.nodeId = model.nodeId;
+  } else {
+    payload.target = target.address;
+    payload.family = target.family;
+  }
+  if (action === DEVICE_ACTIONS.OTBR_PING) {
+    payload.allowSed = document.getElementById("device-diagnostics-allow-sed").checked;
+  }
+  if (action === DEVICE_ACTIONS.OTBR_RESET) {
+    payload.counters = document.querySelector(
+      'input[name="device-diagnostics-counters"]:checked',
+    )?.value;
+    payload.confirmed = true;
+  }
+  try {
+    const response = await fetch("/api/device-actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    const responsePayload = await response.json().catch(() => ({}));
+    if (invocationVersion !== deviceDiagnosticsState.invocationVersion) return;
+    if (!response.ok) throw new Error(responsePayload.error || `Action failed (HTTP ${response.status}).`);
+    deviceDiagnosticsState.jobId = responsePayload.job_id;
+    await pollDeviceActionJob(responsePayload.job_id, invocationVersion);
+  } catch (error) {
+    if (invocationVersion !== deviceDiagnosticsState.invocationVersion) return;
+    deviceDiagnosticsState.jobId = null;
+    renderDeviceDiagnosticResult({ action, status: "failed" }, error.message);
+    setDeviceDiagnosticsStatus("Diagnostic action failed.", true);
+    setDeviceDiagnosticsPending(false);
+  }
+}
+
+async function loadDeviceActionCapabilities() {
+  try {
+    const response = await fetch("/api/device-actions", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    deviceDiagnosticsState.capabilities = await response.json();
+  } catch (error) {
+    console.warn("Device diagnostic capabilities are unavailable:", error);
+    deviceDiagnosticsState.capabilities = { enabled: false, actions: [] };
+  }
+  selectDeviceDiagnosticsRecord(deviceDiagnosticsState.record);
+}
+
+function initDeviceDiagnostics() {
+  document.addEventListener(DEVICE_SELECTION_EVENT, (event) => {
+    selectDeviceDiagnosticsRecord(event.detail?.record ?? null);
+  });
+  document.getElementById("device-diagnostics-target").addEventListener("change", () => {
+    clearDeviceDiagnosticsResult();
+    document.getElementById("device-diagnostics-allow-sed").checked = false;
+    document.querySelectorAll('input[name="device-diagnostics-counters"]').forEach((input) => {
+      input.checked = false;
+    });
+    setDeviceDiagnosticsPending(false);
+  });
+  document.getElementById("device-diagnostics-allow-sed").addEventListener(
+    "change",
+    () => setDeviceDiagnosticsPending(false),
+  );
+  document.querySelectorAll('input[name="device-diagnostics-counters"]').forEach((input) => {
+    input.addEventListener("change", () => setDeviceDiagnosticsPending(false));
+  });
+  document.getElementById("btn-device-diagnostics-ping").addEventListener("click", () => {
+    void invokeDeviceDiagnostic(deviceDiagnosticsState.model?.pingAction);
+  });
+  document.getElementById("btn-device-diagnostics-reset").addEventListener("click", () => {
+    const model = deviceDiagnosticsState.model;
+    const target = selectedDiagnosticTarget();
+    const counters = document.querySelector(
+      'input[name="device-diagnostics-counters"]:checked',
+    )?.value;
+    if (!model || !target || !counters) return;
+    if (window.confirm(
+      `Reset ${counters.toUpperCase()} counters for ${model.title} at ${target.address}?`,
+    )) void invokeDeviceDiagnostic(DEVICE_ACTIONS.OTBR_RESET);
+  });
+  document.getElementById("btn-device-diagnostics-cancel").addEventListener("click", async () => {
+    const jobId = deviceDiagnosticsState.jobId;
+    if (!jobId) return;
+    setDeviceDiagnosticsStatus("Cancelling diagnostic action...");
+    setDeviceDiagnosticsPending(true, true);
+    await fetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`, {
+      method: "DELETE",
+      cache: "no-store",
+    });
+  });
+  void loadDeviceActionCapabilities();
+}
+
 const DIAGNOSTIC_SOURCE_LABELS = Object.freeze({
   macCounters: "MAC Counters",
   mlecounters: "MLE Counters",
@@ -1384,6 +1752,10 @@ const DEVICE_DETAILS_PANEL_TABS = [
     panelId: "device-insights-panel",
   },
   {
+    buttonId: "btn-device-details-diagnostics",
+    panelId: "device-diagnostics-panel",
+  },
+  {
     buttonId: "btn-device-details-settings",
     panelId: "device-settings-panel",
   },
@@ -1440,7 +1812,7 @@ function initDeviceDetailsPanelTabs() {
       const tabs = DEVICE_DETAILS_PANEL_TABS
         .map(({ buttonId: id, panelId: targetPanelId }) => {
           const el = document.getElementById(id);
-          return el ? { el, targetPanelId } : null;
+          return el && !el.hidden ? { el, targetPanelId } : null;
         })
         .filter(Boolean);
       if (!tabs.length) return;
@@ -1508,6 +1880,7 @@ const _CANCELLED_PARTIAL_STATUS_PIN_MS = 3000;
 document
   .getElementById("datasource-filter")
   .addEventListener("change", async (event) => {
+    selectDeviceDiagnosticsRecord(null);
     const selectedSource = event.target.value;
     populateDatasetSelect(selectedSource);
     setPhysicsProfile(PHYSICS_PROFILE_AUTO);
@@ -1525,6 +1898,7 @@ document
 document
   .getElementById("dataset-select")
   .addEventListener("change", async (event) => {
+    selectDeviceDiagnosticsRecord(null);
     document.getElementById("node-filter").value = "all";
     document.getElementById("diagnostic-filter").value = "all";
     setPhysicsProfile(PHYSICS_PROFILE_AUTO);
@@ -1623,6 +1997,7 @@ document.getElementById("view-status-line-content").textContent =
 bindDeviceDetailsSectionFields();
 initDeviceSettings();
 initDeviceInsights();
+initDeviceDiagnostics();
 renderNetworkInsights();
 initDeviceDetailsPanelTabs();
 initDetailPanelToggles(

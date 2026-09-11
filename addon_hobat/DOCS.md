@@ -32,6 +32,12 @@ another reverse proxy must forward the dashboard's path-relative `/api/*`
 requests to Hobat; Hobat does not emit CORS authorization headers. This is not
 authentication and does not block direct HTTP clients that can reach port 9165.
 
+Device Diagnostics are disabled by default. Set `device_actions_enabled` to
+enable Ping. Set `device_reset_enabled` as well to enable destructive OTBR
+Reset Counters. Enabling reset alone has no effect. Because same-origin access
+is not authentication, enable these options only when the Web UI is limited to
+trusted users by Home Assistant ingress or equivalent access control.
+
 The app's `/data` directory can also be backed up with `td_cli system backups
 create`. Collector-generated network credentials, including `networkKey` and
 `pskc`, are redacted before persistence, and backups may contain

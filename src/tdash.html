@@ -366,6 +366,8 @@
           <span id="device-details-nav-bar-left">
             <button id="btn-device-details-properties" title="Show device properties">🔭</button>
             <button id="btn-device-details-insights" title="Show device insights">💡</button>
+            <button id="btn-device-details-diagnostics" title="Show device diagnostics"
+              aria-label="Show device diagnostics" hidden>⌁</button>
             <button id="btn-device-details-settings" title="Show device settings">⛭</button>
           </span>
           <span id="device-details-nav-bar-right">
@@ -415,6 +417,43 @@
         </div>
         <div id="device-insights-panel">
           <div id="device-insights-panel-content" role="status" aria-live="polite"></div>
+        </div>
+        <div id="device-diagnostics-panel" hidden>
+          <h3 id="device-diagnostics-title">Device diagnostics</h3>
+          <div id="device-diagnostics-target-group" class="device-diagnostics-control" hidden>
+            <label for="device-diagnostics-target">Target</label>
+            <select id="device-diagnostics-target"></select>
+            <output id="device-diagnostics-single-target" for="device-diagnostics-target"></output>
+          </div>
+          <details id="device-diagnostics-options" class="device-diagnostics-options">
+            <summary>Ping options</summary>
+            <div class="device-diagnostics-option-grid">
+              <label for="device-diagnostics-attempts">Attempts</label>
+              <input id="device-diagnostics-attempts" type="number" min="1" max="10" value="1">
+              <label for="device-diagnostics-timeout">Timeout</label>
+              <input id="device-diagnostics-timeout" type="number" min="1" max="60" value="3">
+            </div>
+          </details>
+          <label id="device-diagnostics-sed-row" class="device-diagnostics-check" hidden>
+            <input id="device-diagnostics-allow-sed" type="checkbox">
+            Acknowledge active traffic to this sleepy device
+          </label>
+          <div class="device-diagnostics-actions">
+            <button id="btn-device-diagnostics-ping" type="button">Ping</button>
+            <button id="btn-device-diagnostics-cancel" type="button" hidden>Cancel</button>
+          </div>
+          <fieldset id="device-diagnostics-reset" class="device-diagnostics-reset" hidden>
+            <legend>Reset Counters</legend>
+            <div class="device-diagnostics-segments">
+              <label><input type="radio" name="device-diagnostics-counters" value="mac"> MAC</label>
+              <label><input type="radio" name="device-diagnostics-counters" value="mle"> MLE</label>
+              <label><input type="radio" name="device-diagnostics-counters" value="both"> Both</label>
+            </div>
+            <button id="btn-device-diagnostics-reset" type="button" disabled>Reset Counters</button>
+          </fieldset>
+          <p id="device-diagnostics-status" class="device-diagnostics-status"
+            role="status" aria-live="polite"></p>
+          <div id="device-diagnostics-result" class="device-diagnostics-result"></div>
         </div>
         <div id="device-settings-panel">
             <ul id="device-settings-list" class="node-details-list">

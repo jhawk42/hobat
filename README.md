@@ -84,6 +84,15 @@ not authentication: direct clients such as `curl` or `wget` can call any API
 route they can reach, so use firewall or authenticated proxy controls when the
 API must be restricted.
 
+Device Diagnostics are disabled by default because Ping and Reset Counters
+create active network traffic. Start the server with `--enable-device-actions`
+or set `TD_DEVICE_ACTIONS_ENABLED=true` to enable Ping. Reset Counters requires
+the additional `--enable-device-reset` option or
+`TD_DEVICE_RESET_ENABLED=true`. Do not enable either action on a deployment
+exposed beyond a trusted network without an authenticated reverse proxy or
+equivalent access control. Diagnostic results are transient and are never
+written to the data directory.
+
 ## CLI Quick Start
 
 Run commands from the repository root with `PYTHONPATH=src`:

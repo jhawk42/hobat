@@ -13,6 +13,10 @@ WEBSERVER_STATE_REGISTRIES = (
     "_job_runtime_registry",
     "_job_id_by_task",
     "_background_tasks",
+    "_device_action_job_registry",
+    "_device_action_runtime_registry",
+    "_device_action_job_id_by_task",
+    "_device_action_background_tasks",
 )
 
 

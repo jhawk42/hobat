@@ -9,6 +9,8 @@ export OT_REST_LISTEN_ADDR="$(bashio::config 'ot_rest_listen_addr')"
 export OT_REST_LISTEN_PORT="$(bashio::config 'ot_rest_listen_port')"
 export TD_HA_MATTER_WS_HOST="$(bashio::config 'ha_matter_ws_host')"
 export TD_HA_MATTER_WS_PORT="$(bashio::config 'ha_matter_ws_port')"
+export TD_DEVICE_ACTIONS_ENABLED="$(bashio::config 'device_actions_enabled')"
+export TD_DEVICE_RESET_ENABLED="$(bashio::config 'device_reset_enabled')"
 
 # Navigate to the application directory
 cd "$APP_DIR"

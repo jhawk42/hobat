@@ -19,10 +19,14 @@ options:
   ot_rest_listen_port: 8081
   ha_matter_ws_host: 127.0.0.1
   ha_matter_ws_port: 5580
+  device_actions_enabled: false
+  device_reset_enabled: false
 schema:
   ot_rest_listen_addr: str
   ot_rest_listen_port: port
   ha_matter_ws_host: str
   ha_matter_ws_port: port
+  device_actions_enabled: bool
+  device_reset_enabled: bool
 webui: "http://[HOST]:[PORT:9165]/"
 watchdog: "tcp://[HOST]:[PORT:9165]"

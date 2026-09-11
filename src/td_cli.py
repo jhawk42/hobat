@@ -1088,6 +1088,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     single_record_json_output = (
         args.command == "merge-extaddr"
         and any(option in extras for option in ("--read-extaddr", "--update-extaddr"))
+    ) or (
+        args.command == "otbr-cli"
+        and args.cli_command == "device"
+        and "--json" in extras
     ) or (args.command in {"health", "system"} and "--json" in extras) or (
         args.command == "system"
         and args.system_command == "device"

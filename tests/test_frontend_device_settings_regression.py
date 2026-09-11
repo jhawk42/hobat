@@ -12,6 +12,7 @@ DATASET_JS = REPO_ROOT / "src" / "js" / "tdash-dataset.js"
 UI_JS = REPO_ROOT / "src" / "js" / "tdash-ui.js"
 HTML = REPO_ROOT / "src" / "tdash.html"
 CONSTANTS_JS = REPO_ROOT / "src" / "js" / "tdash-constants.js"
+DIAGNOSTICS_JS = REPO_ROOT / "src" / "js" / "tdash-device-diagnostics.js"
 
 
 def _read_text(path: Path) -> str:
@@ -143,6 +144,26 @@ def test_insights_panel_uses_shared_selection_and_evaluator() -> None:
     assert "document.addEventListener(DEVICE_SELECTION_EVENT" in ui_text
     assert "function initDeviceInsights()" in ui_text
     assert "initDeviceInsights();" in ui_text
+
+
+def test_diagnostics_tab_and_lifecycle_are_separate_from_sync() -> None:
+    ui_text = _read_text(UI_JS)
+    html = _read_text(HTML)
+    diagnostics_text = _read_text(DIAGNOSTICS_JS)
+
+    assert html.index('id="btn-device-details-insights"') < html.index(
+        'id="btn-device-details-diagnostics"'
+    ) < html.index('id="btn-device-details-settings"')
+    assert 'id="device-diagnostics-status"' in html
+    assert 'role="status" aria-live="polite"' in html
+    assert 'id="btn-device-diagnostics-cancel"' in html
+    assert 'name="device-diagnostics-counters" value="both"' in html
+    assert 'fetch("/api/device-actions"' in ui_text
+    assert 'fetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`' in ui_text
+    assert "invocationVersion !== deviceDiagnosticsState.invocationVersion" in ui_text
+    assert "buildDeviceDiagnosticsModel" in diagnostics_text
+    assert 'DEVICE_ACTIONS.MATTER_PING' in diagnostics_text
+    assert 'DEVICE_ACTIONS.SYSTEM_PING' in diagnostics_text
 
 
 def test_network_insights_uses_aggregation_and_dataset_refresh_lifecycle() -> None:

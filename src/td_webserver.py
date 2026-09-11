@@ -24,6 +24,16 @@ from td_health_read import (
     HealthUnavailableError,
     TDHealthReadService,
 )
+from td_device_actions import (
+    ACTION_OTBR_RESET,
+    DeviceActionError,
+    DeviceActionRequest,
+    build_cli_args as build_device_action_cli_args,
+    normalize_action_result,
+    parse_device_action_request,
+    record_device_ids,
+    validate_request_against_record,
+)
 
 from util_data import (
     create_checkpoint_filename,
@@ -79,6 +89,12 @@ TD_WEB_HOST_PORT = 9165
 
 TD_DATA_DIR_APP_KEY = aiohttp.web.AppKey("td_data_dir", Path)
 _CLEANUP_TASK_APP_KEY = aiohttp.web.AppKey("cleanup_task", asyncio.Task)
+TD_DEVICE_ACTIONS_ENABLED_APP_KEY = aiohttp.web.AppKey(
+    "td_device_actions_enabled", bool
+)
+TD_DEVICE_RESET_ENABLED_APP_KEY = aiohttp.web.AppKey(
+    "td_device_reset_enabled", bool
+)
 
 # Default max-age for data files in seconds; can be overridden per-file in FILE_ACTION_MAP.
 TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT_DEV = 3600  # 1 hour in seconds
@@ -86,6 +102,8 @@ TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT_OPS = 86400  # 1 day in seconds
 
 TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT = 86400  # 1 day in seconds
 TD_FILE_CACHE_MAX_AGE_ENV_NAME = "TD_FILE_CACHE_MAX_AGE"
+TD_DEVICE_ACTIONS_ENABLED_ENV_NAME = "TD_DEVICE_ACTIONS_ENABLED"
+TD_DEVICE_RESET_ENABLED_ENV_NAME = "TD_DEVICE_RESET_ENABLED"
 
 # ---------------------------------------------------------------------------
 # Mapping table and cache helpers
@@ -479,6 +497,25 @@ class JobRuntime:
     process: "asyncio.subprocess.Process | None" = None
 
 
+@dataclasses.dataclass
+class DeviceActionJobStatus:
+    job_id: str
+    invocation_id: str
+    request: DeviceActionRequest
+    status: str
+    result: dict[str, object] | None = None
+    detail: str = ""
+    created_at: float = dataclasses.field(default_factory=time.time)
+
+
+@dataclasses.dataclass
+class DeviceActionJobRuntime:
+    job_id: str
+    source: str
+    task: "asyncio.Task[None]"
+    process: "asyncio.subprocess.Process | None" = None
+
+
 def _is_terminal_job_status(status: str) -> bool:
     """Return True when *status* is a terminal job state."""
     return status in _JOB_TERMINAL_STATUSES
@@ -580,6 +617,11 @@ _job_id_by_task: dict["asyncio.Task[None]", str] = {}
 # of Task objects that have no other referents).
 _background_tasks: set["asyncio.Task[None]"] = set()
 
+_device_action_job_registry: dict[str, DeviceActionJobStatus] = {}
+_device_action_runtime_registry: dict[str, DeviceActionJobRuntime] = {}
+_device_action_job_id_by_task: dict["asyncio.Task[None]", str] = {}
+_device_action_background_tasks: set["asyncio.Task[None]"] = set()
+
 # Cleanup schedule for the job registry.
 _JOB_TTL_S = 900       # evict completed/errored jobs after 15 minutes
 _CLEANUP_INTERVAL_S = 60  # run eviction sweep every 60 seconds
@@ -618,9 +660,23 @@ async def _cleanup_job_registry_loop() -> None:
         for jid in expired:
             _job_registry.pop(jid, None)
             _clear_job_runtime(jid)
+        expired_action_jobs = [
+            jid
+            for jid, job in list(_device_action_job_registry.items())
+            if _is_terminal_job_status(job.status)
+            and (now - job.created_at) > _JOB_TTL_S
+        ]
+        for jid in expired_action_jobs:
+            _device_action_job_registry.pop(jid, None)
+            _device_action_runtime_registry.pop(jid, None)
         if expired:
             logging.debug(
                 "Evicted %d expired job(s) from registry", len(expired))
+        if expired_action_jobs:
+            logging.debug(
+                "Evicted %d expired device action job(s)",
+                len(expired_action_jobs),
+            )
 
 
 def _safe_filename(filename: str) -> bool:
@@ -716,6 +772,78 @@ async def run_td_cli(
     if stderr:
         logging.warning("td_cli stderr: %s", stderr.decode(errors="replace"))
     return process.returncode  # type: ignore[return-value]
+
+
+_DEVICE_ACTION_OUTPUT_LIMIT_BYTES = 64 * 1024
+
+
+async def _read_bounded_stream(
+    stream: "asyncio.StreamReader | None",
+    limit: int = _DEVICE_ACTION_OUTPUT_LIMIT_BYTES,
+) -> bytes:
+    if stream is None:
+        return b""
+    retained = bytearray()
+    while True:
+        chunk = await stream.read(8192)
+        if not chunk:
+            break
+        remaining = limit - len(retained)
+        if remaining > 0:
+            retained.extend(chunk[:remaining])
+    return bytes(retained)
+
+
+async def run_device_action_cli(
+    action_args: list[str],
+    data_dir: Path,
+    *,
+    timeout_s: float,
+    on_process_started: "Callable[[asyncio.subprocess.Process], None] | None" = None,
+    on_process_ended: "Callable[[], None] | None" = None,
+) -> tuple[int, bytes, bytes, float]:
+    """Run one allowlisted action with bounded capture and child cleanup."""
+    td_cli_path = Path(__file__).parent / "td_cli.py"
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        str(td_cli_path),
+        "--datadir",
+        str(data_dir),
+        *action_args,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    if on_process_started is not None:
+        on_process_started(process)
+    started = time.monotonic()
+    try:
+        stdout_task = asyncio.create_task(_read_bounded_stream(process.stdout))
+        stderr_task = asyncio.create_task(_read_bounded_stream(process.stderr))
+        try:
+            await asyncio.wait_for(process.wait(), timeout=timeout_s)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(
+                        process.wait(), timeout=_PROCESS_TERMINATE_GRACE_S
+                    )
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            raise
+        stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
+        return (
+            int(process.returncode or 0),
+            stdout,
+            stderr,
+            time.monotonic() - started,
+        )
+    finally:
+        if on_process_ended is not None:
+            on_process_ended()
 
 
 # ---------------------------------------------------------------------------
@@ -1398,6 +1526,341 @@ async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Res
     )
 
 
+def _device_action_response(
+    payload: dict[str, object], status: int = 200
+) -> aiohttp.web.Response:
+    return aiohttp.web.json_response(
+        payload,
+        status=status,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def _iter_cached_records(value: object):
+    if isinstance(value, dict):
+        yield value
+        for nested in value.values():
+            yield from _iter_cached_records(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _iter_cached_records(nested)
+
+
+def _load_action_device_records(
+    action_request: DeviceActionRequest,
+    data_dir: Path,
+) -> list[tuple[str, dict[str, object]]]:
+    matches: list[tuple[str, dict[str, object]]] = []
+    for filename in action_request.dataset_files:
+        if not _safe_filename(filename) or get_file_action(filename) is None:
+            raise DeviceActionError(f"dataset file is not allowlisted: {filename}")
+        path = data_dir / filename
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise DeviceActionError(f"dataset file is unavailable: {filename}") from exc
+        except (OSError, json.JSONDecodeError) as exc:
+            raise DeviceActionError(f"dataset file is unreadable: {filename}") from exc
+        for record in _iter_cached_records(payload):
+            if action_request.device_id in record_device_ids(record):
+                matches.append((filename, record))
+    if not matches:
+        raise DeviceActionError("device identity was not found in cached dataset files")
+    return matches
+
+
+def _validate_action_records(
+    action_request: DeviceActionRequest,
+    records: list[tuple[str, dict[str, object]]],
+) -> None:
+    source_prefixes = {
+        "otbr-cli": "td-otbr-cli-",
+        "otbr-restapi": "td-otbr-restapi-",
+        "ha-matter-ws": "td-ha-matter-ws-",
+        "mdns": "td-mdns-",
+        "eve": "td-eve-",
+    }
+    if action_request.source != "merged":
+        prefix = source_prefixes.get(action_request.source)
+        source_matches = prefix is None or any(
+            filename.startswith(prefix) for filename in action_request.dataset_files
+        )
+        if action_request.source == "eve":
+            source_matches = source_matches or any(
+                filename.endswith(".evethreadlayout")
+                for filename in action_request.dataset_files
+            )
+        if action_request.source == "thread-tools":
+            source_matches = (
+                THREAD_TOOLS_DIAGNOSTICS_FILENAME in action_request.dataset_files
+            )
+        if action_request.source == "system":
+            source_matches = (
+                EXTADDR_DEVICE_LABEL_MAP_FILENAME in action_request.dataset_files
+            )
+        if not source_matches:
+            raise DeviceActionError("dataset files do not match the selected source")
+
+    native_prefix = None
+    if action_request.action.startswith("otbr-cli-"):
+        native_prefix = "td-otbr-cli-"
+    elif action_request.action.startswith("ha-matter-ws-"):
+        native_prefix = "td-ha-matter-ws-"
+
+    def provenance(record: dict[str, object]) -> list[str]:
+        value = record.get("_source_files")
+        return [str(item) for item in value] if isinstance(value, list) else []
+
+    if action_request.action == "system-ping":
+        has_native_evidence = any(
+            filename.startswith(("td-otbr-cli-", "td-ha-matter-ws-"))
+            or any(
+                item.startswith(("td-otbr-cli-", "td-ha-matter-ws-"))
+                for item in provenance(record)
+            )
+            for filename, record in records
+        )
+        if has_native_evidence:
+            raise DeviceActionError("system ping cannot replace a native source action")
+
+    errors: list[str] = []
+    for filename, record in records:
+        if native_prefix is not None and not (
+            filename.startswith(native_prefix)
+            or any(item.startswith(native_prefix) for item in provenance(record))
+        ):
+            continue
+        try:
+            validate_request_against_record(action_request, record)
+            return
+        except DeviceActionError as exc:
+            errors.append(str(exc))
+    detail = errors[0] if errors else "device action does not match cached record"
+    raise DeviceActionError(detail)
+
+
+def _action_job_body(job: DeviceActionJobStatus) -> dict[str, object]:
+    body: dict[str, object] = {
+        "job_id": job.job_id,
+        "invocationId": job.invocation_id,
+        "status": job.status,
+        "action": job.request.action,
+    }
+    if job.result is not None:
+        body["result"] = job.result
+    if job.detail:
+        body["detail"] = job.detail
+    return body
+
+
+def _set_device_action_process(
+    job_id: str,
+    process: "asyncio.subprocess.Process | None",
+) -> None:
+    runtime = _device_action_runtime_registry.get(job_id)
+    if runtime is not None:
+        runtime.process = process
+
+
+def _on_device_action_task_done(task: "asyncio.Task[None]") -> None:
+    _device_action_background_tasks.discard(task)
+    job_id = _device_action_job_id_by_task.pop(task, None)
+    if job_id is not None:
+        _device_action_runtime_registry.pop(job_id, None)
+    if not task.cancelled():
+        error = task.exception()
+        if error is not None:
+            logging.error("Device action task failed: %s", error, exc_info=error)
+
+
+async def handle_device_actions_capabilities_api(
+    request: aiohttp.web.Request,
+) -> aiohttp.web.Response:
+    enabled = request.app.get(TD_DEVICE_ACTIONS_ENABLED_APP_KEY, False)
+    reset_enabled = request.app.get(TD_DEVICE_RESET_ENABLED_APP_KEY, False)
+    actions = []
+    if enabled:
+        actions = ["otbr-cli-ping", "ha-matter-ws-ping", "system-ping"]
+        if reset_enabled:
+            actions.append("otbr-cli-reset-counters")
+    return _device_action_response(
+        {
+            "enabled": enabled,
+            "resetEnabled": enabled and reset_enabled,
+            "actions": actions,
+        }
+    )
+
+
+async def handle_device_actions_api(
+    request: aiohttp.web.Request,
+) -> aiohttp.web.Response:
+    if not request.app.get(TD_DEVICE_ACTIONS_ENABLED_APP_KEY, False):
+        return _device_action_response(
+            {"error": "Active device diagnostics are disabled."}, 403
+        )
+    try:
+        payload = await request.json()
+        action_request = parse_device_action_request(payload)
+        if (
+            action_request.action == ACTION_OTBR_RESET
+            and not request.app.get(TD_DEVICE_RESET_ENABLED_APP_KEY, False)
+        ):
+            return _device_action_response(
+                {"error": "Reset Counters is disabled."}, 403
+            )
+        data_dir = request.app[TD_DATA_DIR_APP_KEY]
+        records = _load_action_device_records(action_request, data_dir)
+        _validate_action_records(action_request, records)
+    except (json.JSONDecodeError, DeviceActionError) as exc:
+        return _device_action_response({"error": str(exc)}, 400)
+
+    job_id = str(uuid.uuid4())
+    invocation_id_value = payload.get("invocationId")
+    invocation_id = (
+        invocation_id_value
+        if isinstance(invocation_id_value, str) and invocation_id_value
+        else str(uuid.uuid4())
+    )
+    job = DeviceActionJobStatus(
+        job_id=job_id,
+        invocation_id=invocation_id,
+        request=action_request,
+        status=JOB_STATUS_RUNNING,
+    )
+    _device_action_job_registry[job_id] = job
+    action_args = build_device_action_cli_args(action_request)
+
+    async def _run_action() -> None:
+        try:
+            async with _get_source_lock(action_args[0]):
+                current = _device_action_job_registry.get(job_id)
+                if current is None:
+                    return
+                if current.status == JOB_STATUS_CANCELLING:
+                    current.status = JOB_STATUS_CANCELLED
+                    current.detail = _JOB_CANCEL_GRACE_DETAIL
+                    return
+                try:
+                    exit_code, stdout, stderr, duration = await run_device_action_cli(
+                        action_args,
+                        data_dir,
+                        timeout_s=action_request.deadline_seconds,
+                        on_process_started=lambda process: _set_device_action_process(
+                            job_id, process
+                        ),
+                        on_process_ended=lambda: _set_device_action_process(job_id, None),
+                    )
+                except asyncio.TimeoutError:
+                    current.status = JOB_STATUS_ERROR
+                    current.result = {
+                        "action": action_request.action,
+                        "targetKind": (
+                            "matter-node"
+                            if action_request.node_id is not None
+                            else action_request.family
+                        ),
+                        "target": (
+                            action_request.node_id
+                            if action_request.node_id is not None
+                            else action_request.target
+                        ),
+                        "status": "deadline-exceeded",
+                    }
+                    return
+                try:
+                    cli_payload = json.loads(stdout.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise DeviceActionError(
+                        "device action returned invalid JSON"
+                    ) from exc
+                if not isinstance(cli_payload, dict):
+                    raise DeviceActionError("device action returned an invalid result")
+                current.result = normalize_action_result(
+                    action_request,
+                    cli_payload,
+                    exit_code=exit_code,
+                    duration_seconds=duration,
+                )
+                current.status = JOB_STATUS_DONE
+                if exit_code != 0:
+                    current.detail = f"device action exited with code {exit_code}"
+        except asyncio.CancelledError:
+            current = _device_action_job_registry.get(job_id)
+            if current is not None:
+                current.status = JOB_STATUS_CANCELLED
+                current.detail = _JOB_CANCEL_GRACE_DETAIL
+                current.result = {
+                    "action": action_request.action,
+                    "targetKind": (
+                        "matter-node"
+                        if action_request.node_id is not None
+                        else action_request.family
+                    ),
+                    "target": (
+                        action_request.node_id
+                        if action_request.node_id is not None
+                        else action_request.target
+                    ),
+                    "status": "cancelled",
+                }
+            raise
+        except Exception as exc:
+            current = _device_action_job_registry.get(job_id)
+            if current is not None:
+                current.status = JOB_STATUS_ERROR
+                current.detail = f"{type(exc).__name__}: {exc}"[:512]
+
+    task = asyncio.create_task(_run_action())
+    _device_action_runtime_registry[job_id] = DeviceActionJobRuntime(
+        job_id=job_id,
+        source=action_args[0],
+        task=task,
+    )
+    _device_action_job_id_by_task[task] = job_id
+    _device_action_background_tasks.add(task)
+    task.add_done_callback(_on_device_action_task_done)
+    response = _device_action_response(_action_job_body(job), 202)
+    response.headers["Location"] = f"/api/device-action-jobs/{job_id}"
+    return response
+
+
+async def handle_device_action_job_api(
+    request: aiohttp.web.Request,
+) -> aiohttp.web.Response:
+    job_id = request.match_info["job_id"]
+    job = _device_action_job_registry.get(job_id)
+    if job is None:
+        return _device_action_response(
+            {"error": f"Unknown action job: {job_id}"}, 404
+        )
+    return _device_action_response(_action_job_body(job))
+
+
+async def handle_device_action_job_cancel_api(
+    request: aiohttp.web.Request,
+) -> aiohttp.web.Response:
+    job_id = request.match_info["job_id"]
+    job = _device_action_job_registry.get(job_id)
+    if job is None:
+        return _device_action_response(
+            {"error": f"Unknown action job: {job_id}"}, 404
+        )
+    if job.status == JOB_STATUS_CANCELLING:
+        return _device_action_response(_action_job_body(job), 202)
+    if not _is_cancellable_job_status(job.status):
+        body = _action_job_body(job)
+        body["error"] = "Action job is not cancellable in its current state."
+        return _device_action_response(body, 409)
+
+    job.status = JOB_STATUS_CANCELLING
+    job.detail = _JOB_CANCEL_GRACE_DETAIL
+    runtime = _device_action_runtime_registry.get(job_id)
+    if runtime is not None and not runtime.task.done():
+        runtime.task.cancel()
+    return _device_action_response(_action_job_body(job), 202)
+
+
 async def handle_root(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Redirect / to /tdash.html."""
     raise aiohttp.web.HTTPFound("/tdash.html")
@@ -1440,6 +1903,10 @@ def _non_negative_int(value: str) -> int:
             f"value must be >= 0, got {value!r}"
         )
     return parsed
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _resolve_file_cache_max_age(
@@ -1503,6 +1970,24 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
+    parser.add_argument(
+        "--enable-device-actions",
+        action="store_true",
+        default=_env_flag(TD_DEVICE_ACTIONS_ENABLED_ENV_NAME),
+        help=(
+            "Enable active device diagnostics "
+            f"(env: {TD_DEVICE_ACTIONS_ENABLED_ENV_NAME}; disabled by default)"
+        ),
+    )
+    parser.add_argument(
+        "--enable-device-reset",
+        action="store_true",
+        default=_env_flag(TD_DEVICE_RESET_ENABLED_ENV_NAME),
+        help=(
+            "Enable destructive OTBR Reset Counters actions "
+            f"(env: {TD_DEVICE_RESET_ENABLED_ENV_NAME}; disabled by default)"
+        ),
+    )
     return parser
 
 
@@ -1536,6 +2021,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     app = aiohttp.web.Application()
     app[TD_DATA_DIR_APP_KEY] = td_data_dir
+    app[TD_DEVICE_ACTIONS_ENABLED_APP_KEY] = args.enable_device_actions
+    app[TD_DEVICE_RESET_ENABLED_APP_KEY] = args.enable_device_reset
 
     async def _start_cleanup(app: aiohttp.web.Application) -> None:
         app[_CLEANUP_TASK_APP_KEY] = asyncio.create_task(
@@ -1557,13 +2044,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         for t in tasks:
             t.cancel()
 
-        wait_tasks = short_tasks + tasks
+        action_tasks = list(_device_action_background_tasks)
+        for t in action_tasks:
+            t.cancel()
+
+        wait_tasks = short_tasks + tasks + action_tasks
         if wait_tasks:
             await asyncio.gather(*wait_tasks, return_exceptions=True)
 
         _active_processes.clear()
         _job_runtime_registry.clear()
         _job_id_by_task.clear()
+        _device_action_runtime_registry.clear()
+        _device_action_job_id_by_task.clear()
 
     app.on_startup.append(_start_cleanup)
     app.on_shutdown.append(_on_shutdown)
@@ -1574,6 +2067,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.router.add_get("/api/data/{filename}", handle_data_api)
     app.router.add_get("/api/job/{job_id}", handle_job_api)
     app.router.add_delete("/api/job/{job_id}", handle_job_cancel_api)
+    app.router.add_get(
+        "/api/device-actions", handle_device_actions_capabilities_api
+    )
+    app.router.add_post("/api/device-actions", handle_device_actions_api)
+    app.router.add_get(
+        "/api/device-action-jobs/{job_id}", handle_device_action_job_api
+    )
+    app.router.add_delete(
+        "/api/device-action-jobs/{job_id}", handle_device_action_job_cancel_api
+    )
     app.router.add_get("/api/device/{extAddress}", handle_device_get_api)
     app.router.add_patch("/api/device/{extAddress}", handle_device_patch_api)
     app.router.add_get("/api/health/summary", handle_health_summary_api)

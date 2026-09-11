@@ -137,3 +137,22 @@ def test_td_cli_forwards_device_command_to_action_module() -> None:
     with patch.object(td_cli.otbr_cli_device, "main", return_value=0) as action_main:
         assert td_cli.dispatch(args, extras, parser) == 0
     action_main.assert_called_once_with(["ping", "2001:db8::1"])
+
+
+def test_td_cli_device_json_output_has_no_banner(capsys) -> None:
+    with patch.object(
+        otbr_cli_device.util_ot_ctl,
+        "exec_ot_ctl",
+        return_value=(
+            "16 bytes from 2001:db8::1: icmp_seq=1 hlim=64 time=4ms\n"
+            "1 packets transmitted, 1 packets received. "
+            "Packet loss = 0.0%. Round-trip min/avg/max = 4/4.000/4 ms.\nDone"
+        ),
+    ):
+        assert td_cli.main([
+            "otbr-cli", "device", "ping", "2001:db8::1", "--json"
+        ]) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["target"] == "2001:db8::1"
+    assert result["received"] == 1

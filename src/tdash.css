@@ -1520,6 +1520,164 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   color: var(--muted);
 }
 
+#device-diagnostics-panel {
+  min-width: 0;
+}
+
+#device-diagnostics-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.device-diagnostics-control,
+.device-diagnostics-option-grid {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+}
+
+.device-diagnostics-control[hidden],
+.device-diagnostics-options[hidden],
+.device-diagnostics-check[hidden],
+.device-diagnostics-reset[hidden] {
+  display: none !important;
+}
+
+.device-diagnostics-control output {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.device-diagnostics-control select,
+.device-diagnostics-option-grid input {
+  width: 100%;
+  min-width: 0;
+}
+
+.device-diagnostics-options {
+  margin-top: 10px;
+}
+
+.device-diagnostics-options summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.device-diagnostics-option-grid {
+  margin-top: 8px;
+}
+
+.device-diagnostics-check {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.device-diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.device-diagnostics-reset {
+  margin: 14px 0 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.device-diagnostics-reset legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.device-diagnostics-segments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.device-diagnostics-segments label {
+  padding: 5px 4px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.device-diagnostics-segments label + label {
+  border-left: 1px solid var(--line);
+}
+
+.device-diagnostics-segments label:has(input:checked) {
+  background: var(--accent-soft);
+  color: var(--text-heading);
+  font-weight: 600;
+}
+
+.device-diagnostics-segments input {
+  position: absolute;
+  opacity: 0;
+}
+
+.device-diagnostics-status {
+  min-height: 21px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.device-diagnostics-status.error {
+  color: var(--lq-low);
+}
+
+.device-diagnostics-result {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.device-diagnostics-result dl {
+  display: grid;
+  grid-template-columns: minmax(82px, auto) minmax(0, 1fr);
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.device-diagnostics-result dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.device-diagnostics-result dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.device-diagnostics-result table {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.device-diagnostics-result th,
+.device-diagnostics-result td {
+  padding: 4px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
 #device-settings-panel {
   min-width: 0;
 }

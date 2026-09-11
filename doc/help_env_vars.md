@@ -9,6 +9,8 @@ defaults are selected only when neither `--datadir` nor `TD_DATA_DIR` is set.
 | `td_webserver.py` | `HOST` | `""` (bind all interfaces) | Sets the default host/interface that the web server binds to when `--host` is not passed. |
 | `td_webserver.py` | `PORT` | `9165` | Sets the default web server port when `--port` is not passed. |
 | `td_webserver.py` | `TD_FILE_CACHE_MAX_AGE` | `86400` | Sets the default max-age (seconds) used for data file cache headers and freshness checks when `--file-cache-max-age` is not passed. |
+| `td_webserver.py` | `TD_DEVICE_ACTIONS_ENABLED` | Disabled | Enables active Device Diagnostics Ping actions when set to a true value. `--enable-device-actions` takes precedence. |
+| `td_webserver.py` | `TD_DEVICE_RESET_ENABLED` | Disabled | Enables destructive OTBR Reset Counters actions when set to a true value and device actions are also enabled. `--enable-device-reset` takes precedence. |
 | `otbr_restapi_util.py` | `OT_REST_LISTEN_ADDR` | `127.0.0.1` | Sets the default OTBR REST API host used by the OTBR REST CLI/client when `--host` is not provided. Empty values fall back to `127.0.0.1`. |
 | `otbr_restapi_util.py` | `OT_REST_LISTEN_PORT` | `8081` | Sets the default OTBR REST API port used by the OTBR REST CLI/client when `--port` is not provided. Invalid or empty values fall back to `8081`. |
 | `ha_matter_ws_contract.py` | `TD_HA_MATTER_WS_HOST` | `localhost` | Sets the default Home Assistant Matter WebSocket host when `--host` is not provided. Empty values fall back to `localhost`; `--uri` overrides the complete endpoint. |
