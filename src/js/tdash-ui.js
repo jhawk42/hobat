@@ -2271,6 +2271,10 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
   const _srchInput = document.getElementById("search-input");
   if (_srchInput) _srchInput.value = "";
 
+    const tableColumnCategoryEl = document.getElementById("table-column-category");
+    if (tableColumnCategoryEl) tableColumnCategoryEl.value = "all";
+    setTableColumnCategory("all");
+
   // Final reconciliation render: all files settled, isPartial is false.
   resetDeviceDetailsPanelTabsToDefault();
   renderCurrentView();
