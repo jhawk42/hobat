@@ -98,6 +98,25 @@ def test_network_helpers_extract_rloc16_from_thread_ipv6_addresses() -> None:
     assert util_network.find_rloc16_in_ipv6_addresses(None) is None
 
 
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        ("192.168.4.212", (True, "ipv4-infrastructure")),
+        ("fd6b:32e0:d18::fa05:e6f5:15e3:d06f", (True, "off-mesh-candidate")),
+        ("fe80::4871:9152:4c53:68d3", (False, "ipv6-link-local")),
+        ("fd3b:a255:4aa6:5483:0:ff:fe00:4ce9", (False, "thread-rloc")),
+        ("fd78:b977:5b00:1cbe:2:fdc2:e3c2:7ad7", (False, "thread-interface-signature")),
+        ("not-an-address", (False, "invalid-address")),
+        (None, (False, "invalid-address")),
+        ("ff03::1", (False, "ipv6-multicast")),
+        ("::1", (False, "ipv6-loopback")),
+        ("::", (False, "ipv6-unspecified")),
+    ],
+)
+def test_network_helpers_classify_off_mesh_address_candidates(address, expected) -> None:
+    assert util_network.is_off_mesh_address(address) == expected
+
+
 def test_network_helpers_derive_child_rloc_from_parent_address() -> None:
     assert util_network.derive_child_rloc_ipv6_address(
         [

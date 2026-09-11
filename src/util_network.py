@@ -36,6 +36,32 @@ def find_rloc16_in_ipv6_addresses(ipv6_addrs):
     return None
 
 
+def is_off_mesh_address(address):
+    """Classify whether an address is an off-mesh infrastructure candidate."""
+    if not isinstance(address, str):
+        return False, "invalid-address"
+    try:
+        parsed_address = ipaddress.ip_address(address.strip())
+    except ValueError:
+        return False, "invalid-address"
+
+    if parsed_address.version == 4:
+        return True, "ipv4-infrastructure"
+    if parsed_address.is_link_local:
+        return False, "ipv6-link-local"
+    if parsed_address.is_multicast:
+        return False, "ipv6-multicast"
+    if parsed_address.is_unspecified:
+        return False, "ipv6-unspecified"
+    if parsed_address.is_loopback:
+        return False, "ipv6-loopback"
+    if parsed_address.packed[8:14] == b"\x00\x00\x00\xff\xfe\x00":
+        return False, "thread-rloc"
+    if parsed_address.packed[8:12] == b"\x00\x02\xfd\xc2":
+        return False, "thread-interface-signature"
+    return True, "off-mesh-candidate"
+
+
 def _rloc16_value(rloc16):
     if isinstance(rloc16, bool):
         return None

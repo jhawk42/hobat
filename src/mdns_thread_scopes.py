@@ -83,6 +83,17 @@ def _enrich_properties(properties: dict) -> dict:
     return enriched
 
 
+def _resolve_optional_omr_ipv6addr_prefix() -> str | None:
+    """Return the OMR prefix used for optional mDNS address enrichment."""
+    try:
+        return util_network.build_omr_ipv6_address_prefix(
+            util_network.fetch_omr_prefix()
+        )
+    except (util_network.PrefixFetchError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        logging.warning("mDNS browse continues without OMR address enrichment: %s", exc)
+        return None
+
+
 class MDNSDumpListener(ServiceListener):
     def __init__(
         self,
@@ -523,13 +534,7 @@ options:
 
    # Main execution:
 
-    # Get thread network info for reference in parsing and enriching mdns data
-    thread_network_info = util_network.fetch_thread_network_info()
-    omr_ipv6addr_prefix = (
-        thread_network_info["prefix_omr_ipv6addr_prefix"]
-        if thread_network_info and "prefix_omr_ipv6addr_prefix" in thread_network_info
-        else None
-    )
+    omr_ipv6addr_prefix = _resolve_optional_omr_ipv6addr_prefix()
 
     zeroconf = Zeroconf()
     listener = MDNSDumpListener(

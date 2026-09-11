@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import mdns_thread_scopes as mdns
+import util_network
 
 
 class TestMDNSCheckpointSnapshots(unittest.TestCase):
@@ -99,6 +100,30 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
                     save_mock.call_args.args[0][0]["recordKey"],
                     "_meshcop._udp.local.|test.local.",
                 )
+
+    def test_optional_omr_prefix_failure_does_not_block_mdn_browse(self) -> None:
+        listener = MagicMock()
+        listener.get_records.return_value = []
+        thread = MagicMock()
+
+        with patch.object(
+            mdns.util_network,
+            "fetch_omr_prefix",
+            side_effect=util_network.PrefixFetchError("otbr unavailable"),
+        ), patch.object(mdns, "MDNSDumpListener", return_value=listener) as listener_class, patch.object(
+            mdns, "Zeroconf"
+        ), patch.object(mdns, "ServiceBrowser"), patch.object(
+            mdns.threading, "Thread", return_value=thread
+        ), patch.object(mdns, "save_final_json") as save_final_json:
+            self.assertIsNone(mdns._resolve_optional_omr_ipv6addr_prefix())
+            self.assertIsNone(mdns.main(["thread", "--datadir", str(self.data_dir)]))
+
+        listener_class.assert_called_once_with(
+            include_matter_tcp_supported=False,
+            omr_ipv6addr_prefix=None,
+            checkpoint_output_file=self.data_dir / "td-mdns-scopes-thread.partial.json",
+        )
+        save_final_json.assert_called_once()
 
 
 if __name__ == "__main__":
