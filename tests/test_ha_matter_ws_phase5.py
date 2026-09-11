@@ -591,6 +591,18 @@ def test_td_cli_routes_device_ping_and_attempts(monkeypatch) -> None:
     ]
 
 
+def test_td_cli_routes_dashboard_command(monkeypatch) -> None:
+    forwarded = []
+    monkeypatch.setattr(
+        td_cli.ha_matter_ws_cli,
+        "main",
+        lambda argv: forwarded.append(argv) or 0,
+    )
+
+    assert td_cli.main(["ha-matter-ws", "dashboard"]) == 0
+    assert forwarded == [["dashboard"]]
+
+
 def test_td_cli_device_ping_failure_output_has_no_banner(monkeypatch, capsys) -> None:
     async def fail(*args, **kwargs):
         raise MatterWsRequestTimeoutError("slow")

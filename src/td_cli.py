@@ -459,6 +459,7 @@ def _add_ha_matter_ws_commands(subparsers: argparse._SubParsersAction) -> None:
     mesh_commands.add_parser("fetch-all")
 
     commands.add_parser("topology")
+    commands.add_parser("dashboard")
     commands.add_parser("all")
 
 
