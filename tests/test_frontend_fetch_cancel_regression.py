@@ -58,6 +58,17 @@ def test_completed_job_fetches_the_new_snapshot_without_redispatching() -> None:
     assert completed_fetch < cache_header < redispatch_guard
 
 
+def test_shift_sync_uses_the_direct_refresh_request_intent() -> None:
+    ui_text = _read_text(UI_JS)
+    dataset_text = _read_text(DATASET_JS)
+
+    assert "async function doFetchDataset({ userInitiated = false, forceFresh = false } = {})" in ui_text
+    assert "forceFresh: event.shiftKey" in ui_text
+    assert "forceFresh," in ui_text
+    assert "const forceFresh = options.forceFresh === true;" in dataset_text
+    assert "if (forceFresh || _forceFresh)" in dataset_text
+
+
 
 def test_ui_cancel_path_keeps_current_view_on_cancellation() -> None:
     """Regression guard: cancellation must keep existing rendered view (no partial overwrite)."""

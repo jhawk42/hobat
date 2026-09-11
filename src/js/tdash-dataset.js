@@ -701,6 +701,7 @@ function _buildPartialDataset(entry, rawFiles, loadStartTime) {
 
 export async function loadDataset(entryValue, options = {}) {
   const sessionId = options.sessionId ?? null;
+  const forceFresh = options.forceFresh === true;
   // Called with no args each time a file completes; lets caller trigger an incremental render.
   const onFileReady = options.onFileReady ?? null;
   _assertFetchSessionActive(sessionId);
@@ -763,7 +764,7 @@ export async function loadDataset(entryValue, options = {}) {
     settled = await Promise.allSettled(
       entry.files.map((f, fileIdx) => {
         const reqHeaders = {};
-        if (_forceFresh) {
+        if (forceFresh || _forceFresh) {
           reqHeaders["Cache-Control"] = "no-cache";
         } else if (_onlyCache) {
           reqHeaders["Cache-Control"] =

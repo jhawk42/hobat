@@ -2137,7 +2137,7 @@ function resetFetchTimeTakenProgressToDefault() {
 }
 
 // Fetch dataset function
-async function doFetchDataset({ userInitiated = false } = {}) {
+async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}) {
   if (_fetchInProgress) return;
 
   _fetchInProgress = true;
@@ -2197,6 +2197,7 @@ async function doFetchDataset({ userInitiated = false } = {}) {
   try {
     await loadDataset(selectedValue, {
       sessionId,
+      forceFresh,
       onFileReady: _scheduleIncrementalRender,
     });
   } catch (err) {
@@ -2301,8 +2302,8 @@ async function doFetchDataset({ userInitiated = false } = {}) {
 }
 
 // Fetch button drives data acquisition.
-document.getElementById("btn-fetch").addEventListener("click", () => {
-  void doFetchDataset({ userInitiated: true });
+document.getElementById("btn-fetch").addEventListener("click", (event) => {
+  void doFetchDataset({ userInitiated: true, forceFresh: event.shiftKey });
 });
 
 document.getElementById("btn-fetch-cancel")?.addEventListener("click", async () => {
