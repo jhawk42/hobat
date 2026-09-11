@@ -34,6 +34,7 @@ from td_device_actions import (
     record_device_ids,
     validate_request_against_record,
 )
+from td_source_capabilities import SourceCapabilityService
 
 from util_data import (
     create_checkpoint_filename,
@@ -88,6 +89,9 @@ TD_WEB_HOST_ADDR = ""
 TD_WEB_HOST_PORT = 9165
 
 TD_DATA_DIR_APP_KEY = aiohttp.web.AppKey("td_data_dir", Path)
+TD_SOURCE_CAPABILITIES_APP_KEY = aiohttp.web.AppKey(
+    "td_source_capabilities", SourceCapabilityService
+)
 _CLEANUP_TASK_APP_KEY = aiohttp.web.AppKey("cleanup_task", asyncio.Task)
 TD_DEVICE_ACTIONS_ENABLED_APP_KEY = aiohttp.web.AppKey(
     "td_device_actions_enabled", bool
@@ -1358,6 +1362,16 @@ async def handle_health_capabilities_api(request: aiohttp.web.Request) -> aiohtt
     )
 
 
+async def handle_capabilities_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    service = request.app.get(TD_SOURCE_CAPABILITIES_APP_KEY)
+    if service is None:
+        service = SourceCapabilityService()
+        request.app[TD_SOURCE_CAPABILITIES_APP_KEY] = service
+    return _health_json_response(
+        await service.capabilities(request.app[TD_DATA_DIR_APP_KEY])
+    )
+
+
 # ---------------------------------------------------------------------------
 # R1c — pure file-read / response builder (no asyncio, no shared state)
 # ---------------------------------------------------------------------------
@@ -2021,6 +2035,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     app = aiohttp.web.Application()
     app[TD_DATA_DIR_APP_KEY] = td_data_dir
+    app[TD_SOURCE_CAPABILITIES_APP_KEY] = SourceCapabilityService()
     app[TD_DEVICE_ACTIONS_ENABLED_APP_KEY] = args.enable_device_actions
     app[TD_DEVICE_RESET_ENABLED_APP_KEY] = args.enable_device_reset
 
@@ -2065,6 +2080,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Specific routes are registered before the static catch-all.
     app.router.add_get("/", handle_root)
     app.router.add_get("/api/data/{filename}", handle_data_api)
+    app.router.add_get("/api/capabilities", handle_capabilities_api)
     app.router.add_get("/api/job/{job_id}", handle_job_api)
     app.router.add_delete("/api/job/{job_id}", handle_job_cancel_api)
     app.router.add_get(

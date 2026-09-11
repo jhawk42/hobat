@@ -5,6 +5,13 @@ if ('scrollRestoration' in history) {
 
 import { DATASET_REGISTRY, DATASOURCE_REGISTRY } from "./tdash-dataset-registry.js";
 import {
+  EMPTY_CAPABILITIES,
+  datasetIsAvailable,
+  isFileCached,
+  loadSourceCapabilities,
+  sourceIsAvailable,
+} from "./tdash-capabilities.js";
+import {
   currentDataset,
   loadDataset,
   loadStaticLabelMap,
@@ -99,16 +106,24 @@ configureViewStatusPresenter((status) => {
 
 // ── Build datasource <select> ────────────────────────────────────────
 
-function populateDatasourceSelect() {
+function populateDatasourceSelect(capabilities) {
   const sel = document.getElementById("datasource-filter");
   sel.innerHTML = ""; // Clear existing options
 
   for (let i = 0; i < DATASOURCE_REGISTRY.length; i++) {
     const entry = DATASOURCE_REGISTRY[i];
+    if (!sourceIsAvailable(entry.value, capabilities)) continue;
     const opt = document.createElement("option");
     opt.value = entry.value;
     opt.textContent = entry.label;
     opt.title = entry.label;
+    sel.appendChild(opt);
+  }
+  if (sel.options.length === 0) {
+    const opt = document.createElement("option");
+    opt.textContent = "No available sources";
+    opt.disabled = true;
+    opt.selected = true;
     sel.appendChild(opt);
   }
 }
@@ -116,13 +131,13 @@ function populateDatasourceSelect() {
 
 // ── Section 2: Build dataset <select> ────────────────────────────────────────
 
-function populateDatasetSelect(sourceFilter = null) {
+function populateDatasetSelect(sourceFilter = null, capabilities) {
   const sel = document.getElementById("dataset-select");
   sel.innerHTML = ""; // Clear existing options
 
   const filteredRegistry = sourceFilter
-    ? DATASET_REGISTRY.filter((entry) => entry.source === sourceFilter)
-    : DATASET_REGISTRY;
+    ? DATASET_REGISTRY.filter((entry) => entry.source === sourceFilter && datasetIsAvailable(entry, capabilities))
+    : DATASET_REGISTRY.filter((entry) => datasetIsAvailable(entry, capabilities));
   const defaultDatasetValue = sourceFilter
     ? DATASOURCE_REGISTRY.find((entry) => entry.value === sourceFilter)?.default_dataset_value
     : null;
@@ -162,6 +177,13 @@ function populateDatasetSelect(sourceFilter = null) {
   if (!defaultOption) {
     sel.selectedIndex = filteredRegistry.length > 0 ? 0 : -1;
   }
+  if (filteredRegistry.length === 0) {
+    const opt = document.createElement("option");
+    opt.textContent = "No available datasets";
+    opt.disabled = true;
+    opt.selected = true;
+    sel.appendChild(opt);
+  }
 }
 
 // ── Render dispatcher ────────────────────────────────────────────────────────
@@ -173,6 +195,7 @@ const PHYSICS_PROFILE_AUTO = "auto";
 let _enhanceEnabled = true;
 let _lastFetchStartedAt = null;
 let _currentSearchQuery = "";
+let sourceCapabilities = EMPTY_CAPABILITIES;
 let _fetchInProgress = false;
 const WORKSPACE_ACTIVITY_LIMIT = 100;
 const workspaceActivity = [];
@@ -1882,7 +1905,7 @@ document
   .addEventListener("change", async (event) => {
     selectDeviceDiagnosticsRecord(null);
     const selectedSource = event.target.value;
-    populateDatasetSelect(selectedSource);
+    populateDatasetSelect(selectedSource, sourceCapabilities);
     setPhysicsProfile(PHYSICS_PROFILE_AUTO);
     // Reset filter controls when source changes
     document.getElementById("node-filter").value = "all";
@@ -1970,15 +1993,22 @@ document.getElementById("diagnostic-source-filter").addEventListener("change", (
 // Register callback to sync physics button state when auto-disabled after stabilization
 setOnPhysicsDisabledCallback(() => setPhysics(false));
 
-populateDatasourceSelect();
+try {
+  sourceCapabilities = await loadSourceCapabilities();
+} catch (error) {
+  console.warn("Unable to load source capabilities", error);
+}
+populateDatasourceSelect(sourceCapabilities);
 const initialSource = document.getElementById("datasource-filter").value;
-populateDatasetSelect(initialSource);
+populateDatasetSelect(initialSource, sourceCapabilities);
 populateFilterSelects();
 // Initialize diagnostic-filter with the default diagnostic source
 const initialDiagSource = document.getElementById("diagnostic-source-filter").value;
 populateDiagnosticFilterBySource(initialDiagSource);
 applyLegendLineStylesFromConstants();
-await loadStaticLabelMap();
+if (isFileCached("td-static-extaddr-device-label.json", sourceCapabilities)) {
+  await loadStaticLabelMap();
+}
 initPhysicsProfileSelector();
 
 // Initialize estimated fetch time from the initially selected dataset
