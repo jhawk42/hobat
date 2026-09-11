@@ -42,10 +42,13 @@ from td_const import (
     TD_DATA_DIR_ARG_HELP,
 )
 from util_data import (
+    CollectionWriteOutcome,
     create_checkpoint_filename,
     ensure_data_dir_exists,
     resolve_data_dir,
     resolve_data_file_path,
+    save_checkpoint_json,
+    save_final_json,
     save_json_atomic,
 )
 
@@ -316,10 +319,12 @@ def make_checkpoint_callback(
                     "records": list(getattr(collection, name)),
                 }
             try:
-                save_json_atomic(
+                save_checkpoint_json(
                     payload,
                     partial_path,
+                    CollectionWriteOutcome.partial(has_usable_data=completed > 0),
                     add_trailing_newline=True,
+                    writer=save_json_atomic,
                 )
             except (OSError, TypeError, ValueError):
                 logging.warning("Unable to write Matter checkpoint %s", partial_path)
@@ -656,7 +661,13 @@ def _run(args: argparse.Namespace) -> int:
             ),
         ]
         for payload, output_path in outputs:
-            save_json_atomic(payload, output_path, add_trailing_newline=True)
+            save_final_json(
+                payload,
+                output_path,
+                CollectionWriteOutcome.complete(),
+                add_trailing_newline=True,
+                writer=save_json_atomic,
+            )
         outcome_path = resolve_data_file_path(
             HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME, data_dir
         )
@@ -680,7 +691,13 @@ def _run(args: argparse.Namespace) -> int:
     else:
         print(json.dumps(payload, indent=2))
         return EXIT_OK
-    save_json_atomic(payload, output_path, add_trailing_newline=True)
+    save_final_json(
+        payload,
+        output_path,
+        CollectionWriteOutcome.complete(),
+        add_trailing_newline=True,
+        writer=save_json_atomic,
+    )
     return EXIT_OK
 
 

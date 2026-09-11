@@ -25,6 +25,14 @@ import util_ot_ctl
 import util_network
 import otbr_cli_device
 from util_data import data_file_path, resolve_data_dir, save_json_atomic, create_checkpoint_filename
+from util_data import (
+    CollectionWriteOutcome,
+    create_checkpoint_filename,
+    parse_datadir_from_argv,
+    save_checkpoint_json,
+    save_final_json,
+    save_json_atomic,
+)
 from td_json_key_normalizer import convert_keys_to_camel_case
 from td_device_fields import get_canonical_rloc16, is_placeholder_ext_address
 from extaddr_device_label_map import load_extaddr_device_label_map
@@ -297,7 +305,9 @@ def fetch_network_diag_multicast(
 
                 # Store in result, keyed by rloc16
                 checkpoint_result[rloc16] = record
-            save_topology_to_json_file(checkpoint_result, checkpoint_filepath)
+            save_topology_to_json_file(
+                checkpoint_result, checkpoint_filepath, checkpoint=True
+            )
             logging.info(
                 "event=checkpoint_write command=otbr-cli networkdiag multicast checkpoint_file=%s records=%d stage=multicast",
                 checkpoint_filepath,
@@ -356,7 +366,7 @@ def fetch_network_diag_topology_multicast_network(
         checkpoint_filepath=checkpoint_filepath
     )
     if checkpoint_filepath is not None:
-        save_topology_to_json_file(result, checkpoint_filepath)
+        save_topology_to_json_file(result, checkpoint_filepath, checkpoint=True)
         logging.info(
             "event=checkpoint_write command=otbr-cli networkdiag multicast-network checkpoint_file=%s records=%d stage=final",
             checkpoint_filepath,
@@ -397,7 +407,7 @@ def fetch_network_diag_topology_multicast_neighbors(
         checkpoint_filepath=checkpoint_filepath
     )
     if checkpoint_filepath is not None:
-        save_topology_to_json_file(result, checkpoint_filepath)
+        save_topology_to_json_file(result, checkpoint_filepath, checkpoint=True)
         logging.info(
             "event=checkpoint_write command=otbr-cli networkdiag multicast-neighbors checkpoint_file=%s records=%d stage=final",
             checkpoint_filepath,
@@ -761,7 +771,9 @@ def fetch_network_diag_topology_router_table(
     )
 
     # Checkpoint to file
-    save_topology_to_json_file(network_topology_map, checkpoint_filepath)
+    save_topology_to_json_file(
+        network_topology_map, checkpoint_filepath, checkpoint=True
+    )
 
     return router_table_data, router_rlocs, router_table_by_router_id
 
@@ -824,7 +836,9 @@ def fetch_network_diag_topology_meshdiag_topology(
                                   device_record, extaddr_to_rloc)
 
         # Checkpoint to file
-        save_topology_to_json_file(network_topology_map, checkpoint_filepath)
+        save_topology_to_json_file(
+            network_topology_map, checkpoint_filepath, checkpoint=True
+        )
     else:
         logging.warning(
             "Meshdiag topology data is None. No meshdiag data to merge.")
@@ -889,7 +903,9 @@ def fetch_network_diag_topology_multicast(
         )
 
         # Checkpoint thread device data to file after multicast collection before starting direct queries.
-        save_topology_to_json_file(network_topology_map, checkpoint_filepath)
+        save_topology_to_json_file(
+            network_topology_map, checkpoint_filepath, checkpoint=True
+        )
     else:
         logging.warning("Multicast topology map is empty or None")
 
@@ -1033,7 +1049,8 @@ def fetch_network_diag_topology_detail_routers(
                 # Checkpoint to file after each new record added to topology map
                 # used in progressive loading in dashboard UI
                 save_topology_to_json_file(
-                    network_topology_map, checkpoint_filepath)
+                    network_topology_map, checkpoint_filepath, checkpoint=True
+                )
 
 
 @dataclass(frozen=True)
@@ -1644,7 +1661,10 @@ def print_network_diag_topology(topology):
 
 
 def save_topology_to_json_file(
-    data, filename=OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+    data,
+    filename=OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
+    *,
+    checkpoint: bool = False,
 ):
     """Converts dict format to list format and saves to JSON."""
     if filename is None:
@@ -1689,6 +1709,7 @@ def save_topology_to_json_file(
             "time_statistics": data.get("time_statistics", {}),
         }
         for evidence_field in (
+            "_error",
             "last_attempt_responded",
             "last_attempt_tlv_detail_level",
             "network_diagnostic_status",
@@ -1700,7 +1721,37 @@ def save_topology_to_json_file(
 
         network_map.append(network_node)
 
-    save_json_atomic(convert_keys_to_camel_case(network_map), filename)
+    payload = convert_keys_to_camel_case(network_map)
+    has_failures = any(
+        isinstance(record, dict)
+        and (
+            "_error" in record
+            or record.get("network_diagnostic_status") == "no-response"
+        )
+        for record in data.values()
+    )
+    if checkpoint:
+        save_checkpoint_json(
+            payload,
+            filename,
+            CollectionWriteOutcome.partial(
+                has_usable_data=bool(network_map)
+            ),
+            writer=save_json_atomic,
+        )
+    else:
+        save_final_json(
+            payload,
+            filename,
+            (
+                CollectionWriteOutcome.partial(
+                    has_usable_data=bool(network_map)
+                )
+                if has_failures
+                else CollectionWriteOutcome.complete()
+            ),
+            writer=save_json_atomic,
+        )
     logging.info(
         f"Successfully exported {len(network_map)} records for topology to {filename}")
     logging.debug("Saved topology data into %s as JSON:\n%s",

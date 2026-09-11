@@ -7,7 +7,12 @@ from typing import Any
 
 from otbr_restapi_diagnostics import make_progress_fn
 from td_json_key_normalizer import convert_keys_to_camel_case
-from util_data import create_checkpoint_filename, save_json_atomic
+from util_data import (
+    CollectionWriteOutcome,
+    create_checkpoint_filename,
+    save_checkpoint_json,
+    save_json_atomic,
+)
 from otbr_restapi_util import (
     DIAG_TLV_CHILDREN,
     DIAG_TLV_CHILD_IPV6_ADDRS,
@@ -26,7 +31,12 @@ ROUTER_RLOC16_VALUE = 0
 
 def _write_checkpoint_best_effort(payload: Any, checkpoint_path: Path) -> None:
     try:
-        save_json_atomic(convert_keys_to_camel_case(payload), checkpoint_path)
+        save_checkpoint_json(
+            convert_keys_to_camel_case(payload),
+            checkpoint_path,
+            CollectionWriteOutcome.partial(has_usable_data=bool(payload)),
+            writer=save_json_atomic,
+        )
         logging.info(
             "event=checkpoint_write command=otbr-restapi mesh-diagnostics fetch-all checkpoint_file=%s records=%d stage=device",
             checkpoint_path,

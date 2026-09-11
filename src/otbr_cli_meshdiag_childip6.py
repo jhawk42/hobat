@@ -17,12 +17,29 @@ from otbr_cli_util import (
     resolve_collector_runtime,
 )
 from util_ot_ctl import exec_ot_ctl
-from util_data import create_checkpoint_filename, parse_datadir_from_argv, save_json_atomic
+from util_data import (
+    CollectionWriteOutcome,
+    create_checkpoint_filename,
+    parse_datadir_from_argv,
+    save_checkpoint_json,
+    save_final_json,
+    save_json_atomic,
+)
 
 
 def _write_checkpoint_best_effort(payload, checkpoint_path: Path) -> None:
     try:
-        save_json_atomic(convert_keys_to_camel_case(payload), checkpoint_path)
+        save_checkpoint_json(
+            convert_keys_to_camel_case(payload),
+            checkpoint_path,
+            CollectionWriteOutcome.partial(
+                has_usable_data=any(
+                    isinstance(record, dict) and "_error" not in record
+                    for record in payload
+                )
+            ),
+            writer=save_json_atomic,
+        )
         logging.info(
             "event=checkpoint_write command=otbr-cli meshdiag childip6 checkpoint_file=%s records=%d stage=router",
             checkpoint_path,
@@ -133,7 +150,22 @@ def fetch_all_meshdiag_child_ip6_tables(
         on_result=result_callback,
     )
     if output_path is not None:
-        save_json_atomic(convert_keys_to_camel_case(results), output_path)
+        outcome = (
+            CollectionWriteOutcome.partial(
+                has_usable_data=any(
+                    isinstance(record, dict) and "_error" not in record
+                    for record in results
+                )
+            )
+            if any(isinstance(record, dict) and "_error" in record for record in results)
+            else CollectionWriteOutcome.complete()
+        )
+        save_final_json(
+            convert_keys_to_camel_case(results),
+            output_path,
+            outcome,
+            writer=save_json_atomic,
+        )
         logging.debug(
             "Saved meshdiag router childip6 data into %s as JSON:\n%s",
             output_path,

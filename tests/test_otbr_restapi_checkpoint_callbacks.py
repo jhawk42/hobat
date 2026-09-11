@@ -14,7 +14,7 @@ import otbr_restapi_diagnostics as diagnostics_module
 import otbr_restapi_mesh_diagnostics as mesh_module
 
 
-def test_devices_fetch_writes_checkpoint_when_output_path_is_resolved() -> None:
+def test_devices_fetch_skips_checkpoint_when_output_path_is_resolved_and_complete() -> None:
     client = Mock()
     client.fetch_device_collection.return_value = [{"id": "dev-1"}]
     args = SimpleNamespace(
@@ -38,10 +38,7 @@ def test_devices_fetch_writes_checkpoint_when_output_path_is_resolved() -> None:
         result = devices_module.dispatch_devices(client, args, raw_arg=False, fields=None)
 
     assert result == [{"id": "dev-1"}]
-    checkpoint_write.assert_called_once()
-    payload, checkpoint_path = checkpoint_write.call_args.args
-    assert payload == [{"id": "dev-1"}]
-    assert checkpoint_path == Path("/tmp/td-otbr-restapi-devices-fetch.partial.json")
+    checkpoint_write.assert_not_called()
     final_write.assert_called_once()
     assert final_write.call_args.args[1] == args.resolved_output_path
 
@@ -161,9 +158,9 @@ def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path
             ),
         ),
         (mesh_module, ([{"id": "mesh-1"}], Path("/tmp/mesh.partial.json"))),
-        (cli_childip6, ([], Path("/tmp/childip6.partial.json"))),
-        (cli_childtable, ([], Path("/tmp/childtable.partial.json"))),
-        (cli_neighbors, ([], Path("/tmp/neighbors.partial.json"))),
+        (cli_childip6, ([{"id": "childip6-1"}], Path("/tmp/childip6.partial.json"))),
+        (cli_childtable, ([{"id": "childtable-1"}], Path("/tmp/childtable.partial.json"))),
+        (cli_neighbors, ([{"id": "neighbor-1"}], Path("/tmp/neighbors.partial.json"))),
     ],
 )
 def test_best_effort_checkpoint_write_failures_warn_and_continue(

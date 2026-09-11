@@ -15,9 +15,12 @@ import util_network
 from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
 from td_json_key_normalizer import convert_keys_to_camel_case
 from util_data import (
+    CollectionWriteOutcome,
     create_checkpoint_filename,
     resolve_data_file_path,
     resolve_data_dir,
+    save_checkpoint_json,
+    save_final_json,
     save_json_atomic,
 )
 from td_const import MDNS_SCOPE_FILENAMES, TD_DATA_DIR_ARG_HELP
@@ -297,10 +300,12 @@ class MDNSDumpListener(ServiceListener):
             return
         with self._checkpoint_write_lock:
             records = self.get_records()
-            save_json_atomic(
+            save_checkpoint_json(
                 convert_keys_to_camel_case(records),
                 self._checkpoint_output_file,
+                CollectionWriteOutcome.partial(has_usable_data=bool(records)),
                 indent=2,
+                writer=save_json_atomic,
             )
         logging.debug(
             "Saved %d mDNS checkpoint record(s) to %s",
@@ -557,7 +562,13 @@ options:
 
         records = listener.get_records()
 
-        save_json_atomic(convert_keys_to_camel_case(records), output_file, indent=2)
+        save_final_json(
+            convert_keys_to_camel_case(records),
+            output_file,
+            CollectionWriteOutcome.complete(valid_empty_reason="completed-browse"),
+            indent=2,
+            writer=save_json_atomic,
+        )
 
         logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
         logging.debug(json.dumps(records, indent=2))

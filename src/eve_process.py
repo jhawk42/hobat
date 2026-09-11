@@ -8,11 +8,13 @@ from td_const import EVE_TOPOLOGY_FILENAME
 from td_json_key_normalizer import convert_keys_to_camel_case
 from util_convert import b64_to_extended_address
 from util_data import (
+    CollectionWriteOutcome,
     TDRequiredInputMissingError,
     data_file_path,
     parse_datadir_from_argv,
     require_existing_input_file,
     resolve_data_dir,
+    save_final_json,
     save_json_atomic,
 )
 
@@ -312,7 +314,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         # Save json data structures for reference
         file_path = data_file_path(EVE_TOPOLOGY_FILENAME, td_data_dir)
-        save_json_atomic(convert_keys_to_camel_case(eve_data_enhanced), file_path)
+        save_final_json(
+            convert_keys_to_camel_case(eve_data_enhanced),
+            file_path,
+            CollectionWriteOutcome.complete(valid_empty_reason="valid-eve-layout"),
+            writer=save_json_atomic,
+        )
 
         logging.info("Saved eve topology data to %s", file_path)
         return 0

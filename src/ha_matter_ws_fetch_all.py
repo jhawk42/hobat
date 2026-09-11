@@ -13,7 +13,7 @@ from ha_matter_ws_topology import (
     build_mesh_diagnostic_snapshot,
     build_topology_snapshot,
 )
-from util_data import save_json_atomic
+from util_data import CollectionWriteOutcome, save_final_json, save_json_atomic
 
 
 @dataclass(frozen=True)
@@ -93,9 +93,17 @@ def save_collection(
 ) -> None:
     """Atomically save outputs after collection and normalization have succeeded."""
 
-    save_json_atomic(
-        list(collection.devices), device_output, add_trailing_newline=True
+    save_final_json(
+        list(collection.devices),
+        device_output,
+        CollectionWriteOutcome.complete(),
+        add_trailing_newline=True,
+        writer=save_json_atomic,
     )
-    save_json_atomic(
-        collection.server_info, server_info_output, add_trailing_newline=True
+    save_final_json(
+        collection.server_info,
+        server_info_output,
+        CollectionWriteOutcome.complete(),
+        add_trailing_newline=True,
+        writer=save_json_atomic,
     )

@@ -113,6 +113,20 @@ def test_rest_command_output_writes_atomic_camel_case_json(tmp_path):
     assert not (tmp_path / "result.json.tmp").exists()
 
 
+def test_rest_command_output_replaces_final_for_structured_partial_result_with_records(tmp_path):
+    output_path = tmp_path / "result.json"
+    output_path.write_text('[{"id":"old"}]', encoding="utf-8")
+    payload = {
+        "items": [{"id": "fresh"}],
+        "deviceResults": [{"status": "partial"}],
+        "partial": True,
+    }
+
+    assert emit_rest_command_output(payload, output_path) is payload
+
+    assert json.loads(output_path.read_text(encoding="utf-8")) == payload
+
+
 def test_rest_command_output_writes_atomic_unquoted_text(tmp_path):
     output_path = tmp_path / "dataset.txt"
 

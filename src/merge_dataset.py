@@ -2165,6 +2165,8 @@ def write_merge_outputs(
     output_path: Path,
     report_path: Path | None = None,
 ) -> None:
+    if not result.viable:
+        raise ValueError(result.viability_reason or "merge output is not viable")
     save_json_atomic(
         result.records,
         output_path,
@@ -2192,6 +2194,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         command_inputs = resolve_merge_command_inputs(args, td_data_dir)
         supporting_data = load_merge_supporting_data(command_inputs)
         result = build_merge_output(command_inputs, supporting_data)
+        if not result.viable:
+            logging.error("merge-dataset: %s", result.viability_reason)
+            return 3
         write_merge_outputs(
             result,
             command_inputs.output_path,
@@ -2212,9 +2217,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"identity_collisions={result.report['identity_collision_count']}"
         )
 
-        if not result.viable:
-            logging.error("merge-dataset: %s", result.viability_reason)
-            return 3
         return 0
     except TDRequiredInputMissingError as exc:
         logging.error(str(exc))

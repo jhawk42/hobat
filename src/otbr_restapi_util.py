@@ -2716,7 +2716,7 @@ def emit_rest_payload_output(
         - Logs debug message with JSON content for troubleshooting
         - Does nothing if output_path is None
     """
-    from util_data import save_json_atomic
+    from util_data import CollectionWriteOutcome, save_final_json
     from td_json_key_normalizer import convert_keys_to_camel_case
     
     if output_path is None:
@@ -2730,8 +2730,18 @@ def emit_rest_payload_output(
     
     payload_to_save = convert_keys_to_camel_case(payload)
 
+    outcome = (
+        CollectionWriteOutcome.partial(
+            has_usable_data=bool(
+                payload_to_save.get("items") or payload_to_save.get("records")
+            )
+        )
+        if isinstance(payload_to_save, dict) and payload_to_save.get("partial")
+        else CollectionWriteOutcome.complete()
+    )
     try:
-        save_json_atomic(payload_to_save, output_file)
+        if not save_final_json(payload_to_save, output_file, outcome):
+            return
         logger.info("Saved: %s", output_file)
         logger.debug(
             "Saved data into %s as JSON:\n%s",

@@ -14,7 +14,14 @@ import util_ot_ctl
 import util_network
 from td_json_key_normalizer import convert_keys_to_camel_case
 from extaddr_device_label_map import load_extaddr_device_label_map
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
+from util_data import (
+    CollectionWriteOutcome,
+    data_file_path,
+    parse_datadir_from_argv,
+    resolve_data_dir,
+    save_final_json,
+    save_json_atomic,
+)
 
 
 def fetch_meshdiag_topology():
@@ -394,7 +401,12 @@ def get_meshdiag_topology(
             "Saved %d entries after converting keys to camel case for meshdiag topology data.",
             len(converted),
         )
-        save_json_atomic(converted, output_path)
+        save_final_json(
+            converted,
+            output_path,
+            CollectionWriteOutcome.complete(),
+            writer=save_json_atomic,
+        )
         logging.debug(
             "Saved meshdiag topology data into %s as JSON:\n%s",
             output_path,

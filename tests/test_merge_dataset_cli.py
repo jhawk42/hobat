@@ -192,3 +192,24 @@ def test_write_merge_outputs_does_not_replace_target_on_serialization_failure(
 
     assert output_path.read_text(encoding="utf-8") == '{"existing": true}\n'
     assert not (tmp_path / "merged.json.tmp").exists()
+
+
+def test_write_merge_outputs_does_not_replace_targets_when_not_viable(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "merged.json"
+    report_path = tmp_path / "report.json"
+    output_path.write_text('[{"existing": true}]\n', encoding="utf-8")
+    report_path.write_text('{"existing": true}\n', encoding="utf-8")
+    result = MergeCommandResult(
+        records=[],
+        report={"viable": False},
+        viable=False,
+        viability_reason="no viable seed identities found",
+    )
+
+    with pytest.raises(ValueError, match="no viable seed identities found"):
+        write_merge_outputs(result, output_path, report_path)
+
+    assert output_path.read_text(encoding="utf-8") == '[{"existing": true}]\n'
+    assert report_path.read_text(encoding="utf-8") == '{"existing": true}\n'

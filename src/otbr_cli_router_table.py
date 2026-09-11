@@ -13,7 +13,14 @@ from td_const import (
 from extaddr_device_label_map import load_extaddr_device_label_map
 from td_json_key_normalizer import convert_keys_to_camel_case
 import util_ot_ctl
-from util_data import data_file_path, parse_datadir_from_argv, resolve_data_dir, save_json_atomic
+from util_data import (
+    CollectionWriteOutcome,
+    data_file_path,
+    parse_datadir_from_argv,
+    resolve_data_dir,
+    save_final_json,
+    save_json_atomic,
+)
 
 
 def fetch_router_table():
@@ -153,8 +160,11 @@ def fetch_and_parse_router_table(extaddr_map=None, output_path: Path | None = No
         raise ValueError("Router table output is empty")
     router_table_data = parse_router_table(raw_output, extaddr_map)
     if output_path is not None:
-        save_json_atomic(
-            convert_keys_to_camel_case(router_table_data), output_path
+        save_final_json(
+            convert_keys_to_camel_case(router_table_data),
+            output_path,
+            CollectionWriteOutcome.complete(),
+            writer=save_json_atomic,
         )
         logging.debug(
             "Saved router-table data into %s as JSON:\n%s",

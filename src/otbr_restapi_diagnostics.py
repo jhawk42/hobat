@@ -19,7 +19,12 @@ from otbr_restapi_util import (
     emit_rest_command_output,
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
-from util_data import create_checkpoint_filename, save_json_atomic
+from util_data import (
+    CollectionWriteOutcome,
+    create_checkpoint_filename,
+    save_checkpoint_json,
+    save_json_atomic,
+)
 from util_mac_counters import derive_rest_mac_counter_metrics
 import util_network
 
@@ -291,7 +296,12 @@ def _write_checkpoint_best_effort(
     stage: str,
 ) -> None:
     try:
-        save_json_atomic(convert_keys_to_camel_case(payload), checkpoint_path)
+        save_checkpoint_json(
+            convert_keys_to_camel_case(payload),
+            checkpoint_path,
+            CollectionWriteOutcome.partial(has_usable_data=bool(payload)),
+            writer=save_json_atomic,
+        )
         logging.info(
             "event=checkpoint_write command=%s checkpoint_file=%s records=%d stage=%s",
             command_name,

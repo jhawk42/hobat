@@ -71,6 +71,41 @@ class OptionalInputLoadResult:
     input_path: Path | None
 
 
+class CollectionStatus(str, Enum):
+    """Collection state used to decide whether generated data may be persisted."""
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class CollectionWriteOutcome:
+    """Explicit collector evidence used to gate final and checkpoint writes."""
+
+    status: CollectionStatus
+    has_usable_data: bool = False
+    valid_empty_reason: str | None = None
+
+    @classmethod
+    def complete(cls, *, valid_empty_reason: str | None = None) -> "CollectionWriteOutcome":
+        return cls(
+            status=CollectionStatus.COMPLETE,
+            valid_empty_reason=valid_empty_reason,
+        )
+
+    @classmethod
+    def partial(cls, *, has_usable_data: bool) -> "CollectionWriteOutcome":
+        return cls(
+            status=CollectionStatus.PARTIAL,
+            has_usable_data=has_usable_data,
+        )
+
+    @classmethod
+    def failed(cls) -> "CollectionWriteOutcome":
+        return cls(status=CollectionStatus.FAILED)
+
+
 T = TypeVar("T")
 
 
@@ -389,6 +424,61 @@ def save_json_atomic(data, filename: str | os.PathLike, indent: int = 4, add_tra
             pass
         logging.error(f"Failed to save {filename}: {e}")
         raise
+
+
+def save_final_json(
+    data: Any,
+    filename: str | os.PathLike[str],
+    outcome: CollectionWriteOutcome,
+    *,
+    indent: int = 4,
+    add_trailing_newline: bool = False,
+    writer: Callable[..., None] = save_json_atomic,
+) -> bool:
+    """Replace a final snapshot after complete or useful partial collection."""
+    if outcome.status is CollectionStatus.FAILED or (
+        outcome.status is CollectionStatus.PARTIAL
+        and not outcome.has_usable_data
+    ):
+        logging.info(
+            "event=final_write_skipped file=%s status=%s",
+            filename,
+            outcome.status.value,
+        )
+        return False
+    if indent == 4 and not add_trailing_newline:
+        writer(data, filename)
+    else:
+        writer(data, filename, indent=indent, add_trailing_newline=add_trailing_newline)
+    return True
+
+
+def save_checkpoint_json(
+    data: Any,
+    filename: str | os.PathLike[str],
+    outcome: CollectionWriteOutcome,
+    *,
+    indent: int = 4,
+    add_trailing_newline: bool = False,
+    writer: Callable[..., None] = save_json_atomic,
+) -> bool:
+    """Replace a checkpoint only when a partial collection has usable evidence."""
+    if (
+        outcome.status is not CollectionStatus.PARTIAL
+        or not outcome.has_usable_data
+    ):
+        logging.info(
+            "event=checkpoint_write_skipped file=%s status=%s usable=%s",
+            filename,
+            outcome.status.value,
+            outcome.has_usable_data,
+        )
+        return False
+    if indent == 4 and not add_trailing_newline:
+        writer(data, filename)
+    else:
+        writer(data, filename, indent=indent, add_trailing_newline=add_trailing_newline)
+    return True
 
 
 def save_text_atomic(text: str, filename: str | os.PathLike) -> None:

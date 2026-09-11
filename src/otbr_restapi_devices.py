@@ -7,12 +7,23 @@ from typing import Any
 
 from otbr_restapi_util import OTBRRestApiClient, emit_rest_command_output
 from td_json_key_normalizer import convert_keys_to_camel_case
-from util_data import create_checkpoint_filename, save_json_atomic
+from util_data import (
+    CollectionWriteOutcome,
+    create_checkpoint_filename,
+    save_checkpoint_json,
+    save_json_atomic,
+)
 
 
 def _write_checkpoint_best_effort(payload: Any, checkpoint_path: Path) -> None:
     try:
-        save_json_atomic(convert_keys_to_camel_case(payload), checkpoint_path)
+        records = payload.get("items", []) if isinstance(payload, dict) else payload
+        save_checkpoint_json(
+            convert_keys_to_camel_case(payload),
+            checkpoint_path,
+            CollectionWriteOutcome.partial(has_usable_data=bool(records)),
+            writer=save_json_atomic,
+        )
         logging.info(
             "event=checkpoint_write command=otbr-restapi devices fetch checkpoint_file=%s records=%d stage=final",
             checkpoint_path,
@@ -54,7 +65,7 @@ def dispatch_devices(
             whole_action_attempts=getattr(args, "whole_action_attempts", 1),
             raw=raw_arg,
         )
-        if output_path:
+        if output_path and isinstance(result, dict) and result.get("partial"):
             output_file = Path(output_path)
             checkpoint_path = output_file.parent / create_checkpoint_filename(
                 output_file.name

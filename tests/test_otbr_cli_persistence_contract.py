@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -144,6 +145,54 @@ def test_per_router_collectors_checkpoint_then_save_final_once(monkeypatch, tmp_
     ]
 
 
+def test_per_router_timeout_only_result_retains_final_and_checkpoint(monkeypatch, tmp_path):
+    output_path = tmp_path / OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME
+    checkpoint_path = tmp_path / output_path.name.replace(".json", ".partial.json")
+    output_path.write_text('[{"id":"old-final"}]', encoding="utf-8")
+    checkpoint_path.write_text('[{"id":"old-checkpoint"}]', encoding="utf-8")
+    timeout_result = {
+        "rloc16": "0x0400",
+        "router_child_table": [],
+        "_error": {"type": "ResponseTimeout"},
+    }
+    monkeypatch.setattr(childtable, "fetch_and_parse_router_table", lambda _map: [])
+    monkeypatch.setattr(
+        childtable, "collect_per_router", lambda **_kwargs: [timeout_result]
+    )
+
+    childtable.fetch_all_meshdiag_child_tables({}, output_path=output_path)
+
+    assert output_path.read_text(encoding="utf-8") == '[{"id":"old-final"}]'
+    assert checkpoint_path.read_text(encoding="utf-8") == '[{"id":"old-checkpoint"}]'
+
+
+def test_per_router_mixed_result_replaces_final_and_retains_error_record(monkeypatch, tmp_path):
+    output_path = tmp_path / OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME
+    valid_result = {"rloc16": "0x0400", "router_child_table": []}
+    timeout_result = {
+        "rloc16": "0x0800",
+        "router_child_table": [],
+        "_error": {"type": "ResponseTimeout"},
+    }
+    monkeypatch.setattr(childtable, "fetch_and_parse_router_table", lambda _map: [])
+    monkeypatch.setattr(
+        childtable,
+        "collect_per_router",
+        lambda **_kwargs: [valid_result, timeout_result],
+    )
+
+    childtable.fetch_all_meshdiag_child_tables({}, output_path=output_path)
+
+    assert json.loads(output_path.read_text(encoding="utf-8")) == [
+        {"rloc16": "0x0400", "childTable": []},
+        {
+            "rloc16": "0x0800",
+            "childTable": [],
+            "error": {"type": "ResponseTimeout"},
+        },
+    ]
+
+
 def _stub_fetch_all_stages(monkeypatch, events):
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_router_table", lambda *_args, **_kwargs: events.append("router-table") or ([], [], {}))
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_meshdiag_topology", lambda *_args, **_kwargs: events.append("meshdiag") or [])
@@ -202,7 +251,9 @@ def test_networkdiag_fetch_all_persists_internal_collections_before_return(
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_ipv6_addresses", lambda *_args: {})
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_detail_routers", lambda *_args: None)
     monkeypatch.setattr(networkdiag, "fetch_network_diag_topology_expand_children", lambda *_args: None)
-    monkeypatch.setattr(networkdiag, "save_topology_to_json_file", lambda *_args: None)
+    monkeypatch.setattr(
+        networkdiag, "save_topology_to_json_file", lambda *_args, **_kwargs: None
+    )
 
     networkdiag.fetch_network_diag_topology(
         {},
@@ -253,7 +304,7 @@ def test_networkdiag_fetch_all_checkpoint_and_final_paths_are_distinct(
     monkeypatch.setattr(
         networkdiag,
         "save_topology_to_json_file",
-        lambda _payload, path: writes.append(Path(path)),
+        lambda _payload, path, **_kwargs: writes.append(Path(path)),
     )
 
     networkdiag.fetch_network_diag_topology(
@@ -280,7 +331,11 @@ def test_networkdiag_multicast_collector_checkpoint_final_and_return_order(monke
     checkpoint_path = tmp_path / filename.replace(".json", ".partial.json")
     output_path = tmp_path / filename
     monkeypatch.setattr(networkdiag, "fetch_network_diag_multicast", lambda **_kwargs: events.append("collect") or payload)
-    monkeypatch.setattr(networkdiag, "save_topology_to_json_file", lambda _data, path: events.append(Path(path)))
+    monkeypatch.setattr(
+        networkdiag,
+        "save_topology_to_json_file",
+        lambda _data, path, **_kwargs: events.append(Path(path)),
+    )
 
     result = getattr(networkdiag, collector_name)(checkpoint_filepath=str(checkpoint_path), final_output_path=str(output_path))
     events.append("returned")
@@ -324,7 +379,9 @@ def test_networkdiag_checkpoint_failure_propagates_from_aggregate_stage(monkeypa
     monkeypatch.setattr(
         networkdiag,
         "save_topology_to_json_file",
-        lambda *_args: (_ for _ in ()).throw(OSError("checkpoint disk full")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("checkpoint disk full")
+        ),
     )
 
     with pytest.raises(OSError, match="checkpoint disk full"):
