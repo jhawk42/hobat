@@ -591,6 +591,21 @@ def test_td_cli_routes_device_ping_and_attempts(monkeypatch) -> None:
     ]
 
 
+def test_td_cli_device_ping_failure_output_has_no_banner(monkeypatch, capsys) -> None:
+    async def fail(*args, **kwargs):
+        raise MatterWsRequestTimeoutError("slow")
+
+    monkeypatch.setattr(ha_matter_ws_cli, "_ping_node", fail)
+
+    assert td_cli.main([
+        "ha-matter-ws", "device", "ping", "--node-id", "12"
+    ]) == EXIT_CONNECTION
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["nodeId"] == 12
+    assert payload["outcome"] == "request-timeout"
+
+
 def test_td_cli_family_help_path(capsys) -> None:
     assert td_cli.main(["ha-matter-ws"]) == 0
     output = capsys.readouterr().out

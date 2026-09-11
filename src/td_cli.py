@@ -1092,6 +1092,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.command == "otbr-cli"
         and args.cli_command == "device"
         and "--json" in extras
+    ) or (
+        args.command == "ha-matter-ws"
+        and args.ha_matter_command == "device"
+        and args.ha_matter_device_command == "ping"
     ) or (args.command in {"health", "system"} and "--json" in extras) or (
         args.command == "system"
         and args.system_command == "device"
