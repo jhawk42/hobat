@@ -110,7 +110,7 @@ def test_schema_compatibility_accepts_overlap_and_newer_optional_schema() -> Non
     newer = dict(server_info, schema_version=13)
     validate_server_info(newer)
 
-    assert COLLECTOR_SCHEMA_VERSION == 12
+    assert COLLECTOR_SCHEMA_VERSION == 13
     assert MIN_SUPPORTED_SERVER_SCHEMA_VERSION == 11
 
 
@@ -120,8 +120,8 @@ def test_schema_compatibility_rejects_non_overlapping_ranges() -> None:
 
     with pytest.raises(MatterWsSchemaCompatibilityError, match="older"):
         validate_server_info(dict(server_info, schema_version=10))
-    with pytest.raises(MatterWsSchemaCompatibilityError, match="requires schema 13"):
-        validate_server_info(dict(server_info, schema_version=13, min_supported_schema_version=13))
+    with pytest.raises(MatterWsSchemaCompatibilityError, match="requires schema 14"):
+        validate_server_info(dict(server_info, schema_version=14, min_supported_schema_version=14))
 
 
 def test_thread_diagnostics_fixture_resolves_correct_attribute_semantics() -> None:
@@ -145,7 +145,8 @@ def test_live_thread_contract_matches_model_without_inventing_null_identity() ->
     fixture = _load_fixture("ha_matter_ws_live_thread_contract_schema12.json")
     attributes = fixture["attributes"]
 
-    assert fixture["serverInfo"]["schema_version"] == COLLECTOR_SCHEMA_VERSION
+    assert fixture["serverInfo"]["schema_version"] == 12
+    assert fixture["serverInfo"]["schema_version"] <= COLLECTOR_SCHEMA_VERSION
     assert fixture["inventory"]["threadClusterRevision"] == 3
     assert attributes["0/53/7"]["entryFields"] == [
         str(field_id) for field_id in NEIGHBOR_TABLE_FIELDS

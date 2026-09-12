@@ -9,13 +9,14 @@ import logging
 
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import websockets
 
 from ha_matter_ws_contract import (
     DEFAULT_HA_MATTER_WS_URI,
     MatterWsCommandError,
+    MatterWsCommandUnsupportedError,
     MatterWsContractError,
     MatterWsResponseCorrelationError,
     classify_frame,
@@ -83,8 +84,13 @@ class HaMatterWsClient:
         self._late_response_ids: dict[str, None] = {}
         self._frames: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
+        self._sequenced_events: list[tuple[int, dict[str, Any]]] = []
+        self._event_sequence = 0
+        self._event_condition = asyncio.Condition()
         self._event_received = asyncio.Event()
         self._server_info: dict[str, Any] | None = None
+        self._reader_error: BaseException | None = None
+        self._reader_stopped = asyncio.Event()
         self._closing = False
 
     @property
@@ -100,6 +106,10 @@ class HaMatterWsClient:
     @property
     def events(self) -> tuple[dict[str, Any], ...]:
         return tuple(self._events)
+
+    @property
+    def event_cursor(self) -> int:
+        return self._event_sequence
 
     async def __aenter__(self) -> "HaMatterWsClient":
         try:
@@ -137,6 +147,9 @@ class HaMatterWsClient:
             with suppress(asyncio.CancelledError):
                 await self._reader_task
             self._reader_task = None
+        self._reader_stopped.set()
+        async with self._event_condition:
+            self._event_condition.notify_all()
         self._fail_pending(MatterWsTransportError("Matter WebSocket session closed"))
         if self._websocket is not None:
             await self._websocket.close()
@@ -151,10 +164,19 @@ class HaMatterWsClient:
         command: str,
         *,
         args: Mapping[str, Any] | None = None,
+        require_schema: int | None = None,
         timeout: float | None = None,
     ) -> Any:
         if self._websocket is None or self._reader_task is None:
             raise MatterWsTransportError("Matter WebSocket client is not connected")
+        if require_schema is not None:
+            if require_schema <= 0:
+                raise ValueError("require_schema must be greater than zero")
+            server_schema = self.server_info["schema_version"]
+            if server_schema < require_schema:
+                raise MatterWsCommandUnsupportedError(
+                    command, require_schema, server_schema
+                )
         message_id = self._next_message_id()
         future = asyncio.get_running_loop().create_future()
         self._pending[message_id] = future
@@ -228,6 +250,43 @@ class HaMatterWsClient:
             except asyncio.TimeoutError:
                 return
 
+    async def next_event(
+        self,
+        *,
+        after: int,
+        predicate: Callable[[dict[str, Any]], bool],
+        timeout: float | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        """Return the first retained matching event after a sequence cursor."""
+
+        if after < 0:
+            raise ValueError("after must not be negative")
+        if timeout is not None and timeout <= 0:
+            raise ValueError("timeout must be greater than zero")
+
+        async def wait_for_match() -> tuple[int, dict[str, Any]]:
+            async with self._event_condition:
+                while True:
+                    for sequence, frame in self._sequenced_events:
+                        if sequence > after and predicate(frame):
+                            return sequence, frame
+                    self.raise_if_reader_failed()
+                    if self._reader_stopped.is_set():
+                        raise MatterWsTransportError(
+                            "Matter WebSocket reader stopped before a matching event"
+                        )
+                    await self._event_condition.wait()
+
+        if timeout is None:
+            return await wait_for_match()
+        return await asyncio.wait_for(wait_for_match(), timeout=timeout)
+
+    def raise_if_reader_failed(self) -> None:
+        """Raise the terminal reader exception, if the reader failed."""
+
+        if self._reader_error is not None:
+            raise self._reader_error
+
     async def _receive_frame(self, *, timeout: float | None = None) -> dict[str, Any]:
         if self._websocket is None:
             raise MatterWsTransportError("Matter WebSocket client is not connected")
@@ -259,8 +318,12 @@ class HaMatterWsClient:
                 if kind == "server_info":
                     raise MatterWsContractError("Received duplicate server-info frame")
                 if kind == "event":
-                    self._events.append(frame)
-                    self._event_received.set()
+                    async with self._event_condition:
+                        self._event_sequence += 1
+                        self._events.append(frame)
+                        self._sequenced_events.append((self._event_sequence, frame))
+                        self._event_received.set()
+                        self._event_condition.notify_all()
                     continue
 
                 message_id = frame["message_id"]
@@ -290,7 +353,12 @@ class HaMatterWsClient:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            self._reader_error = exc
             self._fail_pending(exc)
+        finally:
+            self._reader_stopped.set()
+            async with self._event_condition:
+                self._event_condition.notify_all()
 
     def _fail_pending(self, exc: BaseException) -> None:
         for future in self._pending.values():

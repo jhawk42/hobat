@@ -80,7 +80,7 @@ td_cli otbr-restapi [global-forwarded-options] {download,node,devices,diagnostic
 ### `ha-matter-ws`
 
 ```text
-td_cli ha-matter-ws [source-options] {server-info,devices,diagnostics,mesh-diagnostics,topology,all} ...
+td_cli ha-matter-ws [source-options] {server-info,devices,thread,diagnostics,mesh-diagnostics,topology,network-topology,all} ...
 ```
 
 Source options include `--host`, `--port`, `--uri`, `--connect-timeout`,
@@ -92,6 +92,51 @@ provide `get` and `fetch-all` commands; `devices` also provides `list`.
 `topology` writes the canonical topology snapshot, while `all` performs one
 inventory transaction and writes every fixed snapshot plus the collection
 outcome. `--output` applies only to leaf commands.
+
+Native Thread network products are explicit, schema-gated commands and are not
+included in `all`:
+
+```text
+td_cli ha-matter-ws thread border-routers
+td_cli ha-matter-ws thread diagnostics list
+td_cli ha-matter-ws thread diagnostics get --ext-pan-id HEX [--force]
+  [--collection-timeout SECONDS]
+td_cli ha-matter-ws network-topology [--refresh]
+  [--refresh-timeout SECONDS]
+```
+
+`thread border-routers` saves the passive mDNS-discovered Border Router
+inventory to `td-ha-matter-ws-thread-border-routers.json`, with its outcome in
+`td-ha-matter-ws-thread-border-routers.outcome.json`. `thread diagnostics list`
+saves Matter Server's immediately returned diagnostic cache to
+`td-ha-matter-ws-thread-diagnostics.json`, with its outcome in
+`td-ha-matter-ws-thread-diagnostics.outcome.json`, and then closes the one-shot
+connection. Issuing the list command also starts Matter Server's background
+refresh; the saved wrapper and outcome therefore report
+`backgroundRefreshStarted=true`, and batch freshness comes from each upstream
+`collectedAt` value rather than the file write time. Use the saved JSON file for
+a side-effect-free cache read.
+
+`thread diagnostics get` collects one Extended PAN ID, normalized to lowercase,
+and follows matching `thread_diagnostics_updated` events until the batch is
+complete, terminal-partial, or the total deadline expires. The default
+`--collection-timeout` is 45 seconds and includes the request, progressive
+events, validation, and connection close. Transient and terminal partials are
+saved to `td-ha-matter-ws-thread-diagnostics.partial.json`; only a complete
+batch replaces `td-ha-matter-ws-thread-diagnostics.json`. A complete result
+removes the partial checkpoint. `--force` asks Matter Server to replace its
+current per-network collection and can create additional Thread network load;
+avoid concurrent forced invocations for the same network.
+
+`network-topology` saves Matter Server's native schema-13 graph to
+`td-ha-matter-ws-network-topology.json`, with its outcome in
+`td-ha-matter-ws-network-topology.outcome.json`. It is separate from Hobat's
+canonical `topology` command and is not included in `all`. By default it sends
+`refresh=false` and uses Matter Server's current attribute cache. `--refresh`
+explicitly re-reads diagnostics from online Matter nodes before rebuilding the
+graph and can create radio and device load; its default `--refresh-timeout` is
+60 seconds. The one-shot command uses the correlated response and does not wait
+for `network_topology_updated` events.
 
 Normal output excludes Matter credentials. Collection is read-only and limited
 to nodes commissioned to the connected controller. Missing diagnostics on an

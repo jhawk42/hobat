@@ -36,6 +36,8 @@ function payloadForExtractor(extractor, index) {
   if (extractor === "otbr-restapi") return { data: rows };
   if (extractor === "ha-matter-ws-diagnostics") return { diagnostics: rows };
   if (extractor === "ha-matter-ws-mesh-diagnostics") return { meshDiagnostics: rows };
+  if (extractor === "ha-matter-ws-border-routers") return { borderRouters: rows };
+  if (extractor === "ha-matter-ws-network-topology") return { topology: { nodes: rows } };
   return rows;
 }
 
@@ -173,15 +175,41 @@ assert.deepEqual(
   ROW_EXTRACTORS["ha-matter-ws-mesh-diagnostics"](haMatterDashboard),
   haMatterDashboard.meshDiagnostics,
 );
+const nativeBorderRouterWrapper = {
+  borderRouters: [{ extAddressHex: "AABBCCDDEEFF0011", networkName: "Test Thread" }],
+};
+assert.deepEqual(
+  ROW_EXTRACTORS["ha-matter-ws-border-routers"](nativeBorderRouterWrapper),
+  nativeBorderRouterWrapper.borderRouters,
+);
+const nativeTopologyWrapper = { topology: { nodes: [{ id: "native-a" }], connections: [] } };
+assert.deepEqual(
+  ROW_EXTRACTORS["ha-matter-ws-network-topology"](nativeTopologyWrapper),
+  nativeTopologyWrapper.topology.nodes,
+);
 assert.deepEqual(
   DATASET_REGISTRY
     .filter((entry) => entry.source === "ha-matter-ws")
     .map((entry) => entry.value),
   [
     "ha_matter_ws_devices_fetch_all",
+    "ha_matter_ws_thread_border_routers",
     "ha_matter_ws_dashboard_diagnostics",
     "ha_matter_ws_dashboard_mesh_diagnostics",
     "ha_matter_ws_topology",
+    "ha_matter_ws_network_topology",
+  ],
+);
+assert.deepEqual(
+  DATASET_REGISTRY
+    .filter((entry) => [
+      "ha_matter_ws_thread_border_routers",
+      "ha_matter_ws_network_topology",
+    ].includes(entry.value))
+    .map((entry) => [entry.files[0], entry.defaultView, entry.estimateActionCostSecs]),
+  [
+    ["td-ha-matter-ws-thread-border-routers.json", "table", 10],
+    ["td-ha-matter-ws-network-topology.json", "topology", 10],
   ],
 );
 assert.ok(

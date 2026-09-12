@@ -23,21 +23,40 @@ from ha_matter_ws_contract import (
     HA_MATTER_WS_HOST_ENV,
     HA_MATTER_WS_PORT_DEFAULT,
     HA_MATTER_WS_PORT_ENV,
+    MatterWsCommandUnsupportedError,
     MatterWsContractError,
+    MatterWsSchemaCompatibilityError,
     build_ha_matter_ws_uri,
     resolve_default_ha_matter_ws_host,
     resolve_default_ha_matter_ws_port,
 )
 from ha_matter_ws_extractor import MatterExtractionError
 from ha_matter_ws_fetch_all import MatterCollection, collect_devices
+from ha_matter_ws_native_topology import validate_native_topology
 from ha_matter_ws_snapshots import MatterSnapshotSecurityError
+from ha_matter_ws_snapshots import assert_snapshot_safe
+from ha_matter_ws_thread import (
+    SelectedDiagnosticsResult,
+    collect_selected_thread_diagnostics,
+    coalesce_thread_diagnostics_batches,
+    normalize_extended_pan_id,
+    validate_border_router_entries,
+    validate_thread_diagnostics_batches,
+)
 from td_const import (
     HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME,
     HA_MATTER_WS_DASHBOARD_FILENAME,
     HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME,
     HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME,
     HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
+    HA_MATTER_WS_NETWORK_TOPOLOGY_OUTCOME_FILENAME,
     HA_MATTER_WS_SERVER_INFO_FILENAME,
+    HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
+    HA_MATTER_WS_THREAD_BORDER_ROUTERS_OUTCOME_FILENAME,
+    HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME,
+    HA_MATTER_WS_THREAD_DIAGNOSTICS_OUTCOME_FILENAME,
+    HA_MATTER_WS_THREAD_DIAGNOSTICS_PARTIAL_FILENAME,
     HA_MATTER_WS_TOPOLOGY_FILENAME,
     TD_DATA_DIR_ARG_HELP,
 )
@@ -62,6 +81,7 @@ EXIT_EXTRACTION = 6
 EXIT_PERSISTENCE = 7
 EXIT_CANCELLED = 130
 DASHBOARD_SCHEMA_VERSION = "1.0.0"
+NATIVE_SNAPSHOT_SCHEMA_VERSION = "1.0.0"
 PING_MAX_ATTEMPTS = 5
 
 
@@ -142,6 +162,44 @@ def build_parser() -> argparse.ArgumentParser:
     device_get.add_argument("--node-id", required=True)
     device_commands.add_parser("fetch-all", help="Save all normalized nodes")
 
+    thread = commands.add_parser(
+        "thread", help="Read Matter Server native Thread network products"
+    )
+    thread_commands = thread.add_subparsers(dest="thread_command", required=True)
+    thread_commands.add_parser(
+        "border-routers", help="Save passive mDNS Border Router inventory"
+    )
+    thread_diagnostics = thread_commands.add_parser(
+        "diagnostics", help="Read native network-wide Thread diagnostics"
+    )
+    thread_diagnostic_commands = thread_diagnostics.add_subparsers(
+        dest="thread_diagnostics_command", required=True
+    )
+    thread_diagnostic_commands.add_parser(
+        "list",
+        help="Save the current diagnostic cache; starts an upstream background refresh",
+    )
+    thread_diagnostic_get = thread_diagnostic_commands.add_parser(
+        "get", help="Collect progressive diagnostics for one Thread network"
+    )
+    thread_diagnostic_get.add_argument("--ext-pan-id", required=True)
+    thread_diagnostic_get.add_argument("--force", action="store_true")
+    thread_diagnostic_get.add_argument(
+        "--collection-timeout", type=_positive_float, default=45.0
+    )
+
+    network_topology = commands.add_parser(
+        "network-topology", help="Save Matter Server's native network graph"
+    )
+    network_topology.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Refresh Matter node diagnostics before building the graph",
+    )
+    network_topology.add_argument(
+        "--refresh-timeout", type=_positive_float, default=60.0
+    )
+
     device = commands.add_parser(
         "device", help="Run an active diagnostic against one Matter node"
     )
@@ -182,6 +240,11 @@ def _command_path(args: argparse.Namespace) -> tuple[str, ...]:
     nested = getattr(args, f"{args.command.replace('-', '_')}_command", None)
     if nested:
         path.append(nested)
+        second_nested = getattr(
+            args, f"{args.command.replace('-', '_')}_{nested.replace('-', '_')}_command", None
+        )
+        if second_nested:
+            path.append(second_nested)
     return tuple(path)
 
 
@@ -412,6 +475,564 @@ def _collection_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _server_summary(server_info: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: server_info.get(key)
+        for key in ("schema_version", "min_supported_schema_version", "sdk_version")
+    }
+
+
+def _native_wrapper(
+    *,
+    source: str,
+    uri: str,
+    server_info: Mapping[str, Any],
+    request: Mapping[str, Any],
+    payload_name: str,
+    payload: Any,
+    observed_at: str,
+) -> dict[str, Any]:
+    wrapper = {
+        "schemaVersion": NATIVE_SNAPSHOT_SCHEMA_VERSION,
+        "source": source,
+        "uri": uri,
+        "observedAt": observed_at,
+        "server": _server_summary(server_info),
+        "request": dict(request),
+        payload_name: payload,
+    }
+    assert_snapshot_safe(wrapper)
+    return wrapper
+
+
+async def _fetch_native_thread_product(
+    args: argparse.Namespace, path: tuple[str, ...]
+) -> tuple[str, dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+    uri = args.uri or build_ha_matter_ws_uri(args.host, args.port)
+    async with HaMatterWsClient(
+        uri,
+        connect_timeout=args.connect_timeout,
+        request_timeout=args.request_timeout,
+    ) as client:
+        if path == ("thread", "border-routers"):
+            result = await client.request(
+                "get_thread_border_routers", require_schema=12
+            )
+            payload = validate_border_router_entries(result)
+            metadata: dict[str, Any] = {}
+        elif path == ("thread", "diagnostics", "list"):
+            result = await client.request("get_thread_diagnostics", require_schema=12)
+            validated = validate_thread_diagnostics_batches(result)
+            coalesced = coalesce_thread_diagnostics_batches(validated)
+            payload = list(coalesced.batches)
+            metadata = {
+                "acceptedBatchCount": len(payload),
+                "staleBatchCount": coalesced.stale_count,
+                "duplicateBatchCount": coalesced.duplicate_count,
+                "conflictingBatchCount": coalesced.conflict_count,
+                "warnings": list(coalesced.warnings),
+            }
+        else:
+            raise ValueError(f"unsupported native Thread command: {' '.join(path)}")
+        client.raise_if_reader_failed()
+        return client.uri, client.server_info, payload, metadata
+
+
+def _native_thread_paths(
+    path: tuple[str, ...], data_dir: Path, explicit_output: Path | None
+) -> tuple[Path, Path]:
+    if path == ("thread", "border-routers"):
+        final_filename = HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME
+        outcome_filename = HA_MATTER_WS_THREAD_BORDER_ROUTERS_OUTCOME_FILENAME
+    else:
+        final_filename = HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME
+        outcome_filename = HA_MATTER_WS_THREAD_DIAGNOSTICS_OUTCOME_FILENAME
+    return (
+        explicit_output or resolve_data_file_path(final_filename, data_dir),
+        resolve_data_file_path(outcome_filename, data_dir),
+    )
+
+
+def _native_thread_outcome(
+    *,
+    path: tuple[str, ...],
+    uri: str,
+    started_at: str,
+    status: str,
+    final_path: Path,
+    item_count: int = 0,
+    node_count: int = 0,
+    server_info: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    command = (
+        "get_thread_border_routers"
+        if path == ("thread", "border-routers")
+        else "get_thread_diagnostics"
+    )
+    outcome: dict[str, Any] = {
+        "source": "ha-matter-ws",
+        "uri": uri,
+        "startedAt": started_at,
+        "completedAt": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "command": command,
+        "schemaRequirement": 12,
+        "responseCount": 1 if status == "complete" else 0,
+        "eventCount": 0,
+        "itemCount": item_count,
+        "nodeCount": node_count,
+        "finalFile": final_path.name,
+    }
+    if path == ("thread", "diagnostics", "list"):
+        outcome["backgroundRefreshStarted"] = True
+        outcome["freshnessSource"] = "upstream-collectedAt"
+        outcome.update(metadata or {})
+    if server_info is not None:
+        outcome["server"] = _server_summary(server_info)
+    if error is not None:
+        outcome["error"] = error
+    assert_snapshot_safe(outcome)
+    return outcome
+
+
+def _native_error_classification(error: BaseException) -> str:
+    if isinstance(error, asyncio.TimeoutError):
+        return "request-timeout"
+    if isinstance(error, MatterWsRequestTimeoutError):
+        return "request-timeout"
+    if isinstance(error, MatterWsTransportError):
+        return "transport"
+    if isinstance(
+        error, (MatterWsCommandUnsupportedError, MatterWsSchemaCompatibilityError)
+    ):
+        return "schema-unsupported"
+    if isinstance(error, MatterWsCommandError):
+        return "command"
+    if isinstance(error, MatterWsContractError):
+        return "protocol"
+    return "persistence"
+
+
+def _run_native_thread_command(
+    args: argparse.Namespace,
+    path: tuple[str, ...],
+    *,
+    started_at: str,
+    data_dir: Path,
+    explicit_output: Path | None,
+) -> int:
+    uri = args.uri or build_ha_matter_ws_uri(args.host, args.port)
+    final_path, outcome_path = _native_thread_paths(path, data_dir, explicit_output)
+    try:
+        resolved_uri, server_info, records, metadata = asyncio.run(
+            _fetch_native_thread_product(args, path)
+        )
+        observed_at = datetime.now(timezone.utc).isoformat()
+        if path == ("thread", "border-routers"):
+            source = "ha-matter-ws-thread-border-routers"
+            request = {"mode": "passive-discovery"}
+            payload_name = "borderRouters"
+        else:
+            source = "ha-matter-ws-thread-diagnostics"
+            request = {"mode": "list", "backgroundRefreshStarted": True}
+            payload_name = "batches"
+        wrapper = _native_wrapper(
+            source=source,
+            uri=resolved_uri,
+            server_info=server_info,
+            request=request,
+            payload_name=payload_name,
+            payload=records,
+            observed_at=observed_at,
+        )
+        save_final_json(
+            wrapper,
+            final_path,
+            CollectionWriteOutcome.complete(
+                valid_empty_reason=(
+                    "completed-passive-discovery"
+                    if path == ("thread", "border-routers")
+                    else "completed-cache-list"
+                )
+            ),
+            add_trailing_newline=True,
+            writer=save_json_atomic,
+        )
+        node_count = sum(len(batch["nodes"]) for batch in records) if payload_name == "batches" else 0
+        save_json_atomic(
+            _native_thread_outcome(
+                path=path,
+                uri=resolved_uri,
+                started_at=started_at,
+                status="complete",
+                final_path=final_path,
+                item_count=len(records),
+                node_count=node_count,
+                server_info=server_info,
+                metadata=metadata,
+            ),
+            outcome_path,
+            add_trailing_newline=True,
+        )
+        return EXIT_OK
+    except (MatterWsTransportError, MatterWsContractError) as exc:
+        save_json_atomic(
+            _native_thread_outcome(
+                path=path,
+                uri=uri,
+                started_at=started_at,
+                status="failed",
+                final_path=final_path,
+                error=_native_error_classification(exc),
+            ),
+            outcome_path,
+            add_trailing_newline=True,
+        )
+        raise
+
+
+async def _fetch_native_topology(
+    args: argparse.Namespace,
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    uri = args.uri or build_ha_matter_ws_uri(args.host, args.port)
+    async with HaMatterWsClient(
+        uri,
+        connect_timeout=args.connect_timeout,
+        request_timeout=args.request_timeout,
+    ) as client:
+        request_kwargs: dict[str, Any] = {
+            "args": {"refresh": args.refresh},
+            "require_schema": 13,
+        }
+        if args.refresh:
+            request_kwargs["timeout"] = args.refresh_timeout
+        result = await client.request("get_network_topology", **request_kwargs)
+        topology = validate_native_topology(result)
+        client.raise_if_reader_failed()
+        return client.uri, client.server_info, topology
+
+
+def _native_topology_outcome(
+    *,
+    uri: str,
+    started_at: str,
+    status: str,
+    final_path: Path,
+    refresh: bool,
+    topology: Mapping[str, Any] | None = None,
+    server_info: Mapping[str, Any] | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    outcome: dict[str, Any] = {
+        "source": "ha-matter-ws",
+        "uri": uri,
+        "startedAt": started_at,
+        "completedAt": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "command": "get_network_topology",
+        "schemaRequirement": 13,
+        "refresh": refresh,
+        "responseCount": 1 if topology is not None else 0,
+        "eventCount": 0,
+        "nodeCount": len(topology["nodes"]) if topology is not None else 0,
+        "connectionCount": (
+            len(topology["connections"]) if topology is not None else 0
+        ),
+        "finalFile": final_path.name,
+    }
+    if server_info is not None:
+        outcome["server"] = _server_summary(server_info)
+    if error is not None:
+        outcome["error"] = error
+    assert_snapshot_safe(outcome)
+    return outcome
+
+
+def _run_native_topology(
+    args: argparse.Namespace,
+    *,
+    started_at: str,
+    data_dir: Path,
+    explicit_output: Path | None,
+) -> int:
+    uri = args.uri or build_ha_matter_ws_uri(args.host, args.port)
+    final_path = explicit_output or resolve_data_file_path(
+        HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME, data_dir
+    )
+    outcome_path = resolve_data_file_path(
+        HA_MATTER_WS_NETWORK_TOPOLOGY_OUTCOME_FILENAME, data_dir
+    )
+    try:
+        resolved_uri, server_info, topology = asyncio.run(
+            _fetch_native_topology(args)
+        )
+        wrapper = _native_wrapper(
+            source="ha-matter-ws-network-topology",
+            uri=resolved_uri,
+            server_info=server_info,
+            request={"refresh": args.refresh},
+            payload_name="topology",
+            payload=topology,
+            observed_at=datetime.now(timezone.utc).isoformat(),
+        )
+        save_final_json(
+            wrapper,
+            final_path,
+            CollectionWriteOutcome.complete(),
+            add_trailing_newline=True,
+            writer=save_json_atomic,
+        )
+        save_json_atomic(
+            _native_topology_outcome(
+                uri=resolved_uri,
+                started_at=started_at,
+                status="complete",
+                final_path=final_path,
+                refresh=args.refresh,
+                topology=topology,
+                server_info=server_info,
+            ),
+            outcome_path,
+            add_trailing_newline=True,
+        )
+        return EXIT_OK
+    except asyncio.CancelledError:
+        save_json_atomic(
+            _native_topology_outcome(
+                uri=uri,
+                started_at=started_at,
+                status="cancelled",
+                final_path=final_path,
+                refresh=args.refresh,
+                error="cancelled",
+            ),
+            outcome_path,
+            add_trailing_newline=True,
+        )
+        raise
+    except (MatterWsTransportError, MatterWsContractError) as exc:
+        save_json_atomic(
+            _native_topology_outcome(
+                uri=uri,
+                started_at=started_at,
+                status="failed",
+                final_path=final_path,
+                refresh=args.refresh,
+                error=_native_error_classification(exc),
+            ),
+            outcome_path,
+            add_trailing_newline=True,
+        )
+        raise
+
+
+def _selected_diagnostics_outcome(
+    *,
+    uri: str,
+    started_at: str,
+    status: str,
+    final_path: Path,
+    partial_path: Path,
+    ext_pan_id: str,
+    force: bool,
+    result: SelectedDiagnosticsResult | None = None,
+    server_info: Mapping[str, Any] | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    batch = result.batch if result is not None else None
+    outcome: dict[str, Any] = {
+        "source": "ha-matter-ws",
+        "uri": uri,
+        "startedAt": started_at,
+        "completedAt": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "command": "get_thread_diagnostics",
+        "schemaRequirement": 12,
+        "selectedNetwork": ext_pan_id,
+        "force": force,
+        "responseCount": result.response_count if result else 0,
+        "eventCount": result.event_count if result else 0,
+        "acceptedBatchCount": result.accepted_count if result else 0,
+        "staleBatchCount": result.stale_count if result else 0,
+        "duplicateBatchCount": result.duplicate_count if result else 0,
+        "conflictingBatchCount": result.conflict_count if result else 0,
+        "nodeCount": len(batch["nodes"]) if batch else 0,
+        "finalFile": final_path.name,
+        "checkpointFile": partial_path.name,
+        "warnings": list(result.warnings) if result else [],
+    }
+    if batch is not None:
+        outcome["upstreamSource"] = batch["source"]
+        if "partialReason" in batch:
+            outcome["partialReason"] = batch["partialReason"]
+    if server_info is not None:
+        outcome["server"] = _server_summary(server_info)
+    if error is not None:
+        outcome["error"] = error
+    assert_snapshot_safe(outcome)
+    return outcome
+
+
+def _run_selected_thread_diagnostics(
+    args: argparse.Namespace,
+    *,
+    started_at: str,
+    data_dir: Path,
+    explicit_output: Path | None,
+) -> int:
+    try:
+        ext_pan_id = normalize_extended_pan_id(args.ext_pan_id)
+    except MatterWsContractError as exc:
+        raise MatterArgumentError(str(exc)) from exc
+    uri = args.uri or build_ha_matter_ws_uri(args.host, args.port)
+    final_path = explicit_output or resolve_data_file_path(
+        HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME, data_dir
+    )
+    partial_path = resolve_data_file_path(
+        HA_MATTER_WS_THREAD_DIAGNOSTICS_PARTIAL_FILENAME, data_dir
+    )
+    outcome_path = resolve_data_file_path(
+        HA_MATTER_WS_THREAD_DIAGNOSTICS_OUTCOME_FILENAME, data_dir
+    )
+    server_holder: dict[str, Any] = {}
+
+    def checkpoint(batch: dict[str, Any]) -> None:
+        wrapper = _native_wrapper(
+            source="ha-matter-ws-thread-diagnostics",
+            uri=uri,
+            server_info=server_holder,
+            request={"mode": "get", "extPanIdHex": ext_pan_id, "force": args.force},
+            payload_name="batches",
+            payload=[batch],
+            observed_at=datetime.now(timezone.utc).isoformat(),
+        )
+        wrapper["partial"] = True
+        assert_snapshot_safe(wrapper)
+        save_checkpoint_json(
+            wrapper,
+            partial_path,
+            CollectionWriteOutcome.partial(has_usable_data=True),
+            add_trailing_newline=True,
+            writer=save_json_atomic,
+        )
+
+    try:
+        async def fetch() -> tuple[str, dict[str, Any], SelectedDiagnosticsResult]:
+            resolved_uri = args.uri or build_ha_matter_ws_uri(args.host, args.port)
+            client = HaMatterWsClient(
+                resolved_uri,
+                connect_timeout=args.connect_timeout,
+                request_timeout=args.request_timeout,
+                max_frames=1000,
+            )
+            await client.__aenter__()
+            server_holder.update(client.server_info)
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + args.collection_timeout
+            close_budget = min(1.0, args.collection_timeout * 0.1)
+            closed = False
+            try:
+                result = await collect_selected_thread_diagnostics(
+                    client,
+                    ext_pan_id,
+                    force=args.force,
+                    timeout=max(0.001, deadline - loop.time() - close_budget),
+                    checkpoint=checkpoint,
+                )
+                info = client.server_info
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                await asyncio.wait_for(client.close(), timeout=remaining)
+                closed = True
+                return client.uri, info, result
+            finally:
+                if not closed:
+                    await client.close()
+
+        resolved_uri, server_info, result = asyncio.run(fetch())
+        if result.status == "complete" and result.batch is not None:
+            wrapper = _native_wrapper(
+                source="ha-matter-ws-thread-diagnostics",
+                uri=resolved_uri,
+                server_info=server_info,
+                request={"mode": "get", "extPanIdHex": ext_pan_id, "force": args.force},
+                payload_name="batches",
+                payload=[result.batch],
+                observed_at=datetime.now(timezone.utc).isoformat(),
+            )
+            save_final_json(
+                wrapper,
+                final_path,
+                CollectionWriteOutcome.complete(),
+                add_trailing_newline=True,
+                writer=save_json_atomic,
+            )
+            partial_path.unlink(missing_ok=True)
+            exit_code = EXIT_OK
+        else:
+            exit_code = EXIT_CONNECTION if result.status == "timeout" else EXIT_PARTIAL
+        save_json_atomic(
+            _selected_diagnostics_outcome(
+                uri=resolved_uri,
+                started_at=started_at,
+                status=result.status,
+                final_path=final_path,
+                partial_path=partial_path,
+                ext_pan_id=ext_pan_id,
+                force=args.force,
+                result=result,
+                server_info=server_info,
+            ),
+            outcome_path,
+            add_trailing_newline=True,
+        )
+        return exit_code
+    except asyncio.CancelledError:
+        save_json_atomic(
+            _selected_diagnostics_outcome(
+                uri=uri,
+                started_at=started_at,
+                status="cancelled",
+                final_path=final_path,
+                partial_path=partial_path,
+                ext_pan_id=ext_pan_id,
+                force=args.force,
+                server_info=server_holder or None,
+                error="cancelled",
+            ),
+            outcome_path,
+            add_trailing_newline=True,
+        )
+        raise
+    except (asyncio.TimeoutError, MatterWsTransportError, MatterWsContractError) as exc:
+        status = (
+            "timeout"
+            if isinstance(exc, (asyncio.TimeoutError, MatterWsRequestTimeoutError))
+            else "failed"
+        )
+        save_json_atomic(
+            _selected_diagnostics_outcome(
+                uri=uri,
+                started_at=started_at,
+                status=status,
+                final_path=final_path,
+                partial_path=partial_path,
+                ext_pan_id=ext_pan_id,
+                force=args.force,
+                server_info=server_holder or None,
+                error=_native_error_classification(exc),
+            ),
+            outcome_path,
+            add_trailing_newline=True,
+        )
+        if isinstance(exc, asyncio.TimeoutError):
+            raise MatterWsRequestTimeoutError("selected diagnostics deadline expired") from exc
+        raise
+
+
 def _ping_payload(
     *,
     uri: str,
@@ -584,7 +1205,11 @@ def _run(args: argparse.Namespace) -> int:
     if path == ("all",) and args.output:
         raise MatterArgumentError("--output is not supported by the all command")
     node_id = getattr(args, "node_id", None)
-    if path[-1] == "get" and _node_number(node_id) is None:
+    if (
+        path[-1] == "get"
+        and path != ("thread", "diagnostics", "get")
+        and _node_number(node_id) is None
+    ):
         raise MatterArgumentError(f"invalid Matter node id: {node_id}")
 
     explicit_output: Path | None = None
@@ -593,6 +1218,32 @@ def _run(args: argparse.Namespace) -> int:
             explicit_output = resolve_data_file_path(args.output, data_dir)
         except ValueError as exc:
             raise MatterArgumentError(str(exc)) from exc
+
+    if path in {
+        ("thread", "border-routers"),
+        ("thread", "diagnostics", "list"),
+    }:
+        return _run_native_thread_command(
+            args,
+            path,
+            started_at=started_at,
+            data_dir=data_dir,
+            explicit_output=explicit_output,
+        )
+    if path == ("thread", "diagnostics", "get"):
+        return _run_selected_thread_diagnostics(
+            args,
+            started_at=started_at,
+            data_dir=data_dir,
+            explicit_output=explicit_output,
+        )
+    if path == ("network-topology",):
+        return _run_native_topology(
+            args,
+            started_at=started_at,
+            data_dir=data_dir,
+            explicit_output=explicit_output,
+        )
 
     checkpoint_outputs: dict[str, Path] = {}
     checkpoint_dataset = {

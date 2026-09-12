@@ -10,15 +10,18 @@ The first-release baseline is the checked-in capture from
 `matter-server/1.2.3 (matter.js/0.17.5-alpha.0-20260710-82b39217b)`, WebSocket
 schema 12 with minimum schema 11. A read-only live check also passed against
 `matter-server/1.3.3 (matter.js/0.17.7)` with the same schema range. The collector
-accepts a server when these ranges overlap:
+now implements protocol envelopes through schema 13 and accepts a server when
+these ranges overlap:
 
 ```text
 server schema >= 11
-server minimum supported schema <= 12
+server minimum supported schema <= 13
 ```
 
-A newer server remains usable while it supports schema 12. A server whose minimum
-has advanced beyond 12 is rejected before collection. The default endpoint is
+A newer server remains usable while it supports schema 13. A server whose minimum
+has advanced beyond 13 is rejected before collection. Schema-12 and schema-13
+commands are gated individually before a message ID is allocated or a frame is
+sent, so baseline commands remain available on schema 11. The default endpoint is
 assembled from `TD_HA_MATTER_WS_HOST` and `TD_HA_MATTER_WS_PORT`, falling back
 to `ws://localhost:5580/ws`. CLI `--host` and `--port` values override the
 environment, while `--uri` overrides the complete endpoint.
@@ -35,6 +38,60 @@ Commands and replies use:
 Events are independent frames shaped as `{"event": "name", "data": ...}`.
 `start_listening` both enables events and returns the initial node array. Response
 selection must therefore use `message_id`, not frame order or result type.
+
+## Native Thread Network Validation
+
+The native schema-12 Border Router and Thread diagnostic validators live in
+`ha_matter_ws_thread.py`. The schema-13 graph validator lives in
+`ha_matter_ws_native_topology.py`. They preserve the native wire shapes rather
+than converting them into Hobat's commissioned-node snapshots or canonical
+topology.
+
+Validation is bounded for router, network, node, address, route, child, unknown
+TLV, topology-node, and connection collections. Known nested structures are
+type-checked and projected field by field. Unknown scalar fields are retained
+only under a bounded `extensions` object; unknown arrays or objects are rejected.
+Fixed-width identifiers and connection endpoints are validated, topology node
+IDs must be unique, and every connection must reference existing nodes.
+
+BigInt-derived values are accepted as JSON integers only through JavaScript's
+safe-integer maximum. Larger unsigned 64-bit values must be decimal strings so
+they survive a JSON round trip exactly. Diagnostic `networkData` remains allowed
+as non-secret Thread Network Data, while credential-shaped fields including
+Network Key, PSKc, operational datasets, certificates, and access-control data
+are rejected recursively.
+
+The explicit native Thread commands validate these projected values before
+writing separate wrappers. They remain outside `ha-matter-ws all`. Their final
+snapshots are available as dedicated dashboard datasets with separate native
+adaptors rather than being merged into commissioned-node HAWS evidence.
+
+Selected-network diagnostics capture an event cursor before sending
+`get_thread_diagnostics`, then consume only matching
+`thread_diagnostics_updated` events. Extended PAN IDs are normalized to
+lowercase. Newer `collectedAt` batches replace older observations; regressing
+batches and exact duplicates are ignored, while equal-time conflicts retain the
+first batch and add a bounded warning. A single 45-second default deadline
+covers the request, event progression, validation, and orderly close.
+
+Complete selected-network batches atomically replace the native diagnostics
+final and remove its checkpoint. Transient, terminal, unavailable, timed-out,
+cancelled, malformed, and transport-failed operations preserve the prior final.
+Validated partial batches are checkpointed no more than once per second, with a
+final checkpoint for the newest terminal or deadline state. `--force` is an
+explicit operator action and is never scheduled by dashboard, polling, or web
+file actions.
+
+Native schema-13 topology is exposed only through the explicit
+`network-topology` command. It sends `get_network_topology` with
+`refresh=false` by default and validates the correlated response as the
+authoritative one-shot graph without waiting for `network_topology_updated`.
+`--refresh` changes the argument to `true` and applies a 60-second default
+request timeout because it re-reads diagnostics from online Matter nodes. The
+validated graph is persisted unchanged beneath a versioned `topology` wrapper;
+node and connection counts are recorded in a separate outcome. Schema-12
+servers are rejected locally before a message ID is allocated or a frame is
+sent, and failures preserve the previous native topology final.
 
 ## Matter Model Baseline
 
@@ -167,6 +224,38 @@ mobile. Tables rendered two sanitized rows, topology rendered two nodes and one
 link on a positive nonblank canvas, search reset restored the exact baseline,
 document-level mobile overflow remained absent, and all data requests returned
 HTTP 200 without console, page, request, or HTTP errors.
+
+### S8-02A Native Thread Acceptance
+
+On 2026-09-12, the explicit native Thread commands were run against the locally
+available Matter Server schema 13 endpoint with all outputs redirected to an
+isolated temporary directory. No schema-12 endpoint was configured or available;
+schema-12 local rejection remains covered by the transport tests, including zero
+message-ID allocation and zero socket writes for the schema-13 topology command.
+
+- Passive Border Router discovery completed in 451 ms and returned 10 validated
+	entries.
+- The immediate diagnostics cache list completed in 459 ms. The cache was empty,
+	which is a valid complete list response and still initiated the documented
+	upstream background refresh.
+- A non-forced selected-network diagnostic request used an internally selected
+	discovered network and returned a validated terminal partial in 408 ms:
+	`partialReason=no_credentials`, zero nodes, one response, and zero events. The
+	prior diagnostics final remained separate from the partial checkpoint.
+- Cached native topology completed in 444 ms with 22 nodes and 15 connections.
+	One explicit `--refresh` completed in 25.742 seconds, within the 60-second
+	bound, and retained 22 nodes and 15 connections.
+- A forced connection failure returned exit code 3 and left the refreshed native
+	topology final byte-identical.
+- All seven isolated JSON artifacts passed the production recursive credential
+	safety check. The deterministic checked-in `data/` hash was
+	`9c4f129b58ee7378ee901127f33e860c57c864537476a26b6c8f683a96f39f67`
+	before and after acceptance.
+- At the time of this isolated collection acceptance, no native Thread product
+	was registered with dashboard JavaScript or a web server file action. The
+	later dashboard integration adds only bounded cache actions: passive Border
+	Router discovery, diagnostics cache listing, and cached topology with
+	`refresh=false`; it never schedules `--force` or `--refresh`.
 
 ## Upstream Sources
 

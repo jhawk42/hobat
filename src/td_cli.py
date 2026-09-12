@@ -444,6 +444,23 @@ def _add_ha_matter_ws_commands(subparsers: argparse._SubParsersAction) -> None:
     device_get.add_argument("--node-id", required=True)
     device_commands.add_parser("fetch-all")
 
+    thread = commands.add_parser("thread")
+    thread_commands = thread.add_subparsers(dest="ha_matter_thread_command")
+    thread_commands.add_parser("border-routers")
+    thread_diagnostics = thread_commands.add_parser("diagnostics")
+    thread_diagnostic_commands = thread_diagnostics.add_subparsers(
+        dest="ha_matter_thread_diagnostics_command"
+    )
+    thread_diagnostic_commands.add_parser("list")
+    thread_diagnostic_get = thread_diagnostic_commands.add_parser("get")
+    thread_diagnostic_get.add_argument("--ext-pan-id", required=True)
+    thread_diagnostic_get.add_argument("--force", action="store_true")
+    thread_diagnostic_get.add_argument("--collection-timeout", type=float, default=45.0)
+
+    network_topology = commands.add_parser("network-topology")
+    network_topology.add_argument("--refresh", action="store_true")
+    network_topology.add_argument("--refresh-timeout", type=float, default=60.0)
+
     diagnostics = commands.add_parser("diagnostics")
     diagnostic_commands = diagnostics.add_subparsers(
         dest="ha_matter_diagnostics_command"
@@ -531,7 +548,7 @@ def build_parser() -> argparse.ArgumentParser:
         usage: td_cli otbr-restapi [-h] {node,devices,diagnostics,actions,mesh-diagnostics,topology,download} ...
 
     ha-matter-ws
-        usage: td_cli ha-matter-ws [-h] {server-info,device,devices,diagnostics,mesh-diagnostics,topology,all} ...
+        usage: td_cli ha-matter-ws [-h] {server-info,device,devices,thread,diagnostics,mesh-diagnostics,topology,all} ...
 
     mdns
         usage: td_cli mdns [-h] [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
@@ -972,9 +989,19 @@ def _dispatch_ha_matter_ws(
 
     nested_attribute = f"ha_matter_{command.replace('-', '_')}_command"
     nested = getattr(args, nested_attribute, None)
-    if command in {"device", "devices", "diagnostics", "mesh-diagnostics"} and not nested:
+    if command in {"device", "devices", "thread", "diagnostics", "mesh-diagnostics"} and not nested:
         return _normalize_module_rc(
             ha_matter_ws_cli.main([command, "--help"]),
+            "ha_matter_ws_cli.main",
+        )
+    second_nested = (
+        getattr(args, "ha_matter_thread_diagnostics_command", None)
+        if command == "thread" and nested == "diagnostics"
+        else None
+    )
+    if command == "thread" and nested == "diagnostics" and not second_nested:
+        return _normalize_module_rc(
+            ha_matter_ws_cli.main([command, nested, "--help"]),
             "ha_matter_ws_cli.main",
         )
 
@@ -1001,12 +1028,27 @@ def _dispatch_ha_matter_ws(
     forwarded.append(command)
     if nested:
         forwarded.append(nested)
+    if second_nested:
+        forwarded.append(second_nested)
     node_id = getattr(args, "node_id", None)
     if node_id is not None:
         forwarded += ["--node-id", str(node_id)]
     attempts = getattr(args, "attempts", None)
     if attempts is not None:
         forwarded += ["--attempts", str(attempts)]
+    ext_pan_id = getattr(args, "ext_pan_id", None)
+    if ext_pan_id is not None:
+        forwarded += ["--ext-pan-id", ext_pan_id]
+    if getattr(args, "force", False):
+        forwarded.append("--force")
+    collection_timeout = getattr(args, "collection_timeout", None)
+    if collection_timeout is not None:
+        forwarded += ["--collection-timeout", str(collection_timeout)]
+    if getattr(args, "refresh", False):
+        forwarded.append("--refresh")
+    refresh_timeout = getattr(args, "refresh_timeout", None)
+    if refresh_timeout is not None:
+        forwarded += ["--refresh-timeout", str(refresh_timeout)]
     forwarded += extra_args
     return _normalize_module_rc(
         ha_matter_ws_cli.main(forwarded), "ha_matter_ws_cli.main"

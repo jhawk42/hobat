@@ -92,9 +92,11 @@ browser revalidates it.
 The server deduplicates simultaneous refreshes of the same filename and uses an
 `asyncio.Lock` per source command family. Two OTBR CLI actions therefore do not
 run concurrently in one server process, while unrelated source families can
-progress independently. Devices, diagnostics, mesh diagnostics, topology, and
-outcome refreshes from `ha-matter-ws` share one source lock so concurrent
-dashboard requests do not load the Matter controller in parallel.
+progress independently. Devices, diagnostics, mesh diagnostics, canonical and
+native topology, and native Thread inventory refreshes from `ha-matter-ws`
+share one source lock so concurrent dashboard requests do not load the Matter
+controller in parallel. Native dashboard actions never add diagnostics
+`--force` or topology `--refresh`.
 
 ## Background Jobs and Cancellation
 

@@ -377,6 +377,79 @@ assert.equal(
   false,
 );
 
+const nativeBorderRouters = runAdaptor({
+  entry: {
+    adaptor: "ha-matter-ws-native-thread",
+    files: ["td-ha-matter-ws-thread-border-routers.json"],
+    rowExtractor: "ha-matter-ws-border-routers",
+  },
+  rawFiles: [{ borderRouters: [] }],
+  rows: [{
+    extAddressHex: "AABBCCDDEEFF0011",
+    networkName: "Test Thread",
+    hostname: "border-router.local.",
+  }],
+});
+assertResult(nativeBorderRouters, {
+  nodeIds: ["ha-matter-ws-border-router:aabbccddeeff0011"],
+  edges: [],
+  sourceNames: ["ha-matter-ws-thread-border-routers"],
+  hasChildIndex: false,
+});
+assert.equal(nativeBorderRouters.nodeMap.values().next().value.isBorderRouter, true);
+
+const nativeTopologyPayload = {
+  topology: {
+    collected_at: 1767888000000,
+    nodes: [
+      { id: "1", kind: "matter", network_type: "thread", role: "leader", rloc16: 1024 },
+      { id: "br_AABB", kind: "border_router", network_type: "thread", role: "router" },
+      { id: "ap_1122", kind: "wifi_ap", network_type: "wifi", role: "ap" },
+    ],
+    connections: [{
+      source: "1",
+      target: "br_AABB",
+      network: "thread",
+      strength: "unknown",
+      source_to_target: { strength: "medium", lqi: 2, rssi: -70 },
+      target_to_source: { strength: "unknown" },
+      via_route_table: true,
+      path_cost: 1,
+    }, {
+      source: "1",
+      target: "ap_1122",
+      network: "wifi",
+      strength: "strong",
+      source_to_target: { strength: "strong", rssi: -55 },
+    }],
+  },
+};
+const nativeTopology = run(
+  "ha-matter-ws-network-topology",
+  ["td-ha-matter-ws-network-topology.json"],
+  [nativeTopologyPayload],
+);
+assertResult(nativeTopology, {
+  nodeIds: ["1", "br_AABB", "ap_1122"],
+  edges: [
+    ["1", "br_AABB", ["otbr_route"]],
+    ["br_AABB", "1", ["otbr_route"]],
+    ["1", "ap_1122", ["router_neighbor"]],
+  ],
+  sourceNames: ["ha-matter-ws-network-topology"],
+  hasChildIndex: false,
+});
+assert.deepEqual(
+  nativeTopology.edgeData.map((edge) => edge.nativeDirection),
+  ["source_to_target", "target_to_source", "source_to_target"],
+);
+assert.equal(nativeTopology.edgeData[0].nativeConnection.path_cost, 1);
+assert.deepEqual(nativeTopology.edgeData[0].nativeObservation, {
+  strength: "medium",
+  lqi: 2,
+  rssi: -70,
+});
+
 const devicesEnvelope = { data: [
   { id: "device-a", attributes: { extAddress: "aa00112233445566", hostName: "Device A", role: "router" } },
   { id: "device-b", attributes: { extAddress: "bb00112233445566", hostName: "Device B", role: "router" } },
@@ -428,4 +501,4 @@ const extracted = extractOtbrRestApiSources(new Map(restFiles.map((name, index) 
 assert.equal(extracted.diagnostics[0].shared, "mesh");
 assert.equal(extracted.diagnostics[0].basicOnly, true);
 
-process.stdout.write(`${JSON.stringify({ adaptorCount: 9 })}\n`);
+process.stdout.write(`${JSON.stringify({ adaptorCount: 11 })}\n`);

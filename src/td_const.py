@@ -48,6 +48,13 @@ HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME = "td-ha-matter-ws-mesh-diagnos
 HA_MATTER_WS_TOPOLOGY_FILENAME = "td-ha-matter-ws-topology.json"
 HA_MATTER_WS_DASHBOARD_FILENAME = "td-ha-matter-ws-dashboard.json"
 HA_MATTER_WS_COLLECTION_OUTCOME_FILENAME = "td-ha-matter-ws-collection.outcome.json"
+HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME = "td-ha-matter-ws-thread-border-routers.json"
+HA_MATTER_WS_THREAD_BORDER_ROUTERS_OUTCOME_FILENAME = "td-ha-matter-ws-thread-border-routers.outcome.json"
+HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME = "td-ha-matter-ws-thread-diagnostics.json"
+HA_MATTER_WS_THREAD_DIAGNOSTICS_PARTIAL_FILENAME = "td-ha-matter-ws-thread-diagnostics.partial.json"
+HA_MATTER_WS_THREAD_DIAGNOSTICS_OUTCOME_FILENAME = "td-ha-matter-ws-thread-diagnostics.outcome.json"
+HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME = "td-ha-matter-ws-network-topology.json"
+HA_MATTER_WS_NETWORK_TOPOLOGY_OUTCOME_FILENAME = "td-ha-matter-ws-network-topology.outcome.json"
 
 EVE_TOPOLOGY_FILENAME = "td-eve-topology.json"
 THREAD_TOOLS_DIAGNOSTICS_FILENAME = "diagnostics.json"

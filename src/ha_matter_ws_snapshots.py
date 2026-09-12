@@ -13,13 +13,25 @@ class MatterSnapshotSecurityError(ValueError):
 
 SENSITIVE_KEYS = frozenset(
     {
+        "accesscontrol",
+        "acl",
+        "activedataset",
+        "certificate",
+        "certificates",
+        "daccertificate",
         "nocs",
+        "networkkey",
+        "operationaldataset",
         "trustedrootcertificates",
         "rootpublickey",
         "groupkeymap",
         "groupkeyset",
         "groupepochkey",
         "operationalcredentials",
+        "paicertificate",
+        "pendingdataset",
+        "pskc",
+        "threadcredentials",
     }
 )
 

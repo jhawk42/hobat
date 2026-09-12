@@ -551,6 +551,21 @@ export const DATASET_REGISTRY = [
   },
   {
     source: "ha-matter-ws",
+    value: "ha_matter_ws_thread_border_routers",
+    label: "Thread Border Routers",
+    group: "Inventory",
+    files: ["td-ha-matter-ws-thread-border-routers.json"],
+    mergeStrategy: "none",
+    rowExtractor: "ha-matter-ws-border-routers",
+    adaptor: "ha-matter-ws-native-thread",
+    defaultPhysicsProfile: "mesh-balanced",
+    topologyMode: "ha-matter-ws-native-thread",
+    defaultView: "table",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 10
+  },
+  {
+    source: "ha-matter-ws",
     value: "ha_matter_ws_dashboard_diagnostics",
     label: "Diagnostics",
     group: "Diagnostics",
@@ -593,6 +608,21 @@ export const DATASET_REGISTRY = [
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 60
+  },
+  {
+    source: "ha-matter-ws",
+    value: "ha_matter_ws_network_topology",
+    label: "Native Network Topology",
+    group: "Topology",
+    files: ["td-ha-matter-ws-network-topology.json"],
+    mergeStrategy: "none",
+    rowExtractor: "ha-matter-ws-network-topology",
+    adaptor: "ha-matter-ws-network-topology",
+    defaultPhysicsProfile: "mesh-balanced",
+    topologyMode: "ha-matter-ws-network-topology",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 10
   },
 
   // ── Single-file simple dataset ───
@@ -812,6 +842,8 @@ const KNOWN_DATASET_FILES = new Set([
   "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
   "td-ha-matter-ws-topology.json",
   "td-ha-matter-ws-dashboard.json",
+  "td-ha-matter-ws-thread-border-routers.json",
+  "td-ha-matter-ws-network-topology.json",
   "td-mdns-scopes-br.json",
   "td-mdns-scopes-hap.json",
   "td-mdns-scopes-matter.json",
@@ -841,6 +873,8 @@ const ROW_EXTRACTOR_IDS = new Set([
   "otbr-restapi",
   "ha-matter-ws-diagnostics",
   "ha-matter-ws-mesh-diagnostics",
+  "ha-matter-ws-border-routers",
+  "ha-matter-ws-network-topology",
 ]);
 const ADAPTOR_IDS = new Set([
   "meshdiag-networkdiag",
@@ -850,6 +884,8 @@ const ADAPTOR_IDS = new Set([
   "thread-tools-native",
   "otbr-restapi",
   "ha-matter-ws",
+  "ha-matter-ws-native-thread",
+  "ha-matter-ws-network-topology",
   "router-table",
   "raw-array",
 ]);

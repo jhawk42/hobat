@@ -1,0 +1,192 @@
+{
+  "borderRouters": [
+    {
+      "extAddressHex": "AABBCCDDEEFF0011",
+      "extendedPanIdHex": "1122334455667788",
+      "networkName": "Test Thread",
+      "vendorName": "Example Vendor",
+      "modelName": "Example Border Router",
+      "hostname": "border-router.local.",
+      "addresses": ["192.0.2.10", "2001:db8::10", "2001:0db8:0:0:0:0:0:10"],
+      "meshcopPort": 49191,
+      "trelPort": 19788,
+      "threadVersion": "1.3.0",
+      "swVersion": "1.2.3",
+      "recordVersion": "1",
+      "borderAgentIdHex": "A1B2C3D4",
+      "stateBitmapHex": "00000010",
+      "activeTimestampHex": "0000000000000001",
+      "partitionIdHex": "12345678",
+      "domainName": "default.service.arpa.",
+      "sources": ["meshcop", "trel"],
+      "lastSeen": 1767888000000,
+      "futureScalar": "retained"
+    }
+  ],
+  "batches": [
+    {
+      "extPanIdHex": "1122334455667788",
+      "networkName": "Test Thread",
+      "collectedAt": 1767888000000,
+      "source": "meshcop",
+      "partialReason": "in_progress",
+      "nodes": [
+        {
+          "extMacAddress": "AABBCCDDEEFF0011",
+          "rloc16": 1024,
+          "mode": {
+            "rxOnWhenIdle": true,
+            "ftd": true,
+            "fullNetworkData": true
+          },
+          "timeout": 300,
+          "connectivity": {
+            "parentPriority": 1,
+            "linkQuality3": 3,
+            "linkQuality2": 2,
+            "linkQuality1": 1,
+            "leaderCost": 0,
+            "idSequence": 5,
+            "activeRouters": 3,
+            "sedBufferSize": 1280,
+            "sedDatagramCount": 4
+          },
+          "route64": {
+            "idSequence": 5,
+            "entries": [
+              {
+                "routerId": 1,
+                "linkQualityIn": 3,
+                "linkQualityOut": 2,
+                "routeCost": 1
+              }
+            ]
+          },
+          "leaderData": {
+            "partitionId": 305419896,
+            "weighting": 64,
+            "dataVersion": 7,
+            "stableDataVersion": 6,
+            "leaderRouterId": 1
+          },
+          "networkData": "0A0B0C0D",
+          "ipv6Addresses": ["FD000000000000000000000000000001"],
+          "macCounters": {
+            "ifInUnknownProtos": 0,
+            "ifInErrors": 1,
+            "ifOutErrors": 2,
+            "ifInUcastPkts": 3,
+            "ifInBroadcastPkts": 4,
+            "ifInDiscards": 5,
+            "ifOutUcastPkts": 6,
+            "ifOutBroadcastPkts": 7,
+            "ifOutDiscards": 8
+          },
+          "childTable": [
+            {
+              "timeoutExponent": 8,
+              "timeoutSeconds": 256,
+              "incomingLinkQuality": 3,
+              "childId": 7,
+              "mode": {
+                "rxOnWhenIdle": false,
+                "ftd": false,
+                "fullNetworkData": false
+              }
+            }
+          ],
+          "channelPages": [0],
+          "maxChildTimeout": 300,
+          "eui64": "0011223344556677",
+          "version": 4,
+          "vendorName": "Example Vendor",
+          "vendorModel": "Example Device",
+          "vendorSwVersion": "2.0",
+          "threadStackVersion": "OPENTHREAD/1.3",
+          "vendorAppUrl": "https://example.invalid/device",
+          "mleCounters": {
+            "disabledRole": 0,
+            "detachedRole": 1,
+            "childRole": 2,
+            "routerRole": 3,
+            "leaderRole": 4,
+            "attachAttempts": 5,
+            "partitionIdChanges": 6,
+            "betterPartitionAttachAttempts": 7,
+            "parentChanges": 8,
+            "trackedTime": 9007199254740991,
+            "disabledTime": "9007199254740992",
+            "detachedTime": 10,
+            "childTime": 11,
+            "routerTime": 12,
+            "leaderTime": 13
+          },
+          "batteryLevel": 95,
+          "supplyVoltage": 3000,
+          "unknown": [
+            {"type": 200, "value": "DEADBEEF"}
+          ],
+          "futureNodeScalar": true
+        }
+      ]
+    }
+  ],
+  "topology": {
+    "collected_at": 1767888000000,
+    "nodes": [
+      {
+        "id": "1",
+        "kind": "matter",
+        "network_type": "thread",
+        "node_id": "18446744073709551615",
+        "role": "leader",
+        "available": true,
+        "is_bridge": false,
+        "ext_address": "AABBCCDDEEFF0011",
+        "rloc16": 1024,
+        "ext_pan_id": "1122334455667788",
+        "network_name": "Test Thread"
+      },
+      {
+        "id": "br_AABBCCDDEEFF0022",
+        "kind": "border_router",
+        "network_type": "thread",
+        "role": "router",
+        "ext_address": "AABBCCDDEEFF0022",
+        "host_name": "Border Router",
+        "vendor_name": "Example Vendor",
+        "model_name": "Example Border Router",
+        "last_seen": 1767887999000
+      },
+      {
+        "id": "ap_112233445566",
+        "kind": "wifi_ap",
+        "network_type": "wifi",
+        "role": "ap",
+        "network_name": "11:22:33:44:55:66",
+        "ssid": "Test WiFi",
+        "bssid": "11:22:33:44:55:66",
+        "futureNodeScalar": 7
+      }
+    ],
+    "connections": [
+      {
+        "source": "1",
+        "target": "br_AABBCCDDEEFF0022",
+        "network": "thread",
+        "strength": "unknown",
+        "source_to_target": {"strength": "medium", "lqi": 2, "rssi": -70},
+        "target_to_source": {"strength": "unknown"},
+        "via_route_table": true,
+        "path_cost": 1
+      },
+      {
+        "source": "1",
+        "target": "ap_112233445566",
+        "network": "wifi",
+        "strength": "strong",
+        "source_to_target": {"strength": "strong", "rssi": -55}
+      }
+    ]
+  }
+}

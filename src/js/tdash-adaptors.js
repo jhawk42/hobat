@@ -2235,6 +2235,167 @@ export function adaptHaMatterWs(fileMap, extractedRows, rowExtractor = '') {
   return emitAdaptorResult(model);
 }
 
+// ── Adaptor 8: Home Assistant Matter Server native Thread products ─────────
+
+function nativeStrengthStyle(strength) {
+  switch (toText(strength).toLowerCase()) {
+    case 'strong': return { width: 12, color: PALETTE.lqHigh, dashes: false, lqLevel: 3 };
+    case 'medium': return { width: 8, color: PALETTE.lqMedium, dashes: true, lqLevel: 2 };
+    case 'weak': return { width: 4, color: PALETTE.lqLow, dashes: true, lqLevel: 1 };
+    default: return { width: 4, color: PALETTE.lqNone, dashes: strength === 'unknown', lqLevel: 0 };
+  }
+}
+
+function nativeRloc16(value) {
+  const number = toFiniteNumber(value);
+  return number === undefined ? toText(value).toLowerCase() : `0x${number.toString(16).padStart(4, '0')}`;
+}
+
+export function adaptHaMatterWsNativeThread(fileMap, extractedRows) {
+  const rows = asArray(extractedRows);
+  const sourceName = 'ha-matter-ws-thread-border-routers';
+  const model = createAdaptorModel([sourceName]);
+
+  rows.forEach((row, index) => {
+    if (!isPlainObject(row)) return;
+    const extAddress = toText(row.extAddressHex || row.extMacAddress).toLowerCase();
+    const rloc16 = nativeRloc16(row.rloc16);
+    const fallbackId = `ha-matter-ws-border-router:${extAddress || index}`;
+    const canonicalRow = {
+      ...row,
+      extAddress,
+      rloc16,
+      networkName: row.networkName,
+      deviceLabel: row.networkName
+        || row.hostname
+        || row.vendorName
+        || row.vendorModel
+        || fallbackId,
+      role: 'Border Router',
+      isBorderRouter: true,
+      isRouter: true,
+    };
+    const deviceId = registerDevice(model, canonicalRow, {
+      id: fallbackId,
+      preserveId: true,
+      sourceName,
+      nodeRecord: canonicalRow,
+      presentation: {
+        label: buildLabel(canonicalRow),
+        shape: NODE_SHAPES.borderRouter,
+        color: NODE_COLORS.borderRouter,
+        isRouter: true,
+        isLeader: false,
+      },
+    });
+    registerDetails(model, deviceId, canonicalRow, 'replace');
+  });
+
+  return emitAdaptorResult(model);
+}
+
+// ── Adaptor 9: Home Assistant Matter Server native schema-13 topology ──────
+
+export function adaptHaMatterWsNetworkTopology(fileMap) {
+  const wrapper = fileMap.values().next().value;
+  const topology = isPlainObject(wrapper?.topology) ? wrapper.topology : {};
+  const model = createAdaptorModel(['ha-matter-ws-network-topology']);
+
+  asArray(topology.nodes).forEach((node) => {
+    if (!isPlainObject(node)) return;
+    const deviceId = toText(node.id);
+    if (!deviceId) return;
+    const role = toText(node.role).toLowerCase();
+    const isBorderRouter = node.kind === 'border_router';
+    const isChild = role === 'end_device' || role === 'sleepy_end_device';
+    const isRouter = isBorderRouter || ['leader', 'router', 'reed', 'ap'].includes(role);
+    const canonicalNode = {
+      ...node,
+      extAddress: toText(node.ext_address).toLowerCase(),
+      rloc16: nativeRloc16(node.rloc16),
+      deviceLabel: node.network_name || node.host_name || node.vendor_name || deviceId,
+      nodeId: node.node_id,
+      isBorderRouter,
+      isRouter,
+      isLeader: role === 'leader',
+    };
+    registerDevice(model, canonicalNode, {
+      id: deviceId,
+      preserveId: true,
+      sourceName: 'ha-matter-ws-network-topology',
+      nodeRecord: canonicalNode,
+      presentation: {
+        label: buildLabel(canonicalNode),
+        shape: isBorderRouter ? NODE_SHAPES.borderRouter : (isChild ? NODE_SHAPES.child : (isRouter ? NODE_SHAPES.router : NODE_SHAPES.unknown)),
+        color: isBorderRouter ? NODE_COLORS.borderRouter : (isChild ? NODE_COLORS.child : (isRouter ? NODE_COLORS.router : NODE_COLORS.unknown)),
+        isRouter,
+        isLeader: role === 'leader',
+      },
+    });
+    registerDetails(model, deviceId, node, 'replace');
+  });
+
+  asArray(topology.connections).forEach((connection, index) => {
+    if (!isPlainObject(connection)) return;
+    const sourceId = toText(connection.source);
+    const targetId = toText(connection.target);
+    if (!model.devicesById.has(sourceId) || !model.devicesById.has(targetId)) return;
+    const category = connection.via_route_table === true
+      ? EDGE_CATEGORY_OTBR_ROUTE
+      : EDGE_CATEGORY_ROUTER_NEIGHBOR;
+    const directions = [];
+    if (isPlainObject(connection.source_to_target)) {
+      directions.push(['source_to_target', sourceId, targetId, connection.source_to_target]);
+    }
+    if (isPlainObject(connection.target_to_source)) {
+      directions.push(['target_to_source', targetId, sourceId, connection.target_to_source]);
+    }
+    if (directions.length === 0) {
+      directions.push(['summary', sourceId, targetId, { strength: connection.strength }]);
+    }
+
+    directions.forEach(([directionName, fromId, toId, observation]) => {
+      const directed = directionName !== 'summary';
+      const metrics = {
+        strength: observation.strength,
+        lqi: observation.lqi,
+        rssi: observation.rssi,
+        pathCost: connection.path_cost,
+        viaRouteTable: connection.via_route_table,
+        network: connection.network,
+        nativeDirection: directionName,
+        nativeConnection: connection,
+        nativeObservation: observation,
+      };
+      const presentation = {
+        ...nativeStrengthStyle(observation.strength),
+        ...(directed ? { arrows: 'to' } : {}),
+        ...buildEdgeEndpointTitles(
+          model.devicesById.get(fromId)?.nodeRecord,
+          model.devicesById.get(toId)?.nodeRecord,
+          fromId,
+          toId,
+        ),
+        linkCategories: [category],
+      };
+      presentation.title = buildEdgeTitle({ ...metrics, ...presentation });
+      registerRelationship(model, {
+        id: `ha-matter-ws-native:${index}:${directionName}`,
+        sourceId: fromId,
+        targetId: toId,
+        category,
+        directed,
+        sourceName: 'ha-matter-ws-network-topology',
+        metrics,
+        presentation,
+        rawRecord: { connection, direction: directionName, observation },
+      });
+    });
+  });
+
+  return emitAdaptorResult(model);
+}
+
 // ── Dispatch: pick adaptor from the dataset registry identifier ───────────────
 
 export const ADAPTOR_HANDLERS = Object.freeze({
@@ -2250,6 +2411,8 @@ export const ADAPTOR_HANDLERS = Object.freeze({
     rows,
     entry?.rowExtractor,
   ),
+  'ha-matter-ws-native-thread': (fileMap, rows, entry) => adaptHaMatterWsNativeThread(fileMap, rows, entry),
+  'ha-matter-ws-network-topology': (fileMap) => adaptHaMatterWsNetworkTopology(fileMap),
   'raw-array': (fileMap) => adaptRawArray(fileMap),
 });
 

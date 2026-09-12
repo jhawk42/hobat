@@ -16,7 +16,11 @@ from ha_matter_ws_client import (
     MatterWsTransportError,
     fetch_node_snapshot,
 )
-from ha_matter_ws_contract import MatterWsContractError, MatterWsResponseCorrelationError
+from ha_matter_ws_contract import (
+    MatterWsCommandUnsupportedError,
+    MatterWsContractError,
+    MatterWsResponseCorrelationError,
+)
 from ha_matter_ws_extractor import extract_nodes_info
 from ha_matter_ws_fetch_all import collect_devices, save_collection
 
@@ -53,6 +57,10 @@ def _server_info() -> dict[str, Any]:
     return json.loads(FIXTURE.read_text(encoding="utf-8"))["serverInfo"]
 
 
+def _server_info_with_schema(schema_version: int) -> dict[str, Any]:
+    return dict(_server_info(), schema_version=schema_version)
+
+
 def test_client_correlates_out_of_order_responses_and_routes_events(monkeypatch) -> None:
     async def scenario() -> None:
         socket = FakeWebSocket([_server_info()])
@@ -76,6 +84,213 @@ def test_client_correlates_out_of_order_responses_and_routes_events(monkeypatch)
 
         assert socket.closed is True
         assert [message["message_id"] for message in socket.sent] == ["1", "2"]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("server_schema", "required_schema", "supported"),
+    [(11, 12, False), (12, 12, True), (12, 13, False), (13, 13, True)],
+)
+def test_client_gates_commands_by_server_schema_before_send(
+    monkeypatch, server_schema, required_schema, supported
+) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info_with_schema(server_schema)])
+
+        async def on_send(message: dict[str, Any]) -> None:
+            socket.queue({"message_id": message["message_id"], "result": "ok"})
+
+        socket.on_send = on_send
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        async with HaMatterWsClient(request_timeout=0.2) as client:
+            if supported:
+                assert await client.request(
+                    "schema_gated", require_schema=required_schema
+                ) == "ok"
+                assert client._message_id == 1
+                assert len(socket.sent) == 1
+            else:
+                with pytest.raises(MatterWsCommandUnsupportedError) as exc_info:
+                    await client.request("schema_gated", require_schema=required_schema)
+                assert exc_info.value.command == "schema_gated"
+                assert exc_info.value.required_schema == required_schema
+                assert exc_info.value.server_schema == server_schema
+                assert client._message_id == 0
+                assert socket.sent == []
+
+    asyncio.run(scenario())
+
+
+def test_network_topology_is_rejected_on_schema_12_before_send(monkeypatch) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info_with_schema(12)])
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        async with HaMatterWsClient(request_timeout=0.2) as client:
+            with pytest.raises(MatterWsCommandUnsupportedError) as exc_info:
+                await client.request(
+                    "get_network_topology",
+                    args={"refresh": False},
+                    require_schema=13,
+                )
+            assert exc_info.value.command == "get_network_topology"
+            assert client._message_id == 0
+            assert socket.sent == []
+
+    asyncio.run(scenario())
+
+
+def test_client_cursor_retains_event_arriving_before_command_response(monkeypatch) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info_with_schema(13)])
+
+        async def on_send(message: dict[str, Any]) -> None:
+            socket.queue({"event": "thread_diagnostics_updated", "data": {"id": 7}})
+            socket.queue({"message_id": message["message_id"], "result": []})
+
+        socket.on_send = on_send
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        async with HaMatterWsClient(request_timeout=0.2) as client:
+            cursor = client.event_cursor
+            assert await client.request("opt_in", require_schema=12) == []
+            sequence, event = await client.next_event(
+                after=cursor,
+                predicate=lambda frame: frame.get("event")
+                == "thread_diagnostics_updated",
+                timeout=0.2,
+            )
+            assert sequence == 1
+            assert event["data"] == {"id": 7}
+            assert client.event_cursor == 1
+
+    asyncio.run(scenario())
+
+
+def test_client_next_event_ignores_but_retains_unrelated_events(monkeypatch) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        async with HaMatterWsClient(request_timeout=0.2) as client:
+            cursor = client.event_cursor
+            waiter = asyncio.create_task(
+                client.next_event(
+                    after=cursor,
+                    predicate=lambda frame: frame.get("event") == "matching",
+                    timeout=0.2,
+                )
+            )
+            socket.queue({"event": "unrelated", "data": {}})
+            await asyncio.sleep(0)
+            assert waiter.done() is False
+            socket.queue({"event": "matching", "data": {}})
+            sequence, _ = await waiter
+            assert sequence == 2
+            assert [event["event"] for event in client.events] == [
+                "unrelated",
+                "matching",
+            ]
+
+    asyncio.run(scenario())
+
+
+def test_client_next_event_timeout_and_cancellation_do_not_consume_events(
+    monkeypatch,
+) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        async with HaMatterWsClient(request_timeout=0.2) as client:
+            with pytest.raises(asyncio.TimeoutError):
+                await client.next_event(
+                    after=client.event_cursor,
+                    predicate=lambda frame: True,
+                    timeout=0.01,
+                )
+            waiter = asyncio.create_task(
+                client.next_event(
+                    after=client.event_cursor,
+                    predicate=lambda frame: True,
+                )
+            )
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+            socket.queue({"event": "retained", "data": {}})
+            _, event = await client.next_event(
+                after=0, predicate=lambda frame: True, timeout=0.2
+            )
+            assert event["event"] == "retained"
+
+    asyncio.run(scenario())
+
+
+def test_client_reader_failure_wakes_all_event_waiters(monkeypatch) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        async with HaMatterWsClient(request_timeout=0.2) as client:
+            waiters = [
+                asyncio.create_task(
+                    client.next_event(after=0, predicate=lambda frame: True)
+                )
+                for _ in range(2)
+            ]
+            socket.queue({})
+            results = await asyncio.gather(*waiters, return_exceptions=True)
+            assert all(isinstance(result, MatterWsContractError) for result in results)
+            with pytest.raises(MatterWsContractError, match="Unrecognized"):
+                client.raise_if_reader_failed()
+
+    asyncio.run(scenario())
+
+
+def test_client_normal_close_wakes_event_waiter_without_reader_error(monkeypatch) -> None:
+    async def scenario() -> None:
+        socket = FakeWebSocket([_server_info()])
+        monkeypatch.setattr(
+            ha_matter_ws_client.websockets,
+            "connect",
+            lambda *args, **kwargs: socket,
+        )
+
+        client = await HaMatterWsClient(request_timeout=0.2).__aenter__()
+        waiter = asyncio.create_task(
+            client.next_event(after=0, predicate=lambda frame: True)
+        )
+        await client.close()
+        with pytest.raises(MatterWsTransportError, match="reader stopped"):
+            await waiter
+        client.raise_if_reader_failed()
 
     asyncio.run(scenario())
 

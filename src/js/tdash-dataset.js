@@ -146,6 +146,8 @@ export const ROW_EXTRACTORS = Object.freeze({
   "otbr-restapi": (payload) => extractEnvelopeRows(payload, "data"),
   "ha-matter-ws-diagnostics": (payload) => extractEnvelopeRows(payload, "diagnostics"),
   "ha-matter-ws-mesh-diagnostics": (payload) => extractEnvelopeRows(payload, "meshDiagnostics"),
+  "ha-matter-ws-border-routers": (payload) => extractEnvelopeRows(payload, "borderRouters"),
+  "ha-matter-ws-network-topology": (payload) => extractEnvelopeRows(payload?.topology, "nodes"),
 });
 
 export const MERGE_STRATEGY_HANDLERS = Object.freeze({

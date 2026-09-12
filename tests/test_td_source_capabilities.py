@@ -6,7 +6,13 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from td_const import MDNS_SCOPES_BR_FILENAME, OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME
+from td_const import (
+    HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
+    HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
+    HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME,
+    MDNS_SCOPES_BR_FILENAME,
+    OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
+)
 from td_source_capabilities import SourceCapabilityService
 import td_webserver
 
@@ -50,6 +56,21 @@ def test_always_available_source_retains_cached_file_metadata() -> None:
         "configured": False,
         "probe": {"state": "not-applicable"},
     }
+
+
+def test_native_ha_matter_ws_files_are_advertised() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        result = asyncio.run(SourceCapabilityService(probes={}).capabilities(Path(directory)))
+
+    for filename in (
+        HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
+        HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME,
+        HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
+    ):
+        assert result["files"][filename] == {
+            "cached": False,
+            "source": "ha-matter-ws",
+        }
 
 
 def test_failed_probe_is_cached_for_its_ttl() -> None:

@@ -182,6 +182,15 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
             "td-ha-matter-ws-topology.json": ["ha-matter-ws", "topology"],
             "td-ha-matter-ws-dashboard.json": ["ha-matter-ws", "dashboard"],
             "td-ha-matter-ws-collection.outcome.json": ["ha-matter-ws", "all"],
+            "td-ha-matter-ws-thread-border-routers.json": [
+                "ha-matter-ws", "thread", "border-routers"
+            ],
+            "td-ha-matter-ws-thread-diagnostics.json": [
+                "ha-matter-ws", "thread", "diagnostics", "list"
+            ],
+            "td-ha-matter-ws-network-topology.json": [
+                "ha-matter-ws", "network-topology"
+            ],
         }
 
         for filename, action in expected_actions.items():
@@ -196,6 +205,9 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
         )
         for filename in set(expected_actions) - {"td-ha-matter-ws-server-info.json"}:
             self.assertTrue(td_webserver.FILE_ACTION_MAP[filename].force_async)
+
+        self.assertNotIn("--force", sum(expected_actions.values(), []))
+        self.assertNotIn("--refresh", sum(expected_actions.values(), []))
 
         self.assertIs(
             td_webserver._get_source_lock("ha-matter-ws"),

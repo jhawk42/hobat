@@ -16,7 +16,7 @@ HA_MATTER_WS_PORT_DEFAULT = 5580
 DEFAULT_HA_MATTER_WS_URI = (
     f"ws://{HA_MATTER_WS_HOST_DEFAULT}:{HA_MATTER_WS_PORT_DEFAULT}/ws"
 )
-COLLECTOR_SCHEMA_VERSION = 12
+COLLECTOR_SCHEMA_VERSION = 13
 MIN_SUPPORTED_SERVER_SCHEMA_VERSION = 11
 
 PROTOCOL_SOURCE = (
@@ -80,6 +80,19 @@ class MatterWsContractError(ValueError):
 
 class MatterWsSchemaCompatibilityError(MatterWsContractError):
     """The server and collector schema ranges do not overlap."""
+
+
+class MatterWsCommandUnsupportedError(MatterWsContractError):
+    """A command requires a newer schema than the server advertises."""
+
+    def __init__(self, command: str, required_schema: int, server_schema: int) -> None:
+        self.command = command
+        self.required_schema = required_schema
+        self.server_schema = server_schema
+        super().__init__(
+            f"Matter command {command!r} requires schema {required_schema}, "
+            f"server advertises schema {server_schema}"
+        )
 
 
 class MatterWsResponseCorrelationError(MatterWsContractError):
