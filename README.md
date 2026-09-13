@@ -76,6 +76,11 @@ Open `http://localhost:9165/`. The root redirects to `/tdash.html`.
 
 On startup the dashboard does not fetch a dataset until **Sync** is selected. Default is **Auto**. Enable **Cache Only** before Sync to not trigger live collection. **Force Refresh** requests regeneration. Long actions return a background job that the browser polls and can cancel.
 
+For a health-eligible dataset, the **Refresh Health** control in Network
+Insights processes the currently loaded cached snapshot with partial input
+allowed. It writes health history in `hobat_v1.db`, but does not collect source
+data, update snapshots, or probe devices.
+
 Dashboard API calls are same-origin and do not receive CORS authorization
 headers. When using a reverse proxy, serve the dashboard and `/api/*` through
 the same browser origin (and the same path prefix when one is used). Changing

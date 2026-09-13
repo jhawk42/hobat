@@ -27,6 +27,91 @@ def _request(data_dir, *, query=None, match_info=None):
 
 
 class HealthApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_process_dataset_starts_deduplicated_health_task(self) -> None:
+        data_dir = Path(tempfile.mkdtemp())
+        request = _request(data_dir)
+        request.json = unittest.mock.AsyncMock(
+            return_value={"dataset": "otbr_cli_networkdiag_fetch_all"}
+        )
+        task = unittest.mock.MagicMock()
+        task.done.return_value = False
+        def create_closed_task(coroutine):
+            coroutine.close()
+            return task
+
+        with patch.object(td_webserver.asyncio, "create_task", side_effect=create_closed_task), patch.object(
+            td_webserver, "_background_tasks", set()
+        ):
+            response = await td_webserver.handle_health_process_dataset_api(request)
+            duplicate = await td_webserver.handle_health_process_dataset_api(request)
+        payload = json.loads(response.text)
+        duplicate_payload = json.loads(duplicate.text)
+        self.assertEqual(response.status, 202)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(payload["task"], "health-process-dataset")
+        self.assertEqual(payload["dataset"], "otbr_cli_networkdiag_fetch_all")
+        self.assertEqual(payload["job_id"], duplicate_payload["job_id"])
+        self.assertEqual(
+            td_webserver._job_registry[payload["job_id"]].filename, ""
+        )
+
+    async def test_process_dataset_rejects_invalid_request(self) -> None:
+        request = _request(Path(tempfile.mkdtemp()))
+        request.json = unittest.mock.AsyncMock(return_value={"dataset": "all"})
+        with self.assertRaises(aiohttp.web.HTTPBadRequest):
+            await td_webserver.handle_health_process_dataset_api(request)
+
+    async def test_process_dataset_always_allows_partial_input(self) -> None:
+        request = _request(Path(tempfile.mkdtemp()))
+        request.json = unittest.mock.AsyncMock(
+            return_value={"dataset": "otbr_cli_networkdiag_fetch_all"}
+        )
+        with patch.object(
+            td_webserver,
+            "run_device_action_cli",
+            new=unittest.mock.AsyncMock(
+                return_value=(
+                    0,
+                    b'{"assessmentCreated": true, "observationCreated": true}',
+                    b"",
+                    0.1,
+                )
+            ),
+        ) as run_cli:
+            response = await td_webserver.handle_health_process_dataset_api(request)
+            job_id = json.loads(response.text)["job_id"]
+            await td_webserver._job_runtime_registry[job_id].task
+        self.assertEqual(
+            run_cli.await_args.args[0],
+            [
+                "health", "process-dataset", "--dataset",
+                "otbr_cli_networkdiag_fetch_all", "--allow-partial", "--json",
+            ],
+        )
+        self.assertEqual(
+            run_cli.await_args.kwargs["output_limit_bytes"],
+            td_webserver._HEALTH_PROCESS_OUTPUT_LIMIT_BYTES,
+        )
+        self.assertEqual(td_webserver._job_registry[job_id].status, "done")
+
+    async def test_health_task_cancellation_has_metadata_without_filename(self) -> None:
+        job = td_webserver.JobStatus(
+            job_id="health-job",
+            filename="",
+            status=td_webserver.JOB_STATUS_RUNNING,
+            task="health-process-dataset",
+            dataset="otbr_cli_networkdiag_fetch_all",
+        )
+        td_webserver._job_registry[job.job_id] = job
+        response = await td_webserver.handle_job_cancel_api(
+            _request(Path(tempfile.mkdtemp()), match_info={"job_id": job.job_id})
+        )
+        payload = json.loads(response.text)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(payload["task"], "health-process-dataset")
+        self.assertEqual(payload["dataset"], "otbr_cli_networkdiag_fetch_all")
+        self.assertNotIn("filename", payload)
+
     async def test_summary_is_pinned_grouped_and_no_store(self) -> None:
         with self.subTest("stored assessment"):
             import tempfile

@@ -37,6 +37,7 @@ directory through the server allowlist.
 | `GET /api/data/{filename}` | `handle_data_api` | Serve, refresh, or start a job for an allowed data file |
 | `GET /api/job/{job_id}` | `handle_job_api` | Return job state and final/checkpoint metadata |
 | `DELETE /api/job/{job_id}` | `handle_job_cancel_api` | Request cancellation of a running job |
+| `POST /api/health/process-dataset` | `handle_health_process_dataset_api` | Process one approved cached dataset into a health assessment |
 | `GET /api/device/{extAddress}` | `handle_device_get_api` | Read one static device label |
 | `PATCH /api/device/{extAddress}` | `handle_device_patch_api` | Atomically insert or update one device label |
 | `GET /**` | aiohttp static route | Serve `src/` assets |
@@ -185,9 +186,13 @@ Health datasets declare `healthEligible` and `healthProfile`. A cross-language
 contract test keeps active browser entries marked `healthEligible: true` aligned
 with `td-dataset-manifest.json`, including their source, files, merge strategy,
 extractor, adaptor, and profile. For eligible datasets, `tdash-health.js` reads a
-pinned assessment from the query-only `/api/health/*` routes and renders its
-status, five-pillar coverage, grouped findings, bounded history metadata, and
-device-attributed findings. Python remains the only verdict owner.
+pinned assessment from `/api/health/*` and can start a same-origin
+`POST /api/health/process-dataset` task. The server always passes
+`--allow-partial`; this task consumes only the current cached files and writes
+health history in `hobat_v1.db`, without starting a collector, modifying a
+snapshot, or probing devices. The browser renders status, five-pillar coverage,
+grouped findings, bounded history metadata, and device-attributed findings.
+Python remains the only verdict owner.
 
 On Sync, `loadDataset()` starts per-file requests concurrently and uses
 `Promise.allSettled` so successful files can still produce a partial result when

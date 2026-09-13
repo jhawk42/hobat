@@ -86,12 +86,15 @@ import {
 } from "./tdash-view-status.js";
 import {
   exportHealthAssessment,
+  cancelHealthJob,
+  fetchHealthJob,
   fetchHealthAssessment,
   fetchHealthDevice,
   fetchHealthSupport,
   renderDeviceHealth,
   renderHealthInsights,
   renderHealthStatus,
+  startHealthProcessing,
 } from "./tdash-health.js";
 import {
   DEVICE_ACTIONS,
@@ -211,6 +214,12 @@ const healthInsightsState = {
   deviceRequestVersion: 0,
   capabilities: null,
   observations: null,
+  refreshJobId: null,
+  refreshVersion: 0,
+  refreshStatus: "",
+  refreshDetail: "",
+  refreshOutcome: null,
+  refreshedAt: null,
 };
 let healthNavigationContext = null;
 
@@ -563,6 +572,7 @@ function switchView(newView) {
   if (!nextView) return;
   if (newView === currentView) return;
   currentView = newView;
+  updateHealthRefreshControls();
 
   WORKSPACE_VIEWS.forEach(({ view, buttonId, panelId }) => {
     const isActive = view === newView;
@@ -1407,6 +1417,7 @@ function renderNetworkInsights() {
       compareEndpoints: (group) => compareHealthEndpoints(group),
       applyFilter: applyHealthGroupFilter,
     });
+    renderHealthRefreshStatus();
     return;
   }
   contentEl.replaceChildren();
@@ -1467,6 +1478,39 @@ function renderNetworkInsights() {
     sectionEl.appendChild(listEl);
     contentEl.appendChild(sectionEl);
   });
+}
+
+function updateHealthRefreshControls() {
+  const visible = currentView === "insights" && currentDataset?.entry?.healthEligible === true;
+  const refreshButton = document.getElementById("btn-health-refresh");
+  const cancelButton = document.getElementById("btn-health-refresh-cancel");
+  const pending = ["running", "cancelling"].includes(healthInsightsState.refreshStatus);
+  if (refreshButton) {
+    refreshButton.hidden = !visible;
+    refreshButton.disabled = pending;
+  }
+  if (cancelButton) {
+    cancelButton.hidden = !visible || !pending;
+    cancelButton.disabled = healthInsightsState.refreshStatus === "cancelling";
+  }
+}
+
+function renderHealthRefreshStatus() {
+  const contentEl = document.getElementById("network-insights-content");
+  if (!contentEl || currentView !== "insights" || !healthInsightsState.refreshStatus) return;
+  const message = document.createElement("p");
+  const status = healthInsightsState.refreshStatus;
+  message.className = status === "error" ? "network-insights-empty error" : "network-insights-empty";
+  message.textContent = {
+    running: "Processing cached dataset...",
+    cancelling: "Cancelling health processing...",
+    cancelled: "Health processing cancelled.",
+    completed: healthInsightsState.refreshOutcome === true
+      ? "Completed: processed cached dataset."
+      : "Already current: cached dataset assessment is unchanged.",
+    error: healthInsightsState.refreshDetail || "Health processing failed.",
+  }[status] || "";
+  if (message.textContent) contentEl.prepend(message);
 }
 
 function findCurrentDeviceRecord(deviceId) {
@@ -1767,7 +1811,89 @@ async function refreshHealthAssessment() {
       healthInsightsState.loading = false;
       renderHealthStatus(statusEl, healthInsightsState);
       renderNetworkInsights();
+      updateHealthRefreshControls();
     }
+  }
+}
+
+function invalidateHealthRefresh() {
+  healthInsightsState.refreshVersion += 1;
+  healthInsightsState.refreshJobId = null;
+  healthInsightsState.refreshStatus = "";
+  healthInsightsState.refreshDetail = "";
+  healthInsightsState.refreshOutcome = null;
+  healthInsightsState.refreshedAt = null;
+  updateHealthRefreshControls();
+}
+
+async function runHealthRefresh() {
+  const datasetId = currentDataset?.entry?.value;
+  if (!datasetId || currentDataset?.entry?.healthEligible !== true) return;
+  const version = ++healthInsightsState.refreshVersion;
+  healthInsightsState.refreshJobId = null;
+  healthInsightsState.refreshStatus = "running";
+  healthInsightsState.refreshDetail = "";
+  healthInsightsState.refreshOutcome = null;
+  healthInsightsState.assessment = null;
+  healthInsightsState.error = "";
+  setTopologyHealthFindings([]);
+  setTableHealthFindings([]);
+  renderHealthStatus(document.getElementById("health-status-summary"), healthInsightsState);
+  renderNetworkInsights();
+  updateHealthRefreshControls();
+  try {
+    const started = await startHealthProcessing(datasetId);
+    if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
+    healthInsightsState.refreshJobId = started.job_id;
+    let status = started;
+    while (["running", "cancelling"].includes(status.status)) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      status = await fetchHealthJob(started.job_id);
+      if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
+      healthInsightsState.refreshStatus = status.status;
+      renderNetworkInsights();
+      updateHealthRefreshControls();
+    }
+    if (status.status === "done") {
+      await refreshHealthAssessment();
+      if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
+      if (healthInsightsState.error) {
+        healthInsightsState.refreshStatus = "error";
+        healthInsightsState.refreshDetail = healthInsightsState.error;
+      } else {
+        healthInsightsState.refreshStatus = "completed";
+        healthInsightsState.refreshOutcome = status.result?.assessmentCreated === true;
+        healthInsightsState.refreshedAt = new Date().toISOString();
+      }
+    } else {
+      healthInsightsState.refreshStatus = status.status === "cancelled" ? "cancelled" : "error";
+      healthInsightsState.refreshDetail = status.detail || "Health processing failed.";
+    }
+  } catch (error) {
+    if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
+    healthInsightsState.refreshStatus = "error";
+    healthInsightsState.refreshDetail = error.message;
+  } finally {
+    if (version === healthInsightsState.refreshVersion && currentDataset?.entry?.value === datasetId) {
+      renderHealthStatus(document.getElementById("health-status-summary"), healthInsightsState);
+      renderNetworkInsights();
+      updateHealthRefreshControls();
+    }
+  }
+}
+
+async function cancelHealthRefresh() {
+  if (!healthInsightsState.refreshJobId) return;
+  healthInsightsState.refreshStatus = "cancelling";
+  renderNetworkInsights();
+  updateHealthRefreshControls();
+  try {
+    await cancelHealthJob(healthInsightsState.refreshJobId);
+  } catch (error) {
+    healthInsightsState.refreshStatus = "error";
+    healthInsightsState.refreshDetail = error.message;
+    renderNetworkInsights();
+    updateHealthRefreshControls();
   }
 }
 
@@ -1778,6 +1904,12 @@ document.getElementById("btn-health-return")?.addEventListener("click", restoreH
 document.getElementById("btn-health-reset")?.addEventListener("click", resetHealthWorkflow);
 document.getElementById("btn-health-export")?.addEventListener("click", () => {
   exportHealthAssessment(healthInsightsState.assessment);
+});
+document.getElementById("btn-health-refresh")?.addEventListener("click", () => {
+  void runHealthRefresh();
+});
+document.getElementById("btn-health-refresh-cancel")?.addEventListener("click", () => {
+  void cancelHealthRefresh();
 });
 
 const DEVICE_DETAILS_PANEL_TABS = [
@@ -2294,6 +2426,7 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
   // Final reconciliation render: all files settled, isPartial is false.
   resetDeviceDetailsPanelTabsToDefault();
   renderCurrentView();
+  invalidateHealthRefresh();
   void refreshHealthAssessment();
   updateFetchStatusBar(_lastFetchStartedAt);
   if (currentDataset?.fetchMetrics) {

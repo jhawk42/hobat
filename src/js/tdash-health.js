@@ -56,6 +56,35 @@ export function fetchHealthAssessment(datasetId, signal) {
   return healthRequest(`api/health/summary?dataset=${encodeURIComponent(datasetId)}`, signal);
 }
 
+export async function startHealthProcessing(datasetId, signal) {
+  const response = await fetch("api/health/process-dataset", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ dataset: datasetId }),
+    signal,
+  });
+  if (!response.ok) throw new Error(`Health processing unavailable (${response.status}).`);
+  return response.json();
+}
+
+export async function fetchHealthJob(jobId, signal) {
+  const response = await fetch(`api/job/${encodeURIComponent(jobId)}`, {
+    headers: { Accept: "application/json" }, signal,
+  });
+  if (!response.ok) throw new Error(`Health task unavailable (${response.status}).`);
+  return response.json();
+}
+
+export async function cancelHealthJob(jobId, signal) {
+  const response = await fetch(`api/job/${encodeURIComponent(jobId)}`, {
+    method: "DELETE", headers: { Accept: "application/json" }, signal,
+  });
+  if (!response.ok && response.status !== 409) {
+    throw new Error(`Health task cancellation unavailable (${response.status}).`);
+  }
+  return response.json();
+}
+
 export function fetchHealthDevice(assessmentId, deviceId, signal) {
   const query = new URLSearchParams({ assessment: assessmentId });
   return healthRequest(`api/health/devices/${encodeURIComponent(deviceId)}?${query}`, signal);
@@ -87,9 +116,23 @@ export function formatAge(timestamp, parsedTimestamp = Date.parse(timestamp)) {
 export function renderHealthStatus(container, model) {
   if (!container) return;
   container.replaceChildren();
-  const isAvailable = model.loading || (!model.error && Boolean(model.assessment));
+  const isRefreshing = ["running", "cancelling"].includes(model.refreshStatus);
+  const isAvailable = isRefreshing || model.loading || (!model.error && Boolean(model.assessment));
   container.toggleAttribute("hidden", !isAvailable);
   if (!isAvailable) return;
+  if (isRefreshing) {
+    appendText(container, "span", "Health: refreshing", "health-status-state is-loading");
+    return;
+  }
+  if (model.refreshStatus === "cancelled") {
+    appendText(container, "span", "Health: cancelled", "health-status-state");
+    return;
+  }
+  if (model.refreshStatus === "error") {
+    appendText(container, "span", "Health: failed", "health-status-state state-poor");
+    appendText(container, "span", model.refreshDetail, "health-status-detail");
+    return;
+  }
   if (model.loading) {
     appendText(container, "span", "Health: loading", "health-status-state is-loading");
     return;
@@ -99,11 +142,15 @@ export function renderHealthStatus(container, model) {
   appendText(container, "span", `Health: ${assessment.status}`,
     `health-status-state state-${assessment.status.toLowerCase()}`);
   appendText(container, "span", assessment.completeness, "health-status-detail");
-  const parsedObservedAt = Date.parse(assessment.observedAt);
-  const time = appendText(container, "time", formatAge(assessment.observedAt, parsedObservedAt), "health-status-detail");
-  if (Number.isFinite(parsedObservedAt)) {
-    time.dateTime = assessment.observedAt;
-    time.title = new Date(parsedObservedAt).toLocaleString();
+  const displayedAt = model.refreshedAt ?? assessment.observedAt;
+  const parsedDisplayedAt = Date.parse(displayedAt);
+  const time = appendText(container, "time", formatAge(displayedAt, parsedDisplayedAt), "health-status-detail");
+  if (Number.isFinite(parsedDisplayedAt)) {
+    time.dateTime = displayedAt;
+    const observedAt = Date.parse(assessment.observedAt);
+    time.title = model.refreshedAt && Number.isFinite(observedAt)
+      ? `Health processed: ${new Date(parsedDisplayedAt).toLocaleString()}; assessment observed: ${new Date(observedAt).toLocaleString()}`
+      : new Date(parsedDisplayedAt).toLocaleString();
   }
 }
 

@@ -15,7 +15,7 @@ from collections.abc import Callable
 
 import aiohttp.web
 
-from td_health_manifest import HealthManifestError
+from td_health_manifest import HealthManifestError, load_health_manifest
 from td_health_read import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
@@ -508,6 +508,9 @@ class JobStatus:
     # "running" | "cancelling" | "cancelled" | "done" | "error"
     status: str
     detail: str = ""
+    task: str | None = None
+    dataset: str | None = None
+    result: dict[str, object] | None = None
     created_at: float = dataclasses.field(default_factory=time.time)
 
 
@@ -553,21 +556,33 @@ def _is_cancellable_job_status(status: str) -> bool:
 
 def _build_job_poll_body(job: JobStatus) -> dict[str, object]:
     """Build JSON payload for GET /api/job/{job_id} based on status."""
+    metadata = {
+        key: value for key, value in {
+            "task": job.task,
+            "dataset": job.dataset,
+        }.items() if value is not None
+    }
     if job.status == JOB_STATUS_RUNNING:
-        return {"status": JOB_STATUS_RUNNING}
+        return {"status": JOB_STATUS_RUNNING, **metadata}
     if job.status == JOB_STATUS_CANCELLING:
-        return {"status": JOB_STATUS_CANCELLING}
+        return {"status": JOB_STATUS_CANCELLING, **metadata}
     if job.status == JOB_STATUS_CANCELLED:
-        return {"status": JOB_STATUS_CANCELLED, "detail": job.detail}
+        return {"status": JOB_STATUS_CANCELLED, "detail": job.detail, **metadata}
     if job.status == JOB_STATUS_DONE:
-        return {"status": JOB_STATUS_DONE, "filename": job.filename}
+        body: dict[str, object] = {"status": JOB_STATUS_DONE, **metadata}
+        if job.filename:
+            body["filename"] = job.filename
+        if job.result is not None:
+            body["result"] = job.result
+        return body
     # Unknown statuses are surfaced as error payloads to keep polling robust.
     if job.status != JOB_STATUS_ERROR:
         return {
             "status": JOB_STATUS_ERROR,
             "detail": f"Unknown job status: {job.status}",
+            **metadata,
         }
-    return {"status": JOB_STATUS_ERROR, "detail": job.detail}
+    return {"status": JOB_STATUS_ERROR, "detail": job.detail, **metadata}
 
 
 def _to_epoch_ms(ts: float) -> int:
@@ -631,6 +646,8 @@ def _clear_job_runtime(job_id: str) -> None:
 # Registry of in-flight and recently-completed jobs.
 _job_registry: dict[str, JobStatus] = {}
 
+_health_job_id_by_dataset: dict[str, str] = {}
+
 # Phase 2 runtime index: O(1) lookup of active job task/process by job_id.
 _job_runtime_registry: dict[str, JobRuntime] = {}
 
@@ -683,6 +700,9 @@ async def _cleanup_job_registry_loop() -> None:
             if _is_terminal_job_status(j.status) and (now - j.created_at) > _JOB_TTL_S
         ]
         for jid in expired:
+            job = _job_registry.get(jid)
+            if job is not None and job.dataset:
+                _health_job_id_by_dataset.pop(job.dataset, None)
             _job_registry.pop(jid, None)
             _clear_job_runtime(jid)
         expired_action_jobs = [
@@ -800,6 +820,7 @@ async def run_td_cli(
 
 
 _DEVICE_ACTION_OUTPUT_LIMIT_BYTES = 64 * 1024
+_HEALTH_PROCESS_OUTPUT_LIMIT_BYTES = 2 * 1024 * 1024
 
 
 async def _read_bounded_stream(
@@ -824,6 +845,7 @@ async def run_device_action_cli(
     data_dir: Path,
     *,
     timeout_s: float,
+    output_limit_bytes: int = _DEVICE_ACTION_OUTPUT_LIMIT_BYTES,
     on_process_started: "Callable[[asyncio.subprocess.Process], None] | None" = None,
     on_process_ended: "Callable[[], None] | None" = None,
 ) -> tuple[int, bytes, bytes, float]:
@@ -843,8 +865,12 @@ async def run_device_action_cli(
         on_process_started(process)
     started = time.monotonic()
     try:
-        stdout_task = asyncio.create_task(_read_bounded_stream(process.stdout))
-        stderr_task = asyncio.create_task(_read_bounded_stream(process.stderr))
+        stdout_task = asyncio.create_task(
+            _read_bounded_stream(process.stdout, output_limit_bytes)
+        )
+        stderr_task = asyncio.create_task(
+            _read_bounded_stream(process.stderr, output_limit_bytes)
+        )
         try:
             await asyncio.wait_for(process.wait(), timeout=timeout_s)
         except (asyncio.CancelledError, asyncio.TimeoutError):
@@ -1383,6 +1409,108 @@ async def handle_health_capabilities_api(request: aiohttp.web.Request) -> aiohtt
     )
 
 
+async def handle_health_process_dataset_api(
+    request: aiohttp.web.Request,
+) -> aiohttp.web.Response:
+    """POST a bounded, cache-only health processing task for one dataset."""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise aiohttp.web.HTTPBadRequest(reason="malformed JSON body") from exc
+    if not isinstance(payload, dict) or set(payload) != {"dataset"}:
+        raise aiohttp.web.HTTPBadRequest(reason="JSON body must contain only dataset")
+    dataset_id = payload.get("dataset")
+    if not isinstance(dataset_id, str) or not dataset_id:
+        raise aiohttp.web.HTTPBadRequest(reason="dataset must be a non-empty string")
+    if dataset_id not in load_health_manifest().datasets:
+        raise aiohttp.web.HTTPBadRequest(reason="dataset is not health eligible")
+
+    existing_job_id = _health_job_id_by_dataset.get(dataset_id)
+    existing_job = _job_registry.get(existing_job_id) if existing_job_id else None
+    if existing_job is not None and existing_job.status in {
+        JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING,
+    }:
+        job = existing_job
+    else:
+        job_id = str(uuid.uuid4())
+        job = JobStatus(
+            job_id=job_id,
+            filename="",
+            status=JOB_STATUS_RUNNING,
+            task="health-process-dataset",
+            dataset=dataset_id,
+        )
+        _job_registry[job_id] = job
+        _health_job_id_by_dataset[dataset_id] = job_id
+
+        async def _run_health_job(
+            jid: str = job_id,
+            dataset: str = dataset_id,
+            ddir: Path = request.app[TD_DATA_DIR_APP_KEY],
+        ) -> None:
+            try:
+                async with _get_source_lock("health"):
+                    current_job = _job_registry.get(jid)
+                    if current_job is None:
+                        return
+                    if current_job.status == JOB_STATUS_CANCELLING:
+                        current_job.status = JOB_STATUS_CANCELLED
+                        return
+                    exit_code, stdout, _stderr, _elapsed = await run_device_action_cli(
+                        ["health", "process-dataset", "--dataset", dataset, "--allow-partial", "--json"],
+                        ddir,
+                        timeout_s=60,
+                        output_limit_bytes=_HEALTH_PROCESS_OUTPUT_LIMIT_BYTES,
+                        on_process_started=lambda process: _set_job_runtime_process(jid, process),
+                        on_process_ended=lambda: _set_job_runtime_process(jid, None),
+                    )
+                    current_job = _job_registry.get(jid)
+                    if current_job is None:
+                        return
+                    if current_job.status == JOB_STATUS_CANCELLING:
+                        current_job.status = JOB_STATUS_CANCELLED
+                    elif exit_code == 0:
+                        result = json.loads(stdout.decode("utf-8"))
+                        if not isinstance(result, dict):
+                            raise ValueError("health command returned an invalid result")
+                        current_job.result = {
+                            "assessmentCreated": bool(result.get("assessmentCreated")),
+                            "observationCreated": bool(result.get("observationCreated")),
+                        }
+                        current_job.status = JOB_STATUS_DONE
+                    else:
+                        current_job.status = JOB_STATUS_ERROR
+                        current_job.detail = f"td_cli exit code {exit_code}"
+            except asyncio.CancelledError:
+                current_job = _job_registry.get(jid)
+                if current_job is not None:
+                    current_job.status = JOB_STATUS_CANCELLED
+                    if not current_job.detail:
+                        current_job.detail = _JOB_CANCEL_GRACE_DETAIL
+                raise
+            except Exception as exc:
+                current_job = _job_registry.get(jid)
+                if current_job is not None:
+                    current_job.status = JOB_STATUS_ERROR
+                    current_job.detail = f"{type(exc).__name__}: {exc}"[:512]
+            finally:
+                _health_job_id_by_dataset.pop(dataset, None)
+
+        task = asyncio.create_task(_run_health_job())
+        _job_runtime_registry[job_id] = JobRuntime(
+            job_id=job_id, filename="", source="health", task=task,
+        )
+        _job_id_by_task[task] = job_id
+        _background_tasks.add(task)
+        task.add_done_callback(_on_background_task_done)
+
+    return aiohttp.web.json_response(
+        _build_job_poll_body(job) | {"job_id": job.job_id},
+        status=202,
+        headers={"Location": f"/api/job/{job.job_id}", "Cache-Control": "no-store"},
+    )
+
+
 async def handle_capabilities_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     service = request.app.get(TD_SOURCE_CAPABILITIES_APP_KEY)
     if service is None:
@@ -1485,7 +1613,7 @@ async def handle_job_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
         raise aiohttp.web.HTTPNotFound(reason=f"Unknown job: {job_id}")
 
     body = _build_job_poll_body(job)
-    if job.status in {JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING}:
+    if job.filename and job.status in {JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING}:
         data_dir = request.app.get(TD_DATA_DIR_APP_KEY)
         if isinstance(data_dir, Path):
             body.update(_build_checkpoint_poll_metadata(job.filename, data_dir))
@@ -1493,6 +1621,7 @@ async def handle_job_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     return aiohttp.web.Response(
         content_type="application/json",
         text=json.dumps(body),
+        headers={"Cache-Control": "no-store"} if job.task else None,
     )
 
 
@@ -1504,32 +1633,31 @@ async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Res
         raise aiohttp.web.HTTPNotFound(reason=f"Unknown job: {job_id}")
 
     if job.status == JOB_STATUS_CANCELLING:
-        body = {
-            "job_id": job_id,
-            "status": JOB_STATUS_CANCELLING,
-            "filename": job.filename,
-            "detail": job.detail,
-        }
+        body = _build_job_poll_body(job) | {"job_id": job_id, "detail": job.detail}
+        if job.filename:
+            body["filename"] = job.filename
         return aiohttp.web.Response(
             status=202,
             content_type="application/json",
             text=json.dumps(body),
+            headers={"Cache-Control": "no-store"} if job.task else None,
         )
 
     if not _is_cancellable_job_status(job.status):
-        body = {
+        body = _build_job_poll_body(job) | {
             "job_id": job_id,
-            "status": job.status,
-            "filename": job.filename,
             "detail": job.detail,
             "error": "Job is not cancellable in its current state.",
         }
+        if job.filename:
+            body["filename"] = job.filename
         logging.warning("Cancellation requested for non-cancellable job %s: %s",
                         job_id, body["error"])
         return aiohttp.web.Response(
             status=409,
             content_type="application/json",
             text=json.dumps(body),
+            headers={"Cache-Control": "no-store"} if job.task else None,
         )
 
     job.status = JOB_STATUS_CANCELLING
@@ -1548,16 +1676,14 @@ async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Res
             logging.info("Cancelling job %s: task not started yet", job_id)
             runtime.task.cancel()
 
-    body = {
-        "job_id": job_id,
-        "status": JOB_STATUS_CANCELLING,
-        "filename": job.filename,
-        "detail": job.detail,
-    }
+    body = _build_job_poll_body(job) | {"job_id": job_id, "detail": job.detail}
+    if job.filename:
+        body["filename"] = job.filename
     return aiohttp.web.Response(
         status=202,
         content_type="application/json",
         text=json.dumps(body),
+        headers={"Cache-Control": "no-store"} if job.task else None,
     )
 
 
@@ -2122,6 +2248,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.router.add_get("/api/health/observations", handle_health_observations_api)
     app.router.add_get("/api/health/latest", handle_health_latest_api)
     app.router.add_get("/api/health/capabilities", handle_health_capabilities_api)
+    app.router.add_post("/api/health/process-dataset", handle_health_process_dataset_api)
     # Serve all static assets (HTML, JS, CSS, …) from the src/ directory.
     app.router.add_static(
         "/", static_root, show_index=False, follow_symlinks=False)

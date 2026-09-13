@@ -16,6 +16,9 @@ def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() 
         fetchHealthAssessment,
         fetchHealthDevice,
         fetchHealthSupport,
+        startHealthProcessing,
+        fetchHealthJob,
+        cancelHealthJob,
       } from "./src/js/tdash-health.js";
 
       const requested = [];
@@ -27,6 +30,9 @@ def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() 
       await fetchHealthAssessment("dataset-id");
       await fetchHealthDevice("assessment-id", "extaddr:0011223344556677");
       await fetchHealthSupport("extpan:0011223344556677");
+      await startHealthProcessing("dataset-id");
+      await fetchHealthJob("job-id");
+      await cancelHealthJob("job-id");
 
       const pageUrls = [
         "http://localhost:9165/tdash.html",
@@ -46,11 +52,11 @@ def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() 
     )
     result = json.loads(completed.stdout)
 
-    assert len(result["requested"]) == 4
-    assert all(path.startswith("api/health/") for path in result["requested"])
-    assert all(url.startswith("http://localhost:9165/api/health/") for url in result["resolved"][0])
+    assert len(result["requested"]) == 7
+    assert all(path.startswith("api/") for path in result["requested"])
+    assert all(url.startswith("http://localhost:9165/api/") for url in result["resolved"][0])
     assert all(
-        url.startswith("https://ha.example/api/hassio_ingress/session/api/health/")
+      url.startswith("https://ha.example/api/hassio_ingress/session/api/")
         for url in result["resolved"][1]
     )
 
@@ -100,6 +106,8 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
       "health-evidence-filter",
       "btn-health-return",
       "btn-health-reset",
+      "btn-health-refresh",
+      "btn-health-refresh-cancel",
     ):
       assert f'id="{element_id}"' in html
     for section in ("Needs Work", "Needs Attention", "Going Well"):
@@ -114,6 +122,13 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
       assert action in health_js
       assert action in ui_js
     assert "restoreHealthNavigationContext" in ui_js
+    assert "invalidateHealthRefresh" in ui_js
+    assert "Health: refreshing" in health_js
+    assert "Health: failed" in health_js
+    assert "Health: cancelled" in health_js
+    assert "Health processed:" in health_js
+    assert "refreshedAt" in ui_js
+    assert html.index('id="btn-health-refresh"') < html.index('id="btn-details-panel-toggle"')
     assert 'lastRenderedDatasetByView.delete("table")' in ui_js
     assert 'lastRenderedDatasetByView.delete("topology")' in ui_js
     assert "setTopologyHealthFindings" in ui_js
