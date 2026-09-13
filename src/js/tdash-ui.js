@@ -666,13 +666,28 @@ document
   .addEventListener("click", () => setMoreInfo(!isMoreInfoEnabled()));
 
 const tableColumnCategoryEl = document.getElementById("table-column-category");
-if (tableColumnCategoryEl) {
-  getTableColumnCategories().forEach(({ value, label }) => {
+function populateTableColumnCategories(rows) {
+  if (!tableColumnCategoryEl) return;
+  const selectedCategory = tableColumnCategoryEl.value;
+  tableColumnCategoryEl.replaceChildren();
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = "All";
+  tableColumnCategoryEl.appendChild(allOption);
+  getTableColumnCategories(rows).forEach(({ value, label }) => {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = label;
     tableColumnCategoryEl.appendChild(option);
   });
+  const categoryIsAvailable = [...tableColumnCategoryEl.options]
+    .some((option) => option.value === selectedCategory);
+  const nextCategory = categoryIsAvailable ? selectedCategory : "all";
+  tableColumnCategoryEl.value = nextCategory;
+  setTableColumnCategory(nextCategory);
+}
+
+if (tableColumnCategoryEl) {
   tableColumnCategoryEl.addEventListener("change", (event) => {
     setTableColumnCategory(event.target.value);
     if (currentDataset && currentView === "table") {
@@ -700,7 +715,7 @@ function resetNodeDetailsLists() {
     "<li>Click a node to view its properties.</li>";
   document
     .querySelectorAll(
-      "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
+      "#identity-list, #highlights-list, #network-list, #connections-list, #thread-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
     )
     .forEach((list) => {
       list.innerHTML = "";
@@ -2274,6 +2289,7 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     const tableColumnCategoryEl = document.getElementById("table-column-category");
     if (tableColumnCategoryEl) tableColumnCategoryEl.value = "all";
     setTableColumnCategory("all");
+    populateTableColumnCategories(currentDataset.rows);
 
   // Final reconciliation render: all files settled, isPartial is false.
   resetDeviceDetailsPanelTabsToDefault();

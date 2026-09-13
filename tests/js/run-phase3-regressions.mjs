@@ -36,7 +36,17 @@ assert.deepEqual(collectColumns([{ rloc16: "0x1000", room: "Lab" }]).filter((col
 assert.equal(getTableFilterLabel(null, "All nodes"), "All nodes");
 assert.equal(getTableFilterLabel({ selectedOptions: [] }, "All diagnostics"), "All diagnostics");
 assert.equal(getTableFilterLabel({ selectedOptions: [{ text: "Routers" }] }, "All nodes"), "Routers");
-assert.equal(getTableColumnCategories().some(({ value }) => value === "matter-list"), true);
+assert.deepEqual(
+  getTableColumnCategories([
+    { extAddress: "0011223344556677", hostname: "Border Router", modelName: "BorderRouter" },
+  ]).map(({ value }) => value),
+  ["identity-list", "thread-list"],
+);
+assert.deepEqual(
+  getTableColumnCategories([{ matter: { nodeId: 123 } }]).map(({ value }) => value),
+  ["matter-list"],
+);
+assert.deepEqual(getTableColumnCategories([]), []);
 assert.deepEqual(
   getTableColumnsForCategory(
     [{ rloc16: "0x1234", extAddress: "0011223344556677", deviceLabel: "Desk Light", matter: { nodeId: 123, serialNumber: "SN-1", matterVersion: "1.4.1", lastInterview: "2026-08-02T10:30:00Z" }, deviceTypes: ["0x0302"], room: "Lab" }],
@@ -48,9 +58,17 @@ assert.deepEqual(
   getTableColumnsForCategory([{ rloc16: "0x1234" }], "identity-list"),
   ["rloc16"],
 );
+assert.deepEqual(
+  getTableColumnsForCategory(
+    [{ rloc16: "0x1234", modelName: "BorderRouter", networkName: "Test Thread" }],
+    "thread-list",
+  ),
+  ["rloc16", "modelName", "networkName"],
+);
 
 const haMatterRows = buildDatasetRows({
   source: "ha-matter-ws",
+  adaptor: "ha-matter-ws",
   mergeStrategy: "none",
   rowExtractor: "raw-array",
   files: ["ha-matter.json"],

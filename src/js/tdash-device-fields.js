@@ -1,7 +1,7 @@
 // Canonical Thread device fields, normalization, and identity helpers.
 
 export const FIELD_DEFINITIONS = Object.freeze([
-  { path: "extAddress", aliases: ["extaddr", "extMacAddr", "Extended MAC"], transform: "identifier" },
+  { path: "extAddress", aliases: ["extaddr", "extMacAddr", "extMacAddress", "extAddressHex", "ext_address", "Extended MAC"], transform: "identifier" },
   { path: "omrIpv6Address", aliases: ["omrIpv6Addr", "omr_ipv6_addr"], transform: "identifier" },
   { path: "rloc16", aliases: ["RLOC16"], transform: "identifier" },
   { path: "eui", aliases: ["eui64", "EUI64"], transform: "identifier" },
@@ -42,7 +42,6 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "state", aliases: [], transform: "identity" },
   { path: "updated", aliases: [], transform: "identity" },
   { path: "created", aliases: [], transform: "identity" },
-  { path: "hostname", aliases: [], transform: "identity" },
   { path: "routerCount", aliases: [], transform: "number" },
   { path: "hostsService", aliases: [], transform: "boolean" },
   { path: "baId", aliases: [], transform: "identity" },
@@ -50,7 +49,8 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "brCounters", aliases: [], transform: "identity" },
   { path: "extPanId", aliases: ["ext_pan_id"], transform: "identifier" },
   { path: "networkName", aliases: ["network_name"], transform: "identity" },
-  { path: "deviceLabel", aliases: ["device_label"], transform: "identity" },
+  { path: "deviceLabel", aliases: ["device_label", "hostName", "hostname"], transform: "identity" },
+  { path: "nodeId", aliases: ["node_id"], transform: "identity" },
   { path: "tlvValues", aliases: ["tlv_values"], transform: "identity" },
   { path: "lastAttemptResponded", aliases: ["last_attempt_responded"], transform: "number" },
   { path: "lastAttemptTlvDetailLevel", aliases: ["last_attempt_tlv_detail_level"], transform: "number" },
@@ -70,7 +70,7 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "_merge_conflicts", aliases: [], transform: "identity" },
 ]);
 
-export const EXT_ADDRESS_ALIASES = Object.freeze(["extAddress", "extaddr", "extMacAddr", "Extended MAC"]);
+export const EXT_ADDRESS_ALIASES = Object.freeze(["extAddress", "extaddr", "extMacAddr", "extMacAddress", "extAddressHex", "ext_address", "Extended MAC"]);
 export const OMR_ADDRESS_ALIASES = Object.freeze(["omrIpv6Address", "omrIpv6Addr", "omr_ipv6_addr"]);
 export const RLOC16_ALIASES = Object.freeze(["rloc16", "RLOC16"]);
 export const TRANSPORT_FIELDS = Object.freeze(["data", "attributes", "relationships", "meta", "links", "included"]);

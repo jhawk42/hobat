@@ -93,12 +93,21 @@ def test_settings_markup_starts_empty_and_disabled() -> None:
     assert "4e866ce96501b9ed" not in html
 
 
-def test_matter_details_section_precedes_mdns_and_uses_source_fields() -> None:
+def test_thread_details_section_precedes_matter_and_uses_source_fields() -> None:
     html = _read_text(HTML)
     constants_text = _read_text(CONSTANTS_JS)
     utils_text = _read_text(UTILS_JS)
 
-    assert html.index('id="matter-list"') < html.index('id="mdns-list"')
+    assert html.index('id="thread-list"') < html.index('id="matter-list"') < html.index('id="mdns-list"')
+    assert 'sectionId: "thread-list"' in constants_text
+    for field in (
+        "modelName",
+        "borderAgentIdHex",
+        "networkName",
+        "threadNetworkDiagnostics.channel",
+    ):
+        assert f'"{field}"' in constants_text
+    assert '`${listIdPrefix}thread-list`,' in utils_text
     assert 'sectionId: "matter-list"' in constants_text
     for field in (
         "matter.deviceLabel",
@@ -126,6 +135,8 @@ def test_table_category_control_is_registry_driven_and_precedes_more_info() -> N
     assert 'value="all">All</option>' in html
     assert "getTableColumnCategories" in table_text
     assert "DEVICE_DETAILS_SECTIONS" in table_text
+    assert "function populateTableColumnCategories(rows)" in ui_text
+    assert "populateTableColumnCategories(currentDataset.rows);" in ui_text
     assert 'applyTableFilters({ preserveSelection: true })' in ui_text
     assert "let _tableSort = null;" in table_text
     assert "function sortedTableRows(rows)" in table_text

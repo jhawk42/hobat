@@ -58,14 +58,19 @@ function categoryLabel(sectionId) {
     .join(" ");
 }
 
-export function getTableColumnCategories() {
+export function getTableColumnCategories(rows = []) {
   return DEVICE_DETAILS_SECTIONS
     .filter((section) => !section.fields.includes("*"))
+    .filter((section) => section.fields.some((field) => {
+      const preferredField = getPreferredFieldName(field);
+      return rows.some((row) => hasNestedPath(row, preferredField));
+    }))
     .map((section) => ({ value: section.sectionId, label: categoryLabel(section.sectionId) }));
 }
 
 export function setTableColumnCategory(category) {
-  _tableColumnCategory = getTableColumnCategories().some(({ value }) => value === category)
+  _tableColumnCategory = category === "all" || getTableColumnCategories(_tableRows)
+    .some(({ value }) => value === category)
     ? category
     : "all";
 }

@@ -1082,6 +1082,22 @@ export const DEVICE_DETAILS_SECTIONS = Object.freeze([
     ],
   },
   {
+    sectionId: "thread-list",
+    fields: [
+      "modelName",
+      "borderAgentIdHex",
+      "domainName",
+      "networkName",
+      "extPanId",
+      "channel",
+      "threadNetworkDiagnostics.channel",
+      "partitionIdHex",
+      "meshcopPort",
+      "trelPort",
+      "stateBitmapHex",
+    ],
+  },
+  {
     sectionId: "matter-list",
     fields: [
       "matter.deviceLabel",

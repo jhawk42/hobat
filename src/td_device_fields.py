@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 
 FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
-    {"path": "extAddress", "aliases": ("extaddr", "extMacAddr", "Extended MAC"), "transform": "identifier"},
+    {"path": "extAddress", "aliases": ("extaddr", "extMacAddr", "extMacAddress", "extAddressHex", "ext_address", "Extended MAC"), "transform": "identifier"},
     {"path": "omrIpv6Address", "aliases": ("omrIpv6Addr", "omr_ipv6_addr"), "transform": "identifier"},
     {"path": "rloc16", "aliases": ("RLOC16",), "transform": "identifier"},
     {"path": "eui", "aliases": ("eui64", "EUI64"), "transform": "identifier"},
@@ -49,7 +49,6 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "state", "aliases": (), "transform": "identity"},
     {"path": "updated", "aliases": (), "transform": "identity"},
     {"path": "created", "aliases": (), "transform": "identity"},
-    {"path": "hostname", "aliases": (), "transform": "identity"},
     {"path": "routerCount", "aliases": (), "transform": "number"},
     {"path": "hostsService", "aliases": (), "transform": "boolean"},
     {"path": "baId", "aliases": (), "transform": "identity"},
@@ -57,7 +56,8 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "brCounters", "aliases": (), "transform": "identity"},
     {"path": "extPanId", "aliases": ("ext_pan_id",), "transform": "identifier"},
     {"path": "networkName", "aliases": ("network_name",), "transform": "identity"},
-    {"path": "deviceLabel", "aliases": ("device_label",), "transform": "identity"},
+    {"path": "deviceLabel", "aliases": ("device_label", "hostName", "hostname"), "transform": "identity"},
+    {"path": "nodeId", "aliases": ("node_id",), "transform": "identity"},
     {"path": "tlvValues", "aliases": ("tlv_values",), "transform": "identity"},
     {"path": "lastAttemptResponded", "aliases": ("last_attempt_responded",), "transform": "number"},
     {"path": "lastAttemptTlvDetailLevel", "aliases": ("last_attempt_tlv_detail_level",), "transform": "number"},
@@ -85,7 +85,7 @@ PREFERRED_FIELD_NAMES: dict[str, str] = {
 for _definition in FIELD_DEFINITIONS:
     PREFERRED_FIELD_NAMES[_definition["path"]] = _definition["path"]
 
-EXT_ADDRESS_ALIASES = ("extAddress", "extaddr", "extMacAddr", "Extended MAC")
+EXT_ADDRESS_ALIASES = ("extAddress", "extaddr", "extMacAddr", "extMacAddress", "extAddressHex", "ext_address", "Extended MAC")
 OMR_ADDRESS_ALIASES = ("omrIpv6Address", "omrIpv6Addr", "omr_ipv6_addr")
 RLOC16_ALIASES = ("rloc16", "RLOC16")
 TRANSPORT_FIELDS = frozenset({"data", "attributes", "relationships", "meta", "links", "included"})

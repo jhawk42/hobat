@@ -106,6 +106,22 @@ function extractEnvelopeRows(payload, property) {
     : [];
 }
 
+function extractHaMatterWsThreadDiagnostics(payload) {
+  return extractEnvelopeRows(payload, "batches").flatMap((batch) => {
+    if (!isPlainObject(batch) || !Array.isArray(batch.nodes)) return [];
+    return batch.nodes.filter(isPlainObject).map((node) => ({
+      ...node,
+      extPanId: batch.extPanIdHex,
+      networkName: batch.networkName,
+      threadDiagnosticsSource: batch.source,
+      threadDiagnosticsCollectedAt: batch.collectedAt,
+      ...(batch.partialReason === undefined
+        ? {}
+        : { threadDiagnosticsPartialReason: batch.partialReason }),
+    }));
+  });
+}
+
 function addMatterProjection(row) {
   if (!isPlainObject(row)) return row;
   const matter = isPlainObject(row.matter) ? { ...row.matter } : {};
@@ -147,6 +163,7 @@ export const ROW_EXTRACTORS = Object.freeze({
   "ha-matter-ws-diagnostics": (payload) => extractEnvelopeRows(payload, "diagnostics"),
   "ha-matter-ws-mesh-diagnostics": (payload) => extractEnvelopeRows(payload, "meshDiagnostics"),
   "ha-matter-ws-border-routers": (payload) => extractEnvelopeRows(payload, "borderRouters"),
+  "ha-matter-ws-thread-diagnostics": extractHaMatterWsThreadDiagnostics,
   "ha-matter-ws-network-topology": (payload) => extractEnvelopeRows(payload?.topology, "nodes"),
 });
 
@@ -185,7 +202,7 @@ export function buildDatasetRows(entry, rawFiles, options = {}) {
 
   const rows = strategyHandler(groups, options)
     .map((row) => normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT))
-    .map((row) => entry.source === "ha-matter-ws" ? addMatterProjection(row) : row);
+    .map((row) => entry.adaptor === "ha-matter-ws" ? addMatterProjection(row) : row);
   return { rows, loadedFiles, loadedFileIndexes };
 }
 

@@ -17,10 +17,11 @@ accepted during normalization. Important examples are:
 
 | Preferred field | Accepted aliases |
 |---|---|
-| `extAddress` | `extaddr`, `extMacAddr`, `Extended MAC` |
+| `extAddress` | `extaddr`, `extMacAddr`, `extMacAddress`, `extAddressHex`, `ext_address`, `Extended MAC` |
 | `omrIpv6Address` | `omrIpv6Addr`, `omr_ipv6_addr` |
 | `rloc16` | `RLOC16` |
-| `deviceLabel` | `device_label` |
+| `deviceLabel` | `device_label`, `hostName`, `hostname` |
+| `nodeId` | `node_id` |
 | `threadVersion` | `thread_version` |
 | `threadStackVersion` | `thread_stack_version` |
 | `route` | `route64`, `route_data` |
@@ -56,14 +57,32 @@ columns first, and formats nested values for inspection. **More Info** expands
 the displayed column set. The **Categories** selector immediately before it is
 derived from `DEVICE_DETAILS_SECTIONS`: **All** restores the default table
 column set exactly, while another category shows the available `identity-list`
-fields followed by its own available registry fields. Fields use registry
-order, canonical preferred names, and appear only once. Changing category
-preserves rows, search, sorting, and the selected device and its detail panel.
+fields followed by its own available registry fields. Categories are calculated
+from the complete loaded dataset: `All` and only sections containing at least
+one of their own fields are offered. They do not change as users filter, search,
+sort, or select a row. Fields use registry order, canonical preferred names,
+and appear only once. Changing category preserves rows, search, sorting, and the
+selected device and its detail panel.
 
 Selecting a topology node or table row publishes `tdash:device-selected`.
 Details, Device Settings, and Device Insights consume that shared selection.
 Details sections and field bindings come from `DEVICE_DETAILS_SECTIONS`; section
 containers are declared in `tdash.html`.
+
+### Thread Device Details
+
+The **Thread** section is immediately before **Matter**. It shows available
+native HA Matter WebSocket Border Router fields (`modelName`,
+`borderAgentIdHex`, `domainName`, `networkName`, `extPanId`, `channel`,
+`partitionIdHex`, `meshcopPort`, `trelPort`, and `stateBitmapHex`) and the
+reported `threadNetworkDiagnostics.channel` when present. Native Thread
+diagnostics are flattened from cached `batches[].nodes[]` observations; each
+row retains its enclosing network name, Extended PAN ID, source, collection
+time, and optional partial reason. Empty batches create no rows. No scalar
+channel is inferred from `channelPages`, and these observations do not merge
+with commissioned Matter inventory data. A Thread category offered for the
+dataset may be hidden in Device Details when the selected row lacks Thread
+fields.
 
 ### Matter Device Details
 
