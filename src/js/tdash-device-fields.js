@@ -18,7 +18,7 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "mleCounters.betterPartIdAttachAttemptsCount", aliases: ["mleCounters.betterPartitionAttachAttempts"], transform: "number" },
   { path: "id", aliases: [], transform: "identity" },
   { path: "routerId", aliases: ["router_id"], transform: "identity" },
-  { path: "ipv6Addresses", aliases: ["ipv6_addrs"], transform: "stringArray" },
+  { path: "ipv6Addresses", aliases: ["ipv6_addrs", "addresses"], transform: "stringArray" },
   { path: "role", aliases: [], transform: "identity" },
   { path: "type", aliases: [], transform: "identity" },
   { path: "threadVersion", aliases: ["thread_version"], transform: "identity" },

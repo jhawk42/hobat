@@ -22,6 +22,7 @@ accepted during normalization. Important examples are:
 | `rloc16` | `RLOC16` |
 | `deviceLabel` | `device_label`, `hostName`, `hostname` |
 | `nodeId` | `node_id` |
+| `ipv6Addresses` | `ipv6_addrs`, `addresses` |
 | `threadVersion` | `thread_version` |
 | `threadStackVersion` | `thread_stack_version` |
 | `route` | `route64`, `route_data` |
@@ -74,7 +75,8 @@ containers are declared in `tdash.html`.
 The **Thread** section is immediately before **Matter**. It shows available
 native HA Matter WebSocket Border Router fields (`modelName`,
 `borderAgentIdHex`, `domainName`, `networkName`, `extPanId`, `channel`,
-`partitionIdHex`, `meshcopPort`, `trelPort`, and `stateBitmapHex`) and the
+`extendedPanIdHex`, `partitionIdHex`, `meshcopPort`, `trelPort`, and
+`stateBitmapHex`) and the
 reported `threadNetworkDiagnostics.channel` when present. Native Thread
 diagnostics are flattened from cached `batches[].nodes[]` observations; each
 row retains its enclosing network name, Extended PAN ID, source, collection
@@ -83,6 +85,13 @@ channel is inferred from `channelPages`, and these observations do not merge
 with commissioned Matter inventory data. A Thread category offered for the
 dataset may be hidden in Device Details when the selected row lacks Thread
 fields.
+
+The Identity section can show a topology-specific `topologyId`; Highlights can
+show a supplied `routingRole`; and Connections can show `totalRoutes`. The
+Counters section includes native Thread `mleCounters.attachAttemptCount`,
+`betterPartIdAttachAttemptsCount`, `childRoleCount`, `detachedRoleCount`,
+`leaderRoleCount`, `newParentCount`, `partIdChangesCount`, and `routerRoleCount`
+when present.
 
 ### Matter Device Details
 

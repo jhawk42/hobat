@@ -5,7 +5,7 @@
 export const DATASOURCE_REGISTRY = [
   { value: "otbr-cli", label: "otbr-cli", default_dataset_value: "otbr_cli_meshdiag_topology_networkdiag_multicast_network" },
   { value: "otbr-restapi", label: "otbr-restapi", default_dataset_value: "otbr_restapi_devices_list_diagnostics_list" },
-  { value: "ha-matter-ws", label: "ha matter ws", default_dataset_value: "ha_matter_ws_topology" },
+  { value: "ha-matter-ws", label: "ha-matter-ws", default_dataset_value: "ha_matter_ws_topology" },
   { value: "eve", label: "eve app" },
   { value: "thread-tools", label: "thread tools app" },
   { value: "merged", label: "multi-source", default_dataset_value: "merged_static_extaddr_device_label_otbr_cli_meshdiag_topology_networkdiag_fetch_all_otbr_restapi_devices_list_diagnostics_list_mdns_scopes_thread" },
@@ -627,7 +627,7 @@ export const DATASET_REGISTRY = [
   {
     source: "ha-matter-ws",
     value: "ha_matter_ws_network_topology",
-    label: "Native Network Topology",
+    label: "Thread Network Topology",
     group: "Topology",
     files: ["td-ha-matter-ws-network-topology.json"],
     mergeStrategy: "none",

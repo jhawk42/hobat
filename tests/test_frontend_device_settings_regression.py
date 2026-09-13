@@ -103,11 +103,43 @@ def test_thread_details_section_precedes_matter_and_uses_source_fields() -> None
     for field in (
         "modelName",
         "borderAgentIdHex",
+        "extendedPanIdHex",
         "networkName",
         "threadNetworkDiagnostics.channel",
     ):
         assert f'"{field}"' in constants_text
     assert '`${listIdPrefix}thread-list`,' in utils_text
+
+
+def test_requested_native_field_registry_entries_are_available() -> None:
+    constants_text = _read_text(CONSTANTS_JS)
+    utils_text = _read_text(UTILS_JS)
+
+    for field in (
+        '"matter.available"',
+        '"matter.isBridge"',
+        '"extendedPanIdHex"',
+        '"topologyId"',
+        '"totalRoutes"',
+        '"kind"',
+        '"network_type"',
+        '"routingRole"',
+        '"macCounters.rxBroadcastCount"',
+        '"macCounters.rxTotalCount"',
+        '"macCounters.rxUnicastCount"',
+        '"macCounters.txBroadcastCount"',
+        '"macCounters.txTotalCount"',
+        '"macCounters.txUnicastCount"',
+        '"mleCounters.attachAttemptCount"',
+        '"mleCounters.betterPartIdAttachAttemptsCount"',
+        '"mleCounters.childRoleCount"',
+        '"mleCounters.detachedRoleCount"',
+        '"mleCounters.leaderRoleCount"',
+        '"mleCounters.newParentCount"',
+        '"mleCounters.partIdChangesCount"',
+        '"mleCounters.routerRoleCount"',
+    ):
+        assert field in constants_text
     assert 'sectionId: "matter-list"' in constants_text
     for field in (
         "matter.deviceLabel",
