@@ -74,6 +74,7 @@ EXPLICIT_KEY_MAP: dict[str, str] = {
     # Role / mode flags.
     "is_router": "isRouter",
     "is_border_router": "isBorderRouter",
+    "is_primary_bbr": "isPrimaryBBR",
     "thread_version": "threadVersion",
     "thread_stack_version": "threadStackVersion",
     "device_label": "deviceLabel",

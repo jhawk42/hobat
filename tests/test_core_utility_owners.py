@@ -13,6 +13,7 @@ from td_json_key_normalizer import canonical_camel_key, convert_keys_to_camel_ca
 def test_key_normalizer_applies_explicit_and_recursive_rules_without_mutation() -> None:
     payload = {
         "extaddr": "aa00112233445566",
+        "is_primary_bbr": True,
         "leader_data": {
             "partition_id": 7,
             "route_data": [{"route_cost": 2}],
@@ -22,6 +23,7 @@ def test_key_normalizer_applies_explicit_and_recursive_rules_without_mutation() 
 
     assert convert_keys_to_camel_case(payload) == {
         "extAddress": "aa00112233445566",
+        "isPrimaryBBR": True,
         "leaderData": {
             "partitionId": 7,
             "routeData": [{"routeCost": 2}],

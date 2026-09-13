@@ -16,7 +16,10 @@ from otbr_cli_networkdiag_topology import (
     parse_vendor_sw_version,
     parse_route_data,
     parse_multicast_diag_output,
+    _attach_router_id,
+    _mark_primary_bbr,
 )
+from td_device_fields import normalize_input_record
 
 
 def test_parse_eui64():
@@ -87,6 +90,33 @@ def test_parse_leader_data():
     output = "Ext Address: 8e3b369df65e9496"
     result = parse_leader_data(output)
     assert result == {}
+
+
+def test_cli_leader_evidence_requires_matching_router_id_in_same_record():
+    record = {"rloc16": "0x8c00", "leader_data": {"leader_router_id": "0x3e"}}
+    _attach_router_id(record, {"0x3e": {"rloc16": "0x8c00", "router_id": "0x3e"}})
+    normalized = normalize_input_record(record, source="cli")
+    assert normalized["routerId"] == 62
+    assert normalized["leaderData"]["leaderRouterId"] == 62
+    assert normalized["isLeader"] is True
+    assert normalized["leaderEvidence"] == "leader-router-id-match"
+
+    unmatched = normalize_input_record(
+        {"router_id": "0x00", "leader_data": {"leader_router_id": "0x3e"}},
+        source="cli",
+    )
+    assert "isLeader" not in unmatched
+
+
+def test_cli_primary_bbr_evidence_marks_only_matching_multicast_record():
+    matching = {"rloc16": "0x8c00"}
+    _mark_primary_bbr(matching, {"primary": {"server16": "0x8c00"}})
+    assert matching["is_primary_bbr"] is True
+    assert matching["primary_bbr_evidence"] == "otbr-cli-bbr-server16-match"
+
+    unmatched = {"rloc16": "0x9000"}
+    _mark_primary_bbr(unmatched, {"primary": {"server16": "0x8c00"}})
+    assert "is_primary_bbr" not in unmatched
 
 
 def test_parse_vendor_fields():

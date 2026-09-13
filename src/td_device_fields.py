@@ -16,15 +16,17 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "mode.fullNetworkData", "aliases": ("mode.networkData",), "transform": "boolean"},
     {"path": "mode.rxOnWhenIdle", "aliases": ("mode.rxOn", "mode.rx_on_when_idle"), "transform": "boolean"},
     {"path": "mode.device", "aliases": (), "transform": "identity"},
-    {"path": "isLeader", "aliases": ("leader",), "transform": "boolean"},
+    {"path": "isLeader", "aliases": ("leader",), "transform": "strictBoolean"},
     {"path": "isBorderRouter", "aliases": ("br", "is_border_router"), "transform": "boolean"},
     {"path": "isRouter", "aliases": ("is_router",), "transform": "boolean"},
-    {"path": "isPrimaryBBR", "aliases": (), "transform": "boolean"},
+    {"path": "isPrimaryBBR", "aliases": (), "transform": "strictBoolean"},
+    {"path": "leaderEvidence", "aliases": (), "transform": "identity"},
+    {"path": "primaryBBREvidence", "aliases": (), "transform": "identity"},
     {"path": "mleCounters.partIdChangesCount", "aliases": ("mleCounters.partitionIdChanges",), "transform": "number"},
     {"path": "mleCounters.newParentCount", "aliases": ("mleCounters.parentChanges",), "transform": "number"},
     {"path": "mleCounters.betterPartIdAttachAttemptsCount", "aliases": ("mleCounters.betterPartitionAttachAttempts",), "transform": "number"},
     {"path": "id", "aliases": (), "transform": "identity"},
-    {"path": "routerId", "aliases": ("router_id",), "transform": "identity"},
+    {"path": "routerId", "aliases": ("router_id",), "transform": "routerId"},
     {"path": "ipv6Addresses", "aliases": ("ipv6_addrs", "addresses"), "transform": "stringArray"},
     {"path": "role", "aliases": (), "transform": "identity"},
     {"path": "type", "aliases": (), "transform": "identity"},
@@ -212,6 +214,64 @@ def _to_number(value: Any) -> Any:
     return value
 
 
+def normalize_router_id(value: Any) -> int | None:
+    """Return a valid Thread Router ID, or None when the value is malformed."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        router_id = value
+    elif isinstance(value, str):
+        text = value.strip().lower()
+        if not text:
+            return None
+        try:
+            router_id = int(text, 16 if text.startswith("0x") else 10)
+        except ValueError:
+            return None
+    else:
+        return None
+    return router_id if 0 <= router_id <= 62 else None
+
+
+def _normalize_role_evidence(record: dict[str, Any], source: str | None = None) -> None:
+    for role_field in ("isLeader", "isPrimaryBBR"):
+        if role_field in record and not isinstance(record[role_field], bool):
+            record.pop(role_field)
+
+    if source == "rest" and record.get("isPrimaryBBR") is True:
+        record["primaryBBREvidence"] = "explicit-rest"
+
+    router_id = normalize_router_id(record.get("routerId"))
+    if router_id is None:
+        record.pop("routerId", None)
+    else:
+        record["routerId"] = router_id
+
+    leader_data = record.get("leaderData")
+    leader_router_id = (
+        normalize_router_id(leader_data.get("leaderRouterId", leader_data.get("leader_router_id")))
+        if isinstance(leader_data, dict)
+        else None
+    )
+    if isinstance(leader_data, dict):
+        leader_data.pop("leader_router_id", None)
+        if leader_router_id is None:
+            leader_data.pop("leaderRouterId", None)
+        else:
+            leader_data["leaderRouterId"] = leader_router_id
+
+    derived_match = router_id is not None and router_id == leader_router_id
+    explicit = record.get("isLeader") if isinstance(record.get("isLeader"), bool) else None
+    if explicit is not None:
+        if not (explicit and derived_match and record.get("leaderEvidence") == "leader-router-id-match"):
+            record["leaderEvidence"] = "explicit"
+        if derived_match and explicit is False:
+            record["roleEvidenceConflicts"] = [{"role": "isLeader", "explicit": False, "derived": True}]
+    elif derived_match:
+        record["isLeader"] = True
+        record["leaderEvidence"] = "leader-router-id-match"
+
+
 def _normalize_route(value: Any) -> Any:
     if not isinstance(value, dict):
         return deepcopy(value)
@@ -231,8 +291,12 @@ def _transform_value(transform: str, value: Any, source: str | None) -> Any:
         return normalized if normalized else deepcopy(value)
     if transform == "boolean":
         return _to_boolean(value)
+    if transform == "strictBoolean":
+        return value if isinstance(value, bool) else None
     if transform == "number":
         return _to_number(value)
+    if transform == "routerId":
+        return normalize_router_id(value)
     if transform == "route":
         return _normalize_route(value)
     if transform == "relationship" and isinstance(value, list):
@@ -267,6 +331,10 @@ def normalize_input_record(
             continue
         selected_path, value = selected
         transformed = _transform_value(definition["transform"], value, source)
+        if definition["transform"] in {"routerId", "strictBoolean"} and transformed is None:
+            for candidate in candidates:
+                _delete_path(result, candidate)
+            continue
         _set_path(result, preferred, transformed)
         for candidate in candidates:
             if candidate != preferred:
@@ -275,6 +343,7 @@ def normalize_input_record(
     mode = result.get("mode")
     if isinstance(mode, dict) and "device" not in mode and isinstance(mode.get("fullThreadDevice"), bool):
         mode["device"] = "FTD" if mode["fullThreadDevice"] else "MTD"
+    _normalize_role_evidence(result, source)
     return result
 
 

@@ -9,15 +9,17 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "mode.fullNetworkData", aliases: ["mode.networkData"], transform: "boolean" },
   { path: "mode.rxOnWhenIdle", aliases: ["mode.rxOn", "mode.rx_on_when_idle"], transform: "boolean" },
   { path: "mode.device", aliases: [], transform: "identity" },
-  { path: "isLeader", aliases: ["leader"], transform: "boolean" },
+  { path: "isLeader", aliases: ["leader"], transform: "strictBoolean" },
   { path: "isBorderRouter", aliases: ["br", "is_border_router"], transform: "boolean" },
   { path: "isRouter", aliases: ["is_router"], transform: "boolean" },
-  { path: "isPrimaryBBR", aliases: [], transform: "boolean" },
+  { path: "isPrimaryBBR", aliases: [], transform: "strictBoolean" },
+  { path: "leaderEvidence", aliases: [], transform: "identity" },
+  { path: "primaryBBREvidence", aliases: [], transform: "identity" },
   { path: "mleCounters.partIdChangesCount", aliases: ["mleCounters.partitionIdChanges"], transform: "number" },
   { path: "mleCounters.newParentCount", aliases: ["mleCounters.parentChanges"], transform: "number" },
   { path: "mleCounters.betterPartIdAttachAttemptsCount", aliases: ["mleCounters.betterPartitionAttachAttempts"], transform: "number" },
   { path: "id", aliases: [], transform: "identity" },
-  { path: "routerId", aliases: ["router_id"], transform: "identity" },
+  { path: "routerId", aliases: ["router_id"], transform: "routerId" },
   { path: "ipv6Addresses", aliases: ["ipv6_addrs", "addresses"], transform: "stringArray" },
   { path: "role", aliases: [], transform: "identity" },
   { path: "type", aliases: [], transform: "identity" },
@@ -211,6 +213,50 @@ function toNumber(value) {
   return value;
 }
 
+export function normalizeRouterId(value) {
+  let routerId;
+  if (typeof value === "number" && Number.isInteger(value)) routerId = value;
+  else if (typeof value === "string") {
+    const text = value.trim().toLowerCase();
+    if (!/^(0x[0-9a-f]+|\d+)$/.test(text)) return null;
+    routerId = Number.parseInt(text, text.startsWith("0x") ? 16 : 10);
+  } else return null;
+  return routerId >= 0 && routerId <= 62 ? routerId : null;
+}
+
+function normalizeRoleEvidence(record, source) {
+  ["isLeader", "isPrimaryBBR"].forEach((field) => {
+    if (field in record && typeof record[field] !== "boolean") delete record[field];
+  });
+  if (source === "rest" && record.isPrimaryBBR === true) {
+    record.primaryBBREvidence = "explicit-rest";
+  }
+  const routerId = normalizeRouterId(record.routerId);
+  if (routerId === null) delete record.routerId;
+  else record.routerId = routerId;
+  const leaderData = isPlainObject(record.leaderData) ? record.leaderData : null;
+  const leaderRouterId = leaderData
+    ? normalizeRouterId(leaderData.leaderRouterId ?? leaderData.leader_router_id)
+    : null;
+  if (leaderData) {
+    delete leaderData.leader_router_id;
+    if (leaderRouterId === null) delete leaderData.leaderRouterId;
+    else leaderData.leaderRouterId = leaderRouterId;
+  }
+  const derivedMatch = routerId !== null && routerId === leaderRouterId;
+  if (typeof record.isLeader === "boolean") {
+    if (!(record.isLeader && derivedMatch && record.leaderEvidence === "leader-router-id-match")) {
+      record.leaderEvidence = "explicit";
+    }
+    if (derivedMatch && record.isLeader === false) {
+      record.roleEvidenceConflicts = [{ role: "isLeader", explicit: false, derived: true }];
+    }
+  } else if (derivedMatch) {
+    record.isLeader = true;
+    record.leaderEvidence = "leader-router-id-match";
+  }
+}
+
 function normalizeRoute(value) {
   if (!isPlainObject(value)) return cloneValue(value);
   return Object.fromEntries(
@@ -230,7 +276,9 @@ function transformValue(transform, value, source) {
     return normalized || cloneValue(value);
   }
   if (transform === "boolean") return toBoolean(value);
+  if (transform === "strictBoolean") return typeof value === "boolean" ? value : null;
   if (transform === "number") return toNumber(value);
+  if (transform === "routerId") return normalizeRouterId(value);
   if (transform === "route") return normalizeRoute(value);
   if (transform === "relationship" && Array.isArray(value)) {
     return value.map((item) => isPlainObject(item) ? normalizeInputRecord(item, { source }) : cloneValue(item));
@@ -257,7 +305,12 @@ export function normalizeInputRecord(record, options = {}) {
       }
     }
     if (!selected) return;
-    setPath(result, definition.path, transformValue(definition.transform, selected.value, options.source));
+    const transformed = transformValue(definition.transform, selected.value, options.source);
+    if (["routerId", "strictBoolean"].includes(definition.transform) && transformed === null) {
+      candidates.forEach((candidate) => deletePath(result, candidate));
+      return;
+    }
+    setPath(result, definition.path, transformed);
     candidates.forEach((candidate) => {
       if (candidate !== definition.path) deletePath(result, candidate);
     });
@@ -266,6 +319,7 @@ export function normalizeInputRecord(record, options = {}) {
   if (isPlainObject(result.mode) && !("device" in result.mode) && typeof result.mode.fullThreadDevice === "boolean") {
     result.mode.device = result.mode.fullThreadDevice ? "FTD" : "MTD";
   }
+  normalizeRoleEvidence(result, options.source);
   return result;
 }
 

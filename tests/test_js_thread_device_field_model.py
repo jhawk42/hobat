@@ -57,3 +57,4 @@ def test_javascript_field_model_normalization() -> None:
         "zero": True,
         "concrete": False,
     }
+    assert results["_routerIdBounds"] == [0, 62, None, None]

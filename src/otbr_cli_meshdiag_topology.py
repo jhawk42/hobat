@@ -13,6 +13,7 @@ from td_const import (
 import util_ot_ctl
 import util_network
 from td_json_key_normalizer import convert_keys_to_camel_case
+from td_device_fields import normalize_input_record
 from extaddr_device_label_map import load_extaddr_device_label_map
 from util_data import (
     CollectionWriteOutcome,
@@ -79,6 +80,7 @@ def parse_meshdiag_topology_output(
         if match:
             router = {}
             router["id"] = match.group(1)
+            router["router_id"] = match.group(1)
             router["rloc16"] = match.group(2)
             router["extaddr"] = match.group(3)
             router["ver"] = match.group(4) if match.group(4) else None
@@ -396,7 +398,7 @@ def get_meshdiag_topology(
             len(enhanced_links),
             output_path,
         )
-        converted = convert_keys_to_camel_case(enhanced_links)
+        converted = [normalize_input_record(record, source="cli") for record in convert_keys_to_camel_case(enhanced_links)]
         logging.info(
             "Saved %d entries after converting keys to camel case for meshdiag topology data.",
             len(converted),

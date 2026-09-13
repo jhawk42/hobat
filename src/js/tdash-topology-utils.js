@@ -529,6 +529,8 @@ export function buildVisNodeData(
       isRouter,
       hasChildren,
       isBorderRouter,
+      isLeader: node.isLeader === true,
+      isPrimaryBBR: node.isPrimaryBBR === true,
       role: toText(node.role).trim().toLowerCase(),
       borderWidth,
       ifInDiscardsPct: node.ifInDiscardsPct ?? node.ifindiscards_pct,

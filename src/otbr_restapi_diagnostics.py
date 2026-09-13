@@ -19,6 +19,7 @@ from otbr_restapi_util import (
     emit_rest_command_output,
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
+from td_device_fields import normalize_input_record
 from util_data import (
     CollectionWriteOutcome,
     create_checkpoint_filename,
@@ -146,6 +147,13 @@ def _apply_border_router_enrichment(diagnostics: list[Any]) -> list[Any]:
         if not isinstance(record, dict):
             continue
         enrich_border_router(record)
+    return diagnostics
+
+
+def _apply_role_evidence_normalization(diagnostics: list[Any]) -> list[Any]:
+    for index, record in enumerate(diagnostics):
+        if isinstance(record, dict):
+            diagnostics[index] = normalize_input_record(record, source="rest")
     return diagnostics
 
 def make_progress_fn(total: int, enabled: bool):
@@ -345,12 +353,14 @@ def dispatch_diagnostics(
                 _apply_mac_enrichment(items)
                 _apply_time_stats_enrichment(items)
                 _apply_border_router_enrichment(items)
+                _apply_role_evidence_normalization(items)
             return finish(convert_keys_to_camel_case(diagnostics))
 
         if isinstance(diagnostics, list):
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
             _apply_border_router_enrichment(diagnostics)
+            _apply_role_evidence_normalization(diagnostics)
         return finish(convert_keys_to_camel_case(diagnostics))
     if args.diagnostics_command == "get":
         return finish(client.get_diagnostic(args.diagnostics_id, raw=raw_arg))
@@ -370,6 +380,8 @@ def dispatch_diagnostics(
         )
         if not getattr(args, "no_enrich_mac_counters", False):
             _apply_mac_enrichment([result])
+        if isinstance(result, dict):
+            result = normalize_input_record(result, source="rest")
         return finish(convert_keys_to_camel_case(result))
     if args.diagnostics_command == "fetch-all":
         resolved_types = resolve_types(args)
@@ -424,6 +436,7 @@ def dispatch_diagnostics(
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
             _apply_border_router_enrichment(diagnostics)
+        _apply_role_evidence_normalization(diagnostics)
         if getattr(args, "items_only", False):
             return finish(convert_keys_to_camel_case(diagnostics))
         return finish(convert_keys_to_camel_case(outcome))

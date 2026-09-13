@@ -26,6 +26,7 @@ import td_health_cli
 import td_system_cli
 
 import otbr_cli_thread_network_info
+import otbr_cli_bbr
 import otbr_cli_router_table
 import otbr_cli_meshdiag_topology
 import otbr_cli_meshdiag_childtable
@@ -137,6 +138,7 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         "thread-network-info", help="Scan and save thread network info"
     )
     otbr_cli_sub.add_parser("router-table", help="Scan and save router table")
+    otbr_cli_sub.add_parser("bbr", help="Explicitly collect Primary Backbone Router state")
 
     meshdiag_p = otbr_cli_sub.add_parser(
         "meshdiag",
@@ -789,6 +791,7 @@ def _dispatch_otbr_cli(
             "otbr_cli_thread_network_info.main",
         ),
         "router-table": (otbr_cli_router_table.main, "otbr_cli_router_table.main"),
+        "bbr": (otbr_cli_bbr.main, "otbr_cli_bbr.main"),
     }
     if cli_command in direct_commands:
         command_main, module_name = direct_commands[cli_command]

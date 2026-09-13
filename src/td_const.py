@@ -25,6 +25,7 @@ OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME = "td-otbr-cli-meshdiag-router-
 OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME = "td-otbr-cli-networkdiag-fetch-all.json"
 OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME = "td-otbr-cli-networkdiag-multicast-network.json"
 OTBR_CLI_NETWORKDIAG_MULTICAST_NEIGHBORS_FILENAME = "td-otbr-cli-networkdiag-multicast-neighbors.json"
+OTBR_CLI_BBR_FILENAME = "td-otbr-cli-bbr.json"
 
 OTBR_RESTAPI_DATASET_ACTIVE_FILENAME = "td-otbr-restapi-dataset-active.json"
 OTBR_RESTAPI_DEVICES_FILENAME = "td-otbr-restapi-devices.json"

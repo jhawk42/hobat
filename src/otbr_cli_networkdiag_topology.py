@@ -24,6 +24,7 @@ from td_const import (
 import util_ot_ctl
 import util_network
 import otbr_cli_device
+from otbr_cli_bbr import collect_primary_bbr_observation
 from util_data import data_file_path, resolve_data_dir, save_json_atomic, create_checkpoint_filename
 from util_data import (
     CollectionWriteOutcome,
@@ -34,7 +35,7 @@ from util_data import (
     save_json_atomic,
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
-from td_device_fields import get_canonical_rloc16, is_placeholder_ext_address
+from td_device_fields import get_canonical_rloc16, is_placeholder_ext_address, normalize_input_record
 from extaddr_device_label_map import load_extaddr_device_label_map
 from otbr_cli_router_table import fetch_and_parse_router_table
 
@@ -179,11 +180,39 @@ def fetch_network_diag_for_device(
     return network_topology_node
 
 
+def _attach_router_id(record: dict, router_table_by_router_id: dict | None) -> None:
+    if not router_table_by_router_id:
+        return
+    rloc16 = get_canonical_rloc16(record)
+    if not rloc16:
+        return
+    for router in router_table_by_router_id.values():
+        if isinstance(router, dict) and get_canonical_rloc16(router) == rloc16:
+            record["router_id"] = router.get("router_id")
+            return
+
+
+def _mark_primary_bbr(record: dict, primary_bbr_observation: dict | None) -> None:
+    server16 = primary_bbr_observation.get("primary", {}).get("server16") if primary_bbr_observation else None
+    if server16 and get_canonical_rloc16(record) == server16:
+        record["is_primary_bbr"] = True
+        record["primary_bbr_evidence"] = "otbr-cli-bbr-server16-match"
+
+
+def _collect_primary_bbr_observation() -> dict | None:
+    try:
+        return collect_primary_bbr_observation()
+    except Exception as exc:
+        logging.warning("Unable to collect Primary BBR observation: %s", exc)
+        return None
+
+
 def fetch_network_diag_multicast(
     multicast_addr: str,
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
     router_table_by_router_id: dict | None = None,
+    primary_bbr_observation: dict | None = None,
     checkpoint_filepath: str | None = None,
 ) -> dict:
     """
@@ -264,6 +293,9 @@ def fetch_network_diag_multicast(
         for device_record in parsed.values():
             extaddr = device_record["extaddr"]
 
+            _attach_router_id(device_record, router_table_by_router_id)
+            _mark_primary_bbr(device_record, primary_bbr_observation)
+
             # Enrich device record with role classification and prefix-based flags
             _enrich_device_role_and_prefix_flags(
                 device_record, meshlocal_prefix, omr_ipv6addr_prefix
@@ -342,6 +374,7 @@ def fetch_network_diag_topology_multicast_network(
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
     router_table_by_router_id: dict | None = None,
+    primary_bbr_observation: dict | None = None,
     checkpoint_filepath: str | None = None,
     final_output_path: str | None = None,
 ) -> dict:
@@ -358,11 +391,14 @@ def fetch_network_diag_topology_multicast_network(
     Returns:
         Dict keyed by rloc16 with device records from all mesh devices
     """
+    if primary_bbr_observation is None:
+        primary_bbr_observation = _collect_primary_bbr_observation()
     result = fetch_network_diag_multicast(
         multicast_addr=TD_THREAD_MULTICAST_ADDRESSES_MESH_LOCAL_ALL_FTDS_AND_MEDS,  # "ff03::1"
         extaddr_map=extaddr_map,
         thread_network_info=thread_network_info,
         router_table_by_router_id=router_table_by_router_id,
+        primary_bbr_observation=primary_bbr_observation,
         checkpoint_filepath=checkpoint_filepath
     )
     if checkpoint_filepath is not None:
@@ -381,6 +417,7 @@ def fetch_network_diag_topology_multicast_neighbors(
     extaddr_map: dict | None = None,
     thread_network_info: dict | None = None,
     router_table_by_router_id: dict | None = None,
+    primary_bbr_observation: dict | None = None,
     checkpoint_filepath: str | None = None,
     final_output_path: str | None = None,
 ) -> dict:
@@ -399,11 +436,14 @@ def fetch_network_diag_topology_multicast_neighbors(
     Returns:
         Dict keyed by rloc16 with device records from immediate one-hop neighbors
     """
+    if primary_bbr_observation is None:
+        primary_bbr_observation = _collect_primary_bbr_observation()
     result = fetch_network_diag_multicast(
         multicast_addr=TD_THREAD_MULTICAST_ADDRESSES_LINK_LOCAL_ALL_FTDS_AND_MEDS,  # "ff02::1"
         extaddr_map=extaddr_map,
         thread_network_info=thread_network_info,
         router_table_by_router_id=router_table_by_router_id,
+        primary_bbr_observation=primary_bbr_observation,
         checkpoint_filepath=checkpoint_filepath
     )
     if checkpoint_filepath is not None:
@@ -872,6 +912,7 @@ def fetch_network_diag_topology_multicast(
     extaddr_map: dict,
     thread_network_info: dict | None,
     router_table_by_router_id: dict,
+    primary_bbr_observation: dict | None,
     network_topology_map: dict,
     extaddr_to_rloc: dict,
     checkpoint_filepath: str | None,
@@ -886,6 +927,7 @@ def fetch_network_diag_topology_multicast(
         extaddr_map,
         thread_network_info,
         router_table_by_router_id,
+        primary_bbr_observation,
         final_output_path=final_output_path,
     )
 
@@ -1524,6 +1566,8 @@ def fetch_network_diag_topology(
         final_output_path=router_table_output_path,
     )
 
+    primary_bbr_observation = _collect_primary_bbr_observation()
+
     # 5. Query meshdiag topology and merge router records
     meshdiag_topology_data = fetch_network_diag_topology_meshdiag_topology(
         extaddr_map,
@@ -1543,6 +1587,7 @@ def fetch_network_diag_topology(
         extaddr_map,
         thread_network_info,
         router_table_by_router_id,
+        primary_bbr_observation,
         network_topology_map,
         extaddr_to_rloc,
         checkpoint_filepath,
@@ -1696,6 +1741,10 @@ def save_topology_to_json_file(
             "is_border_router": data.get("is_border_router", None),
             "is_router": data.get("is_router", None),
             "leader": data.get("leader", None),
+            "router_id": data.get("router_id"),
+            "is_primary_bbr": data.get("is_primary_bbr"),
+            "leader_evidence": data.get("leader_evidence"),
+            "primary_bbr_evidence": data.get("primary_bbr_evidence"),
             "connectivity": data.get("connectivity", {}),
             "leader_data": data.get("leader_data", {}),
             "vendor_name": data.get("vendor_name"),
@@ -1721,7 +1770,7 @@ def save_topology_to_json_file(
 
         network_map.append(network_node)
 
-    payload = convert_keys_to_camel_case(network_map)
+    payload = [normalize_input_record(record, source="cli") for record in convert_keys_to_camel_case(network_map)]
     has_failures = any(
         isinstance(record, dict)
         and (
@@ -1788,6 +1837,7 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
 
     # Get all active routers (potential parents)
     router_table_data = fetch_and_parse_router_table(extaddr_map)
+    primary_bbr_observation = _collect_primary_bbr_observation()
 
     # Build a dict of router_table_data indexed by router_id
     router_table_by_router_id = {router.get(
@@ -1806,6 +1856,7 @@ def main_multicast_network(argv: Sequence[str] | None = None) -> int:
         extaddr_map,
         thread_network_info,
         router_table_by_router_id,
+        primary_bbr_observation,
         checkpoint_filepath=checkpoint_filepath,
         final_output_path=save_json_filename,
     )
@@ -1849,6 +1900,7 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
 
     # Get all active routers (potential parents)
     router_table_data = fetch_and_parse_router_table(extaddr_map)
+    primary_bbr_observation = _collect_primary_bbr_observation()
 
     # Build a dict of router_table_data indexed by router_id
     router_table_by_router_id = {router.get(
@@ -1867,6 +1919,7 @@ def main_multicast_neighbors(argv: Sequence[str] | None = None) -> int:
         extaddr_map,
         thread_network_info,
         router_table_by_router_id,
+        primary_bbr_observation,
         checkpoint_filepath=checkpoint_filepath,
         final_output_path=save_json_filename,
     )

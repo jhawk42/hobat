@@ -225,5 +225,41 @@ class DiagnosticsFetchAllEnrichmentTests(unittest.TestCase):
         self.assertEqual(stats["routerPct"], 25.0)
 
 
+class DiagnosticsRoleEvidenceTests(unittest.TestCase):
+    def test_list_normalizes_explicit_and_derived_role_evidence(self) -> None:
+        client = Mock()
+        client.list_diagnostics.return_value = [
+            {
+                "routerId": "0x23",
+                "leaderData": {"leaderRouterId": "35"},
+                "isLeader": False,
+                "isPrimaryBBR": True,
+            },
+            {
+                "routerId": "0",
+                "leaderData": {"leaderRouterId": 0},
+                "isPrimaryBBR": "true",
+            },
+        ]
+
+        result = diagnostics_module.dispatch_diagnostics(
+            client,
+            SimpleNamespace(diagnostics_command="list", with_meta=False, no_enrich_mac_counters=False),
+            _RAW_UNSET,
+            fields=None,
+        )
+
+        self.assertEqual(result[0]["routerId"], 35)
+        self.assertFalse(result[0]["isLeader"])
+        self.assertEqual(result[0]["leaderEvidence"], "explicit")
+        self.assertEqual(result[0]["roleEvidenceConflicts"], [{"role": "isLeader", "explicit": False, "derived": True}])
+        self.assertTrue(result[0]["isPrimaryBBR"])
+        self.assertEqual(result[0]["primaryBBREvidence"], "explicit-rest")
+        self.assertEqual(result[1]["routerId"], 0)
+        self.assertTrue(result[1]["isLeader"])
+        self.assertEqual(result[1]["leaderEvidence"], "leader-router-id-match")
+        self.assertNotIn("isPrimaryBBR", result[1])
+
+
 if __name__ == "__main__":
     unittest.main()

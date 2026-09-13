@@ -39,7 +39,7 @@ class CollectorCase:
 COLLECTOR_CASES = (
     CollectorCase(thread_info, "collect_thread_network_info", OTBR_CLI_THREAD_NETWORK_INFO_FILENAME, {"network_name": "test"}, {"networkName": "test"}),
     CollectorCase(router_table, "fetch_and_parse_router_table", OTBR_CLI_ROUTER_TABLE_FILENAME, [{"router_id": "0x01"}], [{"routerId": "0x01"}]),
-    CollectorCase(meshdiag_topology, "get_meshdiag_topology", OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME, [{"router_id": "0x01"}], [{"routerId": "0x01"}]),
+    CollectorCase(meshdiag_topology, "get_meshdiag_topology", OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME, [{"router_id": "0x01"}], [{"routerId": 1}]),
     CollectorCase(neighbortable, "fetch_all_meshdiag_router_neighbor_tables", OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME, [{"router_neighbor_table_count": 1}], [{"routerNeighborsCount": 1}]),
     CollectorCase(childtable, "fetch_all_meshdiag_child_tables", OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME, [{"router_child_table_count": 1}], [{"childTableCount": 1}]),
     CollectorCase(childip6, "fetch_all_meshdiag_child_ip6_tables", OTBR_CLI_MESHDIAG_ROUTER_CHILDIP6_FILENAME, [{"router_child_ip6_table_count": 1}], [{"childIp6TableCount": 1}]),
@@ -233,6 +233,7 @@ def test_networkdiag_fetch_all_persists_internal_collections_before_return(
         extaddr_map,
         thread_network_info,
         router_table_by_router_id,
+        primary_bbr_observation=None,
         checkpoint_filepath=None,
         final_output_path=None,
     ):
@@ -342,6 +343,32 @@ def test_networkdiag_multicast_collector_checkpoint_final_and_return_order(monke
 
     assert result is payload
     assert events == ["collect", checkpoint_path, output_path, "returned"]
+
+
+@pytest.mark.parametrize(
+    "collector_name",
+    [
+        "fetch_network_diag_topology_multicast_network",
+        "fetch_network_diag_topology_multicast_neighbors",
+    ],
+)
+def test_networkdiag_multicast_collectors_observe_primary_bbr_by_default(
+    monkeypatch, collector_name
+):
+    captured = {}
+    monkeypatch.setattr(
+        networkdiag,
+        "collect_primary_bbr_observation",
+        lambda: {"primary": {"server16": "0x8c00"}},
+    )
+    monkeypatch.setattr(
+        networkdiag,
+        "fetch_network_diag_multicast",
+        lambda **kwargs: captured.update(kwargs) or {},
+    )
+
+    assert getattr(networkdiag, collector_name)() == {}
+    assert captured["primary_bbr_observation"] == {"primary": {"server16": "0x8c00"}}
 
 
 def test_networkdiag_collectors_without_paths_do_not_write_standalone_files(monkeypatch):

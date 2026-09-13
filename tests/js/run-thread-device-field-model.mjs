@@ -5,6 +5,7 @@ import {
   getDeviceIdentityKeys,
   isPlaceholderExtAddress,
   normalizeInputRecord,
+  normalizeRouterId,
 } from "../../src/js/tdash-device-fields.js";
 
 
@@ -34,4 +35,5 @@ results._placeholderPolicy = {
   zero: isPlaceholderExtAddress("0000000000000000"),
   concrete: isPlaceholderExtAddress("0011223344556677"),
 };
+results._routerIdBounds = [normalizeRouterId(0), normalizeRouterId("0x3e"), normalizeRouterId(63), normalizeRouterId("bad")];
 process.stdout.write(`${JSON.stringify(results)}\n`);

@@ -311,6 +311,8 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
       detachedDisabledPct: rawDetachedDisabledPct !== undefined ? rawDetachedDisabledPct
         : (existing && Number.isFinite(existing.detachedDisabledPct || existing.detached_disabled_pct) ? (existing.detachedDisabledPct || existing.detached_disabled_pct) : undefined),
       br: rawNode.br === true || (existing ? existing.br === true : false),
+      isLeader: rawNode.isLeader === true || (existing ? existing.isLeader === true : false),
+      isPrimaryBBR: rawNode.isPrimaryBBR === true || (existing ? existing.isPrimaryBBR === true : false),
       fromMeshdiag: (style.source === 'meshdiag') || (existing ? (existing.fromMeshdiag || existing.from_meshdiag) === true : false),
       fromNetworkdiagnostic: (style.source === 'networkdiagnostic') || (existing ? (existing.fromNetworkdiagnostic || existing.from_networkdiagnostic) === true : false),
       shape: (existing && existing.shape === NODE_SHAPES.child) ? NODE_SHAPES.child : (style.shape || (existing ? existing.shape : NODE_SHAPES.router)),
@@ -1846,6 +1848,8 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
       detachedDisabledPct: getRawMetric('timeStatistics.detachedDisabledPct')
         ?? (existing ? existing.detachedDisabledPct || existing.detached_disabled_pct : undefined),
       br: rawNode.br === true || (existing ? existing.br === true : false),
+      isLeader: rawNode.isLeader === true || (existing ? existing.isLeader === true : false),
+      isPrimaryBBR: rawNode.isPrimaryBBR === true || (existing ? existing.isPrimaryBBR === true : false),
       fromOtbrRestapi: true,
       shape: style.shape || (existing ? existing.shape : (isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router)),
       color: style.color || (existing ? existing.color : NODE_COLORS.router)
