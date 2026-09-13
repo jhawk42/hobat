@@ -254,6 +254,15 @@ docker run --name hobat -d \
 Set `TD_OTBR_CONTAINER_USE=0` to run `ot-ctl` locally instead of through
 `docker exec`. 
 
+For the Compose configuration, use the included environment example:
+
+```bash
+docker compose \
+  --env-file examples/.env.docker.example \
+  --file examples/docker-compose.yaml \
+  up -d --build
+```
+
 ## Home Assistant OS App
 
 To install Hobat on Home Assistant OS (HAOS):
