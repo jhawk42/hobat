@@ -280,6 +280,43 @@ assertResult(haMatterDashboard, {
 });
 assert.equal(haMatterDashboard.edgeData[0].isParentChild, false);
 
+const haMatterRawThreadTables = run(
+  "ha-matter-ws",
+  ["td-ha-matter-ws-diagnostics-fetch-all.json"],
+  [[
+    {
+      matterId: "matter:source",
+      thread: {
+        extAddress: "aa00112233445566",
+        rloc16: "0x1000",
+        routingRole: "Router",
+        neighborTable: [{
+          extAddress: "bb00112233445566",
+          rloc16: "0x2000",
+          lqi: 3,
+        }],
+        routeTable: [{
+          extAddress: "bb00112233445566",
+          rloc16: "0x2000",
+          pathCost: 1,
+          allocated: true,
+        }],
+      },
+    },
+  ]],
+);
+assertResult(haMatterRawThreadTables, {
+  nodeIds: ["matter:source", "ha-matter-ws:ext:bb00112233445566"],
+  edges: [[
+    "matter:source",
+    "ha-matter-ws:ext:bb00112233445566",
+    ["router_neighbor", "otbr_route", "otbr_route_router"],
+  ]],
+  sourceNames: ["ha-matter-ws"],
+  hasChildIndex: true,
+});
+assert.equal(haMatterRawThreadTables.edgeData[0].routeCost, 1);
+
 const haMatterDiagnostics = runAdaptor({
   entry: {
     adaptor: "ha-matter-ws",
@@ -376,6 +413,21 @@ assert.equal(
   )?.isRouter,
   false,
 );
+
+  const cachedHaMatterDashboard = JSON.parse(
+    fs.readFileSync("data/td-ha-matter-ws-dashboard.json", "utf8"),
+  );
+  const cachedHaMatterDashboardDiagnostics = runAdaptor({
+    entry: {
+      adaptor: "ha-matter-ws",
+      files: ["td-ha-matter-ws-dashboard.json"],
+      rowExtractor: "ha-matter-ws-diagnostics",
+    },
+    rawFiles: [cachedHaMatterDashboard],
+    rows: cachedHaMatterDashboard.diagnostics,
+  });
+  assert.equal(cachedHaMatterDashboardDiagnostics.nodeData.length, 30);
+  assert.equal(cachedHaMatterDashboardDiagnostics.edgeData.length, 29);
 
 const nativeBorderRouters = runAdaptor({
   entry: {

@@ -2090,6 +2090,9 @@ export function adaptHaMatterWs(fileMap, extractedRows, rowExtractor = '') {
     : (Array.isArray(payload) ? payload : asArray(payload?.topology));
   const model = createAdaptorModel(['ha-matter-ws']);
   const topologyIdToDeviceId = new Map();
+  const extAddressToDeviceId = new Map();
+  const rloc16ToDeviceId = new Map();
+  const canonicalRowsByDeviceId = new Map();
   const relationships = new Map();
 
   rows.forEach((row, index) => {
@@ -2134,15 +2137,67 @@ export function adaptHaMatterWs(fileMap, extractedRows, rowExtractor = '') {
       },
     });
     topologyIdToDeviceId.set(explicitId, deviceId);
+    const extAddress = getCanonicalExtaddr(canonicalRow);
+    if (extAddress) extAddressToDeviceId.set(extAddress, deviceId);
+    if (rloc16) rloc16ToDeviceId.set(rloc16, deviceId);
+    canonicalRowsByDeviceId.set(deviceId, canonicalRow);
     registerDetails(model, deviceId, canonicalRow, 'replace');
-    registerRouterNeighborRows(model, row.rloc16, row.routerNeighbors);
+    registerRouterNeighborRows(
+      model,
+      canonicalRow.rloc16,
+      canonicalRow.routerNeighbors ?? canonicalRow.neighborTable,
+    );
     registerRouterChildRows(model, row.rloc16, row.children);
   });
+
+  function resolveRawRelationshipTarget(ownerId, entry) {
+    const extAddress = getCanonicalExtaddr(entry);
+    const rloc16 = getCanonicalRloc16(entry);
+    const knownTarget = (extAddress && extAddressToDeviceId.get(extAddress))
+      || (rloc16 && rloc16ToDeviceId.get(rloc16));
+    if (knownTarget) return knownTarget;
+
+    const owner = canonicalRowsByDeviceId.get(ownerId) || {};
+    const fallbackId = extAddress
+      ? `ha-matter-ws:ext:${extAddress}`
+      : `ha-matter-ws:rloc:${rloc16}`;
+    const target = {
+      relationshipOnly: true,
+      extAddress,
+      rloc16,
+      networkName: owner.networkName,
+      extPanId: owner.extPanId,
+      role: 'unknown',
+    };
+    const targetId = registerDevice(model, target, {
+      id: fallbackId,
+      preserveId: true,
+      sourceName: 'ha-matter-ws',
+      nodeRecord: target,
+      presentation: {
+        label: buildLabel(target),
+        shape: NODE_SHAPES.router,
+        color: NODE_COLORS.eve,
+        font: buildNodeLabelFont({ fontSize: 13, isRouter: false }),
+        isRouter: false,
+        isLeader: false,
+        relationshipOnly: true,
+      },
+    });
+    if (extAddress) extAddressToDeviceId.set(extAddress, targetId);
+    if (rloc16) rloc16ToDeviceId.set(rloc16, targetId);
+    canonicalRowsByDeviceId.set(targetId, target);
+    registerDetails(model, targetId, target, 'replace');
+    return targetId;
+  }
 
   function collectRelationship(ownerId, relationship, categories) {
     if (!isPlainObject(relationship)) return;
     const sourceId = topologyIdToDeviceId.get(toText(relationship.sourceId)) || ownerId;
-    const targetId = topologyIdToDeviceId.get(toText(relationship.targetId));
+    const targetId = topologyIdToDeviceId.get(toText(relationship.targetId))
+      || (model.devicesById.has(toText(relationship.targetId))
+        ? toText(relationship.targetId)
+        : undefined);
     if (!sourceId || !targetId) return;
     const key = `${sourceId}|${targetId}`;
     const aggregate = relationships.get(key) || {
@@ -2160,8 +2215,11 @@ export function adaptHaMatterWs(fileMap, extractedRows, rowExtractor = '') {
       'lqi', 'averageRssi', 'lastRssi', 'frameErrorRate',
       'messageErrorRate', 'routeCost',
     ].forEach((field) => {
-      if (aggregate.metrics[field] === undefined && relationship[field] !== undefined) {
-        aggregate.metrics[field] = relationship[field];
+      const value = field === 'routeCost'
+        ? relationship.routeCost ?? relationship.pathCost
+        : relationship[field];
+      if (aggregate.metrics[field] === undefined && value !== undefined) {
+        aggregate.metrics[field] = value;
       }
     });
     relationships.set(key, aggregate);
@@ -2199,6 +2257,28 @@ export function adaptHaMatterWs(fileMap, extractedRows, rowExtractor = '') {
       collectRelationship(
         ownerId,
         relationship,
+        routeCategories.length > 0 ? routeCategories : [EDGE_CATEGORY_OTBR_ROUTE],
+      );
+    });
+    const canonicalRow = canonicalRowsByDeviceId.get(ownerId) || row;
+    asArray(canonicalRow.neighborTable).forEach((entry) => {
+      const targetId = resolveRawRelationshipTarget(ownerId, entry);
+      collectRelationship(ownerId, { ...entry, sourceId: ownerId, targetId }, [
+        entry.isChild === true
+          ? EDGE_CATEGORY_DEFAULT_CHILDREN
+          : EDGE_CATEGORY_ROUTER_NEIGHBOR,
+      ]);
+    });
+    asArray(canonicalRow.routeTable).forEach((entry) => {
+      if (entry.allocated === false) return;
+      const targetId = resolveRawRelationshipTarget(ownerId, entry);
+      const routeCategories = getOtbrRouteCategories({
+        ...canonicalRow,
+        role: canonicalRow.role || canonicalRow.routingRole,
+      });
+      collectRelationship(
+        ownerId,
+        { ...entry, sourceId: ownerId, targetId },
         routeCategories.length > 0 ? routeCategories : [EDGE_CATEGORY_OTBR_ROUTE],
       );
     });
