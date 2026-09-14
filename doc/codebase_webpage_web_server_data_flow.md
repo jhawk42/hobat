@@ -37,6 +37,8 @@ directory through the server allowlist.
 | `GET /api/data/{filename}` | `handle_data_api` | Serve, refresh, or start a job for an allowed data file |
 | `GET /api/job/{job_id}` | `handle_job_api` | Return job state and final/checkpoint metadata |
 | `DELETE /api/job/{job_id}` | `handle_job_cancel_api` | Request cancellation of a running job |
+| `GET /api/jobs` | `handle_jobs_api` | Return a no-store projection of all active generic, health, and device-action jobs |
+| `DELETE /api/jobs` | `handle_jobs_cancel_api` | Request deterministic, idempotent cancellation of all active jobs |
 | `POST /api/health/process-dataset` | `handle_health_process_dataset_api` | Process one approved cached dataset into a health assessment |
 | `GET /api/device/{extAddress}` | `handle_device_get_api` | Read one static device label |
 | `PATCH /api/device/{extAddress}` | `handle_device_patch_api` | Atomically insert or update one device label |
@@ -119,6 +121,19 @@ Completed job records are retained temporarily so clients can poll the result.
 The cleanup loop removes terminal jobs after 15 minutes and shutdown cancels
 cleanup and remaining background tasks.
 
+The unified `/api/jobs` resource projects only `running` and `cancelling`
+records from the generic and device-action registries. Stable kind and source
+metadata lives on status records rather than transient runtime handles. The
+projection excludes command arguments, action request payloads, subprocess
+output, and credentials. Bulk cancellation snapshots jobs in creation-time and
+job-ID order and delegates to the same request-independent helpers used by the
+individual DELETE routes. A missing runtime handle transitions a running job to
+`cancelled` instead of leaving it indefinitely in `cancelling`.
+
+Listing and bulk cancellation are server-wide administrative operations. The
+same-origin browser model is not authentication; deployments outside a trusted
+network require an authenticated reverse proxy or equivalent access control.
+
 ## Progressive Checkpoints
 
 Long collectors can atomically replace a sibling `.partial.json` file while
@@ -166,7 +181,8 @@ last-write-wins.
 
 | Layer | Owners | Responsibility |
 |---|---|---|
-| Controls | `tdash.html`, `tdash-ui.js` | Source/dataset selection, Sync/Cancel, views, filters, settings, and insights |
+| Controls | `tdash.html`, `tdash-ui.js` | Source/dataset selection, Sync/Cancel, views, filters, settings, insights, activity logs, and pending jobs |
+| Browser activity | `tdash-activity.js` | Bounded in-memory activity, route/metadata sanitization, subscriptions, and tracked HTTP requests |
 | Fetch and assembly | `tdash-dataset.js`, `tdash-dataset-registry.js` | Registry lookup, cache policy, jobs, checkpoints, extractors, and final/partial datasets |
 | Field and merge contract | `tdash-device-fields.js`, `tdash-merge.js`, `tdash-utils.js` | Preferred fields, aliases, identities, normalization, precedence, conflicts, and provenance |
 | Adaptation | `tdash-adaptors.js`, `tdash-adaptor-model.js` | Source-specific records to canonical devices, relationships, and details |
@@ -174,6 +190,22 @@ last-write-wins.
 | Presentation | `tdash-layouts.js`, `tdash-topology-utils.js`, `tdash-topology-renderer.js`, `tdash-table-renderer.js` | Seed layouts, vis-network lifecycle, topology interaction, and sortable tables |
 | Status | `tdash-view-status.js` | Active-view status ownership and suppression of stale publishers |
 | Styling | `tdash.css`, `tdash-constants.js` | Responsive layout, controls, palettes, node/edge styles, and vis options |
+
+## Browser Activity and Jobs
+
+All browser HTTP calls pass through `trackedFetch()`. Ordinary calls record a
+start and one terminal event; polling calls are silent and their owning
+workflow records only job-state transitions. Dynamic URL components are
+replaced with route templates, query values are retained only for an explicit
+allowlist, metadata is recursively bounded, and failures use HTTP, network, or
+abort classifications rather than arbitrary exception text.
+
+The activity ring stores at most 200 entries in browser memory and is cleared
+only by the operator or page lifecycle. The Jobs tab polls `/api/jobs` every
+two seconds only while visible. An abort controller and monotonic request
+version prevent hidden or stale responses from replacing the current table.
+Neither activity entries nor transient server job records are written to
+`data/`.
 
 ## Dataset Assembly
 

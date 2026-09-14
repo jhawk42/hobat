@@ -1,5 +1,6 @@
 import asyncio
 import dataclasses
+import datetime
 import email.utils
 import json
 import mimetypes
@@ -166,9 +167,12 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
         OTBR_CLI_ROUTER_TABLE_FILENAME: FileAction(
             max_age_s=default_max_age_s, action=["otbr-cli", "router-table"], action_cost_s=2
         ),
-        # meshdiag topology — single command, a few seconds.
+        # meshdiag topology may consume the full 30 s ot-ctl command timeout.
         OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME: FileAction(
-            max_age_s=default_max_age_s, action=["otbr-cli", "meshdiag", "topology"], action_cost_s=6
+            max_age_s=default_max_age_s,
+            action=["otbr-cli", "meshdiag", "topology"],
+            action_cost_s=30,
+            force_async=True,
         ),
         # Per-router meshdiag commands — ~1–2 s each router; 90 s for ~50-router network.
         # force_async=True: 90 s exceeds the browser-safe synchronous limit (~30 s).
@@ -500,6 +504,8 @@ class JobStatus:
     filename: str
     # "running" | "cancelling" | "cancelled" | "done" | "error"
     status: str
+    kind: str = "data"
+    source: str = ""
     detail: str = ""
     task: str | None = None
     dataset: str | None = None
@@ -662,6 +668,7 @@ _JOB_TTL_S = 900       # evict completed/errored jobs after 15 minutes
 _CLEANUP_INTERVAL_S = 60  # run eviction sweep every 60 seconds
 _JOB_CANCEL_GRACE_DETAIL = "Cancellation requested by client."
 _PROCESS_TERMINATE_GRACE_S = 2.0
+_JOB_LIST_LIMIT = 500
 
 
 def _on_background_task_done(task: "asyncio.Task[None]") -> None:
@@ -976,6 +983,8 @@ async def _dispatch_long_cost(
             job_id=job_id,
             filename=filename,
             status=JOB_STATUS_RUNNING,
+            kind="data",
+            source=action_args[0],
         )
         _job_registry[job_id] = job
 
@@ -1430,6 +1439,8 @@ async def handle_health_process_dataset_api(
             job_id=job_id,
             filename="",
             status=JOB_STATUS_RUNNING,
+            kind="health",
+            source="health",
             task="health-process-dataset",
             dataset=dataset_id,
         )
@@ -1618,6 +1629,28 @@ async def handle_job_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     )
 
 
+def _cancel_generic_job(job_id: str) -> str:
+    job = _job_registry.get(job_id)
+    if job is None:
+        return "not-found"
+    if job.status == JOB_STATUS_CANCELLING:
+        return JOB_STATUS_CANCELLING
+    if not _is_cancellable_job_status(job.status):
+        return "already-terminal"
+
+    runtime = _job_runtime_registry.get(job_id)
+    if runtime is None or runtime.task.done():
+        job.status = JOB_STATUS_CANCELLED
+        job.detail = _JOB_CANCEL_GRACE_DETAIL
+        return JOB_STATUS_CANCELLED
+
+    job.status = JOB_STATUS_CANCELLING
+    if not job.detail:
+        job.detail = _JOB_CANCEL_GRACE_DETAIL
+    runtime.task.cancel()
+    return JOB_STATUS_CANCELLING
+
+
 async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """DELETE /api/job/{job_id} — request cancellation of a long-running job."""
     job_id = request.match_info["job_id"]
@@ -1625,7 +1658,8 @@ async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Res
     if job is None:
         raise aiohttp.web.HTTPNotFound(reason=f"Unknown job: {job_id}")
 
-    if job.status == JOB_STATUS_CANCELLING:
+    outcome = _cancel_generic_job(job_id)
+    if outcome == JOB_STATUS_CANCELLING:
         body = _build_job_poll_body(job) | {"job_id": job_id, "detail": job.detail}
         if job.filename:
             body["filename"] = job.filename
@@ -1636,7 +1670,7 @@ async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Res
             headers={"Cache-Control": "no-store"} if job.task else None,
         )
 
-    if not _is_cancellable_job_status(job.status):
+    if outcome == "already-terminal":
         body = _build_job_poll_body(job) | {
             "job_id": job_id,
             "detail": job.detail,
@@ -1653,22 +1687,6 @@ async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Res
             headers={"Cache-Control": "no-store"} if job.task else None,
         )
 
-    job.status = JOB_STATUS_CANCELLING
-    if not job.detail:
-        job.detail = _JOB_CANCEL_GRACE_DETAIL
-
-    runtime = _job_runtime_registry.get(job_id)
-    if runtime is not None:
-        process = runtime.process
-        if process is not None and process.returncode is None and not runtime.task.done():
-            # Cancel task; run_td_cli handles graceful terminate/kill cleanup.
-            logging.info("Cancelling job %s: terminating subprocess", job_id)
-            runtime.task.cancel()
-        elif process is None and not runtime.task.done():
-            # If still queued before subprocess start, cancel the task directly.
-            logging.info("Cancelling job %s: task not started yet", job_id)
-            runtime.task.cancel()
-
     body = _build_job_poll_body(job) | {"job_id": job_id, "detail": job.detail}
     if job.filename:
         body["filename"] = job.filename
@@ -1677,6 +1695,68 @@ async def handle_job_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Res
         content_type="application/json",
         text=json.dumps(body),
         headers={"Cache-Control": "no-store"} if job.task else None,
+    )
+
+
+def _job_created_at_iso(created_at: float) -> str:
+    return datetime.datetime.fromtimestamp(
+        created_at, datetime.timezone.utc
+    ).isoformat().replace("+00:00", "Z")
+
+
+def _project_pending_jobs(now: float | None = None) -> list[dict[str, object]]:
+    observed_at = time.time() if now is None else now
+    projected: list[tuple[float, str, dict[str, object]]] = []
+    for job in _job_registry.values():
+        if job.status not in {JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING}:
+            continue
+        item: dict[str, object] = {
+            "jobId": job.job_id,
+            "kind": job.kind,
+            "status": job.status,
+            "source": job.source,
+            "createdAt": _job_created_at_iso(job.created_at),
+            "elapsedSeconds": max(0, int(observed_at - job.created_at)),
+            "cancellable": job.status == JOB_STATUS_RUNNING,
+            "cancelUrl": f"/api/job/{job.job_id}",
+        }
+        for key, value in {
+            "task": job.task,
+            "filename": job.filename or None,
+            "dataset": job.dataset,
+        }.items():
+            if value is not None:
+                item[key] = value
+        projected.append((job.created_at, job.job_id, item))
+
+    for job in _device_action_job_registry.values():
+        if job.status not in {JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING}:
+            continue
+        item = {
+            "jobId": job.job_id,
+            "kind": "device-action",
+            "status": job.status,
+            "source": job.request.source,
+            "action": job.request.action,
+            "createdAt": _job_created_at_iso(job.created_at),
+            "elapsedSeconds": max(0, int(observed_at - job.created_at)),
+            "cancellable": job.status == JOB_STATUS_RUNNING,
+            "cancelUrl": f"/api/device-action-jobs/{job.job_id}",
+        }
+        projected.append((job.created_at, job.job_id, item))
+
+    projected.sort(key=lambda entry: (entry[0], entry[1]))
+    return [item for _, _, item in projected[:_JOB_LIST_LIMIT]]
+
+
+async def handle_jobs_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    now = time.time()
+    return aiohttp.web.json_response(
+        {
+            "observedAt": _job_created_at_iso(now),
+            "jobs": _project_pending_jobs(now),
+        },
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -1991,6 +2071,27 @@ async def handle_device_action_job_api(
     return _device_action_response(_action_job_body(job))
 
 
+def _cancel_device_action_job(job_id: str) -> str:
+    job = _device_action_job_registry.get(job_id)
+    if job is None:
+        return "not-found"
+    if job.status == JOB_STATUS_CANCELLING:
+        return JOB_STATUS_CANCELLING
+    if not _is_cancellable_job_status(job.status):
+        return "already-terminal"
+
+    runtime = _device_action_runtime_registry.get(job_id)
+    if runtime is None or runtime.task.done():
+        job.status = JOB_STATUS_CANCELLED
+        job.detail = _JOB_CANCEL_GRACE_DETAIL
+        return JOB_STATUS_CANCELLED
+
+    job.status = JOB_STATUS_CANCELLING
+    job.detail = _JOB_CANCEL_GRACE_DETAIL
+    runtime.task.cancel()
+    return JOB_STATUS_CANCELLING
+
+
 async def handle_device_action_job_cancel_api(
     request: aiohttp.web.Request,
 ) -> aiohttp.web.Response:
@@ -2000,19 +2101,42 @@ async def handle_device_action_job_cancel_api(
         return _device_action_response(
             {"error": f"Unknown action job: {job_id}"}, 404
         )
-    if job.status == JOB_STATUS_CANCELLING:
+    outcome = _cancel_device_action_job(job_id)
+    if outcome == JOB_STATUS_CANCELLING:
         return _device_action_response(_action_job_body(job), 202)
-    if not _is_cancellable_job_status(job.status):
+    if outcome == "already-terminal":
         body = _action_job_body(job)
         body["error"] = "Action job is not cancellable in its current state."
         return _device_action_response(body, 409)
 
-    job.status = JOB_STATUS_CANCELLING
-    job.detail = _JOB_CANCEL_GRACE_DETAIL
-    runtime = _device_action_runtime_registry.get(job_id)
-    if runtime is not None and not runtime.task.done():
-        runtime.task.cancel()
     return _device_action_response(_action_job_body(job), 202)
+
+
+async def handle_jobs_cancel_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    pending = [
+        (job.created_at, job.job_id, "generic")
+        for job in _job_registry.values()
+        if job.status in {JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING}
+    ]
+    pending.extend(
+        (job.created_at, job.job_id, "device-action")
+        for job in _device_action_job_registry.values()
+        if job.status in {JOB_STATUS_RUNNING, JOB_STATUS_CANCELLING}
+    )
+    pending.sort(key=lambda entry: (entry[0], entry[1]))
+    results = []
+    for _, job_id, kind in pending[:_JOB_LIST_LIMIT]:
+        outcome = (
+            _cancel_generic_job(job_id)
+            if kind == "generic"
+            else _cancel_device_action_job(job_id)
+        )
+        results.append({"jobId": job_id, "status": outcome})
+    return aiohttp.web.json_response(
+        {"requested": len(results), "jobs": results},
+        status=202,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 async def handle_root(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -2221,6 +2345,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.router.add_get("/", handle_root)
     app.router.add_get("/api/data/{filename}", handle_data_api)
     app.router.add_get("/api/capabilities", handle_capabilities_api)
+    app.router.add_get("/api/jobs", handle_jobs_api)
+    app.router.add_delete("/api/jobs", handle_jobs_cancel_api)
     app.router.add_get("/api/job/{job_id}", handle_job_api)
     app.router.add_delete("/api/job/{job_id}", handle_job_cancel_api)
     app.router.add_get(

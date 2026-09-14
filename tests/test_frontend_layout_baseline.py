@@ -70,23 +70,30 @@ class _IdParentParser(HTMLParser):
 
     def __init__(self) -> None:
         super().__init__()
-        self.stack: list[tuple[str, str | None]] = []
+        self.stack: list[tuple[str, str | None, frozenset[str]]] = []
         self.parent_by_id: dict[str, str | None] = {}
         self.tag_by_id: dict[str, str] = {}
+        self.inside_dashboard_shell_by_id: dict[str, bool] = {}
         self.id_order: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        element_id = dict(attrs).get("id")
+        attributes = dict(attrs)
+        element_id = attributes.get("id")
+        classes = frozenset((attributes.get("class") or "").split())
         parent_id = next(
-            (ancestor_id for _, ancestor_id in reversed(self.stack) if ancestor_id),
+            (ancestor_id for _, ancestor_id, _ in reversed(self.stack) if ancestor_id),
             None,
         )
         if element_id:
             self.parent_by_id[element_id] = parent_id
             self.tag_by_id[element_id] = tag
+            self.inside_dashboard_shell_by_id[element_id] = any(
+                "dashboard-shell" in ancestor_classes
+                for _, _, ancestor_classes in self.stack
+            )
             self.id_order.append(element_id)
         if tag not in self._VOID_ELEMENTS:
-            self.stack.append((tag, element_id))
+            self.stack.append((tag, element_id, classes))
 
     def handle_endtag(self, tag: str) -> None:
         for index in range(len(self.stack) - 1, -1, -1):
@@ -122,6 +129,10 @@ def test_semantic_layout_and_workspace_hierarchy() -> None:
     assert parser.tag_by_id["panel-functions"] == "aside"
     assert parser.tag_by_id["panel-workspace"] == "main"
     assert parser.tag_by_id["panel-device-details"] == "aside"
+    assert all(
+        parser.inside_dashboard_shell_by_id[panel_id]
+        for panel_id in TARGET_LAYOUT_PANEL_IDS
+    )
     assert [
         panel_id for panel_id in parser.id_order if panel_id in TARGET_LAYOUT_PANEL_IDS
     ] == [
@@ -178,16 +189,44 @@ def test_workspace_lifecycle_and_activity_contract() -> None:
     assert 'classList.toggle(\n    "details-panel-collapsed"' in ui_text
     assert "setFunctionsPanelCollapsed" in ui_text
     assert '"functions-panel-collapsed"' in ui_text
-    assert "WORKSPACE_ACTIVITY_LIMIT = 100" in ui_text
-    assert "workspaceActivity.splice" in ui_text
+    activity_text = _read_text(REPO_ROOT / "src" / "js" / "tdash-activity.js")
+    assert "const ACTIVITY_LIMIT = 200" in activity_text
+    assert "activityEntries.splice" in activity_text
     assert "setDatasetActivityObserver" in ui_text
     assert 'userInitiated: true' in ui_text
     assert '["topology", "table"].includes(selectedDataset?.defaultView)' in ui_text
     assert "export function setDatasetActivityObserver" in dataset_text
-    assert '"api-response"' in dataset_text
+    assert '"api-request"' not in dataset_text
+    assert '"api-response"' not in dataset_text
+    assert '"api-error"' not in dataset_text
     assert '"job-status"' in dataset_text
     assert "response.json()" in dataset_text
     assert "response.headers" not in ui_text[ui_text.index("function renderWorkspaceLogs"):ui_text.index("export function getSearchQuery")]
+
+
+def test_logs_workspace_exposes_activity_and_jobs_tabs() -> None:
+    html = _read_text(HTML)
+    ui_text = _read_text(UI_JS)
+
+    for element_id in (
+        "btn-activity-log",
+        "btn-jobs",
+        "workspace-log-panel",
+        "workspace-jobs-panel",
+        "btn-clear-logs",
+        "btn-refresh-jobs",
+        "btn-cancel-all-jobs",
+        "workspace-jobs-content",
+    ):
+        assert f'id="{element_id}"' in html
+    assert 'role="tablist" aria-label="Logs workspace"' in html
+    assert 'aria-controls="workspace-log-panel"' in html
+    assert 'aria-controls="workspace-jobs-panel"' in html
+    assert 'trackedFetch("/api/jobs"' in ui_text
+    assert '}, "silent");' in ui_text
+    assert "new AbortController()" in ui_text
+    assert "jobsViewState.requestVersion" in ui_text
+    assert 'window.confirm("Cancel all pending jobs?")' in ui_text
 
 
 def test_details_collapse_targets_explicit_details_owner_and_notifies_renderer() -> None:

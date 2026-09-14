@@ -109,6 +109,15 @@ class TestResolveAndValidate(unittest.TestCase):
         file_action, _ = _resolve_and_validate(filename, self.data_dir)
         self.assertIsInstance(file_action, FileAction)
 
+    def test_meshdiag_topology_uses_full_async_command_budget(self) -> None:
+        file_action, _ = _resolve_and_validate(
+            "td-otbr-cli-meshdiag-topology.json",
+            self.data_dir,
+        )
+
+        self.assertEqual(file_action.action_cost_s, 30)
+        self.assertTrue(file_action.force_async)
+
 
 # ---------------------------------------------------------------------------
 # R4b — _should_regenerate

@@ -199,6 +199,28 @@ class TestSmokePath_B_ShortCostRegen(SmokeTestBase):
 class TestSmokePath_C_LongCost202(SmokeTestBase):
     """Path C: force_async=True (or cost > threshold) → immediate 202 + job_id."""
 
+    async def test_meshdiag_topology_returns_202_with_full_outer_deadline(self) -> None:
+        filename = "td-otbr-cli-meshdiag-topology.json"
+        observed_timeouts = []
+
+        async def mocked_td_cli(args, data_dir, *, timeout_s=None):
+            observed_timeouts.append(timeout_s)
+            (data_dir / filename).write_bytes(b"{}")
+            return 0
+
+        app = _make_app(self.data_dir)
+        request = _make_request(filename, app)
+
+        with patch.object(td_webserver, "run_td_cli", side_effect=mocked_td_cli):
+            response = await td_webserver.handle_data_api(request)
+            self.assertEqual(response.status, 202)
+            await asyncio.gather(
+                *list(td_webserver._background_tasks),
+                return_exceptions=True,
+            )
+
+        self.assertEqual(observed_timeouts, [45.0])
+
     async def test_force_async_file_returns_202_immediately(self) -> None:
         # "td-otbr-cli-meshdiag-router-neighbortables.json" has force_async=True.
         filename = "td-otbr-cli-meshdiag-router-neighbortables.json"

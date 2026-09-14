@@ -1,3 +1,5 @@
+import { trackedFetch } from "./tdash-activity.js";
+
 const PILLAR_LABELS = Object.freeze({
   availability: "Availability",
   connectivity: "Connectivity",
@@ -41,7 +43,7 @@ function appendText(parent, tagName, text, className = "") {
 }
 
 async function healthRequest(path, signal) {
-  const response = await fetch(path, { headers: { Accept: "application/json" }, signal });
+  const response = await trackedFetch(path, { headers: { Accept: "application/json" }, signal });
   if (!response.ok) {
     const error = new Error(response.status === 404
       ? "No processed health assessment is available for this dataset."
@@ -57,7 +59,7 @@ export function fetchHealthAssessment(datasetId, signal) {
 }
 
 export async function startHealthProcessing(datasetId, signal) {
-  const response = await fetch("api/health/process-dataset", {
+  const response = await trackedFetch("api/health/process-dataset", {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({ dataset: datasetId }),
@@ -68,15 +70,15 @@ export async function startHealthProcessing(datasetId, signal) {
 }
 
 export async function fetchHealthJob(jobId, signal) {
-  const response = await fetch(`api/job/${encodeURIComponent(jobId)}`, {
+  const response = await trackedFetch(`api/job/${encodeURIComponent(jobId)}`, {
     headers: { Accept: "application/json" }, signal,
-  });
+  }, "silent");
   if (!response.ok) throw new Error(`Health task unavailable (${response.status}).`);
   return response.json();
 }
 
 export async function cancelHealthJob(jobId, signal) {
-  const response = await fetch(`api/job/${encodeURIComponent(jobId)}`, {
+  const response = await trackedFetch(`api/job/${encodeURIComponent(jobId)}`, {
     method: "DELETE", headers: { Accept: "application/json" }, signal,
   });
   if (!response.ok && response.status !== 409) {

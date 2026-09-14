@@ -351,9 +351,29 @@
         <div id="view-logs" class="workspace-view workspace-placeholder" role="tabpanel"
           aria-labelledby="btn-logs" hidden>
           <h2>Logs</h2>
-          <div id="workspace-log-content" role="status" aria-live="polite">
-            <p>No browser activity logged yet.</p>
+          <div class="workspace-log-tabs" role="tablist" aria-label="Logs workspace">
+            <button id="btn-activity-log" class="active" type="button" role="tab"
+              aria-selected="true" aria-controls="workspace-log-panel">Logs</button>
+            <button id="btn-jobs" type="button" role="tab" aria-selected="false"
+              aria-controls="workspace-jobs-panel" tabindex="-1">Jobs</button>
           </div>
+          <section id="workspace-log-panel" role="tabpanel" aria-labelledby="btn-activity-log">
+            <div class="workspace-log-actions">
+              <button id="btn-clear-logs" type="button" title="Clear browser activity">Clear Logs</button>
+            </div>
+            <div id="workspace-log-content" role="status" aria-live="polite">
+              <p>No browser activity logged yet.</p>
+            </div>
+          </section>
+          <section id="workspace-jobs-panel" role="tabpanel" aria-labelledby="btn-jobs" hidden>
+            <div class="workspace-job-actions">
+              <button id="btn-refresh-jobs" type="button" title="Refresh pending jobs">Refresh</button>
+              <button id="btn-cancel-all-jobs" type="button" title="Cancel all pending jobs" disabled>Cancel All</button>
+            </div>
+            <div id="workspace-jobs-content" role="status" aria-live="polite">
+              <p>No pending jobs.</p>
+            </div>
+          </section>
         </div>
       </div>
     </main>

@@ -18,7 +18,7 @@ def test_cancel_all_active_jobs_for_current_fetch_session() -> None:
 
     assert "export async function cancelActiveFetchSession()" in text
     assert "const jobIds = Array.from(_activeFetchSession.activeJobIds);" in text
-    assert "jobIds.map((jobId) => fetch(`/api/job/${jobId}`, { method: \"DELETE\" }))" in text
+    assert "jobIds.map((jobId) => trackedFetch(`/api/job/${jobId}`, { method: \"DELETE\" }))" in text
 
 
 
@@ -44,10 +44,20 @@ def test_load_dataset_has_stale_session_guards() -> None:
     )
 
 
+def test_failed_repeat_sync_cannot_complete_against_prior_dataset() -> None:
+    dataset_text = _read_text(DATASET_JS)
+    ui_text = _read_text(UI_JS)
+
+    assert "return currentDataset;" in dataset_text
+    assert 'Failed: ${failedFiles.join(", ")}`;\n    if (progressEl) progressEl.value = 0;\n    return null;' in dataset_text
+    assert "loadedDataset = await loadDataset(selectedValue" in ui_text
+    assert "if (!loadedDataset || currentDataset !== loadedDataset)" in ui_text
+
+
 def test_completed_job_fetches_the_new_snapshot_without_redispatching() -> None:
     text = _read_text(DATASET_JS)
 
-    completed_fetch = text.find('finalResponse = await fetch(`/api/data/${filename}`')
+    completed_fetch = text.find('finalResponse = await trackedFetch(`/api/data/${filename}`')
     cache_header = text.find(
         '"Cache-Control": `max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`',
         completed_fetch,

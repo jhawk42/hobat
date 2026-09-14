@@ -1411,6 +1411,25 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   list-style: none;
 }
 
+.workspace-log-tabs,
+.workspace-log-actions,
+.workspace-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.workspace-log-tabs {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.workspace-log-tabs button.active {
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
 .workspace-log-list li {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
@@ -1425,12 +1444,39 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   font-size: 12px;
 }
 
-.workspace-log-list code {
+.workspace-log-list details {
   grid-column: 1 / -1;
   min-width: 0;
+}
+
+.workspace-log-list code {
+  display: block;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--muted);
+}
+
+.workspace-jobs-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.workspace-jobs-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+}
+
+.workspace-jobs-table th,
+.workspace-jobs-table td {
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.workspace-jobs-error {
+  color: var(--danger, #b00020);
 }
 
 /* Complex value tree inside detail lists */

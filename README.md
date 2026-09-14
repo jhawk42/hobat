@@ -19,6 +19,7 @@ run them deliberately or schedule them (cron) for quiet periods.
 - Progressive rendering from `.partial.json` checkpoints during long jobs.
 - Cache-only, Direct-Refresh and Auto browser modes.
 - Cancellable background collection jobs.
+- Bounded in-memory browser activity logs and a unified pending-jobs view.
 - Search and capability-driven node, link, and diagnostic filters.
 - Editable device labels stored in the configured data directory.
 
@@ -81,6 +82,12 @@ Insights processes the currently loaded cached snapshot with partial input
 allowed. It writes health history in `hobat_v1.db`, but does not collect source
 data, update snapshots, or probe devices.
 
+The **Logs** workspace contains local **Logs** and **Jobs** tabs. Logs retains
+the newest 200 sanitized browser activity entries in memory only. Jobs lists
+active dataset, health, and device-action work and supports individual or
+confirmed bulk cancellation. Neither browser activity nor transient job state
+is persisted in the data directory.
+
 Dashboard API calls are same-origin and do not receive CORS authorization
 headers. When using a reverse proxy, serve the dashboard and `/api/*` through
 the same browser origin (and the same path prefix when one is used). Changing
@@ -88,6 +95,12 @@ the bind host does not create an origin allowlist. This browser restriction is
 not authentication: direct clients such as `curl` or `wget` can call any API
 route they can reach, so use firewall or authenticated proxy controls when the
 API must be restricted.
+
+The unified pending-job listing and bulk cancellation API are server-wide
+administrative operations. Browser confirmation prevents accidental bulk
+cancellation but does not authorize it; deployments outside a trusted network
+must protect these routes with an authenticated reverse proxy or equivalent
+access control.
 
 Device Diagnostics are disabled by default because Ping and Reset Counters
 create active network traffic. Start the server with `--enable-device-actions`

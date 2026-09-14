@@ -103,7 +103,7 @@ class TestSameSourceSerializationShortCost(ConcurrencyTestBase):
 
     async def test_same_source_runs_sequentially(self) -> None:
         file_a = "td-otbr-cli-router-table.json"          # otbr-cli, cost=1
-        file_b = "td-otbr-cli-meshdiag-topology.json"     # otbr-cli, cost=5
+        file_b = "td-otbr-cli-thread-network-info.json"   # otbr-cli, cost=2
 
         running_at_same_time = False
         currently_running = 0
@@ -209,7 +209,7 @@ class TestPostLockFreshnessRecheck(ConcurrencyTestBase):
     """If the file becomes fresh while waiting on the source lock, skip regeneration."""
 
     async def test_second_request_skips_regen_if_file_fresh(self) -> None:
-        filename = "td-otbr-cli-meshdiag-topology.json"  # otbr-cli, cost=5
+        filename = "td-otbr-cli-thread-network-info.json"  # otbr-cli, cost=2
 
         call_count = 0
         first_running = asyncio.Event()

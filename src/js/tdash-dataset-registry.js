@@ -62,7 +62,7 @@ export const DATASET_REGISTRY = [
     topologyMode: "meshdiag-networkdiag",
     defaultView: "topology",
     defaultLinkFilter: "default_links",
-    estimateActionCostSecs: 6
+    estimateActionCostSecs: 30
   },
 
   // ── Single-file simple datasets (otbr-cli) ───

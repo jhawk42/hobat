@@ -85,6 +85,13 @@ import {
   supersedeViewStatus,
 } from "./tdash-view-status.js";
 import {
+  clearActivityEntries,
+  getActivityEntries,
+  recordActivity,
+  subscribeActivity,
+  trackedFetch,
+} from "./tdash-activity.js";
+import {
   exportHealthAssessment,
   cancelHealthJob,
   fetchHealthJob,
@@ -200,8 +207,16 @@ let _lastFetchStartedAt = null;
 let _currentSearchQuery = "";
 let sourceCapabilities = EMPTY_CAPABILITIES;
 let _fetchInProgress = false;
-const WORKSPACE_ACTIVITY_LIMIT = 100;
-const workspaceActivity = [];
+let logsSubview = "logs";
+const jobsViewState = {
+  jobs: [],
+  error: "",
+  loading: false,
+  requestVersion: 0,
+  abortController: null,
+  pollTimer: null,
+  cancellingJobIds: new Set(),
+};
 const healthInsightsState = {
   assessment: null,
   datasetId: null,
@@ -228,7 +243,8 @@ function renderWorkspaceLogs() {
   if (!contentEl) return;
   contentEl.replaceChildren();
 
-  if (workspaceActivity.length === 0) {
+  const entries = getActivityEntries();
+  if (entries.length === 0) {
     const emptyEl = document.createElement("p");
     emptyEl.textContent = "No browser activity logged yet.";
     contentEl.appendChild(emptyEl);
@@ -237,23 +253,35 @@ function renderWorkspaceLogs() {
 
   const listEl = document.createElement("ol");
   listEl.className = "workspace-log-list";
-  [...workspaceActivity].reverse().forEach(({ timestamp, type, message, metadata }) => {
+  [...entries].reverse().forEach((entry) => {
     const itemEl = document.createElement("li");
     const timeEl = document.createElement("time");
-    const date = new Date(timestamp);
+    const date = new Date(entry.timestamp);
     timeEl.dateTime = date.toISOString();
     timeEl.textContent = date.toLocaleTimeString();
 
-    const typeEl = document.createElement("strong");
-    typeEl.textContent = type;
+    const categoryEl = document.createElement("strong");
+    categoryEl.textContent = entry.category;
     const messageEl = document.createElement("span");
-    messageEl.textContent = message;
-    itemEl.append(timeEl, typeEl, messageEl);
+    const requestSummary = [
+      entry.method,
+      entry.route,
+      entry.status ? `HTTP ${entry.status}` : "",
+      Number.isFinite(entry.durationMs) ? `${entry.durationMs} ms` : "",
+    ].filter(Boolean).join(" · ");
+    messageEl.textContent = requestSummary
+      ? `${entry.message} · ${requestSummary}`
+      : entry.message;
+    itemEl.append(timeEl, categoryEl, messageEl);
 
-    if (metadata && Object.keys(metadata).length > 0) {
+    if (entry.metadata && Object.keys(entry.metadata).length > 0) {
+      const detailsEl = document.createElement("details");
+      const summaryEl = document.createElement("summary");
+      summaryEl.textContent = "Details";
       const metadataEl = document.createElement("code");
-      metadataEl.textContent = JSON.stringify(metadata);
-      itemEl.appendChild(metadataEl);
+      metadataEl.textContent = JSON.stringify(entry.metadata);
+      detailsEl.append(summaryEl, metadataEl);
+      itemEl.appendChild(detailsEl);
     }
     listEl.appendChild(itemEl);
   });
@@ -261,22 +289,209 @@ function renderWorkspaceLogs() {
 }
 
 function recordWorkspaceActivity(type, message, metadata = {}) {
-  workspaceActivity.push({ timestamp: Date.now(), type, message, metadata });
-  if (workspaceActivity.length > WORKSPACE_ACTIVITY_LIMIT) {
-    workspaceActivity.splice(0, workspaceActivity.length - WORKSPACE_ACTIVITY_LIMIT);
-  }
-  if (currentView === "logs") renderWorkspaceLogs();
+  recordActivity({
+    category: type.startsWith("job-") ? "job" : "dataset",
+    phase: type === "job-cancel-requested" ? "cancelled" : "changed",
+    message,
+    jobId: metadata.jobId,
+    metadata,
+  });
 }
 
 setDatasetActivityObserver(({ type, metadata }) => {
   const messages = {
-    "api-request": "API request started",
-    "api-response": "API response received",
-    "api-error": "API request failed",
     "job-status": "Asynchronous job status changed",
     "job-cancel-requested": "Asynchronous job cancellation requested",
   };
   recordWorkspaceActivity(type, messages[type] || "Dataset activity", metadata);
+});
+
+subscribeActivity(() => {
+  if (currentView === "logs" && logsSubview === "logs") renderWorkspaceLogs();
+});
+
+function jobsPanelIsVisible() {
+  return currentView === "logs" && logsSubview === "jobs";
+}
+
+function stopJobsPolling() {
+  jobsViewState.requestVersion += 1;
+  jobsViewState.abortController?.abort();
+  jobsViewState.abortController = null;
+  jobsViewState.loading = false;
+  if (jobsViewState.pollTimer !== null) {
+    clearTimeout(jobsViewState.pollTimer);
+    jobsViewState.pollTimer = null;
+  }
+}
+
+function renderWorkspaceJobs() {
+  const contentEl = document.getElementById("workspace-jobs-content");
+  const cancelAllEl = document.getElementById("btn-cancel-all-jobs");
+  if (!contentEl || !cancelAllEl) return;
+  contentEl.replaceChildren();
+  cancelAllEl.disabled = jobsViewState.jobs.length === 0 || jobsViewState.loading;
+
+  if (jobsViewState.error) {
+    const errorEl = document.createElement("p");
+    errorEl.className = "workspace-jobs-error";
+    errorEl.textContent = jobsViewState.error;
+    contentEl.appendChild(errorEl);
+    return;
+  }
+  if (jobsViewState.jobs.length === 0) {
+    const emptyEl = document.createElement("p");
+    emptyEl.textContent = jobsViewState.loading ? "Loading pending jobs..." : "No pending jobs.";
+    contentEl.appendChild(emptyEl);
+    return;
+  }
+
+  const wrapperEl = document.createElement("div");
+  wrapperEl.className = "table-wrap workspace-jobs-table-wrap";
+  const tableEl = document.createElement("table");
+  tableEl.className = "workspace-jobs-table";
+  tableEl.innerHTML = "<thead><tr><th>Type</th><th>Source</th><th>Task or action</th><th>Dataset/file</th><th>Status</th><th>Elapsed</th><th>Action</th></tr></thead>";
+  const bodyEl = document.createElement("tbody");
+  jobsViewState.jobs.forEach((job) => {
+    const rowEl = document.createElement("tr");
+    const values = [
+      job.kind,
+      job.source,
+      job.task || job.action || "",
+      job.dataset || job.filename || "",
+      job.status,
+      `${Math.max(0, Number(job.elapsedSeconds) || 0)}s`,
+    ];
+    values.forEach((value) => {
+      const cellEl = document.createElement("td");
+      cellEl.textContent = value;
+      rowEl.appendChild(cellEl);
+    });
+    const actionCellEl = document.createElement("td");
+    const cancelEl = document.createElement("button");
+    cancelEl.type = "button";
+    cancelEl.textContent = "Cancel";
+    cancelEl.title = `Cancel ${job.kind} job`;
+    cancelEl.disabled = !job.cancellable || jobsViewState.cancellingJobIds.has(job.jobId);
+    cancelEl.addEventListener("click", () => void cancelWorkspaceJob(job));
+    actionCellEl.appendChild(cancelEl);
+    rowEl.appendChild(actionCellEl);
+    bodyEl.appendChild(rowEl);
+  });
+  tableEl.appendChild(bodyEl);
+  wrapperEl.appendChild(tableEl);
+  contentEl.appendChild(wrapperEl);
+}
+
+function recordJobsSnapshotTransitions(previousJobs, currentJobs) {
+  const previousById = new Map(previousJobs.map((job) => [job.jobId, job.status]));
+  currentJobs.forEach((job) => {
+    if (previousById.get(job.jobId) === job.status) return;
+    recordActivity({
+      category: "job",
+      phase: "changed",
+      message: "Pending job status changed",
+      jobId: job.jobId,
+      metadata: { kind: job.kind, source: job.source, status: job.status },
+    });
+  });
+}
+
+async function refreshWorkspaceJobs() {
+  if (!jobsPanelIsVisible()) return;
+  if (jobsViewState.pollTimer !== null) {
+    clearTimeout(jobsViewState.pollTimer);
+    jobsViewState.pollTimer = null;
+  }
+  const requestVersion = ++jobsViewState.requestVersion;
+  jobsViewState.abortController?.abort();
+  const abortController = new AbortController();
+  jobsViewState.abortController = abortController;
+  jobsViewState.loading = true;
+  jobsViewState.error = "";
+  renderWorkspaceJobs();
+  try {
+    const response = await trackedFetch("/api/jobs", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: abortController.signal,
+    }, "silent");
+    const payload = await response.json().catch(() => ({}));
+    if (requestVersion !== jobsViewState.requestVersion || !jobsPanelIsVisible()) return;
+    if (!response.ok || !Array.isArray(payload.jobs)) {
+      throw new Error(`Pending jobs unavailable (HTTP ${response.status}).`);
+    }
+    recordJobsSnapshotTransitions(jobsViewState.jobs, payload.jobs);
+    jobsViewState.jobs = payload.jobs;
+    jobsViewState.cancellingJobIds = new Set(
+      [...jobsViewState.cancellingJobIds]
+        .filter((jobId) => payload.jobs.some((job) => job.jobId === jobId)),
+    );
+  } catch (error) {
+    if (error?.name !== "AbortError" && requestVersion === jobsViewState.requestVersion) {
+      jobsViewState.error = "Pending jobs are unavailable.";
+    }
+  } finally {
+    if (requestVersion === jobsViewState.requestVersion) {
+      jobsViewState.loading = false;
+      jobsViewState.abortController = null;
+      renderWorkspaceJobs();
+      if (jobsPanelIsVisible()) {
+        jobsViewState.pollTimer = setTimeout(() => void refreshWorkspaceJobs(), 2000);
+      }
+    }
+  }
+}
+
+async function cancelWorkspaceJob(job) {
+  if (!job?.cancellable || jobsViewState.cancellingJobIds.has(job.jobId)) return;
+  jobsViewState.cancellingJobIds.add(job.jobId);
+  renderWorkspaceJobs();
+  try {
+    const response = await trackedFetch(job.cancelUrl, { method: "DELETE", cache: "no-store" });
+    if (!response.ok && response.status !== 409) throw new Error("cancel failed");
+  } catch {
+    jobsViewState.error = "The job could not be cancelled.";
+  } finally {
+    jobsViewState.cancellingJobIds.delete(job.jobId);
+    if (jobsPanelIsVisible()) void refreshWorkspaceJobs();
+  }
+}
+
+function setLogsSubview(nextSubview) {
+  if (!new Set(["logs", "jobs"]).has(nextSubview)) return;
+  logsSubview = nextSubview;
+  [
+    ["logs", "btn-activity-log", "workspace-log-panel"],
+    ["jobs", "btn-jobs", "workspace-jobs-panel"],
+  ].forEach(([subview, buttonId, panelId]) => {
+    const active = subview === nextSubview;
+    const buttonEl = document.getElementById(buttonId);
+    const panelEl = document.getElementById(panelId);
+    if (panelEl) panelEl.hidden = !active;
+    if (buttonEl) {
+      buttonEl.classList.toggle("active", active);
+      buttonEl.setAttribute("aria-selected", String(active));
+      buttonEl.tabIndex = active ? 0 : -1;
+    }
+  });
+  stopJobsPolling();
+  if (nextSubview === "logs") renderWorkspaceLogs();
+  if (nextSubview === "jobs" && currentView === "logs") void refreshWorkspaceJobs();
+}
+
+document.getElementById("btn-activity-log")?.addEventListener("click", () => setLogsSubview("logs"));
+document.getElementById("btn-jobs")?.addEventListener("click", () => setLogsSubview("jobs"));
+document.getElementById("btn-clear-logs")?.addEventListener("click", clearActivityEntries);
+document.getElementById("btn-refresh-jobs")?.addEventListener("click", () => {
+  stopJobsPolling();
+  void refreshWorkspaceJobs();
+});
+document.getElementById("btn-cancel-all-jobs")?.addEventListener("click", async () => {
+  if (jobsViewState.jobs.length === 0 || !window.confirm("Cancel all pending jobs?")) return;
+  const response = await trackedFetch("/api/jobs", { method: "DELETE", cache: "no-store" });
+  if (!response.ok) jobsViewState.error = "Pending jobs could not be cancelled.";
+  if (jobsPanelIsVisible()) void refreshWorkspaceJobs();
 });
 
 export function getSearchQuery() {
@@ -571,6 +786,7 @@ function switchView(newView) {
   const nextView = WORKSPACE_VIEWS.find(({ view }) => view === newView);
   if (!nextView) return;
   if (newView === currentView) return;
+  if (currentView === "logs") stopJobsPolling();
   currentView = newView;
   updateHealthRefreshControls();
 
@@ -610,6 +826,7 @@ function switchView(newView) {
     renderCurrentView();
   }
   nextView.onActivate?.();
+  if (newView === "logs" && logsSubview === "jobs") void refreshWorkspaceJobs();
 }
 
 WORKSPACE_VIEWS.forEach(({ view, buttonId }, index) => {
@@ -838,7 +1055,7 @@ async function loadSelectedDeviceLabel() {
   updateDeviceSettingsControls();
 
   try {
-    const response = await fetch(`/api/device/${encodeURIComponent(extAddress)}`, {
+    const response = await trackedFetch(`/api/device/${encodeURIComponent(extAddress)}`, {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
@@ -887,7 +1104,7 @@ async function saveSelectedDeviceLabel() {
   updateDeviceSettingsControls();
 
   try {
-    const response = await fetch(`/api/device/${encodeURIComponent(extAddress)}`, {
+    const response = await trackedFetch(`/api/device/${encodeURIComponent(extAddress)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ deviceLabel }),
@@ -1074,7 +1291,7 @@ function selectDeviceDiagnosticsRecord(record) {
   clearDeviceDiagnosticsResult();
   renderDeviceDiagnosticsSelection();
   if (oldJobId) {
-    void fetch(`/api/device-action-jobs/${encodeURIComponent(oldJobId)}`, {
+    void trackedFetch(`/api/device-action-jobs/${encodeURIComponent(oldJobId)}`, {
       method: "DELETE",
       cache: "no-store",
     });
@@ -1157,14 +1374,25 @@ function renderDeviceDiagnosticResult(result, detail = "") {
 }
 
 async function pollDeviceActionJob(jobId, invocationVersion) {
+  let lastStatus = "running";
   while (invocationVersion === deviceDiagnosticsState.invocationVersion) {
-    const response = await fetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`, {
+    const response = await trackedFetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`, {
       headers: { Accept: "application/json" },
       cache: "no-store",
-    });
+    }, "silent");
     const payload = await response.json().catch(() => ({}));
     if (invocationVersion !== deviceDiagnosticsState.invocationVersion) return;
     if (!response.ok) throw new Error(payload.error || `Action polling failed (HTTP ${response.status}).`);
+    if (payload.status !== lastStatus) {
+      lastStatus = payload.status;
+      recordActivity({
+        category: "job",
+        phase: "changed",
+        message: "Device action job status changed",
+        jobId,
+        metadata: { status: payload.status, action: payload.action },
+      });
+    }
     if (["running", "cancelling"].includes(payload.status)) {
       const elapsed = deviceDiagnosticsState.startedAt
         ? formatDuration(Date.now() - deviceDiagnosticsState.startedAt)
@@ -1229,7 +1457,7 @@ async function invokeDeviceDiagnostic(action) {
     payload.confirmed = true;
   }
   try {
-    const response = await fetch("/api/device-actions", {
+    const response = await trackedFetch("/api/device-actions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       cache: "no-store",
@@ -1239,6 +1467,13 @@ async function invokeDeviceDiagnostic(action) {
     if (invocationVersion !== deviceDiagnosticsState.invocationVersion) return;
     if (!response.ok) throw new Error(responsePayload.error || `Action failed (HTTP ${response.status}).`);
     deviceDiagnosticsState.jobId = responsePayload.job_id;
+    recordActivity({
+      category: "job",
+      phase: "started",
+      message: "Device action job started",
+      jobId: responsePayload.job_id,
+      metadata: { action },
+    });
     await pollDeviceActionJob(responsePayload.job_id, invocationVersion);
   } catch (error) {
     if (invocationVersion !== deviceDiagnosticsState.invocationVersion) return;
@@ -1251,7 +1486,7 @@ async function invokeDeviceDiagnostic(action) {
 
 async function loadDeviceActionCapabilities() {
   try {
-    const response = await fetch("/api/device-actions", {
+    const response = await trackedFetch("/api/device-actions", {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
@@ -1302,7 +1537,7 @@ function initDeviceDiagnostics() {
     if (!jobId) return;
     setDeviceDiagnosticsStatus("Cancelling diagnostic action...");
     setDeviceDiagnosticsPending(true, true);
-    await fetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`, {
+    await trackedFetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`, {
       method: "DELETE",
       cache: "no-store",
     });
@@ -1845,11 +2080,29 @@ async function runHealthRefresh() {
     const started = await startHealthProcessing(datasetId);
     if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
     healthInsightsState.refreshJobId = started.job_id;
+    recordActivity({
+      category: "job",
+      phase: "started",
+      message: "Health processing job started",
+      jobId: started.job_id,
+      metadata: { dataset: datasetId, status: started.status },
+    });
     let status = started;
+    let lastStatus = started.status;
     while (["running", "cancelling"].includes(status.status)) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       status = await fetchHealthJob(started.job_id);
       if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
+      if (status.status !== lastStatus) {
+        lastStatus = status.status;
+        recordActivity({
+          category: "job",
+          phase: "changed",
+          message: "Health processing job status changed",
+          jobId: started.job_id,
+          metadata: { dataset: datasetId, status: status.status },
+        });
+      }
       healthInsightsState.refreshStatus = status.status;
       renderNetworkInsights();
       updateHealthRefreshControls();
@@ -2341,8 +2594,9 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     }
   }
 
+  let loadedDataset = null;
   try {
-    await loadDataset(selectedValue, {
+    loadedDataset = await loadDataset(selectedValue, {
       sessionId,
       forceFresh,
       onFileReady: _scheduleIncrementalRender,
@@ -2398,8 +2652,8 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     setFetchButtonsState(false);
   }
 
-  // loadDataset returns early without updating currentDataset when all files fail.
-  if (!currentDataset || currentDataset.entry?.value !== selectedValue) {
+  // Require the result produced by this attempt, not a prior snapshot of the same dataset.
+  if (!loadedDataset || currentDataset !== loadedDataset) {
     if (_incrementalRenderTimer !== null) { clearTimeout(_incrementalRenderTimer); _incrementalRenderTimer = null; }
     _setStatusSpans(_FETCH_STATUS_IDS, "—");
     _setStatusSpans(_DEVICE_STATUS_IDS, "—");

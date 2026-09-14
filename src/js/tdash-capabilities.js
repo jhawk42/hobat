@@ -1,3 +1,5 @@
+import { trackedFetch } from "./tdash-activity.js";
+
 const AVAILABLE_SOURCE_STATES = new Set(["available", "cached", "live"]);
 
 export const EMPTY_CAPABILITIES = Object.freeze({
@@ -6,7 +8,7 @@ export const EMPTY_CAPABILITIES = Object.freeze({
 });
 
 export async function loadSourceCapabilities() {
-  const response = await fetch("/api/capabilities");
+  const response = await trackedFetch("/api/capabilities");
   if (!response.ok) {
     throw new Error(`Capability request failed (${response.status})`);
   }

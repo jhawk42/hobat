@@ -16,6 +16,7 @@ import {
   mergeRowsByIdentity,
 } from "./tdash-merge.js";
 import { isPlaceholderOmrAddress } from "./tdash-device-fields.js";
+import { trackedFetch } from "./tdash-activity.js";
 
 // ── Module-level state ────────────────────────────────────────────────────────
 
@@ -331,7 +332,7 @@ export async function cancelActiveFetchSession() {
     _emitDatasetActivity("job-cancel-requested", { jobId });
   });
   const cancelRequests = await Promise.allSettled(
-    jobIds.map((jobId) => fetch(`/api/job/${jobId}`, { method: "DELETE" })),
+    jobIds.map((jobId) => trackedFetch(`/api/job/${jobId}`, { method: "DELETE" })),
   );
 
   cancelRequests.forEach((result, index) => {
@@ -416,8 +417,6 @@ function _extractResponseCacheMetadata(response) {
 // handles HTTP 202 by delegating to pollJobUntilDone.
 async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpointData = null) {
   _assertFetchSessionActive(sessionId);
-  const requestStartedAt = Date.now();
-  _emitDatasetActivity("api-request", { method: "GET", url });
   const signal =
     sessionId != null && _activeFetchSession?.id === sessionId
       ? _activeFetchSession.abortController.signal
@@ -425,14 +424,8 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpoin
 
   let response;
   try {
-    response = await fetch(url, { headers: requestHeaders, signal });
+    response = await trackedFetch(url, { headers: requestHeaders, signal });
   } catch (err) {
-    _emitDatasetActivity("api-error", {
-      method: "GET",
-      url,
-      durationMs: Date.now() - requestStartedAt,
-      error: err?.message || String(err),
-    });
     if (_isAbortError(err)) {
       throw new FetchCancelledError(`Fetch cancelled: ${url}`);
     }
@@ -440,12 +433,6 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpoin
   }
 
   _assertFetchSessionActive(sessionId);
-  _emitDatasetActivity("api-response", {
-    method: "GET",
-    url,
-    status: response.status,
-    durationMs: Date.now() - requestStartedAt,
-  });
   if (response.status === 202) {
     const job = await response.json();
     _emitDatasetActivity("job-status", {
@@ -521,7 +508,7 @@ async function pollJobUntilDone(
 
     let pollResponse;
     try {
-      pollResponse = await fetch(`/api/job/${jobId}`, { signal });
+      pollResponse = await trackedFetch(`/api/job/${jobId}`, { signal }, "silent");
     } catch (err) {
       if (_isAbortError(err)) {
         throw new FetchCancelledError(`Polling cancelled for ${filename}`);
@@ -556,18 +543,17 @@ async function pollJobUntilDone(
       try {
         let cpResponse;
         try {
-          cpResponse = await fetch(`/api/data/${pollBody.checkpoint_filename}`, { signal });
+          cpResponse = await trackedFetch(
+            `/api/data/${pollBody.checkpoint_filename}`,
+            { signal },
+            "silent",
+          );
         } catch (err) {
           if (_isAbortError(err)) throw new FetchCancelledError(`Polling cancelled for ${filename}`);
           throw err;
         }
         if (cpResponse.ok) {
           const cpData = await cpResponse.json();
-          _emitDatasetActivity("api-response", {
-            method: "GET",
-            url: `/api/data/${pollBody.checkpoint_filename}`,
-            status: cpResponse.status,
-          });
           lastCheckpointMs = pollBody.checkpoint_last_modified;
           lastCheckpointRenderMs = Date.now();
           onCheckpointData(cpData);
@@ -594,7 +580,7 @@ async function pollJobUntilDone(
       // Read the snapshot just written by the completed job without dispatching again.
       let finalResponse;
       try {
-        finalResponse = await fetch(`/api/data/${filename}`, {
+        finalResponse = await trackedFetch(`/api/data/${filename}`, {
           headers: {
             "Cache-Control": `max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`,
           },
@@ -618,11 +604,6 @@ async function pollJobUntilDone(
           `/api/data/${filename} dispatched another job after job done`,
         );
       }
-      _emitDatasetActivity("api-response", {
-        method: "GET",
-        url: `/api/data/${filename}`,
-        status: finalResponse.status,
-      });
       const data = await finalResponse.json();
       const { responseMaxAge, lastModifiedAt } = _extractResponseCacheMetadata(finalResponse);
       return { data, responseMaxAge, lastModifiedAt };
@@ -726,7 +707,7 @@ export async function loadDataset(entryValue, options = {}) {
   if (!entry) {
     document.getElementById("fetch-status-line-content").textContent =
       `Unknown dataset: ${entryValue}`;
-    return;
+    return null;
   }
 
   const statusEl = document.getElementById("fetch-status-line-content");
@@ -871,7 +852,7 @@ export async function loadDataset(entryValue, options = {}) {
   if (loadedFiles.length === 0) {
     statusEl.textContent = `Error: could not load any file for "${entry.label}". Failed: ${failedFiles.join(", ")}`;
     if (progressEl) progressEl.value = 0;
-    return;
+    return null;
   }
 
   const assembled = buildDatasetRows(entry, rawFiles);
@@ -919,4 +900,5 @@ export async function loadDataset(entryValue, options = {}) {
   if (failedFiles.length > 0) {
     console.warn("Some dataset files could not be loaded:", failedFiles);
   }
+  return currentDataset;
 }
