@@ -6,14 +6,51 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from td_const import (
     HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
     HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
     MDNS_SCOPES_BR_FILENAME,
     OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
 )
+import td_source_capabilities
 from td_source_capabilities import SourceCapabilityService
 import td_webserver
+
+
+@pytest.mark.parametrize("state", ("child", "router", "leader", "detached", "disabled"))
+def test_otbr_cli_probe_accepts_documented_states(monkeypatch: pytest.MonkeyPatch, state: str) -> None:
+    monkeypatch.setenv("TD_OTBR_CONTAINER_USE", "1")
+    monkeypatch.setattr(
+        td_source_capabilities.subprocess,
+        "run",
+        lambda *args, **kwargs: MagicMock(returncode=0, stdout=f"{state}\n".encode()),
+    )
+
+    assert asyncio.run(td_source_capabilities._probe_otbr_cli()) is None
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr", "expected"),
+    (
+        (1, b"child\n", b"", "command-failed"),
+        (1, b"", b"failed to connect to the docker API at unix:///var/run/docker.sock", "docker-unavailable"),
+        (0, b"", b"", "invalid-response"),
+        (0, b"Error\n", b"", "invalid-response"),
+    ),
+)
+def test_otbr_cli_probe_rejects_failed_or_invalid_responses(
+    monkeypatch: pytest.MonkeyPatch, returncode: int, stdout: bytes, stderr: bytes, expected: str
+) -> None:
+    monkeypatch.setenv("TD_OTBR_CONTAINER_USE", "1")
+    monkeypatch.setattr(
+        td_source_capabilities.subprocess,
+        "run",
+        lambda *args, **kwargs: MagicMock(returncode=returncode, stdout=stdout, stderr=stderr),
+    )
+
+    assert asyncio.run(td_source_capabilities._probe_otbr_cli()) == expected
 
 
 def test_cached_evidence_skips_that_source_probe_and_never_writes_files() -> None:

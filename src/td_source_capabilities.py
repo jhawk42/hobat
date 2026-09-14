@@ -61,6 +61,7 @@ from util_ot_ctl import (
 PROBE_TIMEOUT_SECONDS = 2.0
 PROBE_TTL_SECONDS = 60.0
 ALWAYS_AVAILABLE_SOURCES = frozenset({"mdns", "system"})
+OTBR_CLI_STATES = frozenset({"child", "router", "leader", "detached", "disabled"})
 
 SOURCE_FILES = {
     "otbr-cli": (
@@ -137,7 +138,7 @@ async def _probe_otbr_cli() -> str | None:
                 check=False,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 timeout=PROBE_TIMEOUT_SECONDS,
             ),
             timeout=PROBE_TIMEOUT_SECONDS + 0.25,
@@ -145,8 +146,12 @@ async def _probe_otbr_cli() -> str | None:
     except (OSError, subprocess.TimeoutExpired, asyncio.TimeoutError):
         return "unreachable"
     if completed.returncode != 0:
+        stderr = completed.stderr.decode(errors="replace").lower()
+        if use_container and ("docker api" in stderr or "docker.sock" in stderr):
+            return "docker-unavailable"
         return "command-failed"
-    return None if completed.stdout.strip() else "invalid-response"
+    state = completed.stdout.decode(errors="replace").strip().lower()
+    return None if state in OTBR_CLI_STATES else "invalid-response"
 
 
 async def _probe_otbr_restapi() -> str | None:
