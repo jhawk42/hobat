@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 from td_const import (
     HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
     HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
-    HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME,
     MDNS_SCOPES_BR_FILENAME,
     OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
 )
@@ -64,7 +63,6 @@ def test_native_ha_matter_ws_files_are_advertised() -> None:
 
     for filename in (
         HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
-        HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME,
         HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
     ):
         assert result["files"][filename] == {

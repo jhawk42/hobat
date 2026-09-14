@@ -106,22 +106,6 @@ function extractEnvelopeRows(payload, property) {
     : [];
 }
 
-function extractHaMatterWsThreadDiagnostics(payload) {
-  return extractEnvelopeRows(payload, "batches").flatMap((batch) => {
-    if (!isPlainObject(batch) || !Array.isArray(batch.nodes)) return [];
-    return batch.nodes.filter(isPlainObject).map((node) => ({
-      ...node,
-      extPanId: batch.extPanIdHex,
-      networkName: batch.networkName,
-      threadDiagnosticsSource: batch.source,
-      threadDiagnosticsCollectedAt: batch.collectedAt,
-      ...(batch.partialReason === undefined
-        ? {}
-        : { threadDiagnosticsPartialReason: batch.partialReason }),
-    }));
-  });
-}
-
 function extractHaMatterWsTopology(payload) {
   if (Array.isArray(payload)) return payload;
   return isPlainObject(payload) && Array.isArray(payload.topology)
@@ -170,7 +154,6 @@ export const ROW_EXTRACTORS = Object.freeze({
   "ha-matter-ws-diagnostics": (payload) => extractEnvelopeRows(payload, "diagnostics"),
   "ha-matter-ws-mesh-diagnostics": (payload) => extractEnvelopeRows(payload, "meshDiagnostics"),
   "ha-matter-ws-border-routers": (payload) => extractEnvelopeRows(payload, "borderRouters"),
-  "ha-matter-ws-thread-diagnostics": extractHaMatterWsThreadDiagnostics,
   "ha-matter-ws-network-topology": (payload) => extractEnvelopeRows(payload?.topology, "nodes"),
   "ha-matter-ws-topology": extractHaMatterWsTopology,
 });

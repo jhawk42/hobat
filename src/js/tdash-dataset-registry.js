@@ -567,21 +567,6 @@ export const DATASET_REGISTRY = [
   },
   {
     source: "ha-matter-ws",
-    value: "ha_matter_ws_thread_diagnostics",
-    label: "Diagnostics (thread, cached)",
-    group: "Diagnostics",
-    files: ["td-ha-matter-ws-thread-diagnostics.json"],
-    mergeStrategy: "none",
-    rowExtractor: "ha-matter-ws-thread-diagnostics",
-    adaptor: "ha-matter-ws-native-thread",
-    defaultPhysicsProfile: "mesh-balanced",
-    topologyMode: "ha-matter-ws-native-thread",
-    defaultView: "table",
-    defaultLinkFilter: "all_links",
-    estimateActionCostSecs: 10
-  },
-  {
-    source: "ha-matter-ws",
     value: "ha_matter_ws_dashboard_diagnostics",
     label: "Diagnostics",
     group: "Diagnostics",
@@ -652,7 +637,6 @@ export const DATASET_REGISTRY = [
       "td-ha-matter-ws-topology.json",
       "td-ha-matter-ws-dashboard.json",
       "td-ha-matter-ws-thread-border-routers.json",
-      "td-ha-matter-ws-thread-diagnostics.json",
       "td-ha-matter-ws-network-topology.json"
     ],
     mergeStrategy: "by-identity",
@@ -664,7 +648,6 @@ export const DATASET_REGISTRY = [
       "raw-array",
       "ha-matter-ws-topology",
       "ha-matter-ws-border-routers",
-      "ha-matter-ws-thread-diagnostics",
       "ha-matter-ws-network-topology"
     ],
     adaptor: "ha-matter-ws-merge-topology",
@@ -893,7 +876,6 @@ const KNOWN_DATASET_FILES = new Set([
   "td-ha-matter-ws-topology.json",
   "td-ha-matter-ws-dashboard.json",
   "td-ha-matter-ws-thread-border-routers.json",
-  "td-ha-matter-ws-thread-diagnostics.json",
   "td-ha-matter-ws-network-topology.json",
   "td-mdns-scopes-br.json",
   "td-mdns-scopes-hap.json",
@@ -925,7 +907,6 @@ const ROW_EXTRACTOR_IDS = new Set([
   "ha-matter-ws-diagnostics",
   "ha-matter-ws-mesh-diagnostics",
   "ha-matter-ws-border-routers",
-  "ha-matter-ws-thread-diagnostics",
   "ha-matter-ws-network-topology",
   "ha-matter-ws-topology",
 ]);

@@ -185,9 +185,6 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
             "td-ha-matter-ws-thread-border-routers.json": [
                 "ha-matter-ws", "thread", "border-routers"
             ],
-            "td-ha-matter-ws-thread-diagnostics.json": [
-                "ha-matter-ws", "thread", "diagnostics", "list"
-            ],
             "td-ha-matter-ws-network-topology.json": [
                 "ha-matter-ws", "network-topology"
             ],

@@ -2287,9 +2287,7 @@ function nativeTopologyNodePresentation(node) {
 
 export function adaptHaMatterWsNativeThread(fileMap, extractedRows) {
   const rows = asArray(extractedRows);
-  const sourceName = rows.some((row) => row?.threadDiagnosticsCollectedAt !== undefined)
-    ? 'ha-matter-ws-thread-diagnostics'
-    : 'ha-matter-ws-thread-border-routers';
+  const sourceName = 'ha-matter-ws-thread-border-routers';
   const model = createAdaptorModel([sourceName]);
 
   rows.forEach((row, index) => {

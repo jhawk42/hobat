@@ -53,7 +53,6 @@ from td_const import (
     HA_MATTER_WS_NETWORK_TOPOLOGY_FILENAME,
     HA_MATTER_WS_SERVER_INFO_FILENAME,
     HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME,
-    HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME,
     HA_MATTER_WS_TOPOLOGY_FILENAME,
     MDNS_SCOPES_BR_FILENAME,
     MDNS_SCOPES_HAP_FILENAME,
@@ -300,12 +299,6 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
         HA_MATTER_WS_THREAD_BORDER_ROUTERS_FILENAME: FileAction(
             max_age_s=default_max_age_s,
             action=["ha-matter-ws", "thread", "border-routers"],
-            action_cost_s=10,
-            force_async=True,
-        ),
-        HA_MATTER_WS_THREAD_DIAGNOSTICS_FILENAME: FileAction(
-            max_age_s=default_max_age_s,
-            action=["ha-matter-ws", "thread", "diagnostics", "list"],
             action_cost_s=10,
             force_async=True,
         ),

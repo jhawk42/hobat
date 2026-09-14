@@ -37,7 +37,6 @@ function payloadForExtractor(extractor, index) {
   if (extractor === "ha-matter-ws-diagnostics") return { diagnostics: rows };
   if (extractor === "ha-matter-ws-mesh-diagnostics") return { meshDiagnostics: rows };
   if (extractor === "ha-matter-ws-border-routers") return { borderRouters: rows };
-  if (extractor === "ha-matter-ws-thread-diagnostics") return { batches: [{ nodes: rows }] };
   if (extractor === "ha-matter-ws-network-topology") return { topology: { nodes: rows } };
   return rows;
 }
@@ -183,29 +182,6 @@ assert.deepEqual(
   ROW_EXTRACTORS["ha-matter-ws-border-routers"](nativeBorderRouterWrapper),
   nativeBorderRouterWrapper.borderRouters,
 );
-const nativeThreadDiagnosticsWrapper = {
-  batches: [
-    {
-      extPanIdHex: "AABBCCDDEEFF0011",
-      networkName: "Test Thread",
-      source: "credentials",
-      collectedAt: 1234,
-      nodes: [{ extMacAddress: "0011223344556677", channelPages: [15] }],
-    },
-    { extPanIdHex: "0011223344556677", nodes: [], partialReason: "no_credentials" },
-  ],
-};
-assert.deepEqual(
-  ROW_EXTRACTORS["ha-matter-ws-thread-diagnostics"](nativeThreadDiagnosticsWrapper),
-  [{
-    extMacAddress: "0011223344556677",
-    channelPages: [15],
-    extPanId: "AABBCCDDEEFF0011",
-    networkName: "Test Thread",
-    threadDiagnosticsSource: "credentials",
-    threadDiagnosticsCollectedAt: 1234,
-  }],
-);
 const nativeTopologyWrapper = { topology: { nodes: [{ id: "native-a" }], connections: [] } };
 assert.deepEqual(
   ROW_EXTRACTORS["ha-matter-ws-network-topology"](nativeTopologyWrapper),
@@ -218,7 +194,6 @@ assert.deepEqual(
   [
     "ha_matter_ws_devices_fetch_all",
     "ha_matter_ws_thread_border_routers",
-    "ha_matter_ws_thread_diagnostics",
     "ha_matter_ws_dashboard_diagnostics",
     "ha_matter_ws_dashboard_mesh_diagnostics",
     "ha_matter_ws_topology",
