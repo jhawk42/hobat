@@ -41,6 +41,7 @@ export const DATASOURCE_REGISTRY = [
 //                       Precedence: manual user selection > dataset defaultPhysicsProfile
 //   defaultLinkFilter — value pre-selected in #link-filter when this dataset loads
 //   rowExtractor     — named payload extractor used for non-merged table rows
+//   mergeRowExtractors — optional per-file extractors used before merging
 //   adaptor          — named topology adaptor
 //   defaultPhysicsProfile — resolved automatic physics profile
 
@@ -552,7 +553,7 @@ export const DATASET_REGISTRY = [
   {
     source: "ha-matter-ws",
     value: "ha_matter_ws_thread_border_routers",
-    label: "Thread Border Routers",
+    label: "Border Routers (thread)",
     group: "Inventory",
     files: ["td-ha-matter-ws-thread-border-routers.json"],
     mergeStrategy: "none",
@@ -567,7 +568,7 @@ export const DATASET_REGISTRY = [
   {
     source: "ha-matter-ws",
     value: "ha_matter_ws_thread_diagnostics",
-    label: "Thread Diagnostics (cached)",
+    label: "Diagnostics (thread, cached)",
     group: "Diagnostics",
     files: ["td-ha-matter-ws-thread-diagnostics.json"],
     mergeStrategy: "none",
@@ -612,7 +613,7 @@ export const DATASET_REGISTRY = [
   {
     source: "ha-matter-ws",
     value: "ha_matter_ws_topology",
-    label: "Topology",
+    label: "Topology (matter)",
     group: "Topology",
     files: ["td-ha-matter-ws-topology.json"],
     mergeStrategy: "none",
@@ -627,7 +628,7 @@ export const DATASET_REGISTRY = [
   {
     source: "ha-matter-ws",
     value: "ha_matter_ws_network_topology",
-    label: "Thread Network Topology",
+    label: "Topology (thread)",
     group: "Topology",
     files: ["td-ha-matter-ws-network-topology.json"],
     mergeStrategy: "none",
@@ -638,6 +639,40 @@ export const DATASET_REGISTRY = [
     defaultView: "topology",
     defaultLinkFilter: "all_links",
     estimateActionCostSecs: 10
+  },
+  {
+    source: "ha-matter-ws",
+    value: "ha_matter_ws_merge_topology",
+    label: "Topology Merge",
+    group: "Topology",
+    files: [
+      "td-ha-matter-ws-devices-fetch-all.json",
+      "td-ha-matter-ws-diagnostics-fetch-all.json",
+      "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
+      "td-ha-matter-ws-topology.json",
+      "td-ha-matter-ws-dashboard.json",
+      "td-ha-matter-ws-thread-border-routers.json",
+      "td-ha-matter-ws-thread-diagnostics.json",
+      "td-ha-matter-ws-network-topology.json"
+    ],
+    mergeStrategy: "by-identity",
+    rowExtractor: "raw-array",
+    mergeRowExtractors: [
+      "raw-array",
+      "raw-array",
+      "raw-array",
+      "raw-array",
+      "ha-matter-ws-topology",
+      "ha-matter-ws-border-routers",
+      "ha-matter-ws-thread-diagnostics",
+      "ha-matter-ws-network-topology"
+    ],
+    adaptor: "ha-matter-ws-merge-topology",
+    defaultPhysicsProfile: "mesh-balanced",
+    topologyMode: "ha-matter-ws",
+    defaultView: "topology",
+    defaultLinkFilter: "all_links",
+    estimateActionCostSecs: 60
   },
 
   // ── Single-file simple dataset ───
@@ -892,6 +927,7 @@ const ROW_EXTRACTOR_IDS = new Set([
   "ha-matter-ws-border-routers",
   "ha-matter-ws-thread-diagnostics",
   "ha-matter-ws-network-topology",
+  "ha-matter-ws-topology",
 ]);
 const ADAPTOR_IDS = new Set([
   "meshdiag-networkdiag",
@@ -903,6 +939,7 @@ const ADAPTOR_IDS = new Set([
   "ha-matter-ws",
   "ha-matter-ws-native-thread",
   "ha-matter-ws-network-topology",
+  "ha-matter-ws-merge-topology",
   "router-table",
   "raw-array",
 ]);
@@ -964,6 +1001,16 @@ export function validateDatasetRegistry(registry) {
     }
     if (!ROW_EXTRACTOR_IDS.has(entry.rowExtractor)) {
       throw new Error(`Dataset ${label} has unknown row extractor: ${entry.rowExtractor}`);
+    }
+    if (entry.mergeRowExtractors !== undefined) {
+      if (!Array.isArray(entry.mergeRowExtractors) || entry.mergeRowExtractors.length !== entry.files.length) {
+        throw new Error(`Dataset ${label} must define one merge row extractor per file.`);
+      }
+      entry.mergeRowExtractors.forEach((extractor) => {
+        if (!ROW_EXTRACTOR_IDS.has(extractor)) {
+          throw new Error(`Dataset ${label} has unknown merge row extractor: ${extractor}`);
+        }
+      });
     }
     if (!ADAPTOR_IDS.has(entry.adaptor)) {
       throw new Error(`Dataset ${label} has unknown adaptor: ${entry.adaptor}`);

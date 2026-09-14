@@ -223,7 +223,23 @@ assert.deepEqual(
     "ha_matter_ws_dashboard_mesh_diagnostics",
     "ha_matter_ws_topology",
     "ha_matter_ws_network_topology",
+    "ha_matter_ws_merge_topology",
   ],
+);
+const haMatterMergeEntry = DATASET_REGISTRY.find(
+  (dataset) => dataset.value === "ha_matter_ws_merge_topology",
+);
+const haMatterMergeRows = buildDatasetRows(
+  haMatterMergeEntry,
+  haMatterMergeEntry.files.map((file) => JSON.parse(fs.readFileSync(`data/${file}`, "utf8"))),
+).rows;
+assert.ok(haMatterMergeRows.every((row) => row._row_key === undefined));
+assert.equal(
+  haMatterMergeRows.reduce(
+    (count, row) => count + (Array.isArray(row.route?.routeData) ? row.route.routeData.length : 0),
+    0,
+  ),
+  29,
 );
 assert.deepEqual(
   DATASET_REGISTRY

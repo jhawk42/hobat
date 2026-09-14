@@ -122,6 +122,13 @@ function extractHaMatterWsThreadDiagnostics(payload) {
   });
 }
 
+function extractHaMatterWsTopology(payload) {
+  if (Array.isArray(payload)) return payload;
+  return isPlainObject(payload) && Array.isArray(payload.topology)
+    ? payload.topology
+    : [];
+}
+
 function addMatterProjection(row) {
   if (!isPlainObject(row)) return row;
   const matter = isPlainObject(row.matter) ? { ...row.matter } : {};
@@ -165,6 +172,7 @@ export const ROW_EXTRACTORS = Object.freeze({
   "ha-matter-ws-border-routers": (payload) => extractEnvelopeRows(payload, "borderRouters"),
   "ha-matter-ws-thread-diagnostics": extractHaMatterWsThreadDiagnostics,
   "ha-matter-ws-network-topology": (payload) => extractEnvelopeRows(payload?.topology, "nodes"),
+  "ha-matter-ws-topology": extractHaMatterWsTopology,
 });
 
 export const MERGE_STRATEGY_HANDLERS = Object.freeze({
@@ -195,9 +203,15 @@ export function buildDatasetRows(entry, rawFiles, options = {}) {
     if (!extractor) throw new Error(`Unknown row extractor: ${entry.rowExtractor}`);
     groups = [normalizeRows(extractor(rawFiles[firstIndex]), entry.files[firstIndex])];
   } else {
-    groups = loadedFileIndexes.map((index) =>
-      normalizeRows(rawFiles[index], entry.files[index]),
-    );
+    groups = loadedFileIndexes.map((index) => {
+      const extractorId = entry.mergeRowExtractors?.[index];
+      const extractor = extractorId ? ROW_EXTRACTORS[extractorId] : null;
+      if (extractorId && !extractor) throw new Error(`Unknown merge row extractor: ${extractorId}`);
+      return normalizeRows(
+        extractor ? extractor(rawFiles[index]) : rawFiles[index],
+        entry.files[index],
+      );
+    });
   }
 
   const rows = strategyHandler(groups, options)

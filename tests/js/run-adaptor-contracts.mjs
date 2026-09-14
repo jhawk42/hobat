@@ -402,7 +402,7 @@ const nativeTopologyPayload = {
   topology: {
     collected_at: 1767888000000,
     nodes: [
-      { id: "1", kind: "matter", network_type: "thread", role: "leader", rloc16: 1024 },
+      { id: "1", ext_address: "aabbccddeeff0011", kind: "matter", network_type: "thread", role: "leader", rloc16: 1024 },
       { id: "br_AABB", kind: "border_router", network_type: "thread", role: "router" },
       { id: "ap_1122", kind: "wifi_ap", network_type: "wifi", role: "ap" },
     ],
@@ -448,6 +448,27 @@ assert.deepEqual(nativeTopology.edgeData[0].nativeObservation, {
   strength: "medium",
   lqi: 2,
   rssi: -70,
+});
+
+const mergedHaMatterTopology = run(
+  "ha-matter-ws-merge-topology",
+  ["td-ha-matter-ws-network-topology.json"],
+  [nativeTopologyPayload],
+  [{
+    topologyId: "matter-a",
+    extAddress: "aabbccddeeff0011",
+    role: "router",
+  }],
+);
+assertResult(mergedHaMatterTopology, {
+  nodeIds: ["matter-a", "br_AABB", "ap_1122"],
+  edges: [
+    ["matter-a", "br_AABB", ["otbr_route"]],
+    ["br_AABB", "matter-a", ["otbr_route"]],
+    ["matter-a", "ap_1122", ["router_neighbor"]],
+  ],
+  sourceNames: ["ha-matter-ws", "ha-matter-ws-network-topology"],
+  hasChildIndex: true,
 });
 
 const devicesEnvelope = { data: [

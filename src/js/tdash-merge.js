@@ -459,7 +459,17 @@ function mergeRouteObjects(existing, incoming, context) {
   const existingSequence = Number(existing.idSequence ?? existing.id_sequence);
   const incomingSequence = Number(incoming.idSequence ?? incoming.id_sequence);
   if (Number.isFinite(existingSequence) && Number.isFinite(incomingSequence)) {
-    if (isSequenceNewer(incomingSequence, existingSequence)) return { ...incoming };
+    if (isSequenceNewer(incomingSequence, existingSequence)) {
+      const replacement = { ...incoming };
+      if (
+        Array.isArray(existing.routeData)
+        && existing.routeData.length > 0
+        && (!Array.isArray(incoming.routeData) || incoming.routeData.length === 0)
+      ) {
+        replacement.routeData = [...existing.routeData];
+      }
+      return replacement;
+    }
     if (isSequenceNewer(existingSequence, incomingSequence)) return { ...existing };
   }
   const merged = { ...existing };
@@ -660,16 +670,26 @@ export function deepMergeObjects(target, source, pathPrefix, conflictTarget, ctx
  */
 export function mergeRouteData(ownerRloc16, baseRoutes, incomingRoutes, ctx = {}) {
   const index = new Map();
+  const routeKey = (route) => {
+    const routeId = route.id ?? route.routeId;
+    if (routeId !== undefined) return `id:${routeId}`;
+    const sourceId = canonicalIdText(route.sourceId);
+    const targetId = canonicalIdText(route.targetId);
+    if (sourceId && targetId) return `endpoints:${sourceId}|${targetId}`;
+    const extAddress = getCanonicalExtaddr(route);
+    const rloc16 = getCanonicalRloc16(route);
+    return extAddress ? `extaddr:${extAddress}` : (rloc16 ? `rloc16:${rloc16}` : '');
+  };
   baseRoutes.forEach((route) => {
     if (!isPlainObject(route)) return;
-    const routeId = route.id ?? route.routeId;
-    if (routeId !== undefined) index.set(String(routeId), route);
+    const key = routeKey(route);
+    if (key) index.set(key, route);
   });
 
   incomingRoutes.forEach((route) => {
     if (!isPlainObject(route)) return;
-    const routeId = route.id ?? route.routeId;
-    if (routeId === undefined) return;
+    const key = routeKey(route);
+    if (!key) return;
 
     // Partition gate: skip when partition IDs are known and differ
     if (ctx.partitionId !== undefined) {
@@ -677,7 +697,6 @@ export function mergeRouteData(ownerRloc16, baseRoutes, incomingRoutes, ctx = {}
       if (routePartition !== undefined && routePartition !== ctx.partitionId) return;
     }
 
-    const key = String(routeId);
     const existing = index.get(key);
     if (!existing) {
       index.set(key, { ...route });
