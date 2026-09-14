@@ -21,7 +21,7 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "isRouter", "aliases": ("is_router",), "transform": "boolean"},
     {"path": "isPrimaryBBR", "aliases": (), "transform": "strictBoolean"},
     {"path": "leaderEvidence", "aliases": (), "transform": "identity"},
-    {"path": "primaryBBREvidence", "aliases": (), "transform": "identity"},
+    {"path": "primaryBBREvidence", "aliases": ("primaryBbrEvidence",), "transform": "identity"},
     {"path": "mleCounters.partIdChangesCount", "aliases": ("mleCounters.partitionIdChanges",), "transform": "number"},
     {"path": "mleCounters.newParentCount", "aliases": ("mleCounters.parentChanges",), "transform": "number"},
     {"path": "mleCounters.betterPartIdAttachAttemptsCount", "aliases": ("mleCounters.betterPartitionAttachAttempts",), "transform": "number"},

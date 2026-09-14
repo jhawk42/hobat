@@ -574,4 +574,4 @@ const extracted = extractOtbrRestApiSources(new Map(restFiles.map((name, index) 
 assert.equal(extracted.diagnostics[0].shared, "mesh");
 assert.equal(extracted.diagnostics[0].basicOnly, true);
 
-process.stdout.write(`${JSON.stringify({ adaptorCount: 11 })}\n`);
+process.stdout.write(`${JSON.stringify({ adaptorCount: 12 })}\n`);

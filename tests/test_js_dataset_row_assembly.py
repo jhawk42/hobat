@@ -27,4 +27,4 @@ def test_dataset_row_assembly_contract() -> None:
     summary = json.loads(completed.stdout)
     assert summary["datasetCount"] > 0
     assert summary["extractorCount"] == 10
-    assert summary["adaptorCount"] == 11
+    assert summary["adaptorCount"] == 12

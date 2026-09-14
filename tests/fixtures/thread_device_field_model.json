@@ -22,7 +22,7 @@
     {"path":"isRouter","category":"device","jsonTypes":["boolean"],"sources":["rest","cli"],"aliases":["is_router"],"transform":"boolean","mergePolicy":"scalar"},
     {"path":"isPrimaryBBR","category":"device","jsonTypes":["boolean"],"sources":["rest","cli"],"aliases":[],"transform":"strictBoolean","mergePolicy":"scalar"},
     {"path":"leaderEvidence","category":"metadata","jsonTypes":["string"],"sources":["rest","cli"],"aliases":[],"transform":"identity","mergePolicy":"scalar"},
-    {"path":"primaryBBREvidence","category":"metadata","jsonTypes":["string"],"sources":["rest","cli"],"aliases":[],"transform":"identity","mergePolicy":"scalar"},
+    {"path":"primaryBBREvidence","category":"metadata","jsonTypes":["string"],"sources":["rest","cli"],"aliases":["primaryBbrEvidence"],"transform":"identity","mergePolicy":"scalar"},
     {"path":"mleCounters.partIdChangesCount","category":"device","jsonTypes":["number"],"sources":["rest","cli"],"aliases":["mleCounters.partitionIdChanges"],"transform":"number","mergePolicy":"scalar"},
     {"path":"mleCounters.newParentCount","category":"device","jsonTypes":["number"],"sources":["rest","cli"],"aliases":["mleCounters.parentChanges"],"transform":"number","mergePolicy":"scalar"},
     {"path":"mleCounters.betterPartIdAttachAttemptsCount","category":"device","jsonTypes":["number"],"sources":["rest","cli"],"aliases":["mleCounters.betterPartitionAttachAttempts"],"transform":"number","mergePolicy":"scalar"},
