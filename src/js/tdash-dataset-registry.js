@@ -584,7 +584,7 @@ export const DATASET_REGISTRY = [
     source: "ha-matter-ws",
     value: "ha_matter_ws_dashboard_mesh_diagnostics",
     label: "Mesh Diagnostics",
-    group: "Topology",
+    group: "Diagnostics",
     files: ["td-ha-matter-ws-dashboard.json"],
     mergeStrategy: "none",
     rowExtractor: "ha-matter-ws-mesh-diagnostics",
@@ -628,7 +628,7 @@ export const DATASET_REGISTRY = [
   {
     source: "ha-matter-ws",
     value: "ha_matter_ws_merge_topology",
-    label: "Topology Merge",
+    label: "Topology (thread, matter)",
     group: "Topology",
     files: [
       "td-ha-matter-ws-devices-fetch-all.json",
