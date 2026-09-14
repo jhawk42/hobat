@@ -236,7 +236,7 @@ def test_jobs_workspace_poll_delay_scales_with_longest_running_job() -> None:
     poll_source = ui_text[poll_start:poll_end]
 
     assert "JOBS_POLL_MIN_DELAY_MS = 2000" in ui_text
-    assert "JOBS_POLL_EMPTY_DELAY_MS = 5000" in ui_text
+    assert "JOBS_POLL_EMPTY_DELAY_MS = 10000" in ui_text
     assert "JOBS_POLL_MAX_DELAY_MS = 60_000" in ui_text
     assert "if (jobs.length === 0) return JOBS_POLL_EMPTY_DELAY_MS;" in poll_source
     assert "Math.max(0, Number(job.elapsedSeconds) || 0)" in poll_source

@@ -1474,7 +1474,7 @@ async function invokeDeviceDiagnostic(action) {
     payload.confirmed = true;
   }
   try {
-    const response = await trackedFetch("/api/device-actions", {
+    const response = await fetch("/api/device-actions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       cache: "no-store",
@@ -1503,7 +1503,7 @@ async function invokeDeviceDiagnostic(action) {
 
 async function loadDeviceActionCapabilities() {
   try {
-    const response = await trackedFetch("/api/device-actions", {
+    const response = await fetch("/api/device-actions", {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
@@ -1554,7 +1554,7 @@ function initDeviceDiagnostics() {
     if (!jobId) return;
     setDeviceDiagnosticsStatus("Cancelling diagnostic action...");
     setDeviceDiagnosticsPending(true, true);
-    await trackedFetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`, {
+    await fetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`, {
       method: "DELETE",
       cache: "no-store",
     });
