@@ -229,6 +229,21 @@ def test_logs_workspace_exposes_activity_and_jobs_tabs() -> None:
     assert 'window.confirm("Cancel all pending jobs?")' in ui_text
 
 
+def test_jobs_workspace_poll_delay_scales_with_longest_running_job() -> None:
+    ui_text = _read_text(UI_JS)
+    poll_start = ui_text.index("function getJobsPollDelayMs")
+    poll_end = ui_text.index("async function refreshWorkspaceJobs", poll_start)
+    poll_source = ui_text[poll_start:poll_end]
+
+    assert "JOBS_POLL_MIN_DELAY_MS = 2000" in ui_text
+    assert "JOBS_POLL_EMPTY_DELAY_MS = 5000" in ui_text
+    assert "JOBS_POLL_MAX_DELAY_MS = 60_000" in ui_text
+    assert "if (jobs.length === 0) return JOBS_POLL_EMPTY_DELAY_MS;" in poll_source
+    assert "Math.max(0, Number(job.elapsedSeconds) || 0)" in poll_source
+    assert "maxElapsedSeconds * 500" in poll_source
+    assert "JOBS_POLL_MAX_DELAY_MS" in poll_source
+
+
 def test_details_collapse_targets_explicit_details_owner_and_notifies_renderer() -> None:
     utils_text = _read_text(UTILS_JS)
     toggle_start = utils_text.index("export function initDetailPanelToggles")

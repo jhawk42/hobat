@@ -208,6 +208,9 @@ let _currentSearchQuery = "";
 let sourceCapabilities = EMPTY_CAPABILITIES;
 let _fetchInProgress = false;
 let logsSubview = "logs";
+const JOBS_POLL_MIN_DELAY_MS = 2000;
+const JOBS_POLL_EMPTY_DELAY_MS = 10000;
+const JOBS_POLL_MAX_DELAY_MS = 60_000;
 const jobsViewState = {
   jobs: [],
   error: "",
@@ -397,6 +400,18 @@ function recordJobsSnapshotTransitions(previousJobs, currentJobs) {
   });
 }
 
+function getJobsPollDelayMs(jobs) {
+  if (jobs.length === 0) return JOBS_POLL_EMPTY_DELAY_MS;
+  const maxElapsedSeconds = Math.max(
+    0,
+    ...jobs.map((job) => Math.max(0, Number(job.elapsedSeconds) || 0)),
+  );
+  return Math.min(
+    JOBS_POLL_MAX_DELAY_MS,
+    Math.max(JOBS_POLL_MIN_DELAY_MS, maxElapsedSeconds * 500),
+  );
+}
+
 async function refreshWorkspaceJobs() {
   if (!jobsPanelIsVisible()) return;
   if (jobsViewState.pollTimer !== null) {
@@ -409,6 +424,7 @@ async function refreshWorkspaceJobs() {
   jobsViewState.abortController = abortController;
   jobsViewState.loading = true;
   jobsViewState.error = "";
+  let pollDelayMs = JOBS_POLL_MIN_DELAY_MS;
   renderWorkspaceJobs();
   try {
     const response = await trackedFetch("/api/jobs", {
@@ -423,6 +439,7 @@ async function refreshWorkspaceJobs() {
     }
     recordJobsSnapshotTransitions(jobsViewState.jobs, payload.jobs);
     jobsViewState.jobs = payload.jobs;
+    pollDelayMs = getJobsPollDelayMs(payload.jobs);
     jobsViewState.cancellingJobIds = new Set(
       [...jobsViewState.cancellingJobIds]
         .filter((jobId) => payload.jobs.some((job) => job.jobId === jobId)),
@@ -437,7 +454,7 @@ async function refreshWorkspaceJobs() {
       jobsViewState.abortController = null;
       renderWorkspaceJobs();
       if (jobsPanelIsVisible()) {
-        jobsViewState.pollTimer = setTimeout(() => void refreshWorkspaceJobs(), 2000);
+        jobsViewState.pollTimer = setTimeout(() => void refreshWorkspaceJobs(), pollDelayMs);
       }
     }
   }
