@@ -46,6 +46,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 .page {
   padding: 12px 16px;
   max-width: 100%;
@@ -73,7 +85,7 @@ body {
 #panel-navigation { grid-area: navigation; }
 #panel-functions { grid-area: functions; }
 #panel-workspace { grid-area: workspace; }
-#panel-device-details { grid-area: details; }
+#panel-context-details { grid-area: details; }
 
 #panel-navigation {
   padding: 6px;
@@ -1107,13 +1119,53 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   margin-left: auto;
 }
 
-#panel-device-details.details-panel-collapsed {
+#panel-context-details.details-panel-collapsed {
   display: none;
 }
 
-#panel-device-details.details-panel-collapsed #device-details {
+#panel-context-details.details-panel-collapsed #device-details {
   display: none;
 }
+
+.health-finding-details-panel {
+  height: 100%;
+  min-width: 0;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.health-finding-details-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+
+.health-finding-details-header h2 { margin: 0 0 8px; font-size: 17px; }
+.health-finding-detail-summary { margin: 8px 0; }
+.health-finding-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.health-finding-detail-meta span {
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.health-finding-detail-section { margin-top: 14px; }
+.health-finding-detail-section h3 { margin: 0 0 6px; font-size: 14px; }
+.health-affected-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.health-affected-item { padding-top: 6px; border-top: 1px solid var(--line); }
+.health-affected-select { width: 100%; text-align: left; }
+.health-affected-evidence { margin-top: 8px; }
 
 .workspace-navigation-tabs {
   display: flex;
@@ -1322,6 +1374,90 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   color: var(--muted);
 }
 
+.health-population-summary {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.health-finding-table-wrap {
+  container-type: inline-size;
+  max-height: min(58vh, 680px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+#health-finding-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+#health-finding-table th,
+#health-finding-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+#health-finding-table thead {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: var(--surface-raised);
+}
+
+.health-col-status { width: 82px; }
+.health-col-affected { width: 100px; }
+.health-col-secondary { display: none; }
+.health-sort-button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+}
+.health-sort-icon { color: var(--muted); font-size: 11px; }
+.health-finding-select {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+}
+.health-finding-row-summary {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.health-summary-row.is-selected { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.health-summary-row { cursor: pointer; }
+.health-summary-row.state-poor { box-shadow: inset 3px 0 #b42318; }
+.health-summary-row.state-moderate { box-shadow: inset 3px 0 #a15c00; }
+.health-summary-row.state-strong { box-shadow: inset 3px 0 #067647; }
+.health-summary-row.state-unknown { box-shadow: inset 3px 0 var(--muted); }
+.health-table-footer { margin: 8px 0 0; color: var(--muted); }
+
+@container (min-width: 650px) {
+  .health-col-secondary {
+    display: table-cell;
+    width: 108px;
+  }
+}
+
+@media (max-width: 1123px) {
+  .health-col-secondary { display: none; }
+}
+
 .health-finding-details { margin-top: 6px; }
 .health-finding-details summary { cursor: pointer; color: var(--muted); }
 .health-finding-details ol { display: grid; gap: 5px; margin: 7px 0 0; padding-left: 22px; }
@@ -1338,6 +1474,12 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   .health-coverage-pillars { grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr)); }
   .health-finding-evidence { grid-template-columns: 1fr; }
   .health-finding-evidence dd { margin-bottom: 5px; }
+  .health-col-secondary { display: none; }
+  .health-col-status { width: 82px; }
+  .health-col-affected { width: 88px; }
+  #health-finding-table th,
+  #health-finding-table td { padding: 7px 6px; }
+  .health-finding-row-summary { display: none; }
 }
 
 .network-insights-coverage,
@@ -2101,7 +2243,7 @@ td:last-child {
     overflow: auto;
   }
 
-  #panel-device-details #device-details {
+  #panel-context-details #device-details {
     max-height: 72vh;
   }
 
@@ -2197,7 +2339,7 @@ td:last-child {
   #panel-navigation,
   #panel-functions,
   #panel-workspace,
-  #panel-device-details {
+  #panel-context-details {
     height: 100%;
     min-height: 0;
   }
@@ -2224,7 +2366,7 @@ td:last-child {
     justify-content: center;
   }
 
-  #panel-device-details #device-details {
+  #panel-context-details #device-details {
     height: 100%;
     max-height: none;
   }
@@ -2304,12 +2446,12 @@ td:last-child {
   }
 
   #panel-view,
-  #panel-device-details #device-details {
+  #panel-context-details #device-details {
     max-height: none;
   }
 }
 
-#panel-device-details #device-details {
+#panel-context-details #device-details {
   position: relative;
   top: auto;
   width: 100%;

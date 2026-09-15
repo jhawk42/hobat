@@ -92,6 +92,90 @@ def test_health_sections_use_stored_status_and_evidence_kind_without_reclassific
     ]
 
 
+def test_health_summary_projection_sort_counts_and_selection_reconciliation() -> None:
+    script = r"""
+      import {
+        projectHealthFindingDetail,
+        projectHealthSummaryRows,
+        reconcileHealthInsightsSelection,
+      } from "./src/js/tdash-health.js";
+      const finding = (findingId, overrides = {}) => ({
+        findingId,
+        rank: 10,
+        evidenceKind: "snapshot",
+        materiality: "device",
+        deviceIds: [],
+        relationshipIds: [],
+        endpoints: [],
+        evidence: {value: 1},
+        whyItMatters: "Impact",
+        action: "Act",
+        verify: "Verify",
+        sourceFiles: ["source.json"],
+        ...overrides,
+      });
+      const groups = [
+        {
+          groupId: "moderate-device", ruleId: "device.rule", status: "moderate",
+          scope: "device", title: "Device issue", summary: "Summary", confidence: "high",
+          count: 2, deviceIds: ["extaddr:2", "extaddr:1"], relationshipIds: [],
+          findings: [finding("finding-1", {deviceIds: ["extaddr:1"]})],
+        },
+        {
+          groupId: "poor-link", ruleId: "relationship.rule", status: "poor",
+          scope: "relationship", title: "Link issue", summary: "Summary", confidence: "medium",
+          count: 3, deviceIds: ["extaddr:1", "extaddr:2"], relationshipIds: ["link:1", "link:2"],
+          findings: [finding("finding-2", {
+            evidenceKind: "historical", materiality: "relationship",
+            relationshipIds: ["link:1", "link:2"], whyItMatters: "Link impact",
+          })],
+        },
+        {
+          groupId: "strong-network", ruleId: "network.rule", status: "strong",
+          scope: "network", title: "Network good", summary: "Summary", confidence: "high",
+          count: 1, deviceIds: [], relationshipIds: [],
+          findings: [finding("finding-3", {materiality: "network"})],
+        },
+      ];
+      const actionable = projectHealthSummaryRows(groups);
+      const all = projectHealthSummaryRows(groups, {view: "all"});
+      const detail = projectHealthFindingDetail(groups[1], "finding-2");
+      const retained = reconcileHealthInsightsSelection({
+        assessmentId: "old", selectedGroupId: "poor-link",
+        selectedFindingId: "finding-2", detailsOpen: true,
+      }, {assessmentId: "new", findingGroups: groups});
+      const cleared = reconcileHealthInsightsSelection({
+        selectedGroupId: "missing", selectedFindingId: "missing", detailsOpen: true,
+      }, {assessmentId: "new", findingGroups: groups});
+      console.log(JSON.stringify({
+        actionable: actionable.map((row) => [row.groupId, row.affected.label]),
+        all: all.map((row) => row.groupId),
+        detail: [detail.affected.label, detail.items[0].isExpanded, detail.shared.action],
+        retained,
+        cleared,
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    result = json.loads(completed.stdout)
+    assert result["actionable"] == [
+        ["poor-link", "2 relationships"],
+        ["moderate-device", "2 devices"],
+    ]
+    assert result["all"] == ["poor-link", "moderate-device", "strong-network"]
+    assert result["detail"] == ["2 relationships", True, "Act"]
+    assert result["retained"]["assessmentId"] == "new"
+    assert result["retained"]["selectedFindingId"] == "finding-2"
+    assert result["cleared"]["selectedGroupId"] is None
+    assert result["cleared"]["detailsOpen"] is False
+
+
 def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     html = (ROOT / "src/tdash.html").read_text(encoding="utf-8")
     health_js = (ROOT / "src/js/tdash-health.js").read_text(encoding="utf-8")
@@ -101,6 +185,7 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     css = (ROOT / "src/tdash.css").read_text(encoding="utf-8")
 
     for element_id in (
+          "health-view-filter",
       "health-status-filter",
       "health-scope-filter",
       "health-evidence-filter",
@@ -108,6 +193,11 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
       "btn-health-reset",
       "btn-health-refresh",
       "btn-health-refresh-cancel",
+          "health-insights-summary",
+          "health-finding-table",
+          "health-insights-announcement",
+          "health-finding-details",
+          "btn-health-finding-close",
     ):
       assert f'id="{element_id}"' in html
     for section in ("Needs Work", "Needs Attention", "Going Well"):
@@ -122,6 +212,11 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
       assert action in health_js
       assert action in ui_js
     assert "restoreHealthNavigationContext" in ui_js
+    assert "renderHealthFindingDetails" in ui_js
+    assert "initContextDetailsPanel" in ui_js
+    assert 'tableRow.addEventListener("click", () => actions.selectGroup?.(row.groupId));' in health_js
+    assert 'aria-current", "true"' in health_js
+    assert 'heading.setAttribute("aria-sort"' in health_js
     assert "invalidateHealthRefresh" in ui_js
     assert "Health: refreshing" in health_js
     assert "Health: failed" in health_js

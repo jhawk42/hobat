@@ -34,6 +34,10 @@ const FINDING_SECTIONS = Object.freeze([
   { id: "going-well", title: "Going Well", statuses: new Set(["strong"]) },
 ]);
 
+const HEALTH_STATUS_ORDER = Object.freeze({ poor: 0, moderate: 1, unknown: 2, strong: 3 });
+const HEALTH_MATERIALITY_ORDER = Object.freeze({ network: 0, relationship: 1, device: 2, informational: 3 });
+const HEALTH_CONFIDENCE_ORDER = Object.freeze({ high: 0, medium: 1, low: 2 });
+
 function appendText(parent, tagName, text, className = "") {
   const element = document.createElement(tagName);
   element.textContent = text;
@@ -156,13 +160,172 @@ export function renderHealthStatus(container, model) {
   }
 }
 
-function findingMatches(group, filters) {
+export function findingMatches(group, filters) {
   const effectiveScope = group.scope === "observation" ? "network" : group.scope;
   return (filters.status === "all" || group.status === filters.status) &&
     (filters.scope === "all" || effectiveScope === filters.scope) &&
     (filters.evidenceKind === "all" || group.findings.some(
       (finding) => finding.evidenceKind === filters.evidenceKind,
     ));
+}
+
+function uniqueValues(values) {
+  return [...new Set(values.filter((value) => value !== null && value !== undefined && value !== ""))];
+}
+
+function boundedValueLabel(values) {
+  if (values.length === 0) return "Not specified";
+  if (values.length === 1) return values[0];
+  return "Mixed";
+}
+
+function projectAffected(group) {
+  if (group.scope === "relationship") {
+    const count = uniqueValues(group.relationshipIds || []).length;
+    if (count > 0) return { kind: "relationship", count, label: `${count} relationship${count === 1 ? "" : "s"}` };
+  }
+  if (group.scope === "device") {
+    const count = uniqueValues(group.deviceIds || []).length;
+    if (count > 0) return { kind: "device", count, label: `${count} device${count === 1 ? "" : "s"}` };
+  }
+  if (group.scope === "network") return { kind: "network", count: 1, label: "Network" };
+  if (group.scope === "observation") return { kind: "observation", count: 1, label: "Observation" };
+  const count = Number.isInteger(group.count) ? group.count : (group.findings || []).length;
+  return { kind: "finding", count, label: `${count} finding${count === 1 ? "" : "s"}` };
+}
+
+function compareText(left, right) {
+  return String(left ?? "").localeCompare(String(right ?? ""), undefined, { sensitivity: "base" });
+}
+
+function compareNumber(left, right) {
+  return Number(left ?? 0) - Number(right ?? 0);
+}
+
+function comparePriority(left, right) {
+  return compareNumber(HEALTH_STATUS_ORDER[left.status] ?? 99, HEALTH_STATUS_ORDER[right.status] ?? 99)
+    || compareNumber(
+      Math.min(...left.materialities.map((value) => HEALTH_MATERIALITY_ORDER[value] ?? 99), 99),
+      Math.min(...right.materialities.map((value) => HEALTH_MATERIALITY_ORDER[value] ?? 99), 99),
+    )
+    || compareNumber(right.affected.count, left.affected.count);
+}
+
+export function compareHealthSummaryRows(left, right, sort = {}) {
+  const column = sort.column ?? "priority";
+  const direction = sort.direction === "descending" ? -1 : 1;
+  let primary = 0;
+  if (column === "priority") primary = comparePriority(left, right);
+  else if (column === "status") {
+    primary = compareNumber(HEALTH_STATUS_ORDER[left.status] ?? 99, HEALTH_STATUS_ORDER[right.status] ?? 99);
+  } else if (column === "affected") primary = compareNumber(left.affected.count, right.affected.count);
+  else if (column === "confidence") {
+    primary = compareNumber(
+      HEALTH_CONFIDENCE_ORDER[left.confidence] ?? 99,
+      HEALTH_CONFIDENCE_ORDER[right.confidence] ?? 99,
+    );
+  } else if (column === "materiality") {
+    primary = compareNumber(
+      Math.min(...left.materialities.map((value) => HEALTH_MATERIALITY_ORDER[value] ?? 99), 99),
+      Math.min(...right.materialities.map((value) => HEALTH_MATERIALITY_ORDER[value] ?? 99), 99),
+    );
+  } else if (column === "evidence") primary = compareText(left.evidenceLabel, right.evidenceLabel);
+  else primary = compareText(left[column], right[column]);
+  return (primary * direction)
+    || compareNumber(left.catalogOrder, right.catalogOrder)
+    || compareText(left.groupId, right.groupId);
+}
+
+export function projectHealthSummaryRows(groups, options = {}) {
+  const filters = {
+    status: options.filters?.status ?? "all",
+    scope: options.filters?.scope ?? "all",
+    evidenceKind: options.filters?.evidenceKind ?? "all",
+  };
+  const view = options.view ?? "actionable";
+  const rows = (groups || []).map((group, catalogOrder) => {
+    const findings = group.findings || [];
+    const evidenceKinds = uniqueValues(findings.map((finding) => finding.evidenceKind));
+    const materialities = uniqueValues(findings.map((finding) => finding.materiality));
+    return {
+      groupId: group.groupId,
+      ruleId: group.ruleId,
+      presentationVariant: group.presentationVariant ?? null,
+      status: group.status,
+      title: group.title,
+      summary: findingSummary(group),
+      scope: group.scope,
+      confidence: group.confidence,
+      evidenceKinds,
+      evidenceLabel: boundedValueLabel(evidenceKinds),
+      materialities,
+      materialityLabel: boundedValueLabel(materialities),
+      affected: projectAffected(group),
+      rank: Math.max(...findings.map((finding) => Number(finding.rank) || 0), 0),
+      catalogOrder,
+      group,
+    };
+  }).filter((row) => {
+    const inView = view === "all"
+      || (view === "actionable" && ["poor", "moderate", "unknown"].includes(row.status))
+      || (view === "going-well" && row.status === "strong");
+    return inView && findingMatches(row.group, filters);
+  });
+  return rows.sort((left, right) => compareHealthSummaryRows(left, right, options.sort));
+}
+
+function sharedFindingValue(findings, key) {
+  const values = uniqueValues(findings.map((finding) => finding[key]));
+  return values.length === 1 ? values[0] : null;
+}
+
+export function projectHealthFindingDetail(group, selectedFindingId = null) {
+  if (!group) return null;
+  const findings = group.findings || [];
+  const row = projectHealthSummaryRows([group], { view: "all" })[0];
+  return {
+    groupId: group.groupId,
+    heading: group.title,
+    status: group.status,
+    summary: findingSummary(group),
+    scope: group.scope,
+    confidence: group.confidence,
+    evidenceLabel: row.evidenceLabel,
+    materialityLabel: row.materialityLabel,
+    affected: row.affected,
+    shared: {
+      whyItMatters: sharedFindingValue(findings, "whyItMatters"),
+      action: sharedFindingValue(findings, "action"),
+      verify: sharedFindingValue(findings, "verify"),
+      sourceFiles: uniqueValues(findings.flatMap((finding) => finding.sourceFiles || [])).sort(),
+    },
+    items: findings.map((finding) => ({
+      findingId: finding.findingId,
+      label: finding.endpoints?.map(
+        ({ deviceId, displayName }) => displayName || deviceId.replace(/^extaddr:/, ""),
+      ).join(", ") || finding.summary,
+      endpointIds: [...(finding.deviceIds || [])],
+      relationshipIds: [...(finding.relationshipIds || [])],
+      evidenceRows: Object.entries(finding.evidence || {})
+        .filter(([key]) => !["evidenceKind", "materiality", "presentationVariant"].includes(key)),
+      isExpanded: finding.findingId === selectedFindingId,
+      finding,
+    })),
+  };
+}
+
+export function reconcileHealthInsightsSelection(viewState, assessment) {
+  const next = { ...viewState, assessmentId: assessment?.assessmentId ?? null };
+  const group = (assessment?.findingGroups || []).find(
+    ({ groupId }) => groupId === viewState.selectedGroupId,
+  );
+  if (!group) {
+    return { ...next, selectedGroupId: null, selectedFindingId: null, detailsOpen: false };
+  }
+  const findingExists = (group.findings || []).some(
+    ({ findingId }) => findingId === viewState.selectedFindingId,
+  );
+  return { ...next, selectedFindingId: findingExists ? viewState.selectedFindingId : null };
 }
 
 export function projectHealthFindingSections(groups, filters = {}) {
@@ -326,40 +489,35 @@ function renderFindingGroup(group, actions) {
   return item;
 }
 
-export function renderHealthInsights(container, model, filters = {}, actions = {}) {
-  if (!container) return;
+function renderHealthAssessmentSummary(container, model) {
   container.replaceChildren();
-  if (model.loading) {
-    appendText(container, "p", "Loading processed health assessment…", "network-insights-empty");
-    return;
-  }
-  if (model.error || !model.assessment) {
-    appendText(container, "p", model.error || "Health assessment unavailable.", "network-insights-empty");
-    return;
-  }
-
   const assessment = model.assessment;
   const header = document.createElement("div");
   header.className = "health-assessment-header";
   appendText(header, "strong", assessment.status,
     `health-status-state state-${assessment.status.toLowerCase()}`);
+  appendText(header, "span", `${assessment.completeness} · ${assessment.confidence} confidence`);
   appendText(header, "span",
-    `${assessment.completeness} · ${assessment.confidence} confidence · ${assessment.findingCount} findings`);
+    `${assessment.findingGroups?.length ?? 0} finding groups · ${assessment.findingCount} attributed findings`);
+  container.appendChild(header);
+
   const allFindings = (assessment.findingGroups || []).flatMap((group) => group.findings || []);
   const affectedDevices = new Set(allFindings.flatMap((finding) => finding.deviceIds || [])).size;
   const affectedRelationships = new Set(
     allFindings.flatMap((finding) => finding.relationshipIds || []),
   ).size;
-  const totalDevices = assessment.coverage?.deviceCount;
-  appendText(
-    header,
-    "span",
-    `${affectedDevices}${Number.isInteger(totalDevices) ? `/${totalDevices}` : ""} devices · ${affectedRelationships} links`,
-    "health-status-detail",
-  );
-  container.appendChild(header);
+  const populations = document.createElement("p");
+  populations.className = "health-population-summary";
+  const populationParts = [];
+  if (Number.isInteger(assessment.coverage?.deviceCount)) {
+    populationParts.push(`${assessment.coverage.deviceCount} observed devices`);
+  }
+  populationParts.push(`${affectedDevices} affected identities`);
+  populationParts.push(`${affectedRelationships} affected relationships`);
+  populations.textContent = populationParts.join(" · ");
+  container.appendChild(populations);
 
-  const pillarHeading = appendText(container, "h2", "Dataset Evidence Pillars", "health-coverage-heading");
+  const pillarHeading = appendText(container, "h3", "Dataset Evidence Pillars", "health-coverage-heading");
   const pillars = document.createElement("dl");
   pillars.className = "health-coverage-pillars";
   pillars.setAttribute("aria-labelledby", pillarHeading.id = "health-coverage-heading");
@@ -374,9 +532,7 @@ export function renderHealthInsights(container, model, filters = {}, actions = {
     const value = appendText(item, "dd", "", `health-coverage-state state-${status}`);
     appendText(value, "span", COVERAGE_STATUS_GLYPHS[status] ?? "?", "health-coverage-glyph");
     appendText(value, "span", status.replace(/^./, (letter) => letter.toUpperCase()), "health-coverage-state-label");
-    if (capability !== status) {
-      appendText(value, "small", `Dataset: ${capability}`, "health-coverage-capability");
-    }
+    if (capability !== status) appendText(value, "small", `Dataset: ${capability}`, "health-coverage-capability");
     const reasons = Array.isArray(observed?.reasons) ? observed.reasons.join(" ") : "";
     value.title = [
       COVERAGE_STATUS_TOOLTIPS[status] ?? `Coverage status: ${status}.`,
@@ -388,33 +544,196 @@ export function renderHealthInsights(container, model, filters = {}, actions = {
   container.appendChild(pillars);
 
   if (model.capabilities && model.observations) {
-    appendText(
-      container,
-      "p",
-      `${model.capabilities.observationCount} stored observations · ${model.capabilities.expectedRosterCount} expected devices · showing ${model.observations.items.length} recent observations`,
-      "health-history-summary",
-    );
+    appendText(container, "p",
+      `History: ${model.capabilities.observationCount} observations · ${model.capabilities.expectedRosterCount} expected devices`,
+      "health-history-summary");
   }
+}
 
-  const sections = projectHealthFindingSections(assessment.findingGroups || [], filters);
-  if (sections.every((section) => section.groups.length === 0)) {
-    appendText(container, "p", "No findings match the selected health filters.", "network-insights-empty");
+const HEALTH_TABLE_COLUMNS = Object.freeze([
+  { id: "status", label: "Status", className: "health-col-status" },
+  { id: "title", label: "Finding", className: "health-col-finding" },
+  { id: "affected", label: "Affected", className: "health-col-affected" },
+  { id: "scope", label: "Scope", className: "health-col-secondary" },
+  { id: "confidence", label: "Confidence", className: "health-col-secondary" },
+  { id: "evidence", label: "Evidence", className: "health-col-secondary" },
+]);
+
+function nextSort(currentSort, column) {
+  if (currentSort.column !== column) return { column, direction: "ascending" };
+  return { column, direction: currentSort.direction === "ascending" ? "descending" : "ascending" };
+}
+
+function appendHealthSummaryRow(body, row, viewState, actions) {
+  const tableRow = document.createElement("tr");
+  tableRow.className = `health-summary-row state-${row.status}`;
+  tableRow.dataset.groupId = row.groupId;
+  tableRow.classList.toggle("is-selected", row.groupId === viewState.selectedGroupId);
+  tableRow.addEventListener("click", () => actions.selectGroup?.(row.groupId));
+  appendText(tableRow, "td", row.status.replace(/^./, (letter) => letter.toUpperCase()),
+    "health-col-status table-health-status").classList.add(`state-${row.status}`);
+  const findingCell = document.createElement("td");
+  findingCell.className = "health-col-finding";
+  const button = appendText(findingCell, "button", row.title, "health-finding-select");
+  button.type = "button";
+  button.dataset.groupId = row.groupId;
+  button.setAttribute("aria-label", `${row.title}, ${row.status}, ${row.affected.label}`);
+  if (row.groupId === viewState.selectedGroupId) button.setAttribute("aria-current", "true");
+  if (row.summary) appendText(findingCell, "span", row.summary, "health-finding-row-summary");
+  tableRow.appendChild(findingCell);
+  appendText(tableRow, "td", row.affected.label, "health-col-affected");
+  appendText(tableRow, "td", row.scope, "health-col-secondary");
+  appendText(tableRow, "td", row.confidence, "health-col-secondary");
+  appendText(tableRow, "td", row.evidenceLabel, "health-col-secondary");
+  body.appendChild(tableRow);
+}
+
+export function renderHealthInsights(container, model, viewState = {}, actions = {}) {
+  if (!container) return;
+  const summary = container.querySelector("#health-insights-summary");
+  const table = container.querySelector("#health-finding-table");
+  const tableWrap = container.querySelector("#health-finding-table-wrap");
+  const empty = container.querySelector("#health-insights-empty");
+  if (!summary || !table || !tableWrap || !empty) return;
+  summary.replaceChildren();
+  table.tHead?.replaceChildren();
+  table.tBodies[0]?.replaceChildren();
+  tableWrap.hidden = true;
+  empty.replaceChildren();
+  if (model.loading && !model.assessment) {
+    appendText(empty, "p", "Loading processed health assessment…", "network-insights-empty");
     return;
   }
-  sections.forEach((section) => {
-    const sectionElement = document.createElement("section");
-    sectionElement.className = `health-finding-section health-finding-section-${section.id}`;
-    appendText(sectionElement, "h2", section.title);
-    if (section.groups.length === 0) {
-      appendText(sectionElement, "p", "No findings in this section.", "network-insights-empty");
-    } else {
-      const list = document.createElement("ul");
-      list.className = "health-finding-groups";
-      section.groups.forEach((group) => list.appendChild(renderFindingGroup(group, actions)));
-      sectionElement.appendChild(list);
+  if (!model.assessment) {
+    appendText(empty, "p", model.error || "Health assessment unavailable.", "network-insights-empty");
+    return;
+  }
+
+  renderHealthAssessmentSummary(summary, model);
+  if (model.error) {
+    appendText(empty, "p", `Latest refresh failed: ${model.error}`, "network-insights-empty error");
+  }
+  const rows = projectHealthSummaryRows(model.assessment.findingGroups || [], viewState);
+  const headRow = document.createElement("tr");
+  HEALTH_TABLE_COLUMNS.forEach((column) => {
+    const heading = document.createElement("th");
+    heading.scope = "col";
+    heading.className = column.className;
+    const button = appendText(heading, "button", column.label, "health-sort-button");
+    button.type = "button";
+    button.addEventListener("click", () => actions.changeSort?.(nextSort(viewState.sort || {}, column.id)));
+    if (viewState.sort?.column === column.id) {
+      heading.setAttribute("aria-sort", viewState.sort.direction ?? "ascending");
+      appendText(button, "span", viewState.sort.direction === "descending" ? "▼" : "▲", "health-sort-icon");
     }
-    container.appendChild(sectionElement);
+    headRow.appendChild(heading);
   });
+  table.tHead.appendChild(headRow);
+  rows.forEach((row) => appendHealthSummaryRow(table.tBodies[0], row, viewState, actions));
+  if (rows.length === 0) {
+    appendText(empty, "p", "No findings match the selected health filters.", "network-insights-empty");
+  } else {
+    tableWrap.hidden = false;
+    const sortLabel = viewState.sort?.column === "priority"
+      ? "priority"
+      : `${viewState.sort?.column ?? "priority"} ${viewState.sort?.direction ?? "ascending"}`;
+    appendText(empty, "p",
+      `${rows.length} finding group${rows.length === 1 ? "" : "s"} shown · sorted by ${sortLabel}`,
+      "health-table-footer");
+  }
+}
+
+function appendDetailAction(parent, label, action, enabled = true) {
+  if (!enabled) return;
+  const button = appendText(parent, "button", label);
+  button.type = "button";
+  button.addEventListener("click", action);
+}
+
+function appendSharedDetailSection(parent, heading, value) {
+  if (!value) return;
+  const section = document.createElement("section");
+  section.className = "health-finding-detail-section";
+  appendText(section, "h3", heading);
+  appendText(section, "p", value);
+  parent.appendChild(section);
+}
+
+export function renderHealthFindingDetails(container, model, actions = {}) {
+  if (!container) return;
+  container.replaceChildren();
+  if (!model) {
+    appendText(container, "p", "Select a finding group to inspect its evidence.", "network-insights-empty");
+    return;
+  }
+
+  appendText(container, "p", model.summary, "health-finding-detail-summary");
+  const metadata = document.createElement("div");
+  metadata.className = "health-finding-detail-meta";
+  [model.status, model.affected.label, model.scope, `${model.confidence} confidence`,
+    model.evidenceLabel, model.materialityLabel].forEach((value) => appendText(metadata, "span", value));
+  container.appendChild(metadata);
+
+  const actionBar = document.createElement("div");
+  actionBar.className = "health-finding-actions";
+  appendDetailAction(actionBar, "Show in topology", () => actions.showTopology?.(model.groupId),
+    actions.availableTargets > 0);
+  appendDetailAction(actionBar, "Show in table", () => actions.showTable?.(model.groupId),
+    actions.availableTargets > 0);
+  appendDetailAction(actionBar, "Inspect device", () => actions.inspectDevice?.(
+    model.items[0]?.endpointIds[0], model.items[0]?.findingId,
+  ), actions.groupDeviceCount === 1 && actions.availableTargets === 1);
+  appendDetailAction(actionBar, "Compare endpoints", () => actions.compareEndpoints?.(model.groupId),
+    actions.groupDeviceCount === 2 && actions.availableTargets === 2);
+  appendDetailAction(actionBar, "Apply related filter", () => actions.applyFilter?.(model.groupId));
+  container.appendChild(actionBar);
+
+  appendSharedDetailSection(
+    container,
+    "Why it matters",
+    model.shared.whyItMatters || "Varies by affected item.",
+  );
+
+  const affectedSection = document.createElement("section");
+  affectedSection.className = "health-finding-detail-section";
+  appendText(affectedSection, "h3", "Affected items");
+  const list = document.createElement("ol");
+  list.className = "health-affected-list";
+  model.items.forEach((item) => {
+    const listItem = document.createElement("li");
+    listItem.className = "health-affected-item";
+    const selectButton = appendText(listItem, "button", item.label, "health-affected-select");
+    selectButton.type = "button";
+    selectButton.dataset.findingId = item.findingId;
+    selectButton.setAttribute("aria-expanded", String(item.isExpanded));
+    selectButton.addEventListener("click", () => actions.selectFinding?.(item.findingId));
+    if (item.isExpanded) {
+      const evidence = document.createElement("dl");
+      evidence.className = "health-finding-evidence health-affected-evidence";
+      item.evidenceRows.forEach(([key, value]) => {
+        appendText(evidence, "dt", evidenceLabel(key));
+        appendText(evidence, "dd", formatEvidenceValue(value));
+      });
+      listItem.appendChild(evidence);
+      if (!model.shared.whyItMatters) appendText(listItem, "p", item.finding.whyItMatters);
+      if (!model.shared.action) appendText(listItem, "p", `Action: ${item.finding.action}`);
+      if (!model.shared.verify) appendText(listItem, "p", `Verify: ${item.finding.verify}`);
+      if (item.endpointIds.length === 1 && actions.inspectableDeviceIds?.has(item.endpointIds[0])) {
+        appendDetailAction(listItem, "Inspect device", () => actions.inspectDevice?.(
+          item.endpointIds[0], item.findingId,
+        ));
+      }
+    }
+    list.appendChild(listItem);
+  });
+  affectedSection.appendChild(list);
+  container.appendChild(affectedSection);
+
+  appendSharedDetailSection(container, "Recommended action", model.shared.action || "Varies by affected item.");
+  appendSharedDetailSection(container, "Verify", model.shared.verify || "Varies by affected item.");
+  if (model.shared.sourceFiles.length > 0) {
+    appendSharedDetailSection(container, "Sources", model.shared.sourceFiles.join(", "));
+  }
 }
 
 export function exportHealthAssessment(assessment) {

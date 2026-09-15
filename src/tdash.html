@@ -302,6 +302,13 @@
           aria-labelledby="btn-insights" hidden>
           <h2>Thread Network Insights</h2>
           <div id="health-insights-filters" class="health-insights-filters" hidden>
+            <label title="Choose actionable, healthy, or all finding groups.">View
+              <select id="health-view-filter" title="Choose which finding groups to show.">
+                <option value="actionable">Actionable</option>
+                <option value="going-well">Going Well</option>
+                <option value="all">All</option>
+              </select>
+            </label>
             <label title="Filter findings by their assessed health status.">Status
               <select id="health-status-filter" title="Show only findings with the selected health status.">
                 <option value="all">All</option>
@@ -331,6 +338,17 @@
             </label>
             <button id="btn-health-reset" type="button" title="Clear health filters and navigation state">Reset</button>
             <button id="btn-health-export" type="button" title="Download the pinned health assessment">Export JSON</button>
+          </div>
+          <div id="health-insights-workspace" hidden>
+            <div id="health-insights-summary"></div>
+            <div id="health-finding-table-wrap" class="health-finding-table-wrap">
+              <table id="health-finding-table">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div id="health-insights-empty"></div>
+            <p id="health-insights-announcement" class="visually-hidden" role="status" aria-live="polite"></p>
           </div>
           <div id="network-insights-content" role="status" aria-live="polite"></div>
         </div>
@@ -378,7 +396,7 @@
       </div>
     </main>
 
-    <aside id="panel-device-details" class="layout-panel layout-panel-details" aria-label="Device details">
+    <aside id="panel-context-details" class="layout-panel layout-panel-details" aria-label="Context details">
       <div id="device-details" class="node-details-panel">
         <h2>Device details:</h2>
         <ul id="summary-list" class="node-details-list">
@@ -393,6 +411,7 @@
             <button id="btn-device-details-settings" title="Show device settings">⛭</button>
           </span>
           <span id="device-details-nav-bar-right">
+           <button id="btn-back-to-health-finding" type="button" title="Back to finding" hidden>↩</button>
            <button id="btn-device-details-close" title="Close details panel">✕</button>
          </span>
         </div>
@@ -494,6 +513,13 @@
             </div>
         </div>
       </div>
+      <section id="health-finding-details" class="health-finding-details-panel" aria-labelledby="health-finding-details-heading" hidden>
+        <div class="health-finding-details-header">
+          <h2 id="health-finding-details-heading" tabindex="-1">Finding details</h2>
+          <button id="btn-health-finding-close" type="button" title="Close finding details" aria-label="Close finding details">✕</button>
+        </div>
+        <div id="health-finding-details-content"></div>
+      </section>
     </aside>
 
     <nav id="panel-navigation" class="layout-panel layout-panel-navigation" aria-label="Workspace views">

@@ -19,7 +19,8 @@ BEHAVIOR_IDS = (
     "btn-navigation-panel-toggle",
     "panel-functions",
     "panel-workspace",
-    "panel-device-details",
+    "panel-context-details",
+    "health-finding-details",
     "panel-home",
     "device-status",
     "panel-dataset",
@@ -54,7 +55,7 @@ TARGET_LAYOUT_PANEL_IDS = (
     "panel-navigation",
     "panel-functions",
     "panel-workspace",
-    "panel-device-details",
+    "panel-context-details",
 )
 
 
@@ -128,7 +129,7 @@ def test_semantic_layout_and_workspace_hierarchy() -> None:
     assert parser.tag_by_id["panel-navigation"] == "nav"
     assert parser.tag_by_id["panel-functions"] == "aside"
     assert parser.tag_by_id["panel-workspace"] == "main"
-    assert parser.tag_by_id["panel-device-details"] == "aside"
+    assert parser.tag_by_id["panel-context-details"] == "aside"
     assert all(
         parser.inside_dashboard_shell_by_id[panel_id]
         for panel_id in TARGET_LAYOUT_PANEL_IDS
@@ -139,7 +140,7 @@ def test_semantic_layout_and_workspace_hierarchy() -> None:
         "panel-title",
         "panel-functions",
         "panel-workspace",
-        "panel-device-details",
+        "panel-context-details",
         "panel-navigation",
     ]
     assert parser.parent_by_id["panel-home"] == "panel-title"
@@ -152,7 +153,8 @@ def test_semantic_layout_and_workspace_hierarchy() -> None:
     assert parser.parent_by_id["view-logs"] == "panel-view"
     assert parser.parent_by_id["btn-more-info"] == "panel-view"
     assert parser.parent_by_id["chk-auto-view"] == "overview-settings-section"
-    assert parser.parent_by_id["device-details"] == "panel-device-details"
+    assert parser.parent_by_id["device-details"] == "panel-context-details"
+    assert parser.parent_by_id["health-finding-details"] == "panel-context-details"
     assert parser.parent_by_id["topology-view"] == "view-topology"
 
 
@@ -246,29 +248,38 @@ def test_jobs_workspace_poll_delay_scales_with_longest_running_job() -> None:
 
 def test_details_collapse_targets_explicit_details_owner_and_notifies_renderer() -> None:
     utils_text = _read_text(UTILS_JS)
-    toggle_start = utils_text.index("export function initDetailPanelToggles")
-    toggle_end = utils_text.index("headings.forEach", toggle_start)
-    toggle_source = utils_text[toggle_start:toggle_end]
-    function_end = utils_text.index("\n}\n\nexport function mergeForDisplay", toggle_start)
-    function_source = utils_text[toggle_start:function_end]
+    controller_start = utils_text.index("export function initContextDetailsPanel")
+    controller_end = utils_text.index("export function mergeForDisplay", controller_start)
+    controller_source = utils_text[controller_start:controller_end]
 
-    assert 'panelEl.closest("#panel-device-details")' in toggle_source
-    assert 'panelDetailsEl?.classList.toggle("details-panel-collapsed"' in toggle_source
-    assert 'panelEl.classList.toggle("details-panel-collapsed"' in toggle_source
-    assert "onPanelVisibilityChanged?.(isPanelCollapsed);" in toggle_source
-    assert 'btn.textContent = collapsed ? "◀" : "▶";' in toggle_source
-    assert "return setPanelCollapsed;" in function_source
+    assert 'host?.classList.toggle("details-panel-collapsed"' in controller_source
+    assert 'host?.querySelector("#device-details")' in controller_source
+    assert 'host?.querySelector("#health-finding-details")' in controller_source
+    assert "onVisibilityChanged?.(isCollapsed);" in controller_source
+    assert 'toggleButton.textContent = isCollapsed ? "◀" : "▶";' in controller_source
+    assert "setCollapsed," in controller_source
+    assert "setMode," in controller_source
 
 
-def test_insights_activation_collapses_device_details_panel() -> None:
+def test_insights_activation_collapses_context_details_panel() -> None:
     ui_text = _read_text(UI_JS)
     insights_start = ui_text.index('view: "insights"')
     insights_end = ui_text.index('view: "settings"', insights_start)
     insights_source = ui_text[insights_start:insights_end]
 
-    assert "setDeviceDetailsPanelCollapsed(true);" in insights_source
+    assert "contextDetailsController.setCollapsed(true);" in insights_source
     assert "renderNetworkInsights();" in insights_source
-    assert "setDeviceDetailsPanelCollapsed = initDetailPanelToggles(" in ui_text
+    assert "contextDetailsController = initContextDetailsPanel({" in ui_text
+
+
+def test_dataset_health_refresh_preserves_context_details_visibility() -> None:
+    ui_text = _read_text(UI_JS)
+    refresh_start = ui_text.index("async function refreshHealthAssessment()")
+    dataset_state_start = ui_text.index("  healthInsightsState.datasetId =", refresh_start)
+    dataset_change_source = ui_text[refresh_start:dataset_state_start]
+
+    assert 'setContextDetailsMode("device");' in dataset_change_source
+    assert "contextDetailsController.setCollapsed" not in dataset_change_source
 
 
 def test_vis_navigation_rules_are_not_nested_under_unused_heading() -> None:

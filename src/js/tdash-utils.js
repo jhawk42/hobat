@@ -684,36 +684,9 @@ function _appendGrouped(entries, listEl) {
 
 // Sets up collapsible section headings and a global collapse/expand-all control
 // for the given panel element. Call once after the DOM is ready.
-export function initDetailPanelToggles(panelEl, onPanelVisibilityChanged) {
+export function initDetailPanelToggles(panelEl) {
   const headings = Array.from(panelEl.querySelectorAll("h2"));
-  const panelDetailsEl = panelEl.closest("#panel-device-details");
-  const panelToggleBtn = document.getElementById("btn-details-panel-toggle");
   let isAllCollapsed = false;
-  let isPanelCollapsed = false;
-
-  const syncPanelToggleButton = (btn, collapsed) => {
-    if (!btn) return;
-    const action = collapsed ? "Expand" : "Collapse";
-    btn.title = `${action} details panel`;
-    btn.setAttribute("aria-label", `${action} details panel`);
-    btn.setAttribute("aria-expanded", String(!collapsed));
-    btn.textContent = collapsed ? "◀" : "▶";
-  };
-
-  const setPanelCollapsed = (collapsed) => {
-    const nextCollapsed = Boolean(collapsed);
-    if (isPanelCollapsed === nextCollapsed) return;
-    isPanelCollapsed = nextCollapsed;
-    panelDetailsEl?.classList.toggle("details-panel-collapsed", isPanelCollapsed);
-    panelEl.classList.toggle("details-panel-collapsed", isPanelCollapsed);
-    syncPanelToggleButton(panelToggleBtn, isPanelCollapsed);
-    onPanelVisibilityChanged?.(isPanelCollapsed);
-  };
-
-  syncPanelToggleButton(panelToggleBtn, false);
-  panelToggleBtn?.addEventListener("click", () => {
-    setPanelCollapsed(!isPanelCollapsed);
-  });
 
   headings.forEach((h2, idx) => {
     const listEl = h2.nextElementSibling;
@@ -790,7 +763,48 @@ export function initDetailPanelToggles(panelEl, onPanelVisibilityChanged) {
     }
   });
 
-  return setPanelCollapsed;
+}
+
+export function initContextDetailsPanel({ host, toggleButton, onVisibilityChanged }) {
+  let isCollapsed = false;
+  let mode = "device";
+
+  const syncToggleButton = () => {
+    if (!toggleButton) return;
+    const action = isCollapsed ? "Expand" : "Collapse";
+    toggleButton.title = `${action} details panel`;
+    toggleButton.setAttribute("aria-label", `${action} details panel`);
+    toggleButton.setAttribute("aria-expanded", String(!isCollapsed));
+    toggleButton.textContent = isCollapsed ? "◀" : "▶";
+  };
+
+  const setCollapsed = (collapsed) => {
+    const nextCollapsed = Boolean(collapsed);
+    if (isCollapsed === nextCollapsed) {
+      syncToggleButton();
+      return;
+    }
+    isCollapsed = nextCollapsed;
+    host?.classList.toggle("details-panel-collapsed", isCollapsed);
+    syncToggleButton();
+    onVisibilityChanged?.(isCollapsed);
+  };
+
+  const setMode = (nextMode) => {
+    mode = nextMode === "finding" ? "finding" : "device";
+    host?.querySelector("#device-details")?.toggleAttribute("hidden", mode !== "device");
+    host?.querySelector("#health-finding-details")?.toggleAttribute("hidden", mode !== "finding");
+  };
+
+  toggleButton?.addEventListener("click", () => setCollapsed(!isCollapsed));
+  syncToggleButton();
+  setMode(mode);
+  return {
+    getMode: () => mode,
+    isCollapsed: () => isCollapsed,
+    setCollapsed,
+    setMode,
+  };
 }
 
 export function mergeForDisplay(primary, secondary) {

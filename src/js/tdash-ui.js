@@ -58,6 +58,7 @@ import {
 } from "./tdash-constants.js";
 import {
   bindDeviceDetailsSectionFields,
+  initContextDetailsPanel,
   initDetailPanelToggles,
   formatAgo,
   formatDuration,
@@ -98,7 +99,11 @@ import {
   fetchHealthAssessment,
   fetchHealthDevice,
   fetchHealthSupport,
+  projectHealthFindingDetail,
+  projectHealthSummaryRows,
+  reconcileHealthInsightsSelection,
   renderDeviceHealth,
+  renderHealthFindingDetails,
   renderHealthInsights,
   renderHealthStatus,
   startHealthProcessing,
@@ -239,6 +244,23 @@ const healthInsightsState = {
   refreshOutcome: null,
   refreshedAt: null,
 };
+const healthInsightsViewState = {
+  assessmentId: null,
+  view: "actionable",
+  filters: { status: "all", scope: "all", evidenceKind: "all" },
+  sort: { column: "priority", direction: "ascending" },
+  selectedGroupId: null,
+  selectedFindingId: null,
+  tableScrollTop: 0,
+  detailsOpen: false,
+  sortWasChanged: false,
+};
+const contextDetailsState = {
+  mode: "device",
+  device: { record: null, activePanelId: "device-properties-panel" },
+  finding: { assessmentId: null, groupId: null, findingId: null },
+};
+let findingDeviceReturnContext = null;
 let healthNavigationContext = null;
 
 function renderWorkspaceLogs() {
@@ -734,10 +756,23 @@ function handleDetailsPanelVisibilityChanged(isCollapsed) {
     "details-panel-collapsed",
     isCollapsed,
   );
+  if (contextDetailsState.mode === "finding") {
+    healthInsightsViewState.detailsOpen = !isCollapsed;
+  }
   resizeAndFitTopology();
 }
 
-let setDeviceDetailsPanelCollapsed = () => {};
+let contextDetailsController = {
+  getMode: () => "device",
+  isCollapsed: () => false,
+  setCollapsed: () => {},
+  setMode: () => {},
+};
+
+function setContextDetailsMode(mode) {
+  contextDetailsState.mode = mode;
+  contextDetailsController.setMode(mode);
+}
 
 function setFunctionsPanelCollapsed(isCollapsed) {
   const shell = document.querySelector(".dashboard-shell");
@@ -791,7 +826,7 @@ const WORKSPACE_VIEWS = Object.freeze([
     buttonId: "btn-insights",
     panelId: "view-insights",
     onActivate: () => {
-      setDeviceDetailsPanelCollapsed(true);
+      if (!healthInsightsViewState.detailsOpen) contextDetailsController.setCollapsed(true);
       renderNetworkInsights();
     },
   },
@@ -809,6 +844,12 @@ function switchView(newView) {
   if (!nextView) return;
   if (newView === currentView) return;
   if (currentView === "logs") stopJobsPolling();
+  if (currentView === "insights" && newView !== "insights") {
+    healthInsightsViewState.detailsOpen = false;
+    findingDeviceReturnContext = null;
+    document.getElementById("btn-back-to-health-finding")?.setAttribute("hidden", "");
+    setContextDetailsMode("device");
+  }
   currentView = newView;
   updateHealthRefreshControls();
 
@@ -1647,10 +1688,17 @@ function renderNetworkInsightCondition(parent, condition, eligibleDeviceCount) {
 
 function renderNetworkInsights() {
   const contentEl = document.getElementById("network-insights-content");
+  const healthWorkspaceEl = document.getElementById("health-insights-workspace");
+  const tableWrapEl = document.getElementById("health-finding-table-wrap");
   if (!contentEl) return;
   const healthEligible = currentDataset?.entry?.healthEligible === true;
   document.getElementById("health-insights-filters")?.toggleAttribute("hidden", !healthEligible);
+  healthWorkspaceEl?.toggleAttribute("hidden", !healthEligible);
+  contentEl.toggleAttribute("hidden", healthEligible);
   if (healthEligible) {
+    if (tableWrapEl && !healthWorkspaceEl.hidden) {
+      healthInsightsViewState.tableScrollTop = tableWrapEl.scrollTop;
+    }
     const assessment = healthInsightsState.assessment;
     if (assessment) {
       const findings = (assessment.findingGroups || []).flatMap(
@@ -1661,19 +1709,29 @@ function renderNetworkInsights() {
       if (currentDataset?.entry?.value === assessment.datasetId) {
         currentDataset.healthAssessment = assessment;
       }
+      const visibleRows = projectHealthSummaryRows(
+        assessment.findingGroups || [], healthInsightsViewState,
+      );
+      if (healthInsightsViewState.selectedGroupId && !visibleRows.some(
+        ({ groupId }) => groupId === healthInsightsViewState.selectedGroupId,
+      )) {
+        healthInsightsViewState.selectedGroupId = null;
+        healthInsightsViewState.selectedFindingId = null;
+        healthInsightsViewState.detailsOpen = false;
+        setContextDetailsMode("device");
+        contextDetailsController.setCollapsed(true);
+      }
     }
-    renderHealthInsights(contentEl, healthInsightsState, {
-      status: document.getElementById("health-status-filter")?.value ?? "all",
-      scope: document.getElementById("health-scope-filter")?.value ?? "all",
-      evidenceKind: document.getElementById("health-evidence-filter")?.value ?? "all",
-    }, {
-      availableTargets: countAvailableHealthTargets,
-      showTopology: (group) => navigateToHealthTargets("topology", group),
-      showTable: (group) => navigateToHealthTargets("table", group),
-      inspectDevice: (group) => inspectHealthDevice(group.deviceIds[0]),
-      compareEndpoints: (group) => compareHealthEndpoints(group),
-      applyFilter: applyHealthGroupFilter,
+    renderHealthInsights(healthWorkspaceEl, healthInsightsState, healthInsightsViewState, {
+      selectGroup: selectHealthFindingGroup,
+      changeSort: (sort) => {
+        healthInsightsViewState.sort = sort;
+        healthInsightsViewState.sortWasChanged = true;
+        renderNetworkInsights();
+      },
     });
+    if (tableWrapEl) tableWrapEl.scrollTop = healthInsightsViewState.tableScrollTop;
+    renderSelectedHealthFinding();
     renderHealthRefreshStatus();
     return;
   }
@@ -1753,7 +1811,7 @@ function updateHealthRefreshControls() {
 }
 
 function renderHealthRefreshStatus() {
-  const contentEl = document.getElementById("network-insights-content");
+  const contentEl = document.getElementById("health-insights-empty");
   if (!contentEl || currentView !== "insights" || !healthInsightsState.refreshStatus) return;
   const message = document.createElement("p");
   const status = healthInsightsState.refreshStatus;
@@ -1770,6 +1828,91 @@ function renderHealthRefreshStatus() {
   if (message.textContent) contentEl.prepend(message);
 }
 
+function selectHealthFindingGroup(groupId) {
+  const group = resolveHealthFindingGroup(groupId);
+  healthInsightsViewState.selectedGroupId = groupId;
+  healthInsightsViewState.selectedFindingId = group?.findings?.[0]?.findingId ?? null;
+  healthInsightsViewState.detailsOpen = true;
+  contextDetailsState.finding = {
+    assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
+    groupId,
+    findingId: healthInsightsViewState.selectedFindingId,
+  };
+  setContextDetailsMode("finding");
+  contextDetailsController.setCollapsed(false);
+  renderNetworkInsights();
+  const selectedButton = document.querySelector(`.health-finding-select[data-group-id="${CSS.escape(groupId)}"]`);
+  const isDesktop = window.matchMedia("(min-width: 1124px)").matches;
+  const focusTarget = isDesktop ? selectedButton : document.getElementById("health-finding-details-heading");
+  requestAnimationFrame(() => {
+    focusTarget?.focus();
+    if (!isDesktop) focusTarget?.scrollIntoView({ block: "start" });
+  });
+}
+
+function resolveHealthFindingGroup(groupId) {
+  return (healthInsightsState.assessment?.findingGroups || []).find(
+    (group) => group.groupId === groupId,
+  ) ?? null;
+}
+
+function announceHealthInsight(message) {
+  const announcement = document.getElementById("health-insights-announcement");
+  if (announcement) announcement.textContent = message;
+}
+
+function closeHealthFindingDetails({ restoreFocus = true } = {}) {
+  healthInsightsViewState.detailsOpen = false;
+  contextDetailsController.setCollapsed(true);
+  if (restoreFocus && healthInsightsViewState.selectedGroupId) {
+    const groupId = healthInsightsViewState.selectedGroupId;
+    requestAnimationFrame(() => document.querySelector(
+      `.health-finding-select[data-group-id="${CSS.escape(groupId)}"]`,
+    )?.focus());
+  }
+}
+
+function renderSelectedHealthFinding() {
+  if (!healthInsightsViewState.detailsOpen || !healthInsightsViewState.selectedGroupId) return;
+  const group = resolveHealthFindingGroup(healthInsightsViewState.selectedGroupId);
+  if (!group) {
+    closeHealthFindingDetails({ restoreFocus: false });
+    return;
+  }
+  const model = projectHealthFindingDetail(group, healthInsightsViewState.selectedFindingId);
+  const heading = document.getElementById("health-finding-details-heading");
+  if (heading) heading.textContent = model.heading;
+  const availableDeviceIds = new Set(
+    (group.deviceIds || []).filter((deviceId) => findCurrentDeviceRecord(deviceId)),
+  );
+  renderHealthFindingDetails(document.getElementById("health-finding-details-content"), model, {
+    availableTargets: availableDeviceIds.size,
+    groupDeviceCount: group.deviceIds?.length ?? 0,
+    inspectableDeviceIds: availableDeviceIds,
+    selectFinding: (findingId) => {
+      healthInsightsViewState.selectedFindingId = findingId;
+      contextDetailsState.finding.findingId = findingId;
+      renderSelectedHealthFinding();
+    },
+    showTopology: (selectedGroupId) => navigateToHealthTargets(
+      "topology", resolveHealthFindingGroup(selectedGroupId),
+    ),
+    showTable: (selectedGroupId) => navigateToHealthTargets(
+      "table", resolveHealthFindingGroup(selectedGroupId),
+    ),
+    inspectDevice: (deviceId, findingId) => inspectHealthDevice(deviceId, findingId),
+    compareEndpoints: (selectedGroupId) => compareHealthEndpoints(
+      resolveHealthFindingGroup(selectedGroupId),
+    ),
+    applyFilter: (selectedGroupId) => applyHealthGroupFilter(
+      resolveHealthFindingGroup(selectedGroupId),
+    ),
+  });
+  setContextDetailsMode("finding");
+  contextDetailsController.setCollapsed(false);
+  announceHealthInsight(`Finding details updated: ${model.heading}`);
+}
+
 function findCurrentDeviceRecord(deviceId) {
   const extAddress = deviceId?.replace(/^extaddr:/, "").toLowerCase();
   return currentDataset?.rows?.find(
@@ -1783,6 +1926,8 @@ function countAvailableHealthTargets(group) {
 
 function rememberHealthNavigationContext() {
   if (healthNavigationContext) return;
+  const tableWrap = document.getElementById("health-finding-table-wrap");
+  if (tableWrap) healthInsightsViewState.tableScrollTop = tableWrap.scrollTop;
   healthNavigationContext = {
     view: currentView,
     search: document.getElementById("search-input")?.value ?? "",
@@ -1790,6 +1935,17 @@ function rememberHealthNavigationContext() {
     linkFilter: document.getElementById("link-filter")?.value ?? "default_links",
     diagnosticFilter: document.getElementById("diagnostic-filter")?.value ?? "all",
     selectedRecord: deviceInsightsState.record,
+    insights: currentView === "insights" ? {
+      assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
+      view: healthInsightsViewState.view,
+      filters: { ...healthInsightsViewState.filters },
+      sort: { ...healthInsightsViewState.sort },
+      sortWasChanged: healthInsightsViewState.sortWasChanged,
+      selectedGroupId: healthInsightsViewState.selectedGroupId,
+      selectedFindingId: healthInsightsViewState.selectedFindingId,
+      tableScrollTop: healthInsightsViewState.tableScrollTop,
+      detailsOpen: healthInsightsViewState.detailsOpen,
+    } : null,
   };
   document.getElementById("btn-health-return")?.removeAttribute("hidden");
 }
@@ -1824,12 +1980,23 @@ function navigateToHealthTargets(view, group, { compare = false } = {}) {
   if (view === "topology") selectTopologyHealthTargets(group.deviceIds);
 }
 
-function inspectHealthDevice(deviceId) {
+function inspectHealthDevice(deviceId, findingId = null) {
   const record = findCurrentDeviceRecord(deviceId);
   if (!record) return;
-  rememberHealthNavigationContext();
+  if (healthInsightsViewState.selectedGroupId) {
+    findingDeviceReturnContext = {
+      assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
+      groupId: healthInsightsViewState.selectedGroupId,
+      findingId: findingId ?? healthInsightsViewState.selectedFindingId,
+    };
+  } else {
+    rememberHealthNavigationContext();
+  }
+  setContextDetailsMode("device");
+  contextDetailsController.setCollapsed(false);
   publishDeviceSelection(record);
   setActiveDeviceDetailsPanel("device-insights-panel");
+  document.getElementById("btn-back-to-health-finding")?.removeAttribute("hidden");
 }
 
 function compareHealthEndpoints(group) {
@@ -1837,13 +2004,40 @@ function compareHealthEndpoints(group) {
 }
 
 function applyHealthGroupFilter(group) {
+  if (!group) return;
+  healthInsightsViewState.filters.status = group.status;
+  healthInsightsViewState.filters.scope = group.scope === "observation" ? "network" : group.scope;
   document.getElementById("health-status-filter").value = group.status;
   document.getElementById("health-scope-filter").value =
     group.scope === "observation" ? "network" : group.scope;
   const evidenceKinds = new Set(group.findings.map((finding) => finding.evidenceKind));
-  document.getElementById("health-evidence-filter").value =
-    evidenceKinds.size === 1 ? [...evidenceKinds][0] : "all";
+  const evidenceKind = evidenceKinds.size === 1 ? [...evidenceKinds][0] : "all";
+  healthInsightsViewState.filters.evidenceKind = evidenceKind;
+  document.getElementById("health-evidence-filter").value = evidenceKind;
   renderNetworkInsights();
+}
+
+function returnToHealthFinding() {
+  const context = findingDeviceReturnContext;
+  findingDeviceReturnContext = null;
+  document.getElementById("btn-back-to-health-finding")?.setAttribute("hidden", "");
+  if (!context || context.assessmentId !== healthInsightsState.assessment?.assessmentId) {
+    announceHealthInsight("The health assessment changed; return to the finding summary.");
+    return;
+  }
+  const group = resolveHealthFindingGroup(context.groupId);
+  if (!group) {
+    announceHealthInsight("The selected finding is no longer available.");
+    return;
+  }
+  healthInsightsViewState.selectedGroupId = context.groupId;
+  healthInsightsViewState.selectedFindingId = context.findingId;
+  healthInsightsViewState.detailsOpen = true;
+  contextDetailsState.finding = { ...context };
+  renderSelectedHealthFinding();
+  requestAnimationFrame(() => document.querySelector(
+    `.health-affected-select[data-finding-id="${CSS.escape(context.findingId || "")}"]`,
+  )?.focus());
 }
 
 function restoreHealthNavigationContext() {
@@ -1855,16 +2049,49 @@ function restoreHealthNavigationContext() {
   document.getElementById("diagnostic-filter").value = context.diagnosticFilter;
   document.getElementById("search-input").value = context.search;
   _currentSearchQuery = parseSearchQuery(context.search);
+  if (context.insights) {
+    Object.assign(healthInsightsViewState, context.insights);
+    Object.assign(
+      healthInsightsViewState,
+      reconcileHealthInsightsSelection(healthInsightsViewState, healthInsightsState.assessment),
+    );
+    document.getElementById("health-view-filter").value = healthInsightsViewState.view;
+    document.getElementById("health-status-filter").value = healthInsightsViewState.filters.status;
+    document.getElementById("health-scope-filter").value = healthInsightsViewState.filters.scope;
+    document.getElementById("health-evidence-filter").value = healthInsightsViewState.filters.evidenceKind;
+  }
   lastRenderedDatasetByView.delete("topology");
   lastRenderedDatasetByView.delete("table");
+  publishDeviceSelection(context.selectedRecord);
   switchView(context.view);
   renderCurrentView({ force: true });
-  publishDeviceSelection(context.selectedRecord);
+  if (context.insights?.detailsOpen && healthInsightsViewState.selectedGroupId) {
+    renderSelectedHealthFinding();
+  }
+  requestAnimationFrame(() => {
+    const tableWrap = document.getElementById("health-finding-table-wrap");
+    if (tableWrap) tableWrap.scrollTop = healthInsightsViewState.tableScrollTop;
+  });
   document.getElementById("btn-health-return")?.setAttribute("hidden", "");
 }
 
 function resetHealthWorkflow() {
   healthNavigationContext = null;
+  findingDeviceReturnContext = null;
+  healthInsightsViewState.view = "actionable";
+  healthInsightsViewState.filters = { status: "all", scope: "all", evidenceKind: "all" };
+  healthInsightsViewState.sort = { column: "priority", direction: "ascending" };
+  healthInsightsViewState.sortWasChanged = false;
+  healthInsightsViewState.selectedGroupId = null;
+  healthInsightsViewState.selectedFindingId = null;
+  healthInsightsViewState.tableScrollTop = 0;
+  healthInsightsViewState.detailsOpen = false;
+  contextDetailsState.finding = { assessmentId: null, groupId: null, findingId: null };
+  setContextDetailsMode("device");
+  contextDetailsController.setCollapsed(true);
+  document.getElementById("btn-back-to-health-finding")?.setAttribute("hidden", "");
+  const viewFilter = document.getElementById("health-view-filter");
+  if (viewFilter) viewFilter.value = "actionable";
   for (const id of ["health-status-filter", "health-scope-filter", "health-evidence-filter"]) {
     const element = document.getElementById(id);
     if (element) element.value = "all";
@@ -1977,6 +2204,8 @@ function initDeviceInsights() {
   renderDeviceInsights(null);
   document.addEventListener(DEVICE_SELECTION_EVENT, (event) => {
     deviceInsightsState.record = event.detail?.record ?? null;
+    contextDetailsState.device.record = deviceInsightsState.record;
+    if (deviceInsightsState.record) setContextDetailsMode("device");
     void refreshSelectedDeviceHealth(deviceInsightsState.record);
   });
 }
@@ -2020,7 +2249,17 @@ async function refreshSelectedDeviceHealth(record) {
 
 async function refreshHealthAssessment() {
   const entry = currentDataset?.entry;
-  healthInsightsState.assessment = null;
+  const datasetChanged = healthInsightsState.datasetId !== entry?.value;
+  if (datasetChanged) {
+    healthInsightsState.assessment = null;
+    healthInsightsViewState.assessmentId = null;
+    healthInsightsViewState.selectedGroupId = null;
+    healthInsightsViewState.selectedFindingId = null;
+    healthInsightsViewState.tableScrollTop = 0;
+    healthInsightsViewState.detailsOpen = false;
+    findingDeviceReturnContext = null;
+    setContextDetailsMode("device");
+  }
   healthInsightsState.datasetId = entry?.value ?? null;
   healthInsightsState.error = "";
   healthInsightsState.device = null;
@@ -2043,6 +2282,10 @@ async function refreshHealthAssessment() {
     const assessment = await fetchHealthAssessment(entry.value);
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
     healthInsightsState.assessment = assessment;
+    Object.assign(
+      healthInsightsViewState,
+      reconcileHealthInsightsSelection(healthInsightsViewState, assessment),
+    );
     if (currentDataset?.entry?.value === assessment.datasetId) {
       currentDataset.healthAssessment = assessment;
     }
@@ -2091,7 +2334,6 @@ async function runHealthRefresh() {
   healthInsightsState.refreshStatus = "running";
   healthInsightsState.refreshDetail = "";
   healthInsightsState.refreshOutcome = null;
-  healthInsightsState.assessment = null;
   healthInsightsState.error = "";
   setTopologyHealthFindings([]);
   setTableHealthFindings([]);
@@ -2172,10 +2414,25 @@ async function cancelHealthRefresh() {
   }
 }
 
-document.getElementById("health-status-filter")?.addEventListener("change", renderNetworkInsights);
-document.getElementById("health-scope-filter")?.addEventListener("change", renderNetworkInsights);
-document.getElementById("health-evidence-filter")?.addEventListener("change", renderNetworkInsights);
+document.getElementById("health-view-filter")?.addEventListener("change", (event) => {
+  healthInsightsViewState.view = event.target.value;
+  healthInsightsViewState.filters.status = "all";
+  document.getElementById("health-status-filter").value = "all";
+  renderNetworkInsights();
+});
+[
+  ["health-status-filter", "status"],
+  ["health-scope-filter", "scope"],
+  ["health-evidence-filter", "evidenceKind"],
+].forEach(([id, key]) => document.getElementById(id)?.addEventListener("change", (event) => {
+  healthInsightsViewState.filters[key] = event.target.value;
+  renderNetworkInsights();
+}));
 document.getElementById("btn-health-return")?.addEventListener("click", restoreHealthNavigationContext);
+document.getElementById("btn-health-finding-close")?.addEventListener("click", () => {
+  closeHealthFindingDetails();
+});
+document.getElementById("btn-back-to-health-finding")?.addEventListener("click", returnToHealthFinding);
 document.getElementById("btn-health-reset")?.addEventListener("click", resetHealthWorkflow);
 document.getElementById("btn-health-export")?.addEventListener("click", () => {
   exportHealthAssessment(healthInsightsState.assessment);
@@ -2207,6 +2464,7 @@ const DEVICE_DETAILS_PANEL_TABS = [
 ];
 
 function setActiveDeviceDetailsPanel(activePanelId) {
+  contextDetailsState.device.activePanelId = activePanelId;
   DEVICE_DETAILS_PANEL_TABS.forEach(({ buttonId, panelId }) => {
     const buttonEl = document.getElementById(buttonId);
     const panelEl = document.getElementById(panelId);
@@ -2452,10 +2710,15 @@ initDeviceInsights();
 initDeviceDiagnostics();
 renderNetworkInsights();
 initDeviceDetailsPanelTabs();
-setDeviceDetailsPanelCollapsed = initDetailPanelToggles(
-  document.getElementById("device-details"),
-  handleDetailsPanelVisibilityChanged,
-);
+initDetailPanelToggles(document.getElementById("device-details"));
+contextDetailsController = initContextDetailsPanel({
+  host: document.getElementById("panel-context-details"),
+  toggleButton: document.getElementById("btn-details-panel-toggle"),
+  onVisibilityChanged: handleDetailsPanelVisibilityChanged,
+});
+document.getElementById("btn-device-details-close")?.addEventListener("click", () => {
+  contextDetailsController.setCollapsed(true);
+});
 
 // Cache checkbox helper: make checkboxes mutually exclusive
 function updateCacheCheckboxes(changedCheckbox) {

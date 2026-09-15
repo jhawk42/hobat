@@ -221,7 +221,9 @@ def test_network_insights_uses_aggregation_and_dataset_refresh_lifecycle() -> No
     assert "function renderNetworkInsights()" in ui_text
     assert "contentEl.replaceChildren();" in ui_text
     assert "aggregateNetworkDiagnosticsForRows(currentDataset.rows)" in ui_text
-    assert "onActivate: renderNetworkInsights" in ui_text
+    assert 'id="health-insights-workspace" hidden' in html
+    assert 'id="health-insights-announcement"' in html
+    assert "renderHealthInsights(healthWorkspaceEl" in ui_text
     assert "renderNetworkInsights();\n  const view = currentView;" in ui_text
     assert "renderNetworkInsights();\ninitDeviceDetailsPanelTabs();" in ui_text
     assert "NETWORK_INSIGHT_DEVICE_LIMIT = 10" in ui_text
