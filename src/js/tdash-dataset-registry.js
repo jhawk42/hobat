@@ -183,7 +183,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "otbr_cli_networkdiag_fetch_all",
-    label: "Network Diagnostics (fetch-all)⏱️",
+    label: "Network Diagnostics (fetch-all)🔬⏱️",
     group: "Detailed: most time",
     files: ["td-otbr-cli-networkdiag-fetch-all.json"],
     mergeStrategy: "none",
@@ -251,7 +251,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "otbr_cli_topology_health",
-    label: "Topology ⏱️",
+    label: "Topology 🔬⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -275,7 +275,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-cli",
     value: "otbr_cli_topology_mdns_health",
-    label: "Topology + mDNS⏱️",
+    label: "Topology + mDNS🔬⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-cli-meshdiag-topology.json",
@@ -391,7 +391,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "otbr_restapi_devices_fetch_diagnostics_fetch_all",
-    label: "Devices Fetch + Diagnostics (fetch-all)⏱️",
+    label: "Devices Fetch + Diagnostics (fetch-all)🔬⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
@@ -447,7 +447,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all",
-    label: "Topology ⏱️",
+    label: "Topology 🔬⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
@@ -496,7 +496,7 @@ export const DATASET_REGISTRY = [
   {
     source: "otbr-restapi",
     value: "otbr_restapi_topology_mdns_health",
-    label: "Topology + mDNS⏱️",
+    label: "Topology + mDNS🔬⏱️",
     group: "Detailed: most time",
     files: [
       "td-otbr-restapi-devices-fetch.json", 
@@ -739,7 +739,7 @@ export const DATASET_REGISTRY = [
   {
     source: "merged",
     value: "merged_otbr_topology_mdns_health",
-    label: "Topology CLI* + REST* + mDNS⏱️",
+    label: "Topology CLI* + REST* + mDNS🔬⏱️",
     files: [
       "td-static-extaddr-device-label.json",
       "td-otbr-cli-meshdiag-topology.json",
