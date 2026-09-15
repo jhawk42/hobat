@@ -52,6 +52,7 @@ def test_failed_repeat_sync_cannot_complete_against_prior_dataset() -> None:
     assert 'Failed: ${failedFiles.join(", ")}`;\n    if (progressEl) progressEl.value = 0;\n    return null;' in dataset_text
     assert "loadedDataset = await loadDataset(selectedValue" in ui_text
     assert "if (!loadedDataset || currentDataset !== loadedDataset)" in ui_text
+    assert "Dataset unavailable: could not load" in ui_text
 
 
 def test_completed_job_fetches_the_new_snapshot_without_redispatching() -> None:

@@ -131,6 +131,25 @@ class TestSmokePath_B_ShortCostRegen(SmokeTestBase):
         self.assertEqual(response.status, 200)
         self.assertEqual(response.body, content)
 
+    async def test_cache_only_missing_file_returns_404_without_regeneration(self) -> None:
+        """Cache Only must not create a missing dynamic snapshot."""
+        import aiohttp.web
+
+        filename = "td-otbr-cli-router-table.json"
+        app = _make_app(self.data_dir)
+        req = _make_request(
+            filename, app, cache_control="only-if-cached, max-age=31536000"
+        )
+
+        with patch.object(td_webserver, "run_td_cli", new_callable=AsyncMock) as run_cli:
+            with self.assertRaisesRegex(
+                aiohttp.web.HTTPNotFound, "Cache-only data file not available"
+            ):
+                await td_webserver.handle_data_api(req)
+
+        run_cli.assert_not_awaited()
+        self.assertFalse((self.data_dir / filename).exists())
+
     async def test_fresh_file_served_without_regen(self) -> None:
         """A fresh file on disk must be served without invoking run_td_cli."""
         filename = "td-otbr-cli-router-table.json"

@@ -35,9 +35,14 @@ def make_data_request(
     app: object,
     *,
     no_cache: bool = False,
+    cache_control: str | None = None,
 ) -> MagicMock:
     request = MagicMock()
     request.match_info = {"filename": filename}
     request.app = app
-    request.headers = {"Cache-Control": "no-cache"} if no_cache else {}
+    request.headers = (
+        {"Cache-Control": cache_control}
+        if cache_control is not None
+        else ({"Cache-Control": "no-cache"} if no_cache else {})
+    )
     return request

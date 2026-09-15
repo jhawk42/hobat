@@ -765,7 +765,7 @@ export async function loadDataset(entryValue, options = {}) {
           reqHeaders["Cache-Control"] = "no-cache";
         } else if (_onlyCache) {
           reqHeaders["Cache-Control"] =
-            `max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`;
+            `only-if-cached, max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`;
         } else {
           const cached = fileMaxAgeCache.get(f);
           if (cached) reqHeaders["Cache-Control"] = `max-age=${cached.maxAge}`;

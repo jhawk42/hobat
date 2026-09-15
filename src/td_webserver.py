@@ -1157,6 +1157,7 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
     data_dir = request.app[TD_DATA_DIR_APP_KEY]
     cc = parse_request_cache_control(request.headers.get("Cache-Control"))
     no_cache = bool(cc.get("no-cache", False))
+    only_if_cached = bool(cc.get("only-if-cached", False))
     request_max_age_s = cc.get("max-age")
 
     file_action, file_path = _resolve_and_validate(filename, data_dir)
@@ -1169,6 +1170,12 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
         if not file_path.is_file():
             raise aiohttp.web.HTTPNotFound(
                 reason=f"Static file not found: {filename}")
+    elif only_if_cached and _should_regenerate(
+        file_path, file_action, no_cache, request_max_age_s
+    ):
+        raise aiohttp.web.HTTPNotFound(
+            reason=f"Cache-only data file not available: {filename}"
+        )
     elif _should_regenerate(file_path, file_action, no_cache, request_max_age_s):
         action_args: list[str] = file_action.action  # type: ignore[assignment]
         if file_action.force_async or file_action.action_cost_s > _LONG_COST_THRESHOLD_S:

@@ -2942,7 +2942,7 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     if (_incrementalRenderTimer !== null) { clearTimeout(_incrementalRenderTimer); _incrementalRenderTimer = null; }
     _setStatusSpans(_FETCH_STATUS_IDS, "—");
     _setStatusSpans(_DEVICE_STATUS_IDS, "—");
-    supersedeViewStatus(`Error: could not load dataset "${selectedValue}".`);
+    supersedeViewStatus(`Dataset unavailable: could not load "${selectedValue}".`);
     recordWorkspaceActivity("dataset-sync", "Dataset sync produced no usable data", {
       dataset: selectedValue,
     });
