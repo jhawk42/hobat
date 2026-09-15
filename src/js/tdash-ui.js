@@ -737,6 +737,8 @@ function handleDetailsPanelVisibilityChanged(isCollapsed) {
   resizeAndFitTopology();
 }
 
+let setDeviceDetailsPanelCollapsed = () => {};
+
 function setFunctionsPanelCollapsed(isCollapsed) {
   const shell = document.querySelector(".dashboard-shell");
   const toggleButton = document.getElementById("btn-functions-panel-toggle");
@@ -788,7 +790,10 @@ const WORKSPACE_VIEWS = Object.freeze([
     view: "insights",
     buttonId: "btn-insights",
     panelId: "view-insights",
-    onActivate: renderNetworkInsights,
+    onActivate: () => {
+      setDeviceDetailsPanelCollapsed(true);
+      renderNetworkInsights();
+    },
   },
   { view: "settings", buttonId: "btn-settings", panelId: "view-settings" },
   {
@@ -2447,7 +2452,7 @@ initDeviceInsights();
 initDeviceDiagnostics();
 renderNetworkInsights();
 initDeviceDetailsPanelTabs();
-initDetailPanelToggles(
+setDeviceDetailsPanelCollapsed = initDetailPanelToggles(
   document.getElementById("device-details"),
   handleDetailsPanelVisibilityChanged,
 );

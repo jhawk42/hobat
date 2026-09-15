@@ -249,12 +249,26 @@ def test_details_collapse_targets_explicit_details_owner_and_notifies_renderer()
     toggle_start = utils_text.index("export function initDetailPanelToggles")
     toggle_end = utils_text.index("headings.forEach", toggle_start)
     toggle_source = utils_text[toggle_start:toggle_end]
+    function_end = utils_text.index("\n}\n\nexport function mergeForDisplay", toggle_start)
+    function_source = utils_text[toggle_start:function_end]
 
     assert 'panelEl.closest("#panel-device-details")' in toggle_source
     assert 'panelDetailsEl?.classList.toggle("details-panel-collapsed"' in toggle_source
     assert 'panelEl.classList.toggle("details-panel-collapsed"' in toggle_source
     assert "onPanelVisibilityChanged?.(isPanelCollapsed);" in toggle_source
     assert 'btn.textContent = collapsed ? "◀" : "▶";' in toggle_source
+    assert "return setPanelCollapsed;" in function_source
+
+
+def test_insights_activation_collapses_device_details_panel() -> None:
+    ui_text = _read_text(UI_JS)
+    insights_start = ui_text.index('view: "insights"')
+    insights_end = ui_text.index('view: "settings"', insights_start)
+    insights_source = ui_text[insights_start:insights_end]
+
+    assert "setDeviceDetailsPanelCollapsed(true);" in insights_source
+    assert "renderNetworkInsights();" in insights_source
+    assert "setDeviceDetailsPanelCollapsed = initDetailPanelToggles(" in ui_text
 
 
 def test_vis_navigation_rules_are_not_nested_under_unused_heading() -> None:

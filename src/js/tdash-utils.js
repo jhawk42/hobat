@@ -700,13 +700,19 @@ export function initDetailPanelToggles(panelEl, onPanelVisibilityChanged) {
     btn.textContent = collapsed ? "◀" : "▶";
   };
 
-  syncPanelToggleButton(panelToggleBtn, false);
-  panelToggleBtn?.addEventListener("click", () => {
-    isPanelCollapsed = !isPanelCollapsed;
+  const setPanelCollapsed = (collapsed) => {
+    const nextCollapsed = Boolean(collapsed);
+    if (isPanelCollapsed === nextCollapsed) return;
+    isPanelCollapsed = nextCollapsed;
     panelDetailsEl?.classList.toggle("details-panel-collapsed", isPanelCollapsed);
     panelEl.classList.toggle("details-panel-collapsed", isPanelCollapsed);
     syncPanelToggleButton(panelToggleBtn, isPanelCollapsed);
     onPanelVisibilityChanged?.(isPanelCollapsed);
+  };
+
+  syncPanelToggleButton(panelToggleBtn, false);
+  panelToggleBtn?.addEventListener("click", () => {
+    setPanelCollapsed(!isPanelCollapsed);
   });
 
   headings.forEach((h2, idx) => {
@@ -783,6 +789,8 @@ export function initDetailPanelToggles(panelEl, onPanelVisibilityChanged) {
       h2.appendChild(headerActions);
     }
   });
+
+  return setPanelCollapsed;
 }
 
 export function mergeForDisplay(primary, secondary) {
