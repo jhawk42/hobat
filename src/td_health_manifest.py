@@ -48,9 +48,18 @@ class HealthDataset:
 
 
 @dataclass(frozen=True)
+class IneligibleHealthDataset:
+    datasource_id: str
+    dataset_id: str
+    reason: str
+    required_evidence: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class HealthManifest:
     schema_version: int
     datasets: Mapping[str, HealthDataset]
+    ineligible_datasets: Mapping[str, IneligibleHealthDataset]
 
     def dataset(self, dataset_id: str) -> HealthDataset:
         try:
@@ -78,8 +87,11 @@ def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:
 
     raw_profiles = raw.get("healthProfiles")
     raw_datasets = raw.get("datasets")
+    raw_ineligible_datasets = raw.get("ineligibleDatasets", [])
     if not isinstance(raw_profiles, dict) or not isinstance(raw_datasets, list):
         raise HealthManifestError("Manifest requires healthProfiles and datasets")
+    if not isinstance(raw_ineligible_datasets, list):
+        raise HealthManifestError("ineligibleDatasets must be an array")
 
     profiles: dict[str, HealthProfile] = {}
     for profile_id, value in raw_profiles.items():
@@ -152,7 +164,35 @@ def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:
             health_profile=profiles[profile_id],
         )
 
+    ineligible_datasets: dict[str, IneligibleHealthDataset] = {}
+    for value in raw_ineligible_datasets:
+        if not isinstance(value, dict):
+            raise HealthManifestError("Invalid ineligible health dataset")
+        dataset_id = value.get("value")
+        datasource_id = value.get("source")
+        reason = value.get("reason")
+        required_evidence = value.get("requiredEvidence")
+        if not isinstance(dataset_id, str) or not dataset_id:
+            raise HealthManifestError("Ineligible dataset value must be a non-empty string")
+        if dataset_id in datasets or dataset_id in ineligible_datasets:
+            raise HealthManifestError(f"Duplicate health dataset value: {dataset_id}")
+        if not isinstance(datasource_id, str) or not datasource_id:
+            raise HealthManifestError(f"Invalid source for {dataset_id}")
+        if not isinstance(reason, str) or not reason:
+            raise HealthManifestError(f"Invalid ineligibility reason for {dataset_id}")
+        if not isinstance(required_evidence, list) or not required_evidence or any(
+            not isinstance(item, str) or not item for item in required_evidence
+        ):
+            raise HealthManifestError(f"Invalid required evidence for {dataset_id}")
+        ineligible_datasets[dataset_id] = IneligibleHealthDataset(
+            datasource_id=datasource_id,
+            dataset_id=dataset_id,
+            reason=reason,
+            required_evidence=tuple(required_evidence),
+        )
+
     return HealthManifest(
         schema_version=SUPPORTED_SCHEMA_VERSION,
         datasets=MappingProxyType(datasets),
+        ineligible_datasets=MappingProxyType(ineligible_datasets),
     )

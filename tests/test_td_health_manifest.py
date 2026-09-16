@@ -50,6 +50,15 @@ def test_manifest_contains_only_approved_datasets() -> None:
     merged_profile = manifest.dataset("merged_otbr_topology_mdns_health").health_profile
     assert merged_profile.identity_file == "td-otbr-cli-thread-network-info.json"
     assert merged_profile.profile_id == "merged-otbr-topology-diagnostics-mdns-v1"
+    matter_topology = manifest.ineligible_datasets["ha_matter_ws_merge_topology"]
+    assert matter_topology.datasource_id == "ha-matter-ws"
+    assert "separate stable identity context" in matter_topology.reason
+    assert matter_topology.required_evidence == (
+        "A dedicated cached identity file with one canonical extPanId and networkName",
+        "Processor-owned normalization of native topology nodes and connections into canonical devices and relationships",
+        "A merge outcome proving all required Matter inputs were collected successfully for one observation",
+    )
+    assert "ha_matter_ws_merge_topology" not in manifest.datasets
 
 
 def test_manifest_rejects_unknown_dataset() -> None:

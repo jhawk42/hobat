@@ -60,6 +60,12 @@ OTBR CLI profiles and the merged OTBR profile use
 profiles use `td-otbr-restapi-dataset-active.json`. Both identity files provide
 `extPanId` and `networkName` independently of the selected evidence recipe.
 
+`ha_matter_ws_merge_topology` is explicitly ineligible. Current Matter snapshots
+contain consistent per-record Extended PAN IDs, but do not provide a dedicated
+identity context, processor-normalized native topology relationships, or a
+single merged-collection outcome. It can be reconsidered when those three
+cached contracts are available; see `ineligibleDatasets` in the manifest.
+
 Future workitems:
 Add Source: thread-panid-merged 
 Sources: otbr-cli and otbr-restapi 
@@ -197,7 +203,7 @@ remains Unknown.
 ## Coverage Pillars
 
 Each health profile in `td-dataset-manifest.json` declares static capability for
-five fixed pillars, checked against `ALLOWED_COVERAGE_STATES` in
+five stored-assessment pillars, checked against `ALLOWED_COVERAGE_STATES` in
 `td_health_manifest.py`. Every assessment also records `observedPillars`, which
 applies the same states to evidence actually present in that observation:
 
@@ -208,6 +214,13 @@ applies the same states to evidence actually present in that observation:
 | `delivery` | Packet delivery and error-counter evidence from observed devices and relationships. |
 | `resilience` | Router, Border Router, and alternate-path evidence for avoiding single points of failure. |
 | `externalRouting` | Border Router and OMR configuration evidence; it does not imply tested backbone or Internet reachability. |
+
+The dashboard currently presents Availability, Connectivity, Delivery, and
+Resilience only. It intentionally suppresses the External Routing pillar and
+its `network.external-routing` finding while preserving the raw observation
+and stored-assessment evidence. Re-enable it only after an approved contract
+defines the external-routing conclusion, required source snapshots, and
+freshness/completeness requirements; restoring a display label is insufficient.
 
 Each pillar is assigned one of three coverage states:
 

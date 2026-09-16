@@ -92,6 +92,63 @@ def test_health_sections_use_stored_status_and_evidence_kind_without_reclassific
     ]
 
 
+def test_external_routing_is_excluded_from_health_presentation_projections() -> None:
+    script = r"""
+      import {
+        projectHealthFindingDetail,
+        projectHealthFindingSections,
+        projectHealthSummaryRows,
+        projectVisibleHealthFindingGroups,
+        reconcileHealthInsightsSelection,
+      } from "./src/js/tdash-health.js";
+
+      const finding = (findingId, evidenceKind = "snapshot") => ({
+        findingId, rank: 1, evidenceKind, materiality: "network",
+        deviceIds: ["extaddr:1"], relationshipIds: [], endpoints: [], evidence: {},
+      });
+      const external = {
+        groupId: "external", ruleId: "network.external-routing", status: "moderate",
+        scope: "external", title: "Border Router OMR Addressing", summary: "Hidden",
+        confidence: "medium", count: 1, deviceIds: ["extaddr:1"], relationshipIds: [],
+        findings: [finding("external-finding")],
+      };
+      const retained = {
+        groupId: "retained", ruleId: "network.router-redundancy", status: "poor",
+        scope: "network", title: "Router Redundancy", summary: "Visible",
+        confidence: "high", count: 1, deviceIds: [], relationshipIds: [],
+        findings: [finding("retained-finding")],
+      };
+      const assessment = { assessmentId: "assessment", findingGroups: [external, retained] };
+      console.log(JSON.stringify({
+        visible: projectVisibleHealthFindingGroups(assessment.findingGroups).map(({ ruleId }) => ruleId),
+        rows: projectHealthSummaryRows(assessment.findingGroups, { view: "all" }).map(({ ruleId }) => ruleId),
+        sections: projectHealthFindingSections(assessment.findingGroups).flatMap(
+          ({ groups }) => groups.map(({ ruleId }) => ruleId),
+        ),
+        detail: projectHealthFindingDetail(external),
+        cleared: reconcileHealthInsightsSelection({ selectedGroupId: "external", selectedFindingId: "external-finding" }, assessment),
+        retained: reconcileHealthInsightsSelection({ selectedGroupId: "retained", selectedFindingId: "retained-finding" }, assessment),
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    result = json.loads(completed.stdout)
+    assert result["visible"] == ["network.router-redundancy"]
+    assert result["rows"] == ["network.router-redundancy"]
+    assert result["sections"] == ["network.router-redundancy"]
+    assert result["detail"] is None
+    assert result["cleared"]["selectedGroupId"] is None
+    assert result["cleared"]["detailsOpen"] is False
+    assert result["retained"]["selectedGroupId"] == "retained"
+    assert result["retained"]["selectedFindingId"] == "retained-finding"
+
+
 def test_health_summary_projection_sort_counts_and_selection_reconciliation() -> None:
     script = r"""
       import {

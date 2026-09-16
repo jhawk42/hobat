@@ -651,6 +651,7 @@ export const DATASET_REGISTRY = [
       "ha-matter-ws-network-topology"
     ],
     adaptor: "ha-matter-ws-merge-topology",
+    healthEligible: false,
     defaultPhysicsProfile: "mesh-balanced",
     topologyMode: "ha-matter-ws",
     defaultView: "topology",

@@ -100,6 +100,7 @@ import {
   fetchHealthDevice,
   fetchHealthSupport,
   projectHealthFindingDetail,
+  projectVisibleHealthFindingGroups,
   projectHealthSummaryRows,
   reconcileHealthInsightsSelection,
   renderDeviceHealth,
@@ -1733,7 +1734,7 @@ function renderNetworkInsights() {
     }
     const assessment = healthInsightsState.assessment;
     if (assessment) {
-      const findings = (assessment.findingGroups || []).flatMap(
+      const findings = projectVisibleHealthFindingGroups(assessment.findingGroups).flatMap(
         (group) => group.findings || [],
       );
       setTopologyHealthFindings(findings);
@@ -1774,6 +1775,16 @@ function renderNetworkInsights() {
       contentEl,
       "p",
       "Load a dataset to view network diagnostic insights.",
+      "network-insights-empty",
+    );
+    return;
+  }
+
+  if (currentDataset.entry.healthEligible === false) {
+    appendNetworkInsightElement(
+      contentEl,
+      "p",
+      "Health assessment is unavailable for this dataset.",
       "network-insights-empty",
     );
     return;
@@ -1883,7 +1894,7 @@ function selectHealthFindingGroup(groupId) {
 }
 
 function resolveHealthFindingGroup(groupId) {
-  return (healthInsightsState.assessment?.findingGroups || []).find(
+  return projectVisibleHealthFindingGroups(healthInsightsState.assessment?.findingGroups).find(
     (group) => group.groupId === groupId,
   ) ?? null;
 }
@@ -2321,7 +2332,7 @@ async function refreshHealthAssessment() {
     if (currentDataset?.entry?.value === assessment.datasetId) {
       currentDataset.healthAssessment = assessment;
     }
-    const attributedFindings = (assessment.findingGroups || [])
+    const attributedFindings = projectVisibleHealthFindingGroups(assessment.findingGroups)
       .flatMap((group) => group.findings || []);
     setTopologyHealthFindings(attributedFindings);
     setTableHealthFindings(attributedFindings, assessment.observedAt);

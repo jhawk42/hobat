@@ -16,6 +16,11 @@ const PILLAR_TOOLTIPS = Object.freeze({
   externalRouting: "Evidence that the Thread mesh has usable external or Border Router connectivity.",
 });
 
+const HEALTH_PRESENTATION_POLICY = Object.freeze({
+  visiblePillars: Object.freeze(["availability", "connectivity", "delivery", "resilience"]),
+  suppressedRuleIds: new Set(["network.external-routing"]),
+});
+
 const COVERAGE_STATUS_TOOLTIPS = Object.freeze({
   sufficient: "Sufficient: the assessment has the evidence required for this pillar.",
   limited: "Limited: some useful evidence is available, but coverage is incomplete.",
@@ -236,6 +241,12 @@ export function compareHealthSummaryRows(left, right, sort = {}) {
     || compareText(left.groupId, right.groupId);
 }
 
+export function projectVisibleHealthFindingGroups(groups) {
+  return (groups || []).filter(
+    ({ ruleId }) => !HEALTH_PRESENTATION_POLICY.suppressedRuleIds.has(ruleId),
+  );
+}
+
 export function projectHealthSummaryRows(groups, options = {}) {
   const filters = {
     status: options.filters?.status ?? "all",
@@ -243,7 +254,7 @@ export function projectHealthSummaryRows(groups, options = {}) {
     evidenceKind: options.filters?.evidenceKind ?? "all",
   };
   const view = options.view ?? "actionable";
-  const rows = (groups || []).map((group, catalogOrder) => {
+  const rows = projectVisibleHealthFindingGroups(groups).map((group, catalogOrder) => {
     const findings = group.findings || [];
     const evidenceKinds = uniqueValues(findings.map((finding) => finding.evidenceKind));
     const materialities = uniqueValues(findings.map((finding) => finding.materiality));
@@ -280,7 +291,7 @@ function sharedFindingValue(findings, key) {
 }
 
 export function projectHealthFindingDetail(group, selectedFindingId = null) {
-  if (!group) return null;
+  if (!projectVisibleHealthFindingGroups([group]).length) return null;
   const findings = group.findings || [];
   const row = projectHealthSummaryRows([group], { view: "all" })[0];
   return {
@@ -316,7 +327,7 @@ export function projectHealthFindingDetail(group, selectedFindingId = null) {
 
 export function reconcileHealthInsightsSelection(viewState, assessment) {
   const next = { ...viewState, assessmentId: assessment?.assessmentId ?? null };
-  const group = (assessment?.findingGroups || []).find(
+  const group = projectVisibleHealthFindingGroups(assessment?.findingGroups).find(
     ({ groupId }) => groupId === viewState.selectedGroupId,
   );
   if (!group) {
@@ -334,7 +345,9 @@ export function projectHealthFindingSections(groups, filters = {}) {
     scope: filters.scope ?? "all",
     evidenceKind: filters.evidenceKind ?? "all",
   };
-  const matched = groups.filter((group) => findingMatches(group, effectiveFilters));
+  const matched = projectVisibleHealthFindingGroups(groups).filter(
+    (group) => findingMatches(group, effectiveFilters),
+  );
   return FINDING_SECTIONS.map((section) => ({
     ...section,
     groups: matched.filter((group) => section.statuses.has(group.status)),
@@ -492,16 +505,17 @@ function renderFindingGroup(group, actions) {
 function renderHealthAssessmentSummary(container, model) {
   container.replaceChildren();
   const assessment = model.assessment;
+  const visibleGroups = projectVisibleHealthFindingGroups(assessment.findingGroups);
+  const allFindings = visibleGroups.flatMap((group) => group.findings || []);
   const header = document.createElement("div");
   header.className = "health-assessment-header";
   appendText(header, "strong", assessment.status,
     `health-status-state state-${assessment.status.toLowerCase()}`);
   appendText(header, "span", `${assessment.completeness} · ${assessment.confidence} confidence`);
   appendText(header, "span",
-    `${assessment.findingGroups?.length ?? 0} finding groups · ${assessment.findingCount} attributed findings`);
+    `${visibleGroups.length} finding groups · ${allFindings.length} attributed findings`);
   container.appendChild(header);
 
-  const allFindings = (assessment.findingGroups || []).flatMap((group) => group.findings || []);
   const affectedDevices = new Set(allFindings.flatMap((finding) => finding.deviceIds || [])).size;
   const affectedRelationships = new Set(
     allFindings.flatMap((finding) => finding.relationshipIds || []),
@@ -521,7 +535,8 @@ function renderHealthAssessmentSummary(container, model) {
   const pillars = document.createElement("dl");
   pillars.className = "health-coverage-pillars";
   pillars.setAttribute("aria-labelledby", pillarHeading.id = "health-coverage-heading");
-  Object.entries(PILLAR_LABELS).forEach(([pillar, label]) => {
+  HEALTH_PRESENTATION_POLICY.visiblePillars.forEach((pillar) => {
+    const label = PILLAR_LABELS[pillar];
     const item = document.createElement("div");
     item.className = "health-coverage-pillar";
     const name = appendText(item, "dt", label);
