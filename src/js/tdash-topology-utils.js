@@ -16,6 +16,7 @@ import {
   getIsolatedAnchorPresetLabel,
 } from "./tdash-constants.js";
 import { EDGE_CATEGORY_LABELS } from "./tdash-constants.js";
+import { isPlaceholderExtAddress } from "./tdash-device-fields.js";
 
 let _isolatedAnchorPresetName = ISOLATED_ANCHOR_PRESET_A;
 
@@ -119,6 +120,26 @@ export function buildLabel(node) {
     toText(node.deviceLabel) || toText(node.device_label) || toText(node.name) || "found node";
   const rloc16 = toText(node.rloc16) || "rloc16:not_found";
   return `${nodeName}\n${rloc16}`;
+}
+
+export function buildNodeHoverLabel(node) {
+  const rawLabel = [
+    node?.deviceLabel,
+    node?.device_label,
+    node?.name,
+    node?.hostname,
+    node?.hostName,
+  ].map(toText).find(Boolean) || "Unknown node";
+  const label = rawLabel.replace(/\s+/g, " ").trim();
+  const boundedLabel = label.length > 80 ? `${label.slice(0, 77)}...` : label;
+  const rloc16 = toText(node?.rloc16);
+  if (rloc16) return `${boundedLabel}\nRLOC16: ${rloc16}`;
+
+  const extAddress = getCanonicalExtaddr(node);
+  if (extAddress && !isPlaceholderExtAddress(extAddress)) {
+    return `${boundedLabel}\nExtAddr: ${extAddress}`;
+  }
+  return `${boundedLabel}\nIdentifier: unavailable`;
 }
 
 export function isUnknownNodeName(nodeName) {
@@ -519,6 +540,7 @@ export function buildVisNodeData(
     return {
       id: node.id,
       label: labelFn(node),
+      title: buildNodeHoverLabel(node),
       shape: effectiveShape,
       size,
       color: effectiveColor ? { ...effectiveColor } : effectiveColor,

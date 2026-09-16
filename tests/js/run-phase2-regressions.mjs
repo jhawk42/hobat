@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { runAdaptor } from "../../src/js/tdash-adaptors.js";
 import { resolveLayoutCollisions } from "../../src/js/tdash-layouts.js";
 import { assignParallelEdgeCurves } from "../../src/js/tdash-topology-renderer.js";
-import { buildVisNodeData } from "../../src/js/tdash-topology-utils.js";
+import { buildNodeHoverLabel, buildVisNodeData } from "../../src/js/tdash-topology-utils.js";
 
 function mergedEdges(row) {
   return runAdaptor({
@@ -50,5 +50,25 @@ assert.deepEqual(
   [visNodes[0].total_link_1, visNodes[0].total_link_2, visNodes[0].total_link_3, visNodes[0].lq1_ratio, visNodes[0].lq3_ratio],
   [0, 1, 2, 0, 3],
 );
+assert.equal(
+  buildNodeHoverLabel({ rloc16: "0x1000", deviceLabel: "Preferred", name: "Ignored", hostname: "Ignored" }),
+  "Preferred\nRLOC16: 0x1000",
+);
+assert.equal(
+  buildNodeHoverLabel({ extAddress: "AA:00:11:22:33:44:55:66", hostname: "\nHost\tName " }),
+  "Host Name\nExtAddr: aa:00:11:22:33:44:55:66",
+);
+assert.equal(
+  buildNodeHoverLabel({ extAddress: "unknown-0x1000", hostName: "Fallback host" }),
+  "Fallback host\nIdentifier: unavailable",
+);
+assert.equal(buildNodeHoverLabel({}), "Unknown node\nIdentifier: unavailable");
+const longHoverLabel = buildNodeHoverLabel({
+  name: "x".repeat(81),
+  rloc16: "0x2000",
+});
+assert.equal(longHoverLabel.split("\n")[0].length, 80);
+assert.match(longHoverLabel, /\.\.\.\nRLOC16: 0x2000$/);
+assert.equal(visNodes[0].title, "Unknown node\nIdentifier: unavailable");
 
 process.stdout.write("phase2 regressions passed\n");

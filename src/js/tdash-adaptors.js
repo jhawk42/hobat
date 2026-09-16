@@ -19,7 +19,7 @@ import {
 import {
   chooseNodeId, buildLabel,
   buildMainRouterRloc16, buildChildRloc16,
-  addEdge, buildEdgeTitle, groupIsolatedUnknownNodes, buildVisNodeData, buildNodeLabelFont,
+  addEdge, buildEdgeTitle, buildNodeHoverLabel, groupIsolatedUnknownNodes, buildVisNodeData, buildNodeLabelFont,
   lqStyleFromField, lqStyleFromAvgLqi, lqStyleFromLinkMargin
 } from './tdash-topology-utils.js';
 import { isPlaceholderOmrAddress } from './tdash-device-fields.js';
@@ -2128,6 +2128,7 @@ export function adaptHaMatterWs(fileMap, extractedRows, rowExtractor = '') {
       nodeRecord: canonicalRow,
       presentation: {
         label: buildLabel(canonicalRow),
+        title: buildNodeHoverLabel(canonicalRow),
         shape: isChild ? NODE_SHAPES.child : NODE_SHAPES.router,
         color: isChild ? NODE_COLORS.child : NODE_COLORS.eve,
         font: buildNodeLabelFont({ fontSize: isRouter ? 19.5 : 13, isRouter }),
@@ -2176,6 +2177,7 @@ export function adaptHaMatterWs(fileMap, extractedRows, rowExtractor = '') {
       nodeRecord: target,
       presentation: {
         label: buildLabel(target),
+        title: buildNodeHoverLabel(target),
         shape: NODE_SHAPES.router,
         color: NODE_COLORS.eve,
         font: buildNodeLabelFont({ fontSize: 13, isRouter: false }),
