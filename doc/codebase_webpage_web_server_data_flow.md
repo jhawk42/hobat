@@ -224,7 +224,9 @@ pinned assessment from `/api/health/*` and can start a same-origin
 health history in `hobat_v1.db`, without starting a collector, modifying a
 snapshot, or probing devices. The browser renders status, five-pillar coverage,
 grouped findings, bounded history metadata, and device-attributed findings.
-Python remains the only verdict owner.
+Python remains the only verdict owner. The finding view defaults to All for
+each dataset and is held only in browser memory; reloads, dataset changes, and
+Reset restore All.
 
 On Sync, `loadDataset()` starts per-file requests concurrently and uses
 `Promise.allSettled` so successful files can still produce a partial result when

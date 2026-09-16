@@ -247,7 +247,7 @@ const healthInsightsState = {
 };
 const healthInsightsViewState = {
   assessmentId: null,
-  view: "actionable",
+  view: "all",
   filters: { status: "all", scope: "all", evidenceKind: "all" },
   sort: { column: "priority", direction: "ascending" },
   selectedGroupId: null,
@@ -2121,7 +2121,7 @@ function restoreHealthNavigationContext() {
 function resetHealthWorkflow() {
   healthNavigationContext = null;
   findingDeviceReturnContext = null;
-  healthInsightsViewState.view = "actionable";
+  healthInsightsViewState.view = "all";
   healthInsightsViewState.filters = { status: "all", scope: "all", evidenceKind: "all" };
   healthInsightsViewState.sort = { column: "priority", direction: "ascending" };
   healthInsightsViewState.sortWasChanged = false;
@@ -2134,7 +2134,7 @@ function resetHealthWorkflow() {
   contextDetailsController.setCollapsed(true);
   document.getElementById("btn-back-to-health-finding")?.setAttribute("hidden", "");
   const viewFilter = document.getElementById("health-view-filter");
-  if (viewFilter) viewFilter.value = "actionable";
+  if (viewFilter) viewFilter.value = "all";
   for (const id of ["health-status-filter", "health-scope-filter", "health-evidence-filter"]) {
     const element = document.getElementById(id);
     if (element) element.value = "all";
@@ -2296,6 +2296,8 @@ async function refreshHealthAssessment() {
   if (datasetChanged) {
     healthInsightsState.assessment = null;
     healthInsightsViewState.assessmentId = null;
+    healthInsightsViewState.view = "all";
+    document.getElementById("health-view-filter").value = "all";
     healthInsightsViewState.selectedGroupId = null;
     healthInsightsViewState.selectedFindingId = null;
     healthInsightsViewState.tableScrollTop = 0;

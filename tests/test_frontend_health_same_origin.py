@@ -278,6 +278,10 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert "Health: refreshing" in health_js
     assert "Health: failed" in health_js
     assert "Health: cancelled" in health_js
+    assert '<option value="all" selected>All</option>' in html
+    assert 'view: "all"' in ui_js
+    assert 'healthInsightsViewState.view = "all";' in ui_js
+    assert 'document.getElementById("health-view-filter").value = "all";' in ui_js
     assert "Health processed:" in health_js
     assert "refreshedAt" in ui_js
     assert html.index('id="btn-health-refresh"') < html.index('id="btn-details-panel-toggle"')
