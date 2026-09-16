@@ -1090,10 +1090,10 @@ export function populateNodeDetailsLists(details, listIdPrefix = "") {
 
 export const DEVICE_SELECTION_EVENT = "tdash:device-selected";
 
-export function publishDeviceSelection(record) {
+export function publishDeviceSelection(record, { direct = false, resolved = false } = {}) {
   document.dispatchEvent(
     new CustomEvent(DEVICE_SELECTION_EVENT, {
-      detail: { record: record ?? null },
+      detail: { record: record ?? null, direct, resolved },
     }),
   );
 }

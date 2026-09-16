@@ -583,10 +583,10 @@ export function renderTopologyForDataset(
         });
       return;
     }
-    showNodeDetails(params.nodes[0]);
+    showNodeDetails(params.nodes[0], { direct: true });
   });
 
-  function showNodeDetails(selectedId) {
+  function showNodeDetails(selectedId, { direct = false } = {}) {
     const _QL =
       "#identity-list, #highlights-list, #network-list, #connections-list, " +
       "#mdns-list, #routes-links-list, #neighbors-list, #children-list, " +
@@ -600,7 +600,6 @@ export function renderTopologyForDataset(
       _hide();
       return;
     }
-    publishDeviceSelection(mergedDetails);
     const details = sortDetailsWithPriority(
       flattenObjectEntries(mergedDetails).filter(
         ([key]) => !shouldExcludeDetailPath(key),
@@ -613,6 +612,7 @@ export function renderTopologyForDataset(
       _hide();
       return;
     }
+    publishDeviceSelection(mergedDetails, { direct });
     populateNodeDetailsLists(details);
   }
 

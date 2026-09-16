@@ -25,9 +25,47 @@ def test_device_selection_event_is_shared_by_both_renderers() -> None:
     table_text = _read_text(TABLE_JS)
 
     assert 'DEVICE_SELECTION_EVENT = "tdash:device-selected"' in utils_text
-    assert "export function publishDeviceSelection(record)" in utils_text
-    assert "publishDeviceSelection(mergedDetails);" in topology_text
-    assert "publishDeviceSelection(rawRow);" in table_text
+    assert "export function publishDeviceSelection(record, { direct = false, resolved = false } = {})" in utils_text
+    assert "detail: { record: record ?? null, direct, resolved }" in utils_text
+    assert "publishDeviceSelection(mergedDetails, { direct });" in topology_text
+    assert "publishDeviceSelection(rawRow, { direct: true });" in table_text
+
+
+def test_direct_selection_resolves_current_dataset_and_reopens_only_when_valid() -> None:
+    ui_text = _read_text(UI_JS)
+
+    selection_start = ui_text.index("function clearSelectedDeviceDetails()")
+    selection_end = ui_text.index("function renderWorkspaceLogs()", selection_start)
+    selection_source = ui_text[selection_start:selection_end]
+
+    assert "function resolveCurrentDeviceSelection(record)" in selection_source
+    assert "getDeviceIdentityKeys(candidate).includes(identityKey)" in selection_source
+    assert "if (matches.length === 1) return matches[0];" in selection_source
+    assert "if (matches.length > 1) return null;" in selection_source
+    assert "event.stopImmediatePropagation();" in selection_source
+    assert "if (!record) clearSelectedDeviceDetails();" in selection_source
+    assert 'if (record && selection.direct) {' in selection_source
+    assert 'setContextDetailsMode("device");' in selection_source
+    assert "contextDetailsController.setCollapsed(false);" in selection_source
+    assert "publishDeviceSelection(record, { resolved: true });" in selection_source
+
+
+def test_table_direct_selection_validates_details_and_filtering_clears_hidden_selection() -> None:
+    table_text = _read_text(TABLE_JS)
+
+    click_start = table_text.index('tr.addEventListener("click", () => {')
+    click_end = table_text.index("fragment.appendChild(tr);", click_start)
+    click_source = table_text[click_start:click_end]
+    filters_start = table_text.index("export function applyTableFilters")
+    filters_end = table_text.index("export function renderTableForDataset", filters_start)
+    filters_source = table_text[filters_start:filters_end]
+
+    assert click_source.index("if (details.length === 0) {") < click_source.index(
+        "publishDeviceSelection(rawRow, { direct: true });"
+    )
+    assert "publishDeviceSelection(null, { direct: true });" in click_source
+    assert "sortedRows.includes(_selectedTableRow)" in filters_source
+    assert "if (preserveSelection && !selectedRow) _selectedTableRow = null;" in filters_source
 
 
 def test_selection_clear_paths_publish_null() -> None:

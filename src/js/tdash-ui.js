@@ -68,7 +68,7 @@ import {
   DEVICE_SELECTION_EVENT,
   publishDeviceSelection,
 } from "./tdash-utils.js";
-import { canonicalizeExtAddress } from "./tdash-device-fields.js";
+import { canonicalizeExtAddress, getDeviceIdentityKeys } from "./tdash-device-fields.js";
 import {
   populateFilterSelects,
   populateDiagnosticFilterBySource,
@@ -262,6 +262,38 @@ const contextDetailsState = {
 };
 let findingDeviceReturnContext = null;
 let healthNavigationContext = null;
+
+function clearSelectedDeviceDetails() {
+  document.querySelectorAll("#device-properties-panel .node-details-list").forEach((list) => {
+    list.innerHTML = "";
+    list.classList.add("hidden");
+  });
+}
+
+function resolveCurrentDeviceSelection(record) {
+  const identityKeys = getDeviceIdentityKeys(record);
+  for (const identityKey of identityKeys) {
+    const matches = (currentDataset?.rows ?? []).filter(
+      (candidate) => getDeviceIdentityKeys(candidate).includes(identityKey),
+    );
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) return null;
+  }
+  return null;
+}
+
+document.addEventListener(DEVICE_SELECTION_EVENT, (event) => {
+  const selection = event.detail ?? {};
+  if (selection.resolved) return;
+  event.stopImmediatePropagation();
+  const record = resolveCurrentDeviceSelection(selection.record);
+  if (!record) clearSelectedDeviceDetails();
+  if (record && selection.direct) {
+    setContextDetailsMode("device");
+    contextDetailsController.setCollapsed(false);
+  }
+  publishDeviceSelection(record, { resolved: true });
+}, true);
 
 function renderWorkspaceLogs() {
   const contentEl = document.getElementById("workspace-log-content");

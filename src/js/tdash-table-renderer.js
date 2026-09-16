@@ -424,19 +424,21 @@ function renderTableRows(rows, columns, isSearchActive = false, selectedRow = nu
       tr.classList.add("selected-row");
       const summaryListEl = document.getElementById("summary-list");
       const rawRow = _lastFilteredRows[idx] ?? row;
-      _selectedTableRow = rawRow;
-      publishDeviceSelection(rawRow);
       const details = sortDetailsWithPriority(
         flattenObjectEntries(rawRow).filter(
           ([key]) => !shouldExcludeDetailPath(key, "table"),
         ),
       );
       if (details.length === 0) {
+        _selectedTableRow = null;
+        publishDeviceSelection(null, { direct: true });
         if (summaryListEl)
           summaryListEl.innerHTML =
             "<li>No details available for selected row.</li>";
         return;
       }
+      _selectedTableRow = rawRow;
+      publishDeviceSelection(rawRow, { direct: true });
       if (summaryListEl) summaryListEl.innerHTML = "";
       populateNodeDetailsLists(details);
     });
@@ -491,7 +493,10 @@ export function applyTableFilters({ preserveSelection = false } = {}) {
   const { matchingRows } = filterRowsBySearch(filtered, searchQuery, _moreInfoEnabled);
   const sortedRows = sortedTableRows(matchingRows);
   _lastFilteredRows = sortedRows;
-  const selectedRow = preserveSelection ? _selectedTableRow : null;
+  const selectedRow = preserveSelection && sortedRows.includes(_selectedTableRow)
+    ? _selectedTableRow
+    : null;
+  if (preserveSelection && !selectedRow) _selectedTableRow = null;
   if (!preserveSelection) _selectedTableRow = null;
   const activeColumns = _tableColumnCategory === "all"
     ? (_moreInfoEnabled
