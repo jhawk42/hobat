@@ -124,7 +124,7 @@ export function formatAge(timestamp, parsedTimestamp = Date.parse(timestamp)) {
   return `${value} ${label}${value === 1 ? "" : "s"} ago`;
 }
 
-export function renderHealthStatus(container, model) {
+export function renderHealthStatus(container, model, actions = {}) {
   if (!container) return;
   container.replaceChildren();
   const isRefreshing = ["running", "cancelling"].includes(model.refreshStatus);
@@ -150,8 +150,28 @@ export function renderHealthStatus(container, model) {
   }
 
   const assessment = model.assessment;
-  appendText(container, "span", `Health: ${assessment.status}`,
-    `health-status-state state-${assessment.status.toLowerCase()}`);
+  const status = typeof assessment.status === "string" ? assessment.status.trim() : "";
+  if (!status) {
+    appendText(container, "span", "Health: unavailable", "health-status-state");
+    return;
+  }
+  const heading = appendText(container, "button", "Health:", "health-status-button health-status-navigation");
+  heading.type = "button";
+  heading.addEventListener("click", () => actions.openInsights?.());
+  const coloringEnabled = model.topologyColoringEnabled === true;
+  const statusButton = appendText(
+    container,
+    "button",
+    `${status} (coloring ${coloringEnabled ? "on" : "off"})`,
+    `health-status-button health-status-state state-${status.toLowerCase()}`,
+  );
+  statusButton.type = "button";
+  statusButton.setAttribute("aria-pressed", String(coloringEnabled));
+  statusButton.setAttribute(
+    "aria-label",
+    `${status} health; topology coloring ${coloringEnabled ? "on" : "off"}`,
+  );
+  statusButton.addEventListener("click", () => actions.toggleTopologyColoring?.());
   appendText(container, "span", assessment.completeness, "health-status-detail");
   const displayedAt = model.refreshedAt ?? assessment.observedAt;
   const parsedDisplayedAt = Date.parse(displayedAt);

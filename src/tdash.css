@@ -1245,6 +1245,21 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 }
 
 .health-status-state { font-weight: 700; }
+.health-status-button {
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.health-status-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.health-status-navigation { text-decoration: underline; }
+.health-status-button[aria-pressed="true"] { text-decoration: underline; }
 .health-status-state.state-strong { color: #067647; }
 .health-status-state.state-moderate { color: #a15c00; }
 .health-status-state.state-poor { color: #b42318; }

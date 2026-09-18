@@ -136,8 +136,12 @@ export function getTopologyNodeData() {
 export function getTopologyDatasetCounts() {
   return _topologyDatasetCounts;
 }
-export function setTopologyHealthFindings(findings = []) {
+export function setTopologyHealthFindings(findings = [], enabled = false) {
   _healthStatusByDeviceId = new Map();
+  if (!enabled) {
+    _topologyFilterHandlers?.applyHealthOverlay?.();
+    return;
+  }
   const severity = { unknown: 0, strong: 1, moderate: 2, poor: 3 };
   findings.forEach((finding) => {
     (finding.deviceIds || []).forEach((deviceId) => {

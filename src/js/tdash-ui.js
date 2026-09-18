@@ -214,6 +214,7 @@ let _currentSearchQuery = "";
 let sourceCapabilities = EMPTY_CAPABILITIES;
 let _fetchInProgress = false;
 let logsSubview = "logs";
+let healthTopologyColoringEnabled = false;
 const JOBS_POLL_MIN_DELAY_MS = 2000;
 const JOBS_POLL_EMPTY_DELAY_MS = 10000;
 const JOBS_POLL_MAX_DELAY_MS = 60_000;
@@ -1734,11 +1735,7 @@ function renderNetworkInsights() {
     }
     const assessment = healthInsightsState.assessment;
     if (assessment) {
-      const findings = projectVisibleHealthFindingGroups(assessment.findingGroups).flatMap(
-        (group) => group.findings || [],
-      );
-      setTopologyHealthFindings(findings);
-      setTableHealthFindings(findings, assessment.observedAt);
+      applyHealthAssessmentPresentation(assessment);
       if (currentDataset?.entry?.value === assessment.datasetId) {
         currentDataset.healthAssessment = assessment;
       }
@@ -1835,6 +1832,30 @@ function renderNetworkInsights() {
     });
     sectionEl.appendChild(listEl);
     contentEl.appendChild(sectionEl);
+  });
+}
+
+function applyHealthAssessmentPresentation(assessment) {
+  const findings = assessment
+    ? projectVisibleHealthFindingGroups(assessment.findingGroups).flatMap(
+      (group) => group.findings || [],
+    )
+    : [];
+  setTopologyHealthFindings(findings, healthTopologyColoringEnabled);
+  setTableHealthFindings(findings, assessment?.observedAt ?? "");
+}
+
+function renderHealthStatusSummary() {
+  renderHealthStatus(document.getElementById("health-status-summary"), {
+    ...healthInsightsState,
+    topologyColoringEnabled: healthTopologyColoringEnabled,
+  }, {
+    openInsights: () => switchView("insights"),
+    toggleTopologyColoring: () => {
+      healthTopologyColoringEnabled = !healthTopologyColoringEnabled;
+      renderNetworkInsights();
+      renderHealthStatusSummary();
+    },
   });
 }
 
@@ -2294,6 +2315,7 @@ async function refreshHealthAssessment() {
   const entry = currentDataset?.entry;
   const datasetChanged = healthInsightsState.datasetId !== entry?.value;
   if (datasetChanged) {
+    healthTopologyColoringEnabled = false;
     healthInsightsState.assessment = null;
     healthInsightsViewState.assessmentId = null;
     healthInsightsViewState.view = "all";
@@ -2309,19 +2331,18 @@ async function refreshHealthAssessment() {
   healthInsightsState.error = "";
   healthInsightsState.device = null;
   healthInsightsState.deviceError = "";
-  setTopologyHealthFindings([]);
-  setTableHealthFindings([]);
-  const statusEl = document.getElementById("health-status-summary");
+  applyHealthAssessmentPresentation(null);
   if (entry?.healthEligible !== true) {
+    healthTopologyColoringEnabled = false;
     healthInsightsState.loading = false;
-    renderHealthStatus(statusEl, healthInsightsState);
+    renderHealthStatusSummary();
     renderNetworkInsights();
     return;
   }
 
   const requestVersion = ++healthInsightsState.assessmentRequestVersion;
   healthInsightsState.loading = true;
-  renderHealthStatus(statusEl, healthInsightsState);
+  renderHealthStatusSummary();
   renderNetworkInsights();
   try {
     const assessment = await fetchHealthAssessment(entry.value);
@@ -2334,10 +2355,7 @@ async function refreshHealthAssessment() {
     if (currentDataset?.entry?.value === assessment.datasetId) {
       currentDataset.healthAssessment = assessment;
     }
-    const attributedFindings = projectVisibleHealthFindingGroups(assessment.findingGroups)
-      .flatMap((group) => group.findings || []);
-    setTopologyHealthFindings(attributedFindings);
-    setTableHealthFindings(attributedFindings, assessment.observedAt);
+    applyHealthAssessmentPresentation(assessment);
     lastRenderedDatasetByView.delete("table");
     if (currentView === "table") renderCurrentView({ force: true });
     try {
@@ -2350,11 +2368,12 @@ async function refreshHealthAssessment() {
     }
   } catch (error) {
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    healthTopologyColoringEnabled = false;
     healthInsightsState.error = error.message;
   } finally {
     if (requestVersion === healthInsightsState.assessmentRequestVersion) {
       healthInsightsState.loading = false;
-      renderHealthStatus(statusEl, healthInsightsState);
+      renderHealthStatusSummary();
       renderNetworkInsights();
       updateHealthRefreshControls();
     }
@@ -2380,9 +2399,8 @@ async function runHealthRefresh() {
   healthInsightsState.refreshDetail = "";
   healthInsightsState.refreshOutcome = null;
   healthInsightsState.error = "";
-  setTopologyHealthFindings([]);
-  setTableHealthFindings([]);
-  renderHealthStatus(document.getElementById("health-status-summary"), healthInsightsState);
+  applyHealthAssessmentPresentation(null);
+  renderHealthStatusSummary();
   renderNetworkInsights();
   updateHealthRefreshControls();
   try {
@@ -2433,11 +2451,15 @@ async function runHealthRefresh() {
     }
   } catch (error) {
     if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
+    healthTopologyColoringEnabled = false;
     healthInsightsState.refreshStatus = "error";
     healthInsightsState.refreshDetail = error.message;
   } finally {
     if (version === healthInsightsState.refreshVersion && currentDataset?.entry?.value === datasetId) {
-      renderHealthStatus(document.getElementById("health-status-summary"), healthInsightsState);
+      if (["cancelled", "error"].includes(healthInsightsState.refreshStatus)) {
+        healthTopologyColoringEnabled = false;
+      }
+      renderHealthStatusSummary();
       renderNetworkInsights();
       updateHealthRefreshControls();
     }

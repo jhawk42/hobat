@@ -233,6 +233,70 @@ def test_health_summary_projection_sort_counts_and_selection_reconciliation() ->
     assert result["cleared"]["detailsOpen"] is False
 
 
+def test_health_status_controls_keep_navigation_and_coloring_independent() -> None:
+    script = r'''
+      import { renderHealthStatus } from "./src/js/tdash-health.js";
+
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.attributes = {};
+          this.listeners = {};
+          this.textContent = "";
+          this.className = "";
+        }
+        appendChild(child) { this.children.push(child); return child; }
+        replaceChildren(...children) { this.children = children; }
+        toggleAttribute(name, force) { this.attributes[name] = String(Boolean(force)); }
+        setAttribute(name, value) { this.attributes[name] = String(value); }
+        addEventListener(type, listener) { this.listeners[type] = listener; }
+        click() { this.listeners.click?.(); }
+      }
+      globalThis.document = { createElement: (tagName) => new Element(tagName) };
+
+      const container = new Element("div");
+      let openedInsights = 0;
+      let toggledColoring = 0;
+      renderHealthStatus(container, {
+        assessment: {
+          status: "Moderate", completeness: "complete", observedAt: "2026-09-18T00:00:00Z",
+        },
+        loading: false, error: "", refreshStatus: "", topologyColoringEnabled: false,
+      }, {
+        openInsights: () => { openedInsights += 1; },
+        toggleTopologyColoring: () => { toggledColoring += 1; },
+      });
+      const [heading, status] = container.children;
+      heading.click();
+      status.click();
+      console.log(JSON.stringify({
+        heading: [heading.tagName, heading.textContent],
+        status: [status.tagName, status.textContent, status.attributes["aria-pressed"], status.attributes["aria-label"]],
+        openedInsights,
+        toggledColoring,
+      }));
+    '''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    result = json.loads(completed.stdout)
+    assert result["heading"] == ["button", "Health:"]
+    assert result["status"] == [
+        "button",
+        "Moderate (coloring off)",
+        "false",
+        "Moderate health; topology coloring off",
+    ]
+    assert result["openedInsights"] == 1
+    assert result["toggledColoring"] == 1
+
+
 def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     html = (ROOT / "src/tdash.html").read_text(encoding="utf-8")
     health_js = (ROOT / "src/js/tdash-health.js").read_text(encoding="utf-8")
@@ -278,6 +342,12 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert "Health: refreshing" in health_js
     assert "Health: failed" in health_js
     assert "Health: cancelled" in health_js
+    assert "healthTopologyColoringEnabled = false" in ui_js
+    assert "setTopologyHealthFindings(findings, healthTopologyColoringEnabled)" in ui_js
+    assert "applyHealthAssessmentPresentation(assessment)" in ui_js
+    assert "applyHealthAssessmentPresentation(null)" in ui_js
+    assert "topologyColoringEnabled" in health_js
+    assert 'aria-pressed", String(coloringEnabled)' in health_js
     assert '<option value="all" selected>All</option>' in html
     assert 'view: "all"' in ui_js
     assert 'healthInsightsViewState.view = "all";' in ui_js
@@ -306,5 +376,7 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert ".health-coverage-state.state-sufficient" in css
     assert ".health-coverage-state.state-limited" in css
     assert ".health-coverage-state.state-missing" in css
+    assert ".health-status-button" in css
+    assert ".health-status-navigation" in css
     assert "overflow-wrap: anywhere" in css
     assert "@media (max-width: 760px)" in css

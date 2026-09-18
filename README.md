@@ -82,6 +82,11 @@ Insights processes the currently loaded cached snapshot with partial input
 allowed. It writes health history in `hobat_v1.db`, but does not collect source
 data, update snapshots, or probe devices.
 
+The device summary's **Health:** control opens Network Insights. Its adjacent
+health status control optionally colors topology node borders from the current
+assessment; coloring is off by default, is not persisted, and resets when the
+active dataset changes.
+
 The **Logs** workspace contains local **Logs** and **Jobs** tabs. Logs retains
 the newest 200 sanitized browser activity entries in memory only. Jobs lists
 active dataset, health, and device-action work and supports individual or
