@@ -2,6 +2,7 @@ import json
 import os
 import re
 import logging
+import time
 from pathlib import Path
 from typing import Sequence
 
@@ -10,10 +11,14 @@ from td_const import OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME
 from td_json_key_normalizer import convert_keys_to_camel_case
 from otbr_cli_router_table import fetch_and_parse_router_table
 from otbr_cli_util import (
+    add_meshdiag_table_evidence,
+    build_meshdiag_ambiguous_result,
     build_timeout_error_record,
+    classify_meshdiag_table_response,
     collect_per_router,
     is_response_timeout_error,
     load_extaddr_map_or_empty,
+    meshdiag_collection_outcome,
     parse_conn_time,
     parse_err_rate_metrics,
     parse_rss_metrics,
@@ -65,23 +70,28 @@ def _parse_yes_no_to_bool(value):
 def fetch_meshdiag_child_table_for_device(parent_rloc16, router=None, extaddr_map=None):
     """Collect and parse `meshdiag childtable` output for one parent router."""
 
+    started_at = time.monotonic()
     output = exec_ot_ctl(f"meshdiag childtable {parent_rloc16}")
+    elapsed_ms = max(0, round((time.monotonic() - started_at) * 1000))
     logging.debug(
         f"[DEBUG] Output of 'meshdiag childtable {parent_rloc16}':\n{output}\n"
     )
 
-    if is_response_timeout_error(output):
-        device_label = (
-            extaddr_map.get(router.get("extaddr"), "Unknown")
-            if router and extaddr_map
-            else "Unknown"
-        )
-        return build_timeout_error_record(
+    device_label = (
+        extaddr_map.get(router.get("extaddr"), "Unknown")
+        if router and extaddr_map
+        else "Unknown"
+    )
+    table_status, error_type = classify_meshdiag_table_response(output)
+    if table_status != "success":
+        return add_meshdiag_table_evidence(build_timeout_error_record(
             rloc16=parent_rloc16,
             device_label=device_label,
             result_table_key="router_child_table",
             rloc_key="rloc16",
-        )
+        ), command="meshdiag childtable", table_status=table_status,
+            error_type=error_type, elapsed_ms=elapsed_ms, router=router,
+            device_label=device_label)
 
     router_child_table = {
         "rloc16": parent_rloc16,
@@ -190,7 +200,15 @@ def fetch_meshdiag_child_table_for_device(parent_rloc16, router=None, extaddr_ma
     router_child_table["router_child_table_count"] = len(
         router_child_table_data)
 
-    return router_child_table
+    return add_meshdiag_table_evidence(
+        router_child_table,
+        command="meshdiag childtable",
+        table_status=table_status,
+        error_type=error_type,
+        elapsed_ms=elapsed_ms,
+        router=router,
+        device_label=device_label,
+    )
 
 
 def fetch_all_meshdiag_child_tables(
@@ -217,18 +235,16 @@ def fetch_all_meshdiag_child_tables(
         extaddr_map=extaddr_map,
         collection_name="meshdiag childtable",
         on_result=result_callback,
+        ambiguous_result_fn=lambda rloc16, router: build_meshdiag_ambiguous_result(
+            rloc16=rloc16,
+            router=router,
+            device_label=extaddr_map.get(router.get("extaddr"), "Unknown") if extaddr_map else "Unknown",
+            result_table_key="router_child_table",
+            command="meshdiag childtable",
+        ),
     )
     if output_path is not None:
-        outcome = (
-            CollectionWriteOutcome.partial(
-                has_usable_data=any(
-                    isinstance(record, dict) and "_error" not in record
-                    for record in results
-                )
-            )
-            if any(isinstance(record, dict) and "_error" in record for record in results)
-            else CollectionWriteOutcome.complete()
-        )
+        outcome = meshdiag_collection_outcome(results)
         save_final_json(
             convert_keys_to_camel_case(results),
             output_path,

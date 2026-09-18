@@ -181,12 +181,17 @@ def _fetch_prefix_via_ot_ctl(command, label):
 
 def _build_ipv6_prefix_by_type(prefix, kind):
     """Formats a prefix for a specific address kind."""
-    base_prefix = _strip_prefix_mask(prefix)
-
     if kind == "meshlocal":
-        return base_prefix + THREAD_RLOC16_ADDRESS_PREFIX
+        network = ipaddress.IPv6Network(prefix, strict=False)
+        if network.prefixlen != 64:
+            raise ValueError("mesh-local prefix must be a /64")
+        rloc_prefix = network.network_address.packed[:8] + b"\x00\x00\x00\xff\xfe\x00"
+        return ":".join(
+            f"{int.from_bytes(rloc_prefix[index:index + 2], 'big'):x}"
+            for index in range(0, len(rloc_prefix), 2)
+        ) + ":"
     if kind == "omr":
-        return base_prefix
+        return _strip_prefix_mask(prefix)
 
     raise ValueError(f"Unsupported prefix kind: {kind}")
 

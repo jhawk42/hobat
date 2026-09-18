@@ -71,6 +71,13 @@ Reusable collectors remain side-effect free when no output path is supplied.
 Progressive `.partial.json` files are separate checkpoints and never replace the
 mandatory final snapshot.
 
+The per-router `meshdiag routerneighbortable`, `childtable`, and `childip6`
+collectors record an explicit table attempt for every queried router. On a
+timeout or explicit OTBR error, they may issue one bounded, two-attempt ping to
+that router's validated mesh-local RLOC IPv6 address. Ping evidence is distinct
+from table evidence: a reply does not turn a failed table collection into a
+success, and an all-failed run retains its prior final snapshot.
+
 ### OTBR REST API
 
 | File | Responsibility |

@@ -38,7 +38,8 @@ def test_network_helpers_cover_prefix_identity_and_address_selection(monkeypatch
     monkeypatch.setattr(util_network.util_ot_ctl, "exec_ot_ctl", lambda command: "fd00:1234::/64 Done")
 
     assert util_network.fetch_meshlocal_prefix() == "fd00:1234::/64"
-    assert util_network.build_rloc_ipv6_address_prefix("fd00:1234::/64") == "fd00:1234:0:ff:fe00:"
+    rloc_prefix = util_network.build_rloc_ipv6_address_prefix("fd00:1234::/64")
+    assert util_network.build_rloc16_ipv6_address(rloc_prefix, "0400") == "fd00:1234:0:0:0:ff:fe00:0400"
     assert util_network.build_omr_ipv6_address_prefix("fd00:abcd::/64") == "fd00:abcd"
     assert util_network.is_router("0x4C00") is True
     assert util_network.is_router("0x4a01") is False

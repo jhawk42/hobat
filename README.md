@@ -132,6 +132,9 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag multicast
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag fetch-all
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli networkdiag fetch-all \
   --children-ping-fallback
+PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli meshdiag routerneighbortable
+PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli meshdiag childtable
+PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli meshdiag childip6
 PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-cli topology
 
 # Explicit active device operations; neither runs as part of collection or health processing
@@ -171,6 +174,13 @@ this command does not resolve names or change cached snapshots.
 `otbr-cli topology` runs the complete CLI collection sequence. Detailed
 `networkdiag fetch-all` and REST diagnostic sweeps are the highest-impact
 commands; use cached snapshots for repeated analysis.
+
+The per-router OTBR CLI meshdiag table collectors automatically send one
+bounded two-attempt ICMPv6 probe to the queried router only after a table
+timeout or explicit OTBR error. The resulting snapshot records table and ping
+evidence separately; a ping reply does not make a failed table collection
+successful. The probe is skipped when a unique, valid mesh-local router target
+cannot be derived.
 
 Default OTBR REST `diagnostics fetch-all` and `topology` sweeps retry known
 terminal or no-result responses with progressively smaller, role-aware TLV

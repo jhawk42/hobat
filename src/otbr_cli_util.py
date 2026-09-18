@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,7 +19,13 @@ from typing import Any
 
 from extaddr_device_label_map import load_extaddr_device_label_map
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
-from util_data import data_file_path, load_optional_input, resolve_data_dir
+from util_data import (
+    CollectionWriteOutcome,
+    data_file_path,
+    load_optional_input,
+    resolve_data_dir,
+)
+import util_network
 
 
 @dataclass(frozen=True)
@@ -153,6 +160,202 @@ def is_response_timeout_error(output: str) -> bool:
     return re.search(r"Error\s+(\d+):\s+ResponseTimeout", output) is not None
 
 
+def classify_meshdiag_table_response(output: str) -> tuple[str, str | None]:
+    """Classify an OTBR meshdiag response without treating an error as a table."""
+    if not isinstance(output, str):
+        return "protocol-error", "ProtocolError"
+    error_match = re.search(r"Error\s+\d+:\s*([A-Za-z][A-Za-z0-9_-]*)", output)
+    if error_match:
+        error_type = error_match.group(1)
+        return ("timeout", error_type) if error_type == "ResponseTimeout" else ("error", error_type)
+    if not output.rstrip().endswith("Done"):
+        return "protocol-error", "ProtocolError"
+    return "success", None
+
+
+def canonical_router_rloc16(value: object) -> str | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(str(value), 0)
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= parsed < 0xFFFE or not util_network.is_router(parsed):
+        return None
+    return f"0x{parsed:04x}"
+
+
+def canonical_extaddr(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower().replace(":", "").replace("-", "")
+    if not re.fullmatch(r"[0-9a-f]{16}", normalized):
+        return None
+    return normalized
+
+
+def build_meshdiag_target_identity(router: dict | None, rloc16: object, device_label: str) -> dict[str, str]:
+    identity: dict[str, str] = {"device_label": device_label, "address_kind": "mesh-local-rloc"}
+    canonical_rloc16 = canonical_router_rloc16(rloc16)
+    if canonical_rloc16 is not None:
+        identity["rloc16"] = canonical_rloc16
+    extaddr = canonical_extaddr(router.get("extaddr")) if isinstance(router, dict) else None
+    if extaddr is not None:
+        identity["extaddr"] = extaddr
+    return identity
+
+
+def _meshdiag_ping_evidence(status: str = "not-attempted") -> dict[str, object]:
+    return {"status": status, "attempted": False, "elapsed_ms": 0}
+
+
+def add_meshdiag_table_evidence(
+    record: dict[str, Any],
+    *,
+    command: str,
+    table_status: str,
+    error_type: str | None,
+    elapsed_ms: int,
+    router: dict | None,
+    device_label: str,
+    ping: Callable[[Any], Any] | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """Attach independent table and bounded reachability evidence to one result."""
+    record["table_attempt"] = {
+        "command": command,
+        "status": table_status,
+        "elapsed_ms": elapsed_ms,
+        "error_type": error_type,
+    }
+    record["target_identity"] = build_meshdiag_target_identity(
+        router, record.get("rloc16"), device_label
+    )
+    if table_status == "success":
+        record["ping"] = _meshdiag_ping_evidence()
+        return record
+
+    record["_error"] = {"type": error_type or "ProtocolError"}
+    if table_status == "protocol-error":
+        record["ping"] = _meshdiag_ping_evidence()
+        return record
+
+    canonical_rloc16 = canonical_router_rloc16(record.get("rloc16"))
+    if canonical_rloc16 is None:
+        record["ping"] = _meshdiag_ping_evidence("unavailable")
+        return record
+    try:
+        meshlocal_prefix = util_network.fetch_meshlocal_prefix()
+        target = util_network.build_rloc16_ipv6_address(
+            util_network.build_rloc_ipv6_address_prefix(meshlocal_prefix),
+            canonical_rloc16[2:],
+        )
+        from td_device_actions import normalize_unicast_address
+
+        normalized_target, family = normalize_unicast_address(target)
+        if family != "ipv6":
+            raise ValueError("derived target is not IPv6")
+    except Exception as exc:
+        logging.info(
+            "meshdiag fallback ping unavailable router=%s reason=%s",
+            canonical_rloc16,
+            type(exc).__name__,
+        )
+        record["ping"] = _meshdiag_ping_evidence("unavailable")
+        return record
+
+    from otbr_cli_device import PING_DEFAULT_INTERVAL, PING_DEFAULT_TIMEOUT, PingRequest, ping_device
+
+    started_at = monotonic()
+    try:
+        result = (ping or ping_device)(
+            PingRequest(
+                target=normalized_target,
+                count=2,
+                interval_seconds=PING_DEFAULT_INTERVAL,
+                timeout_seconds=PING_DEFAULT_TIMEOUT,
+            )
+        )
+        if result.error_category == "none" and result.received > 0:
+            ping_status = "reply"
+        elif result.error_category == "timeout":
+            ping_status = "no-reply"
+        elif "unsupported" in result.output.lower():
+            ping_status = "unsupported"
+        else:
+            ping_status = "error"
+        record["ping"] = {
+            "status": ping_status,
+            "attempted": True,
+            "elapsed_ms": max(0, round((monotonic() - started_at) * 1000)),
+            "target": normalized_target,
+            "sent": result.sent,
+            "received": result.received,
+            "loss": result.loss,
+            "round_trip_summary_ms": result.round_trip_summary_ms,
+            "timeout_seconds": result.timeout_seconds,
+            "error_category": result.error_category,
+        }
+    except Exception as exc:
+        logging.warning(
+            "meshdiag fallback ping failed router=%s error_type=%s",
+            canonical_rloc16,
+            type(exc).__name__,
+        )
+        record["ping"] = {
+            "status": "error",
+            "attempted": True,
+            "elapsed_ms": max(0, round((monotonic() - started_at) * 1000)),
+            "target": normalized_target,
+            "error_category": "local-dispatch",
+        }
+    return record
+
+
+def build_meshdiag_ambiguous_result(
+    *,
+    rloc16: str,
+    router: dict,
+    device_label: str,
+    result_table_key: str,
+    command: str,
+) -> dict[str, Any]:
+    record = build_timeout_error_record(
+        rloc16=rloc16,
+        device_label=device_label,
+        result_table_key=result_table_key,
+    )
+    record["_error"] = {"type": "AmbiguousTarget"}
+    record["table_attempt"] = {
+        "command": command,
+        "status": "error",
+        "elapsed_ms": 0,
+        "error_type": "AmbiguousTarget",
+    }
+    record["target_identity"] = build_meshdiag_target_identity(router, rloc16, device_label)
+    record["ping"] = _meshdiag_ping_evidence("unavailable")
+    return record
+
+
+def meshdiag_collection_outcome(results: list[dict[str, Any]]) -> CollectionWriteOutcome:
+    if any("table_attempt" not in record for record in results):
+        has_failures = any("_error" in record for record in results)
+        return (
+            CollectionWriteOutcome.partial(
+                has_usable_data=any("_error" not in record for record in results)
+            )
+            if has_failures
+            else CollectionWriteOutcome.complete()
+        )
+    successful = [
+        record for record in results
+        if record.get("table_attempt", {}).get("status") == "success"
+    ]
+    if len(successful) == len(results):
+        return CollectionWriteOutcome.complete()
+    return CollectionWriteOutcome.partial(has_usable_data=bool(successful))
+
+
 def build_timeout_error_record(
     rloc16: str,
     device_label: str = "Unknown",
@@ -214,6 +417,7 @@ def collect_per_router(
     extaddr_map: dict | None = None,
     collection_name: str = "data",
     on_result: Callable[[list[dict], str, dict | None], None] | None = None,
+    ambiguous_result_fn: Callable[[str, dict], dict] | None = None,
 ) -> list[dict]:
     """Orchestrate per-router data collection with standardized logging.
     
@@ -247,21 +451,31 @@ def collect_per_router(
         ...     collection_name="meshdiag childtable"
         ... )
     """
-    # Extract RLOCs from router table (filter out entries without rloc16)
-    router_rlocs = [
-        router.get("rloc16") 
-        for router in router_table_data 
-        if router.get("rloc16")
-    ]
-    
     results = []
-    
-    for rloc16 in router_rlocs:
-        # Find the full router record for this rloc16
-        router = next(
-            (r for r in router_table_data if r.get("rloc16") == rloc16),
-            None
-        )
+    routers_by_rloc: dict[str, dict] = {}
+    ambiguous_rlocs: set[str] = set()
+    for router in router_table_data:
+        if not isinstance(router, dict):
+            continue
+        rloc16 = canonical_router_rloc16(router.get("rloc16"))
+        if rloc16 is None:
+            continue
+        existing = routers_by_rloc.get(rloc16)
+        if existing is None:
+            routers_by_rloc[rloc16] = router
+        elif canonical_extaddr(existing.get("extaddr")) != canonical_extaddr(router.get("extaddr")):
+            ambiguous_rlocs.add(rloc16)
+
+    for rloc16, router in routers_by_rloc.items():
+        if rloc16 in ambiguous_rlocs:
+            logging.warning("Skipping ambiguous %s router identity for %s", rloc16, collection_name)
+            if ambiguous_result_fn is None:
+                continue
+            result = ambiguous_result_fn(rloc16, router)
+            results.append(result)
+            if on_result is not None:
+                on_result(results, rloc16, router)
+            continue
         
         # Log collection start with device context
         if router:
