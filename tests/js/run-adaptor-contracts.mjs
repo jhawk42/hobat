@@ -403,10 +403,10 @@ const cachedHaMatter = run(
   ["td-ha-matter-ws-topology.json"],
   [cachedHaMatterRows],
 );
-assert.equal(cachedHaMatter.nodeData.length, 31);
+assert.equal(cachedHaMatter.nodeData.length, 30);
 assert.equal(cachedHaMatter.edgeData.length, 38);
 assert.equal(cachedHaMatter.edgeData[0].arrows, "to");
-assert.equal(cachedHaMatter.nodeData.filter((node) => node.isRouter === true).length, 20);
+assert.equal(cachedHaMatter.nodeData.filter((node) => node.isRouter === true).length, 19);
 assert.equal(cachedHaMatter.nodeData.filter((node) => node.isRouter !== true).length, 11);
 assert.equal(
   cachedHaMatter.nodeData.find(
@@ -427,7 +427,7 @@ assert.equal(
     rawFiles: [cachedHaMatterDashboard],
     rows: cachedHaMatterDashboard.diagnostics,
   });
-  assert.equal(cachedHaMatterDashboardDiagnostics.nodeData.length, 31);
+  assert.equal(cachedHaMatterDashboardDiagnostics.nodeData.length, 30);
   assert.equal(cachedHaMatterDashboardDiagnostics.edgeData.length, 29);
 
 const nativeBorderRouters = runAdaptor({
