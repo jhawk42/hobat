@@ -2,8 +2,8 @@
 
 usage: python3 -m td_webserver [-h] [--verbose] [--debug] [--host HOST]
                                [--port PORT] [--file-cache-max-age SECONDS]
-                               [--datadir DATADIR] [--enable-device-actions]
-                               [--enable-device-reset]
+                               [--datadir DATADIR] [--disable-device-actions]
+                               [--disable-device-reset]
 
 Start the Thread Network Topology Dashboard web server.
 
@@ -25,18 +25,18 @@ Device labels are read and updated through `GET`/`PATCH
 Active Device Diagnostics use `POST /api/device-actions` and the distinct
 `/api/device-action-jobs/{job_id}` polling and cancellation resource. These
 responses use `Cache-Control: no-store`, results remain in memory for bounded
-polling, and no action writes a snapshot or checkpoint. Ping is disabled unless
-`--enable-device-actions` or `TD_DEVICE_ACTIONS_ENABLED=true` is set. Destructive
-Reset Counters additionally requires `--enable-device-reset` or
-`TD_DEVICE_RESET_ENABLED=true`.
+polling, and no action writes a snapshot or checkpoint. Ping and Reset Counters
+are enabled by default. `--disable-device-actions` or a false
+`TD_DEVICE_ACTIONS_ENABLED` value disables all actions. `--disable-device-reset`
+or a false `TD_DEVICE_RESET_ENABLED` value disables only Reset Counters.
 
 Browser API access is same-origin. API responses do not include CORS
 authorization headers, and cross-origin preflights for mutating methods are not
 handled. Changing `--host` or deploying behind a reverse proxy does not add an
 origin allowlist; serve the dashboard and API through the same browser origin.
 This policy is not authentication and does not prevent direct HTTP clients with
-network access from calling the API. Put Hobat behind authenticated access
-control before enabling device actions outside a trusted network.
+network access from calling the API. Default-on device actions require Hobat to
+be behind authenticated access control or a firewall outside a trusted network.
 
 
 ## Options
@@ -57,10 +57,10 @@ options:
                      use /data
                      when present; otherwise create/use ./data under the
                      current run directory.
-  --enable-device-actions
-                     Enable active device Ping diagnostics (env:
-                     TD_DEVICE_ACTIONS_ENABLED; disabled by default).
-  --enable-device-reset
-                     Enable destructive OTBR Reset Counters actions (env:
-                     TD_DEVICE_RESET_ENABLED; disabled by default).
+  --disable-device-actions
+                     Disable all active device diagnostics (env:
+                     TD_DEVICE_ACTIONS_ENABLED; enabled by default).
+  --disable-device-reset
+                     Disable destructive OTBR Reset Counters actions (env:
+                     TD_DEVICE_RESET_ENABLED; enabled by default).
 ```

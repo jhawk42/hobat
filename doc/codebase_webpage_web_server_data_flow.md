@@ -40,6 +40,10 @@ directory through the server allowlist.
 | `GET /api/jobs` | `handle_jobs_api` | Return a no-store projection of all active generic, health, and device-action jobs |
 | `DELETE /api/jobs` | `handle_jobs_cancel_api` | Request deterministic, idempotent cancellation of all active jobs |
 | `POST /api/health/process-dataset` | `handle_health_process_dataset_api` | Process one approved cached dataset into a health assessment |
+| `GET /api/device-actions` | `handle_device_actions_capabilities_api` | Return the effective global device-action policy and enabled action names |
+| `POST /api/device-actions` | `handle_device_actions_api` | Validate and start one allowed transient device diagnostic action |
+| `GET /api/device-action-jobs/{job_id}` | `handle_device_action_job_api` | Return one transient device-action job state/result |
+| `DELETE /api/device-action-jobs/{job_id}` | `handle_device_action_job_cancel_api` | Request cancellation of one transient device-action job |
 | `GET /api/device/{extAddress}` | `handle_device_get_api` | Read one static device label |
 | `PATCH /api/device/{extAddress}` | `handle_device_patch_api` | Atomically insert or update one device label |
 | `GET /**` | aiohttp static route | Serve `src/` assets |
@@ -54,6 +58,21 @@ This removes cross-origin browser authorization; it is not authentication or a
 network-access boundary. Direct HTTP clients such as `curl` and `wget` can still
 call reachable API routes, including mutation routes. Use firewall or
 authenticated reverse-proxy controls when access must be restricted.
+
+## Device Diagnostics
+
+Device diagnostics are enabled by default. `GET /api/device-actions` reports
+the effective policy: all Ping actions and OTBR Reset Counters are available
+unless the server starts with `--disable-device-actions` or
+`--disable-device-reset`, or the corresponding `TD_DEVICE_*_ENABLED`
+environment override is false. The parent disable removes Reset Counters as
+well. Each POST revalidates the cached record, selected target, source, and
+action capability before dispatch; action results and jobs remain transient and
+are never written to snapshots, checkpoints, labels, or health data.
+
+Same-origin routing does not authenticate these mutation routes. Default-on
+operation requires a trusted network or authenticated reverse proxy/firewall
+before deployment outside a trusted environment.
 
 ### Data Request Flow
 

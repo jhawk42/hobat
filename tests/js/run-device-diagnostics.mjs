@@ -27,6 +27,28 @@ assert.equal(otbr.targets[0].address, "fd00::10");
 assert.equal(otbr.sleepy, true);
 assert.equal(otbr.resetSupported, true);
 
+const resetDisabled = buildDeviceDiagnosticsModel({
+  extAddress: "aabbccddeeff0011",
+  ipv6Addresses: ["fd00::10"],
+}, {
+  source: "otbr-cli",
+  files: ["td-otbr-cli-networkdiag-fetch-all.json"],
+}, {
+  enabled: true,
+  resetEnabled: false,
+  actions: [DEVICE_ACTIONS.OTBR_PING],
+});
+assert.equal(resetDisabled.pingAction, DEVICE_ACTIONS.OTBR_PING);
+assert.equal(resetDisabled.resetSupported, false);
+
+assert.equal(buildDeviceDiagnosticsModel({
+  extAddress: "aabbccddeeff0011",
+  ipv6Addresses: ["fd00::10"],
+}, {
+  source: "otbr-cli",
+  files: ["td-otbr-cli-networkdiag-fetch-all.json"],
+}, { enabled: false, resetEnabled: false, actions: [] }), null);
+
 const matter = buildDeviceDiagnosticsModel({
   matter: { nodeId: "4660" },
   networkInterfaces: [{ ipv6Addresses: ["fd00::20"] }],

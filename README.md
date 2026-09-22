@@ -107,14 +107,16 @@ cancellation but does not authorize it; deployments outside a trusted network
 must protect these routes with an authenticated reverse proxy or equivalent
 access control.
 
-Device Diagnostics are disabled by default because Ping and Reset Counters
-create active network traffic. Start the server with `--enable-device-actions`
-or set `TD_DEVICE_ACTIONS_ENABLED=true` to enable Ping. Reset Counters requires
-the additional `--enable-device-reset` option or
-`TD_DEVICE_RESET_ENABLED=true`. Do not enable either action on a deployment
-exposed beyond a trusted network without an authenticated reverse proxy or
-equivalent access control. Diagnostic results are transient and are never
-written to the data directory.
+Device Diagnostics are enabled by default: Ping and OTBR Reset Counters create
+active network traffic. Use `--disable-device-actions` or
+`TD_DEVICE_ACTIONS_ENABLED=false` to disable all diagnostic actions. Use
+`--disable-device-reset` or `TD_DEVICE_RESET_ENABLED=false` to disable only
+Reset Counters while retaining Ping. Environment values accept `1`, `true`,
+`yes`, or `on` to enable and `0`, `false`, `no`, or `off` to disable; CLI
+disable switches take precedence. Same-origin routing is not authentication,
+so deployments beyond a trusted network require an authenticated reverse proxy
+or equivalent firewall controls before exposing the server. Diagnostic results
+are transient and are never written to the data directory.
 
 ## CLI Quick Start
 

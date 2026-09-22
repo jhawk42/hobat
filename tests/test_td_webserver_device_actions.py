@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from aiohttp.test_utils import TestClient, TestServer
+
 import td_webserver
 from td_const import OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
 from td_device_actions import ACTION_OTBR_PING, ACTION_OTBR_RESET
@@ -42,7 +44,7 @@ class DeviceActionApiTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*tasks, return_exceptions=True)
         self._tmpdir.cleanup()
 
-    def _request(self, payload: object, *, enabled: bool = True, reset: bool = False):
+    def _request(self, payload: object, *, enabled: bool = True, reset: bool = True):
         request = MagicMock()
         request.app = {
             td_webserver.TD_DATA_DIR_APP_KEY: self.data_dir,
@@ -171,6 +173,45 @@ class DeviceActionApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 403)
         self.assertIn("Reset Counters", json.loads(response.text)["error"])
 
+    async def test_default_enabled_reset_dispatches(self) -> None:
+        payload = {
+            "action": ACTION_OTBR_RESET,
+            "deviceId": "extAddress:aabbccddeeff0011",
+            "source": "otbr-cli",
+            "datasetFiles": [OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME],
+            "target": "fd00::10",
+            "family": "ipv6",
+            "counters": "both",
+            "confirmed": True,
+        }
+
+        async def fake_runner(args, data_dir, **kwargs):
+            self.assertEqual(
+                args,
+                [
+                    "otbr-cli",
+                    "device",
+                    "reset-counters",
+                    "fd00::10",
+                    "--counters",
+                    "both",
+                    "--confirm",
+                    "--json",
+                ],
+            )
+            self.assertEqual(data_dir, self.data_dir)
+            return 0, b'{"acceptedForTransmission": true}', b"", 0.25
+
+        with patch.object(td_webserver, "run_device_action_cli", side_effect=fake_runner):
+            response = await td_webserver.handle_device_actions_api(self._request(payload))
+            body = json.loads(response.text)
+            await asyncio.wait_for(
+                td_webserver._device_action_runtime_registry[body["job_id"]].task,
+                timeout=1,
+            )
+
+        self.assertEqual(response.status, 202)
+
     async def test_poll_response_does_not_expose_subprocess_stderr(self) -> None:
         secret = "endpoint-token=not-for-browser"
 
@@ -266,6 +307,37 @@ class DeviceActionApiTests(unittest.IsolatedAsyncioTestCase):
         stream.feed_eof()
         output = await td_webserver._read_bounded_stream(stream)
         self.assertEqual(len(output), td_webserver._DEVICE_ACTION_OUTPUT_LIMIT_BYTES)
+
+
+class StartupDeviceActionCapabilityTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        with patch.object(td_webserver.aiohttp.web, "run_app") as run_app:
+            td_webserver.main(["--datadir", self._tmpdir.name, "--port", "0"])
+        self.client = TestClient(TestServer(run_app.call_args.args[0]))
+        await self.client.start_server()
+
+    async def asyncTearDown(self) -> None:
+        await self.client.close()
+        self._tmpdir.cleanup()
+
+    async def test_no_flag_start_exposes_all_device_actions(self) -> None:
+        response = await self.client.get("/api/device-actions")
+        body = await response.json()
+
+        self.assertEqual(response.status, 200)
+        self.assertTrue(body["enabled"])
+        self.assertTrue(body["resetEnabled"])
+        self.assertEqual(
+            body["actions"],
+            [
+                "otbr-cli-ping",
+                "ha-matter-ws-ping",
+                "system-ping",
+                "otbr-cli-reset-counters",
+            ],
+        )
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
 
 
 if __name__ == "__main__":

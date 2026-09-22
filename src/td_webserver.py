@@ -111,6 +111,8 @@ TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT = 86400  # 1 day in seconds
 TD_FILE_CACHE_MAX_AGE_ENV_NAME = "TD_FILE_CACHE_MAX_AGE"
 TD_DEVICE_ACTIONS_ENABLED_ENV_NAME = "TD_DEVICE_ACTIONS_ENABLED"
 TD_DEVICE_RESET_ENABLED_ENV_NAME = "TD_DEVICE_RESET_ENABLED"
+_TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSE_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
 # ---------------------------------------------------------------------------
 # Mapping table and cache helpers
@@ -2190,8 +2192,43 @@ def _non_negative_int(value: str) -> int:
     return parsed
 
 
-def _env_flag(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+def _parse_optional_env_bool(
+    name: str,
+    parser: argparse.ArgumentParser,
+) -> bool | None:
+    """Return an optional normalized boolean or fail startup for invalid input."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return None
+    normalized_value = raw_value.strip().lower()
+    if not normalized_value:
+        return None
+    if normalized_value in _TRUE_ENV_VALUES:
+        return True
+    if normalized_value in _FALSE_ENV_VALUES:
+        return False
+    parser.error(
+        f"Invalid {name} value: {raw_value!r}; expected one of "
+        "1, true, yes, on, 0, false, no, or off."
+    )
+    return None
+
+
+def _resolve_device_action_enablement(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> tuple[bool, bool]:
+    """Resolve diagnostic gates with CLI > environment > default precedence."""
+    actions_env = _parse_optional_env_bool(TD_DEVICE_ACTIONS_ENABLED_ENV_NAME, parser)
+    reset_env = _parse_optional_env_bool(TD_DEVICE_RESET_ENABLED_ENV_NAME, parser)
+
+    actions_enabled = False if args.disable_device_actions else (
+        actions_env if actions_env is not None else True
+    )
+    reset_enabled = False if (
+        not actions_enabled or args.disable_device_reset
+    ) else (reset_env if reset_env is not None else True)
+    return actions_enabled, reset_enabled
 
 
 def _resolve_file_cache_max_age(
@@ -2256,21 +2293,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
     parser.add_argument(
-        "--enable-device-actions",
+        "--disable-device-actions",
         action="store_true",
-        default=_env_flag(TD_DEVICE_ACTIONS_ENABLED_ENV_NAME),
         help=(
-            "Enable active device diagnostics "
-            f"(env: {TD_DEVICE_ACTIONS_ENABLED_ENV_NAME}; disabled by default)"
+            "Disable active device diagnostics "
+            f"(env: {TD_DEVICE_ACTIONS_ENABLED_ENV_NAME}; enabled by default)"
         ),
     )
     parser.add_argument(
-        "--enable-device-reset",
+        "--disable-device-reset",
         action="store_true",
-        default=_env_flag(TD_DEVICE_RESET_ENABLED_ENV_NAME),
         help=(
-            "Enable destructive OTBR Reset Counters actions "
-            f"(env: {TD_DEVICE_RESET_ENABLED_ENV_NAME}; disabled by default)"
+            "Disable destructive OTBR Reset Counters actions "
+            f"(env: {TD_DEVICE_RESET_ENABLED_ENV_NAME}; enabled by default)"
         ),
     )
     return parser
@@ -2284,6 +2319,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     cache_max_age_s, cache_max_age_source = _resolve_file_cache_max_age(args, parser)
+    device_actions_enabled, device_reset_enabled = _resolve_device_action_enablement(
+        args, parser
+    )
     _set_default_file_cache_max_age(cache_max_age_s)
 
     # Apply verbosity / debug flags
@@ -2307,8 +2345,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     app = aiohttp.web.Application()
     app[TD_DATA_DIR_APP_KEY] = td_data_dir
     app[TD_SOURCE_CAPABILITIES_APP_KEY] = SourceCapabilityService()
-    app[TD_DEVICE_ACTIONS_ENABLED_APP_KEY] = args.enable_device_actions
-    app[TD_DEVICE_RESET_ENABLED_APP_KEY] = args.enable_device_reset
+    app[TD_DEVICE_ACTIONS_ENABLED_APP_KEY] = device_actions_enabled
+    app[TD_DEVICE_RESET_ENABLED_APP_KEY] = device_reset_enabled
 
     async def _start_cleanup(app: aiohttp.web.Application) -> None:
         app[_CLEANUP_TASK_APP_KEY] = asyncio.create_task(

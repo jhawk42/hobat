@@ -32,10 +32,12 @@ another reverse proxy must forward the dashboard's path-relative `/api/*`
 requests to Hobat; Hobat does not emit CORS authorization headers. This is not
 authentication and does not block direct HTTP clients that can reach port 9165.
 
-Device Diagnostics are disabled by default. Set `device_actions_enabled` to
-enable Ping. Set `device_reset_enabled` as well to enable destructive OTBR
-Reset Counters. Enabling reset alone has no effect. Because same-origin access
-is not authentication, enable these options only when the Web UI is limited to
+Device Diagnostics are enabled by default. Set `device_actions_enabled: false`
+to disable Ping and all other diagnostic actions. Set
+`device_reset_enabled: false` to disable destructive OTBR Reset Counters while
+leaving Ping available; disabling actions also disables reset. Existing saved
+`false` values remain explicit opt-outs. Because same-origin access is not
+authentication, default-on diagnostics require the Web UI to be limited to
 trusted users by Home Assistant ingress or equivalent access control.
 
 The app's `/data` directory can also be backed up with `td_cli system backups

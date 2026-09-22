@@ -7,6 +7,7 @@ import logging
 import os
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import call, patch
 
 import td_cli
@@ -119,6 +120,126 @@ class TestTopLevelCommands(unittest.TestCase):
             value, source = td_webserver._resolve_file_cache_max_age(args, parser)
         self.assertEqual(value, 42)
         self.assertEqual(source, "cli")
+
+    def test_webserver_device_actions_default_to_enabled(self):
+        with patch.dict(os.environ, {}, clear=True):
+            parser = td_webserver.build_parser()
+            args = parser.parse_args([])
+            enabled, reset_enabled = td_webserver._resolve_device_action_enablement(
+                args, parser
+            )
+        self.assertTrue(enabled)
+        self.assertTrue(reset_enabled)
+
+    def test_webserver_device_actions_accept_boolean_environment_values(self):
+        for value, expected in (
+            ("1", True), ("TrUe", True), (" YES ", True), ("on", True),
+            ("0", False), ("FALSE", False), (" no ", False), ("Off", False),
+        ):
+            with self.subTest(value=value), patch.dict(
+                os.environ,
+                {td_webserver.TD_DEVICE_ACTIONS_ENABLED_ENV_NAME: value},
+                clear=True,
+            ):
+                parser = td_webserver.build_parser()
+                args = parser.parse_args([])
+                enabled, reset_enabled = td_webserver._resolve_device_action_enablement(
+                    args, parser
+                )
+                self.assertEqual(enabled, expected)
+                self.assertEqual(reset_enabled, expected)
+
+    def test_webserver_blank_device_action_environment_values_are_unset(self):
+        with patch.dict(
+            os.environ,
+            {
+                td_webserver.TD_DEVICE_ACTIONS_ENABLED_ENV_NAME: " \t ",
+                td_webserver.TD_DEVICE_RESET_ENABLED_ENV_NAME: "",
+            },
+            clear=True,
+        ):
+            parser = td_webserver.build_parser()
+            args = parser.parse_args([])
+            enabled, reset_enabled = td_webserver._resolve_device_action_enablement(
+                args, parser
+            )
+        self.assertTrue(enabled)
+        self.assertTrue(reset_enabled)
+
+    def test_webserver_invalid_device_action_environment_value_fails_even_with_cli_override(self):
+        with patch.dict(
+            os.environ,
+            {td_webserver.TD_DEVICE_RESET_ENABLED_ENV_NAME: "maybe"},
+            clear=True,
+        ):
+            parser = td_webserver.build_parser()
+            args = parser.parse_args(["--disable-device-actions"])
+            with self.assertRaises(SystemExit):
+                td_webserver._resolve_device_action_enablement(args, parser)
+
+    def test_webserver_disable_switches_override_environment_and_parent_reset_gate(self):
+        with patch.dict(
+            os.environ,
+            {
+                td_webserver.TD_DEVICE_ACTIONS_ENABLED_ENV_NAME: "true",
+                td_webserver.TD_DEVICE_RESET_ENABLED_ENV_NAME: "true",
+            },
+            clear=True,
+        ):
+            parser = td_webserver.build_parser()
+            args = parser.parse_args(["--disable-device-actions"])
+            self.assertEqual(
+                td_webserver._resolve_device_action_enablement(args, parser),
+                (False, False),
+            )
+            args = parser.parse_args(["--disable-device-reset"])
+            self.assertEqual(
+                td_webserver._resolve_device_action_enablement(args, parser),
+                (True, False),
+            )
+            args = parser.parse_args([
+                "--disable-device-actions", "--disable-device-reset",
+            ])
+            self.assertEqual(
+                td_webserver._resolve_device_action_enablement(args, parser),
+                (False, False),
+            )
+
+    def test_webserver_rejects_removed_positive_device_action_switches(self):
+        parser = td_webserver.build_parser()
+        for option in ("--enable-device-actions", "--enable-device-reset"):
+            with self.subTest(option=option), self.assertRaises(SystemExit):
+                parser.parse_args([option])
+
+    def test_webserver_help_lists_only_disable_device_action_switches(self):
+        parser = td_webserver.build_parser()
+        help_text = parser.format_help()
+        self.assertIn("--disable-device-actions", help_text)
+        self.assertIn("--disable-device-reset", help_text)
+        self.assertNotIn("--enable-device-actions", help_text)
+        self.assertNotIn("--enable-device-reset", help_text)
+
+    def test_addon_device_action_defaults_and_exports(self):
+        repository_root = Path(__file__).resolve().parents[1]
+        config_text = (repository_root / "addon_hobat" / "config.yaml").read_text(
+            encoding="utf-8"
+        )
+        run_script = (repository_root / "addon_hobat" / "run.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("device_actions_enabled: true", config_text)
+        self.assertIn("device_reset_enabled: true", config_text)
+        self.assertIn("device_actions_enabled: bool", config_text)
+        self.assertIn("device_reset_enabled: bool", config_text)
+        self.assertIn(
+            'export TD_DEVICE_ACTIONS_ENABLED="$(bashio::config \'device_actions_enabled\')"',
+            run_script,
+        )
+        self.assertIn(
+            'export TD_DEVICE_RESET_ENABLED="$(bashio::config \'device_reset_enabled\')"',
+            run_script,
+        )
 
 
 # ---------------------------------------------------------------------------
