@@ -48,6 +48,8 @@ import {
   setMoreInfoEnabled,
   isMoreInfoEnabled,
 } from "./tdash-table-renderer.js";
+import { runAdaptor } from "./tdash-adaptors.js";
+import { projectObservedTopologyLinkCounts } from "./tdash-adaptor-model.js";
 import { EDGE_LQ_STYLES } from "./tdash-constants.js";
 import {
   PHYSICS_PROFILE_MESH_BASELINE,
@@ -633,7 +635,13 @@ function renderCurrentView({ force = false } = {}) {
   const view = currentView;
   if (view !== "topology" && view !== "table") return;
   activateViewStatus(view, currentDataset);
-  if (!force && lastRenderedDatasetByView.get(view) === currentDataset) return;
+  if (!force && lastRenderedDatasetByView.get(view) === currentDataset) {
+    if (view === "topology") {
+      const counts = getTopologyDatasetCounts();
+      if (counts) updateDeviceStatusBar(counts);
+    }
+    return;
+  }
 
   const effectiveDataset = _enhanceEnabled
     ? {
@@ -657,7 +665,12 @@ function renderCurrentView({ force = false } = {}) {
     const counts = getTopologyDatasetCounts();
     if (counts) updateDeviceStatusBar(counts);
   } else if (view === "table") {
-    renderTableForDataset(effectiveDataset, currentDataset);
+    const adaptorResult = runAdaptor(effectiveDataset);
+    const tableRows = projectObservedTopologyLinkCounts(
+      effectiveDataset.rows,
+      adaptorResult,
+    ).rows;
+    renderTableForDataset({ ...effectiveDataset, rows: tableRows }, currentDataset);
     updateDeviceStatusBar(computeRowCounts(currentDataset.rows));
   }
 

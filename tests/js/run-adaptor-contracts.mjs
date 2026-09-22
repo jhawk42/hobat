@@ -6,6 +6,7 @@ import {
   extractOtbrRestApiSources,
   runAdaptor,
 } from "../../src/js/tdash-adaptors.js";
+import { projectObservedTopologyLinkCounts } from "../../src/js/tdash-adaptor-model.js";
 
 
 function run(adaptor, files, rawFiles, rows = []) {
@@ -502,6 +503,19 @@ assert.deepEqual(nativeTopology.edgeData[0].nativeObservation, {
   lqi: 2,
   rssi: -70,
 });
+const nativeTopologyProjection = projectObservedTopologyLinkCounts(
+  nativeTopologyPayload.topology.nodes,
+  nativeTopology,
+);
+assert.deepEqual(
+  [
+    nativeTopologyProjection.rows[0].observedTopologyLinks,
+    nativeTopologyProjection.rows[0].observedTopologyLinksLq3,
+    nativeTopologyProjection.rows[0].observedTopologyLinksLq2,
+    nativeTopologyProjection.rows[0].observedTopologyLinksLq1,
+  ],
+  [3, 1, 1, 0],
+);
 
 const mergedHaMatterTopology = run(
   "ha-matter-ws-merge-topology",
@@ -523,6 +537,11 @@ assertResult(mergedHaMatterTopology, {
   sourceNames: ["ha-matter-ws", "ha-matter-ws-network-topology"],
   hasChildIndex: true,
 });
+const mergedHaMatterProjection = projectObservedTopologyLinkCounts(
+  [{ topologyId: "matter-a", extAddress: "aabbccddeeff0011" }],
+  mergedHaMatterTopology,
+);
+assert.equal(mergedHaMatterProjection.rows[0].observedTopologyLinks, 3);
 
 const devicesEnvelope = { data: [
   { id: "device-a", attributes: { extAddress: "aa00112233445566", hostName: "Device A", role: "router" } },
@@ -567,6 +586,53 @@ assert.equal(rest.rawByIdForDetails.get("aa00112233445566").shared, "mesh");
 assert.equal(rest.rawByIdForDetails.get("aa00112233445566").basicOnly, true);
 assert.equal(rest.routerNeighborByRloc16.get("0x1000").router_neighbor_table.length, 1);
 assert.equal(rest.routerChildByRloc16.get("0x1000").router_child_table.length, 1);
+
+const projectedCounts = projectObservedTopologyLinkCounts([
+  { extAddress: "aa00112233445566", totalLinks: 99 },
+  { extAddress: "bb00112233445566" },
+  { extAddress: "cc00112233445566" },
+  { extAddress: "dd00112233445566" },
+], {
+  nodeData: [{ id: "a" }, { id: "b" }, { id: "c" }],
+  nodeMap: new Map([
+    ["a", { extAddress: "aa00112233445566" }],
+    ["b", { extAddress: "bb00112233445566" }],
+    ["c", { extAddress: "cc00112233445566" }],
+  ]),
+  rawByIdForDetails: new Map(),
+  edgeData: [
+    { id: "route-a-b", from: "a", to: "b", lqLevel: 3 },
+    { id: "parallel-a-b", from: "a", to: "b", lqLevel: 1 },
+    { id: "reverse-b-a", from: "b", to: "a", lqLevel: 2 },
+    { id: "route-a-b", from: "a", to: "b", lqLevel: 3 },
+  ],
+});
+assert.equal(projectedCounts.hasRelationshipEvidence, true);
+assert.equal(projectedCounts.rows[0].totalLinks, 99);
+assert.deepEqual(
+  projectedCounts.rows.slice(0, 2).map((row) => [
+    row.observedTopologyLinks,
+    row.observedTopologyLinksLq3,
+    row.observedTopologyLinksLq2,
+    row.observedTopologyLinksLq1,
+  ]),
+  [[3, 1, 1, 1], [3, 1, 1, 1]],
+);
+assert.deepEqual(
+  [
+    projectedCounts.rows[2].observedTopologyLinks,
+    projectedCounts.rows[2].observedTopologyLinksLq3,
+  ],
+  [0, 0],
+);
+assert.equal("observedTopologyLinks" in projectedCounts.rows[3], false);
+
+const noEvidenceProjection = projectObservedTopologyLinkCounts(
+  [{ extAddress: "aa00112233445566" }],
+  { edgeData: [], nodeData: [{ id: "a" }], nodeMap: new Map([["a", { extAddress: "aa00112233445566" }]]) },
+);
+assert.equal(noEvidenceProjection.hasRelationshipEvidence, false);
+assert.equal("observedTopologyLinks" in noEvidenceProjection.rows[0], false);
 
 assert.deepEqual(extractOtbrRestApiItems({ extAddress: "AA", attributes: { role: "router" } }), [
   { extAddress: "AA", attributes: { role: "router" }, role: "router" },

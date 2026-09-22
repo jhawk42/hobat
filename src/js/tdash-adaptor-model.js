@@ -205,6 +205,7 @@ export function emitAdaptorResult(model) {
   const edgeData = model.relationships.map((relationship) => ({
     ...relationship.presentation,
     ...relationship.metrics,
+    id: relationship.id,
     from: relationship.sourceId,
     to: relationship.targetId,
     linkCategories: Array.isArray(relationship.presentation.linkCategories)
@@ -223,6 +224,98 @@ export function emitAdaptorResult(model) {
     result.routerChildByRloc16 = new Map(model.routerChildrenByRloc16);
   }
   return result;
+}
+
+function normalizedRecordId(record) {
+  const value = record?.topologyId ?? record?.matterId ?? record?.id;
+  return typeof value === "string" || typeof value === "number"
+    ? String(value).trim().toLowerCase()
+    : "";
+}
+
+function addRecordIdentityMappings(index, record, deviceId) {
+  if (!isPlainObject(record)) return;
+  getDeviceIdentityKeys(record).forEach((key) => {
+    if (!index.has(key)) index.set(key, deviceId);
+  });
+  const recordId = normalizedRecordId(record);
+  if (recordId && !index.has(`id:${recordId}`)) index.set(`id:${recordId}`, deviceId);
+}
+
+function resolveProjectedDeviceId(index, record) {
+  const identityKey = getDeviceIdentityKeys(record).find((key) => index.has(key));
+  if (identityKey) return index.get(identityKey);
+  const recordId = normalizedRecordId(record);
+  return recordId ? index.get(`id:${recordId}`) : undefined;
+}
+
+/**
+ * Returns cloned table rows annotated with counts from observed adaptor edges.
+ * Rows without a canonical topology identity or relationship evidence are left unchanged.
+ */
+export function projectObservedTopologyLinkCounts(rows, adaptorResult) {
+  if (!Array.isArray(rows) || !Array.isArray(adaptorResult?.edgeData)) {
+    return { rows, hasRelationshipEvidence: false };
+  }
+  const edgeData = adaptorResult.edgeData;
+  if (edgeData.length === 0) return { rows, hasRelationshipEvidence: false };
+
+  const identityToDeviceId = new Map();
+  const deviceIds = new Set([
+    ...(adaptorResult.nodeData ?? []).map((node) => String(node.id)),
+    ...(adaptorResult.nodeMap instanceof Map ? adaptorResult.nodeMap.keys() : []),
+    ...(adaptorResult.rawByIdForDetails instanceof Map ? adaptorResult.rawByIdForDetails.keys() : []),
+  ]);
+  deviceIds.forEach((deviceId) => {
+    const normalizedDeviceId = String(deviceId);
+    identityToDeviceId.set(`id:${normalizedDeviceId.toLowerCase()}`, normalizedDeviceId);
+    addRecordIdentityMappings(identityToDeviceId, adaptorResult.nodeMap?.get(deviceId), normalizedDeviceId);
+    addRecordIdentityMappings(identityToDeviceId, adaptorResult.rawByIdForDetails?.get(deviceId), normalizedDeviceId);
+    addRecordIdentityMappings(
+      identityToDeviceId,
+      (adaptorResult.nodeData ?? []).find((node) => String(node.id) === normalizedDeviceId),
+      normalizedDeviceId,
+    );
+  });
+
+  const countsByDeviceId = new Map();
+  const seenEdgeIds = new Set();
+  edgeData.forEach((edge, index) => {
+    const edgeId = String(edge.id ?? `${edge.from}|${edge.to}|${index}`);
+    if (seenEdgeIds.has(edgeId)) return;
+    seenEdgeIds.add(edgeId);
+    new Set([String(edge.from), String(edge.to)]).forEach((deviceId) => {
+      const counts = countsByDeviceId.get(deviceId) ?? {
+        observedTopologyLinks: 0,
+        observedTopologyLinksLq3: 0,
+        observedTopologyLinksLq2: 0,
+        observedTopologyLinksLq1: 0,
+      };
+      counts.observedTopologyLinks += 1;
+      if (edge.lqLevel === 3) counts.observedTopologyLinksLq3 += 1;
+      if (edge.lqLevel === 2) counts.observedTopologyLinksLq2 += 1;
+      if (edge.lqLevel === 1) counts.observedTopologyLinksLq1 += 1;
+      countsByDeviceId.set(deviceId, counts);
+    });
+  });
+
+  return {
+    rows: rows.map((row) => {
+      if (!isPlainObject(row)) return row;
+      const deviceId = resolveProjectedDeviceId(identityToDeviceId, row);
+      if (!deviceId) return row;
+      return {
+        ...row,
+        ...(countsByDeviceId.get(deviceId) ?? {
+          observedTopologyLinks: 0,
+          observedTopologyLinksLq3: 0,
+          observedTopologyLinksLq2: 0,
+          observedTopologyLinksLq1: 0,
+        }),
+      };
+    }),
+    hasRelationshipEvidence: true,
+  };
 }
 
 export function createAdaptorModelFromResult(result) {
