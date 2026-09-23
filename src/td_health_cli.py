@@ -71,6 +71,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="expected",
         help="State to store with --roster-device.",
     )
+    compare = commands.add_parser("compare", description="Compare two stored health assessments.")
+    compare.add_argument("--before-assessment", required=True)
+    compare.add_argument("--after-assessment", required=True)
+    compare.add_argument("--dry-run", action="store_true")
+    compare.add_argument("--json", action="store_true", dest="json_output")
     for name, help_text in (
         ("purge", "Delete health records older than a UTC cutoff"),
         ("purge-all", "Delete all health-domain records"),
@@ -187,6 +192,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     data_dir = resolve_data_dir(args.datadir)
     if args.health_command in {"purge", "purge-all", "purge-by-device"}:
         return _run_purge(args, data_dir)
+    if args.health_command == "compare":
+        database_path = data_dir / HOBAT_DATABASE_FILENAME
+        if not database_path.is_file():
+            parser.error("Health store is not available")
+        store = SQLiteHealthStore(database_path, read_only=args.dry_run)
+        try:
+            interval, items, created = store.compare_assessments(
+                args.before_assessment, args.after_assessment, dry_run=args.dry_run,
+            )
+        except (KeyError, ValueError) as exc:
+            parser.error(str(exc))
+        document = {
+            "schemaVersion": 1, "comparisonId": interval.comparison_id,
+            "beforeAssessmentId": interval.before_assessment_id,
+            "afterAssessmentId": interval.after_assessment_id,
+            "comparable": interval.compatibility.comparable,
+            "reasons": list(interval.compatibility.reasons),
+            "itemCount": len(items), "created": created, "dryRun": args.dry_run,
+        }
+        print(json.dumps(document, sort_keys=True) if args.json_output else (
+            f"Comparison {interval.comparison_id}: {len(items)} items, "
+            f"{'comparable' if interval.compatibility.comparable else 'not comparable'}"
+            f"{' (dry run)' if args.dry_run else ''}"
+        ))
+        return 0
     policy = load_health_policy(args.policy_config_dir or Path.cwd() / "config")
     if args.dry_run and args.export_latest:
         parser.error("--dry-run cannot be combined with --export-latest")

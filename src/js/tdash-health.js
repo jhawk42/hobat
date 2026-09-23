@@ -101,6 +101,193 @@ export function fetchHealthDevice(assessmentId, deviceId, signal) {
   return healthRequest(`api/health/devices/${encodeURIComponent(deviceId)}?${query}`, signal);
 }
 
+export function fetchHealthRoster(networkId, offset = 0, signal) {
+  const query = new URLSearchParams({ network: networkId, limit: "25", offset: String(offset) });
+  return healthRequest(`api/health/roster?${query}`, signal);
+}
+
+export function fetchHealthRosterDevice(networkId, deviceId, signal) {
+  const query = new URLSearchParams({ network: networkId });
+  return healthRequest(`api/health/roster/${encodeURIComponent(deviceId)}?${query}`, signal);
+}
+
+export function fetchHealthComparisons(networkId, datasetId, offset = 0, signal) {
+  const query = new URLSearchParams({ network: networkId, dataset: datasetId, limit: "25", offset: String(offset) });
+  return healthRequest(`api/health/comparisons?${query}`, signal);
+}
+
+export function fetchHealthComparison(comparisonId, offset = 0, signal) {
+  const query = new URLSearchParams({ limit: "25", offset: String(offset) });
+  return healthRequest(`api/health/comparisons/${encodeURIComponent(comparisonId)}?${query}`, signal);
+}
+
+export function isComparisonPageForAssessment(page, assessment, offset) {
+  return page?.schemaVersion === 1 && Array.isArray(page.items)
+    && Number.isInteger(page.total) && page.total >= 0
+    && Number.isInteger(page.limit) && page.limit > 0
+    && Number.isInteger(page.offset) && page.offset >= 0
+    && page.offset === offset && page.items.length <= page.limit
+    && page.offset + page.items.length <= page.total
+    && page.items.every((item) => item?.networkId === assessment.networkId
+      && item.datasetId === assessment.datasetId && typeof item.comparisonId === "string"
+      && item.comparisonId.length > 0);
+}
+
+export function renderHealthComparison(container, page, comparison, viewState = {}, actions = {}) {
+  if (!container) return;
+  container.replaceChildren();
+  if (viewState.loading) {
+    appendText(container, "p", "Loading stored comparisons…");
+    return;
+  }
+  if (viewState.error) {
+    appendText(container, "p", viewState.error);
+    return;
+  }
+  if (!page || !Array.isArray(page.items)) {
+    appendText(container, "p", "Stored comparisons are unavailable.");
+    return;
+  }
+  if (!page.total) {
+    appendText(container, "p", "No stored comparisons for this dataset.");
+    return;
+  }
+  const picker = document.createElement("select");
+  picker.setAttribute("aria-label", "Stored comparison");
+  const prompt = document.createElement("option");
+  prompt.value = "";
+  prompt.textContent = "Select a comparison";
+  picker.appendChild(prompt);
+  page.items.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.comparisonId;
+    option.textContent = `Before ${item.beforeObservedAt} · After ${item.afterObservedAt}`;
+    picker.appendChild(option);
+  });
+  if (comparison && !page.items.some((item) => item.comparisonId === comparison.comparisonId)) {
+    const pinned = document.createElement("option");
+    pinned.value = comparison.comparisonId;
+    pinned.textContent = `Before ${comparison.beforeObservedAt} · After ${comparison.afterObservedAt} (selected)`;
+    picker.appendChild(pinned);
+  }
+  picker.value = comparison?.comparisonId || "";
+  picker.addEventListener("change", () => actions.select?.(picker.value));
+  container.appendChild(picker);
+  const nav = appendText(container, "div", "", "health-comparison-navigation");
+  const previous = appendText(nav, "button", "Previous pairs");
+  previous.type = "button";
+  previous.disabled = page.offset === 0;
+  previous.addEventListener("click", () => actions.page?.(Math.max(0, page.offset - page.limit)));
+  const next = appendText(nav, "button", "Next pairs");
+  next.type = "button";
+  next.disabled = page.offset + page.items.length >= page.total;
+  next.addEventListener("click", () => actions.page?.(page.offset + page.limit));
+  if (!comparison) return;
+  appendText(container, "h3", `Before ${comparison.beforeObservedAt} · After ${comparison.afterObservedAt}`);
+  const reasons = comparison.reasons?.join(", ") || "none";
+  appendText(container, "p", `Baseline: ${comparison.baselineState} · Gap: ${comparison.gapState || "unknown"} · Reset: ${comparison.resetState} · ${comparison.comparable ? "Comparable" : `Unknown (${reasons})`}`);
+  const filter = document.createElement("select");
+  filter.setAttribute("aria-label", "Comparison scope");
+  ["all", "network", "device", "relationship"].forEach((scope) => {
+    const option = document.createElement("option");
+    option.value = scope;
+    option.textContent = scope === "all" ? "All scopes" : scope;
+    filter.appendChild(option);
+  });
+  filter.value = viewState.scope || "all";
+  filter.addEventListener("change", () => actions.scope?.(filter.value));
+  container.appendChild(filter);
+  if (!comparison.items?.length) {
+    appendText(container, "p", "No items on this page.");
+  } else {
+    const wrap = appendText(container, "div", "", "health-comparison-table-wrap");
+    const table = document.createElement("table");
+    const header = document.createElement("tr");
+    ["Subject", "Evidence", "Before", "After", "Delta", "Result", "Source / reset"].forEach((label) => appendText(header, "th", label));
+    const head = document.createElement("thead");
+    head.appendChild(header);
+    table.appendChild(head);
+    const body = document.createElement("tbody");
+    const visible = comparison.items.filter((item) => !viewState.scope || viewState.scope === "all" || item.scope === viewState.scope);
+    visible.forEach((item) => {
+        const row = document.createElement("tr");
+        const format = (value) => value == null ? "Unknown" : typeof value === "string" ? value : JSON.stringify(value);
+        const subject = appendText(row, "td", item.subjectId);
+        if (item.scope === "device" && actions.canInspect?.(item.subjectId)) {
+          const inspect = appendText(subject, "button", "Show in table");
+          inspect.type = "button";
+          inspect.addEventListener("click", () => actions.inspect?.(item.subjectId));
+        }
+        appendText(row, "td", `${item.metric || item.itemKind} · ${item.sampleCount} ${item.sampleCount === 1 ? "sample" : "samples"}`);
+        appendText(row, "td", format(item.beforeValue));
+        appendText(row, "td", format(item.afterValue));
+        appendText(row, "td", item.delta == null ? "—" : `${item.delta} ${item.unit || ""}`);
+        appendText(row, "td", item.comparable ? `${item.change}${item.direction ? ` · ${item.direction}` : ""}` : `Unknown · ${item.primaryReason || "unqualified"}`);
+        appendText(row, "td", `${item.sourceFiles?.join(", ") || "Unknown"} · ${item.resetState}`);
+        body.appendChild(row);
+      });
+    table.appendChild(body);
+    wrap.appendChild(table);
+    if (!visible.length) appendText(container, "p", "No items match this scope on the current page.");
+  }
+  const pages = appendText(container, "div", "", "health-comparison-navigation");
+  const back = appendText(pages, "button", "Previous items");
+  back.type = "button";
+  back.disabled = comparison.offset === 0;
+  back.addEventListener("click", () => actions.items?.(Math.max(0, comparison.offset - comparison.limit)));
+  const forward = appendText(pages, "button", "Next items");
+  forward.type = "button";
+  forward.disabled = comparison.offset + comparison.items.length >= comparison.itemCount;
+  forward.addEventListener("click", () => actions.items?.(comparison.offset + comparison.limit));
+}
+
+export function renderHealthRoster(container, page, detail, actions = {}) {
+  if (!container) return;
+  container.replaceChildren();
+  container.hidden = !page;
+  if (!page) return;
+  appendText(container, "h3", `Observed devices (${page.total})`);
+  if (!page.total) {
+    appendText(container, "p", "No attributed Thread device facts yet.");
+    return;
+  }
+  const list = appendText(container, "ul", "", "health-roster-list");
+  page.devices.forEach((device) => {
+    const item = document.createElement("li");
+    const button = appendText(item, "button", device.displayLabel);
+    button.type = "button";
+    button.title = `${device.deviceId} · ${device.labelOrigin} label`;
+    button.setAttribute("aria-expanded", String(detail?.deviceId === device.deviceId));
+    button.addEventListener("click", () => actions.select?.(device.deviceId));
+    appendText(item, "span", ` ${device.fieldCounts.fresh} fresh · ${device.fieldCounts.stale} stale · ${device.fieldCounts.conflicted} conflicted`);
+    list.appendChild(item);
+  });
+  if (detail) {
+    const section = appendText(container, "section", "", "health-roster-detail");
+    appendText(section, "h4", `${detail.displayLabel} · ${detail.deviceId}`);
+    const table = document.createElement("table");
+    const body = document.createElement("tbody");
+    Object.entries(detail.fields).forEach(([field, fact]) => {
+      const row = document.createElement("tr");
+      appendText(row, "th", field);
+      const value = fact.freshness === "absent" ? "Absent" : `${JSON.stringify(fact.value)} · ${fact.freshness} · ${fact.confidence} · ${fact.sourceFile || "unknown source"}`;
+      appendText(row, "td", value);
+      body.appendChild(row);
+    });
+    table.appendChild(body);
+    section.appendChild(table);
+  }
+  const navigation = appendText(container, "div", "", "health-roster-navigation");
+  const previous = appendText(navigation, "button", "Previous");
+  previous.type = "button";
+  previous.disabled = page.offset === 0;
+  previous.addEventListener("click", () => actions.page?.(Math.max(0, page.offset - page.limit)));
+  const next = appendText(navigation, "button", "Next");
+  next.type = "button";
+  next.disabled = page.offset + page.devices.length >= page.total;
+  next.addEventListener("click", () => actions.page?.(page.offset + page.limit));
+}
+
 export async function fetchHealthSupport(networkId, signal) {
   const query = new URLSearchParams({ network: networkId, limit: "5", offset: "0" });
   const [capabilities, observations] = await Promise.all([

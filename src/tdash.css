@@ -1394,6 +1394,60 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   color: var(--muted);
 }
 
+#health-roster {
+  margin: 16px 0;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.health-roster-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 6px 16px;
+  list-style: none;
+  padding: 0;
+}
+
+.health-roster-list li { overflow-wrap: anywhere; }
+.health-roster-list span { color: var(--muted); }
+.health-roster-detail { max-height: 40vh; overflow: auto; }
+.health-roster-detail table { width: 100%; border-collapse: collapse; }
+.health-roster-detail th, .health-roster-detail td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.health-roster-navigation { display: flex; gap: 8px; }
+
+#health-mode-switch,
+.health-comparison-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+#health-mode-switch[hidden] { display: none; }
+
+#health-mode-switch button[aria-pressed="true"] {
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+#health-comparison { margin: 12px 0; }
+#health-comparison select { max-width: 100%; }
+.health-comparison-table-wrap { overflow: auto; max-height: min(58vh, 680px); }
+.health-comparison-table-wrap table { width: 100%; border-collapse: collapse; }
+.health-comparison-table-wrap th,
+.health-comparison-table-wrap td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
 .health-finding-table-wrap {
   container-type: inline-size;
   max-height: min(58vh, 680px);

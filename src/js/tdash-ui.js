@@ -100,6 +100,11 @@ import {
   fetchHealthJob,
   fetchHealthAssessment,
   fetchHealthDevice,
+  fetchHealthRoster,
+  fetchHealthRosterDevice,
+  fetchHealthComparisons,
+  fetchHealthComparison,
+  isComparisonPageForAssessment,
   fetchHealthSupport,
   projectHealthFindingDetail,
   projectVisibleHealthFindingGroups,
@@ -108,6 +113,8 @@ import {
   renderDeviceHealth,
   renderHealthFindingDetails,
   renderHealthInsights,
+  renderHealthRoster,
+  renderHealthComparison,
   renderHealthStatus,
   startHealthProcessing,
 } from "./tdash-health.js";
@@ -241,6 +248,13 @@ const healthInsightsState = {
   deviceRequestVersion: 0,
   capabilities: null,
   observations: null,
+  roster: null,
+  rosterDetail: null,
+  comparisonPage: null,
+  comparison: null,
+  comparisonLoading: false,
+  comparisonError: "",
+  comparisonRequestVersion: 0,
   refreshJobId: null,
   refreshVersion: 0,
   refreshStatus: "",
@@ -258,6 +272,10 @@ const healthInsightsViewState = {
   tableScrollTop: 0,
   detailsOpen: false,
   sortWasChanged: false,
+  mode: "snapshot",
+  comparisonScope: "all",
+  comparisonOffset: 0,
+  comparisonItemOffset: 0,
 };
 const contextDetailsState = {
   mode: "device",
@@ -1773,6 +1791,37 @@ function renderNetworkInsights() {
         renderNetworkInsights();
       },
     });
+    renderHealthRoster(document.getElementById("health-roster"), healthInsightsState.roster,
+      healthInsightsState.rosterDetail, { select: selectRosterDevice, page: loadRosterPage });
+    const comparisonAvailable = healthInsightsState.capabilities?.comparisonReadModel === 1;
+    const comparisonMode = comparisonAvailable && healthInsightsViewState.mode === "comparison";
+    const modeSwitch = document.getElementById("health-mode-switch");
+    modeSwitch.hidden = !comparisonAvailable;
+    document.getElementById("health-mode-snapshot").setAttribute("aria-pressed", String(!comparisonMode));
+    document.getElementById("health-mode-comparison").setAttribute("aria-pressed", String(comparisonMode));
+    document.getElementById("btn-health-comparison-reset").hidden = !comparisonMode;
+    document.getElementById("health-insights-filters").hidden = comparisonMode;
+    document.getElementById("health-insights-summary").hidden = comparisonMode;
+    document.getElementById("health-insights-empty").hidden = comparisonMode;
+    if (comparisonMode) {
+      document.getElementById("health-finding-table-wrap").hidden = true;
+      document.getElementById("health-roster").hidden = true;
+    }
+    const comparisonEl = document.getElementById("health-comparison");
+    comparisonEl.hidden = !comparisonMode;
+    if (comparisonMode) {
+      renderHealthComparison(comparisonEl, healthInsightsState.comparisonPage,
+        healthInsightsState.comparison, {
+          loading: healthInsightsState.loading || healthInsightsState.comparisonLoading,
+          error: healthInsightsState.comparisonError,
+          scope: healthInsightsViewState.comparisonScope,
+        }, {
+          select: selectComparison, page: loadComparisonPage, items: loadComparisonItems,
+          scope: (scope) => { healthInsightsViewState.comparisonScope = scope; renderNetworkInsights(); },
+          canInspect: (deviceId) => Boolean(findCurrentDeviceRecord(deviceId)),
+          inspect: (deviceId) => navigateToHealthTargets("table", { deviceIds: [deviceId] }),
+        });
+    }
     if (tableWrapEl) tableWrapEl.scrollTop = healthInsightsViewState.tableScrollTop;
     renderSelectedHealthFinding();
     renderHealthRefreshStatus();
@@ -2022,6 +2071,11 @@ function rememberHealthNavigationContext() {
       selectedFindingId: healthInsightsViewState.selectedFindingId,
       tableScrollTop: healthInsightsViewState.tableScrollTop,
       detailsOpen: healthInsightsViewState.detailsOpen,
+      mode: healthInsightsViewState.mode,
+      comparisonScope: healthInsightsViewState.comparisonScope,
+      comparisonOffset: healthInsightsViewState.comparisonOffset,
+      comparisonItemOffset: healthInsightsViewState.comparisonItemOffset,
+      comparisonId: healthInsightsState.comparison?.comparisonId ?? null,
     } : null,
   };
   document.getElementById("btn-health-return")?.removeAttribute("hidden");
@@ -2136,6 +2190,9 @@ function restoreHealthNavigationContext() {
     document.getElementById("health-status-filter").value = healthInsightsViewState.filters.status;
     document.getElementById("health-scope-filter").value = healthInsightsViewState.filters.scope;
     document.getElementById("health-evidence-filter").value = healthInsightsViewState.filters.evidenceKind;
+    if (context.insights.comparisonId && healthInsightsState.comparison?.comparisonId !== context.insights.comparisonId) {
+      void selectComparison(context.insights.comparisonId, context.insights.comparisonItemOffset);
+    }
   }
   lastRenderedDatasetByView.delete("topology");
   lastRenderedDatasetByView.delete("table");
@@ -2163,6 +2220,15 @@ function resetHealthWorkflow() {
   healthInsightsViewState.selectedFindingId = null;
   healthInsightsViewState.tableScrollTop = 0;
   healthInsightsViewState.detailsOpen = false;
+  healthInsightsViewState.mode = "snapshot";
+  healthInsightsViewState.comparisonScope = "all";
+  healthInsightsViewState.comparisonOffset = 0;
+  healthInsightsViewState.comparisonItemOffset = 0;
+  healthInsightsState.comparisonRequestVersion += 1;
+  healthInsightsState.comparisonPage = null;
+  healthInsightsState.comparison = null;
+  healthInsightsState.comparisonLoading = false;
+  healthInsightsState.comparisonError = "";
   contextDetailsState.finding = { assessmentId: null, groupId: null, findingId: null };
   setContextDetailsMode("device");
   contextDetailsController.setCollapsed(true);
@@ -2292,7 +2358,6 @@ async function refreshSelectedDeviceHealth(record) {
   const requestVersion = ++healthInsightsState.deviceRequestVersion;
   healthInsightsState.device = null;
   healthInsightsState.deviceError = "";
-  healthInsightsState.capabilities = null;
   healthInsightsState.observations = null;
   healthInsightsState.deviceLoading = false;
   if (currentDataset?.entry?.healthEligible !== true) {
@@ -2324,6 +2389,103 @@ async function refreshSelectedDeviceHealth(record) {
   }
 }
 
+async function loadRosterPage(offset) {
+  const networkId = healthInsightsState.assessment?.networkId;
+  const requestVersion = healthInsightsState.assessmentRequestVersion;
+  if (!networkId) return;
+  try {
+    const page = await fetchHealthRoster(networkId, offset);
+    if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    healthInsightsState.roster = page;
+    healthInsightsState.rosterDetail = null;
+    renderNetworkInsights();
+  } catch (error) {
+    console.warn("Observed device roster is unavailable:", error);
+  }
+}
+
+async function selectRosterDevice(deviceId) {
+  const networkId = healthInsightsState.assessment?.networkId;
+  const requestVersion = healthInsightsState.assessmentRequestVersion;
+  if (!networkId) return;
+  if (healthInsightsState.rosterDetail?.deviceId === deviceId) {
+    healthInsightsState.rosterDetail = null;
+    renderNetworkInsights();
+    return;
+  }
+  try {
+    const detail = await fetchHealthRosterDevice(networkId, deviceId);
+    if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    healthInsightsState.rosterDetail = detail;
+    renderNetworkInsights();
+  } catch (error) {
+    console.warn("Observed device details are unavailable:", error);
+  }
+}
+
+async function loadComparisonPage(offset) {
+  const assessment = healthInsightsState.assessment;
+  if (!assessment) return;
+  const version = ++healthInsightsState.comparisonRequestVersion;
+  healthInsightsState.comparisonError = "";
+  healthInsightsState.comparisonLoading = true;
+  renderNetworkInsights();
+  try {
+    const page = await fetchHealthComparisons(assessment.networkId, assessment.datasetId, offset);
+    if (version !== healthInsightsState.comparisonRequestVersion ||
+      healthInsightsState.assessment?.datasetId !== assessment.datasetId ||
+      healthInsightsState.assessment?.networkId !== assessment.networkId) return;
+    if (!isComparisonPageForAssessment(page, assessment, offset)) throw new Error("Invalid stored comparison page.");
+    healthInsightsState.comparisonPage = page;
+    healthInsightsViewState.comparisonOffset = offset;
+  } catch (error) {
+    if (version !== healthInsightsState.comparisonRequestVersion) return;
+    healthInsightsState.comparisonError = error.message;
+  }
+  healthInsightsState.comparisonLoading = false;
+  renderNetworkInsights();
+}
+
+async function loadComparisonItems(offset) {
+  const comparisonId = healthInsightsState.comparison?.comparisonId;
+  if (comparisonId) await selectComparison(comparisonId, offset);
+}
+
+async function selectComparison(comparisonId, offset = 0) {
+  const assessment = healthInsightsState.assessment;
+  const version = ++healthInsightsState.comparisonRequestVersion;
+  healthInsightsState.comparisonError = "";
+  if (!comparisonId) {
+    healthInsightsState.comparison = null;
+    healthInsightsState.comparisonLoading = false;
+    healthInsightsViewState.comparisonItemOffset = 0;
+    renderNetworkInsights();
+    return;
+  }
+  healthInsightsState.comparisonLoading = true;
+  renderNetworkInsights();
+  try {
+    const comparison = await fetchHealthComparison(comparisonId, offset);
+    if (version !== healthInsightsState.comparisonRequestVersion ||
+      healthInsightsState.assessment?.datasetId !== assessment?.datasetId ||
+      healthInsightsState.assessment?.networkId !== assessment?.networkId) return;
+    if (comparison?.schemaVersion !== 1 || comparison.comparisonId !== comparisonId ||
+        comparison.networkId !== assessment.networkId || comparison.datasetId !== assessment.datasetId ||
+      !Array.isArray(comparison.items) || comparison.offset !== offset ||
+      !Number.isInteger(comparison.limit) || comparison.limit < 1 ||
+      !Number.isInteger(comparison.itemCount) || comparison.itemCount < offset + comparison.items.length) {
+      throw new Error("Invalid stored comparison response.");
+    }
+    healthInsightsState.comparison = comparison;
+    healthInsightsViewState.comparisonItemOffset = offset;
+  } catch (error) {
+    if (version !== healthInsightsState.comparisonRequestVersion) return;
+    healthInsightsState.comparisonError = error.message;
+  }
+  healthInsightsState.comparisonLoading = false;
+  renderNetworkInsights();
+}
+
 async function refreshHealthAssessment() {
   const entry = currentDataset?.entry;
   const datasetChanged = healthInsightsState.datasetId !== entry?.value;
@@ -2337,6 +2499,14 @@ async function refreshHealthAssessment() {
     healthInsightsViewState.selectedFindingId = null;
     healthInsightsViewState.tableScrollTop = 0;
     healthInsightsViewState.detailsOpen = false;
+    healthInsightsViewState.mode = "snapshot";
+    healthInsightsViewState.comparisonScope = "all";
+    healthInsightsViewState.comparisonOffset = 0;
+    healthInsightsViewState.comparisonItemOffset = 0;
+    healthInsightsState.comparisonPage = null;
+    healthInsightsState.comparison = null;
+    healthInsightsState.comparisonLoading = false;
+    healthInsightsState.comparisonRequestVersion += 1;
     findingDeviceReturnContext = null;
     setContextDetailsMode("device");
   }
@@ -2344,6 +2514,8 @@ async function refreshHealthAssessment() {
   healthInsightsState.error = "";
   healthInsightsState.device = null;
   healthInsightsState.deviceError = "";
+  healthInsightsState.roster = null;
+  healthInsightsState.rosterDetail = null;
   applyHealthAssessmentPresentation(null);
   if (entry?.healthEligible !== true) {
     healthTopologyColoringEnabled = false;
@@ -2376,8 +2548,18 @@ async function refreshHealthAssessment() {
       if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
       healthInsightsState.capabilities = support.capabilities;
       healthInsightsState.observations = support.observations;
+      if (support.capabilities?.comparisonReadModel === 1) {
+        await loadComparisonPage(healthInsightsViewState.comparisonOffset);
+      }
     } catch (error) {
       console.warn("Health history metadata is unavailable:", error);
+    }
+    try {
+      const roster = await fetchHealthRoster(assessment.networkId);
+      if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+      healthInsightsState.roster = roster;
+    } catch (error) {
+      console.warn("Observed device roster is unavailable:", error);
     }
   } catch (error) {
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
@@ -2500,6 +2682,15 @@ document.getElementById("health-view-filter")?.addEventListener("change", (event
   document.getElementById("health-status-filter").value = "all";
   renderNetworkInsights();
 });
+document.getElementById("health-mode-snapshot")?.addEventListener("click", () => {
+  healthInsightsViewState.mode = "snapshot";
+  renderNetworkInsights();
+});
+document.getElementById("health-mode-comparison")?.addEventListener("click", () => {
+  healthInsightsViewState.mode = "comparison";
+  renderNetworkInsights();
+  if (!healthInsightsState.comparisonPage) void loadComparisonPage(0);
+});
 [
   ["health-status-filter", "status"],
   ["health-scope-filter", "scope"],
@@ -2514,6 +2705,7 @@ document.getElementById("btn-health-finding-close")?.addEventListener("click", (
 });
 document.getElementById("btn-back-to-health-finding")?.addEventListener("click", returnToHealthFinding);
 document.getElementById("btn-health-reset")?.addEventListener("click", resetHealthWorkflow);
+document.getElementById("btn-health-comparison-reset")?.addEventListener("click", resetHealthWorkflow);
 document.getElementById("btn-health-export")?.addEventListener("click", () => {
   exportHealthAssessment(healthInsightsState.assessment);
 });

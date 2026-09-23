@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -14,11 +15,16 @@ from td_health_observation_model import (
     Confidence,
     DeviceSample,
     HealthStatus,
+    MetricSample,
     Observation,
     RelationshipSample,
+    SourceEvidence,
 )
 from td_health_observation_store import HealthStoreFutureSchemaError
-from td_health_sqlite import SCHEMA_VERSION, SQLiteHealthStore
+from td_health_read import TDHealthReadService
+from td_health_roster import RosterFact
+from td_health_observation_store import HOBAT_DATABASE_FILENAME
+from td_health_sqlite import SCHEMA_VERSION, SQLiteHealthStore, _SCHEMA
 
 
 def _result(suffix: str = "1") -> tuple[Observation, Assessment]:
@@ -76,6 +82,38 @@ def test_atomic_save_is_idempotent_and_sets_sqlite_guards(tmp_path) -> None:
         assert connection.execute(
             "SELECT evaluator_version, profile_id FROM assessments"
         ).fetchone() == ("snapshot-test", "profile-test")
+
+
+def test_roster_source_time_and_partial_observation_do_not_refresh_projection(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    first_time = "2026-09-01T00:00:00+00:00"
+    second_time = "2026-09-02T00:00:00+00:00"
+
+    def save(suffix: str, value: str, source_time: str, completeness=Completeness.COMPLETE):
+        observation, assessment = _result(suffix)
+        observation = replace(observation, completeness=completeness,
+                              sources=(SourceEvidence(filename, f"digest-{suffix}", "final", "valid", source_time),))
+        fact = RosterFact(observation.devices[0].device_id, "role", json.dumps(value),
+                          "transient", filename, 3, "high")
+        store.save_processing_result(observation, assessment, roster_facts=(fact,))
+        return observation
+
+    first = save("1", "router", first_time)
+    second = save("2", "child", first_time)
+    save("3", "leader", second_time, Completeness.PARTIAL)
+    with sqlite3.connect(store.path) as connection:
+        current = connection.execute(
+            "SELECT value_json, observation_id, source_observed_at FROM device_last_known WHERE field_key='role'"
+        ).fetchone()
+        assert current == ('"router"', first.observation_id, first_time)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM device_fact_samples WHERE field_key='role'"
+        ).fetchone()[0] == 3
+        assert connection.execute(
+            "SELECT value_json FROM device_fact_samples WHERE observation_id=? AND field_key='role'",
+            (second.observation_id,),
+        ).fetchone()[0] == '"child"'
 
 
 def test_atomic_save_rolls_back_when_assessment_insert_fails(tmp_path, monkeypatch) -> None:
@@ -363,6 +401,28 @@ def test_purge_device_removes_identity_and_invalidates_affected_assessment(tmp_p
         assert connection.execute("SELECT COUNT(*) FROM current_assessments").fetchone()[0] == 0
 
 
+def test_purge_device_preserves_other_network_fact_samples(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    first, first_assessment = _result("1")
+    second, second_assessment = _result("2")
+    second = replace(second, network_id="extpan:0011223344556677")
+    store.save_processing_result(first, first_assessment)
+    store.save_processing_result(second, second_assessment)
+    with sqlite3.connect(store.path) as connection:
+        connection.executemany(
+            """INSERT INTO device_fact_samples
+               (observation_id, device_id, field_key, source_file, value_json, value_class)
+               VALUES (?, 'extaddr:8672766ae0578187', 'extAddress', 'legacy-unknown',
+                       '"8672766ae0578187"', 'identity')""",
+            ((first.observation_id,), (second.observation_id,)),
+        )
+    store.purge_device("extaddr:8672766ae0578187", network_id=first.network_id)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT observation_id FROM device_fact_samples"
+        ).fetchall() == [(second.observation_id,)]
+
+
 def test_purge_device_removes_relationship_but_preserves_other_endpoint(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
     store.save_processing_result(*_result())
@@ -385,10 +445,10 @@ def test_purge_device_removes_relationship_but_preserves_other_endpoint(tmp_path
             ),
         )
         connection.execute(
-            "INSERT INTO relationship_samples VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO relationship_samples VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "observation-1", "relationship-1", "neighbor", 3, 3,
-                None, None, None, None, None, "extaddr:8672766ae0578187", "[]",
+                None, None, None, None, None, "extaddr:8672766ae0578187", "[]", None,
             ),
         )
 
@@ -413,3 +473,211 @@ def test_purge_rolls_back_completely_on_failure(tmp_path, monkeypatch) -> None:
         store.purge_all()
     assert store.store_capabilities()["observationCount"] == 1
     assert store.store_capabilities()["assessmentCount"] == 1
+
+
+def test_comparison_pair_is_atomic_idempotent_and_late_arrival_does_not_repoint(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    before, after = _result("1"), _result("3")
+    store.save_processing_result(*before)
+    store.save_processing_result(replace(after[0], completeness=Completeness.DEGRADED), after[1])
+    interval, items, created = store.compare_assessments("assessment-1", "assessment-3", dry_run=True)
+    assert not created and len(items) == 2
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 0
+    assert store.compare_assessments("assessment-1", "assessment-3")[2] is True
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 1
+    assert store.compare_assessments("assessment-1", "assessment-3")[2] is False
+    store.save_processing_result(*_result("2"))
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT assessment_id FROM current_assessments").fetchone()[0] == "assessment-3"
+        assert connection.execute(
+            "SELECT before_assessment_id, after_assessment_id FROM comparisons ORDER BY after_observed_at"
+        ).fetchall() == [("assessment-1", "assessment-2"), ("assessment-1", "assessment-3")]
+    assert interval.comparison_id == store.compare_assessments("assessment-1", "assessment-3", dry_run=True)[0].comparison_id
+
+
+def test_auto_comparison_persists_immutable_partition_and_rloc_changes(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    for suffix, partition, rloc in (("1", 10, "0x1234"), ("2", 20, "0x5678")):
+        observation, assessment = _result(suffix)
+        observation = replace(observation, sources=(SourceEvidence(
+            filename, f"digest-{suffix}", "final", "valid", observation.observed_at),))
+        assessment = replace(assessment, sample_contract_version="comparison-v1",
+                     health_policy_digest="policy-digest")
+        facts = (RosterFact(observation.devices[0].device_id, "leaderData.partitionId",
+                            json.dumps(partition), "transient", filename, 3, "high"),
+                 RosterFact(observation.devices[0].device_id, "rloc16",
+                            json.dumps(rloc), "transient", filename, 3, "high"))
+        store.save_processing_result(observation, assessment, roster_facts=facts)
+    with sqlite3.connect(store.path) as connection:
+        rows = connection.execute(
+            "SELECT metric, before_json, after_json, change FROM comparison_items "
+            "WHERE metric IN ('partition', 'rloc16') ORDER BY metric"
+        ).fetchall()
+    assert [(metric, json.loads(before), json.loads(after), change) for metric, before, after, change in rows] == [
+        ("partition", 10, 20, "changed"), ("rloc16", "0x1234", "0x5678", "changed")]
+
+
+def test_pruned_comparison_is_read_only_and_device_purge_removes_it(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME, max_observations=2)
+    for suffix in ("1", "2", "3"):
+        store.save_processing_result(*_result(suffix))
+    service = TDHealthReadService(tmp_path)
+    listing = service.comparisons(network_id="extpan:78b9775b001c1cbe",
+                                  dataset_id="otbr_cli_networkdiag_fetch_all", limit=1, offset=1)
+    assert listing["total"] == 2 and len(listing["items"]) == 1
+    detail = service.comparison(comparison_id=listing["items"][0]["comparisonId"], limit=25, offset=0)
+    assert detail["baselineState"] == "pruned"
+    assert detail["reasons"][0] == "baseline-pruned" or "baseline-pruned" in detail["reasons"]
+    assert not detail["comparable"] and detail["itemCount"] == len(detail["items"])
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 2
+    dry = store.purge_device("extaddr:8672766ae0578187", dry_run=True)
+    applied = store.purge_device("extaddr:8672766ae0578187")
+    assert dry.deleted == applied.deleted
+    assert applied.deleted["comparisons"] == 2
+    assert service.comparison(comparison_id=detail["comparisonId"], limit=25, offset=0) is None
+
+
+def test_real_v3_migration_backfills_only_lossless_device_facts(tmp_path) -> None:
+    path = tmp_path / HOBAT_DATABASE_FILENAME
+    with sqlite3.connect(path) as connection:
+        connection.executescript(_SCHEMA)
+        connection.execute("INSERT INTO schema_migrations VALUES (3, CURRENT_TIMESTAMP)")
+        connection.execute("INSERT INTO devices VALUES (?, ?)", ("extaddr:8672766ae0578187", "8672766ae0578187"))
+        connection.execute(
+            """INSERT INTO observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("observation-old", "otbr-cli", "otbr_cli_networkdiag_fetch_all",
+             "extpan:78b9775b001c1cbe", None, "2026-09-01T00:00:00+00:00",
+             "2026-09-01T00:00:00+00:00", "complete", "digest"),
+        )
+        connection.execute("INSERT INTO device_samples VALUES (?, ?, ?, ?, ?, ?)",
+                           ("observation-old", "extaddr:8672766ae0578187", "router", "attached", 0, "[]"))
+    SQLiteHealthStore(path)
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            "SELECT field_key, value_json, source_file, source_observed_at, roster_policy_digest FROM device_fact_samples ORDER BY field_key"
+        ).fetchall()
+        assert rows == [
+            ("extAddress", '"8672766ae0578187"', "legacy-unknown", None, None),
+            ("role", '"router"', "legacy-unknown", None, None),
+            ("state", '"attached"', "legacy-unknown", None, None),
+        ]
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone() == (4,)
+
+
+def test_v3_upgrade_reopen_keeps_comparison_and_roster_provenance(tmp_path) -> None:
+    path = tmp_path / HOBAT_DATABASE_FILENAME
+    with sqlite3.connect(path) as connection:
+        connection.executescript(_SCHEMA)
+        connection.execute("INSERT INTO schema_migrations VALUES (3, CURRENT_TIMESTAMP)")
+    store = SQLiteHealthStore(path)
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    for suffix in ("1", "2"):
+        observation, assessment = _result(suffix)
+        observation = replace(observation, sources=(SourceEvidence(
+            filename, f"digest-{suffix}", "final", "valid", observation.observed_at,
+        ),))
+        fact = RosterFact(observation.devices[0].device_id, "role", json.dumps("router"),
+                          "transient", filename, 3, "high")
+        store.save_processing_result(observation, assessment, roster_facts=(fact,))
+
+    SQLiteHealthStore(path)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall() == [(2,), (3,), (4,)]
+        assert connection.execute("SELECT before_assessment_id, after_assessment_id FROM comparisons").fetchall() == [
+            ("assessment-1", "assessment-2")]
+        assert connection.execute(
+            "SELECT observation_id, source_observed_at FROM device_fact_samples WHERE field_key='role' ORDER BY observation_id"
+        ).fetchall() == [
+            ("observation-1", "2026-09-01T00:00:01+00:00"),
+            ("observation-2", "2026-09-01T00:00:02+00:00"),
+        ]
+        assert connection.execute("SELECT observation_id FROM device_last_known WHERE field_key='role'").fetchone() == (
+            "observation-2",)
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_comparison_failure_rolls_back_observation_and_current_pointer(tmp_path, monkeypatch) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    store.save_processing_result(*_result("1"))
+
+    def fail(*_args):
+        raise RuntimeError("comparison failure")
+
+    monkeypatch.setattr(store, "_store_comparison", fail)
+    with pytest.raises(RuntimeError, match="comparison failure"):
+        store.save_processing_result(*_result("2"))
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM observations").fetchone() == (1,)
+        assert connection.execute("SELECT assessment_id FROM current_assessments").fetchone() == ("assessment-1",)
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone() == (0,)
+
+
+def test_idempotent_retry_recreates_missing_comparison(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    store.save_processing_result(*_result("1"))
+    later = _result("2")
+    store.save_processing_result(*later)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        comparison_id = connection.execute("SELECT comparison_id FROM comparisons").fetchone()[0]
+        connection.execute("DELETE FROM comparisons")
+    repeated = store.save_processing_result(*later)
+    assert not repeated.observation_created and not repeated.assessment_created
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT comparison_id FROM comparisons").fetchone() == (comparison_id,)
+
+
+def test_route64_contract_cannot_upgrade_immutable_observation_samples(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result()
+    store.save_processing_result(observation, assessment)
+    updated = replace(assessment, assessment_id="assessment-route64",
+                      sample_contract_version="comparison-v1-route64")
+    with pytest.raises(ValueError, match="sample contract"):
+        store.save_processing_result(observation, updated)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT assessment_id FROM assessments").fetchall() == [(assessment.assessment_id,)]
+
+
+def test_pruned_numeric_delta_is_suppressed_without_mutating_persisted_item(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME, max_observations=2)
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+
+    def endpoint(suffix, value):
+        observation, assessment = _result(suffix)
+        observation = replace(
+            observation,
+            sources=(SourceEvidence(filename, suffix, "final", "valid", observation.observed_at),),
+            metrics=(MetricSample(observation.devices[0].device_id, "routerRolePercent",
+                                  value, "percent", None, filename),),
+        )
+        return observation, replace(assessment, sample_contract_version="comparison-v1",
+                                    health_policy_digest="health-policy")
+
+    for suffix, value in (("1", 50), ("2", 60)):
+        store.save_processing_result(*endpoint(suffix, value))
+    service = TDHealthReadService(tmp_path)
+    listing = service.comparisons(network_id="extpan:78b9775b001c1cbe",
+                                  dataset_id="otbr_cli_networkdiag_fetch_all", limit=25, offset=0)
+    comparison_id = listing["items"][0]["comparisonId"]
+    first = service.comparison(comparison_id=comparison_id, limit=25, offset=0)
+    numeric = next(item for item in first["items"] if item["metric"] == "routerRolePercent")
+    assert numeric["delta"] == 10 and numeric["change"] == "changed"
+    store.save_processing_result(*endpoint("3", 65))
+    effective = service.comparison(comparison_id=comparison_id, limit=25, offset=0)
+    numeric = next(item for item in effective["items"] if item["metric"] == "routerRolePercent")
+    assert effective["baselineState"] == "pruned"
+    assert not numeric["comparable"] and numeric["change"] == "unknown"
+    assert numeric["delta"] is None and numeric["direction"] is None
+    assert "baseline-pruned" in numeric["reasons"]
+    with sqlite3.connect(store.path) as connection:
+        stored = connection.execute(
+            "SELECT delta_json FROM comparison_items WHERE comparison_id=? AND metric='routerRolePercent'",
+            (comparison_id,),
+        ).fetchone()
+        assert json.loads(stored[0]) == 10

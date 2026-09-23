@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { computeRowCounts, evaluateDiagnosticOption, getRowRoleProjection, isRowVisibleByNodeFilter } from "../../src/js/tdash-filters.js";
 import { buildDatasetRows } from "../../src/js/tdash-dataset.js";
-import { formatAge } from "../../src/js/tdash-health.js";
+import { formatAge, isComparisonPageForAssessment } from "../../src/js/tdash-health.js";
 import {
   collectColumns,
   getTableColumnCategories,
@@ -82,5 +82,15 @@ assert.deepEqual([counts.borderRouters, counts.routers, counts.children], [1, 1,
 assert.equal(formatAge(null), "unknown");
 assert.equal(formatAge("not-a-date"), "unknown");
 assert.equal(formatAge(new Date(Date.now() - 30_000).toISOString()), "just now");
+const assessment = { networkId: "extpan:78b9775b001c1cbe", datasetId: "otbr_cli_networkdiag_fetch_all" };
+const page = { schemaVersion: 1, total: 1, limit: 25, offset: 0, items: [{
+  comparisonId: "comparison:one", networkId: assessment.networkId, datasetId: assessment.datasetId,
+}] };
+assert.equal(isComparisonPageForAssessment(page, assessment, 0), true);
+assert.equal(isComparisonPageForAssessment({ ...page, items: [] }, assessment, 0), true);
+assert.equal(isComparisonPageForAssessment({ ...page, offset: 25 }, assessment, 0), false);
+assert.equal(isComparisonPageForAssessment({ ...page, total: 0 }, assessment, 0), false);
+assert.equal(isComparisonPageForAssessment({ ...page, items: [{ ...page.items[0], networkId: "extpan:0000000000000000" }] }, assessment, 0), false);
+assert.equal(isComparisonPageForAssessment({ ...page, items: [{ ...page.items[0], datasetId: "other" }] }, assessment, 0), false);
 
 process.stdout.write("phase3 regressions passed\n");

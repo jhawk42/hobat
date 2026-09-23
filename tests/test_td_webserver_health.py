@@ -27,6 +27,23 @@ def _request(data_dir, *, query=None, match_info=None):
 
 
 class HealthApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_roster_routes_validate_network_and_return_no_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+            with self.assertRaises(aiohttp.web.HTTPBadRequest):
+                await td_webserver.handle_health_roster_api(_request(data_dir))
+            page = await td_webserver.handle_health_roster_api(
+                _request(data_dir, query={"network": "extpan:78b9775b001c1cbe"})
+            )
+            self.assertEqual(page.headers["Cache-Control"], "no-store")
+            self.assertEqual(json.loads(page.text)["devices"], [])
+            with self.assertRaises(aiohttp.web.HTTPNotFound):
+                await td_webserver.handle_health_roster_device_api(
+                    _request(data_dir, query={"network": "extpan:78b9775b001c1cbe"},
+                             match_info={"device_id": "extaddr:8672766ae0578187"})
+                )
+
     async def test_process_dataset_starts_deduplicated_health_task(self) -> None:
         data_dir = Path(tempfile.mkdtemp())
         request = _request(data_dir)
@@ -198,6 +215,30 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(
                     any(name.lower().startswith("access-control-") for name in response.headers)
                 )
+
+    async def test_comparisons_are_bounded_pinned_and_never_written_by_get(self) -> None:
+        store = SQLiteHealthStore(self.data_dir / HOBAT_DATABASE_FILENAME)
+        store.save_processing_result(*_result("2"))
+        listing = await self.client.get(
+            "/api/health/comparisons?network=extpan:78b9775b001c1cbe"
+            "&dataset=otbr_cli_networkdiag_fetch_all&limit=1&offset=0"
+        )
+        self.assertEqual(listing.status, 200)
+        self.assertEqual(listing.headers["Cache-Control"], "no-store")
+        body = await listing.json()
+        self.assertEqual((body["schemaVersion"], body["total"], len(body["items"])), (1, 1, 1))
+        comparison_id = body["items"][0]["comparisonId"]
+        detail = await self.client.get(f"/api/health/comparisons/{comparison_id}?limit=1&offset=0")
+        self.assertEqual(detail.status, 200)
+        pinned = await detail.json()
+        self.assertEqual(pinned["comparisonId"], comparison_id)
+        self.assertEqual(len(pinned["items"]), 1)
+        self.assertGreaterEqual(pinned["itemCount"], 1)
+        self.assertEqual((await self.client.get("/api/health/comparisons/comparison:missing")).status, 404)
+        self.assertEqual((await self.client.get("/api/health/comparisons?dataset=otbr_cli_networkdiag_fetch_all")).status, 400)
+        self.assertEqual((await self.client.get("/api/health/comparisons?network=extpan:78b9775b001c1cbe&dataset=otbr_cli_networkdiag_fetch_all&limit=101")).status, 400)
+        self.assertEqual(store.comparison_rows(network_id="extpan:78b9775b001c1cbe",
+                                               dataset_id="otbr_cli_networkdiag_fetch_all", limit=25, offset=0)[1], 1)
 
     async def test_foreign_origin_is_not_authorized_and_mutating_preflights_fail(self) -> None:
         health_paths = (

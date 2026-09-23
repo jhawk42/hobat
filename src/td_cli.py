@@ -390,6 +390,7 @@ def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Assess approved cached Thread datasets",
         add_help=False,
     )
+    health_commands.add_parser("compare", help="Compare stored health assessments", add_help=False)
     health_commands.add_parser("purge", help="Delete old health records", add_help=False)
     health_commands.add_parser("purge-all", help="Delete all health records", add_help=False)
     health_commands.add_parser(

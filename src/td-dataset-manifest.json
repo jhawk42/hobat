@@ -117,6 +117,39 @@
       "healthProfile": "merged-otbr-topology-diagnostics-mdns-v1"
     }
   ],
+  "rosterPolicy": {
+    "version": "roster-v1",
+    "aliasCollisionWindowSeconds": 604800,
+    "maxStringLength": 256,
+    "maxAddresses": 32,
+    "fields": {
+      "extAddress": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}, {"filename": "td-otbr-cli-meshdiag-topology.json", "rank": 2}, {"filename": "td-otbr-restapi-mesh-diagnostics-fetch-all.json", "rank": 2}], "freshnessSeconds": null},
+      "omrIpv6Address": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 2592000},
+      "rloc16": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-meshdiag-topology.json", "rank": 2}], "freshnessSeconds": 604800},
+      "deviceLabel": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 2592000},
+      "eui64": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": null},
+      "routerId": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
+      "ipv6Addresses": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
+      "type": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
+      "isBorderRouter": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
+      "isRouter": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
+      "isLeader": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
+      "isPrimaryBBR": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
+      "role": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-meshdiag-topology.json", "rank": 2}], "freshnessSeconds": 604800},
+      "state": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
+      "mode.device": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 604800},
+      "mode.rxOnWhenIdle": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 604800},
+      "mode.fullThreadDevice": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 604800},
+      "mode.fullNetworkData": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 604800},
+      "threadVersion": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 2592000},
+      "threadStackVersion": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 2592000},
+      "leaderData.partitionId": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
+      "leaderData.leaderRouterId": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
+      "vendorName": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 2592000},
+      "vendorModel": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 2592000},
+      "vendorSwVersion": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 2592000}
+    }
+  },
   "healthProfiles": {
     "otbr-cli-networkdiag-v1": {
       "identityFile": "td-otbr-cli-thread-network-info.json",

@@ -278,9 +278,33 @@ relationship samples, assessment, findings, and current pointer commit together.
 Any failure rolls back the whole operation. Reprocessing unchanged inputs and
 policy is idempotent.
 
-Schema version 3 stores evaluator version and health profile ID as explicit
-assessment provenance. Older assessments migrate with `legacy-unknown` values;
-their immutable finding and evidence rows are not rewritten.
+Schema version 4 adds comparison provenance and item tables, per-final-file
+source observation times, metric kinds, and observed-roster tables.
+Older assessments and metrics retain `legacy-unknown` sample semantics; only
+losslessly represented extAddress, role, and state device facts are backfilled
+with unknown source provenance. Existing assessments and findings are not
+rewritten. A comparison is stored atomically with an eligible new assessment;
+late-arriving observations do not move the current pointer backward.
+
+New observations also retain source-specific Thread device facts. Only complete
+observations advance the last-known projection; a repeated device file with an
+unchanged source timestamp does not refresh its facts. The projection is separate
+from the operator-managed `expected_devices` roster and does not infer device
+identity from labels, EUI-64, RLOC16, or IPv6 addresses. Read-only
+`GET /api/health/roster?network=extpan:...&limit=25&offset=0` pages canonical
+devices; `GET /api/health/roster/extaddr:...?network=extpan:...` shows each
+approved field, including absent and stale fields. Health Insights shows the
+same projection under Observed devices.
+Stale observed labels without a higher-priority label display a canonical
+address suffix with `stale label` text; their original value and provenance
+remain in the field details. Duplicate selected labels across devices show a
+canonical suffix and `duplicate label` text, even across roster pages; label
+origin and canonical identity remain separate. An older database must be migrated by
+a write-capable `health process-dataset` before roster reads are available;
+reads alone never migrate it. Reprocessing an unchanged observation upgrades
+the schema but does not fabricate a last-known roster: new, complete observations
+with valid source timestamps populate the projection. Unattributed migrated
+facts retain unknown confidence and cannot replace sourced facts.
 
 The `snapshot-v10` read projection resolves known-rule titles, descriptions,
 actions, verification text, evidence kinds, materiality, and template keys from
@@ -296,8 +320,10 @@ assessment pointers for dataset IDs no longer present in the manifest are
 removed transactionally. Their immutable observations and assessments remain
 available as history.
 
-The store retains at most 2,000 observations. Pruning occurs in the same write
-transaction and never deletes collector snapshots. Automatic byte retention,
+The store retains at most 2,000 observations and 2,000 comparison headers.
+Pruning occurs in the same write transaction and never deletes collector
+snapshots. Retained comparisons with pruned endpoints become Unknown on reads;
+their original endpoint IDs and timestamps remain unchanged. Automatic byte retention,
 redaction, scheduling, probes, duration, rates, trends, and firmware compliance
 are not implemented.
 
@@ -318,6 +344,9 @@ and non-health tables. `purge-by-device --device EXTADDR` removes that identity'
 health samples, relationships, and roster entry and deletes assessments derived
 from affected observations. Shared observation/source records remain. None of
 these commands removes data from collector snapshots, exports, or backups.
+Purge-by-device also removes comparisons that reference an affected endpoint
+observation; ordinary age/count retention leaves comparison headers available
+with a pruned-baseline read state. Dry-run deletion counts match apply counts.
 
 All purge commands support `--dry-run` and `--json`. Mutation requires an
 interactive confirmation or `--yes`.
@@ -344,6 +373,67 @@ network credentials from collector snapshots, and configuration. Restrict
 filesystem access and treat Home Assistant backup inclusion as sensitive.
 
 ## Read API and Dashboard
+
+Compare two stored assessments explicitly without reading or refreshing cached
+collector files:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health compare \
+  --before-assessment ASSESSMENT_ID --after-assessment ASSESSMENT_ID --dry-run --json
+```
+
+Omit `--dry-run` to store the deterministic pair. Automatic pairs use the
+latest complete assessment strictly earlier than the new observation for the
+same network and dataset; identical observation times are not paired. The
+separate `comparison-v1` policy permits gaps of at most seven days and an
+uptime-continuity tolerance of 300 seconds. The result is discrete Before/After
+evidence, not a trend, rate, duration, or availability estimate. Counter
+decreases and missing or conflicting reset witnesses produce Unknown rather
+than a spike. A newer outcome file does not refresh an unchanged device file.
+Approved cached device sources do not provide an audited reset epoch or uptime
+witness, so increasing since-reset counters also remain Unknown; OTBR
+`TrackedTime` is not treated as device uptime.
+Partition and RLOC16 changes require matching, unambiguous immutable device
+facts at both endpoints, with a newer attributed source time; the current
+last-known roster does not supply historical endpoint values.
+OTBR CLI hex partition IDs are stored as bounded integer facts, not treated
+as opaque version strings.
+
+For `otbr_cli_networkdiag_fetch_all`, a complete Route64 table from one
+canonical reporter can contribute directional reporter-to-destination
+membership comparisons. A table qualifies only with a bounded ID sequence,
+at most 63 distinct entries, and every Router ID resolving unambiguously to
+an explicitly reported device in that final snapshot. An explicit empty table
+qualifies; a missing, malformed, duplicate, or unresolved table does not.
+Both endpoint reporters must have qualified Route64 coverage from the same
+final file with advancing source times before an added or removed route can
+be reported. Otherwise the route item is Unknown. These are discrete
+destination-membership observations, not a measured next hop, route cost
+change, continuous route history, or a claim about Internet reachability.
+Other datasets do not contribute Route64 comparisons.
+Route64-aware OTBR networkdiag assessments use the `comparison-v1-route64`
+sample contract and a distinct observation identity. Reprocessing a cached
+snapshot preserves legacy immutable samples rather than relabeling them;
+comparisons between legacy and Route64-aware assessments are non-comparable.
+For snapshot OMR evidence, the identity file's observed OMR and mesh-local
+IPv6 CIDRs must be valid, disjoint, and no later than processing time. An
+identity refresh does not refresh the device file's source-observed time.
+Stored roster addresses are sourced
+display values, not verified stable OMR aliases; prefix provenance is not yet
+persisted with those facts.
+
+`GET /api/health/comparisons?network=...&dataset=...&limit=25&offset=0`
+lists stored summaries; `GET /api/health/comparisons/{comparison_id}?limit=25&offset=0`
+returns a pinned header and item page. Limits cannot exceed 100. Both routes
+are read-only and no-store. Responses distinguish stored comparability from a
+read-time `baseline-pruned` override; no GET creates or repairs a comparison.
+For health-eligible datasets with comparison read capability, Insights offers
+Snapshot and Comparison modes. Comparison lists stored pairs for the selected
+network and dataset; select a pair to see its exact Before and After endpoints,
+item values, source attribution, and server-provided comparability reasons.
+The scope control filters the current item page. Next/Previous pages keep the
+selected pair pinned; Reset returns to the Snapshot view and clears workflow
+filters. This view does not create pairs or infer deltas from roster values.
 
 The aiohttp server exposes query-only, `Cache-Control: no-store` routes for the
 latest or pinned assessment, grouped or ungrouped findings, one attributed

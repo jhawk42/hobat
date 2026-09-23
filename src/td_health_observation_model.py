@@ -49,6 +49,7 @@ class SourceEvidence:
     digest: str
     kind: str
     state: str
+    source_observed_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,8 @@ class Assessment:
     coverage: Mapping[str, Any]
     findings: tuple[Finding, ...]
     assessed_at: str
+    sample_contract_version: str = "legacy-unknown"
+    health_policy_digest: str | None = None
 
 
 def canonical_ext_pan_id(value: object) -> str:

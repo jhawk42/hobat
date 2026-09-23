@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+from td_health_comparison import ROUTE64_SAMPLE_CONTRACT_VERSION
 from td_health_observation_model import (
     Assessment,
     Completeness,
@@ -441,9 +443,17 @@ def evaluate_observation(
         and _profile_supports_rule(profile, "network.external-routing")
     ):
         addresses = device_ipv6_addresses or {}
+        omr_network = ipaddress.IPv6Network(omr_prefix)
+
+        def in_omr(address: str) -> bool:
+            try:
+                return ipaddress.IPv6Address(address) in omr_network
+            except (ipaddress.AddressValueError, TypeError):
+                return False
+
         omr_border_router_ids = tuple(sorted(
             device_id for device_id in border_router_ids
-            if any(addr.startswith(omr_prefix) for addr in addresses.get(device_id, ()))
+            if any(in_omr(addr) for addr in addresses.get(device_id, ()))
         ))
         findings.append(_finding(
             observation,
@@ -1123,8 +1133,13 @@ def evaluate_observation(
     assessment_input_digest = _assessment_input_digest(
         policy, profile, expected_device_ids, absences
     )
+    sample_contract_version = (
+        ROUTE64_SAMPLE_CONTRACT_VERSION if observation.dataset_id == "otbr_cli_networkdiag_fetch_all"
+        else "comparison-v1"
+    )
     assessment_id = _stable_id(
-        "assessment", observation.observation_id, assessment_input_digest
+        "assessment", observation.observation_id, assessment_input_digest,
+        *([sample_contract_version] if sample_contract_version != "comparison-v1" else []),
     )
     return Assessment(
         assessment_id=assessment_id,
@@ -1138,4 +1153,6 @@ def evaluate_observation(
         coverage=coverage,
         findings=tuple(sorted(findings, key=lambda item: (-int(item.rank), item.finding_id))),
         assessed_at=assessment_time,
+        sample_contract_version=sample_contract_version,
+        health_policy_digest=policy.digest,
     )

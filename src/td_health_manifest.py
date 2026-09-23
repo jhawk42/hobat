@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,14 @@ COVERAGE_PILLARS = (
     "externalRouting",
 )
 ALLOWED_COVERAGE_STATES = frozenset({"sufficient", "limited", "missing"})
+ROSTER_FIELDS = (
+    "extAddress", "omrIpv6Address", "rloc16", "deviceLabel", "eui64", "routerId",
+    "ipv6Addresses", "type", "isBorderRouter", "isRouter", "isLeader",
+    "isPrimaryBBR", "role", "state", "mode.device", "mode.rxOnWhenIdle",
+    "mode.fullThreadDevice", "mode.fullNetworkData", "threadVersion",
+    "threadStackVersion", "leaderData.partitionId", "leaderData.leaderRouterId",
+    "vendorName", "vendorModel", "vendorSwVersion",
+)
 
 
 class HealthManifestError(ValueError):
@@ -56,10 +65,22 @@ class IneligibleHealthDataset:
 
 
 @dataclass(frozen=True)
+class RosterPolicy:
+    version: str
+    digest: str
+    alias_collision_window_seconds: int
+    max_string_length: int
+    max_addresses: int
+    sources: Mapping[str, Mapping[str, int]]
+    freshness_seconds: Mapping[str, int | None]
+
+
+@dataclass(frozen=True)
 class HealthManifest:
     schema_version: int
     datasets: Mapping[str, HealthDataset]
     ineligible_datasets: Mapping[str, IneligibleHealthDataset]
+    roster_policy: RosterPolicy
 
     def dataset(self, dataset_id: str) -> HealthDataset:
         try:
@@ -74,6 +95,46 @@ def _safe_filename(value: object, *, field: str) -> str:
     if not isinstance(value, str) or not value or Path(value).name != value:
         raise HealthManifestError(f"{field} must be a path-safe filename")
     return value
+
+
+def _roster_policy(raw: object, datasets: Mapping[str, HealthDataset]) -> RosterPolicy:
+    if not isinstance(raw, dict) or not isinstance(raw.get("version"), str) or not raw["version"]:
+        raise HealthManifestError("Manifest requires a versioned rosterPolicy")
+    declared = {filename for dataset in datasets.values() for filename in dataset.files}
+    excluded = {filename for filename in declared if filename.startswith("td-mdns-") or
+                filename.startswith("td-static-") or ".outcome." in filename or ".partial." in filename}
+    allowed = declared - excluded
+    fields = raw.get("fields")
+    if not isinstance(fields, dict) or set(fields) != set(ROSTER_FIELDS):
+        raise HealthManifestError("rosterPolicy must define every approved field")
+    limits = ("aliasCollisionWindowSeconds", "maxStringLength", "maxAddresses")
+    if any(type(raw.get(key)) is not int or raw[key] <= 0 for key in limits):
+        raise HealthManifestError("Invalid rosterPolicy limits")
+    sources: dict[str, Mapping[str, int]] = {}
+    freshness: dict[str, int | None] = {}
+    for field, definition in fields.items():
+        if not isinstance(definition, dict) or set(definition) != {"sources", "freshnessSeconds"}:
+            raise HealthManifestError(f"Invalid rosterPolicy field: {field}")
+        declared_sources = definition["sources"]
+        if not isinstance(declared_sources, list) or not declared_sources:
+            raise HealthManifestError(f"Missing roster sources for {field}")
+        ranks: dict[str, int] = {}
+        for source in declared_sources:
+            if not isinstance(source, dict) or set(source) != {"filename", "rank"}:
+                raise HealthManifestError(f"Invalid roster source for {field}")
+            filename = _safe_filename(source["filename"], field=f"rosterPolicy.{field}")
+            if filename not in allowed or filename in ranks or type(source["rank"]) is not int or source["rank"] <= 0:
+                raise HealthManifestError(f"Duplicate or unapproved roster source for {field}: {filename}")
+            ranks[filename] = source["rank"]
+        age = definition["freshnessSeconds"]
+        if age is not None and (type(age) is not int or age <= 0):
+            raise HealthManifestError(f"Invalid roster freshness for {field}")
+        sources[field] = MappingProxyType(ranks)
+        freshness[field] = age
+    encoded = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return RosterPolicy(raw["version"], hashlib.sha256(encoded).hexdigest(),
+                        raw["aliasCollisionWindowSeconds"], raw["maxStringLength"],
+                        raw["maxAddresses"], MappingProxyType(sources), MappingProxyType(freshness))
 
 
 def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:
@@ -195,4 +256,5 @@ def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:
         schema_version=SUPPORTED_SCHEMA_VERSION,
         datasets=MappingProxyType(datasets),
         ineligible_datasets=MappingProxyType(ineligible_datasets),
+        roster_policy=_roster_policy(raw.get("rosterPolicy"), datasets),
     )

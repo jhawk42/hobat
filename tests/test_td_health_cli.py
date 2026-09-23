@@ -5,13 +5,17 @@ from __future__ import annotations
 import io
 import json
 import hashlib
+import os
 from contextlib import redirect_stdout
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import td_cli
 import td_health_cli
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
+from td_health_read import TDHealthReadService
 from td_health_sqlite import SQLiteHealthStore
+from test_td_health_sqlite import _result
 
 
 def _seed(data_dir) -> None:
@@ -36,6 +40,87 @@ def test_dry_run_json_does_not_create_database(tmp_path) -> None:
     assert document["networkId"] == "extpan:78b9775b001c1cbe"
     assert document["assessmentCreated"] is None
     assert not (tmp_path / HOBAT_DATABASE_FILENAME).exists()
+
+
+def test_explicit_compare_is_cache_only_dry_run_and_idempotent(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    store.save_processing_result(*_result("1"))
+    store.save_processing_result(*_result("2"))
+    output = io.StringIO()
+    args = ["--datadir", str(tmp_path), "compare", "--before-assessment", "assessment-1",
+            "--after-assessment", "assessment-2", "--json"]
+    with redirect_stdout(output):
+        assert td_health_cli.main([*args, "--dry-run"]) == 0
+    document = json.loads(output.getvalue())
+    assert document["dryRun"] and not document["created"]
+    assert document["comparisonId"].startswith("comparison:")
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert td_health_cli.main(args) == 0
+    assert not json.loads(output.getvalue())["created"]
+
+
+def test_top_level_compare_forwards_to_health_cli(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    store.save_processing_result(*_result("1"))
+    store.save_processing_result(*_result("2"))
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert td_cli.main([
+            "--datadir", str(tmp_path), "health", "compare",
+            "--before-assessment", "assessment-1",
+            "--after-assessment", "assessment-2", "--dry-run", "--json",
+        ]) == 0
+    assert json.loads(output.getvalue())["dryRun"]
+
+
+def test_cached_cli_counter_change_without_reset_witness_stays_unknown(tmp_path) -> None:
+    _seed(tmp_path)
+    identity = tmp_path / "td-otbr-cli-thread-network-info.json"
+    snapshot = tmp_path / "td-otbr-cli-networkdiag-fetch-all.json"
+    first_time = datetime.now(timezone.utc) - timedelta(days=2)
+    os.utime(identity, (first_time.timestamp(), first_time.timestamp()))
+    assessment_ids = []
+    for index, count in enumerate((0, 1, 0)):
+        snapshot.write_text(json.dumps([{
+            "extAddress": "8672766ae0578187", "role": "router",
+            "mleCounters": {"newParentCount": count},
+            "timeStatistics": {"trackedTime": 100 + index * 86400},
+        }]), encoding="utf-8")
+        observed_at = first_time + timedelta(days=index)
+        os.utime(snapshot, (observed_at.timestamp(), observed_at.timestamp()))
+        output = io.StringIO()
+        with redirect_stdout(output):
+            assert td_cli.main(["--datadir", str(tmp_path), "health", "process-dataset",
+                                "--dataset", "otbr_cli_networkdiag_fetch_all", "--json"]) == 0
+        assessment_ids.append(json.loads(output.getvalue())["assessmentId"])
+
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert td_cli.main(["--datadir", str(tmp_path), "health", "compare",
+                            "--before-assessment", assessment_ids[0],
+                            "--after-assessment", assessment_ids[1], "--dry-run", "--json"]) == 0
+    comparison_id = json.loads(output.getvalue())["comparisonId"]
+    service = TDHealthReadService(tmp_path)
+    detail = service.comparison(comparison_id=comparison_id, limit=100, offset=0)
+    counter = next(item for item in detail["items"] if item["metric"] == "parentChanges")
+    assert (counter["beforeValue"], counter["afterValue"]) == (0, 1)
+    assert counter["beforeSourceObservedAt"] < counter["afterSourceObservedAt"]
+    assert counter["resetState"] == "unknown" and counter["resetWitness"]["witness"] is None
+    assert counter["reasons"] == ["reset-unknown"]
+    assert counter["change"] == "unknown" and counter["delta"] is None
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert td_cli.main(["--datadir", str(tmp_path), "health", "compare",
+                            "--before-assessment", assessment_ids[1],
+                            "--after-assessment", assessment_ids[2], "--dry-run", "--json"]) == 0
+    detail = service.comparison(comparison_id=json.loads(output.getvalue())["comparisonId"],
+                                limit=100, offset=0)
+    decreased = next(item for item in detail["items"] if item["metric"] == "parentChanges")
+    assert (decreased["beforeValue"], decreased["afterValue"]) == (1, 0)
+    assert decreased["resetState"] == "reset-detected"
+    assert decreased["reasons"] == ["reset-detected"]
+    assert decreased["change"] == "unknown" and decreased["delta"] is None
 
 
 def test_dry_run_uses_existing_roster_history_without_mutating_store(tmp_path) -> None:

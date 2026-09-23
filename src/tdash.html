@@ -340,7 +340,14 @@
             <button id="btn-health-export" type="button" title="Download the pinned health assessment">Export JSON</button>
           </div>
           <div id="health-insights-workspace" hidden>
+            <div id="health-mode-switch" role="group" aria-label="Health view mode" hidden>
+              <button id="health-mode-snapshot" type="button" aria-pressed="true">Snapshot</button>
+              <button id="health-mode-comparison" type="button" aria-pressed="false">Comparison</button>
+              <button id="btn-health-comparison-reset" type="button" hidden>Reset</button>
+            </div>
+            <section id="health-comparison" aria-label="Stored comparison" hidden></section>
             <div id="health-insights-summary"></div>
+            <section id="health-roster" aria-label="Observed Thread devices" hidden></section>
             <div id="health-finding-table-wrap" class="health-finding-table-wrap">
               <table id="health-finding-table">
                 <thead></thead>

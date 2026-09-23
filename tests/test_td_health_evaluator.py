@@ -257,7 +257,7 @@ def test_border_router_address_in_omr_prefix_is_strong_external_routing() -> Non
         observation,
         load_health_policy(),
         profile=PROFILE,
-        omr_prefix="fd6b:32e0:d18:0",
+        omr_prefix="fd6b:32e0:d18::/64",
         device_ipv6_addresses={
             "extaddr:1111111111111111": ("fd6b:32e0:d18:0:1234:5678:9abc:def0",),
         },
@@ -295,9 +295,9 @@ def test_border_router_without_omr_address_is_moderate_external_routing() -> Non
         observation,
         load_health_policy(),
         profile=PROFILE,
-        omr_prefix="fd6b:32e0:d18:0",
+        omr_prefix="fd6b:32e0:d18::/64",
         device_ipv6_addresses={
-            "extaddr:1111111111111111": ("fd3b:a255:4aa6:5483:0:ff:fe00:1",),
+            "extaddr:1111111111111111": ("fd6b:32e0:d18:0001::1", "invalid-ipv6"),
         },
     )
     finding = next(
@@ -919,7 +919,7 @@ def test_complete_full_evidence_observation_has_sufficient_observed_coverage() -
         load_health_policy(),
         profile=PROFILE,
         expected_device_ids=frozenset(device.device_id for device in devices),
-        omr_prefix="fd00:1",
+        omr_prefix="fd00:1::/64",
         device_ipv6_addresses={devices[0].device_id: ("fd00:1::1",)},
     )
 
@@ -952,7 +952,7 @@ def test_missing_capability_omits_inapplicable_external_routing_rule() -> None:
         observation,
         load_health_policy(),
         profile=profile,
-        omr_prefix="fd00:1",
+        omr_prefix="fd00:1::/64",
         device_ipv6_addresses={observation.devices[0].device_id: ("fd00:1::1",)},
     )
 

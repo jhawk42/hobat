@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,7 +11,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from merge_dataset import SOURCE_PRECEDENCE
-from td_device_fields import get_canonical_ext_address, normalize_input_record
+from td_const import OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+from td_device_fields import get_canonical_ext_address, normalize_input_record, normalize_router_id
+from td_health_comparison import ROUTE64_SAMPLE_CONTRACT_VERSION
 from td_health_evaluator import evaluate_observation
 from td_health_manifest import HealthDataset, load_health_manifest
 from td_health_observation_model import (
@@ -26,6 +29,7 @@ from td_health_observation_model import (
     relationship_id,
 )
 from td_health_policy import HealthPolicy
+from td_health_roster import RosterFact, extract_roster_facts
 from td_health_sqlite import SQLiteHealthStore
 
 
@@ -39,6 +43,7 @@ class ProcessingResult:
     assessment: Assessment
     observation_created: bool | None
     assessment_created: bool | None
+    roster_facts: tuple[RosterFact, ...] = ()
 
 
 def _stable_read(path: Path) -> tuple[Any, str, int]:
@@ -55,6 +60,14 @@ def _stable_read(path: Path) -> tuple[Any, str, int]:
     except json.JSONDecodeError as exc:
         raise HealthProcessingError(f"Invalid JSON in {path.name}: {exc}") from exc
     return payload, hashlib.sha256(content).hexdigest(), after.st_mtime_ns
+
+
+def _source_time(mtime_ns: int, read_time: datetime) -> str | None:
+    try:
+        timestamp = datetime.fromtimestamp(mtime_ns / 1_000_000_000, timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+    return timestamp.isoformat() if timestamp <= read_time.astimezone(timezone.utc) else None
 
 
 def _records(payload: Any) -> list[dict[str, Any]]:
@@ -104,13 +117,18 @@ def _integer(value: Any) -> int | None:
 
 
 def _omr_prefix_from_identity(identity: Mapping[str, Any]) -> str | None:
-    precomputed = identity.get("prefixOmrIpv6AddrPrefix")
-    if isinstance(precomputed, str) and precomputed:
-        return precomputed
     prefix = identity.get("prefixOmr")
-    if isinstance(prefix, str) and prefix:
-        return prefix.split("/")[0].rstrip(":")
-    return None
+    mesh = identity.get("prefixMeshLocal")
+    if (not isinstance(prefix, str) or "/" not in prefix or
+            not isinstance(mesh, str) or "/" not in mesh):
+        return None
+    try:
+        network = ipaddress.IPv6Network(prefix)
+        if network.overlaps(ipaddress.IPv6Network(mesh)):
+            return None
+    except ValueError:
+        return None
+    return str(network)
 
 
 def _normalize_samples(
@@ -124,6 +142,8 @@ def _normalize_samples(
 ]:
     devices: dict[str, dict[str, Any]] = {}
     rloc_devices: dict[str, str] = {}
+    router_devices: dict[int, str | None] = {}
+    route_reporter_counts: dict[str, int] = {}
     normalized_by_file: dict[str, list[dict[str, Any]]] = {}
     ordered_files = sorted(
         dataset.files, key=lambda filename: (-SOURCE_PRECEDENCE.get(filename, 0), filename)
@@ -161,6 +181,14 @@ def _normalize_samples(
             rloc = record.get("rloc16")
             if isinstance(rloc, str):
                 rloc_devices[rloc.lower()] = device_id
+            if filename == OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME and dataset.dataset_id == "otbr_cli_networkdiag_fetch_all":
+                route_reporter_counts[device_id] = route_reporter_counts.get(device_id, 0) + 1
+                router_id = normalize_router_id(record.get("routerId"))
+                if router_id is not None:
+                    if router_id in router_devices and router_devices[router_id] != device_id:
+                        router_devices[router_id] = None
+                    else:
+                        router_devices[router_id] = device_id
 
     relationships: dict[str, RelationshipSample] = {}
     metrics: dict[tuple[str, str, str], MetricSample] = {}
@@ -177,6 +205,37 @@ def _normalize_samples(
                     reporter_id = rloc_devices.get(rloc.lower())
             if reporter_id is None:
                 continue
+            try:
+                route_reporter_id = device_id_from_ext_address(get_canonical_ext_address(record))
+            except ValueError:
+                route_reporter_id = None
+            if (filename == OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+                    and dataset.dataset_id == "otbr_cli_networkdiag_fetch_all"
+                    and route_reporter_id == reporter_id
+                    and route_reporter_counts.get(reporter_id) == 1):
+                route = record.get("route")
+                if isinstance(route, dict) and type(route.get("idSequence")) is int and 0 <= route["idSequence"] <= 255:
+                    entries = route.get("routeData")
+                    if isinstance(entries, list) and len(entries) <= 63:
+                        targets: set[str] = set()
+                        valid = True
+                        for entry in entries:
+                            route_id = normalize_router_id(entry.get("routeId")) if isinstance(entry, dict) else None
+                            target_id = router_devices.get(route_id) if route_id is not None else None
+                            if target_id is None or target_id in targets:
+                                valid = False
+                                break
+                            targets.add(target_id)
+                        if valid:
+                            metrics[(reporter_id, "route64Coverage", filename)] = MetricSample(
+                                reporter_id, "route64Coverage", 1.0, "flag", None, filename
+                            )
+                            for target_id in targets - {reporter_id}:
+                                link_id = f"link:route:{reporter_id}->{target_id}"
+                                relationships[link_id] = RelationshipSample(
+                                    link_id, "router-route", reporter_id, target_id,
+                                    None, None, None, None, None, None, None, reporter_id, (filename,),
+                                )
             mac_counters = record.get("macCounters")
             if isinstance(mac_counters, dict):
                 denominator = _number(mac_counters.get("ifTotalPkts"))
@@ -316,11 +375,14 @@ def build_processing_result(
     store: SQLiteHealthStore | None = None,
     processing_time: datetime | None = None,
 ) -> ProcessingResult:
-    dataset = load_health_manifest().dataset(dataset_id)
+    manifest = load_health_manifest()
+    dataset = manifest.dataset(dataset_id)
     payloads: dict[str, Any] = {}
     sources: list[SourceEvidence] = []
     mtimes: list[int] = []
+    identity_mtime: int | None = None
     completeness = Completeness.COMPLETE
+    read_time = processing_time or datetime.now(timezone.utc)
 
     required = [*dataset.files, dataset.health_profile.identity_file]
     for filename in required:
@@ -336,7 +398,12 @@ def build_processing_result(
             continue
         payloads[filename] = payload
         mtimes.append(mtime)
-        sources.append(SourceEvidence(filename, digest, "identity" if filename == dataset.health_profile.identity_file else "final", "valid"))
+        if filename == dataset.health_profile.identity_file:
+            identity_mtime = mtime
+        sources.append(SourceEvidence(
+            filename, digest, "identity" if filename == dataset.health_profile.identity_file else "final",
+            "valid", _source_time(mtime, read_time) if filename in dataset.files else None,
+        ))
         checkpoint = path.with_name(path.name.removesuffix(".json") + ".partial.json")
         if checkpoint.exists() and checkpoint.stat().st_mtime_ns > mtime:
             completeness = Completeness.PARTIAL
@@ -389,14 +456,28 @@ def build_processing_result(
     devices, relationships, metrics, duplicate_relationship_ids, device_ipv6_addresses = _normalize_samples(
         dataset, available_finals
     )
-    omr_prefix = _omr_prefix_from_identity(identity)
+    roster_facts = tuple(
+        fact
+        for filename in dataset.files if filename in available_finals
+        for record in _records(available_finals[filename])
+        for fact in extract_roster_facts(record, filename=filename, dataset=dataset,
+                                         policy=manifest.roster_policy)
+    )
+    omr_prefix = (
+        _omr_prefix_from_identity(identity)
+        if identity_mtime is not None and _source_time(identity_mtime, read_time) else None
+    )
     source_set_digest = hashlib.sha256(
         "\0".join(f"{source.filename}:{source.digest}" for source in sorted(sources, key=lambda item: item.filename)).encode("utf-8")
     ).hexdigest()
     observed_ns = max(mtimes, default=0)
     observed_at = datetime.fromtimestamp(observed_ns / 1_000_000_000, timezone.utc).isoformat()
     now = processing_time or datetime.now(timezone.utc)
-    observation_key = "\0".join((dataset.datasource_id, dataset.dataset_id, network_id, observed_at, source_set_digest))
+    observation_parts = (dataset.datasource_id, dataset.dataset_id, network_id,
+                         observed_at, source_set_digest)
+    if dataset.dataset_id == "otbr_cli_networkdiag_fetch_all":
+        observation_parts += (ROUTE64_SAMPLE_CONTRACT_VERSION,)
+    observation_key = "\0".join(observation_parts)
     observation_id = "observation:" + hashlib.sha256(observation_key.encode("utf-8")).hexdigest()[:24]
     observation = Observation(
         observation_id=observation_id,
@@ -433,16 +514,18 @@ def build_processing_result(
         omr_prefix=omr_prefix,
         device_ipv6_addresses=device_ipv6_addresses,
     )
-    return ProcessingResult(observation, assessment, None, None)
+    return ProcessingResult(observation, assessment, None, None, roster_facts)
 
 
 def process_health(**kwargs: Any) -> ProcessingResult:
     store: SQLiteHealthStore = kwargs["store"]
     result = build_processing_result(**kwargs)
-    saved = store.save_processing_result(result.observation, result.assessment)
+    saved = store.save_processing_result(result.observation, result.assessment,
+                                         roster_facts=result.roster_facts)
     return ProcessingResult(
         result.observation,
         result.assessment,
         saved.observation_created,
         saved.assessment_created,
+        result.roster_facts,
     )

@@ -1317,6 +1317,65 @@ async def _health_service_call(request: aiohttp.web.Request, method: str, **kwar
         raise aiohttp.web.HTTPInternalServerError(reason=str(exc)) from exc
     except HealthManifestError as exc:
         raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
+    except ValueError as exc:
+        raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            raise aiohttp.web.HTTPServiceUnavailable(reason="Health store is busy") from exc
+        raise aiohttp.web.HTTPInternalServerError(reason="Health store read failed") from exc
+    except sqlite3.DatabaseError as exc:
+        raise aiohttp.web.HTTPInternalServerError(reason="Health store read failed") from exc
+
+
+async def handle_health_comparisons_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    network_id = request.query.get("network")
+    dataset_id = request.query.get("dataset")
+    if not network_id or not dataset_id:
+        raise aiohttp.web.HTTPBadRequest(reason="network and dataset are required")
+    result = await _health_service_call(
+        request, "comparisons", network_id=network_id, dataset_id=dataset_id,
+        limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
+        offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
+    )
+    return _health_json_response(result)
+
+
+async def handle_health_roster_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    network_id = request.query.get("network")
+    if not network_id:
+        raise aiohttp.web.HTTPBadRequest(reason="network is required")
+    result = await _health_service_call(
+        request, "roster", network_id=network_id,
+        limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
+        offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
+    )
+    return _health_json_response(result)
+
+
+async def handle_health_roster_device_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    network_id = request.query.get("network")
+    device_id = request.match_info.get("device_id", "")
+    if not network_id or not device_id.startswith("extaddr:"):
+        raise aiohttp.web.HTTPBadRequest(reason="network and canonical device ID are required")
+    result = await _health_service_call(request, "roster_device", network_id=network_id,
+                                        device_id=device_id)
+    if result is None:
+        raise aiohttp.web.HTTPNotFound(reason="Roster device not found")
+    return _health_json_response(result)
+
+
+async def handle_health_comparison_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    comparison_id = request.match_info.get("comparison_id", "")
+    if not comparison_id.startswith("comparison:"):
+        raise aiohttp.web.HTTPBadRequest(reason="invalid comparison ID")
+    result = await _health_service_call(
+        request, "comparison", comparison_id=comparison_id,
+        limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
+        offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
+    )
+    if result is None:
+        raise aiohttp.web.HTTPNotFound(reason="Comparison not found")
+    return _health_json_response(result)
 
 
 async def handle_health_summary_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -2410,6 +2469,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.router.add_get("/api/health/findings", handle_health_findings_api)
     app.router.add_get("/api/health/devices/{device_id}", handle_health_device_api)
     app.router.add_get("/api/health/observations", handle_health_observations_api)
+    app.router.add_get("/api/health/comparisons", handle_health_comparisons_api)
+    app.router.add_get("/api/health/comparisons/{comparison_id}", handle_health_comparison_api)
+    app.router.add_get("/api/health/roster", handle_health_roster_api)
+    app.router.add_get("/api/health/roster/{device_id}", handle_health_roster_device_api)
     app.router.add_get("/api/health/latest", handle_health_latest_api)
     app.router.add_get("/api/health/capabilities", handle_health_capabilities_api)
     app.router.add_post("/api/health/process-dataset", handle_health_process_dataset_api)
