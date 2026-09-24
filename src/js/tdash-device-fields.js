@@ -39,6 +39,12 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "childTable", aliases: ["router_child_table"], transform: "relationship" },
   { path: "childIpv6Addresses", aliases: ["child_ipv6_addresses"], transform: "stringArray" },
   { path: "routerNeighbors", aliases: ["router_neighbor_table"], transform: "relationship" },
+  { path: "frameErrorRate", aliases: ["err_rate_frame_pct"], transform: "relationshipMetric" },
+  { path: "messageErrorRate", aliases: ["err_rate_msg_pct"], transform: "relationshipMetric" },
+  { path: "averageRssi", aliases: ["rss_ave"], transform: "relationshipMetric" },
+  { path: "linkMargin", aliases: ["rss_margin"], transform: "relationshipMetric" },
+  { path: "queuedMessageCount", aliases: ["q_msg"], transform: "relationshipMetric" },
+  { path: "linkQuality", aliases: ["lq", "link_quality"], transform: "relationshipMetric" },
   { path: "rlocAddress", aliases: [], transform: "identifier" },
   { path: "mlEidIid", aliases: [], transform: "identity" },
   { path: "state", aliases: [], transform: "identity" },
@@ -99,6 +105,7 @@ export const PREFERRED_FIELD_NAMES = Object.freeze(
 const FIELD_DEFINITIONS_BY_PATH = Object.fromEntries(
   FIELD_DEFINITIONS.map((definition) => [definition.path, definition]),
 );
+const LEGACY_METRIC_ALIAS_FIRST = new Set(["frameErrorRate", "messageErrorRate"]);
 
 export function canonicalExtPanId(value) {
   let number;
@@ -129,7 +136,8 @@ export function getPreferredFieldPath(name) {
 export function getFieldNameCandidates(name) {
   const path = getPreferredFieldPath(name);
   const definition = FIELD_DEFINITIONS_BY_PATH[path];
-  return definition ? [...new Set([path, ...definition.aliases])] : [name];
+  return definition ? [...new Set(LEGACY_METRIC_ALIAS_FIRST.has(path)
+    ? [...definition.aliases, path] : [path, ...definition.aliases])] : [name];
 }
 
 export function normalizeNestedMetricFields(record) {
@@ -321,18 +329,18 @@ function normalizeRoute(value) {
   );
 }
 
-function transformValue(transform, value, source) {
+function transformValue(transform, value, source, canonicalMetrics) {
   if (transform === "identifier") {
     const normalized = normalizeIdentifierText(value);
     return normalized || cloneValue(value);
   }
   if (transform === "boolean") return toBoolean(value);
   if (transform === "strictBoolean") return typeof value === "boolean" ? value : null;
-  if (transform === "number") return toNumber(value);
+  if (transform === "number" || transform === "relationshipMetric") return toNumber(value);
   if (transform === "routerId") return normalizeRouterId(value);
   if (transform === "route") return normalizeRoute(value);
   if (transform === "relationship" && Array.isArray(value)) {
-    return value.map((item) => isPlainObject(item) ? normalizeInputRecord(item, { source }) : cloneValue(item));
+    return value.map((item) => isPlainObject(item) ? normalizeInputRecord(item, { source, canonicalMetrics }) : cloneValue(item));
   }
   if (transform === "stringArray" && Array.isArray(value)) {
     return value.map((item) => typeof item === "string" ? normalizeIdentifierText(item) : cloneValue(item));
@@ -346,6 +354,7 @@ export function normalizeInputRecord(record, options = {}) {
   TRANSPORT_FIELDS.forEach((field) => delete result[field]);
 
   FIELD_DEFINITIONS.forEach((definition) => {
+    if (definition.transform === "relationshipMetric" && options.canonicalMetrics !== true) return;
     const candidates = [definition.path, ...definition.aliases];
     let selected;
     for (const candidate of candidates) {
@@ -356,7 +365,7 @@ export function normalizeInputRecord(record, options = {}) {
       }
     }
     if (!selected) return;
-    const transformed = transformValue(definition.transform, selected.value, options.source);
+    const transformed = transformValue(definition.transform, selected.value, options.source, options.canonicalMetrics);
     if (["routerId", "strictBoolean"].includes(definition.transform) && transformed === null) {
       candidates.forEach((candidate) => deletePath(result, candidate));
       return;

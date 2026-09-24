@@ -1,3 +1,4 @@
+import { buildDeviceProjections } from "./tdash-device-projection.js";
 import {
   LINK_FILTER_ALL,
   LINK_FILTER_EVE_NATIVE,
@@ -286,7 +287,7 @@ export function computeTopologyCapabilities(nodeData, edgeData) {
 // Called at the top of renderTableForDataset.
 // Scans normalised row objects (including router_neighbor_table sub-arrays).
 // edgeCategories is always an empty Set (table view has no topology edges).
-export function computeTableCapabilities(rows) {
+export function scanTableCapabilities(rows) {
   let hasFtdNodes = false;
   let hasMtdNodes = false;
   let hasReedNodes = false;
@@ -457,6 +458,14 @@ export function computeTableCapabilities(rows) {
     hasFieldRouterPct,
     hasFieldDetachedDisabledPct,
   };
+}
+
+export function computeTableCapabilities(rows, projections = buildDeviceProjections(rows)) {
+  const values = [...projections.values()];
+  const empty = scanTableCapabilities([]);
+  return Object.fromEntries(Object.keys(empty).map((key) => [
+    key, key === "edgeCategories" ? new Set() : values.some((projection) => projection.diagnostics[key] === true),
+  ]));
 }
 
 // ── Filter select population (DOM) ───────────────────────────────────────────
@@ -690,7 +699,18 @@ export function updateFilterOptionVisibility(capabilities, view) {
 
 // ── Node visibility predicates (topology) ─────────────────────────────────────
 
-export function isNodeVisibleByFilter(node, filterMode) {
+export function isNodeVisibleByFilter(node, filterMode, projection) {
+  if (projection) {
+    if (filterMode === "ftd-devices") return projection.deviceType === "FTD";
+    if (filterMode === "mtd-devices") return projection.deviceType === "MTD";
+    if (filterMode === "reed-devices") return projection.isReed;
+    if (filterMode === "main-routers") return projection.isRouter;
+    if (filterMode === "border-routers") return projection.isBorderRouter;
+    const hasChildren = projection.relationships.children > 0 || projection.relationships.totalChildren > 0;
+    if (filterMode === "routers-with-children") return projection.isRouter && hasChildren;
+    if (filterMode === "routers-without-children") return projection.isRouter && !hasChildren;
+    return true;
+  }
   if (filterMode === "ftd-devices")
     return toText(node.mode_device).toUpperCase() === "FTD";
   if (filterMode === "mtd-devices")
@@ -845,15 +865,6 @@ export function isRowVisibleByNodeFilter(row, filterMode) {
 
 // ── Per-record diagnostic evaluation ─────────────────────────────────────────
 
-const DIAGNOSTIC_RELATIONSHIP_FIELD_ALIASES = Object.freeze({
-  frameErrorRate: ["err_rate_frame_pct", "frameErrorRate"],
-  messageErrorRate: ["err_rate_msg_pct", "messageErrorRate"],
-  averageRssi: ["averageRssi", "rss_ave"],
-  linkMargin: ["linkMargin", "rss_margin"],
-  queuedMessageCount: ["queuedMessageCount", "q_msg"],
-  linkQuality: ["linkQuality", "lq", "link_quality"],
-});
-
 export function compareDiagnosticMetric(metric, comparison, threshold) {
   if (!Number.isFinite(metric) || !Number.isFinite(threshold)) return false;
   if (comparison === ">=") return metric >= threshold;
@@ -866,12 +877,8 @@ export function compareDiagnosticMetric(metric, comparison, threshold) {
 }
 
 function getRelationshipMetric(record, option) {
-  const aliases = DIAGNOSTIC_RELATIONSHIP_FIELD_ALIASES[option.collectionMetricField] ?? [];
-  for (const field of aliases) {
-    const value = toFiniteNumber(record?.[field]);
-    if (Number.isFinite(value)) return value;
-  }
-  return undefined;
+  const value = toFiniteNumber(getColumnValue(record, option.collectionMetricField));
+  return Number.isFinite(value) ? value : undefined;
 }
 
 function metricMatchesOption(metric, option) {
@@ -1151,19 +1158,23 @@ export function aggregateNetworkDiagnosticsForRows(rows) {
   };
 }
 
-export function isNodeVisibleByDiagnosticFilter(node, filterMode) {
+export function isNodeVisibleByDiagnosticFilter(node, filterMode, projection) {
   if (filterMode === "all") return true;
   const option = getDiagnosticOptionByValue(filterMode);
   if (!option) return true;
+  if (projection?.diagnostics[option.capabilityKey] === false) return false;
   const evaluation = evaluateDiagnosticsForRecord(node, "topology")
     .find((item) => item.option.value === filterMode);
   return evaluation?.triggered === true;
 }
 
-export function isRowVisibleByDiagnosticFilter(row, filterMode) {
+export function isRowVisibleByDiagnosticFilter(row, filterMode, projection) {
   if (filterMode === "all") return true;
   const option = getDiagnosticOptionByValue(filterMode);
   if (!option) return true;
+  if (projection && option.conditionKind === "collection") {
+    if (!projection.metrics[option.collectionPath]?.[option.collectionMetricField]?.length) return false;
+  } else if (projection?.diagnostics[option.capabilityKey] === false) return false;
   const evaluation = evaluateDiagnosticsForRecord(row, "table")
     .find((item) => item.option.value === filterMode);
   return evaluation?.triggered === true;

@@ -18,12 +18,14 @@ import {
   isRowVisibleByNodeFilter,
   isRowVisibleByDiagnosticFilter,
 } from "./tdash-filters.js";
+import { buildDeviceProjections } from "./tdash-device-projection.js";
 import { publishViewStatus } from "./tdash-view-status.js";
 import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
 
 // ── Module-level table state ──────────────────────────────────────────────────
 
 let _tableRows = [];
+let _tableProjectionByRow = new WeakMap();
 let _tableColumns = [];
 let _tableDatasetLabel = "";
 let _tableDatasetToken = null;
@@ -489,7 +491,7 @@ export function applyTableFilters({ preserveSelection = false } = {}) {
   const filtered = _tableRows.filter(
     (row) =>
       isRowVisibleByNodeFilter(row, nodeMode) &&
-      isRowVisibleByDiagnosticFilter(row, diagMode),
+      isRowVisibleByDiagnosticFilter(row, diagMode, _tableProjectionByRow.get(row)),
   );
   const { matchingRows } = filterRowsBySearch(filtered, searchQuery, _moreInfoEnabled);
   const sortedRows = sortedTableRows(matchingRows);
@@ -571,7 +573,13 @@ export function renderTableForDataset(dataset, statusDatasetToken = dataset) {
   _tableDatasetToken = statusDatasetToken;
 
   // ── compute and apply dynamic filter option visibility ────────
-  const capabilities = computeTableCapabilities(rows);
+  _tableProjectionByRow = new WeakMap();
+  const projections = [...(dataset.deviceProjections ?? buildDeviceProjections(rows)).values()];
+  rows.forEach((row, index) => {
+    const projection = projections[index];
+    _tableProjectionByRow.set(row, projection);
+  });
+  const capabilities = computeTableCapabilities(rows, projections);
   dataset.capabilities = capabilities;
   updateFilterOptionVisibility(capabilities, "table");
 

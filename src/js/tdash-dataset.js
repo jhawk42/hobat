@@ -16,6 +16,7 @@ import {
   mergeRowsByIdentity,
 } from "./tdash-merge.js";
 import { isPlaceholderOmrAddress } from "./tdash-device-fields.js";
+import { buildDeviceProjections } from "./tdash-device-projection.js";
 import { trackedFetch } from "./tdash-activity.js";
 
 // ── Module-level state ────────────────────────────────────────────────────────
@@ -689,6 +690,7 @@ function _buildPartialDataset(entry, rawFiles, loadStartTime) {
     entry,
     rawFiles: canonicalRawFiles,
     rows,
+    deviceProjections: buildDeviceProjections(rows),
     loadedFiles,
     fetchDurationMs: Date.now() - loadStartTime,
     fileLastModifiedAt: oldestLastModifiedAt,
@@ -878,6 +880,7 @@ export async function loadDataset(entryValue, options = {}) {
     entry,
     rawFiles: canonicalRawFiles,
     rows: assembled.rows,
+    deviceProjections: buildDeviceProjections(assembled.rows),
     loadedFiles: assembled.loadedFiles,
     fetchDurationMs,
     fileLastModifiedAt: oldestLastModifiedAt,

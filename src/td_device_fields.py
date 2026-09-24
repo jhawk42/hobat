@@ -46,6 +46,12 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "childTable", "aliases": ("router_child_table",), "transform": "relationship"},
     {"path": "childIpv6Addresses", "aliases": ("child_ipv6_addresses",), "transform": "stringArray"},
     {"path": "routerNeighbors", "aliases": ("router_neighbor_table",), "transform": "relationship"},
+    {"path": "frameErrorRate", "aliases": ("err_rate_frame_pct",), "transform": "relationshipMetric"},
+    {"path": "messageErrorRate", "aliases": ("err_rate_msg_pct",), "transform": "relationshipMetric"},
+    {"path": "averageRssi", "aliases": ("rss_ave",), "transform": "relationshipMetric"},
+    {"path": "linkMargin", "aliases": ("rss_margin",), "transform": "relationshipMetric"},
+    {"path": "queuedMessageCount", "aliases": ("q_msg",), "transform": "relationshipMetric"},
+    {"path": "linkQuality", "aliases": ("lq", "link_quality"), "transform": "relationshipMetric"},
     {"path": "rlocAddress", "aliases": (), "transform": "identifier"},
     {"path": "mlEidIid", "aliases": (), "transform": "identity"},
     {"path": "state", "aliases": (), "transform": "identity"},
@@ -325,6 +331,8 @@ def normalize_input_record(
         result.pop(key, None)
 
     for definition in FIELD_DEFINITIONS:
+        if definition["transform"] == "relationshipMetric":
+            continue
         preferred = definition["path"]
         candidates = (preferred, *definition["aliases"])
         selected = next(

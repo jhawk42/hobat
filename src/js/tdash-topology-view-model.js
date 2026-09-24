@@ -5,6 +5,7 @@ import {
   DIAGNOSTIC_FILTER_OPTIONS,
 } from "./tdash-constants.js";
 import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
+import { projectAdaptorNode } from "./tdash-device-projection.js";
 import {
   edgeMatchesLinkFilter,
   isChildLinkQualityDiagnosticMode,
@@ -85,7 +86,7 @@ function getRouterChildRows(viewModel, parentNodeId) {
   return mergedRows;
 }
 
-export function createTopologyViewModel(adaptorResult) {
+export function createTopologyViewModel(adaptorResult, projections = new Map()) {
   const nodes = (adaptorResult.nodeData || []).map(cloneValue);
   const edges = (adaptorResult.edgeData || []).map(cloneValue);
   const nodeMap = new Map(
@@ -100,6 +101,22 @@ export function createTopologyViewModel(adaptorResult) {
 
   nodeMap.forEach((node, nodeId) => indexIdentity(identityToNodeId, node, nodeId));
   rawByIdForDetails.forEach((row, nodeId) => indexIdentity(identityToNodeId, row, nodeId));
+
+  const projectionByIdentity = new Map();
+  projections.forEach((projection) => {
+    identityKeysForRecord(projection).forEach((key) => projectionByIdentity.set(key, projection));
+  });
+  const projectionByNodeId = new Map();
+  const displayById = new Map(nodes.map((node) => [node.id, node]));
+  nodeMap.forEach((node, nodeId) => {
+    for (const record of [rawByIdForDetails.get(nodeId), node]) {
+      const projection = identityKeysForRecord(record).map((key) => projectionByIdentity.get(key)).find(Boolean);
+      if (projection) {
+        projectionByNodeId.set(nodeId, projectAdaptorNode(projection, displayById.get(nodeId) ?? node));
+        break;
+      }
+    }
+  });
 
   return Object.freeze({
     nodes,
@@ -116,6 +133,7 @@ export function createTopologyViewModel(adaptorResult) {
     ),
     sourceNames: [...(adaptorResult.sourceNames || [])],
     identityToNodeId,
+    projectionByNodeId,
     originalNodeStyling: new Map(nodes.map((node) => [node.id, cloneNodeStyle(node)])),
     edgeIndexes: buildTopologyEdgeIndexes(edges),
     datasetCounts: computeDatasetCounts(nodes, edges),
@@ -154,8 +172,8 @@ export function computeTopologyVisibility(viewModel, filterState) {
 
   viewModel.nodes.forEach((node) => {
     if (
-      isNodeVisibleByFilter(node, filterState.nodeMode)
-      && isNodeVisibleByDiagnosticFilter(node, filterState.diagnosticMode)
+      isNodeVisibleByFilter(node, filterState.nodeMode, viewModel.projectionByNodeId.get(node.id))
+      && isNodeVisibleByDiagnosticFilter(node, filterState.diagnosticMode, viewModel.projectionByNodeId.get(node.id))
     ) visibleNodeIds.add(node.id);
   });
 
