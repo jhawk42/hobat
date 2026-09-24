@@ -49,7 +49,7 @@ def test_javascript_policy_metadata_matches_python() -> None:
 
 
 MERGE_JS = REPO_ROOT / "src" / "js" / "tdash-merge.js"
-ADAPTORS_JS = REPO_ROOT / "src" / "js" / "tdash-adaptors.js"
+ADAPTORS_JS = REPO_ROOT / "src" / "js" / "tdash-adaptor-otbr-cli.js"
 
 
 def _read_text(path: Path) -> str:

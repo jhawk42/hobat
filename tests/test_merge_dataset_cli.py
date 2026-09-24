@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -22,6 +23,16 @@ from merge_dataset import (
 
 def _write_json(path: Path, payload) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_merge_policy_modules_do_not_import_other_policy_modules() -> None:
+    for name in ("merge_report", "merge_policy_mdns", "merge_policy_relationship", "merge_policy_identity"):
+        source = (Path(merge_dataset.__file__).parent / f"{name}.py").read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.ImportFrom):
+                assert not node.module.startswith("merge_policy_"), f"{name} imports {node.module}"
+            if isinstance(node, ast.Import):
+                assert not any(alias.name.startswith("merge_policy_") for alias in node.names), name
 
 
 def test_merge_excludes_cross_instance_and_stale_sidecars(tmp_path: Path) -> None:

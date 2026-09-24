@@ -6,12 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import re
 
 from collections import defaultdict
 from copy import deepcopy
-from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -24,22 +21,21 @@ from td_json_key_normalizer import convert_keys_to_camel_case
 from td_device_fields import (
     EXT_ADDRESS_ALIASES,
     OMR_ADDRESS_ALIASES,
-    get_canonical_ext_address,
-    get_canonical_omr_address,
-    is_placeholder_ext_address,
+    get_canonical_ext_address as get_canonical_extaddr,
+    get_canonical_omr_address as get_canonical_omr,
+    is_placeholder_ext_address as is_placeholder_extaddr,
     is_placeholder_device_label,
     is_placeholder_omr_address,
-    normalize_identifier_text as normalize_device_identifier_text,
+    normalize_identifier_text,
     normalize_input_record,
 )
 from td_device_merge import MergeContext, create_merge_context, sort_sources_by_priority
-from td_network_identity import NetworkScope
 from td_record_merge import (
-    append_merge_conflict as append_record_conflict,
-    merge_lists as merge_record_lists,
-    merge_unique_strings as merge_record_unique_strings,
-    value_is_empty as record_value_is_empty,
-    values_equivalent as record_values_equivalent,
+    append_merge_conflict,
+    merge_lists,
+    merge_unique_strings,
+    value_is_empty,
+    values_equivalent,
 )
 from td_const import (
     EVE_TOPOLOGY_FILENAME,
@@ -78,6 +74,54 @@ from util_data import (
 )
 from util_data import TDRequiredInputMissingError
 
+
+from merge_report import (
+    MergeCommandInputs,
+    MergeSupportingData,
+    MergeCommandResult,
+    evaluate_merge_viability,
+    write_merge_outputs,
+)
+
+from merge_policy_mdns import (
+    merge_mdns_service_info,
+    get_mdns_event_priority,
+    merge_mdns_records,
+    is_mdns_record,
+    is_matter_operational_mdns_record,
+    _normalize_alias_text,
+    _append_unique_alias,
+    _extract_service_info_property_decoded,
+    get_matter_fabric_node_identity,
+    update_mdns_aliases,
+    extract_mdns_merge_view,
+    apply_mdns_merge_view,
+    merge_mdns_record_into_node,
+)
+
+from merge_policy_relationship import (
+    get_partition_id,
+    merge_route_data,
+    _merge_relationship_records,
+    merge_children_array,
+    merge_router_neighbors,
+    _merge_route_field,
+    _merge_relationship_field,
+    _merge_neighbor_field,
+    _merge_address_field,
+    is_sequence_newer,
+    compare_sequences,
+)
+
+from merge_policy_identity import (
+    first_normalized_identifier,
+    normalize_record_aliases,
+    derive_mode_device,
+    normalize_identifiers,
+    find_candidate_node_ids,
+    add_identifier,
+    filter_candidate_ids_for_extaddr_consistency,
+)
 
 PRIORITY_FIELDS = [
     # === TIER 1: Primary Identity (Essential P0) ===
@@ -257,117 +301,6 @@ def load_json(path: Path) -> Any:
         return json.load(f)
 
 
-def normalize_identifier_text(value: Any) -> str:
-    return normalize_device_identifier_text(value)
-
-
-def first_normalized_identifier(record: dict[str, Any], keys: tuple[str, ...]) -> str:
-    for key in keys:
-        value = normalize_identifier_text(record.get(key))
-        if value:
-            return value
-    return ""
-
-
-def get_canonical_extaddr(record: dict[str, Any]) -> str:
-    return get_canonical_ext_address(record)
-
-
-def get_canonical_omr(record: dict[str, Any]) -> str:
-    return get_canonical_omr_address(record)
-
-
-def is_placeholder_extaddr(value: Any) -> bool:
-    """Return True for known non-identity extaddr placeholder values."""
-    return is_placeholder_ext_address(value)
-
-
-def normalize_record_aliases(record: dict[str, Any]) -> dict[str, Any]:
-    extaddr = get_canonical_extaddr(record)
-    omr_addr = get_canonical_omr(record)
-
-    if extaddr:
-        record["extAddress"] = extaddr
-    if omr_addr:
-        record["omrIpv6Address"] = omr_addr
-
-    return record
-
-
-def derive_mode_device(record: dict[str, Any]) -> str:
-    mode_device_raw = record.get("mode.device")
-    if isinstance(mode_device_raw, str) and mode_device_raw.strip():
-        value = mode_device_raw.strip().upper()
-        if value in {"FTD", "MTD"}:
-            return value
-
-    mode = record.get("mode")
-    if isinstance(mode, dict):
-        mode_device = mode.get("device")
-        if isinstance(mode_device, str) and mode_device.strip():
-            value = mode_device.strip().upper()
-            if value in {"FTD", "MTD"}:
-                return value
-
-        device_type_ftd = mode.get("deviceTypeFTD")
-        if isinstance(device_type_ftd, bool):
-            return "FTD" if device_type_ftd else "MTD"
-
-        device_type = mode.get("device_type")
-        if isinstance(device_type, (int, float)):
-            return "FTD" if int(device_type) != 0 else "MTD"
-
-    role = record.get("role")
-    if isinstance(role, str):
-        role_text = role.strip().lower()
-        if role_text in ("router", "border router"):
-            return "FTD"
-        if role_text == "child":
-            return "MTD"
-
-    node_type = record.get("type")
-    if isinstance(node_type, str):
-        type_text = node_type.strip().lower()
-        if type_text in ("router", "border router"):
-            return "FTD"
-        if "child" in type_text:
-            return "MTD"
-
-    return ""
-
-
-def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, Any]:
-    normalized = normalize_input_record(record)
-    record.clear()
-    record.update(normalized)
-
-    omr_addr = get_canonical_omr(record)
-
-    if not omr_addr:
-        ipv6_values = record.get("ipv6Addresses")
-        if isinstance(ipv6_values, list):
-            prefix = omr_prefix.lower()
-            for ip_value in ipv6_values:
-                if isinstance(ip_value, str) and ip_value.lower().startswith(prefix):
-                    omr_addr = ip_value.lower()
-                    break
-
-    if omr_addr:
-        record["omrIpv6Address"] = omr_addr
-
-    mode_device = derive_mode_device(record)
-    if mode_device:
-        record["mode.device"] = mode_device
-        mode = record.get("mode")
-        if isinstance(mode, dict) and (
-            not isinstance(mode.get("device"), str)
-            or not mode.get("device", "").strip()
-        ):
-            mode["device"] = mode_device
-
-    return record
-
-
 def extract_records(filename: str, data: Any) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
 
@@ -403,733 +336,6 @@ def extract_records(filename: str, data: Any) -> list[dict[str, Any]]:
 
     return records
 
-
-def value_is_empty(value: Any) -> bool:
-    return record_value_is_empty(value)
-
-
-def merge_unique_strings(existing: list[Any], incoming: list[Any]) -> list[str]:
-    return merge_record_unique_strings(existing, incoming)
-
-
-def values_equivalent(left: Any, right: Any) -> bool:
-    return record_values_equivalent(left, right)
-
-
-def append_merge_conflict(
-    base: dict[str, Any], path: str, cur_val: Any, new_value: Any, limit: int = 20
-) -> None:
-    append_record_conflict(base, path, cur_val, new_value, limit=limit)
-
-
-def merge_lists(left: list[Any], right: list[Any]) -> list[Any]:
-    return merge_record_lists(left, right)
-
-
-# ============================================================================
-# Phase 2: Sequence Number Comparison (RFC 1982)
-# ============================================================================
-
-def is_sequence_newer(seq_a: int, seq_b: int, bits: int = 8) -> bool:
-    """
-    Compare two sequence numbers with wraparound handling (RFC 1982).
-    
-    Returns True if seq_a is newer than seq_b.
-    Uses serial number arithmetic for 8-bit counter (0-255).
-    
-    Examples:
-        100 > 50:  True (no wraparound)
-        5 > 250:   True (wraparound: 250→255→0→5)
-        250 > 5:   False
-        128 > 0:   False (ambiguous, exactly half-max)
-    """
-    if seq_a == seq_b:
-        return False
-    
-    max_val = 2 ** bits
-    half_max = max_val // 2
-    
-    diff = (seq_a - seq_b) % max_val
-    return diff < half_max
-
-
-def compare_sequences(seq_a: int | None, seq_b: int | None) -> str:
-    """
-    Compare two sequence numbers, handling None values.
-    
-    Returns: "a_newer", "b_newer", "equal", or "unknown"
-    """
-    if seq_a is None and seq_b is None:
-        return "unknown"
-    if seq_a is None:
-        return "b_newer"
-    if seq_b is None:
-        return "a_newer"
-    
-    if seq_a == seq_b:
-        return "equal"
-    
-    if is_sequence_newer(seq_a, seq_b):
-        return "a_newer"
-    else:
-        return "b_newer"
-
-
-# ============================================================================
-# Phase 2: Partition Extraction
-# ============================================================================
-
-def get_partition_id(record: dict[str, Any]) -> str:
-    """
-    Extract partitionId from leaderData.
-    
-    Returns normalized partition_id string or "unknown" if not found.
-    """
-    # Canonical merged format
-    leader_data = record.get("leaderData")
-    if isinstance(leader_data, dict):
-        partition_id = leader_data.get("partitionId")
-        if partition_id is not None:
-            # Normalize to string
-            if isinstance(partition_id, int):
-                return f"0x{partition_id:08x}"
-            elif isinstance(partition_id, str):
-                return partition_id.strip().lower()
-    
-    return "unknown"
-
-
-# ============================================================================
-# Phase 2: Route Data Merge (Composite Identity)
-# ============================================================================
-
-def merge_route_data(
-    owner_rloc16: str,
-    base_route_data: dict[str, Any],
-    incoming_route_data: dict[str, Any],
-    partition_id: str,
-) -> dict[str, Any]:
-    """
-    Merge route data using composite identity: (owner_rloc16, destination_route_id).
-    
-    Uses sequence number precedence (highest wins).
-    Only merges routes within same partition.
-    
-    Args:
-        owner_rloc16: RLOC16 of the node that owns this routing table
-        base_route_data: Existing route dict
-        incoming_route_data: New route dict
-        partition_id: Partition ID for validation
-    
-    Returns:
-        Merged route dict
-    """
-    base = base_route_data
-    incoming = incoming_route_data
-    
-    # Extract sequence numbers
-    base_seq = base.get("idSequence")
-    incoming_seq = incoming.get("idSequence")
-    
-    # Compare sequences
-    seq_comparison = compare_sequences(base_seq, incoming_seq)
-    
-    # If incoming has higher sequence, replace entirely
-    if seq_comparison == "b_newer":
-        logging.debug(f"Route data: incoming sequence {incoming_seq} > base {base_seq}, using incoming")
-        return deepcopy(incoming_route_data)
-    
-    # If base has higher sequence, keep base
-    if seq_comparison == "a_newer":
-        logging.debug(f"Route data: base sequence {base_seq} > incoming {incoming_seq}, keeping base")
-        return deepcopy(base_route_data)
-    
-    # Sequences equal or both unknown - merge by route identity
-    logging.debug(f"Route data: sequences equal ({base_seq}), merging by route identity")
-    
-    base_routes = base.get("routeData", [])
-    incoming_routes = incoming.get("routeData", [])
-    
-    if not isinstance(base_routes, list):
-        base_routes = []
-    if not isinstance(incoming_routes, list):
-        incoming_routes = []
-    
-    # Merge by composite identity: (owner_rloc16, dest_route_id)
-    merged_routes = {}
-    
-    for route in base_routes:
-        if isinstance(route, dict):
-            route_id = route.get("routeId")
-            if route_id is not None:
-                identity = (owner_rloc16, str(route_id))
-                merged_routes[identity] = deepcopy(route)
-    
-    for route in incoming_routes:
-        if isinstance(route, dict):
-            route_id = route.get("routeId")
-            if route_id is not None:
-                identity = (owner_rloc16, str(route_id))
-                # If already exists, prefer non-zero link quality values
-                if identity in merged_routes:
-                    existing = merged_routes[identity]
-                    # Merge additional fields
-                    for key, value in route.items():
-                        if key not in existing or value_is_empty(existing.get(key)):
-                            existing[key] = value
-                else:
-                    merged_routes[identity] = deepcopy(route)
-    
-    # Reconstruct canonical route object
-    result = deepcopy(base_route_data) if base_route_data else deepcopy(incoming_route_data)
-    
-    # Ensure result has proper structure
-    if not isinstance(result, dict):
-        result = {}
-    
-    # Set merged routes
-    result["routeData"] = list(merged_routes.values())
-    
-    # Preserve sequence number
-    if base_seq is not None:
-        result["idSequence"] = base_seq
-    elif incoming_seq is not None:
-        result["idSequence"] = incoming_seq
-    
-    return result
-
-
-# ============================================================================
-# Phase 2: Children Array Merge (Composite Identity)
-# ============================================================================
-
-def _merge_relationship_records(
-    base_records: list[Any],
-    incoming_records: list[Any],
-    *,
-    parent_rloc16: str | None = None,
-    prefer_incoming_values: bool = False,
-) -> list[dict[str, Any]]:
-    merged: dict[int | str, dict[str, Any]] = {}
-    by_extaddr: dict[tuple[str | None, str], int] = {}
-    by_rloc16: dict[tuple[str | None, str], set[int]] = defaultdict(set)
-    next_id = 0
-
-    for record in base_records + incoming_records:
-        if not isinstance(record, dict):
-            continue
-
-        extaddr = normalize_identifier_text(record.get("extAddress"))
-        rloc16 = normalize_identifier_text(record.get("rloc16"))
-        if not extaddr and not rloc16:
-            merged[next_id] = deepcopy(record)
-            next_id += 1
-            continue
-
-        extaddr_key = (parent_rloc16, extaddr)
-        rloc16_key = (parent_rloc16, rloc16)
-        existing_id = by_extaddr.get(extaddr_key) if extaddr else None
-        rloc_candidates = by_rloc16[rloc16_key] if rloc16 else set()
-        if existing_id is None and len(rloc_candidates) == 1:
-            candidate_id = next(iter(rloc_candidates))
-            candidate_extaddr = normalize_identifier_text(
-                merged[candidate_id].get("extAddress"))
-            if not extaddr or not candidate_extaddr or candidate_extaddr == extaddr:
-                existing_id = candidate_id
-
-        if existing_id is None:
-            existing_id = next_id
-            next_id += 1
-            merged[existing_id] = deepcopy(record)
-        else:
-            existing = merged[existing_id]
-            for key, value in record.items():
-                if key not in existing or value_is_empty(existing.get(key)):
-                    existing[key] = value
-                elif (
-                    prefer_incoming_values
-                    and not value_is_empty(value)
-                    and existing.get(key) != value
-                ):
-                    existing[key] = value
-
-        if extaddr:
-            by_extaddr[extaddr_key] = existing_id
-        if rloc16:
-            by_rloc16[rloc16_key].add(existing_id)
-
-    return list(merged.values())
-
-
-def merge_children_array(
-    parent_rloc16: str,
-    base_children: list[Any],
-    incoming_children: list[Any],
-) -> list[dict[str, Any]]:
-    """
-    Merge children arrays using composite identity: (parent_rloc16, child_extaddr).
-    
-    Critical: childId is parent-local only, NOT globally unique!
-    
-    Args:
-        parent_rloc16: RLOC16 of the parent node
-        base_children: Existing children array
-        incoming_children: New children array
-    
-    Returns:
-        Merged children array
-    """
-    return _merge_relationship_records(
-        base_children,
-        incoming_children,
-        parent_rloc16=normalize_identifier_text(parent_rloc16),
-        prefer_incoming_values=True,
-    )
-
-
-# ============================================================================
-# Phase 2: Router Neighbors Merge
-# ============================================================================
-
-def merge_router_neighbors(
-    base_neighbors: list[Any],
-    incoming_neighbors: list[Any],
-) -> list[dict[str, Any]]:
-    """
-    Merge routerNeighbors arrays by identity (rloc16 or extaddr).
-    
-    Args:
-        base_neighbors: Existing routerNeighbors array
-        incoming_neighbors: New routerNeighbors array
-    
-    Returns:
-        Merged routerNeighbors array
-    """
-    return _merge_relationship_records(base_neighbors, incoming_neighbors)
-
-
-# ============================================================================
-# Phase 3: mDNS Service Info Merge
-# ============================================================================
-
-def merge_mdns_service_info(
-    base_service_info: dict[str, Any],
-    incoming_service_info: dict[str, Any],
-    base_timestamp: float | None,
-    incoming_timestamp: float | None,
-) -> dict[str, Any]:
-    """
-    Merge mDNS service_info objects.
-    
-    Uses timestamp precedence (newer wins).
-    Preserves most complete nested structure.
-    
-    Args:
-        base_service_info: Existing service_info
-        incoming_service_info: New service_info
-        base_timestamp: Base captured_at_epoch
-        incoming_timestamp: Incoming captured_at_epoch
-    
-    Returns:
-        Merged service_info
-    """
-    # If timestamps available, prefer newer
-    if base_timestamp is not None and incoming_timestamp is not None:
-        if incoming_timestamp > base_timestamp:
-            # Incoming is newer, use it as base
-            result = deepcopy(incoming_service_info)
-            # Merge any additional fields from base
-            for key, value in base_service_info.items():
-                if key not in result or value_is_empty(result.get(key)):
-                    result[key] = deepcopy(value)
-            return result
-        else:
-            # Base is newer or equal, keep it
-            result = deepcopy(base_service_info)
-            # Merge any additional fields from incoming
-            for key, value in incoming_service_info.items():
-                if key not in result or value_is_empty(result.get(key)):
-                    result[key] = deepcopy(value)
-            return result
-    
-    # No timestamp comparison possible, merge deeply
-    result = deepcopy(base_service_info)
-    for key, value in incoming_service_info.items():
-        if key not in result:
-            result[key] = deepcopy(value)
-        elif isinstance(result[key], dict) and isinstance(value, dict):
-            # Merge nested dicts
-            for nested_key, nested_value in value.items():
-                if nested_key not in result[key] or value_is_empty(result[key].get(nested_key)):
-                    result[key][nested_key] = deepcopy(nested_value)
-        elif value_is_empty(result[key]) and not value_is_empty(value):
-            result[key] = deepcopy(value)
-    
-    return result
-
-
-def get_mdns_event_priority(event: str) -> int:
-    """
-    Get priority for mDNS event types.
-    
-    Priority: add=3, update=2, remove=1
-    Higher priority events take precedence.
-    """
-    event_priorities = {
-        "add": 3,
-        "update": 2,
-        "remove": 1,
-    }
-    return event_priorities.get(event, 0)
-
-
-def merge_mdns_records(
-    base: dict[str, Any],
-    incoming: dict[str, Any],
-) -> dict[str, Any]:
-    """
-    Merge two mDNS records with timestamp and event precedence.
-    
-    Rules:
-    - Newer timestamp wins (captured_at_epoch)
-    - If timestamps equal, event priority: add > update > remove
-    - service_info merged with timestamp precedence
-    
-    Args:
-        base: Existing mDNS record
-        incoming: New mDNS record
-    
-    Returns:
-        Merged mDNS record
-    """
-    base_timestamp = base.get("capturedAtEpoch", base.get("captured_at_epoch"))
-    incoming_timestamp = incoming.get(
-        "capturedAtEpoch", incoming.get("captured_at_epoch")
-    )
-    incoming_is_primary = False
-    if isinstance(base_timestamp, (int, float)) and isinstance(
-        incoming_timestamp, (int, float)
-    ):
-        if incoming_timestamp > base_timestamp:
-            incoming_is_primary = True
-        elif incoming_timestamp == base_timestamp:
-            incoming_is_primary = get_mdns_event_priority(
-                str(incoming.get("event", ""))
-            ) > get_mdns_event_priority(str(base.get("event", "")))
-
-    primary, secondary = (
-        (incoming, base) if incoming_is_primary else (base, incoming)
-    )
-    result = deepcopy(primary)
-    for key, value in secondary.items():
-        if key in {"serviceInfo", "service_info"}:
-            continue
-        if key not in result or value_is_empty(result.get(key)):
-            result[key] = deepcopy(value)
-
-    base_service = base.get("serviceInfo", base.get("service_info"))
-    incoming_service = incoming.get("serviceInfo", incoming.get("service_info"))
-    if isinstance(base_service, dict) or isinstance(incoming_service, dict):
-        service_key = (
-            "serviceInfo"
-            if "serviceInfo" in base or "serviceInfo" in incoming
-            else "service_info"
-        )
-        if base_timestamp == incoming_timestamp:
-            primary_service = primary.get(service_key, {})
-            secondary_service = secondary.get(service_key, {})
-            result[service_key] = merge_mdns_service_info(
-                primary_service if isinstance(primary_service, dict) else {},
-                secondary_service if isinstance(secondary_service, dict) else {},
-                None,
-                None,
-            )
-        else:
-            result[service_key] = merge_mdns_service_info(
-                base_service if isinstance(base_service, dict) else {},
-                incoming_service if isinstance(incoming_service, dict) else {},
-                base_timestamp if isinstance(base_timestamp, (int, float)) else None,
-                incoming_timestamp
-                if isinstance(incoming_timestamp, (int, float))
-                else None,
-            )
-        result.pop("service_info" if service_key == "serviceInfo" else "serviceInfo", None)
-    return result
-
-
-def is_mdns_record(record: dict[str, Any]) -> bool:
-    """Return True when a record appears to be an mDNS capture row."""
-    if not isinstance(record, dict):
-        return False
-    if isinstance(record.get("record_key"), str) and "|" in record["record_key"]:
-        return True
-    scope = record.get("scope")
-    if isinstance(scope, str) and scope.startswith("_") and scope.endswith(".local."):
-        return True
-    return False
-
-
-def is_matter_operational_mdns_record(record: dict[str, Any]) -> bool:
-    """Return True for Matter operational mDNS records."""
-    if not is_mdns_record(record):
-        return False
-    scope = record.get("scope")
-    return isinstance(scope, str) and scope.strip().lower() == "_matter._tcp.local."
-
-
-def _normalize_alias_text(value: Any, lower: bool = False) -> str:
-    if not isinstance(value, str):
-        return ""
-    text = value.strip()
-    if not text:
-        return ""
-    return text.lower() if lower else text
-
-
-def _append_unique_alias(container: dict[str, Any], key: str, value: str) -> None:
-    if not value:
-        return
-    existing = container.get(key)
-    if not isinstance(existing, list):
-        existing = []
-    if value not in existing:
-        existing.append(value)
-    container[key] = existing
-
-
-def _extract_service_info_property_decoded(record: dict[str, Any], key: str) -> str:
-    service_info = record.get("serviceInfo", record.get("service_info"))
-    if not isinstance(service_info, dict):
-        return ""
-    props = service_info.get("properties")
-    if not isinstance(props, dict):
-        return ""
-    prop_obj = props.get(key)
-    if not isinstance(prop_obj, dict):
-        return ""
-    decoded = prop_obj.get("decoded")
-    if isinstance(decoded, str):
-        return decoded.strip()
-    return ""
-
-
-def get_matter_fabric_node_identity(record: dict[str, Any]) -> str:
-    """Return normalized Matter composite identity from FabricID_compressed + NodeID."""
-    if not isinstance(record, dict):
-        return ""
-
-    matter = record.get("matter")
-    matter_record = matter if isinstance(matter, dict) else record
-    fabric_value = matter_record.get(
-        "compressedFabricId", matter_record.get("fabricId")
-    )
-    node_value = matter_record.get("nodeId")
-
-    def normalize_component(value: Any) -> str:
-        if isinstance(value, bool):
-            return ""
-        if isinstance(value, int):
-            return f"{value:016x}" if 0 <= value < 1 << 64 else ""
-        if not isinstance(value, str):
-            return ""
-        text = value.strip().lower()
-        if not text:
-            return ""
-        if re.fullmatch(r"(?:0x)?[0-9a-f]{1,16}", text):
-            return f"{int(text, 16):016x}"
-        return text
-
-    fabric_id = normalize_component(fabric_value)
-    node_id = normalize_component(node_value)
-    if fabric_id and node_id:
-        return f"{fabric_id}|{node_id}"
-
-    fabric_id = _normalize_alias_text(
-        _extract_service_info_property_decoded(record, "FabricID_compressed"),
-        lower=True,
-    )
-    node_id = _normalize_alias_text(
-        _extract_service_info_property_decoded(record, "NodeID"),
-        lower=True,
-    )
-
-    if not fabric_id or not node_id:
-        return ""
-    return f"{fabric_id}|{node_id}"
-
-
-def update_mdns_aliases(target: dict[str, Any], record: dict[str, Any]) -> None:
-    """Collect stable alias values observed across mDNS records for one merged node."""
-    if not isinstance(target, dict) or not isinstance(record, dict):
-        return
-
-    aliases = target.setdefault("_mdns_aliases", {})
-    if not isinstance(aliases, dict):
-        aliases = {}
-        target["_mdns_aliases"] = aliases
-
-    name_value = _normalize_alias_text(record.get("name"), lower=False)
-    server_value = _normalize_alias_text(record.get("server"), lower=False)
-    server_key_value = _normalize_alias_text(record.get("server_key"), lower=True)
-
-    if not server_value:
-        service_info = record.get("serviceInfo", record.get("service_info"))
-        if isinstance(service_info, dict):
-            server_value = _normalize_alias_text(service_info.get("server"), lower=False)
-            if not server_key_value:
-                server_key_value = _normalize_alias_text(service_info.get("key"), lower=True)
-
-    fabric_id = _normalize_alias_text(
-        _extract_service_info_property_decoded(record, "FabricID_compressed"),
-        lower=False,
-    )
-    node_id = _normalize_alias_text(
-        _extract_service_info_property_decoded(record, "NodeID"),
-        lower=False,
-    )
-
-    _append_unique_alias(aliases, "name_aliases", name_value)
-    _append_unique_alias(aliases, "server_aliases", server_value)
-    _append_unique_alias(aliases, "server_key_aliases", server_key_value)
-    _append_unique_alias(aliases, "fabric_id_compressed_aliases", fabric_id)
-    _append_unique_alias(aliases, "node_id_aliases", node_id)
-
-    matter_composite = get_matter_fabric_node_identity(record)
-    if matter_composite:
-        _append_unique_alias(aliases, "matter_fabric_node_aliases", matter_composite)
-
-
-def extract_mdns_merge_view(record: dict[str, Any]) -> dict[str, Any]:
-    """Extract an mDNS-focused view suitable for merge_mdns_records."""
-    if not isinstance(record, dict):
-        return {}
-
-    mdns_fields = (
-        "recordKey",
-        "event",
-        "capturedAtEpoch",
-        "capturedAtIso",
-        "scope",
-        "name",
-        "extAddress",
-        "omrIpv6Addr",
-        "isBorderRouter",
-        "role",
-        "serviceInfo",
-        "server",
-        "serverKey",
-    )
-
-    out: dict[str, Any] = {}
-    for key in mdns_fields:
-        if key in record:
-            out[key] = deepcopy(record[key])
-
-    service_info = out.get("service_info")
-    if isinstance(service_info, dict):
-        if "server" not in out and isinstance(service_info.get("server"), str):
-            out["server"] = service_info.get("server")
-        if "server_key" not in out and isinstance(service_info.get("key"), str):
-            out["server_key"] = service_info.get("key")
-
-    return out
-
-
-def apply_mdns_merge_view(target: dict[str, Any], merged: dict[str, Any]) -> None:
-    """Write merged mDNS fields back onto the merged node without touching non-mDNS fields."""
-    if not isinstance(target, dict) or not isinstance(merged, dict):
-        return
-
-    for key in (
-        "recordKey",
-        "event",
-        "capturedAtEpoch",
-        "capturedAtIso",
-        "scope",
-        "name",
-        "extAddress",
-        "omrIpv6Addr",
-        "isBorderRouter",
-        "role",
-        "serviceInfo",
-        "server",
-        "serverKey",
-    ):
-        if key in merged:
-            target[key] = deepcopy(merged[key])
-
-
-def merge_mdns_record_into_node(target: dict[str, Any], incoming: dict[str, Any]) -> None:
-    """Merge incoming mDNS row into a merged target node using mDNS-specific precedence."""
-    if not is_mdns_record(incoming):
-        return
-
-    update_mdns_aliases(target, target)
-    update_mdns_aliases(target, incoming)
-
-    base_view = extract_mdns_merge_view(target)
-    incoming_view = extract_mdns_merge_view(incoming)
-    if not incoming_view:
-        return
-
-    merged_view = (
-        merge_mdns_records(base_view, incoming_view)
-        if base_view
-        else deepcopy(incoming_view)
-    )
-    apply_mdns_merge_view(target, merged_view)
-
-
-def _merge_route_field(
-    current: Any, incoming: Any, context: MergeContext
-) -> Any:
-    if not isinstance(incoming, dict):
-        return deepcopy(current)
-    if (
-        context.partition_id != "unknown"
-        and context.incoming_partition_id != "unknown"
-        and context.partition_id != context.incoming_partition_id
-    ):
-        return deepcopy(current)
-    if not isinstance(current, dict):
-        return deepcopy(incoming)
-    return merge_route_data(
-        context.owner_rloc16,
-        current,
-        incoming,
-        context.partition_id,
-    )
-
-
-def _merge_relationship_field(
-    current: Any, incoming: Any, context: MergeContext
-) -> Any:
-    if not isinstance(incoming, list):
-        return deepcopy(current)
-    return merge_children_array(
-        context.owner_rloc16,
-        current if isinstance(current, list) else [],
-        incoming,
-    )
-
-
-def _merge_neighbor_field(
-    current: Any, incoming: Any, _context: MergeContext
-) -> Any:
-    if not isinstance(incoming, list):
-        return deepcopy(current)
-    return merge_router_neighbors(
-        current if isinstance(current, list) else [],
-        incoming,
-    )
-
-
-def _merge_address_field(
-    current: Any, incoming: Any, _context: MergeContext
-) -> Any:
-    if not isinstance(incoming, list):
-        return deepcopy(current)
-    return merge_unique_strings(current if isinstance(current, list) else [], incoming)
 
 
 MERGE_FIELD_HANDLERS = {
@@ -1227,7 +433,7 @@ def deep_merge(
                 current_path,
                 cur,
                 value,
-                context.conflict_limit,
+                limit=context.conflict_limit,
             )
     return base
 
@@ -1265,30 +471,6 @@ def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
     return identities
 
 
-def find_candidate_node_ids(
-    identity_values: dict[str, str],
-    by_rloc16: dict[str, int],
-    by_extaddr: dict[str, int],
-    by_omr: dict[str, int],
-    by_matter_fabric_node: dict[str, int],
-) -> set[int]:
-    candidate_ids: set[int] = set()
-
-    rloc16 = identity_values.get("rloc16")
-    extaddr = identity_values.get("extAddress")
-    omr = identity_values.get("omrIpv6Address")
-    matter_id = identity_values.get("matter_fabric_node")
-
-    if isinstance(extaddr, str) and extaddr in by_extaddr:
-        candidate_ids.add(by_extaddr[extaddr])
-    if isinstance(omr, str) and omr in by_omr:
-        candidate_ids.add(by_omr[omr])
-    if isinstance(rloc16, str) and rloc16 in by_rloc16:
-        candidate_ids.add(by_rloc16[rloc16])
-    if isinstance(matter_id, str) and matter_id in by_matter_fabric_node:
-        candidate_ids.add(by_matter_fabric_node[matter_id])
-
-    return candidate_ids
 
 
 def index_node_identity_values(
@@ -1370,43 +552,8 @@ def filter_candidate_ids_for_matter_identity_consistency(
     return filtered
 
 
-def add_identifier(
-    index: dict[str, int],
-    key: str,
-    node_id: int,
-) -> None:
-    if key:
-        index[key] = node_id
 
 
-def filter_candidate_ids_for_extaddr_consistency(
-    candidate_ids: set[int],
-    incoming_extaddr: str,
-    nodes: dict[int, dict[str, Any]],
-) -> set[int]:
-    """Keep only candidate nodes that do not conflict with incoming concrete extaddr."""
-    if not incoming_extaddr:
-        return candidate_ids
-
-    filtered: set[int] = set()
-    for node_id in candidate_ids:
-        node = nodes.get(node_id)
-        if not isinstance(node, dict):
-            continue
-
-        node_extaddr = get_canonical_extaddr(node)
-        if not node_extaddr:
-            filtered.add(node_id)
-            continue
-
-        if is_placeholder_extaddr(node_extaddr):
-            filtered.add(node_id)
-            continue
-
-        if node_extaddr == incoming_extaddr:
-            filtered.add(node_id)
-
-    return filtered
 
 
 def merge_nodes(
@@ -1827,37 +974,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-@dataclass(frozen=True)
-class MergeCommandInputs:
-    data_dir: Path
-    input_files: tuple[str, ...]
-    required_files: frozenset[str]
-    loaded_input_files: tuple[str, ...]
-    skipped_files: tuple[dict[str, str], ...]
-    dataset_path: Path
-    extaddr_map_path: Path
-    output_path: Path
-    report_path: Path | None
-    dataset_file: str
-    extaddr_map_file: str
-    merge_strategy: str
-    matter_identity_mode: str
 
 
-@dataclass(frozen=True)
-class MergeSupportingData:
-    device_label_map: dict[str, Any]
-    network_info: dict[str, Any]
-    omr_prefix: str
-    reference_files: tuple[dict[str, Any], ...]
 
 
-@dataclass(frozen=True)
-class MergeCommandResult:
-    records: list[dict[str, Any]]
-    report: dict[str, Any]
-    viable: bool
-    viability_reason: str | None
 
 
 def resolve_merge_command_inputs(
@@ -1977,24 +1097,6 @@ def load_merge_supporting_data(
     )
 
 
-def evaluate_merge_viability(
-    records: Sequence[dict[str, Any]],
-) -> tuple[bool, int, str | None]:
-    identity_seed_record_count = 0
-    for node in records:
-        extaddr = get_canonical_extaddr(node)
-        rloc16 = normalize_identifier_text(node.get("rloc16"))
-        omr_addr = get_canonical_omr(node)
-        if (
-            (extaddr and not is_placeholder_extaddr(extaddr))
-            or rloc16
-            or (omr_addr and not is_placeholder_omr_address(omr_addr))
-        ):
-            identity_seed_record_count += 1
-
-    viable = identity_seed_record_count > 0
-    reason = None if viable else "no viable seed identities found in loaded input files"
-    return viable, identity_seed_record_count, reason
 
 
 def build_merge_output(
@@ -2060,33 +1162,6 @@ def build_merge_output(
     )
 
 
-def write_merge_outputs(
-    result: MergeCommandResult,
-    output_path: Path,
-    report_path: Path | None = None,
-) -> None:
-    if not result.viable:
-        raise ValueError(result.viability_reason or "merge output is not viable")
-    save_json_atomic(
-        result.records,
-        output_path,
-        indent=2,
-        add_trailing_newline=True,
-    )
-    instance = result.report.get("networkInstance")
-    if instance:
-        write_network_scope(output_path, NetworkScope(
-            instance["extPanId"], instance["networkName"], instance["provenance"],
-            "no-ext-pan-id-observed" if instance["extPanId"] is None else None,
-            datetime.now(timezone.utc).isoformat(), tuple(instance["sources"]),
-        ))
-    if report_path is not None:
-        save_json_atomic(
-            result.report,
-            report_path,
-            indent=2,
-            add_trailing_newline=True,
-        )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
