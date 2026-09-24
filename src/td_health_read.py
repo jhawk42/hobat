@@ -6,6 +6,7 @@ import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
+from functools import cmp_to_key
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,9 @@ from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 25
+ROSTER_PRESENCE = ("observed", "missing", "offline", "not-assessed")
+ROSTER_STATES = ("expected", "intentionally-offline", "intermittent", "retired", "untracked")
+ROSTER_SORTS = ("label", "presence", "rosterState", "lastObserved", "quality")
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
 # Scope-namespaced order bases leave room to insert new rule_ids without renumbering neighbors.
 NETWORK_ORDER_BASE = 1000
@@ -178,6 +182,7 @@ class TDHealthReadService:
         counts["conflicted"] = sum(item["conflictState"] != "none" for item in fields.values())
         times = [item["sourceObservedAt"] for item in fields.values() if item["sourceObservedAt"]]
         result = {"deviceId": device_id, "displayLabel": label, "labelOrigin": origin,
+                  "rosterState": data.get("rosterState", "untracked"),
                   "labelAmbiguity": "stale label" if origin == "fallback" and observed and observed["freshness"] == "stale" else "none",
                   "lastObservedAt": max(times, default=None),
                   "lastEndpointPresenceAt": data["lastEndpointPresenceAt"],
@@ -225,13 +230,89 @@ class TDHealthReadService:
                         device["labelAmbiguity"] = "duplicate label"
 
     def roster(self, *, network_id: str, limit: int = DEFAULT_PAGE_SIZE,
-               offset: int = 0, read_time: datetime | None = None) -> dict[str, Any]:
+               offset: int = 0, read_time: datetime | None = None,
+               assessment_id: str | None = None, q: str = "", presence: str = "observed",
+               roster_state: str = "all", sort: str = "label",
+               direction: str = "ascending") -> dict[str, Any]:
         if (not network_id.startswith("extpan:") or
             network_id_from_ext_pan_id(network_id.removeprefix("extpan:")) != network_id or
             not 1 <= limit <= MAX_PAGE_SIZE or offset < 0):
             raise ValueError("Invalid roster page or network")
+        if (presence not in (*ROSTER_PRESENCE, "all") or
+            roster_state not in (*ROSTER_STATES, "all") or
+            sort not in ROSTER_SORTS or direction not in ("ascending", "descending") or
+            not isinstance(q, str) or len(q) > 120):
+            raise ValueError("Invalid roster filter or sort")
         self._require_roster_schema()
         now = read_time or datetime.now(timezone.utc)
+        if assessment_id is not None:
+            assessment, rows, findings = self.store.roster_snapshot(
+                network_id=network_id, assessment_id=assessment_id,
+            )
+            if assessment is None:
+                raise ValueError("Assessment not found")
+            labels = self._labels()
+            devices = [self._roster_projection(row, now=now, labels=labels, detailed=False)
+                       for row in rows]
+            by_id = {device["deviceId"]: device for device in devices}
+            for row in rows:
+                by_id[row["deviceId"]]["presenceState"] = (
+                    "observed" if row["observed"] else "not-assessed"
+                )
+            for finding in findings:
+                state = finding["rule_id"].removeprefix("device.")
+                for device_id in _decode_json(finding["device_ids_json"], field="presence IDs"):
+                    if device_id in by_id and by_id[device_id]["presenceState"] != "observed":
+                        by_id[device_id]["presenceState"] = state
+            collisions: dict[str, int] = {}
+            for device in devices:
+                if device["labelOrigin"] != "fallback":
+                    collisions[device["displayLabel"]] = collisions.get(device["displayLabel"], 0) + 1
+            for device in devices:
+                label = device["displayLabel"]
+                if collisions.get(label, 0) > 1:
+                    device["displayLabel"] = f"{label} · {device['deviceId'][-8:]} (duplicate label)"
+                    device["labelAmbiguity"] = "duplicate label"
+            total = len(devices)
+            active_expected = sum(device["rosterState"] == "expected" for device in devices)
+            search = q.strip().casefold()
+            devices = [device for device in devices if
+                       (presence == "all" or device["presenceState"] == presence) and
+                       (roster_state == "all" or device["rosterState"] == roster_state) and
+                       (not search or search in device["displayLabel"].casefold() or
+                        search in device["deviceId"].casefold())]
+
+            def sort_value(device: dict) -> Any:
+                if sort == "label":
+                    return device["displayLabel"].casefold()
+                if sort == "presence":
+                    return ROSTER_PRESENCE.index(device["presenceState"])
+                if sort == "rosterState":
+                    return ROSTER_STATES.index(device["rosterState"])
+                if sort == "lastObserved":
+                    timestamp = device["lastEndpointPresenceAt"]
+                    return datetime.fromisoformat(timestamp) if timestamp else None
+                counts = device["fieldCounts"]
+                return (counts["fresh"], counts["stale"], counts["conflicted"]) if any(counts.values()) else None
+
+            def compare(left: dict, right: dict) -> int:
+                first, second = sort_value(left), sort_value(right)
+                if first is None or second is None:
+                    result = (first is None) - (second is None)
+                else:
+                    result = (first > second) - (first < second)
+                    if direction == "descending":
+                        result = -result
+                return result or ((left["deviceId"] > right["deviceId"]) -
+                                  (left["deviceId"] < right["deviceId"]))
+
+            devices.sort(key=cmp_to_key(compare))
+            return {"schemaVersion": 2, "networkId": network_id,
+                    "assessmentId": assessment_id, "observedAt": assessment["observed_at"],
+                    "total": total, "filteredTotal": len(devices),
+                    "activeExpectedTotal": active_expected, "limit": limit, "offset": offset,
+                    "sort": {"column": sort, "direction": direction},
+                    "devices": devices[offset:offset + limit]}
         rows, total = self.store.roster_rows(network_id=network_id, limit=limit, offset=offset)
         labels = self._labels()
         devices = [self._roster_projection(row, now=now, labels=labels, detailed=False) for row in rows]

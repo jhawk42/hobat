@@ -433,6 +433,13 @@ def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tm
         processing_time=datetime(2026, 9, 1, 0, 1, tzinfo=timezone.utc),
     )
     assert any(f.rule_id == "device.offline" for f in offline.assessment.findings)
+    pinned = TDHealthReadService(tmp_path).roster(
+        network_id=network_id, assessment_id=offline.assessment.assessment_id,
+        presence="offline",
+    )
+    assert pinned["filteredTotal"] == 1
+    assert pinned["devices"][0]["deviceId"] == device_id
+    assert pinned["devices"][0]["presenceState"] == "offline"
 
     store.upsert_expected_device(
         network_id, device_id, "expected", "intentionally-offline"
@@ -451,6 +458,12 @@ def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tm
     assert not any(
         finding.rule_id == "device.offline" for finding in updated.assessment.findings
     )
+    historical = TDHealthReadService(tmp_path).roster(
+        network_id=network_id, assessment_id=offline.assessment.assessment_id,
+        presence="offline", roster_state="intentionally-offline",
+    )
+    assert historical["filteredTotal"] == 1
+    assert historical["devices"][0]["rosterState"] == "intentionally-offline"
 
 
 def test_complete_absences_below_roster_ratio_are_offline_without_network_impact(tmp_path) -> None:

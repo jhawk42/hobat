@@ -61,6 +61,31 @@ def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() 
     )
 
 
+def test_roster_request_pins_assessment_and_bounded_query() -> None:
+    script = r"""
+      import {fetchHealthRoster} from "./src/js/tdash-health.js";
+      let url;
+      globalThis.fetch = async (path) => {
+        url = path;
+        return {ok: true, json: async () => ({schemaVersion: 2})};
+      };
+      await fetchHealthRoster("extpan:78b9775b001c1cbe", "assessment-1", {
+        offset: 25, search: "Office Router", presence: "missing", rosterState: "expected",
+        sort: {column: "lastObserved", direction: "descending"},
+      });
+      console.log(JSON.stringify(Object.fromEntries(new URL(url, "http://localhost/").searchParams)));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    assert json.loads(completed.stdout) == {
+        "network": "extpan:78b9775b001c1cbe", "assessment": "assessment-1",
+        "limit": "25", "offset": "25", "q": "Office Router", "presence": "missing",
+        "rosterState": "expected", "sort": "lastObserved", "direction": "descending",
+    }
+
+
 def test_health_sections_use_stored_status_and_evidence_kind_without_reclassification() -> None:
     script = r"""
       import {projectHealthFindingSections} from "./src/js/tdash-health.js";

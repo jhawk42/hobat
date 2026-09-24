@@ -87,6 +87,14 @@ health status control optionally colors topology node borders from the current
 assessment; coloring is off by default, is not persisted, and resets when the
 active dataset changes.
 
+Network Insights opens on **Findings**. **Device Roster** shows a searchable,
+sortable, paginated inventory for the selected stored assessment. Presence
+defaults to **Observed** and describes that assessment, not network health;
+the separate roster designation reflects the current operator-managed state.
+Missing and Offline come from stored assessment findings, not device age.
+Selecting a device opens its stored facts in the details panel. Roster reads
+do not collect data or modify enrollment; roster administration remains CLI-only.
+
 The **Logs** workspace contains local **Logs** and **Jobs** tabs. Logs retains
 the newest 200 sanitized browser activity entries in memory only. Jobs lists
 active dataset, health, and device-action work and supports individual or

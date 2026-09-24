@@ -44,6 +44,34 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                              match_info={"device_id": "extaddr:8672766ae0578187"})
                 )
 
+    async def test_pinned_roster_route_validates_filters_and_preserves_v1(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+            observation, assessment = _result()
+            store.save_processing_result(observation, assessment)
+            base = {"network": observation.network_id, "assessment": assessment.assessment_id}
+            response = await td_webserver.handle_health_roster_api(_request(data_dir, query=base))
+            payload = json.loads(response.text)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+            self.assertEqual(payload["schemaVersion"], 2)
+            self.assertEqual(payload["devices"][0]["presenceState"], "observed")
+            legacy = await td_webserver.handle_health_roster_api(
+                _request(data_dir, query={"network": observation.network_id})
+            )
+            self.assertEqual(json.loads(legacy.text)["schemaVersion"], 1)
+            for key, value in (("presence", "healthy"), ("rosterState", "online"),
+                               ("sort", "unknown"), ("direction", "sideways"),
+                               ("q", "x" * 121), ("limit", "101")):
+                with self.subTest(key=key), self.assertRaises(aiohttp.web.HTTPBadRequest):
+                    await td_webserver.handle_health_roster_api(
+                        _request(data_dir, query={**base, key: value})
+                    )
+            with self.assertRaises(aiohttp.web.HTTPBadRequest):
+                await td_webserver.handle_health_roster_api(_request(
+                    data_dir, query={**base, "network": "extpan:0000000000000000"},
+                ))
+
     async def test_process_dataset_starts_deduplicated_health_task(self) -> None:
         data_dir = Path(tempfile.mkdtemp())
         request = _request(data_dir)

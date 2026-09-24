@@ -1269,6 +1269,53 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 
 .health-insights-filters { margin-bottom: 14px; }
 
+.health-insights-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+#health-insights-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+#health-insights-tabs { display: flex; gap: 4px; }
+#health-insights-tabs button {
+  max-width: 50%;
+  min-width: 0;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  padding: 9px 12px;
+  color: var(--muted);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+#health-insights-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: inherit;
+  font-weight: 700;
+}
+#health-insights-tabs button:focus-visible,
+.health-roster-table-wrap button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.health-roster-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 14px;
+  margin: 12px 0;
+}
+.health-roster-controls label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.health-roster-controls input, .health-roster-controls select { max-width: 100%; }
+
 .health-insights-filters label {
   display: grid;
   gap: 3px;
@@ -1395,9 +1442,38 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 }
 
 #health-roster {
-  margin: 16px 0;
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
+  min-width: 0;
+  margin: 8px 0;
+}
+
+.health-roster-results { color: var(--muted); font-size: 12px; }
+.health-roster-table-wrap { max-height: min(58vh, 680px); overflow: auto; border: 1px solid var(--line); }
+.health-roster-table-wrap table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.health-roster-table-wrap thead { position: sticky; top: 0; z-index: 1; background: var(--surface-raised); }
+.health-roster-table-wrap th, .health-roster-table-wrap td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.health-roster-table-wrap th button { border: 0; background: transparent; font: inherit; cursor: pointer; text-align: left; }
+.health-roster-table-wrap tbody tr.selected { background: var(--surface-raised); }
+.health-roster-table-wrap td:first-child button { border: 0; background: transparent; color: var(--accent); text-align: left; cursor: pointer; }
+.health-roster-mobile-meta { display: none; }
+.health-roster-identity { user-select: text; overflow-wrap: anywhere; }
+#health-roster-details table { width: 100%; border-collapse: collapse; }
+#health-roster-details th, #health-roster-details td { text-align: left; border-bottom: 1px solid var(--line); padding: 5px; overflow-wrap: anywhere; }
+#device-details.roster-selected > :not(h2):not(#device-details-nav-bar):not(#health-roster-details) { display: none; }
+#device-details.roster-selected #device-details-nav-bar-left { display: none; }
+#device-details.roster-selected #health-roster-details { display: block; }
+
+@media (max-width: 600px) {
+  .health-roster-controls label { min-width: min(100%, 140px); flex: 1; }
+  .health-roster-table-wrap th:nth-child(n+3),
+  .health-roster-table-wrap td:nth-child(n+3) { display: none; }
+  .health-roster-table-wrap th:first-child { width: 70%; }
+  .health-roster-mobile-meta { display: block; color: var(--muted); font-size: 11px; }
 }
 
 .health-roster-list {

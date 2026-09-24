@@ -1344,10 +1344,23 @@ async def handle_health_roster_api(request: aiohttp.web.Request) -> aiohttp.web.
     network_id = request.query.get("network")
     if not network_id:
         raise aiohttp.web.HTTPBadRequest(reason="network is required")
+    from td_health_read import ROSTER_PRESENCE, ROSTER_SORTS, ROSTER_STATES
+
+    presence = request.query.get("presence", "observed")
+    roster_state = request.query.get("rosterState", "all")
+    sort = request.query.get("sort", "label")
+    direction = request.query.get("direction", "ascending")
+    search = request.query.get("q", "")
+    if (presence not in (*ROSTER_PRESENCE, "all") or
+        roster_state not in (*ROSTER_STATES, "all") or sort not in ROSTER_SORTS or
+        direction not in ("ascending", "descending") or len(search) > 120):
+        raise aiohttp.web.HTTPBadRequest(reason="Invalid roster filter or sort")
     result = await _health_service_call(
         request, "roster", network_id=network_id,
         limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
         offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
+        assessment_id=request.query.get("assessment"), q=search, presence=presence,
+        roster_state=roster_state, sort=sort, direction=direction,
     )
     return _health_json_response(result)
 

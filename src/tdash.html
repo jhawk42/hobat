@@ -301,6 +301,15 @@
         <div id="view-insights" class="workspace-view workspace-placeholder" role="tabpanel"
           aria-labelledby="btn-insights" hidden>
           <h2>Insights: Health</h2>
+          <div id="health-insights-workspace" hidden>
+            <div class="health-insights-sticky">
+            <div id="health-insights-summary"></div>
+            <div id="health-insights-tabs" role="tablist" aria-label="Health insights">
+              <button id="health-tab-findings" type="button" role="tab" aria-controls="health-panel-findings" aria-selected="true" tabindex="0">Findings <span id="health-findings-count"></span></button>
+              <button id="health-tab-roster" type="button" role="tab" aria-controls="health-panel-roster" aria-selected="false" tabindex="-1">Device Roster <span id="health-roster-count"></span></button>
+            </div>
+            </div>
+            <section id="health-panel-findings" role="tabpanel" aria-labelledby="health-tab-findings">
           <div id="health-insights-filters" class="health-insights-filters" hidden>
             <label title="Choose actionable, healthy, or all finding groups.">View
               <select id="health-view-filter" title="Choose which finding groups to show.">
@@ -339,15 +348,13 @@
             <button id="btn-health-reset" type="button" title="Clear health filters and navigation state">Reset</button>
             <button id="btn-health-export" type="button" title="Download the pinned health assessment">Export JSON</button>
           </div>
-          <div id="health-insights-workspace" hidden>
             <div id="health-mode-switch" role="group" aria-label="Health view mode" hidden>
               <button id="health-mode-snapshot" type="button" aria-pressed="true">Snapshot</button>
               <button id="health-mode-comparison" type="button" aria-pressed="false">Comparison</button>
               <button id="btn-health-comparison-reset" type="button" hidden>Reset</button>
             </div>
             <section id="health-comparison" aria-label="Stored comparison" hidden></section>
-            <div id="health-insights-summary"></div>
-            <section id="health-roster" aria-label="Observed Thread devices" hidden></section>
+            <div id="health-insights-evidence"></div>
             <div id="health-finding-table-wrap" class="health-finding-table-wrap">
               <table id="health-finding-table">
                 <thead></thead>
@@ -355,6 +362,24 @@
               </table>
             </div>
             <div id="health-insights-empty"></div>
+            </section>
+            <section id="health-panel-roster" role="tabpanel" aria-labelledby="health-tab-roster" hidden>
+              <div class="health-roster-controls">
+                <label>Search devices <input id="health-roster-search" type="search" maxlength="120" autocomplete="off"></label>
+                <label>Presence <select id="health-roster-presence" title="Presence in the selected assessment, not network health">
+                  <option value="observed">Observed</option><option value="missing">Missing</option>
+                  <option value="offline">Offline</option><option value="not-assessed">Not assessed</option>
+                  <option value="all">All</option>
+                </select></label>
+                <label>Roster designation <select id="health-roster-designation">
+                  <option value="all">All</option><option value="expected">Expected</option>
+                  <option value="intentionally-offline">Intentionally offline</option>
+                  <option value="intermittent">Intermittent</option><option value="retired">Retired</option>
+                  <option value="untracked">Untracked</option>
+                </select></label>
+              </div>
+              <section id="health-roster" aria-label="Device roster"></section>
+            </section>
             <p id="health-insights-announcement" class="visually-hidden" role="status" aria-live="polite"></p>
           </div>
           <div id="network-insights-content" role="status" aria-live="polite"></div>
@@ -422,6 +447,10 @@
            <button id="btn-device-details-close" title="Close details panel">✕</button>
          </span>
         </div>
+
+        <section id="health-roster-details" aria-label="Stored roster device details" hidden>
+          <div id="health-roster-details-content"></div>
+        </section>
 
         <div id="device-properties-panel">
           <!-- section field contracts are populated by JS from DEVICE_DETAILS_SECTIONS -->

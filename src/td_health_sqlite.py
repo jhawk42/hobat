@@ -692,6 +692,71 @@ class SQLiteHealthStore:
             return [self._roster_device_rows(connection, network_id, row["device_id"])
                     for row in rows], total
 
+    def roster_snapshot(self, *, network_id: str, assessment_id: str) -> tuple[dict | None, list[dict], list[dict]]:
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN")
+            assessment = connection.execute(
+                """SELECT a.assessment_id, o.observation_id, o.network_id, o.observed_at
+                   FROM assessments a JOIN observations o USING (observation_id)
+                   WHERE a.assessment_id=?""", (assessment_id,),
+            ).fetchone()
+            if assessment is None:
+                return None, [], []
+            if assessment["network_id"] != network_id:
+                raise ValueError("Assessment does not belong to network")
+            findings = [dict(row) for row in connection.execute(
+                """SELECT rule_id, device_ids_json FROM findings WHERE assessment_id=?
+                   AND scope='device' AND rule_id IN ('device.missing', 'device.offline')""",
+                (assessment_id,),
+            )]
+            candidates = {row["device_id"]: {
+                "deviceId": row["device_id"], "fields": [], "conflicts": [],
+                "expectedLabel": None, "rosterState": "untracked",
+                "lastEndpointPresenceAt": None, "observed": False,
+            } for row in connection.execute(
+                """SELECT device_id FROM device_last_known WHERE network_id=?
+                   UNION SELECT device_id FROM expected_devices WHERE network_id=?
+                   UNION SELECT device_id FROM device_samples WHERE observation_id=?""",
+                (network_id, network_id, assessment["observation_id"]),
+            )}
+            for finding in findings:
+                for device_id in json.loads(finding["device_ids_json"]):
+                    candidates.setdefault(device_id, {
+                        "deviceId": device_id, "fields": [], "conflicts": [],
+                        "expectedLabel": None, "rosterState": "untracked",
+                        "lastEndpointPresenceAt": None, "observed": False,
+                    })
+            for row in connection.execute(
+                "SELECT device_id, label, roster_state FROM expected_devices WHERE network_id=?", (network_id,),
+            ):
+                candidates[row["device_id"]]["expectedLabel"] = row["label"]
+                candidates[row["device_id"]]["rosterState"] = row["roster_state"]
+            for row in connection.execute(
+                "SELECT * FROM device_last_known WHERE network_id=? ORDER BY device_id, field_key", (network_id,),
+            ):
+                candidates[row["device_id"]]["fields"].append(dict(row))
+            for row in connection.execute(
+                """SELECT c.device_id, c.field_key, c.value_json, c.other_device_id,
+                          c.source_observed_at, other.source_observed_at AS other_source_observed_at
+                   FROM device_identity_conflicts c JOIN device_last_known other
+                   ON other.network_id=c.network_id AND other.device_id=c.other_device_id
+                   AND other.field_key=c.field_key AND other.value_json=c.value_json
+                   WHERE c.network_id=?""", (network_id,),
+            ):
+                if row["device_id"] in candidates:
+                    candidates[row["device_id"]]["conflicts"].append(dict(row))
+            for row in connection.execute(
+                """SELECT ds.device_id, MAX(o.observed_at) AS last_seen,
+                          MAX(CASE WHEN ds.observation_id=? THEN 1 ELSE 0 END) AS observed
+                   FROM device_samples ds JOIN observations o USING (observation_id)
+                   WHERE o.network_id=? GROUP BY ds.device_id""",
+                (assessment["observation_id"], network_id),
+            ):
+                if row["device_id"] in candidates:
+                    candidates[row["device_id"]]["lastEndpointPresenceAt"] = row["last_seen"]
+                    candidates[row["device_id"]]["observed"] = bool(row["observed"])
+            return dict(assessment), list(candidates.values()), findings
+
     @staticmethod
     def _roster_device_rows(connection: sqlite3.Connection, network_id: str,
                             device_id: str) -> dict:
@@ -700,7 +765,7 @@ class SQLiteHealthStore:
             (network_id, device_id),
         ).fetchall()
         expected = connection.execute(
-            "SELECT label FROM expected_devices WHERE network_id=? AND device_id=?",
+            "SELECT label, roster_state FROM expected_devices WHERE network_id=? AND device_id=?",
             (network_id, device_id),
         ).fetchone()
         conflicts = connection.execute(
@@ -719,13 +784,15 @@ class SQLiteHealthStore:
         ).fetchone()[0]
         return {"deviceId": device_id, "fields": [dict(row) for row in rows],
                 "expectedLabel": expected["label"] if expected else None,
+            "rosterState": expected["roster_state"] if expected else "untracked",
+            "designated": expected is not None,
                 "conflicts": [dict(row) for row in conflicts], "lastEndpointPresenceAt": presence}
 
     def roster_device_row(self, *, network_id: str, device_id: str) -> dict | None:
         with closing(self._connect()) as connection:
             connection.execute("BEGIN")
             data = self._roster_device_rows(connection, network_id, device_id)
-            return data if data["fields"] else None
+            return data if data["fields"] or data["designated"] or data["lastEndpointPresenceAt"] else None
 
     def roster_label_candidates(self, *, network_id: str, label: str,
                                 limit: int, offset: int) -> list[dict]:

@@ -114,6 +114,7 @@ import {
   renderHealthFindingDetails,
   renderHealthInsights,
   renderHealthRoster,
+  renderHealthRosterDetail,
   renderHealthComparison,
   renderHealthStatus,
   startHealthProcessing,
@@ -250,6 +251,8 @@ const healthInsightsState = {
   observations: null,
   roster: null,
   rosterDetail: null,
+  rosterError: "",
+  rosterLoading: false,
   comparisonPage: null,
   comparison: null,
   comparisonLoading: false,
@@ -276,6 +279,19 @@ const healthInsightsViewState = {
   comparisonScope: "all",
   comparisonOffset: 0,
   comparisonItemOffset: 0,
+};
+let healthInsightsTab = "findings";
+const healthRosterViewState = {
+  assessmentId: null,
+  search: "",
+  presence: "observed",
+  rosterState: "all",
+  sort: { column: "label", direction: "ascending" },
+  offset: 0,
+  selectedDeviceId: null,
+  tableScrollTop: 0,
+  requestVersion: 0,
+  detailVersion: 0,
 };
 const contextDetailsState = {
   mode: "device",
@@ -309,6 +325,7 @@ document.addEventListener(DEVICE_SELECTION_EVENT, (event) => {
   if (selection.resolved) return;
   event.stopImmediatePropagation();
   const record = resolveCurrentDeviceSelection(selection.record);
+  document.getElementById("device-details")?.classList.remove("roster-selected");
   if (!record) clearSelectedDeviceDetails();
   if (record && selection.direct) {
     setContextDetailsMode("device");
@@ -1791,8 +1808,33 @@ function renderNetworkInsights() {
         renderNetworkInsights();
       },
     });
+    const summary = document.getElementById("health-insights-summary");
+    summary.replaceChildren();
+    if (assessment) {
+      appendNetworkInsightElement(summary, "strong", `${assessment.status} · ${assessment.completeness} · ${assessment.confidence} confidence`);
+      appendNetworkInsightElement(summary, "span", `Observed ${assessment.observedAt || "unknown"}`);
+      appendNetworkInsightElement(summary, "span", `${assessment.coverage?.deviceCount ?? "Unknown"} observed devices`);
+    }
+    const findingCount = projectHealthSummaryRows(assessment?.findingGroups || [], healthInsightsViewState).length;
+    document.getElementById("health-findings-count").textContent = `${findingCount} groups`;
+    document.getElementById("health-roster-count").textContent = healthInsightsState.roster
+      ? `${healthInsightsState.roster.filteredTotal} of ${healthInsightsState.roster.total} devices` : "";
+    for (const tab of ["findings", "roster"]) {
+      const active = healthInsightsTab === tab;
+      const button = document.getElementById(`health-tab-${tab}`);
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+      document.getElementById(`health-panel-${tab}`).hidden = !active;
+    }
+    const rosterWrap = document.querySelector(".health-roster-table-wrap");
+    if (rosterWrap && healthInsightsTab === "roster") healthRosterViewState.tableScrollTop = rosterWrap.scrollTop;
     renderHealthRoster(document.getElementById("health-roster"), healthInsightsState.roster,
-      healthInsightsState.rosterDetail, { select: selectRosterDevice, page: loadRosterPage });
+      { ...healthRosterViewState, loading: healthInsightsState.rosterLoading,
+        error: healthInsightsState.rosterError }, {
+        select: selectRosterDevice, page: loadRosterPage, sort: changeRosterSort,
+      });
+    const newRosterWrap = document.querySelector(".health-roster-table-wrap");
+    if (newRosterWrap) newRosterWrap.scrollTop = healthRosterViewState.tableScrollTop;
     const comparisonAvailable = healthInsightsState.capabilities?.comparisonReadModel === 1;
     const comparisonMode = comparisonAvailable && healthInsightsViewState.mode === "comparison";
     const modeSwitch = document.getElementById("health-mode-switch");
@@ -1801,11 +1843,10 @@ function renderNetworkInsights() {
     document.getElementById("health-mode-comparison").setAttribute("aria-pressed", String(comparisonMode));
     document.getElementById("btn-health-comparison-reset").hidden = !comparisonMode;
     document.getElementById("health-insights-filters").hidden = comparisonMode;
-    document.getElementById("health-insights-summary").hidden = comparisonMode;
+    document.getElementById("health-insights-evidence").hidden = comparisonMode;
     document.getElementById("health-insights-empty").hidden = comparisonMode;
     if (comparisonMode) {
       document.getElementById("health-finding-table-wrap").hidden = true;
-      document.getElementById("health-roster").hidden = true;
     }
     const comparisonEl = document.getElementById("health-comparison");
     comparisonEl.hidden = !comparisonMode;
@@ -2114,6 +2155,7 @@ function navigateToHealthTargets(view, group, { compare = false } = {}) {
 function inspectHealthDevice(deviceId, findingId = null) {
   const record = findCurrentDeviceRecord(deviceId);
   if (!record) return;
+  document.getElementById("device-details")?.classList.remove("roster-selected");
   if (healthInsightsViewState.selectedGroupId) {
     findingDeviceReturnContext = {
       assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
@@ -2390,37 +2432,109 @@ async function refreshSelectedDeviceHealth(record) {
 }
 
 async function loadRosterPage(offset) {
-  const networkId = healthInsightsState.assessment?.networkId;
-  const requestVersion = healthInsightsState.assessmentRequestVersion;
-  if (!networkId) return;
+  const assessment = healthInsightsState.assessment;
+  if (!assessment) return;
+  healthRosterViewState.offset = offset;
+  const version = ++healthRosterViewState.requestVersion;
+  const query = { ...healthRosterViewState, sort: { ...healthRosterViewState.sort } };
+  healthInsightsState.rosterLoading = true;
+  healthInsightsState.rosterError = "";
+  healthInsightsState.roster = null;
+  renderNetworkInsights();
   try {
-    const page = await fetchHealthRoster(networkId, offset);
-    if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    const page = await fetchHealthRoster(assessment.networkId, assessment.assessmentId, query);
+    if (version !== healthRosterViewState.requestVersion ||
+        assessment.assessmentId !== healthInsightsState.assessment?.assessmentId) return;
     healthInsightsState.roster = page;
-    healthInsightsState.rosterDetail = null;
-    renderNetworkInsights();
+    if (healthRosterViewState.selectedDeviceId && offset === 0 &&
+        page.devices.some((device) => device.deviceId === healthRosterViewState.selectedDeviceId)) {
+      healthInsightsState.rosterDetailPresence = page.devices.find(
+        (device) => device.deviceId === healthRosterViewState.selectedDeviceId,
+      ).presenceState;
+    }
+    announceHealthInsight(`${page.filteredTotal} of ${page.total} roster devices, sorted by ${query.sort.column} ${query.sort.direction}.`);
   } catch (error) {
-    console.warn("Observed device roster is unavailable:", error);
+    if (version !== healthRosterViewState.requestVersion) return;
+    healthInsightsState.rosterError = error.message;
+    healthInsightsState.roster = null;
+  } finally {
+    if (version === healthRosterViewState.requestVersion) {
+      healthInsightsState.rosterLoading = false;
+      renderNetworkInsights();
+    }
   }
 }
 
 async function selectRosterDevice(deviceId) {
   const networkId = healthInsightsState.assessment?.networkId;
-  const requestVersion = healthInsightsState.assessmentRequestVersion;
+  const assessmentId = healthInsightsState.assessment?.assessmentId;
+  const version = ++healthRosterViewState.detailVersion;
   if (!networkId) return;
-  if (healthInsightsState.rosterDetail?.deviceId === deviceId) {
+  if (healthRosterViewState.selectedDeviceId === deviceId) {
+    healthRosterViewState.selectedDeviceId = null;
     healthInsightsState.rosterDetail = null;
+    document.getElementById("device-details").classList.remove("roster-selected");
+    contextDetailsController.setCollapsed(true);
     renderNetworkInsights();
     return;
   }
+  healthRosterViewState.selectedDeviceId = deviceId;
+  healthInsightsState.rosterDetailPresence = healthInsightsState.roster?.devices.find(
+    (device) => device.deviceId === deviceId,
+  )?.presenceState;
+  renderNetworkInsights();
   try {
     const detail = await fetchHealthRosterDevice(networkId, deviceId);
-    if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    if (version !== healthRosterViewState.detailVersion ||
+        assessmentId !== healthInsightsState.assessment?.assessmentId) return;
     healthInsightsState.rosterDetail = detail;
+    renderHealthRosterDetail(document.getElementById("health-roster-details-content"), detail,
+      healthInsightsState.rosterDetailPresence);
+    document.getElementById("device-details").classList.add("roster-selected");
+    setContextDetailsMode("device");
+    contextDetailsController.setCollapsed(false);
     renderNetworkInsights();
   } catch (error) {
-    console.warn("Observed device details are unavailable:", error);
+    if (version === healthRosterViewState.detailVersion) {
+      healthRosterViewState.selectedDeviceId = null;
+      announceHealthInsight(`Device details unavailable: ${error.message}`);
+      renderNetworkInsights();
+    }
   }
+}
+
+function changeRosterSort(column) {
+  healthRosterViewState.sort = { column, direction: healthRosterViewState.sort.column === column &&
+    healthRosterViewState.sort.direction === "ascending" ? "descending" : "ascending" };
+  resetRosterScroll();
+  void loadRosterPage(0);
+}
+
+function resetRosterScroll() {
+  const wrap = document.querySelector(".health-roster-table-wrap");
+  if (wrap) wrap.scrollTop = 0;
+  healthRosterViewState.tableScrollTop = 0;
+}
+
+function applyRosterFilter() {
+  const detail = healthInsightsState.rosterDetail;
+  if (healthRosterViewState.selectedDeviceId && detail && (
+    (healthRosterViewState.presence !== "all" &&
+      healthRosterViewState.presence !== healthInsightsState.rosterDetailPresence) ||
+    (healthRosterViewState.rosterState !== "all" &&
+      healthRosterViewState.rosterState !== detail.rosterState) ||
+    (healthRosterViewState.search && !detail.displayLabel.toLowerCase().includes(
+      healthRosterViewState.search.toLowerCase()) && !detail.deviceId.toLowerCase().includes(
+      healthRosterViewState.search.toLowerCase()))
+  )) {
+    healthRosterViewState.selectedDeviceId = null;
+    healthRosterViewState.detailVersion += 1;
+    healthInsightsState.rosterDetail = null;
+    document.getElementById("device-details").classList.remove("roster-selected");
+    contextDetailsController.setCollapsed(true);
+  }
+  resetRosterScroll();
+  void loadRosterPage(0);
 }
 
 async function loadComparisonPage(offset) {
@@ -2488,8 +2602,10 @@ async function selectComparison(comparisonId, offset = 0) {
 
 async function refreshHealthAssessment() {
   const entry = currentDataset?.entry;
+  const previousAssessmentId = healthInsightsState.assessment?.assessmentId;
   const datasetChanged = healthInsightsState.datasetId !== entry?.value;
   if (datasetChanged) {
+    healthInsightsTab = "findings";
     healthTopologyColoringEnabled = false;
     healthInsightsState.assessment = null;
     healthInsightsViewState.assessmentId = null;
@@ -2515,7 +2631,11 @@ async function refreshHealthAssessment() {
   healthInsightsState.device = null;
   healthInsightsState.deviceError = "";
   healthInsightsState.roster = null;
-  healthInsightsState.rosterDetail = null;
+  if (datasetChanged) healthInsightsState.rosterDetail = null;
+  healthInsightsState.rosterError = "";
+  healthRosterViewState.requestVersion += 1;
+  healthRosterViewState.detailVersion += 1;
+  document.getElementById("device-details").classList.remove("roster-selected");
   applyHealthAssessmentPresentation(null);
   if (entry?.healthEligible !== true) {
     healthTopologyColoringEnabled = false;
@@ -2533,6 +2653,26 @@ async function refreshHealthAssessment() {
     const assessment = await fetchHealthAssessment(entry.value);
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
     healthInsightsState.assessment = assessment;
+    if (previousAssessmentId !== assessment.assessmentId) {
+      healthInsightsState.rosterDetail = null;
+      healthRosterViewState.assessmentId = assessment.assessmentId;
+      healthRosterViewState.selectedDeviceId = null;
+      healthRosterViewState.offset = 0;
+      healthRosterViewState.tableScrollTop = 0;
+      if (datasetChanged) {
+        healthRosterViewState.search = "";
+        healthRosterViewState.presence = "observed";
+        healthRosterViewState.rosterState = "all";
+        healthRosterViewState.sort = { column: "label", direction: "ascending" };
+        document.getElementById("health-roster-search").value = "";
+        document.getElementById("health-roster-presence").value = "observed";
+        document.getElementById("health-roster-designation").value = "all";
+      }
+    }
+    if (healthInsightsTab === "roster" && healthInsightsState.rosterDetail) {
+      document.getElementById("device-details").classList.add("roster-selected");
+    }
+    void loadRosterPage(healthRosterViewState.offset);
     Object.assign(
       healthInsightsViewState,
       reconcileHealthInsightsSelection(healthInsightsViewState, assessment),
@@ -2553,13 +2693,6 @@ async function refreshHealthAssessment() {
       }
     } catch (error) {
       console.warn("Health history metadata is unavailable:", error);
-    }
-    try {
-      const roster = await fetchHealthRoster(assessment.networkId);
-      if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
-      healthInsightsState.roster = roster;
-    } catch (error) {
-      console.warn("Observed device roster is unavailable:", error);
     }
   } catch (error) {
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
@@ -2682,6 +2815,51 @@ document.getElementById("health-view-filter")?.addEventListener("change", (event
   document.getElementById("health-status-filter").value = "all";
   renderNetworkInsights();
 });
+function activateHealthTab(tab) {
+  if (healthInsightsTab === "roster") {
+    healthRosterViewState.tableScrollTop = document.querySelector(".health-roster-table-wrap")?.scrollTop ?? 0;
+  }
+  healthInsightsTab = tab;
+  if (tab !== "roster") document.getElementById("device-details").classList.remove("roster-selected");
+  if (tab === "findings" && healthInsightsViewState.detailsOpen && healthInsightsViewState.selectedGroupId) {
+    renderSelectedHealthFinding();
+  } else if (tab === "roster" && healthInsightsState.rosterDetail) {
+    document.getElementById("device-details").classList.add("roster-selected");
+    setContextDetailsMode("device");
+    contextDetailsController.setCollapsed(false);
+  } else {
+    setContextDetailsMode("device");
+    contextDetailsController.setCollapsed(true);
+  }
+  renderNetworkInsights();
+  document.getElementById(`health-tab-${tab}`)?.focus();
+}
+for (const tab of ["findings", "roster"]) {
+  const button = document.getElementById(`health-tab-${tab}`);
+  button?.addEventListener("click", () => activateHealthTab(tab));
+  button?.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    activateHealthTab(event.key === "Home" ? "findings" : event.key === "End" ? "roster"
+      : healthInsightsTab === "findings" ? "roster" : "findings");
+  });
+}
+let rosterSearchTimer;
+document.getElementById("health-roster-search")?.addEventListener("input", (event) => {
+  clearTimeout(rosterSearchTimer);
+  const search = event.target.value;
+  rosterSearchTimer = setTimeout(() => {
+    healthRosterViewState.search = search;
+    applyRosterFilter();
+  }, 250);
+});
+for (const [id, key] of [["health-roster-presence", "presence"],
+  ["health-roster-designation", "rosterState"]]) {
+  document.getElementById(id)?.addEventListener("change", (event) => {
+    healthRosterViewState[key] = event.target.value;
+    applyRosterFilter();
+  });
+}
 document.getElementById("health-mode-snapshot")?.addEventListener("click", () => {
   healthInsightsViewState.mode = "snapshot";
   renderNetworkInsights();

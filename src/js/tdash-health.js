@@ -101,8 +101,10 @@ export function fetchHealthDevice(assessmentId, deviceId, signal) {
   return healthRequest(`api/health/devices/${encodeURIComponent(deviceId)}?${query}`, signal);
 }
 
-export function fetchHealthRoster(networkId, offset = 0, signal) {
-  const query = new URLSearchParams({ network: networkId, limit: "25", offset: String(offset) });
+export function fetchHealthRoster(networkId, assessmentId, view, signal) {
+  const query = new URLSearchParams({ network: networkId, assessment: assessmentId,
+    limit: "25", offset: String(view.offset), q: view.search, presence: view.presence,
+    rosterState: view.rosterState, sort: view.sort.column, direction: view.sort.direction });
   return healthRequest(`api/health/roster?${query}`, signal);
 }
 
@@ -241,42 +243,72 @@ export function renderHealthComparison(container, page, comparison, viewState = 
   forward.addEventListener("click", () => actions.items?.(comparison.offset + comparison.limit));
 }
 
-export function renderHealthRoster(container, page, detail, actions = {}) {
+const ROSTER_COLUMNS = [
+  ["label", "Device"], ["presence", "Presence"], ["rosterState", "Roster designation"],
+  ["lastObserved", "Last observed"], ["quality", "Data quality"],
+];
+
+function rosterLabel(value) {
+  return value?.replaceAll("-", " ").replace(/^./, (letter) => letter.toUpperCase()) || "Unknown";
+}
+
+export function renderHealthRoster(container, page, view, actions = {}) {
   if (!container) return;
   container.replaceChildren();
-  container.hidden = !page;
-  if (!page) return;
-  appendText(container, "h3", `Observed devices (${page.total})`);
-  if (!page.total) {
-    appendText(container, "p", "No attributed Thread device facts yet.");
+  if (view.loading && !page) {
+    appendText(container, "p", "Loading device roster…");
     return;
   }
-  const list = appendText(container, "ul", "", "health-roster-list");
-  page.devices.forEach((device) => {
-    const item = document.createElement("li");
-    const button = appendText(item, "button", device.displayLabel);
-    button.type = "button";
-    button.title = `${device.deviceId} · ${device.labelOrigin} label`;
-    button.setAttribute("aria-expanded", String(detail?.deviceId === device.deviceId));
-    button.addEventListener("click", () => actions.select?.(device.deviceId));
-    appendText(item, "span", ` ${device.fieldCounts.fresh} fresh · ${device.fieldCounts.stale} stale · ${device.fieldCounts.conflicted} conflicted`);
-    list.appendChild(item);
-  });
-  if (detail) {
-    const section = appendText(container, "section", "", "health-roster-detail");
-    appendText(section, "h4", `${detail.displayLabel} · ${detail.deviceId}`);
-    const table = document.createElement("table");
-    const body = document.createElement("tbody");
-    Object.entries(detail.fields).forEach(([field, fact]) => {
-      const row = document.createElement("tr");
-      appendText(row, "th", field);
-      const value = fact.freshness === "absent" ? "Absent" : `${JSON.stringify(fact.value)} · ${fact.freshness} · ${fact.confidence} · ${fact.sourceFile || "unknown source"}`;
-      appendText(row, "td", value);
-      body.appendChild(row);
-    });
-    table.appendChild(body);
-    section.appendChild(table);
+  if (view.error) appendText(container, "p", `Device roster unavailable: ${view.error}`, "error");
+  if (!page) return;
+  appendText(container, "p", `${page.filteredTotal} of ${page.total} devices · ${page.devices.length
+    ? `${page.offset + 1}–${page.offset + page.devices.length}` : "no rows on this page"}`,
+  "health-roster-results");
+  if (!page.activeExpectedTotal) appendText(container, "p", "No active expected roster is configured.");
+  if (!page.filteredTotal) {
+    appendText(container, "p", view.presence === "observed" && view.rosterState === "all" && !view.search
+      ? "No devices were observed in this assessment; this does not establish network health."
+      : "No devices match these roster filters.");
+    return;
   }
+  const wrap = appendText(container, "div", "", "health-roster-table-wrap");
+  const table = document.createElement("table");
+  const head = table.createTHead().insertRow();
+  ROSTER_COLUMNS.forEach(([column, title]) => {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    const button = appendText(cell, "button", title);
+    button.type = "button";
+    button.addEventListener("click", () => actions.sort?.(column));
+    if (view.sort.column === column) {
+      cell.setAttribute("aria-sort", view.sort.direction);
+      appendText(button, "span", view.sort.direction === "ascending" ? " ▲" : " ▼", "health-sort-icon");
+    }
+    head.appendChild(cell);
+  });
+  const body = table.createTBody();
+  page.devices.forEach((device) => {
+    const row = body.insertRow();
+    row.classList.toggle("selected", view.selectedDeviceId === device.deviceId);
+    const deviceCell = row.insertCell();
+    const button = appendText(deviceCell, "button", device.displayLabel);
+    button.type = "button";
+    button.dataset.deviceId = device.deviceId;
+    button.title = device.deviceId;
+    button.setAttribute("aria-label", `${device.displayLabel}, ${device.deviceId}, inspect device`);
+    button.setAttribute("aria-expanded", String(view.selectedDeviceId === device.deviceId));
+    button.addEventListener("click", () => actions.select?.(device.deviceId));
+    appendText(deviceCell, "small", `${rosterLabel(device.presenceState)} · ${rosterLabel(device.rosterState)} · ${
+      device.lastEndpointPresenceAt ? formatAge(device.lastEndpointPresenceAt) : "Never observed"}`,
+    "health-roster-mobile-meta");
+    appendText(row.insertCell(), "span", rosterLabel(device.presenceState));
+    appendText(row.insertCell(), "span", rosterLabel(device.rosterState));
+    appendText(row.insertCell(), "time", device.lastEndpointPresenceAt
+      ? `${formatAge(device.lastEndpointPresenceAt)} · ${device.lastEndpointPresenceAt}` : "Unknown");
+    const counts = device.fieldCounts;
+    appendText(row.insertCell(), "span", `${counts.fresh} fresh · ${counts.stale} stale · ${counts.conflicted} conflicted`);
+  });
+  wrap.appendChild(table);
   const navigation = appendText(container, "div", "", "health-roster-navigation");
   const previous = appendText(navigation, "button", "Previous");
   previous.type = "button";
@@ -284,8 +316,33 @@ export function renderHealthRoster(container, page, detail, actions = {}) {
   previous.addEventListener("click", () => actions.page?.(Math.max(0, page.offset - page.limit)));
   const next = appendText(navigation, "button", "Next");
   next.type = "button";
-  next.disabled = page.offset + page.devices.length >= page.total;
+  next.disabled = page.offset + page.devices.length >= page.filteredTotal;
   next.addEventListener("click", () => actions.page?.(page.offset + page.limit));
+}
+
+export function renderHealthRosterDetail(container, detail, presenceState) {
+  if (!container) return;
+  container.replaceChildren();
+  if (!detail) return;
+  appendText(container, "h3", detail.displayLabel);
+  appendText(container, "p", detail.deviceId, "health-roster-identity");
+  const copy = appendText(container, "button", "Copy ID");
+  copy.type = "button";
+  copy.addEventListener("click", () => navigator.clipboard.writeText(detail.deviceId));
+  appendText(container, "p", `Presence: ${rosterLabel(presenceState)} · Roster designation: ${rosterLabel(detail.rosterState)}`);
+  appendText(container, "p", `Last endpoint presence: ${detail.lastEndpointPresenceAt || "Unknown"}`);
+  const table = document.createElement("table");
+  const body = table.createTBody();
+  Object.entries(detail.fields).forEach(([field, fact]) => {
+    const row = body.insertRow();
+    const heading = document.createElement("th");
+    heading.scope = "row";
+    heading.textContent = field;
+    row.appendChild(heading);
+    appendText(row.insertCell(), "span", fact.freshness === "absent" ? "Absent"
+      : `${JSON.stringify(fact.value)} · ${fact.freshness} · ${fact.confidence} · ${fact.sourceFile || "unknown source"}`);
+  });
+  container.appendChild(table);
 }
 
 export async function fetchHealthSupport(networkId, signal) {
@@ -812,7 +869,7 @@ function appendHealthSummaryRow(body, row, viewState, actions) {
 
 export function renderHealthInsights(container, model, viewState = {}, actions = {}) {
   if (!container) return;
-  const summary = container.querySelector("#health-insights-summary");
+  const summary = container.querySelector("#health-insights-evidence");
   const table = container.querySelector("#health-finding-table");
   const tableWrap = container.querySelector("#health-finding-table-wrap");
   const empty = container.querySelector("#health-insights-empty");

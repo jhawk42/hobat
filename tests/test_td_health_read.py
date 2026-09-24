@@ -49,6 +49,79 @@ def test_assessment_projection_groups_losslessly_and_resolves_labels(tmp_path) -
     assert "device_id" not in device
 
 
+def test_pinned_roster_includes_observed_without_facts_and_designation_only(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result()
+    store.save_processing_result(observation, assessment)
+    expected_id = "extaddr:0000000000000001"
+    store.upsert_expected_device(observation.network_id, expected_id, "Alpha")
+    service = TDHealthReadService(tmp_path)
+
+    observed = service.roster(network_id=observation.network_id,
+                              assessment_id=assessment.assessment_id)
+    assert observed["schemaVersion"] == 2
+    assert observed["total"] == 2 and observed["filteredTotal"] == 1
+    assert observed["activeExpectedTotal"] == 1
+    assert observed["devices"][0]["presenceState"] == "observed"
+    assert observed["devices"][0]["rosterState"] == "untracked"
+
+    page = service.roster(network_id=observation.network_id,
+                          assessment_id=assessment.assessment_id, presence="all",
+                          sort="label", limit=1)
+    assert page["filteredTotal"] == 2
+    assert page["devices"][0]["deviceId"] == expected_id
+    assert page["devices"][0]["presenceState"] == "not-assessed"
+    assert service.roster_device(network_id=observation.network_id,
+                                 device_id=expected_id)["fields"]["deviceLabel"]["freshness"] == "absent"
+    second = service.roster(network_id=observation.network_id,
+                            assessment_id=assessment.assessment_id, presence="all",
+                            sort="label", limit=1, offset=1)
+    assert second["devices"][0]["deviceId"] == observation.devices[0].device_id
+    assert service.roster(network_id=observation.network_id,
+                          assessment_id=assessment.assessment_id, presence="not-assessed")["filteredTotal"] == 1
+
+    try:
+        service.roster(network_id="extpan:0000000000000000",
+                       assessment_id=assessment.assessment_id)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Cross-network assessment was accepted")
+
+
+def test_pinned_roster_sorts_and_filters_complete_population_before_paging(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result()
+    store.save_processing_result(observation, assessment)
+    for index in range(30):
+        store.upsert_expected_device(observation.network_id, f"extaddr:{index:016x}",
+                                     "Same" if index in (0, 29) else f"Room {index:02d}")
+    service = TDHealthReadService(tmp_path)
+    page = service.roster(network_id=observation.network_id,
+                          assessment_id=assessment.assessment_id, presence="all", limit=25)
+    assert page["total"] == page["filteredTotal"] == 31
+    assert page["devices"][0]["displayLabel"] == "Room 01"
+    second = service.roster(network_id=observation.network_id,
+                            assessment_id=assessment.assessment_id, presence="all", limit=25, offset=25)
+    assert second["devices"][3]["displayLabel"] == "Same · 00000000 (duplicate label)"
+    assert second["devices"][4]["displayLabel"] == "Same · 0000001d (duplicate label)"
+    filtered = service.roster(network_id=observation.network_id,
+                              assessment_id=assessment.assessment_id, presence="not-assessed",
+                              roster_state="expected", q="room", limit=5, offset=5)
+    assert filtered["filteredTotal"] == 28
+    assert filtered["devices"][0]["displayLabel"] == "Room 06"
+    for sort in ("label", "presence", "rosterState", "lastObserved", "quality"):
+        for direction in ("ascending", "descending"):
+            ordered = service.roster(network_id=observation.network_id,
+                                     assessment_id=assessment.assessment_id,
+                                     presence="all", sort=sort, direction=direction, limit=100)
+            assert len({device["deviceId"] for device in ordered["devices"]}) == 31
+            if sort == "lastObserved":
+                assert ordered["devices"][0]["deviceId"] == observation.devices[0].device_id
+            if sort == "quality":
+                assert ordered["devices"][0]["deviceId"] == "extaddr:0000000000000000"
+
+
 def test_finding_groups_follow_operator_presentation_order() -> None:
     findings = [
         {
