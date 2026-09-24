@@ -135,6 +135,17 @@ export function isComparisonPageForAssessment(page, assessment, offset) {
       && item.comparisonId.length > 0);
 }
 
+function formatComparisonTime(timestamp, now) {
+  if (typeof timestamp !== "string" || !timestamp.trim()) return "unknown";
+  const observedAt = Date.parse(timestamp);
+  if (!Number.isFinite(observedAt)) return "unknown";
+  const totalMinutes = Math.max(0, Math.floor((now - observedAt) / 60_000));
+  const days = Math.floor(totalMinutes / 1_440);
+  const hours = Math.floor((totalMinutes % 1_440) / 60);
+  const minutes = totalMinutes % 60;
+  return [days > 0 && `${days}d`, hours > 0 && `${hours}h`, `${minutes}m`].filter(Boolean).join(" ");
+}
+
 export function renderHealthComparison(container, page, comparison, viewState = {}, actions = {}) {
   if (!container) return;
   container.replaceChildren();
@@ -156,6 +167,8 @@ export function renderHealthComparison(container, page, comparison, viewState = 
   }
   const picker = document.createElement("select");
   picker.setAttribute("aria-label", "Stored comparison");
+  const now = Date.now();
+  const comparisonLabel = (item) => `Before: ${formatComparisonTime(item.beforeObservedAt, now)} · After: ${formatComparisonTime(item.afterObservedAt, now)}`;
   const prompt = document.createElement("option");
   prompt.value = "";
   prompt.textContent = "Select a comparison";
@@ -163,13 +176,13 @@ export function renderHealthComparison(container, page, comparison, viewState = 
   page.items.forEach((item) => {
     const option = document.createElement("option");
     option.value = item.comparisonId;
-    option.textContent = `Before ${item.beforeObservedAt} · After ${item.afterObservedAt}`;
+    option.textContent = comparisonLabel(item);
     picker.appendChild(option);
   });
   if (comparison && !page.items.some((item) => item.comparisonId === comparison.comparisonId)) {
     const pinned = document.createElement("option");
     pinned.value = comparison.comparisonId;
-    pinned.textContent = `Before ${comparison.beforeObservedAt} · After ${comparison.afterObservedAt} (selected)`;
+    pinned.textContent = `${comparisonLabel(comparison)} (selected)`;
     picker.appendChild(pinned);
   }
   picker.value = comparison?.comparisonId || "";

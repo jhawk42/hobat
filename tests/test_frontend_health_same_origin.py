@@ -10,6 +10,71 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_health_comparison_dropdown_uses_relative_times_without_changing_selection() -> None:
+    script = r"""
+      import {renderHealthComparison} from "./src/js/tdash-health.js";
+
+      const now = Date.parse("2026-09-24T12:00:00Z");
+      Date.now = () => now;
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.listeners = {};
+        }
+        appendChild(child) { this.children.push(child); return child; }
+        replaceChildren() { this.children = []; }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+      }
+      globalThis.document = {createElement: (tagName) => new Element(tagName)};
+
+      const page = {total: 6, offset: 0, limit: 3, items: [
+        {comparisonId: "pair-1", beforeObservedAt: "2026-09-23T07:48:00Z",
+          afterObservedAt: "2026-09-24T11:54:00Z"},
+        {comparisonId: "pair-2", beforeObservedAt: "2026-09-24T11:59:01Z",
+          afterObservedAt: "2026-09-24T12:01:00Z"},
+        {comparisonId: "pair-3", beforeObservedAt: null, afterObservedAt: "invalid"},
+      ]};
+      const comparison = {comparisonId: "pinned", beforeObservedAt: "2026-09-24T11:00:00Z",
+        afterObservedAt: "2026-09-24T11:59:00Z", items: [], reasons: []};
+      const selected = [];
+      const paged = [];
+      const container = new Element("section");
+      renderHealthComparison(container, page, comparison, {}, {
+        select: (id) => selected.push(id), page: (offset) => paged.push(offset),
+      });
+      const [picker, navigation, heading] = container.children;
+      const selectedValue = picker.value;
+      picker.value = "pair-1";
+      picker.listeners.change();
+      navigation.children[1].listeners.click();
+      console.log(JSON.stringify({
+        options: picker.children.map(({value, textContent}) => [value, textContent]),
+        selectedValue, selected, paged, heading: heading.textContent,
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result == {
+        "options": [
+            ["", "Select a comparison"],
+            ["pair-1", "Before: 1d 4h 12m · After: 6m"],
+            ["pair-2", "Before: 0m · After: 0m"],
+            ["pair-3", "Before: unknown · After: unknown"],
+            ["pinned", "Before: 1h 0m · After: 1m (selected)"],
+        ],
+        "selectedValue": "pinned",
+        "selected": ["pair-1"],
+        "paged": [3],
+        "heading": "Before 2026-09-24T11:00:00Z · After 2026-09-24T11:59:00Z",
+    }
+
+
 def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() -> None:
     script = r"""
       import {
