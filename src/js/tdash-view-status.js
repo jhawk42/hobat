@@ -1,3 +1,13 @@
+export function networkInstanceStatus(filenames, capabilities) {
+  const instances = filenames.map((name) => capabilities?.files?.[name]?.networkInstance).filter(Boolean);
+  if (!instances.length) return "Network instance: unknown";
+  const known = new Set(instances.map((scope) => scope.extPanId).filter(Boolean));
+  if (known.size > 1) return "Network instance: mixed";
+  const scope = instances.find((item) => item.extPanId && item.provenance === "observed")
+    ?? instances.find((item) => item.extPanId) ?? instances[0];
+  return `Network instance: ${scope.extPanId ?? "unknown"} (${scope.provenance})`;
+}
+
 export function createViewStatusOwner(presentStatus = () => {}) {
   let activeView = null;
   let datasetToken = null;

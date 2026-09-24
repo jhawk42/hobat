@@ -57,7 +57,7 @@
     {"path":"baState","category":"device","jsonTypes":["string","number"],"sources":["rest"],"aliases":[],"transform":"identity","mergePolicy":"scalar"},
     {"path":"hostsService","category":"device","jsonTypes":["boolean"],"sources":["rest"],"aliases":[],"transform":"boolean","mergePolicy":"scalar"},
     {"path":"brCounters","category":"device","jsonTypes":["object"],"sources":["rest"],"aliases":[],"transform":"identity","mergePolicy":"object"},
-    {"path":"extPanId","category":"device","jsonTypes":["string"],"sources":["rest"],"aliases":["ext_pan_id"],"transform":"identifier","mergePolicy":"scalar"},
+    {"path":"extPanId","category":"device","jsonTypes":["string"],"sources":["rest"],"aliases":["ext_pan_id","extendedPanId","extPanIdHex"],"transform":"identifier","mergePolicy":"scalar"},
     {"path":"networkName","category":"device","jsonTypes":["string"],"sources":["rest"],"aliases":["network_name"],"transform":"identity","mergePolicy":"scalar"},
     {"path":"deviceLabel","category":"extension","jsonTypes":["string"],"sources":["cli","eve"],"aliases":["device_label","hostName","hostname"],"transform":"identity","mergePolicy":"scalar"},
     {"path":"nodeId","category":"device","jsonTypes":["string","number"],"sources":["rest","cli"],"aliases":["node_id"],"transform":"identity","mergePolicy":"scalar"},

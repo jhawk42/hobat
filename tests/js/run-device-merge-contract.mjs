@@ -1,7 +1,10 @@
+import assert from "node:assert/strict";
 import fs from "node:fs";
 
 import { mergeRowsByStrategy, normalizeRows } from "../../src/js/tdash-merge.js";
-import { normalizeInputRecord } from "../../src/js/tdash-device-fields.js";
+import { canonicalExtPanId, normalizeInputRecord } from "../../src/js/tdash-device-fields.js";
+
+assert.throws(() => canonicalExtPanId(8699115387970395326), /represented exactly/);
 
 
 function projectResult(value) {
@@ -19,6 +22,14 @@ function projectResult(value) {
 
 function runCase(contractCase) {
   const { inputs } = contractCase;
+  if (contractCase.operation === "network-identity") {
+    try {
+      const extPanId = canonicalExtPanId(inputs.value);
+      return { extPanId, networkId: `extpan:${extPanId}` };
+    } catch (_error) {
+      return { error: "invalid" };
+    }
+  }
   if (contractCase.operation === "normalize") {
     let normalized = inputs.record;
     for (let iteration = 0; iteration < (inputs.repeat ?? 1); iteration += 1) {
@@ -30,6 +41,11 @@ function runCase(contractCase) {
   const rowGroups = inputs.sources.map((source) =>
     normalizeRows(source.records, source.name),
   );
+  if (contractCase.operation === "collector-reconciliation") {
+    const merged = mergeRowsByStrategy(rowGroups, "by-identity", inputs.options ?? {})[0];
+    return Object.fromEntries(inputs.fields.filter((field) => field in merged)
+      .map((field) => [field, merged[field]]));
+  }
   return projectResult(
     mergeRowsByStrategy(rowGroups, inputs.strategy, inputs.options ?? {}),
   );

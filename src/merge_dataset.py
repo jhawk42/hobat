@@ -11,6 +11,7 @@ import re
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -26,11 +27,13 @@ from td_device_fields import (
     get_canonical_ext_address,
     get_canonical_omr_address,
     is_placeholder_ext_address,
+    is_placeholder_device_label,
     is_placeholder_omr_address,
     normalize_identifier_text as normalize_device_identifier_text,
     normalize_input_record,
 )
 from td_device_merge import MergeContext, create_merge_context, sort_sources_by_priority
+from td_network_identity import NetworkScope
 from td_record_merge import (
     append_merge_conflict as append_record_conflict,
     merge_lists as merge_record_lists,
@@ -68,8 +71,10 @@ from td_const import (
 )
 from util_data import (
     load_optional_input,
+    read_network_scope,
     resolve_data_dir,
     save_json_atomic,
+    write_network_scope,
 )
 from util_data import TDRequiredInputMissingError
 
@@ -1264,6 +1269,8 @@ def deep_merge(
         elif key == "extAddress" and is_placeholder_extaddr(cur) and not is_placeholder_extaddr(value):
             # Prefer a concrete extaddr over known placeholder values.
             base[key] = deepcopy(value)
+        elif key == "deviceLabel" and is_placeholder_device_label(cur) and not is_placeholder_device_label(value) and not value_is_empty(value):
+            base[key] = deepcopy(value)
         elif (
             not value_is_empty(cur)
             and not value_is_empty(value)
@@ -1519,9 +1526,35 @@ def build_merged_records(
     identity_collision_examples: list[dict[str, Any]] = []
 
     ordered_input_files = sort_sources_by_priority(input_files, SOURCE_PRECEDENCE)
+    loaded: dict[str, tuple[Any, list[dict[str, Any]]]] = {}
+    scopes: dict[str, dict[str, Any] | None] = {}
+    errors: dict[str, str | None] = {}
     for filename in ordered_input_files:
         data = input_data[filename] if input_data is not None else load_json(base_dir / filename)
         records = extract_records(filename, data)
+        loaded[filename] = (data, records)
+        scopes[filename], errors[filename] = read_network_scope(base_dir / filename) if (base_dir / filename).exists() else (None, "missing-sidecar")
+
+    chosen = next((scopes[name] for provenance in ("observed", "operator")
+                   for name in ordered_input_files if scopes[name] is not None
+                   and scopes[name].get("provenance") == provenance
+                   and scopes[name].get("extPanId")), None)
+    output_id = chosen["extPanId"] if chosen else None
+    excluded: list[dict[str, Any]] = []
+    for filename in ordered_input_files:
+        data, records = loaded[filename]
+        scope = scopes[filename]
+        mismatch = scope is not None and scope.get("extPanId") and output_id and scope["extPanId"] != output_id
+        conflicted = scope is not None and str(scope.get("reason") or "").startswith("multiple-instances-in-scope")
+        if errors[filename] not in (None, "missing-sidecar") or mismatch or conflicted:
+            excluded.append({
+                "filename": filename,
+                "extPanId": scope.get("extPanId") if scope else None,
+                "recordCount": len(records),
+                "reason": "multiple-instances-in-scope" if conflicted else "cross-instance" if mismatch else errors[filename],
+            })
+            records_read_by_source[filename] = len(records)
+            continue
         records_read_by_source[filename] = len(records)
         for raw_record in records:
             record = normalize_identifiers(raw_record, omr_prefix)
@@ -1614,6 +1647,8 @@ def build_merged_records(
                         ),
                         partition_id=get_partition_id(nodes[node_id]),
                         incoming_partition_id=get_partition_id(record),
+                        network_scope=f"extpan:{output_id or 'unknown'}",
+                        incoming_network_scope=f"extpan:{output_id or 'unknown'}",
                         conflict_target=nodes[node_id],
                         matter_identity_mode=matter_identity_mode,
                     ),
@@ -1690,6 +1725,13 @@ def build_merged_records(
             merged_nodes_by_source[src] += 1
 
     report = {
+        "networkInstance": {
+            "extPanId": output_id,
+            "networkName": chosen.get("networkName") if chosen else None,
+            "provenance": chosen["provenance"] if chosen else "unknown",
+            "sources": chosen.get("sources", []) if chosen else [],
+            "excluded": excluded,
+        },
         "input_files": ordered_input_files,
         "matter_identity_mode": matter_identity_mode,
         "records_read_by_source": records_read_by_source,
@@ -2045,7 +2087,10 @@ def build_merge_output(
     output_records = merged_records
     if command_inputs.merge_strategy == "none":
         passthrough_records: list[dict[str, Any]] = []
+        excluded_files = {item["filename"] for item in report["networkInstance"]["excluded"]}
         for filename in command_inputs.loaded_input_files:
+            if filename in excluded_files:
+                continue
             records = extract_records(filename, input_data[filename])
             for raw_record in records:
                 record = normalize_identifiers(raw_record, supporting_data.omr_prefix)
@@ -2082,6 +2127,13 @@ def write_merge_outputs(
         indent=2,
         add_trailing_newline=True,
     )
+    instance = result.report.get("networkInstance")
+    if instance:
+        write_network_scope(output_path, NetworkScope(
+            instance["extPanId"], instance["networkName"], instance["provenance"],
+            "no-ext-pan-id-observed" if instance["extPanId"] is None else None,
+            datetime.now(timezone.utc).isoformat(), tuple(instance["sources"]),
+        ))
     if report_path is not None:
         save_json_atomic(
             result.report,

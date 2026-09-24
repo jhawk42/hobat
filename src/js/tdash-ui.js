@@ -85,6 +85,7 @@ import { parseSearchQuery, filterRowsBySearch } from "./tdash-search.js";
 import {
   activateViewStatus,
   configureViewStatusPresenter,
+  networkInstanceStatus,
   supersedeViewStatus,
 } from "./tdash-view-status.js";
 import {
@@ -127,7 +128,9 @@ import {
 
 configureViewStatusPresenter((status) => {
   const statusEl = document.getElementById("view-status-line-content");
-  if (statusEl) statusEl.textContent = status;
+  if (statusEl) statusEl.textContent = currentDataset?.entry
+    ? `${status} | ${networkInstanceStatus(currentDataset.loadedFiles ?? currentDataset.entry.files, sourceCapabilities)}`
+    : status;
 });
 
 // ── Build datasource <select> ────────────────────────────────────────
@@ -3413,6 +3416,11 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     populateTableColumnCategories(currentDataset.rows);
 
   // Final reconciliation render: all files settled, isPartial is false.
+  try {
+    sourceCapabilities = await loadSourceCapabilities();
+  } catch (error) {
+    console.warn("Unable to refresh source capabilities", error);
+  }
   resetDeviceDetailsPanelTabsToDefault();
   renderCurrentView();
   invalidateHealthRefresh();

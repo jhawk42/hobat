@@ -49,7 +49,7 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "baId", aliases: [], transform: "identity" },
   { path: "baState", aliases: [], transform: "identity" },
   { path: "brCounters", aliases: [], transform: "identity" },
-  { path: "extPanId", aliases: ["ext_pan_id"], transform: "identifier" },
+  { path: "extPanId", aliases: ["ext_pan_id", "extendedPanId", "extPanIdHex"], transform: "identifier" },
   { path: "networkName", aliases: ["network_name"], transform: "identity" },
   { path: "deviceLabel", aliases: ["device_label", "hostName", "hostname"], transform: "identity" },
   { path: "nodeId", aliases: ["node_id"], transform: "identity" },
@@ -99,6 +99,28 @@ export const PREFERRED_FIELD_NAMES = Object.freeze(
 const FIELD_DEFINITIONS_BY_PATH = Object.fromEntries(
   FIELD_DEFINITIONS.map((definition) => [definition.path, definition]),
 );
+
+export function canonicalExtPanId(value) {
+  let number;
+  if (typeof value === "bigint") {
+    number = value;
+  } else if (typeof value === "number" && Number.isSafeInteger(value)) {
+    number = BigInt(value);
+  } else if (typeof value === "string") {
+    const text = value.trim();
+    if (/^0x[0-9a-f]{16}$/i.test(text)) {
+      number = BigInt(text);
+    } else {
+      const hex = text.replace(/[:-]/g, "");
+      if (/^[0-9a-f]{16}$/i.test(hex)) number = BigInt(`0x${hex}`);
+      else if (/^[0-9]+$/.test(text)) number = BigInt(text);
+    }
+  }
+  if (number === undefined || number <= 0n || number > 0xffffffffffffffffn) {
+    throw new Error("extPanId must be a nonzero 64-bit value represented exactly");
+  }
+  return number.toString(16).padStart(16, "0");
+}
 
 export function getPreferredFieldPath(name) {
   return PREFERRED_FIELD_NAMES[name] ?? name;
@@ -171,6 +193,10 @@ export function isPlaceholderExtAddress(value) {
   const normalized = normalizeIdentifierText(value);
   if (!normalized || /^(found|offline|unknown)-/.test(normalized)) return true;
   return PLACEHOLDER_EXT_ADDRESSES.has(normalized.replace(/[:.-]/g, ""));
+}
+
+export function isPlaceholderDeviceLabel(value) {
+  return typeof value === "string" && /^(found|unknown|offline)-/i.test(value);
 }
 
 export function canonicalizeExtAddress(value) {

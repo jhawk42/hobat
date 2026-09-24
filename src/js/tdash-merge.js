@@ -1,5 +1,5 @@
 import { MERGE_STRATEGIES, SOURCE_PRECEDENCE } from "./tdash-constants.js";
-import { getDeviceIdentityKeys, isPlaceholderExtAddress } from "./tdash-device-fields.js";
+import { getDeviceIdentityKeys, isPlaceholderExtAddress, isPlaceholderDeviceLabel } from "./tdash-device-fields.js";
 import {
   toText,
   isPlainObject,
@@ -508,7 +508,12 @@ export function mergeRowFields(target, source, context = {}) {
       });
       return;
     }
-    if (isEmptyMergeValue(tv) && !isEmptyMergeValue(sv)) {
+    if (key === "ipv6Addresses" && Array.isArray(sv)) {
+      target[key] = [...new Set([...(Array.isArray(tv) ? tv : []), ...sv])];
+    } else if (key === "deviceLabel" && isPlaceholderDeviceLabel(tv)
+      && !isPlaceholderDeviceLabel(sv) && !isEmptyMergeValue(sv)) {
+      target[key] = sv;
+    } else if (isEmptyMergeValue(tv) && !isEmptyMergeValue(sv)) {
       target[key] = sv;
     } else if (isPlainObject(tv) && isPlainObject(sv)) {
       deepMergeObjects(tv, sv, key, target);

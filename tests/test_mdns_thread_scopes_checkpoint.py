@@ -26,7 +26,7 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
 
         info = SimpleNamespace(
             addresses=[b"\x7f\x00\x00\x01"],
-            properties={b"xa": bytes.fromhex("0011223344556677")},
+            properties={b"xa": bytes.fromhex("0011223344556677"), b"xp": bytes.fromhex("78b9775b001c1cbe")},
             parsed_addresses=lambda: ["fd00::1"],
             name="test.local.",
             type="_meshcop._udp.local.",
@@ -59,6 +59,7 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
         self.assertEqual(written_payload[0]["recordKey"], "_meshcop._udp.local.|test.local.")
         self.assertEqual(written_payload[0]["name"], "test.local.")
         self.assertEqual(written_payload[0]["event"], "add")
+        self.assertEqual(written_payload[0]["extPanId"], "78b9775b001c1cbe")
 
     def test_add_service_handles_packed_address_variants(self) -> None:
         address_cases = {

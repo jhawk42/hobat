@@ -279,6 +279,11 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Browse timeout in seconds forwarded to mdns_thread_scopes",
     )
     mdns_p.add_argument(
+        "--ext-pan-id",
+        default=None,
+        help="Extended PAN ID to use when mDNS cannot observe it",
+    )
+    mdns_p.add_argument(
         "--haptcp",
         action="store_true",
         default=False,
@@ -901,6 +906,8 @@ def _dispatch_mdns(
         mdns_argv.append("--haptcp")
     if getattr(args, "mattertcpsupported", False):
         mdns_argv.append("--mattertcpsupported")
+    if args.ext_pan_id is not None:
+        mdns_argv += ["--ext-pan-id", args.ext_pan_id]
     mdns_argv += list(extra_args)
     return _normalize_module_rc(
         mdns_thread_scopes.main(_forward_with_datadir(args, mdns_argv)),

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 from typing import Any, Mapping
 
+from td_network_identity import canonical_ext_pan_id, network_id_from_ext_pan_id
+
 
 _EXT_PAN_ID_PATTERN = re.compile(r"^[0-9a-f]{16}$")
 
@@ -144,19 +146,6 @@ class Assessment:
     assessed_at: str
     sample_contract_version: str = "legacy-unknown"
     health_policy_digest: str | None = None
-
-
-def canonical_ext_pan_id(value: object) -> str:
-    if not isinstance(value, str):
-        raise ValueError("extPanId must be a string")
-    canonical = value.strip().lower().replace(":", "").replace("-", "")
-    if not _EXT_PAN_ID_PATTERN.fullmatch(canonical):
-        raise ValueError("extPanId must contain exactly 16 hexadecimal digits")
-    return canonical
-
-
-def network_id_from_ext_pan_id(value: object) -> str:
-    return f"extpan:{canonical_ext_pan_id(value)}"
 
 
 def device_id_from_ext_address(value: object) -> str:

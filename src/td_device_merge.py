@@ -15,6 +15,8 @@ class MergeContext:
     owner_rloc16: str = ""
     partition_id: str = "unknown"
     incoming_partition_id: str = "unknown"
+    network_scope: str = "extpan:unknown"
+    incoming_network_scope: str = "extpan:unknown"
     conflict_target: dict[str, Any] | None = None
     conflict_limit: int = 20
     matter_identity_mode: str = "strict-omr"

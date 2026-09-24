@@ -15,7 +15,7 @@ from util_data import (
 )
 
 
-def collect_thread_network_info(output_path: Path | None = None):
+def collect_thread_network_info(output_path: Path | None = None, ext_pan_id: object = None):
     thread_network_info = util_network.fetch_thread_network_info()
     if output_path is not None:
         save_final_json(
@@ -23,6 +23,7 @@ def collect_thread_network_info(output_path: Path | None = None):
             output_path,
             CollectionWriteOutcome.complete(),
             writer=save_json_atomic,
+            ext_pan_id=ext_pan_id,
         )
         logging.debug(
             "Saved thread network info data into %s as JSON:\n%s",
@@ -38,16 +39,22 @@ def collect_thread_network_info(output_path: Path | None = None):
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Collect OTBR Thread network info")
+    parser.add_argument("--datadir", default=None)
+    parser.add_argument("--ext-pan-id", default=None)
+    args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
     )
 
-    td_data_dir = resolve_data_dir(data_dir=parse_datadir_from_argv(argv))
+    td_data_dir = resolve_data_dir(data_dir=args.datadir)
     try:
         save_json_path = data_file_path(
             OTBR_CLI_THREAD_NETWORK_INFO_FILENAME, td_data_dir
         )
-        collect_thread_network_info(save_json_path)
+        collect_thread_network_info(save_json_path, ext_pan_id=args.ext_pan_id)
         return 0
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         logging.error(f"Invalid payload while collecting thread-network-info: {exc}")

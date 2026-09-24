@@ -4,6 +4,7 @@ import {
   activateViewStatus,
   configureViewStatusPresenter,
   createViewStatusOwner,
+  networkInstanceStatus,
   publishViewStatus,
   supersedeViewStatus,
 } from "../../src/js/tdash-view-status.js";
@@ -12,6 +13,14 @@ const presented = [];
 const owner = createViewStatusOwner((status) => presented.push(status));
 const firstDataset = {};
 const secondDataset = {};
+const capabilities = { files: {
+  first: { networkInstance: { extPanId: "78b9775b001c1cbe", provenance: "observed" } },
+  second: { networkInstance: { extPanId: "1111111111111111", provenance: "operator" } },
+} };
+assert.equal(networkInstanceStatus(["first"], capabilities), "Network instance: 78b9775b001c1cbe (observed)");
+assert.equal(networkInstanceStatus(["second"], capabilities), "Network instance: 1111111111111111 (operator)");
+assert.equal(networkInstanceStatus(["first", "second"], capabilities), "Network instance: mixed");
+assert.equal(networkInstanceStatus(["missing"], capabilities), "Network instance: unknown");
 
 assert.equal(owner.activate("topology", firstDataset), undefined);
 assert.equal(owner.publish("topology", "Showing: 93 nodes, 0 links", firstDataset), true);

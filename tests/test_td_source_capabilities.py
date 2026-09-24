@@ -16,6 +16,8 @@ from td_const import (
 )
 import td_source_capabilities
 from td_source_capabilities import SourceCapabilityService
+from td_network_identity import NetworkScope
+from util_data import write_network_scope
 import td_webserver
 
 
@@ -92,6 +94,18 @@ def test_always_available_source_retains_cached_file_metadata() -> None:
         "configured": False,
         "probe": {"state": "not-applicable"},
     }
+
+
+def test_capabilities_only_advertise_digest_valid_instance(tmp_path: Path) -> None:
+    snapshot = tmp_path / MDNS_SCOPES_BR_FILENAME
+    snapshot.write_text("[]", encoding="utf-8")
+    write_network_scope(snapshot, NetworkScope("78b9775b001c1cbe", None, "observed", None, "now", (snapshot.name,)))
+    service = SourceCapabilityService(probes={})
+    result = asyncio.run(service.capabilities(tmp_path))
+    assert result["files"][snapshot.name]["networkInstance"]["extPanId"] == "78b9775b001c1cbe"
+    snapshot.write_text("[{}]", encoding="utf-8")
+    result = asyncio.run(service.capabilities(tmp_path))
+    assert "networkInstance" not in result["files"][snapshot.name]
 
 
 def test_native_ha_matter_ws_files_are_advertised() -> None:

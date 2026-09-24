@@ -679,6 +679,12 @@ class TestDispatchOtherCommands(unittest.TestCase):
         )
         self.assertEqual(rc, 0)
 
+    def test_mdns_operator_identity_before_scope_is_forwarded(self):
+        with patch.object(td_cli.mdns_thread_scopes, "main", return_value=0) as collector:
+            rc = self._dispatch(["mdns", "--ext-pan-id", "0x78B9775B001C1CBE", "matter"])
+        self.assertEqual(rc, 0)
+        collector.assert_called_once_with(["matter", "--ext-pan-id", "0x78B9775B001C1CBE"])
+
     def test_restapi_download_forwards_extras(self):
         argv = [
             "otbr-restapi",

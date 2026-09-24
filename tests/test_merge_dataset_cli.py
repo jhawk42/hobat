@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 import merge_dataset
+from td_network_identity import NetworkScope
+from util_data import read_network_scope, write_network_scope
 
 from merge_dataset import (
     MergeCommandResult,
@@ -20,6 +22,58 @@ from merge_dataset import (
 
 def _write_json(path: Path, payload) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_merge_excludes_cross_instance_and_stale_sidecars(tmp_path: Path) -> None:
+    names = ["first.json", "second.json", "third.json", "unknown.json"]
+    for name in names:
+        _write_json(tmp_path / name, [{"rloc16": "0x1234", "extAddress": "aabbccddeeff0011"}])
+    for name, pan in zip(names, ("78b9775b001c1cbe", "1111111111111111", "2222222222222222")):
+        write_network_scope(tmp_path / name, NetworkScope(pan, None, "observed", None, "now", (name,)))
+    _write_json(tmp_path / "third.json", [{"rloc16": "0x9999"}])
+
+    records, report = merge_dataset.build_merged_records(tmp_path, "", names, {})
+
+    assert report["networkInstance"]["extPanId"] == "78b9775b001c1cbe"
+    assert [(item["filename"], item["reason"], item["recordCount"])
+            for item in report["networkInstance"]["excluded"]] == [
+        ("second.json", "cross-instance", 1), ("third.json", "digest-mismatch", 1),
+    ]
+    assert len(records) == 1
+
+
+def test_merge_all_unknown_sidecars_preserves_identity_join(tmp_path: Path) -> None:
+    for name in ("first.json", "second.json"):
+        _write_json(tmp_path / name, [{"rloc16": "0x1234"}])
+    records, report = merge_dataset.build_merged_records(tmp_path, "", ["first.json", "second.json"], {})
+    assert len(records) == 1
+    assert report["networkInstance"]["provenance"] == "unknown"
+
+
+def test_observed_instance_wins_over_higher_order_operator(tmp_path: Path) -> None:
+    for name, pan, provenance in (
+        ("first.json", "1111111111111111", "operator"),
+        ("second.json", "78b9775b001c1cbe", "observed"),
+    ):
+        _write_json(tmp_path / name, [{"rloc16": "0x1234"}])
+        write_network_scope(tmp_path / name, NetworkScope(pan, None, provenance, None, "now", (name,)))
+    records, report = merge_dataset.build_merged_records(tmp_path, "", ["first.json", "second.json"], {})
+    assert len(records) == 1
+    assert report["networkInstance"]["extPanId"] == "78b9775b001c1cbe"
+    assert report["networkInstance"]["excluded"][0]["filename"] == "first.json"
+
+
+def test_conflicted_scope_does_not_join_unknown_compatibility_path(tmp_path: Path) -> None:
+    _write_json(tmp_path / "observed.json", [{"rloc16": "0x1234"}])
+    _write_json(tmp_path / "mixed.json", [{"rloc16": "0x5678"}])
+    write_network_scope(tmp_path / "observed.json", NetworkScope("78b9775b001c1cbe", None, "observed", None, "now", ("observed.json",)))
+    write_network_scope(tmp_path / "mixed.json", NetworkScope(None, None, "unknown", "multiple-instances-in-scope: 1111111111111111, 78b9775b001c1cbe", "now", ("mixed.json",)))
+    records, report = merge_dataset.build_merged_records(tmp_path, "", ["observed.json", "mixed.json"], {})
+    assert len(records) == 1
+    assert report["networkInstance"]["excluded"] == [{
+        "filename": "mixed.json", "extPanId": None, "recordCount": 1,
+        "reason": "multiple-instances-in-scope",
+    }]
 
 
 def test_resolve_input_files_stably_deduplicates_before_exclusions() -> None:
@@ -107,6 +161,7 @@ def test_build_and_write_merge_output_are_independently_testable(tmp_path: Path)
     write_merge_outputs(result, inputs.output_path, inputs.report_path)
     assert json.loads(inputs.output_path.read_text(encoding="utf-8")) == result.records
     assert json.loads(inputs.report_path.read_text(encoding="utf-8")) == result.report
+    assert read_network_scope(inputs.output_path)[0]["provenance"] == "unknown"
 
 
 def test_build_merge_output_loads_each_passthrough_source_once(

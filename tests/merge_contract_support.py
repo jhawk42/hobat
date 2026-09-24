@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from merge_dataset import build_merged_records, normalize_identifiers
+from td_network_identity import canonical_ext_pan_id, network_id_from_ext_pan_id
+from td_device_fields import normalize_input_record
+from otbr_cli_networkdiag_topology import _upsert_device_record
 from td_json_key_normalizer import convert_keys_to_camel_case
 
 
@@ -18,6 +21,8 @@ NODE_RUNNER_PATH = REPO_ROOT / "tests" / "js" / "run-device-merge-contract.mjs"
 
 AREAS = {
     "identity",
+    "networkIdentity",
+    "collectorReconciliation",
     "normalization",
     "scalar",
     "precedence",
@@ -29,7 +34,7 @@ AREAS = {
     "provenance",
     "conflict",
 }
-OPERATIONS = {"normalize", "merge"}
+OPERATIONS = {"normalize", "merge", "network-identity", "collector-reconciliation"}
 ENFORCEMENT_STATES = {"baseline", "contract"}
 KNOWN_STRATEGIES = {"by-identity", "by-rloc16"}
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -99,9 +104,11 @@ def validate_contract(contract: dict[str, Any]) -> list[str]:
             errors.append(f"{case_id} contract cases must not define expected.current")
 
         inputs = case.get("inputs", {})
-        if case.get("operation") == "merge":
-            if inputs.get("strategy") not in KNOWN_STRATEGIES:
+        if case.get("operation") in ("merge", "collector-reconciliation"):
+            if case["operation"] == "merge" and inputs.get("strategy") not in KNOWN_STRATEGIES:
                 errors.append(f"{case_id}.inputs.strategy is invalid")
+            if case["operation"] == "collector-reconciliation" and not isinstance(inputs.get("fields"), list):
+                errors.append(f"{case_id}.inputs.fields must be an array")
             sources = inputs.get("sources")
             if not isinstance(sources, list) or not sources:
                 errors.append(f"{case_id}.inputs.sources must be non-empty")
@@ -114,6 +121,9 @@ def validate_contract(contract: dict[str, Any]) -> list[str]:
                         errors.append(f"{case_id}.sources[{source_index}].name is required")
                     if not isinstance(source.get("records"), list):
                         errors.append(f"{case_id}.sources[{source_index}].records must be an array")
+        elif case.get("operation") == "network-identity":
+            if "value" not in inputs:
+                errors.append(f"{case_id}.inputs.value is required")
         elif not isinstance(inputs.get("record"), dict):
             errors.append(f"{case_id}.inputs.record must be an object")
 
@@ -203,6 +213,14 @@ def first_difference(expected: Any, actual: Any, path: str = "$") -> str | None:
 
 def run_python_case(case: dict[str, Any], work_dir: Path) -> Any:
     inputs = case["inputs"]
+    if case["operation"] == "network-identity":
+        try:
+            return {
+                "extPanId": canonical_ext_pan_id(inputs["value"]),
+                "networkId": network_id_from_ext_pan_id(inputs["value"]),
+            }
+        except ValueError:
+            return {"error": "invalid"}
     if case["operation"] == "normalize":
         normalized = deepcopy(inputs["record"])
         for _ in range(inputs.get("repeat", 1)):
@@ -225,6 +243,17 @@ def run_python_case(case: dict[str, Any], work_dir: Path) -> Any:
         device_label_map={},
         matter_identity_mode=options.get("matterIdentityMode", "strict-omr"),
     )
+    if case["operation"] == "collector-reconciliation":
+        fields = inputs["fields"]
+        dataset_result = {field: records[0].get(field) for field in fields if field in records[0]}
+        existing = deepcopy(inputs["sources"][0]["records"][0])
+        incoming = deepcopy(inputs["sources"][1]["records"][0])
+        by_rloc = {existing["rloc16"]: existing}
+        _upsert_device_record(by_rloc, incoming, {})
+        collector = normalize_input_record(by_rloc[existing["rloc16"]], source="cli")
+        collector_result = {field: collector.get(field) for field in fields if field in collector}
+        assert collector_result == dataset_result, f"{case['id']} collector/dataset mismatch"
+        return dataset_result
     return project_result(records)
 
 

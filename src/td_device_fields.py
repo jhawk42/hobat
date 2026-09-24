@@ -56,7 +56,7 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "baId", "aliases": (), "transform": "identity"},
     {"path": "baState", "aliases": (), "transform": "identity"},
     {"path": "brCounters", "aliases": (), "transform": "identity"},
-    {"path": "extPanId", "aliases": ("ext_pan_id",), "transform": "identifier"},
+    {"path": "extPanId", "aliases": ("ext_pan_id", "extendedPanId", "extPanIdHex"), "transform": "identifier"},
     {"path": "networkName", "aliases": ("network_name",), "transform": "identity"},
     {"path": "deviceLabel", "aliases": ("device_label", "hostName", "hostname"), "transform": "identity"},
     {"path": "nodeId", "aliases": ("node_id",), "transform": "identity"},
@@ -146,6 +146,10 @@ def is_placeholder_ext_address(value: Any) -> bool:
         or normalized == ""
         or normalized.startswith(("found-", "unknown-", "offline-"))
     )
+
+
+def is_placeholder_device_label(value: Any) -> bool:
+    return isinstance(value, str) and value.lower().startswith(("found-", "unknown-", "offline-"))
 
 
 def _get_path(record: Mapping[str, Any], path: str) -> tuple[bool, Any]:

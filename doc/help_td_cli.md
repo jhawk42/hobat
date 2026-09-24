@@ -145,13 +145,25 @@ unavailable or non-Thread Matter node are not treated as zero values.
 ### `mdns`
 
 ```text
-td_cli mdns [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [SCOPE]
+td_cli mdns [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [--ext-pan-id ID] [SCOPE]
 ```
 
 The owning mDNS parser uses a 3-second idle timeout unless
 `TD_MDNS_BROWSE_TIMEOUT` or `--browse-timeout` overrides it. `--haptcp` adds
 `_hap._tcp.local.` for `thread` or `hap`; `--mattertcpsupported` includes
 `_matter._tcp` records whose `T=1` TXT value reports TCP support.
+`--ext-pan-id` supplies an operator identity only when the selected scope has no
+observed MeshCoP Extended PAN ID. It also works on
+`td_cli otbr-cli thread-network-info --ext-pan-id ID`; an observed value wins
+and a disagreement is logged. The `HOBAT_EXT_PAN_ID` environment fallback
+applies only at collection, never during merge. IDs accept 16 hex digits,
+`0x`-prefixed or byte-separated hex, or exact decimal text. Use strings for
+large IDs in JavaScript; unsafe numeric values lose precision.
+
+Final collector snapshots have sibling `.network.json` files containing
+provenance and the snapshot SHA-256. Merge excludes known cross-instance and
+digest-mismatched inputs, treats missing sidecars as unknown instance, and
+reports exclusions in the merge report. The merged record file remains an array.
 
 ### `process-eve`
 

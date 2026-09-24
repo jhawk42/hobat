@@ -8,6 +8,7 @@ import logging
 
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Literal, Sequence
 
 from td_const import (
@@ -49,7 +50,7 @@ from otbr_cli_networkdiag_util import (
     TLV_VALUES_CHILD_BASIC,
     fetch_ipv6_addresses,
     device_type_from_mode,
-    merge_device_record,
+    reconcile_device_record,
     get_tlv_values_for_detail_level,
 )
 from otbr_cli_networkdiag_parsers import (
@@ -319,7 +320,7 @@ def fetch_network_diag_multicast(
             # Add TLV set info to record
             device_record["tlv_values"] = tlv_values
             if extaddr in consolidated:
-                merge_device_record(consolidated[extaddr], device_record)
+                reconcile_device_record(consolidated[extaddr], device_record)
             else:
                 consolidated[extaddr] = device_record
 
@@ -687,7 +688,7 @@ def _upsert_device_record(
     Side Effects:
         Mutates records_by_rloc by either:
         - Adding incoming_record as a new entry, or
-        - Merging incoming_record into an existing entry via merge_device_record()
+        - Merging incoming_record into an existing entry via reconcile_device_record()
         - Removing old rloc16 key and adding new one if extaddr matches but rloc16 changed
         Mutates extaddr_to_rloc to track current rloc16 for each extaddr
     """
@@ -712,7 +713,7 @@ def _upsert_device_record(
             old_record = records_by_rloc.pop(existing_rloc16, None)
             if old_record:
                 # Merge old data into incoming record to preserve any data collected earlier
-                merge_device_record(incoming_record, old_record)
+                reconcile_device_record(incoming_record, old_record)
 
             # Update extaddr mapping
             extaddr_to_rloc[extaddr] = rloc16
@@ -724,7 +725,7 @@ def _upsert_device_record(
 
     if rloc16 in records_by_rloc:
         # Merge new data into existing record
-        merge_device_record(records_by_rloc[rloc16], incoming_record)
+        reconcile_device_record(records_by_rloc[rloc16], incoming_record)
     else:
         # Add new record
         records_by_rloc[rloc16] = incoming_record
@@ -1768,6 +1769,12 @@ def save_topology_to_json_file(
             if evidence_field in data:
                 network_node[evidence_field] = data[evidence_field]
 
+        if not checkpoint:
+            network_node["_source_files"] = list(dict.fromkeys([
+                *data.get("_source_files", []), Path(filename).name,
+            ]))
+            if "_merge_conflicts" in data:
+                network_node["_merge_conflicts"] = data["_merge_conflicts"]
         network_map.append(network_node)
 
     payload = [normalize_input_record(record, source="cli") for record in convert_keys_to_camel_case(network_map)]

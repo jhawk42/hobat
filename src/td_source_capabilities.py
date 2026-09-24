@@ -56,6 +56,7 @@ from util_ot_ctl import (
     TD_OTBR_CONTAINER_USE_DEFAULT,
     TD_OTBR_CONTAINER_USE_ENV,
 )
+from util_data import read_network_scope
 
 
 PROBE_TIMEOUT_SECONDS = 2.0
@@ -208,6 +209,11 @@ class SourceCapabilityService:
             filename: {"cached": (data_dir / filename).is_file(), "source": source}
             for filename, source in FILE_SOURCES.items()
         }
+        for filename, file_info in files.items():
+            if file_info["cached"]:
+                scope, _ = read_network_scope(data_dir / filename)
+                if scope is not None:
+                    file_info["networkInstance"] = scope
         sources: dict[str, object] = {}
         for source, filenames in SOURCE_FILES.items():
             cached = any(files[filename]["cached"] for filename in filenames)

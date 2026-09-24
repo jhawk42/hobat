@@ -426,6 +426,56 @@ def save_json_atomic(data, filename: str | os.PathLike, indent: int = 4, add_tra
         raise
 
 
+def network_scope_path(filename: str | os.PathLike) -> Path:
+    path = Path(filename)
+    return path.with_name(f"{path.stem}.network.json")
+
+
+def write_network_scope(filename: str | os.PathLike, scope: "NetworkScope") -> None:
+    from hashlib import sha256
+
+    path = Path(filename)
+    save_json_atomic(
+        {
+            "extPanId": scope.ext_pan_id,
+            "networkName": scope.network_name,
+            "provenance": scope.provenance,
+            "reason": scope.reason,
+            "observedAt": scope.observed_at,
+            "sources": list(scope.sources),
+            "snapshotSha256": sha256(path.read_bytes()).hexdigest(),
+        },
+        network_scope_path(path),
+        indent=2,
+        add_trailing_newline=True,
+    )
+
+
+def read_network_scope(filename: str | os.PathLike) -> tuple[dict[str, Any] | None, str | None]:
+    from hashlib import sha256
+
+    path = Path(filename)
+    sidecar = network_scope_path(path)
+    if not sidecar.exists():
+        return None, "missing-sidecar"
+    try:
+        scope = json.loads(sidecar.read_text(encoding="utf-8"))
+        if not isinstance(scope, dict) or scope.get("snapshotSha256") != sha256(path.read_bytes()).hexdigest():
+            return None, "digest-mismatch"
+        from td_network_identity import canonical_ext_pan_id
+
+        ext_pan_id = scope.get("extPanId")
+        if ext_pan_id is not None and canonical_ext_pan_id(ext_pan_id) != ext_pan_id:
+            return None, "invalid-sidecar"
+        if scope.get("provenance") not in ("observed", "operator", "unknown"):
+            return None, "invalid-sidecar"
+        if (scope["provenance"] == "unknown") != (ext_pan_id is None):
+            return None, "invalid-sidecar"
+        return scope, None
+    except (OSError, ValueError, TypeError):
+        return None, "invalid-sidecar"
+
+
 def save_final_json(
     data: Any,
     filename: str | os.PathLike[str],
@@ -434,6 +484,7 @@ def save_final_json(
     indent: int = 4,
     add_trailing_newline: bool = False,
     writer: Callable[..., None] = save_json_atomic,
+    ext_pan_id: object = None,
 ) -> bool:
     """Replace a final snapshot after complete or useful partial collection."""
     if outcome.status is CollectionStatus.FAILED or (
@@ -450,6 +501,13 @@ def save_final_json(
         writer(data, filename)
     else:
         writer(data, filename, indent=indent, add_trailing_newline=add_trailing_newline)
+    if writer is save_json_atomic and Path(filename).name.startswith(("td-otbr-cli-", "td-otbr-restapi-", "td-ha-matter-ws-", "td-mdns-scopes-", "td-eve-")):
+        from td_network_identity import resolve_network_scope
+
+        write_network_scope(
+            filename,
+            resolve_network_scope(filename, data, ext_pan_id if ext_pan_id is not None else os.environ.get("HOBAT_EXT_PAN_ID")),
+        )
     return True
 
 

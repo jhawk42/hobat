@@ -149,215 +149,78 @@ def device_type_from_mode(mode):
     return "Unknown"
 
 
-def merge_device_record(existing: dict, new: dict) -> dict:
-    """
-    Merges a newer device record into an existing one, preserving the most complete information.
+def reconcile_device_record(existing: dict, incoming: dict) -> dict:
+    from td_device_fields import FIELD_DEFINITIONS, normalize_input_record
+    from td_record_merge import append_merge_conflict, merge_lists, value_is_empty
 
-    Used when the same device responds to multiple multicast retries with different TLV data.
-    This function applies field-by-field merge rules to combine responses intelligently.
-
-    Args:
-        existing: The existing device record to merge into (mutated in place)
-        new: The new device record to merge from
-
-    Returns:
-        The updated existing dict (mutated and also returned)
-
-    Merge rules (field by field):
-        - extaddr: Keep existing (should be identical, it's the key)
-        - rloc16: Keep existing if not "Unknown", else take new
-        - device_label: Keep existing label, unless it is a discovered placeholder
-        - tlv_values: Take new if new is non-empty dict and existing is empty, else keep existing
-        - thread_stack_version: Keep existing if not "Unknown", else take new
-        - mode: Take new if new mode is non-empty and existing is empty, else keep existing
-        - ipv6_addrs: Union: merge lists, deduplicate preserving order
-        - responder_ipv6: Keep existing (first responder wins)
-        - children: Take new if new is non-empty list and existing is empty, else keep existing
-        - mac_counters: Take new if new is non-empty dict and existing is empty, else keep existing
-        - mle_counters: Take new if new is non-empty dict and existing is empty, else keep existing
-        - time_statistics: Take new if new is non-empty dict and existing is empty, else keep existing
-        - eui64: Keep existing if present, else take new
-        - connectivity: Take new if new is non-empty dict and existing is empty, else keep existing
-        - leader_data: Take new if new is non-empty dict and existing is empty, else keep existing
-        - vendor_name: Keep existing if present, else take new
-        - vendor_model: Keep existing if present, else take new
-        - vendor_sw_version: Keep existing if present, else take new
-        - route: Take new if new is non-empty dict and existing is empty, else keep existing
-    """
-    # Replace discovery placeholders when a later diagnostic returns a real identity.
-    placeholder_prefixes = ("found-", "Unknown-", "Offline-")
-    existing_extaddr = existing.get("extaddr", "")
-    new_extaddr = new.get("extaddr", "")
-    if (
-        isinstance(existing_extaddr, str)
-        and existing_extaddr.startswith(placeholder_prefixes)
-        and isinstance(new_extaddr, str)
-        and new_extaddr
-        and not new_extaddr.startswith(placeholder_prefixes)
-    ):
-        existing["extaddr"] = new_extaddr
-
-    # rloc16: keep existing if not "Unknown", else take new
-    if existing.get("rloc16") == "Unknown" and new.get("rloc16") != "Unknown":
-        existing["rloc16"] = new["rloc16"]
-
-    # Retain support for legacy Unknown- and Offline- cached placeholders.
-    existing_label = existing.get("device_label", "")
-    new_label = new.get("device_label", "")
-    existing_is_placeholder = existing_label.startswith(placeholder_prefixes)
-    new_is_placeholder = new_label.startswith(placeholder_prefixes)
-    if not existing_label and new_label:
-        existing["device_label"] = new_label
-    elif existing_is_placeholder and new_label and not new_is_placeholder:
-        existing["device_label"] = new["device_label"]
-
-    # Keep highest attempt/detail metadata, including 0 values from first-attempt success.
-    new_last_attempt_responded = new.get("last_attempt_responded")
-    existing_last_attempt_responded = existing.get("last_attempt_responded")
-    if (
-        new_last_attempt_responded is not None
-        and (
-            existing_last_attempt_responded is None
-            or new_last_attempt_responded > existing_last_attempt_responded
+    current = normalize_input_record(existing, source="cli")
+    updated = normalize_input_record(incoming, source="cli")
+    preferred_to_key = {
+        definition["path"]: next(
+            (key for key in (*definition["aliases"], definition["path"])
+             if "." not in key and (key in existing or key in incoming)),
+            definition["path"],
         )
-    ):
-        existing["last_attempt_responded"] = new_last_attempt_responded
+        for definition in FIELD_DEFINITIONS if "." not in definition["path"]
+    }
 
-    new_last_attempt_tlv_detail_level = new.get(
-        "last_attempt_tlv_detail_level")
-    existing_last_attempt_tlv_detail_level = existing.get(
-        "last_attempt_tlv_detail_level")
-    if (
-        new_last_attempt_tlv_detail_level is not None
-        and (
-            existing_last_attempt_tlv_detail_level is None
-            or new_last_attempt_tlv_detail_level > existing_last_attempt_tlv_detail_level
-        )
-    ):
-        existing["last_attempt_tlv_detail_level"] = new_last_attempt_tlv_detail_level
+    def apply(field: str, value: object) -> None:
+        key = preferred_to_key.get(field, field)
+        existing[key] = value
+        current[field] = value
 
-    # tlv_values: take new if new is non-empty dict and len new > len existing, else keep existing
-    new_tlv_values = new.get("tlv_values", {})
-    existing_tlv_values = existing.get("tlv_values", {})
-    if new_tlv_values and existing_tlv_values and len(new_tlv_values) > len(existing_tlv_values):
-        existing["tlv_values"] = new_tlv_values
+    for field in ("extAddress", "deviceLabel"):
+        old, new = current.get(field), updated.get(field)
+        placeholder = isinstance(old, str) and old.startswith(("found-", "Unknown-", "Offline-"))
+        new_is_real = isinstance(new, str) and new and not new.startswith(("found-", "Unknown-", "Offline-"))
+        if new_is_real and (value_is_empty(old) or placeholder):
+            apply(field, new)
 
-    # tlv_values: take new if new is non-empty dict and existing is empty, else keep existing
-    if not existing_tlv_values and new_tlv_values:
-        existing["tlv_values"] = new_tlv_values
+    if existing.get("rloc16") == "Unknown" and updated.get("rloc16") not in (None, "Unknown", "unknown"):
+        apply("rloc16", updated["rloc16"])
 
-    # thread_stack_version: take new if len new > len existing, else keep existing
-    new_thread_stack_version = new.get("thread_stack_version")
-    existing_thread_stack_version = existing.get("thread_stack_version")
-    if new_thread_stack_version and existing_thread_stack_version and len(new_thread_stack_version) > len(existing_thread_stack_version):
-        existing["thread_stack_version"] = new_thread_stack_version
+    for field in ("lastAttemptResponded", "lastAttemptTlvDetailLevel"):
+        new = updated.get(field)
+        old = current.get(field)
+        if new is not None and (old is None or new > old):
+            apply(field, new)
 
-    # thread_stack_version: keep existing if not "Unknown", else take new
-    if existing.get("thread_stack_version") == "Unknown" and new.get("thread_stack_version") != "Unknown":
-        existing["thread_stack_version"] = new["thread_stack_version"]
-
-    # thread_version: take new if existing is not present, else keep existing
-    if not existing.get("thread_version") and new.get("thread_version"):
-        existing["thread_version"] = new["thread_version"]
-
-    # ver: take new if existing is not present", else keep existing
-    if not existing.get("ver") and new.get("ver"):
-        existing["ver"] = new["ver"]
-
-    # mode: take new if new mode is non empty even if existing is not empty, else keep existing
-    if new.get("mode"):
-        existing["mode"] = new["mode"]
-
-    # ipv6_addrs: union merge, deduplicate preserving order
-    if existing.get("ipv6_addrs") and new.get("ipv6_addrs"):
-        # Merge lists, deduplicate while preserving order
-        seen = set(existing["ipv6_addrs"])
-        for addr in new["ipv6_addrs"]:
-            if addr not in seen:
-                existing["ipv6_addrs"].append(addr)
-                seen.add(addr)
-    elif new.get("ipv6_addrs"):
-        existing["ipv6_addrs"] = new["ipv6_addrs"]
-
-    # omr_ipv6_addr: keep existing (first responder wins)
-    if not existing.get("omr_ipv6_addr") and new.get("omr_ipv6_addr"):
-        existing["omr_ipv6_addr"] = new["omr_ipv6_addr"]
-
-    # is_router: take new if new is True and existing is not True, else keep existing
-    if new.get("is_router") and not existing.get("is_router"):
-        existing["is_router"] = new["is_router"]
-        existing["role"] = "router"
-
-    # is_border_router: take new if new if True and existing is None or False or "Unknown", else keep existing
-    new_is_border_router = new.get("is_border_router")
-    existing_is_border_router = existing.get("is_border_router")
-    if new_is_border_router and (not existing_is_border_router or existing_is_border_router is None or existing_is_border_router == "Unknown"):
-        existing["is_border_router"] = new_is_border_router
-        existing["type"] = "border router"
-
-    # "br": take new if new is non-empty dict and existing is empty, else keep existing
-    if not existing.get("br") and new.get("br"):
-        existing["br"] = new["br"]
-
-    # "type": (take new if new is non-empty and existing is empty) or (take new if new is "border router" and existing is "router", else keep existing)
-    new_type = new.get("type")
-    existing_type = existing.get("type")
-    if (not existing_type and new_type) or (existing_type == "router" and new_type == "border router"):
-        existing["type"] = new_type
-
-    # "role": (take new if new is non-empty and existing is empty) or (take new if new is "border router" and existing is "router", else keep existing)
-    new_role = new.get("role")
-    existing_role = existing.get("role")
-    if (not existing_role and new_role) or (existing_role == "router" and new_role == "border router"):
-        existing["role"] = new_role
-
-    # "leader": take new if new is non-empty and existing is empty, else keep existing
-    if not existing.get("leader") and new.get("leader"):
-        existing["leader"] = new["leader"]
-
-    # route: take new if new is non-empty dict even if existing is not empty, else keep existing
-    if new.get("route"):
-        existing["route"] = new["route"]
-
-    # children: take new if new is non-empty list even if existing is not empty, else keep existing
-    if new.get("children"):
-        existing["children"] = new["children"]
-        existing["total_children"] = len(existing["children"])
-
-    # mac_counters: take new if new is non-empty dict and existing is empty
-    if not existing.get("mac_counters") and new.get("mac_counters"):
-        existing["mac_counters"] = new["mac_counters"]
-
-    # mle_counters: take new if new is non-empty dict and existing is empty
-    if not existing.get("mle_counters") and new.get("mle_counters"):
-        existing["mle_counters"] = new["mle_counters"]
-
-    # time_statistics: take new if new is non-empty dict and existing is empty
-    if not existing.get("time_statistics") and new.get("time_statistics"):
-        existing["time_statistics"] = new["time_statistics"]
-
-    # eui64: keep existing if present, else take new
-    if not existing.get("eui64") and new.get("eui64"):
-        existing["eui64"] = new["eui64"]
-
-    # connectivity: take new if new is non-empty dict and existing is empty
-    if not existing.get("connectivity") and new.get("connectivity"):
-        existing["connectivity"] = new["connectivity"]
-
-    # leader_data: take new if new is non-empty dict and existing is empty
-    if not existing.get("leader_data") and new.get("leader_data"):
-        existing["leader_data"] = new["leader_data"]
-
-    # vendor_name: keep existing if present, else take new
-    if not existing.get("vendor_name") and new.get("vendor_name"):
-        existing["vendor_name"] = new["vendor_name"]
-
-    # vendor_model: keep existing if present, else take new
-    if not existing.get("vendor_model") and new.get("vendor_model"):
-        existing["vendor_model"] = new["vendor_model"]
-
-    # vendor_sw_version: keep existing if present, else take new
-    if not existing.get("vendor_sw_version") and new.get("vendor_sw_version"):
-        existing["vendor_sw_version"] = new["vendor_sw_version"]
-
+    for field, new in updated.items():
+        if field in ("extAddress", "deviceLabel", "rloc16", "lastAttemptResponded", "lastAttemptTlvDetailLevel"):
+            continue
+        old = current.get(field)
+        if field == "ipv6Addresses" and isinstance(new, list):
+            if new:
+                apply(field, merge_lists(old if isinstance(old, list) else [], new))
+        elif field in ("mode", "route", "children"):
+            if not value_is_empty(new):
+                apply(field, incoming.get(preferred_to_key.get(field, field), new))
+                if field == "children":
+                    apply("totalChildren", len(new))
+        elif field in ("isRouter", "isBorderRouter"):
+            if new is True and old is not True:
+                apply(field, new)
+                if field == "isRouter":
+                    apply("role", "router")
+                else:
+                    apply("type", "border router")
+        elif field in ("type", "role"):
+            if not value_is_empty(new) and (value_is_empty(old) or (old == "router" and new == "border router")):
+                apply(field, new)
+        elif field == "tlvValues" and isinstance(new, dict):
+            if value_is_empty(old) or (isinstance(old, dict) and len(new) > len(old)):
+                if new:
+                    apply(field, new)
+        elif field == "threadStackVersion":
+            if not value_is_empty(new) and (value_is_empty(old) or old == "Unknown" or len(str(new)) > len(str(old))):
+                apply(field, new)
+        elif not value_is_empty(new):
+            if value_is_empty(old) or old == "Unknown":
+                apply(field, new)
+            elif old != new and not isinstance(new, (dict, list)):
+                append_merge_conflict(existing, field, old, new)
+    for source in incoming.get("_source_files", []):
+        sources = existing.setdefault("_source_files", [])
+        if source not in sources:
+            sources.append(source)
     return existing

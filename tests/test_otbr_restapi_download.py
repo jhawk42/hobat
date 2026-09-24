@@ -149,7 +149,9 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
             sorted(output_filenames),
             [
                 "td-otbr-restapi-dataset-active.json",
+                "td-otbr-restapi-dataset-active.network.json",
                 "td-otbr-restapi-diagnostics.json",
+                "td-otbr-restapi-diagnostics.network.json",
             ],
         )
 
@@ -292,8 +294,8 @@ class TdGetOtbrRestApiTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            output_filenames,
-            ["td-otbr-restapi-diagnostic-ok.json"],
+            sorted(output_filenames),
+            ["td-otbr-restapi-diagnostic-ok.json", "td-otbr-restapi-diagnostic-ok.network.json"],
         )
 
     def test_diagnostics_skip_empty_device_collection(self) -> None:

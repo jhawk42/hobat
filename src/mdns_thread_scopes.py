@@ -249,6 +249,9 @@ class MDNSDumpListener(ServiceListener):
             "xa", {}).get("hex", None)
         if extaddr is not None:
             retobj["extAddress"] = extaddr
+        ext_pan_id = service_info.get("properties", {}).get("xp", {}).get("hex")
+        if ext_pan_id is not None and type_ == "_meshcop._udp.local.":
+            retobj["extPanId"] = ext_pan_id
             
         # promote BR role to top level for easier access
         decoded_mn = service_info.get("properties", {}).get("mn", {}).get("decoded", None)
@@ -444,6 +447,7 @@ options:
         help="Scope filter: thread | br | hap | matter  (default: thread scopes)",
     )
     parser.add_argument("--datadir", default=None, help=TD_DATA_DIR_ARG_HELP)
+    parser.add_argument("--ext-pan-id", default=None, help="Extended PAN ID to use when not observed")
     parser.add_argument(
         "--browse-timeout",
         type=float,
@@ -573,6 +577,7 @@ options:
             CollectionWriteOutcome.complete(valid_empty_reason="completed-browse"),
             indent=2,
             writer=save_json_atomic,
+            ext_pan_id=args.ext_pan_id,
         )
 
         logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
