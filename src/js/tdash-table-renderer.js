@@ -314,14 +314,15 @@ export function collectColumns(rows) {
   const seen = new Set();
   rows.forEach((row) => {
     Object.keys(row).forEach((key) => {
-      if (!seen.has(key)) {
-        seen.add(key);
-        columns.push(key);
+      const preferred = getPreferredFieldName(key);
+      if (!seen.has(preferred)) {
+        seen.add(preferred);
+        columns.push(preferred);
       }
     });
   });
   const healthColumns = _tableHealthByDeviceId.size > 0 ? HEALTH_COLUMNS : [];
-  const pinned = [...new Set(TABLE_PRIORITY_COLUMNS)].filter(
+  const pinned = [...new Set(TABLE_PRIORITY_COLUMNS.map(getPreferredFieldName))].filter(
     (col) => seen.has(col) || rows.some((row) => hasNestedPath(row, col)),
   );
   const remaining = columns.filter((col) => !pinned.includes(col));

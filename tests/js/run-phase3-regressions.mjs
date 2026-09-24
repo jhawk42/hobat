@@ -33,6 +33,11 @@ assert.equal(rangeEvaluation.metric, -75);
 assert.deepEqual(rangeEvaluation.matchedRecords, [{ averageRssi: -75 }]);
 
 assert.deepEqual(collectColumns([{ rloc16: "0x1000", room: "Lab" }]).filter((column) => column === "room"), ["room"]);
+assert.deepEqual(
+  collectColumns([{ br: true, ver: "1.2" }, { isBorderRouter: true, version: "1.3" }])
+    .filter((column) => ["br", "isBorderRouter", "ver", "version"].includes(column)),
+  ["isBorderRouter", "version"],
+);
 assert.equal(getTableFilterLabel(null, "All nodes"), "All nodes");
 assert.equal(getTableFilterLabel({ selectedOptions: [] }, "All diagnostics"), "All diagnostics");
 assert.equal(getTableFilterLabel({ selectedOptions: [{ text: "Routers" }] }, "All nodes"), "Routers");

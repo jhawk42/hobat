@@ -19,11 +19,9 @@ def test_utils_exposes_route_container_canonicalization() -> None:
     assert "canonicalizeRouteContainer" in text
     assert "dropLegacyRouteData" in text
 
-    # Canonical route object should drop nested legacy route_data key.
-    assert "delete normalizedRoute.route_data;" in text
-
-    # Legacy route_data arrays must be mapped into canonical routeData.
-    assert "_getOwnPropertyValueByAlias(routeSource, \"routeData\") ?? routeSource.route_data" in text
+    # Route entries and container aliases use the canonical field model.
+    assert "normalizeInputRecord({ route: routeSource }).route" in text
+    assert "routeSource.routeData !== undefined && routeSource.route_data !== undefined" in text
 
     # Optional top-level cleanup of legacy route_data container.
     assert "delete result.route_data;" in text

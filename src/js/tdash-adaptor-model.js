@@ -1,5 +1,6 @@
 import {
   getDeviceIdentityKeys,
+  getPreferredFieldPath,
   normalizeInputRecord,
 } from "./tdash-device-fields.js";
 
@@ -16,6 +17,24 @@ function mergeMissing(existing, incoming) {
     }
   });
   return merged;
+}
+
+function removeDuplicateAliases(record) {
+  const result = { ...record };
+  const preferredKeys = new Map();
+  for (const key of Object.keys(result)) {
+    const preferred = getPreferredFieldPath(key);
+    const retained = preferredKeys.get(preferred);
+    if (retained === undefined) {
+      preferredKeys.set(preferred, key);
+    } else if (key === preferred) {
+      delete result[retained];
+      preferredKeys.set(preferred, key);
+    } else {
+      delete result[key];
+    }
+  }
+  return result;
 }
 
 function addSourceName(model, sourceName) {
@@ -199,8 +218,8 @@ export function emitAdaptorResult(model) {
   const nodeData = [];
   const nodeMap = new Map();
   model.devicesById.forEach((device, deviceId) => {
-    nodeData.push({ ...device.presentation, id: deviceId });
-    nodeMap.set(deviceId, device.nodeRecord);
+    nodeData.push(removeDuplicateAliases({ ...device.presentation, id: deviceId }));
+    nodeMap.set(deviceId, removeDuplicateAliases(device.nodeRecord));
   });
   const edgeData = model.relationships.map((relationship) => ({
     ...relationship.presentation,

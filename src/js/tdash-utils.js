@@ -1,8 +1,10 @@
 import {
-  FIELD_ALIASES,
   DEVICE_DETAILS_SECTIONS,
 } from "./tdash-constants.js";
 import {
+  getFieldNameCandidates,
+  getPreferredFieldPath,
+  normalizeNestedMetricFields,
   getCanonicalExtAddress,
   getCanonicalOmrAddress,
   getCanonicalRloc16 as getDeviceCanonicalRloc16,
@@ -47,32 +49,8 @@ export function getCanonicalOmrIpv6Address(row) {
 
 // ── Field-name normalisation helpers ─────────────────────────────────────────
 
-// Build reverse lookup once at module load: alias → canonical name.
-const _ALIAS_TO_CANONICAL = (() => {
-  const map = new Map();
-  Object.entries(FIELD_ALIASES).forEach(([canonical, aliases]) => {
-    aliases.forEach((alias) => map.set(alias, canonical));
-  });
-  return map;
-})();
-
-function _getFieldNameCandidates(fieldName) {
-  const canonical = getCanonicalFieldName(fieldName);
-  const canonicalAliases = FIELD_ALIASES[canonical] ?? [];
-  const aliasCanonical = _ALIAS_TO_CANONICAL.get(fieldName);
-  const aliasCanonicalAliases = aliasCanonical
-    ? FIELD_ALIASES[aliasCanonical] ?? []
-    : [];
-  return [...new Set([
-    fieldName,
-    canonical,
-    ...canonicalAliases,
-    ...aliasCanonicalAliases,
-  ])];
-}
-
 function _getOwnPropertyValueByAlias(obj, fieldName) {
-  for (const candidate of _getFieldNameCandidates(fieldName)) {
+  for (const candidate of getFieldNameCandidates(fieldName)) {
     if (Object.prototype.hasOwnProperty.call(obj, candidate)) {
       return obj[candidate];
     }
@@ -80,45 +58,8 @@ function _getOwnPropertyValueByAlias(obj, fieldName) {
   return undefined;
 }
 
-/** Returns the legacy canonical key from FIELD_ALIASES, or the name itself if unknown. */
-export function getCanonicalFieldName(fieldName) {
-  return _ALIAS_TO_CANONICAL.get(fieldName) ?? fieldName;
-}
-
-/**
- * Returns the preferred frontend field name for Phase 2 (camelCase-first).
- * Falls back to the legacy canonical key when no alias mapping exists.
- */
 export function getPreferredFieldName(fieldName) {
-  const legacyCanonical = getCanonicalFieldName(fieldName);
-  const preferredAliases = FIELD_ALIASES[legacyCanonical] ?? [];
-  return preferredAliases[0] ?? legacyCanonical;
-}
-
-/**
- * Returns a shallow copy of `row` with both preferred camelCase and legacy
- * canonical keys added alongside aliases. Existing keys are never overwritten.
- */
-export function normalizeFieldNames(row) {
-  if (!isPlainObject(row)) return row;
-  const result = { ...row };
-  Object.entries(row).forEach(([key, value]) => {
-    const legacyCanonical = getCanonicalFieldName(key);
-    const preferred = getPreferredFieldName(key);
-    if (preferred !== key && !(preferred in result)) result[preferred] = value;
-    if (legacyCanonical !== key && !(legacyCanonical in result)) {
-      result[legacyCanonical] = value;
-    }
-  });
-  return result;
-}
-
-function _normalizeRouteEntries(routeEntries) {
-  if (!Array.isArray(routeEntries)) return [];
-  return routeEntries.map((entry) => {
-    if (!isPlainObject(entry)) return entry;
-    return normalizeFieldNames(entry);
-  });
+  return getPreferredFieldPath(fieldName);
 }
 
 /**
@@ -166,19 +107,13 @@ export function normalizeRouteContainer(row, options = {}) {
       });
     }
 
-    const routeDataSource =
-      _getOwnPropertyValueByAlias(routeSource, "routeData") ?? routeSource.route_data;
-    const routeData = _normalizeRouteEntries(routeDataSource);
-    const idSequence = _getOwnPropertyValueByAlias(routeSource, "idSequence");
-    const normalizedRoute = normalizeFieldNames(routeSource);
-
-    normalizedRoute.routeData = routeData;
-    if (idSequence !== undefined && !Object.prototype.hasOwnProperty.call(normalizedRoute, "idSequence")) {
-      normalizedRoute.idSequence = idSequence;
+    const normalizedRoute = normalizeInputRecord({ route: routeSource }).route;
+    if (routeSource.routeData !== undefined && routeSource.route_data !== undefined) {
+      normalizedRoute.routeData = normalizeInputRecord({ route: { routeData: routeSource.routeData } }).route.routeData;
     }
-
-    // Canonical container keeps routeData only.
-    delete normalizedRoute.route_data;
+    if (routeSource.idSequence !== undefined && routeSource.id_sequence !== undefined) {
+      normalizedRoute.idSequence = routeSource.idSequence;
+    }
 
     result.route = normalizedRoute;
   }
@@ -192,21 +127,20 @@ export function normalizeRouteContainer(row, options = {}) {
 
 /**
  * Normalizes field names for objects within an array (e.g., neighbor/child tables).
- * Applies normalizeFieldNames to each object and handles percentage field conversion.
+ * Normalizes each object and handles percentage field conversion.
  * 
  * For fields ending with "_pct", if the source value is a decimal (0-1), it's
  * converted to percentage (0-100). This ensures REST API decimal error rates
  * (e.g., 0.061) are converted to percentages (6.1) to match filter thresholds.
  * 
  * @param {Array} arr - Array of objects to normalize
- * @returns {Array} New array with normalized objects containing both camelCase
- *                  preferred names and legacy aliases
+ * @returns {Array} New array with normalized objects
  */
 export function normalizeNestedArrayFields(arr) {
   if (!Array.isArray(arr)) return arr;
   return arr.map(item => {
     if (!isPlainObject(item)) return item;
-    const normalized = normalizeFieldNames(item);
+    const normalized = normalizeNestedMetricFields(normalizeInputRecord(item));
     
     // Handle percentage field conversion for link quality metrics
     // If a canonical field ends with _pct and its value is decimal (0-1), multiply by 100

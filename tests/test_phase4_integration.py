@@ -21,7 +21,6 @@ from copy import deepcopy
 from merge_dataset import (
     deep_merge,
     build_merged_records,
-    normalize_field_names_in_record,
     get_partition_id,
     is_sequence_newer,
     merge_route_data,

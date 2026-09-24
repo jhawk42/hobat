@@ -14,7 +14,6 @@ import {
   mergeForDisplay,
   getColumnValue,
   normalizeNestedArrayFields,
-  normalizeFieldNames,
 } from './tdash-utils.js';
 import {
   chooseNodeId, buildLabel,
@@ -326,7 +325,7 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
       // Child nodes (ellipse shape) should always use child color, not router default
       merged.color = NODE_COLORS.child;
     }
-    nodeMap.set(nodeId, normalizeFieldNames(merged));
+    nodeMap.set(nodeId, merged);
   }
 
   function ensureNode(nodeId, rawNode, style) {
@@ -712,7 +711,7 @@ export function adaptEve(fileMap) {
       // Child nodes (ellipse shape) should always use child color
       merged.color = NODE_COLORS.child;
     }
-    nodeMap.set(nodeId, normalizeFieldNames(merged));
+    nodeMap.set(nodeId, merged);
   }
 
   eveArray.forEach((node) => {
@@ -811,10 +810,10 @@ export function adaptEveNative(fileMap) {
     const merged = {
       id: nodeId,
       name: toText(rawNode.name) || (existing ? existing.name : ''),
-      device_label: toText(rawNode.device_label) || toText(rawNode.name) || (existing ? existing.device_label : ''),
+      deviceLabel: toText(rawNode.deviceLabel || rawNode.device_label) || toText(rawNode.name) || (existing ? existing.deviceLabel : ''),
       rloc16: rloc16Hex,
       source_id: toText(rawNode.id) || (existing ? existing.source_id : ''),
-      extaddr: toText(rawNode.extaddr) || (existing ? existing.extaddr : ''),
+      extAddress: toText(rawNode.extAddress || rawNode.extaddr) || (existing ? existing.extAddress : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
       role: toText(rawNode.role).trim().toLowerCase() || (existing ? existing.role : ''),
       room: toText(rawNode.room) || (existing ? existing.room : ''),
@@ -837,7 +836,7 @@ export function adaptEveNative(fileMap) {
       // Child nodes (ellipse shape) should always use child color
       merged.color = NODE_COLORS.child;
     }
-    nodeMap.set(nodeId, normalizeFieldNames(merged));
+    nodeMap.set(nodeId, merged);
   }
 
   // Pass 1: register all nodes
@@ -1036,7 +1035,7 @@ export function adaptThreadToolsNative(fileMap) {
       merged.color = NODE_COLORS.child;
     }
 
-    nodeMap.set(nodeId, normalizeFieldNames(merged));
+    nodeMap.set(nodeId, merged);
     if (merged.rloc16) rloc16ToNodeId.set(merged.rloc16.toLowerCase(), nodeId);
   }
 
@@ -1376,7 +1375,7 @@ export function adaptMergedDetailed(fileMap) {
     };
     merged.isFtdRouter = merged.modeDevice === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
     if (merged.br) merged.color = NODE_COLORS.borderRouter;
-    nodeMap.set(nodeId, normalizeFieldNames(merged));
+    nodeMap.set(nodeId, merged);
   }
 
   function ensureNodeForLink(linkNode, fallbackId) {
@@ -1830,7 +1829,7 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
       type: roleText || toText(rawNode.type) || (existing ? existing.type : ''),
       role: roleText || (existing ? existing.role : ''),
       modeDevice: modeDevice || (existing ? existing.modeDevice || existing.mode_device : ''),
-      omrIpv6Addr: toText(rawNode.omr_ipv6_addr) || (existing ? existing.omrIpv6Addr || existing.omr_ipv6_addr : ''),
+      omrIpv6Address: getCanonicalOmrIpv6Address(rawNode) || (existing ? existing.omrIpv6Address : ''),
       ifTotalErrorsTotalPktsRatio: getRawMetric('macCounters.ifTotalErrorsTotalPktsRatio')
         ?? (existing ? existing.ifTotalErrorsTotalPktsRatio || existing.iftotalerrors_totalpkts_ratio : undefined),
       ifTotalDiscardsTotalPktsRatio: getRawMetric('macCounters.ifTotalDiscardsTotalPktsRatio')
@@ -1856,7 +1855,7 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
     };
     merged.isFtdRouter = merged.modeDevice === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
     if (merged.br) merged.color = NODE_COLORS.borderRouter;
-    nodeMap.set(nodeId, normalizeFieldNames(merged));
+    nodeMap.set(nodeId, merged);
   }
 
   // Pass 1: register nodes from devices (extAddress as node ID)

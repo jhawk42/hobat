@@ -96,6 +96,31 @@ export const PREFERRED_FIELD_NAMES = Object.freeze(
   ),
 );
 
+const FIELD_DEFINITIONS_BY_PATH = Object.fromEntries(
+  FIELD_DEFINITIONS.map((definition) => [definition.path, definition]),
+);
+
+export function getPreferredFieldPath(name) {
+  return PREFERRED_FIELD_NAMES[name] ?? name;
+}
+
+export function getFieldNameCandidates(name) {
+  const path = getPreferredFieldPath(name);
+  const definition = FIELD_DEFINITIONS_BY_PATH[path];
+  return definition ? [...new Set([path, ...definition.aliases])] : [name];
+}
+
+export function normalizeNestedMetricFields(record) {
+  const result = { ...record };
+  for (const [alias, preferred] of [["frameErrorRate", "err_rate_frame_pct"], ["messageErrorRate", "err_rate_msg_pct"]]) {
+    if (alias in result) {
+      if (!(preferred in result)) result[preferred] = result[alias];
+      delete result[alias];
+    }
+  }
+  return result;
+}
+
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }

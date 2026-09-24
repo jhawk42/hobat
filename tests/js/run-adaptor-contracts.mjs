@@ -7,6 +7,7 @@ import {
   runAdaptor,
 } from "../../src/js/tdash-adaptors.js";
 import { projectObservedTopologyLinkCounts } from "../../src/js/tdash-adaptor-model.js";
+import { getPreferredFieldPath } from "../../src/js/tdash-device-fields.js";
 
 
 function run(adaptor, files, rawFiles, rows = []) {
@@ -14,6 +15,14 @@ function run(adaptor, files, rawFiles, rows = []) {
 }
 
 function assertResult(result, expected) {
+  for (const record of [...result.nodeData, ...result.nodeMap.values()]) {
+    const seen = new Set();
+    for (const field of Object.keys(record)) {
+      const preferred = getPreferredFieldPath(field);
+      assert.ok(!seen.has(preferred), `duplicate preferred field ${preferred} on ${record.id}`);
+      seen.add(preferred);
+    }
+  }
   assert.deepEqual(result.nodeData.map((node) => node.id), expected.nodeIds);
   assert.deepEqual(
     result.edgeData.map((edge) => [edge.from, edge.to, edge.linkCategories]),

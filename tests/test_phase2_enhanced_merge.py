@@ -16,11 +16,10 @@ from pathlib import Path
 from copy import deepcopy
 
 import pytest
+from td_device_fields import PREFERRED_FIELD_NAMES, normalize_input_record
 
 # Add src directory to path
 from merge_dataset import (
-    get_canonical_field_name,
-    normalize_field_names_in_record,
     is_sequence_newer,
     compare_sequences,
     get_partition_id,
@@ -35,13 +34,9 @@ def test_field_normalization():
     """Test field name normalization."""
     print("\n=== Test: Field Name Normalization ===")
     
-    # Test canonical field name resolution
-    assert get_canonical_field_name("extaddr") == "extaddr"
-    assert get_canonical_field_name("extAddress") == "extaddr"
-    assert get_canonical_field_name("Extended MAC") == "extaddr"
-    assert get_canonical_field_name("route") == "route"
-    assert get_canonical_field_name("id_sequence") == "id_sequence"
-    assert get_canonical_field_name("idSequence") == "id_sequence"
+    assert PREFERRED_FIELD_NAMES["extaddr"] == "extAddress"
+    assert PREFERRED_FIELD_NAMES["Extended MAC"] == "extAddress"
+    assert PREFERRED_FIELD_NAMES["router_id"] == "routerId"
     
     # Test record normalization
     record = {
@@ -49,13 +44,12 @@ def test_field_normalization():
         "routerId": "0x05",
         "omrIpv6Address": "fd00::1",
     }
-    normalized = normalize_field_names_in_record(record)
-    assert "extaddr" in normalized
-    assert "router_id" in normalized
-    assert "omrIpv6Address" in normalized  # camelCase is the canonical form for this field
-    # Original keys preserved
+    normalized = normalize_input_record(record)
     assert "extAddress" in normalized
     assert "routerId" in normalized
+    assert "omrIpv6Address" in normalized
+    assert "extaddr" not in normalized
+    assert "router_id" not in normalized
     
     print("✅ PASS: Field normalization works correctly")
 

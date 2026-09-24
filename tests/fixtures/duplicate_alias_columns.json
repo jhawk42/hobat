@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {"source": "otbr-cli", "input": {"extaddr": "AA11", "extAddress": "BB22", "total_children": 2, "totalChildren": 3, "children": [{"extaddr": "CC33", "extAddress": "DD44"}]}, "expected": {"extAddress": "bb22", "totalChildren": 3, "children": [{"extAddress": "dd44"}]}},
+    {"source": "otbr-restapi", "input": {"thread_version": "1.2", "threadVersion": "1.3", "router_neighbor_table": [{"extaddr": "AA11"}], "routerNeighbors": [{"extAddress": "BB22"}]}, "expected": {"threadVersion": "1.3", "routerNeighbors": [{"extAddress": "bb22"}]}},
+    {"source": "ha-matter-ws", "input": {"router_child_table": [{"extaddr": "AA11"}], "childTable": [{"extAddress": "BB22"}], "total_links": 4, "totalLinks": 5}, "expected": {"childTable": [{"extAddress": "bb22"}], "totalLinks": 5}},
+    {"source": "eve", "input": {"extaddr": "AA11", "thread_version": "1.2", "router_neighbor_table": [{"extaddr": "BB22"}]}, "expected": {"extAddress": "aa11", "threadVersion": "1.2", "routerNeighbors": [{"extAddress": "bb22"}]}},
+    {"source": "mdns", "input": {"extaddr": "AA11", "router_neighbor_table": [{"extaddr": "BB22"}]}, "expected": {"extAddress": "aa11", "routerNeighbors": [{"extAddress": "bb22"}]}}
+  ]
+}
