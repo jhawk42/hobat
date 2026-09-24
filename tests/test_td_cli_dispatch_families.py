@@ -15,6 +15,29 @@ def _dispatch(argv: list[str]) -> int:
 
 
 @pytest.mark.parametrize(
+    ("argv", "usage"),
+    [
+        (["health"], "usage: td_cli health"),
+        (["system"], "usage: td_cli system"),
+        (["system", "backups"], "usage: td_cli system backups"),
+        (["system", "device"], "usage: td_cli system device"),
+    ],
+)
+def test_command_without_subcommand_prints_help(argv, usage, capsys):
+    assert td_cli.main(argv) == 0
+
+    assert usage in capsys.readouterr().out
+
+
+def test_mdns_without_scope_prints_help_without_browsing(capsys):
+    with patch.object(td_cli.mdns_thread_scopes, "main") as mdns_main:
+        assert td_cli.main(["mdns"]) == 0
+
+    mdns_main.assert_not_called()
+    assert "usage: td_cli mdns" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
     ("argv", "module_name", "expected_argv"),
     [
         (

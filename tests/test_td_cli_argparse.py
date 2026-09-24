@@ -74,10 +74,10 @@ class TestTopLevelCommands(unittest.TestCase):
         self.assertEqual(args.command, "otbr-restapi")
         self.assertEqual(args.restapi_command, "download")
 
-    def test_mdns_defaults(self):
+    def test_mdns_without_scope_does_not_select_default_scope(self):
         args = _parse(["mdns"])
         self.assertEqual(args.command, "mdns")
-        self.assertEqual(args.mdns_scope, "thread")
+        self.assertIsNone(args.mdns_scope)
         self.assertIsNone(args.browse_timeout)
         self.assertFalse(args.haptcp)
         self.assertFalse(args.mattertcpsupported)

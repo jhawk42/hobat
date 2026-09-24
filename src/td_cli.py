@@ -268,9 +268,8 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
     mdns_p.add_argument(
         "mdns_scope",
         nargs="?",
-        default="thread",
         choices=["thread", "br", "hap", "matter"],
-        help="mDNS scope to query (default: thread)",
+        help="mDNS scope to query; provide one to run a scan",
     )
     mdns_p.add_argument(
         "--browse-timeout",
@@ -384,7 +383,7 @@ def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
         "health",
         help="Thread network health commands",
     )
-    health_commands = health.add_subparsers(dest="health_command", required=True)
+    health_commands = health.add_subparsers(dest="health_command", required=False)
     health_commands.add_parser(
         "process-dataset",
         help="Assess approved cached Thread datasets",
@@ -402,13 +401,13 @@ def _add_process_commands(subparsers: argparse._SubParsersAction) -> None:
 def _add_system_commands(subparsers: argparse._SubParsersAction) -> None:
     """Build routing-only system administration commands."""
     system = subparsers.add_parser("system", help="Hobat system administration")
-    system_commands = system.add_subparsers(dest="system_command", required=True)
+    system_commands = system.add_subparsers(dest="system_command", required=False)
     backups = system_commands.add_parser("backups", help="Create or restore backups")
-    backup_actions = backups.add_subparsers(dest="backup_action", required=True)
+    backup_actions = backups.add_subparsers(dest="backup_action", required=False)
     backup_actions.add_parser("create", help="Create a data-directory backup", add_help=False)
     backup_actions.add_parser("restore", help="Restore a data-directory backup", add_help=False)
     device = system_commands.add_parser("device", help="Host device diagnostic commands")
-    device_actions = device.add_subparsers(dest="device_action", required=True)
+    device_actions = device.add_subparsers(dest="device_action", required=False)
     device_actions.add_parser("ping", help="Probe one literal IP address", add_help=False)
 
 
@@ -892,7 +891,9 @@ def _dispatch_otbr_cli(
 def _dispatch_mdns(
     args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
 ) -> int:
-    del parser
+    if args.mdns_scope is None:
+        _print_child_subparser_help(parser, "mdns")
+        return 0
     mdns_argv: list[str] = [getattr(args, "mdns_scope", "thread")]
     if getattr(args, "browse_timeout", None) is not None:
         mdns_argv += ["--browse-timeout", str(args.browse_timeout)]
@@ -958,7 +959,9 @@ def _dispatch_process_eve(
 def _dispatch_health(
     args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
 ) -> int:
-    del parser
+    if args.health_command is None:
+        _print_child_subparser_help(parser, "health")
+        return 0
     return _normalize_module_rc(
         td_health_cli.main(
             _forward_with_datadir(args, [args.health_command] + extra_args)
@@ -970,7 +973,18 @@ def _dispatch_health(
 def _dispatch_system(
     args: argparse.Namespace, extra_args: list[str], parser: argparse.ArgumentParser
 ) -> int:
-    del parser
+    if args.system_command is None:
+        _print_child_subparser_help(parser, "system")
+        return 0
+    system_parser = _find_child_subparser(parser, "system")
+    if args.system_command == "backups" and args.backup_action is None:
+        if system_parser is not None:
+            _print_child_subparser_help(system_parser, "backups")
+        return 0
+    if args.system_command == "device" and args.device_action is None:
+        if system_parser is not None:
+            _print_child_subparser_help(system_parser, "device")
+        return 0
     action = (
         [args.system_command, args.device_action]
         if args.system_command == "device"
