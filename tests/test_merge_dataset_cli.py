@@ -91,6 +91,29 @@ def test_resolve_input_groups_preserves_group_and_file_order() -> None:
     assert resolved[-1] == "td-otbr-restapi-devices.json"
 
 
+def test_catalog_groups_preserve_legacy_file_order() -> None:
+    expected = {
+        "system": ["td-static-extaddr-device-label.json"],
+        "otbr-cli": [
+            "td-otbr-cli-router-table.json", "td-otbr-cli-meshdiag-topology.json",
+            "td-otbr-cli-networkdiag-fetch-all.json", "td-otbr-cli-networkdiag-multicast-network.json",
+            "td-otbr-cli-meshdiag-router-neighbortables.json", "td-otbr-cli-meshdiag-router-childtables.json",
+        ],
+        "otbr-restapi": [
+            "td-otbr-restapi-devices-fetch.json", "td-otbr-restapi-diagnostics-fetch-all.json",
+            "td-otbr-restapi-mesh-diagnostics-fetch-all.json", "td-otbr-restapi-devices-list.json",
+            "td-otbr-restapi-diagnostics-list.json", "td-otbr-restapi-diagnostics.json",
+            "td-otbr-restapi-devices.json",
+        ],
+        "ha-matter-ws": ["td-ha-matter-ws-topology.json"],
+        "mdns": ["td-mdns-scopes-br.json", "td-mdns-scopes-hap.json"],
+        "eve": ["td-eve-topology.json"],
+    }
+    expected["full"] = [file for group in ("otbr-cli", "otbr-restapi", "ha-matter-ws", "mdns")
+                        for file in expected[group]]
+    assert {group: resolve_input_groups([group]) for group in expected} == expected
+
+
 def test_resolve_input_groups_rejects_unknown_names() -> None:
     with pytest.raises(ValueError, match=r"Unknown input group\(s\): missing"):
         resolve_input_groups(["missing"])

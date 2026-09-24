@@ -116,9 +116,10 @@ def extract_roster_facts(
         return ()
     facts: list[RosterFact] = []
     for field, sources in policy.sources.items():
-        rank = sources.get(filename)
-        if rank is None:
+        if filename not in sources:
             continue
+        from td_source_authority import field_rank
+        rank = field_rank(field, filename, policy=policy)
         value = _validated(field, _source_value(record, field), policy)
         if value is None:
             continue

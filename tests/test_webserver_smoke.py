@@ -51,6 +51,21 @@ class SmokeTestBase(unittest.IsolatedAsyncioTestCase):
         self._tmpdir.cleanup()
 
 
+class TestCatalogApi(SmokeTestBase):
+    async def test_returns_startup_catalog_without_caching(self) -> None:
+        from td_dataset_catalog import load_dataset_catalog
+
+        catalog = load_dataset_catalog()
+        request = MagicMock()
+        request.app = {td_webserver.TD_CATALOG_APP_KEY: catalog}
+
+        response = await td_webserver.handle_catalog_api(request)
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(json.loads(response.body), catalog)
+
+
 # ---------------------------------------------------------------------------
 # Path A — STATIC file served
 # ---------------------------------------------------------------------------

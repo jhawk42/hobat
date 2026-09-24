@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from td_health_manifest import HealthManifestError, load_health_manifest
+from td_health_manifest import MANIFEST_PATH, HealthManifestError, load_health_manifest
 
 
 EXPECTED_DATASETS = {
@@ -25,7 +25,8 @@ EXPECTED_DATASETS = {
 def test_manifest_contains_only_approved_datasets() -> None:
     manifest = load_health_manifest()
 
-    assert manifest.schema_version == 1
+    assert manifest.schema_version == 2
+    assert manifest.roster_policy.digest == "52176e13b7493071e15e53ff713a5cfbc33ff0817f4b00aee47391c97b16cf65"
     assert set(manifest.datasets) == EXPECTED_DATASETS
     assert manifest.dataset("otbr_cli_networkdiag_fetch_all").files == (
         "td-otbr-cli-networkdiag-fetch-all.json",
@@ -64,6 +65,25 @@ def test_manifest_contains_only_approved_datasets() -> None:
 def test_manifest_rejects_unknown_dataset() -> None:
     with pytest.raises(HealthManifestError, match="not health eligible"):
         load_health_manifest().dataset("unsupported")
+
+
+def test_schema_two_keeps_health_subset_and_roster_digest(tmp_path: Path) -> None:
+    baseline = load_health_manifest()
+    raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    raw["schemaVersion"] = 2
+    extra = next(entry for entry in raw["datasets"] if entry["source"] == "mdns").copy()
+    extra["value"] = "mdns_scopes_test"
+    extra.pop("mergeGroups", None)
+    extra.pop("mergeInputs", None)
+    raw["datasets"].append(extra)
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    expanded = load_health_manifest(path)
+
+    assert expanded.schema_version == 2
+    assert expanded.datasets == baseline.datasets
+    assert expanded.roster_policy.digest == baseline.roster_policy.digest
 
 
 def test_manifest_rejects_unsafe_filename(tmp_path) -> None:

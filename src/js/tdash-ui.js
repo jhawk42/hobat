@@ -3,7 +3,7 @@ if ('scrollRestoration' in history) {
   history.scrollRestoration = 'manual';
 }
 
-import { DATASET_REGISTRY, DATASOURCE_REGISTRY } from "./tdash-dataset-registry.js";
+import { DATASET_REGISTRY, DATASOURCE_REGISTRY, DATASET_CATALOG_FALLBACK, setDatasetCatalog } from "./tdash-dataset-registry.js";
 import {
   EMPTY_CAPABILITIES,
   datasetIsAvailable,
@@ -3126,6 +3126,14 @@ document.getElementById("diagnostic-source-filter").addEventListener("change", (
 // Register callback to sync physics button state when auto-disabled after stabilization
 setOnPhysicsDisabledCallback(() => setPhysics(false));
 
+try {
+  const response = await fetch("/api/catalog", { cache: "no-store" });
+  if (!response.ok) throw new Error(`Catalog HTTP ${response.status}`);
+  setDatasetCatalog(await response.json());
+} catch (error) {
+  console.warn("Unable to load dataset catalog; using bundled fallback", error);
+  setDatasetCatalog(DATASET_CATALOG_FALLBACK);
+}
 try {
   sourceCapabilities = await loadSourceCapabilities();
 } catch (error) {

@@ -16,7 +16,8 @@ const fields = [
 
 const selected = (entry) => Object.fromEntries(fields.map((field) => [field, entry[field]]));
 const actual = eligible.map(selected).sort((left, right) => left.value.localeCompare(right.value));
-const expected = manifest.datasets.map(selected).sort((left, right) => left.value.localeCompare(right.value));
+const expected = manifest.datasets.filter((entry) => entry.healthEligible === true)
+  .map(selected).sort((left, right) => left.value.localeCompare(right.value));
 
 if (JSON.stringify(actual) !== JSON.stringify(expected)) {
   console.error(JSON.stringify({ actual, expected }, null, 2));

@@ -100,7 +100,8 @@ __marimo__/
 docker-compose.override.yml
 docker-compose.*.local.yml
 
-script/
+script/*
+!script/build_dataset_catalog.py
 downloads/
 plan/
 data/

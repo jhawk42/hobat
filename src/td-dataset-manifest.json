@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "ineligibleDatasets": [
     {
       "source": "ha-matter-ws",
@@ -15,17 +15,188 @@
   "datasets": [
     {
       "source": "otbr-cli",
+      "value": "otbr_cli_meshdiag_topology",
+      "label": "Mesh Topology (meshdiag)",
+      "group": "Fast",
+      "files": [
+        "td-otbr-cli-meshdiag-topology.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 30,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-meshdiag-topology.json",
+          "order": 1
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_networkdiag_multicast_network",
+      "label": "Network Diagnostics (multicast FTD)",
+      "group": "Fast",
+      "files": [
+        "td-otbr-cli-networkdiag-multicast-network.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 15,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-networkdiag-multicast-network.json",
+          "order": 3
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_meshdiag_topology_networkdiag_multicast_network",
+      "label": "Mesh + FTD Diagnostics",
+      "group": "Versatile: more time",
+      "files": [
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-multicast-network.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 30,
+      "healthEligible": false
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_meshdiag_topology_networkdiag_multicast_network_router_neighbortables_router_childtables_mdns_scopes_thread",
+      "label": "Mesh + FTD + Neighbor/Child + mDNS",
+      "group": "Versatile: more time",
+      "files": [
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-multicast-network.json",
+        "td-otbr-cli-meshdiag-router-neighbortables.json",
+        "td-otbr-cli-meshdiag-router-childtables.json",
+        "td-mdns-scopes-thread.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 270,
+      "healthEligible": false
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_meshdiag_router_neighbortables",
+      "label": "Router Neighbor Table",
+      "group": "Versatile: more time",
+      "files": [
+        "td-otbr-cli-meshdiag-router-neighbortables.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "merged-detailed",
+      "defaultPhysicsProfile": "mesh-ring",
+      "topologyMode": "merged-detailed",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 90,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-meshdiag-router-neighbortables.json",
+          "order": 4
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_meshdiag_router_childtables",
+      "label": "Router Child Table",
+      "group": "Versatile: more time",
+      "files": [
+        "td-otbr-cli-meshdiag-router-childtables.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "merged-detailed",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "merged-detailed",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 90,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-meshdiag-router-childtables.json",
+          "order": 5
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-cli",
       "value": "otbr_cli_networkdiag_fetch_all",
-      "files": ["td-otbr-cli-networkdiag-fetch-all.json"],
+      "label": "Network Diagnostics (fetch-all)🔬⏱️",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-cli-networkdiag-fetch-all.json"
+      ],
       "mergeStrategy": "none",
       "rowExtractor": "raw-array",
       "adaptor": "meshdiag-networkdiag",
       "healthEligible": true,
-      "healthProfile": "otbr-cli-networkdiag-v1"
+      "healthProfile": "otbr-cli-networkdiag-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 600,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-networkdiag-fetch-all.json",
+          "order": 2
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
     },
     {
       "source": "otbr-cli",
       "value": "otbr_cli_topology_health",
+      "label": "Topology 🔬⏱️",
+      "group": "Detailed: most time",
       "files": [
         "td-otbr-cli-meshdiag-topology.json",
         "td-otbr-cli-networkdiag-fetch-all.json",
@@ -36,11 +207,19 @@
       "rowExtractor": "raw-array",
       "adaptor": "meshdiag-networkdiag",
       "healthEligible": true,
-      "healthProfile": "otbr-cli-topology-diagnostics-v1"
+      "healthProfile": "otbr-cli-topology-diagnostics-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 900
     },
     {
       "source": "otbr-cli",
       "value": "otbr_cli_topology_mdns_health",
+      "label": "Topology + mDNS🔬⏱️",
+      "group": "Detailed: most time",
       "files": [
         "td-otbr-cli-meshdiag-topology.json",
         "td-otbr-cli-networkdiag-fetch-all.json",
@@ -52,11 +231,146 @@
       "rowExtractor": "raw-array",
       "adaptor": "meshdiag-networkdiag",
       "healthEligible": true,
-      "healthProfile": "otbr-cli-topology-diagnostics-mdns-v1"
+      "healthProfile": "otbr-cli-topology-diagnostics-mdns-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 900
+    },
+    {
+      "source": "otbr-cli",
+      "value": "otbr_cli_router_table",
+      "label": "Router Table",
+      "group": "System",
+      "files": [
+        "td-otbr-cli-router-table.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "router-table",
+      "healthEligible": false,
+      "defaultPhysicsProfile": "mesh-ring",
+      "topologyMode": "router-table",
+      "defaultView": "table",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-cli-router-table.json",
+          "order": 0
+        }
+      ],
+      "mergeGroups": [
+        "otbr-cli"
+      ]
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_diagnostics_list",
+      "label": "Diagnostics (list)",
+      "group": "Fast",
+      "files": [
+        "td-otbr-restapi-diagnostics-list.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-restapi-diagnostics-list.json",
+          "order": 4
+        }
+      ],
+      "mergeGroups": [
+        "otbr-restapi"
+      ]
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_devices_list",
+      "label": "Devices (list)",
+      "group": "Fast",
+      "files": [
+        "td-otbr-restapi-devices-list.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-restapi-devices-list.json",
+          "order": 3
+        }
+      ],
+      "mergeGroups": [
+        "otbr-restapi"
+      ]
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_devices_list_diagnostics_list",
+      "label": "Devices + Diagnostics (list)",
+      "group": "Fast",
+      "files": [
+        "td-otbr-restapi-devices-list.json",
+        "td-otbr-restapi-diagnostics-list.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 2,
+      "healthEligible": false
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_devices_fetch",
+      "label": "Devices (fetch)",
+      "group": "Versatile: more time",
+      "files": [
+        "td-otbr-restapi-devices-fetch.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 30,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-restapi-devices-fetch.json",
+          "order": 0
+        }
+      ],
+      "mergeGroups": [
+        "otbr-restapi"
+      ]
     },
     {
       "source": "otbr-restapi",
       "value": "otbr_restapi_devices_fetch_diagnostics_fetch_all",
+      "label": "Devices Fetch + Diagnostics (fetch-all)🔬⏱️",
+      "group": "Detailed: most time",
       "files": [
         "td-otbr-restapi-devices-fetch.json",
         "td-otbr-restapi-diagnostics-fetch-all.json"
@@ -65,11 +379,72 @@
       "rowExtractor": "otbr-restapi",
       "adaptor": "otbr-restapi",
       "healthEligible": true,
-      "healthProfile": "otbr-restapi-devices-diagnostics-v1"
+      "healthProfile": "otbr-restapi-devices-diagnostics-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1260
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_diagnostics_fetch_all",
+      "label": "Diagnostics (fetch-all)⏱️",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-restapi-diagnostics-fetch-all.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1200,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-restapi-diagnostics-fetch-all.json",
+          "order": 1
+        }
+      ],
+      "mergeGroups": [
+        "otbr-restapi"
+      ]
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_mesh_diagnostics_fetch_all",
+      "label": "Mesh Diagnostics (fetch-all)⏱️",
+      "group": "Detailed: most time",
+      "files": [
+        "td-otbr-restapi-mesh-diagnostics-fetch-all.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "otbr-restapi",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 600,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+          "order": 2
+        }
+      ],
+      "mergeGroups": [
+        "otbr-restapi"
+      ]
     },
     {
       "source": "otbr-restapi",
       "value": "otbr_restapi_devices_fetch_diagnostics_fetch_all_mesh_diagnostics_fetch_all",
+      "label": "Topology 🔬⏱️",
+      "group": "Detailed: most time",
       "files": [
         "td-otbr-restapi-devices-fetch.json",
         "td-otbr-restapi-diagnostics-fetch-all.json",
@@ -79,11 +454,19 @@
       "rowExtractor": "otbr-restapi",
       "adaptor": "otbr-restapi",
       "healthEligible": true,
-      "healthProfile": "otbr-restapi-topology-diagnostics-v1"
+      "healthProfile": "otbr-restapi-topology-diagnostics-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 2450
     },
     {
       "source": "otbr-restapi",
       "value": "otbr_restapi_topology_mdns_health",
+      "label": "Topology + mDNS🔬⏱️",
+      "group": "Detailed: most time",
       "files": [
         "td-otbr-restapi-devices-fetch.json",
         "td-otbr-restapi-diagnostics-fetch-all.json",
@@ -94,11 +477,274 @@
       "rowExtractor": "otbr-restapi",
       "adaptor": "otbr-restapi",
       "healthEligible": true,
-      "healthProfile": "otbr-restapi-topology-diagnostics-mdns-v1"
+      "healthProfile": "otbr-restapi-topology-diagnostics-mdns-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "otbr_restapi",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 2450
+    },
+    {
+      "source": "otbr-restapi",
+      "value": "otbr_restapi_actions_list",
+      "label": "Actions (list)",
+      "group": "System",
+      "files": [
+        "td-otbr-restapi-actions-list.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "otbr-restapi",
+      "adaptor": "raw-array",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "raw-array",
+      "defaultView": "table",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_devices_fetch_all",
+      "label": "Devices",
+      "group": "Inventory",
+      "files": [
+        "td-ha-matter-ws-devices-fetch-all.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "ha-matter-ws",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "ha-matter-ws",
+      "defaultView": "table",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_thread_border_routers",
+      "label": "Border Routers (thread)",
+      "group": "Inventory",
+      "files": [
+        "td-ha-matter-ws-thread-border-routers.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "ha-matter-ws-border-routers",
+      "adaptor": "ha-matter-ws-native-thread",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "ha-matter-ws-native-thread",
+      "defaultView": "table",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 10,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_dashboard_diagnostics",
+      "label": "Diagnostics",
+      "group": "Diagnostics",
+      "files": [
+        "td-ha-matter-ws-dashboard.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "ha-matter-ws-diagnostics",
+      "adaptor": "ha-matter-ws",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "ha-matter-ws",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_dashboard_mesh_diagnostics",
+      "label": "Mesh Diagnostics",
+      "group": "Diagnostics",
+      "files": [
+        "td-ha-matter-ws-dashboard.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "ha-matter-ws-mesh-diagnostics",
+      "adaptor": "ha-matter-ws",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "ha-matter-ws",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_topology",
+      "label": "Topology (matter)",
+      "group": "Topology",
+      "files": [
+        "td-ha-matter-ws-topology.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "ha-matter-ws",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "ha-matter-ws",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-ha-matter-ws-topology.json",
+          "order": 0
+        }
+      ],
+      "mergeGroups": [
+        "ha-matter-ws"
+      ]
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_network_topology",
+      "label": "Topology (thread)",
+      "group": "Topology",
+      "files": [
+        "td-ha-matter-ws-network-topology.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "ha-matter-ws-network-topology",
+      "adaptor": "ha-matter-ws-network-topology",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "ha-matter-ws-network-topology",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 10,
+      "healthEligible": false
+    },
+    {
+      "source": "ha-matter-ws",
+      "value": "ha_matter_ws_merge_topology",
+      "label": "Topology (thread, matter)",
+      "group": "Topology",
+      "files": [
+        "td-ha-matter-ws-devices-fetch-all.json",
+        "td-ha-matter-ws-diagnostics-fetch-all.json",
+        "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
+        "td-ha-matter-ws-topology.json",
+        "td-ha-matter-ws-dashboard.json",
+        "td-ha-matter-ws-thread-border-routers.json",
+        "td-ha-matter-ws-network-topology.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "mergeRowExtractors": [
+        "raw-array",
+        "raw-array",
+        "raw-array",
+        "raw-array",
+        "ha-matter-ws-topology",
+        "ha-matter-ws-border-routers",
+        "ha-matter-ws-network-topology"
+      ],
+      "adaptor": "ha-matter-ws-merge-topology",
+      "healthEligible": false,
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "ha-matter-ws",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 60
+    },
+    {
+      "source": "eve",
+      "value": "eve_thread_network_layout_native",
+      "label": "Eve Layout (native)",
+      "group": "Native",
+      "files": [
+        "Eve Thread Network Layout.evethreadlayout"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "eve-native",
+      "adaptor": "eve-native",
+      "defaultPhysicsProfile": "mesh-ring",
+      "topologyMode": "eve_native",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false
+    },
+    {
+      "source": "eve",
+      "value": "eve_topology_processed",
+      "label": "Eve Topology (processed)",
+      "group": "Processed",
+      "files": [
+        "td-eve-topology.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "eve-processed",
+      "adaptor": "eve-enhanced",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "eve_enhanced",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-eve-topology.json",
+          "order": 0
+        }
+      ],
+      "mergeGroups": [
+        "eve"
+      ]
+    },
+    {
+      "source": "thread-tools",
+      "value": "thread_tools_diagnostics_native",
+      "label": "Thread Tools (native)",
+      "group": "Native",
+      "files": [
+        "diagnostics.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "thread-tools-native",
+      "adaptor": "thread-tools-native",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "thread_tools_native",
+      "defaultView": "topology",
+      "defaultLinkFilter": "all_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false
+    },
+    {
+      "source": "merged",
+      "value": "merged_static_extaddr_device_label_otbr_cli_meshdiag_topology_networkdiag_fetch_all_otbr_restapi_devices_list_diagnostics_list_mdns_scopes_thread",
+      "label": "Topology Dynamic Merge: CLI + REST + mDNS",
+      "group": null,
+      "files": [
+        "td-static-extaddr-device-label.json",
+        "td-otbr-cli-meshdiag-topology.json",
+        "td-otbr-cli-networkdiag-fetch-all.json",
+        "td-otbr-restapi-devices-list.json",
+        "td-otbr-restapi-diagnostics-list.json",
+        "td-mdns-scopes-thread.json"
+      ],
+      "mergeStrategy": "by-identity",
+      "rowExtractor": "raw-array",
+      "adaptor": "meshdiag-networkdiag",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 720,
+      "healthEligible": false
     },
     {
       "source": "merged",
       "value": "merged_otbr_topology_mdns_health",
+      "label": "Topology CLI* + REST* + mDNS🔬⏱️",
       "files": [
         "td-static-extaddr-device-label.json",
         "td-otbr-cli-meshdiag-topology.json",
@@ -114,7 +760,163 @@
       "rowExtractor": "raw-array",
       "adaptor": "meshdiag-networkdiag",
       "healthEligible": true,
-      "healthProfile": "merged-otbr-topology-diagnostics-mdns-v1"
+      "healthProfile": "merged-otbr-topology-diagnostics-mdns-v1",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "meshdiag-networkdiag",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 900
+    },
+    {
+      "source": "merged",
+      "value": "merged_precomputed_topology_all_sources",
+      "label": "Topology Premerged Multi-Source",
+      "group": null,
+      "files": [
+        "td-merged-topology-all.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "merged-detailed",
+      "defaultPhysicsProfile": "mesh-compact",
+      "topologyMode": "merged-detailed",
+      "physicsProfile": "mesh-compact",
+      "defaultView": "topology",
+      "defaultLinkFilter": "default_links",
+      "estimateActionCostSecs": 1,
+      "healthEligible": false
+    },
+    {
+      "source": "mdns",
+      "value": "mdns_scopes_border_router",
+      "label": "mDNS Border Router Scope",
+      "group": "Versatile: more time",
+      "files": [
+        "td-mdns-scopes-br.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "raw-array",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "raw-array",
+      "defaultLinkFilter": "default_links",
+      "defaultView": "table",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-mdns-scopes-br.json",
+          "order": 0
+        }
+      ],
+      "mergeGroups": [
+        "mdns"
+      ]
+    },
+    {
+      "source": "mdns",
+      "value": "mdns_scopes_hap",
+      "label": "mDNS HomeKit (HAP) Scope",
+      "group": "Versatile: more time",
+      "files": [
+        "td-mdns-scopes-hap.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "raw-array",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "raw-array",
+      "defaultLinkFilter": "default_links",
+      "defaultView": "table",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-mdns-scopes-hap.json",
+          "order": 1
+        }
+      ],
+      "mergeGroups": [
+        "mdns"
+      ]
+    },
+    {
+      "source": "mdns",
+      "value": "mdns_scopes_matter",
+      "label": "mDNS Matter Scope",
+      "group": "Versatile: more time",
+      "files": [
+        "td-mdns-scopes-matter.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "raw-array",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "raw-array",
+      "defaultLinkFilter": "default_links",
+      "defaultView": "table",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-mdns-scopes-matter.json",
+          "enabled": false,
+          "disabledReason": "Excluded from the legacy mdns merge group"
+        }
+      ]
+    },
+    {
+      "source": "mdns",
+      "value": "mdns_scopes_thread",
+      "label": "mDNS Thread Scopes (all)",
+      "group": "Detailed: most time",
+      "files": [
+        "td-mdns-scopes-thread.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "raw-array",
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "raw-array",
+      "defaultLinkFilter": "default_links",
+      "defaultView": "table",
+      "estimateActionCostSecs": 60,
+      "healthEligible": false,
+      "mergeInputs": [
+        {
+          "file": "td-mdns-scopes-thread.json",
+          "enabled": false,
+          "disabledReason": "Excluded from the legacy mdns merge group"
+        }
+      ]
+    },
+    {
+      "source": "system",
+      "value": "system_static_extaddr_device_label",
+      "label": "ExtAddr to Device Label Map",
+      "group": null,
+      "files": [
+        "td-static-extaddr-device-label.json"
+      ],
+      "mergeStrategy": "none",
+      "rowExtractor": "raw-array",
+      "adaptor": "raw-array",
+      "healthEligible": false,
+      "defaultPhysicsProfile": "mesh-balanced",
+      "topologyMode": "raw-array",
+      "defaultLinkFilter": "default_links",
+      "defaultView": "table",
+      "estimateActionCostSecs": 1,
+      "mergeInputs": [
+        {
+          "file": "td-static-extaddr-device-label.json",
+          "order": 0
+        }
+      ],
+      "mergeGroups": [
+        "system"
+      ]
     }
   ],
   "rosterPolicy": {
@@ -123,31 +925,363 @@
     "maxStringLength": 256,
     "maxAddresses": 32,
     "fields": {
-      "extAddress": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}, {"filename": "td-otbr-cli-meshdiag-topology.json", "rank": 2}, {"filename": "td-otbr-restapi-mesh-diagnostics-fetch-all.json", "rank": 2}], "freshnessSeconds": null},
-      "omrIpv6Address": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 2592000},
-      "rloc16": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-meshdiag-topology.json", "rank": 2}], "freshnessSeconds": 604800},
-      "deviceLabel": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 2592000},
-      "eui64": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": null},
-      "routerId": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
-      "ipv6Addresses": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
-      "type": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
-      "isBorderRouter": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
-      "isRouter": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
-      "isLeader": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
-      "isPrimaryBBR": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
-      "role": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-meshdiag-topology.json", "rank": 2}], "freshnessSeconds": 604800},
-      "state": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
-      "mode.device": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 604800},
-      "mode.rxOnWhenIdle": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 604800},
-      "mode.fullThreadDevice": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 604800},
-      "mode.fullNetworkData": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 604800},
-      "threadVersion": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 2592000},
-      "threadStackVersion": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}], "freshnessSeconds": 2592000},
-      "leaderData.partitionId": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
-      "leaderData.leaderRouterId": {"sources": [{"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}, {"filename": "td-otbr-restapi-diagnostics-fetch-all.json", "rank": 3}], "freshnessSeconds": 604800},
-      "vendorName": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 2592000},
-      "vendorModel": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 2592000},
-      "vendorSwVersion": {"sources": [{"filename": "td-otbr-restapi-devices-fetch.json", "rank": 3}, {"filename": "td-otbr-cli-networkdiag-fetch-all.json", "rank": 3}], "freshnessSeconds": 2592000}
+      "extAddress": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-diagnostics-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-meshdiag-topology.json",
+            "rank": 2
+          },
+          {
+            "filename": "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+            "rank": 2
+          }
+        ],
+        "freshnessSeconds": null
+      },
+      "omrIpv6Address": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-diagnostics-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 2592000
+      },
+      "rloc16": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-meshdiag-topology.json",
+            "rank": 2
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "deviceLabel": {
+        "sources": [
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 2592000
+      },
+      "eui64": {
+        "sources": [
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-diagnostics-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": null
+      },
+      "routerId": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-diagnostics-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "ipv6Addresses": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-diagnostics-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "type": {
+        "sources": [
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "isBorderRouter": {
+        "sources": [
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "isRouter": {
+        "sources": [
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "isLeader": {
+        "sources": [
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "isPrimaryBBR": {
+        "sources": [
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "role": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-meshdiag-topology.json",
+            "rank": 2
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "state": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-diagnostics-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "mode.device": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "mode.rxOnWhenIdle": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "mode.fullThreadDevice": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "mode.fullNetworkData": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "threadVersion": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 2592000
+      },
+      "threadStackVersion": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 2592000
+      },
+      "leaderData.partitionId": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-diagnostics-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "leaderData.leaderRouterId": {
+        "sources": [
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-restapi-diagnostics-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 604800
+      },
+      "vendorName": {
+        "sources": [
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 2592000
+      },
+      "vendorModel": {
+        "sources": [
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 2592000
+      },
+      "vendorSwVersion": {
+        "sources": [
+          {
+            "filename": "td-otbr-restapi-devices-fetch.json",
+            "rank": 3
+          },
+          {
+            "filename": "td-otbr-cli-networkdiag-fetch-all.json",
+            "rank": 3
+          }
+        ],
+        "freshnessSeconds": 2592000
+      }
     }
   },
   "healthProfiles": {
@@ -252,6 +1386,208 @@
       },
       "topologyAuthority": true,
       "borderRouterAuthority": true
+    }
+  },
+  "datasources": [
+    {
+      "value": "otbr-cli",
+      "label": "otbr-cli",
+      "default_dataset_value": "otbr_cli_meshdiag_topology_networkdiag_multicast_network"
+    },
+    {
+      "value": "otbr-restapi",
+      "label": "otbr-restapi",
+      "default_dataset_value": "otbr_restapi_devices_list_diagnostics_list"
+    },
+    {
+      "value": "ha-matter-ws",
+      "label": "ha-matter-ws",
+      "default_dataset_value": "ha_matter_ws_topology"
+    },
+    {
+      "value": "eve",
+      "label": "eve app"
+    },
+    {
+      "value": "thread-tools",
+      "label": "thread tools app"
+    },
+    {
+      "value": "merged",
+      "label": "multi-source",
+      "default_dataset_value": "merged_static_extaddr_device_label_otbr_cli_meshdiag_topology_networkdiag_fetch_all_otbr_restapi_devices_list_diagnostics_list_mdns_scopes_thread"
+    },
+    {
+      "value": "mdns",
+      "label": "mdns"
+    },
+    {
+      "value": "system",
+      "label": "system"
+    }
+  ],
+  "mergeGroups": {
+    "system": {
+      "files": []
+    },
+    "otbr-cli": {
+      "files": []
+    },
+    "otbr-restapi": {
+      "files": [
+        {
+          "file": "td-otbr-restapi-diagnostics.json",
+          "order": 5
+        },
+        {
+          "file": "td-otbr-restapi-devices.json",
+          "order": 6
+        }
+      ]
+    },
+    "ha-matter-ws": {
+      "files": []
+    },
+    "mdns": {
+      "files": []
+    },
+    "eve": {
+      "files": []
+    },
+    "full": {
+      "composedOf": [
+        "otbr-cli",
+        "otbr-restapi",
+        "ha-matter-ws",
+        "mdns"
+      ],
+      "excluded": {
+        "system": "Not included in legacy full merge",
+        "eve": "Not included in legacy full merge"
+      }
+    }
+  },
+  "authority": {
+    "version": "authority-v1",
+    "sourceDefaults": {
+      "td-static-extaddr-device-label.json": 101,
+      "td-otbr-cli-networkdiag-fetch-all.json": 100,
+      "td-otbr-cli-networkdiag-multicast-network.json": 99,
+      "td-otbr-cli-meshdiag-topology.json": 98,
+      "td-otbr-cli-meshdiag-router-neighbortables.json": 97,
+      "td-otbr-cli-meshdiag-router-childtables.json": 96,
+      "td-otbr-cli-router-table.json": 95,
+      "td-otbr-restapi-diagnostics-fetch-all.json": 90,
+      "td-otbr-restapi-mesh-diagnostics-fetch-all.json": 89,
+      "td-otbr-restapi-diagnostics-list.json": 88,
+      "td-otbr-restapi-diagnostics.json": 87,
+      "td-otbr-restapi-devices-fetch.json": 86,
+      "td-otbr-restapi-devices-list.json": 85,
+      "td-otbr-restapi-devices.json": 84,
+      "td-ha-matter-ws-topology.json": 83,
+      "td-ha-matter-ws-mesh-diagnostics-fetch-all.json": 82,
+      "td-ha-matter-ws-diagnostics-fetch-all.json": 81,
+      "td-ha-matter-ws-devices-fetch-all.json": 80,
+      "td-eve-topology.json": 60,
+      "td-mdns-scopes-thread.json": 50,
+      "td-mdns-scopes-br.json": 49,
+      "td-mdns-scopes-hap.json": 48,
+      "td-mdns-scopes-matter.json": 47
+    },
+    "excludedFromFieldAuthority": [
+      "td-mdns-",
+      "td-static-",
+      ".outcome.",
+      ".partial."
+    ]
+  },
+  "vocabulary": {
+    "knownFiles": [
+      "Eve Thread Network Layout.evethreadlayout",
+      "diagnostics.json",
+      "td-eve-topology.json",
+      "td-ha-matter-ws-devices-fetch-all.json",
+      "td-ha-matter-ws-diagnostics-fetch-all.json",
+      "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
+      "td-ha-matter-ws-topology.json",
+      "td-ha-matter-ws-dashboard.json",
+      "td-ha-matter-ws-thread-border-routers.json",
+      "td-ha-matter-ws-network-topology.json",
+      "td-mdns-scopes-br.json",
+      "td-mdns-scopes-hap.json",
+      "td-mdns-scopes-matter.json",
+      "td-mdns-scopes-thread.json",
+      "td-merged-topology-all.json",
+      "td-otbr-cli-meshdiag-router-childtables.json",
+      "td-otbr-cli-meshdiag-router-neighbortables.json",
+      "td-otbr-cli-meshdiag-topology.json",
+      "td-otbr-cli-networkdiag-fetch-all.json",
+      "td-otbr-cli-networkdiag-multicast-network.json",
+      "td-otbr-cli-router-table.json",
+      "td-otbr-restapi-actions-list.json",
+      "td-otbr-restapi-devices-fetch.json",
+      "td-otbr-restapi-devices-list.json",
+      "td-otbr-restapi-diagnostics-fetch-all.json",
+      "td-otbr-restapi-diagnostics-list.json",
+      "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+      "td-static-extaddr-device-label.json"
+    ],
+    "mergeStrategies": [
+      "none",
+      "by-rloc16",
+      "by-identity"
+    ],
+    "rowExtractors": [
+      "raw-array",
+      "eve-native",
+      "eve-processed",
+      "thread-tools-native",
+      "otbr-restapi",
+      "ha-matter-ws-diagnostics",
+      "ha-matter-ws-mesh-diagnostics",
+      "ha-matter-ws-border-routers",
+      "ha-matter-ws-network-topology",
+      "ha-matter-ws-topology"
+    ],
+    "adaptors": [
+      "meshdiag-networkdiag",
+      "merged-detailed",
+      "eve-enhanced",
+      "eve-native",
+      "thread-tools-native",
+      "otbr-restapi",
+      "ha-matter-ws",
+      "ha-matter-ws-native-thread",
+      "ha-matter-ws-network-topology",
+      "ha-matter-ws-merge-topology",
+      "router-table",
+      "raw-array"
+    ],
+    "physicsProfiles": [
+      "mesh-baseline",
+      "mesh-dense",
+      "mesh-balanced",
+      "mesh-compact",
+      "mesh-sparse",
+      "mesh-ring",
+      "mesh-tree-horizontal",
+      "mesh-tree-vertical"
+    ],
+    "requiredExtractorByAdaptor": {
+      "eve-enhanced": "eve-processed",
+      "eve-native": "eve-native",
+      "thread-tools-native": "thread-tools-native",
+      "otbr-restapi": "otbr-restapi"
+    },
+    "valuePrefixBySource": {
+      "otbr-cli": "otbr_cli_",
+      "otbr-restapi": "otbr_restapi_",
+      "ha-matter-ws": "ha_matter_ws_",
+      "eve": "eve_",
+      "thread-tools": "thread_tools_",
+      "mdns": "mdns_",
+      "merged": "merged_",
+      "system": "system_"
     }
   }
 }

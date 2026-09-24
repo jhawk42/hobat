@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from merge_dataset import SOURCE_PRECEDENCE
+from td_source_authority import source_rank
 from td_const import OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
 from td_device_fields import get_canonical_ext_address, normalize_input_record, normalize_router_id
 from td_health_comparison import ROUTE64_SAMPLE_CONTRACT_VERSION
@@ -146,7 +146,7 @@ def _normalize_samples(
     route_reporter_counts: dict[str, int] = {}
     normalized_by_file: dict[str, list[dict[str, Any]]] = {}
     ordered_files = sorted(
-        dataset.files, key=lambda filename: (-SOURCE_PRECEDENCE.get(filename, 0), filename)
+        dataset.files, key=lambda filename: (-source_rank(filename), filename)
     )
     for filename in ordered_files:
         normalized_by_file[filename] = [

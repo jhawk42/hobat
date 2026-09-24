@@ -1,4 +1,5 @@
-import { MERGE_STRATEGIES, SOURCE_PRECEDENCE } from "./tdash-constants.js";
+import { MERGE_STRATEGIES } from "./tdash-constants.js";
+import { sourceDefaults } from "./tdash-source-authority.js";
 import { getDeviceIdentityKeys, isPlaceholderExtAddress, isPlaceholderDeviceLabel } from "./tdash-device-fields.js";
 import {
   toText,
@@ -433,7 +434,7 @@ function mergeMdnsRowIntoTarget(target, source) {
 }
 
 export function createMergeContext(existingSource, incomingSource, options = {}) {
-  const priorities = options.sourcePriorities ?? SOURCE_PRECEDENCE;
+  const priorities = options.sourcePriorities ?? sourceDefaults();
   return Object.freeze({
     existingSource: existingSource ?? "",
     incomingSource: incomingSource ?? "",
@@ -819,10 +820,10 @@ export function mergeRouterNeighbors(baseNeighbors, incomingNeighbors, context =
  *
  * Each element of `rowGroups` is expected to have at least one row with
  * `_source_files[0]` set by `normalizeRows()`.  The priority map defaults to
- * `SOURCE_PRECEDENCE` but can be overridden via `priorityMap`.
+ * catalog source defaults but can be overridden via `priorityMap`.
  */
 export function sortRowGroupsByPriority(rowGroups, priorityMap) {
-  const map = priorityMap ?? SOURCE_PRECEDENCE;
+  const map = priorityMap ?? sourceDefaults();
   return [...rowGroups].sort((groupA, groupB) => {
     const srcA = groupA[0]?._source_files?.[0] ?? "";
     const srcB = groupB[0]?._source_files?.[0] ?? "";

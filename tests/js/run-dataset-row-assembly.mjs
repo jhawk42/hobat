@@ -4,6 +4,9 @@ import fs from "node:fs";
 import {
   DATASOURCE_REGISTRY,
   DATASET_REGISTRY,
+  DATASET_CATALOG_FALLBACK,
+  setDatasetCatalog,
+  validateDatasetCatalog,
   validateDatasetRegistry,
 } from "../../src/js/tdash-dataset-registry.js";
 import {
@@ -160,6 +163,19 @@ assert.deepEqual(inputFiles, [rawFirst, undefined]);
 assert.equal(Object.hasOwn(inputEntry, "loadedFiles"), false);
 
 assert.doesNotThrow(() => validateDatasetRegistry(DATASET_REGISTRY));
+const servedCatalog = JSON.parse(fs.readFileSync(new URL("../../src/td-dataset-manifest.json", import.meta.url)));
+assert.deepEqual(DATASET_CATALOG_FALLBACK, servedCatalog);
+assert.doesNotThrow(() => setDatasetCatalog(servedCatalog));
+for (const [patch, message] of [
+  [{ mergeStrategy: "invalid" }, /unknown merge strategy/],
+  [{ adaptor: "invalid" }, /unknown adaptor/],
+  [{ mergeRowExtractors: [] }, /one merge row extractor per file/],
+]) {
+  const invalid = { ...servedCatalog, datasets: [{ ...servedCatalog.datasets[0], ...patch }] };
+  assert.throws(() => validateDatasetCatalog(invalid), message);
+}
+assert.throws(() => validateDatasetCatalog({ ...servedCatalog, vocabulary: {} }), /vocabulary/);
+setDatasetCatalog(DATASET_CATALOG_FALLBACK);
 
 const haMatterSource = DATASOURCE_REGISTRY.find((source) => source.value === "ha-matter-ws");
 assert.equal(haMatterSource?.default_dataset_value, "ha_matter_ws_topology");

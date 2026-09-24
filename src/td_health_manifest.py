@@ -11,7 +11,7 @@ from typing import Mapping
 
 
 MANIFEST_PATH = Path(__file__).with_name("td-dataset-manifest.json")
-SUPPORTED_SCHEMA_VERSION = 1
+SUPPORTED_SCHEMA_VERSION = 2
 ALLOWED_MERGE_STRATEGIES = frozenset({"none", "by-identity", "by-rloc16"})
 COVERAGE_PILLARS = (
     "availability",
@@ -143,8 +143,11 @@ def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:
     except (OSError, json.JSONDecodeError) as exc:
         raise HealthManifestError(f"Cannot load health manifest: {exc}") from exc
 
-    if not isinstance(raw, dict) or raw.get("schemaVersion") != SUPPORTED_SCHEMA_VERSION:
+    if not isinstance(raw, dict) or raw.get("schemaVersion") not in (1, SUPPORTED_SCHEMA_VERSION):
         raise HealthManifestError("Unsupported health manifest schemaVersion")
+    if raw["schemaVersion"] == 2:
+        from td_dataset_catalog import validate_dataset_catalog
+        validate_dataset_catalog(raw)
 
     raw_profiles = raw.get("healthProfiles")
     raw_datasets = raw.get("datasets")
@@ -189,18 +192,24 @@ def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:
         )
 
     datasets: dict[str, HealthDataset] = {}
+    seen_dataset_ids: set[str] = set()
     for value in raw_datasets:
-        if not isinstance(value, dict) or value.get("healthEligible") is not True:
-            raise HealthManifestError("Health manifest contains an ineligible dataset")
+        if not isinstance(value, dict):
+            raise HealthManifestError("Invalid dataset entry")
         dataset_id = value.get("value")
+        if not isinstance(dataset_id, str) or not dataset_id:
+            raise HealthManifestError("Dataset value must be a non-empty string")
+        if dataset_id in seen_dataset_ids:
+            raise HealthManifestError(f"Duplicate dataset value: {dataset_id}")
+        seen_dataset_ids.add(dataset_id)
+        if value.get("healthEligible") is not True:
+            if raw["schemaVersion"] == 2 and value.get("healthEligible") is False:
+                continue
+            raise HealthManifestError("Health manifest contains an ineligible dataset")
         datasource_id = value.get("source")
         profile_id = value.get("healthProfile")
         files = value.get("files")
         merge_strategy = value.get("mergeStrategy")
-        if not isinstance(dataset_id, str) or not dataset_id:
-            raise HealthManifestError("Dataset value must be a non-empty string")
-        if dataset_id in datasets:
-            raise HealthManifestError(f"Duplicate dataset value: {dataset_id}")
         if not isinstance(datasource_id, str) or not datasource_id:
             raise HealthManifestError(f"Invalid source for {dataset_id}")
         if not isinstance(files, list) or not files:
@@ -253,7 +262,7 @@ def load_health_manifest(path: Path = MANIFEST_PATH) -> HealthManifest:
         )
 
     return HealthManifest(
-        schema_version=SUPPORTED_SCHEMA_VERSION,
+        schema_version=raw["schemaVersion"],
         datasets=MappingProxyType(datasets),
         ineligible_datasets=MappingProxyType(ineligible_datasets),
         roster_policy=_roster_policy(raw.get("rosterPolicy"), datasets),

@@ -17,6 +17,7 @@ from collections.abc import Callable
 import aiohttp.web
 
 from td_health_manifest import HealthManifestError, load_health_manifest
+from td_dataset_catalog import load_dataset_catalog
 from td_health_read import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
@@ -95,6 +96,7 @@ TD_DATA_DIR_APP_KEY = aiohttp.web.AppKey("td_data_dir", Path)
 TD_SOURCE_CAPABILITIES_APP_KEY = aiohttp.web.AppKey(
     "td_source_capabilities", SourceCapabilityService
 )
+TD_CATALOG_APP_KEY = aiohttp.web.AppKey("td_catalog", dict)
 _CLEANUP_TASK_APP_KEY = aiohttp.web.AppKey("cleanup_task", asyncio.Task)
 TD_DEVICE_ACTIONS_ENABLED_APP_KEY = aiohttp.web.AppKey(
     "td_device_actions_enabled", bool
@@ -1606,6 +1608,12 @@ async def handle_capabilities_api(request: aiohttp.web.Request) -> aiohttp.web.R
     )
 
 
+async def handle_catalog_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    return aiohttp.web.json_response(
+        request.app[TD_CATALOG_APP_KEY], headers={"Cache-Control": "no-store"}
+    )
+
+
 # ---------------------------------------------------------------------------
 # R1c — pure file-read / response builder (no asyncio, no shared state)
 # ---------------------------------------------------------------------------
@@ -2416,6 +2424,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     app = aiohttp.web.Application()
     app[TD_DATA_DIR_APP_KEY] = td_data_dir
+    app[TD_CATALOG_APP_KEY] = load_dataset_catalog()
     app[TD_SOURCE_CAPABILITIES_APP_KEY] = SourceCapabilityService()
     app[TD_DEVICE_ACTIONS_ENABLED_APP_KEY] = device_actions_enabled
     app[TD_DEVICE_RESET_ENABLED_APP_KEY] = device_reset_enabled
@@ -2462,6 +2471,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.router.add_get("/", handle_root)
     app.router.add_get("/api/data/{filename}", handle_data_api)
     app.router.add_get("/api/capabilities", handle_capabilities_api)
+    app.router.add_get("/api/catalog", handle_catalog_api)
     app.router.add_get("/api/jobs", handle_jobs_api)
     app.router.add_delete("/api/jobs", handle_jobs_cancel_api)
     app.router.add_get("/api/job/{job_id}", handle_job_api)

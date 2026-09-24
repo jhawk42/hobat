@@ -215,96 +215,42 @@ MERGE_IDENTITY_FIELDS = {
     "rloc16": "rloc16",
 }
 
-# Phase 3: Source Precedence Rules (Priority: Higher = Wins)
-# Used to resolve conflicts when multiple sources provide same field
-SOURCE_PRECEDENCE = {
-    EXTADDR_DEVICE_LABEL_MAP_FILENAME: 101, # Highest priority
+from td_source_authority import AUTHORITY, source_rank
 
-    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME: 100, # Highest priority (most detailed)
-    OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME: 99,
-    OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME: 98,
-    OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME: 97,
-    OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME: 96,
-    OTBR_CLI_ROUTER_TABLE_FILENAME: 95,
-
-    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME: 90,
-    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME: 89,
-    OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME: 88,
-    OTBR_RESTAPI_DIAGNOSTICS_FILENAME: 87,
-    OTBR_RESTAPI_DEVICES_FETCH_FILENAME: 86,
-    OTBR_RESTAPI_DEVICES_LIST_FILENAME: 85,
-    OTBR_RESTAPI_DEVICES_FILENAME: 84,
-
-    HA_MATTER_WS_TOPOLOGY_FILENAME: 83,
-    HA_MATTER_WS_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME: 82,
-    HA_MATTER_WS_DIAGNOSTICS_FETCH_ALL_FILENAME: 81,
-    HA_MATTER_WS_DEVICES_FETCH_ALL_FILENAME: 80,
-
-    EVE_TOPOLOGY_FILENAME: 60,
-
-    MDNS_SCOPES_THREAD_FILENAME: 50,
-    MDNS_SCOPES_BR_FILENAME: 49,                # mDNS scopes (service discovery)
-    MDNS_SCOPES_HAP_FILENAME: 48,
-    MDNS_SCOPES_MATTER_FILENAME: 47,
-}
+SOURCE_PRECEDENCE = AUTHORITY.source_defaults
 
 
-SYSTEM_INPUT_FILES: list[str] = [
-    EXTADDR_DEVICE_LABEL_MAP_FILENAME,
-]
+def load_merge_groups(manifest: dict) -> dict[str, list[str]]:
+    declared = manifest["mergeGroups"]
+    groups: dict[str, list[str]] = {}
+    for name, definition in declared.items():
+        if "composedOf" in definition:
+            groups[name] = [file for part in definition["composedOf"] for file in groups[part]]
+            continue
+        ordered = [(item["order"], item["file"]) for item in definition.get("files", [])
+                   if item.get("enabled", True)]
+        for dataset in manifest["datasets"]:
+            if name not in dataset.get("mergeGroups", []):
+                continue
+            ordered.extend((item["order"], item["file"])
+                           for item in dataset.get("mergeInputs", []) if item.get("enabled", True))
+        ordered.sort(key=lambda pair: pair[0])
+        if len({order for order, _ in ordered}) != len(ordered):
+            raise ValueError(f"Duplicate merge input order in group {name}")
+        groups[name] = [file for _, file in ordered]
+    return groups
 
-OTBR_CLI_INPUT_FILES: list[str] = [
-    OTBR_CLI_ROUTER_TABLE_FILENAME,
-    OTBR_CLI_MESHDIAG_TOPOLOGY_FILENAME,
-    OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
-    OTBR_CLI_NETWORKDIAG_MULTICAST_NETWORK_FILENAME,
-    OTBR_CLI_MESHDIAG_ROUTER_NEIGHBORTABLES_FILENAME,
-    OTBR_CLI_MESHDIAG_ROUTER_CHILDTABLES_FILENAME,
-]
 
-OTBR_RESTAPI_INPUT_FILES: list[str] = [
-    OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
-    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
-    OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
-    OTBR_RESTAPI_DEVICES_LIST_FILENAME,
-    OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME,
-    OTBR_RESTAPI_DIAGNOSTICS_FILENAME,
-    OTBR_RESTAPI_DEVICES_FILENAME,
-]
+from td_dataset_catalog import load_dataset_catalog
 
-HA_MATTER_WS_INPUT_FILES: list[str] = [
-    HA_MATTER_WS_TOPOLOGY_FILENAME,
-]
-
-MDNS_INPUT_FILES: list[str] = [
-    ##MDNS_SCOPES_THREAD_FILENAME,                 # mDNS Thread devices
-    MDNS_SCOPES_BR_FILENAME,                       # mDNS Border Router discovery
-    MDNS_SCOPES_HAP_FILENAME,                      # mDNS HomeKit devices
-    ##MDNS_SCOPES_MATTER_FILENAME,                 # mDNS Matter devices
-]
-
-EVE_INPUT_FILES: list[str] = [
-    EVE_TOPOLOGY_FILENAME,
-]
-
-DEFAULT_FULL_INPUT_FILES: list[str] = (
-                                       ## SYSTEM_INPUT_FILES 
-                                       OTBR_CLI_INPUT_FILES 
-                                       + OTBR_RESTAPI_INPUT_FILES 
-                                       + HA_MATTER_WS_INPUT_FILES
-                                       + MDNS_INPUT_FILES 
-                                       ##+ EVE_INPUT_FILES
-                                       + [])
-
-GROUP_TO_INPUT_FILES: dict[str, list[str]] = {
-    "system": SYSTEM_INPUT_FILES,
-    "otbr-cli": OTBR_CLI_INPUT_FILES,
-    "otbr-restapi": OTBR_RESTAPI_INPUT_FILES,
-    "ha-matter-ws": HA_MATTER_WS_INPUT_FILES,
-    "mdns": MDNS_INPUT_FILES,
-    "eve": EVE_INPUT_FILES,
-    "full": DEFAULT_FULL_INPUT_FILES,
-}
+GROUP_TO_INPUT_FILES: dict[str, list[str]] = load_merge_groups(load_dataset_catalog())
+SYSTEM_INPUT_FILES = GROUP_TO_INPUT_FILES["system"]
+OTBR_CLI_INPUT_FILES = GROUP_TO_INPUT_FILES["otbr-cli"]
+OTBR_RESTAPI_INPUT_FILES = GROUP_TO_INPUT_FILES["otbr-restapi"]
+HA_MATTER_WS_INPUT_FILES = GROUP_TO_INPUT_FILES["ha-matter-ws"]
+MDNS_INPUT_FILES = GROUP_TO_INPUT_FILES["mdns"]
+EVE_INPUT_FILES = GROUP_TO_INPUT_FILES["eve"]
+DEFAULT_FULL_INPUT_FILES = GROUP_TO_INPUT_FILES["full"]
 
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:

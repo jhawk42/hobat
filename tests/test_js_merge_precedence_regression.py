@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from merge_dataset import SOURCE_PRECEDENCE
+from td_dataset_catalog import load_dataset_catalog
+from td_source_authority import field_rank, source_rank
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +27,15 @@ def test_javascript_policy_metadata_matches_python() -> None:
         text=True,
     )
     result = json.loads(completed.stdout)
-    assert result["sourcePrecedence"] == SOURCE_PRECEDENCE
+    catalog = load_dataset_catalog()
+    assert result["sourcePrecedence"] == SOURCE_PRECEDENCE == catalog["authority"]["sourceDefaults"]
+    assert catalog["authority"]["fieldOverrides"]["extAddress"]["td-otbr-cli-networkdiag-fetch-all.json"] == 3
+    assert len(result["sourcePrecedence"]) == 23
+    assert result["authorityCases"] == {
+        "sourceDefault": source_rank("td-otbr-cli-networkdiag-fetch-all.json"),
+        "fieldOverride": field_rank("extAddress", "td-otbr-cli-networkdiag-fetch-all.json"),
+        "unknownSource": field_rank("extAddress", "not-listed.json"),
+    }
     assert set(result["handlerPaths"]) == {
         "route",
         "children",

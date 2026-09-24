@@ -185,6 +185,14 @@ this command does not resolve names or change cached snapshots.
 `networkdiag fetch-all` and REST diagnostic sweeps are the highest-impact
 commands; use cached snapshots for repeated analysis.
 
+Dataset recipes, merge input groups, and source authority defaults are declared
+in `src/td-dataset-manifest.json` (schema 2). The server loads it at startup and
+serves it at `GET /api/catalog` with `Cache-Control: no-store`; the dashboard
+uses a bundled snapshot if the catalog request fails. After editing the manifest,
+regenerate the bundled fallback with `python3 script/build_dataset_catalog.py`
+and restart the server. Health field ranks remain derived from the unchanged
+`rosterPolicy`, so existing health observation policy digests remain valid.
+
 The per-router OTBR CLI meshdiag table collectors automatically send one
 bounded two-attempt ICMPv6 probe to the queried router only after a table
 timeout or explicit OTBR error. The resulting snapshot records table and ping

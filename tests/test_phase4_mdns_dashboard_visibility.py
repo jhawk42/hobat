@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from td_dataset_catalog import load_dataset_catalog
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DATASET_REGISTRY_JS = REPO_ROOT / "src" / "js" / "tdash-dataset-registry.js"
 DATASET_JS = REPO_ROOT / "src" / "js" / "tdash-dataset.js"
 
 
@@ -13,14 +14,11 @@ def _read_text(path: Path) -> str:
 
 
 def test_mdns_datasets_are_present_in_dashboard_registry() -> None:
-    text = _read_text(DATASET_REGISTRY_JS)
+    entries = [entry for entry in load_dataset_catalog()["datasets"] if entry["source"] == "mdns"]
+    files = {file for entry in entries for file in entry["files"]}
 
-    assert 'source: "mdns"' in text
-    assert 'value: "mdns_thread_scopes_thread"' in text or 'td-mdns-scopes-thread.json' in text
-    assert 'td-mdns-scopes-thread.json' in text
-    assert 'td-mdns-scopes-br.json' in text
-    assert 'td-mdns-scopes-hap.json' in text
-    assert 'td-mdns-scopes-matter.json' in text
+    assert {"td-mdns-scopes-thread.json", "td-mdns-scopes-br.json",
+            "td-mdns-scopes-hap.json", "td-mdns-scopes-matter.json"} <= files
 
 
 def test_mdns_datasets_support_progressive_checkpoint_fetching() -> None:
