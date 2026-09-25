@@ -300,6 +300,10 @@ These options must be placed after `otbr-restapi` and before its subcommand.
 | `mesh-diagnostics` | `children`, `child-ipv6`, `router-neighbors`, `fetch`, `fetch-all` | Fetch mesh-diagnostic TLV datasets |
 | `topology` | *(none)* | Run full sweep: devices fetch + diagnostics fetch-all + mesh-diagnostics fetch-all |
 
+`otbr-restapi node dataset active get` saves JSON to `td-otbr-restapi-dataset-active.json`
+in the data directory by default, along with its network identity sidecar. Use
+`--no-auto-output` to print it without saving; `get --text` does not auto-save.
+
 ---
 
 ## Data Directory Behavior

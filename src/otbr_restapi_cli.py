@@ -13,6 +13,7 @@ from contextlib import redirect_stderr
 from util_data import resolve_data_file_path, resolve_data_dir
 from td_const import (
     OTBR_RESTAPI_ACTIONS_LIST_FILENAME,
+    OTBR_RESTAPI_DATASET_ACTIVE_FILENAME,
     OTBR_RESTAPI_DEVICES_FETCH_FILENAME,
     OTBR_RESTAPI_DEVICES_LIST_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
@@ -866,6 +867,13 @@ def _auto_output_path(args: argparse.Namespace, data_dir: Path) -> str | None:
         return None  # explicit --output overrides auto-naming
 
     resource = getattr(args, "resource", None)
+    if resource == "node":
+        if (getattr(args, "node_command", None) == "dataset"
+                and getattr(args, "dataset_kind", None) == "active"
+                and getattr(args, "dataset_command", None) == "get"
+                and not getattr(args, "text", False)):
+            return str(data_dir / OTBR_RESTAPI_DATASET_ACTIVE_FILENAME)
+        return None
     if resource == "diagnostics":
         command = getattr(args, "diagnostics_command", None)
     elif resource == "mesh-diagnostics":

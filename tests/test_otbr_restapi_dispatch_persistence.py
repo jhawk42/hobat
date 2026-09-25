@@ -7,7 +7,9 @@ import otbr_restapi_devices as devices_module
 import otbr_restapi_diagnostics as diagnostics_module
 import otbr_restapi_mesh_diagnostics as mesh_module
 import otbr_restapi_node as node_module
+import otbr_restapi_cli as cli_module
 from otbr_restapi_util import emit_rest_command_output
+from util_data import read_network_scope
 
 
 def test_node_dispatch_saves_json_before_return():
@@ -86,6 +88,40 @@ def test_node_active_dataset_json_redacts_file_output():
         "networkName": "test-network",
         "pskc": "[Redacted]",
     }
+
+
+def test_active_dataset_get_auto_output_publishes_observed_scope(tmp_path, monkeypatch):
+    client = Mock()
+    client.get_active_dataset.return_value = {
+        "extPanId": "78b9775b001c1cbe",
+        "networkKey": "SECRET-NETWORK-KEY",
+    }
+    monkeypatch.setenv("HOBAT_EXT_PAN_ID", "78b9775b001c1cbe")
+
+    with patch.object(cli_module, "build_client", return_value=client):
+        assert cli_module.main([
+            "--datadir", str(tmp_path), "--raw", "node", "dataset", "active", "get",
+        ]) == 0
+
+    output = tmp_path / "td-otbr-restapi-dataset-active.json"
+    scope, error = read_network_scope(output)
+    assert error is None
+    assert scope["provenance"] == "observed"
+    assert scope["extPanId"] == "78b9775b001c1cbe"
+    assert json.loads(output.read_text(encoding="utf-8"))["networkKey"] == "[Redacted]"
+    client.get_active_dataset.assert_called_once_with(plain_text=False, raw=True)
+
+
+def test_active_dataset_auto_output_respects_output_modes(tmp_path):
+    command = ["node", "dataset", "active", "get"]
+    for argv in (
+        command + ["--text"],
+        ["--no-auto-output"] + command,
+        ["--output", "custom.json"] + command,
+        ["node", "state", "get"],
+    ):
+        args = cli_module.build_parser().parse_args(argv)
+        assert cli_module._auto_output_path(args, tmp_path) is None
 
 
 def test_node_dispatch_without_output_path_remains_side_effect_free():
