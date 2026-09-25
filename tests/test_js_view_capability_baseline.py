@@ -4,6 +4,11 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = pytest.mark.requires_data_dir
+
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/fixtures/view_capability_baseline.json"
