@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-import http.client
-import os
-import socketserver
 import tempfile
-import threading
 import unittest
-from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -51,64 +46,6 @@ class DataDirResolutionTests(unittest.TestCase):
                 with self.assertRaises(PermissionError):
                     util_data.resolve_data_dir(
                         data_dir=None, env={}, cwd=tmpdir)
-
-
-@unittest.skip("td_webserver uses aiohttp; TDashHandler-based tests superseded by test_td_webserver_concurrency.py")
-class WebServerRoutingTests(unittest.TestCase):
-    """Verification coverage for matrix web-server behavior checks."""
-
-    server: socketserver.TCPServer
-    port: int
-    thread: threading.Thread
-    static_dir: str
-    data_dir: str
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.static_dir = tempfile.mkdtemp()
-        with open(
-            os.path.join(cls.static_dir, "tdash.html"), "w", encoding="utf-8"
-        ) as f:
-            f.write("<html><body>dashboard</body></html>")
-        with open(os.path.join(cls.static_dir, "app.js"), "w", encoding="utf-8") as f:
-            f.write("console.log('ok');")
-
-        cls.data_dir = tempfile.mkdtemp()
-        with open(os.path.join(cls.data_dir, "data.json"), "w", encoding="utf-8") as f:
-            f.write('{"ok": true}')
-
-        handler = partial(
-            web_server.TDashHandler,  # type: ignore[attr-defined]  # old API, class removed
-            directory=cls.static_dir,
-            td_data_dir=Path(cls.data_dir),
-        )
-
-        cls.server = socketserver.TCPServer(("127.0.0.1", 0), handler)
-        cls.port = cls.server.server_address[1]
-        cls.thread = threading.Thread(
-            target=cls.server.serve_forever, daemon=True)
-        cls.thread.start()
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.server.shutdown()
-        cls.thread.join(timeout=5)
-
-    def _get(self, path: str) -> http.client.HTTPResponse:
-        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-        conn.request("GET", path)
-        return conn.getresponse()
-
-    def test_case_5b_static_js_still_served_from_static_root(self) -> None:
-        response = self._get("/app.js")
-        self.assertEqual(response.status, 200)
-        self.assertIn("javascript", response.getheader(
-            "Content-Type", "").lower())
-
-    def test_case_5c_json_path_traversal_returns_404(self) -> None:
-        # Encoded traversal path should be denied and never escape td_data_dir.
-        response = self._get("/%2e%2e/secret.json")
-        self.assertEqual(response.status, 404)
 
 
 class DirectModuleInvocationTests(unittest.TestCase):
