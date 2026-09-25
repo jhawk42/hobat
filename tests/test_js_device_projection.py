@@ -2,6 +2,11 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = pytest.mark.requires_data_dir
+
 
 def test_device_projection_matches_cached_capabilities() -> None:
     root = Path(__file__).resolve().parents[1]
