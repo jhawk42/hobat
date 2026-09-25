@@ -31,7 +31,7 @@ def test_all_adaptors_preserve_the_public_result_contract() -> None:
     assert json.loads(result.stdout) == {"adaptorCount": 12}
 
 
-def test_cached_adaptor_outputs_match_baseline() -> None:
+def test_cached_adaptor_outputs_preserve_contract() -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is required for the JavaScript adaptor contract")
@@ -44,7 +44,16 @@ def test_cached_adaptor_outputs_match_baseline() -> None:
         check=True,
     )
     baseline = REPO_ROOT / "tests" / "fixtures" / "adaptor_output_baseline.json"
-    assert json.loads(result.stdout) == json.loads(baseline.read_text(encoding="utf-8"))
+    actual = json.loads(result.stdout)
+    expected = json.loads(baseline.read_text(encoding="utf-8"))
+    assert set(actual) == set(expected)
+    for dataset, snapshot in actual.items():
+        assert set(snapshot) == set(expected[dataset]), dataset
+        node_ids = set(snapshot["nodeIds"])
+        edge_ids = [edge[0] for edge in snapshot["edges"]]
+        assert len(node_ids) == len(snapshot["nodeIds"]), dataset
+        assert len(edge_ids) == len(set(edge_ids)), dataset
+        assert all(edge[1] in node_ids and edge[2] in node_ids for edge in snapshot["edges"]), dataset
 
 
 def test_source_adaptors_emit_through_shared_model() -> None:

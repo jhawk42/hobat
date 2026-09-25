@@ -35,6 +35,7 @@ before the REST subcommand.
 - Collectors atomically write final snapshots before returning success.
 - Long collectors may update sibling `.partial.json` checkpoints.
 - REST topology also writes `.outcome.json` per-device completion summaries.
+- Final Thread-source snapshots have sibling `.network.json` instance scopes.
 - `merge-dataset` reads selected snapshots and atomically writes its merged
   output and optional report.
 - The web server reads the effective directory and invokes `td_cli --datadir`
@@ -44,5 +45,16 @@ before the REST subcommand.
 
 Atomic replacement protects readers from partial files. It does not serialize
 independent writer processes; concurrent external writes remain last-write-wins.
+
+For `td-<source>-<name>.json`, the sidecar is
+`td-<source>-<name>.network.json`. `util_data.save_final_json()` writes it
+after the final snapshot, with `extPanId` (16 lowercase hex digits or null),
+`networkName`, `provenance` (`observed`, `operator`, or `unknown`), `reason`,
+`observedAt`, `sources`, and `snapshotSha256`. The digest binds the scope to
+the exact final snapshot bytes. `merge_dataset.py` reads and validates the
+sidecar: a mismatch or invalid sidecar excludes that input and reports why;
+missing sidecars remain unknown and can still participate. Checkpoints
+(`.partial.json`) and REST completion summaries (`.outcome.json`) are separate
+files and never establish network identity.
 
 See [Codebase Overview](codebase_overview.md) and [Webpage, Web Server, and Data Flow](codebase_webpage_web_server_data_flow.md).

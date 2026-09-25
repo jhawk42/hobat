@@ -9,7 +9,10 @@ browser modules under `src/js/`.
 tdash.html + tdash.css
         |
         v
-tdash-ui.js -> tdash-dataset.js -> /api/data/{filename}
+tdash-ui.js -> /api/catalog -> /api/capabilities
+        |
+        v
+tdash-dataset.js -> /api/data/{filename}
                                       |
                                       v
                               td_webserver.py
@@ -19,21 +22,25 @@ tdash-ui.js -> tdash-dataset.js -> /api/data/{filename}
                          +------ data/ <-------+
                                 |
                                 v
-dataset assembly -> merge -> adaptor model -> topology view model
-                                |                    |
-                                v                    v
-                         table renderer      layouts + topology renderer
+buildDatasetRows -> buildDeviceProjections -> runAdaptor
+                              |                    |
+                              v                    v
+                   table + diagnostic filters   topology view model
 ```
 
 The browser never calls OTBR directly. Live work is owned by Python collectors
 started through `td_cli`; the browser consumes files from the configured data
 directory through the server allowlist.
+See the [data-flow ownership table](merge_thread_device_info.md#ownership) for
+the field, identity, authority, and projection owners in both runtimes.
 
 ## Server Routes
 
 | Method and route | Handler | Behavior |
 |---|---|---|
 | `GET /` | `handle_root` | Redirect to `/tdash.html` |
+| `GET /api/catalog` | `handle_catalog_api` | Return the validated dataset catalog without caching |
+| `GET /api/capabilities` | `handle_capabilities_api` | Report available source files and actions |
 | `GET /api/data/{filename}` | `handle_data_api` | Serve, refresh, or start a job for an allowed data file |
 | `GET /api/job/{job_id}` | `handle_job_api` | Return job state and final/checkpoint metadata |
 | `DELETE /api/job/{job_id}` | `handle_job_cancel_api` | Request cancellation of a running job |
@@ -103,6 +110,13 @@ deduplicate by filename -> create background job -> 202 + Location
 estimated cost, and `force_async`. Checkpoint filenames are derived from dynamic
 entries with the `.partial.json` suffix and are served as non-regenerating,
 zero-max-age files.
+
+A catalog recipe can reuse an already registered filename by changing only the
+[manifest](../src/td-dataset-manifest.json). A new snapshot filename also needs
+an entry in `td_webserver.py` `FILE_ACTION_MAP` (static or with a collector
+action) and a producer or operator-supplied file. Listing it in the catalog
+alone does not make `/api/data/{filename}` serve it: unknown filenames return
+404.
 
 Data responses include `Cache-Control`, `Last-Modified`, and an ETag based on
 mtime and size. `If-None-Match` takes precedence over `If-Modified-Since` and
@@ -202,10 +216,10 @@ last-write-wins.
 |---|---|---|
 | Controls | `tdash.html`, `tdash-ui.js` | Source/dataset selection, Sync/Cancel, views, filters, settings, insights, activity logs, and pending jobs |
 | Browser activity | `tdash-activity.js` | Bounded in-memory activity, route/metadata sanitization, subscriptions, and tracked HTTP requests |
-| Fetch and assembly | `tdash-dataset.js`, `tdash-dataset-registry.js` | Registry lookup, cache policy, jobs, checkpoints, extractors, and final/partial datasets |
+| Fetch and assembly | `tdash-dataset.js`, `tdash-dataset-registry.js` | Catalog lookup, cache policy, jobs, checkpoints, extractors, and final/partial datasets |
 | Field and merge contract | `tdash-device-fields.js`, `tdash-merge.js`, `tdash-utils.js` | Preferred fields, aliases, identities, normalization, precedence, conflicts, and provenance |
-| Adaptation | `tdash-adaptors.js`, `tdash-adaptor-model.js` | Source-specific records to canonical devices, relationships, and details |
-| View model | `tdash-topology-view-model.js`, `tdash-filters.js`, `tdash-search.js` | Indexed visibility, capabilities, diagnostic matching, and search state |
+| Adaptation | `tdash-adaptors.js`, `tdash-adaptor-*.js`, `tdash-adaptor-model.js` | Source-specific records to canonical devices, relationships, and details |
+| View model | `tdash-device-projection.js`, `tdash-topology-view-model.js`, `tdash-filters.js`, `tdash-search.js` | Derived device state, indexed visibility, diagnostic matching, and search state |
 | Presentation | `tdash-layouts.js`, `tdash-topology-utils.js`, `tdash-topology-renderer.js`, `tdash-table-renderer.js` | Seed layouts, vis-network lifecycle, topology interaction, and sortable tables |
 | Status | `tdash-view-status.js` | Active-view status ownership and suppression of stale publishers |
 | Styling | `tdash.css`, `tdash-constants.js` | Responsive layout, controls, palettes, node/edge styles, and vis options |
@@ -228,10 +242,28 @@ Neither activity entries nor transient server job records are written to
 
 ## Dataset Assembly
 
-`DATASOURCE_REGISTRY` defines eight source groups. `DATASET_REGISTRY` is the
-runtime authority for selectable datasets and declares ordered files, merge
-strategy, row extractor, adaptor, default view, link filter, physics profile,
-and estimated action cost.
+At startup, `tdash-ui.js` fetches `/api/catalog` first, then
+`/api/capabilities`, before populating source and dataset controls. If the
+catalog request fails or validation rejects it, `tdash-dataset-registry.js`
+uses the bundled `tdash-catalog-fallback.js`; a capabilities failure leaves
+the catalog available but without source availability hints. The single
+[manifest](../src/td-dataset-manifest.json) defines ordered files, merge
+strategy, row extractor, adaptor, defaults, and `mergeGroups`; update it to
+add a dataset. `DATASOURCE_REGISTRY` and `DATASET_REGISTRY` are runtime views
+of the selected catalog, not independent declarations.
+
+After editing the manifest, run `python3 script/build_dataset_catalog.py` to
+regenerate the bundled fallback and restart the server. The manifest is the
+single recipe source of truth, but the generated fallback must be refreshed
+with it; recipes that introduce new snapshot filenames also need the server
+registration and producer described under [Data Request Flow](#data-request-flow).
+
+Browser assembly does not enforce network-instance separation: it can combine
+files from different instances. `tdash-view-status.js` compares known instance
+IDs from `/api/capabilities` for loaded files and displays `Network instance:
+mixed` when they disagree; unknown scopes do not block rendering. The offline
+merge has a separate exclusion rule described in the
+[Network Instance section](merge_thread_device_info.md#network-instance).
 
 Health datasets declare `healthEligible` and `healthProfile`. A cross-language
 contract test keeps active browser entries marked `healthEligible: true` aligned
@@ -247,11 +279,14 @@ Python remains the only verdict owner. The finding view defaults to All for
 each dataset and is held only in browser memory; reloads, dataset changes, and
 Reset restore All.
 
-On Sync, `loadDataset()` starts per-file requests concurrently and uses
+On Sync, `tdash-dataset.js` `loadDataset()` starts per-file requests concurrently and uses
 `Promise.allSettled` so successful files can still produce a partial result when
 another file fails or is cancelled. `buildDatasetRows()` is the pure assembly
 boundary: it applies the selected row extractor, merge strategy, and canonical
-output normalization while preserving source indexes.
+output normalization while preserving source indexes. It then calls
+`buildDeviceProjections()` in `tdash-device-projection.js` once per assembled
+dataset. `tdash-adaptors.js` `runAdaptor()` dispatches the selected recipe to
+the source adaptor, which emits through `tdash-adaptor-model.js`.
 
 The three browser merge strategies are:
 
@@ -273,7 +308,7 @@ assembled dataset
 source adaptor -> adaptor model -> emitted node/edge/detail maps
       |
       v
-topology view model -> capability scan -> filter/search visibility
+topology view model + device projections -> filter/search visibility
       |
       v
 layout seed -> vis.DataSet -> vis.Network -> status + details events
@@ -292,15 +327,20 @@ to the active profile.
 
 ## Tables, Search, Filters, and Details
 
-The table renderer discovers columns from current records and orders preferred
-fields before additional fields. More Info expands the displayed/searchable
-surface. Row and topology-node selection publish the same
+The table renderer displays canonical row fields and orders preferred fields
+before additional fields. `tdash-device-projection.js` computes device
+capabilities once from assembled rows; `tdash-filters.js` derives dataset
+capabilities from those projections and decides which diagnostic options to
+offer, also checking for matching records in the active view. The table
+renderer does not decide availability by scanning raw column names. More Info
+expands the displayed/searchable surface. Row and topology-node selection publish the same
 `tdash:device-selected` event, keeping details, settings, and diagnostic
 insights synchronized.
 
-Filter options are capability-driven. The browser scans the active topology or
-table payload and hides or disables unsupported node, link, and diagnostic
-options. Link filtering applies only to topology. Diagnostic relationship
+Filter options are capability-driven. `tdash-filters.js` uses the dataset's
+device projections to offer supported node and diagnostic options; the topology
+view model also uses projections for node and link visibility. Link filtering
+applies only to topology. Diagnostic relationship
 matches can expand both endpoints and force the matching relationship visible.
 
 Normal search targets the maintained identity, role, version, network, and
