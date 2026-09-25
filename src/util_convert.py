@@ -7,7 +7,7 @@ def b64_to_extended_address(b64, reverse=False):
     Converts a base64-encoded extended address to hexadecimal format.
 
     Args:
-        b64: Base64 encoded string (may contain escaped slashes \/)
+        b64: Base64 encoded string (may contain escaped slashes \\/)
         reverse: If True, reverses byte order for 802.15.4 little-endianness
 
     Returns:
