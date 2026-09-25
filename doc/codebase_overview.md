@@ -20,14 +20,20 @@ OTBR CLI / OTBR REST / HA Matter WS / mDNS / Eve
 Browser <---- aiohttp web server ----> td_cli subprocess
 ```
 
+The snapshot path is not the only browser/server flow. The dashboard also reads
+health assessments from `hobat_v1.db`, can request cache-only health processing,
+and can start transient device diagnostics. Source capabilities report cached
+files and source availability; when needed, the server performs bounded
+reachability probes. Device labels use a separate static-map read/update API.
+
 | Layer | Owners | Responsibility |
 |---|---|---|
-| Browser | `tdash.html`, `tdash.css`, `js/*.js` | Dataset selection, fetch sessions, merge/adaptation, filters, layouts, topology/table rendering |
-| HTTP server | `td_webserver.py` | Static assets, data allowlist, cache policy, jobs, cancellation, device labels |
+| Browser | `src/tdash.html`, `src/tdash.css`, `src/js/*.js` | Dataset selection, fetch sessions, merge/adaptation, filters, layouts, topology/table rendering, health views, and device actions |
+| HTTP server | `td_webserver.py` | Static assets, catalog and source capabilities, data allowlist, cache policy, jobs, health APIs, device actions, and device labels |
 | CLI dispatcher | `td_cli.py` | Top-level command tree and command-family dispatch |
 | Collectors | `otbr_cli_*.py`, `otbr_restapi_*.py`, `ha_matter_ws_*.py`, `mdns_*.py`, `eve_process.py` | Live collection, parsing, normalization, checkpoints, final snapshots |
-| Processing | `merge_dataset.py`, `merge_extaddr_device_label_map.py`, `td_health_*.py` | Cross-source merge, label-map administration, and cache-only health assessment |
-| Shared contracts | `td_const.py`, `td_device_fields.py`, `td_device_merge.py`, `td_record_merge.py`, `td_json_key_normalizer.py`, `util_*.py` | Filenames, fields, merge policies, data paths, network and subprocess helpers |
+| Processing | `merge_dataset.py`, `merge_extaddr_device_label_map.py`, `td_health_*.py`, `td_system_backups.py` | Cross-source merge, label-map administration, cache-only health assessment, and data-directory backup/restore |
+| Shared contracts | `td_const.py`, `td_dataset_catalog.py`, `td_network_identity.py`, `td_source_authority.py`, `td_source_capabilities.py`, `td_device_fields.py`, `td_device_merge.py`, `td_record_merge.py`, `td_json_key_normalizer.py`, `util_*.py` | Catalog validation, source availability, filenames, identities, fields, merge policies, data paths, network and subprocess helpers |
 | Persistence | Effective data directory | Operator inputs, generated snapshots, and the Hobat-wide `hobat_v1.db` SQLite store |
 
 Runtime dependencies include `aiohttp`, `websockets`, and `zeroconf`. The browser
@@ -40,7 +46,12 @@ uses vendored vis-network and sortable table libraries.
 | File | Responsibility |
 |---|---|
 | `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `health`, `system`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
-| `td_webserver.py` | aiohttp application, file action registry, HTTP caching, background jobs, cancellation, and device-label API |
+| `td_webserver.py` | aiohttp application, dataset catalog, source capabilities, file action registry, HTTP caching, background jobs, health APIs, device actions, and device-label API |
+| `td_dataset_catalog.py` | Dataset manifest validation and runtime catalog loading, including health roster policy projections |
+| `td_source_capabilities.py` | Cached source/file inventory and deduplicated, bounded live availability probes |
+| `td_source_authority.py` | Source-priority and per-field authority resolution from the catalog |
+| `td_network_identity.py` | Canonical Extended PAN ID parsing and normalization |
+| `td_device_actions.py` | Validation and allowlisted command construction for transient device diagnostics |
 | `td_const.py` | Authoritative Python cache filenames, data-directory constants, and Thread multicast addresses |
 | `td_device_fields.py` | Python field definitions, preferred names, aliases, identities, and placeholders |
 | `td_device_merge.py` | Shared merge context, source ordering, and domain merge policy |
@@ -52,6 +63,8 @@ uses vendored vis-network and sortable table libraries.
 | Files | Responsibility |
 |---|---|
 | `otbr_cli_thread_network_info.py` | Active dataset, mesh-local prefix, and favored OMR prefix |
+| `otbr_cli_bbr.py` | Border Router information collection |
+| `otbr_cli_device.py` | Explicit active device ping and counter-reset operations |
 | `otbr_cli_router_table.py` | Router table collection and parsing |
 | `otbr_cli_meshdiag_topology.py` | Mesh topology, addresses, links, and children |
 | `otbr_cli_meshdiag_childip6.py` | Per-router child IPv6 tables |
@@ -104,6 +117,8 @@ OTBR action API has no idempotency key; idempotent reads use bounded retries.
 | `ha_matter_ws_client.py`, `ha_matter_ws_contract.py` | Correlated WebSocket transport, handshake compatibility, and pinned Matter paths |
 | `ha_matter_ws_extractor.py`, `ha_matter_ws_snapshots.py` | Matter node decoding, canonical records, coverage, and credential exclusion |
 | `ha_matter_ws_topology.py` | Directional neighbor, child, route, and placeholder topology derivation |
+| `ha_matter_ws_thread.py` | Native Thread Border Router and selected-network diagnostics validation and collection |
+| `ha_matter_ws_native_topology.py` | Native schema-13 network-topology validation |
 | `ha_matter_ws_fetch_all.py`, `ha_matter_ws_cli.py` | One-snapshot orchestration, checkpoints, atomic files, outcome, and source CLI |
 
 The source is read-only and controller-scoped. Its fallback URI is
@@ -121,11 +136,14 @@ explicitly absent. It does not replace OTBR network-wide collection.
 | `merge_extaddr_device_label_map.py` | Bulk merge plus single-record read/upsert for the static label map |
 | `extaddr_device_label_map.py` | Static label-map loading |
 | `td_health_manifest.py`, `td-dataset-manifest.json` | Approved health dataset/profile contracts shared with browser registry metadata |
+| `td_health_rules.py`, `td-health-rules.json` | Health finding catalog validation and stable rule metadata |
+| `td_health_cli.py` | Health processing, comparison, roster, and retention command dispatch |
 | `td_health_processor.py`, `td_health_evaluator.py` | Stable cached-file reads, safe normalization, completeness, and Python-owned verdicts |
 | `td_health_observation_model.py`, `td_health_policy.py` | Frozen domain contracts and validated `snapshot-v1` policy |
-| `td_health_sqlite.py`, `td_health_history.py` | Atomic observation history, current assessment, bounded retention, and explicit roster operations |
+| `td_health_observation_store.py`, `td_health_sqlite.py`, `td_health_history.py` | Observation persistence boundary, SQLite transactions, current assessment, and bounded retention |
+| `td_health_graph.py`, `td_health_roster.py`, `td_health_comparison.py` | Topology evidence graph, expected/observed roster operations, and stored-assessment comparisons |
 | `td_health_read.py`, `td_webserver.py` health routes | Query-only SQLite projections, assessment pinning, grouped findings, bounded history, and no-store HTTP responses |
-| `td_system_backups.py`, `td_system_cli.py` | Versioned full-data-directory backup, manifest validation, and staged restore |
+| `td_system_backups.py`, `td_system_cli.py`, `td_system_ping.py` | Versioned data-directory backup/restore and bounded host ping |
 | `util_data.py` | Data-directory resolution and atomic JSON/text writes |
 | `util_network.py`, `util_convert.py`, `util_mac_counters.py` | Network, address conversion, and counter helpers |
 | `profile_wrapper_td_cli.py`, `profile_wrapper_td_webserver.py` | Development profiling wrappers |
@@ -139,13 +157,20 @@ datasets. It does not contain health thresholds or reclassify evidence.
 | File | Responsibility |
 |---|---|
 | `tdash-ui.js` | DOM event wiring, source/dataset controls, view dispatch, settings, and insights |
-| `tdash-dataset-registry.js` | Seven source groups and selectable dataset definitions |
+| `tdash-activity.js` | Bounded browser activity log, metadata sanitization, and tracked HTTP requests |
+| `tdash-dataset-registry.js` | Catalog-backed source groups and selectable dataset definitions |
+| `tdash-catalog-fallback.js` | Generated bundled fallback catalog used when `/api/catalog` is unavailable or invalid |
+| `tdash-capabilities.js` | Source and file capability loading and availability checks |
 | `tdash-dataset.js` | Fetch sessions, cache controls, jobs, cancellation, checkpoints, and dataset assembly |
 | `tdash-device-fields.js` | Browser field definitions, aliases, identities, transforms, and placeholders |
 | `tdash-merge.js` | Browser merge strategies, source precedence, conflicts, and provenance |
 | `tdash-utils.js` | Canonical identifiers, field normalization, payload normalization, and formatting |
-| `tdash-adaptors.js` | Source-specific conversion to the topology adaptor contract |
+| `tdash-adaptors.js` | Dispatch from dataset recipes to source adaptors |
+| `tdash-adaptor-*.js`, `tdash-adaptor-shared.js` | Source-specific record conversion and shared adaptor helpers |
 | `tdash-adaptor-model.js` | Canonical device/relationship/detail model and validated emission |
+| `tdash-source-authority.js` | Browser projection of catalog source authority for merge ordering |
+| `tdash-device-diagnostics.js` | Eligible device targets and supported transient diagnostic actions |
+| `tdash-health.js` | Health API requests and rendering of server-owned assessments, roster, and comparisons |
 | `tdash-topology-view-model.js` | Indexed topology state and pure filter/search visibility calculations |
 | `tdash-topology-utils.js` | Node/edge helpers, indexes, styles, labels, and isolated-node anchors |
 | `tdash-topology-renderer.js` | vis-network lifecycle, rendering, interaction, search highlights, and layout selection |

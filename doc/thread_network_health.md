@@ -66,10 +66,12 @@ identity context, processor-normalized native topology relationships, or a
 single merged-collection outcome. It can be reconsidered when those three
 cached contracts are available; see `ineligibleDatasets` in the manifest.
 
-Future workitems:
-Add Source: thread-panid-merged 
-Sources: otbr-cli and otbr-restapi 
-Based on panid 
+### Proposed Future Work (Not Implemented)
+
+A possible `thread-panid-merged` dataset could combine OTBR CLI and OTBR REST
+evidence by Extended PAN ID. This proposal is not a current catalog source or
+health-eligible dataset; implementation would require an approved plan and
+manifest changes.
 
 Arbitrary dataset IDs and file paths are rejected. Required final, identity,
 and outcome filenames are versioned in `src/td-dataset-manifest.json`.

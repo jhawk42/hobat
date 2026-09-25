@@ -28,11 +28,11 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 |---|---|
 | `otbr-cli` | Scan OTBR CLI commands |
 | `otbr-restapi` | Query OTBR REST API commands |
-| `ha-matter-ws` | Read commissioned nodes from Home Assistant Matter Server |
+| `ha-matter-ws` | Collect commissioned-node and native Thread snapshots or run an explicit Matter-node diagnostic |
 | `mdns` | Scan Thread-related mDNS scopes |
 | `process-eve` | Parse and enhance an Eve Thread layout file |
 | `health` | Process, inspect, or purge health history |
-| `system` | Create or restore complete Hobat data-directory backups |
+| `system` | Create or restore data-directory backups or run a bounded host ping |
 | `merge-dataset` (`merge-data`) | Merge Thread (otbr-cli, otbr-restapi, eve, mdns) sources into one cache file; `merge-data` is a compatibility alias |
 | `merge-extaddr` | Read or upsert one device label, or bulk-merge missing extaddr entries into the static map |
 
@@ -43,7 +43,7 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 ### `otbr-cli`
 
 ```text
-td_cli otbr-cli {thread-network-info,router-table,topology,meshdiag,networkdiag,device} ...
+td_cli otbr-cli {thread-network-info,router-table,bbr,meshdiag,networkdiag,device,topology} ...
 ```
 
 `otbr-cli topology` runs seven steps in order: thread network info, router
@@ -80,7 +80,7 @@ td_cli otbr-restapi [global-forwarded-options] {download,node,devices,diagnostic
 ### `ha-matter-ws`
 
 ```text
-td_cli ha-matter-ws [source-options] {server-info,devices,thread,diagnostics,mesh-diagnostics,topology,network-topology,all} ...
+td_cli ha-matter-ws [source-options] {server-info,device,devices,thread,network-topology,diagnostics,mesh-diagnostics,topology,dashboard,all} ...
 ```
 
 Source options include `--host`, `--port`, `--uri`, `--connect-timeout`,
@@ -91,7 +91,19 @@ overrides the complete endpoint. `devices`, `diagnostics`, and `mesh-diagnostics
 provide `get` and `fetch-all` commands; `devices` also provides `list`.
 `topology` writes the canonical topology snapshot, while `all` performs one
 inventory transaction and writes every fixed snapshot plus the collection
-outcome. `--output` applies only to leaf commands.
+outcome. `dashboard` writes the dashboard data bundle. `--output` applies only
+to leaf commands.
+
+`device ping` is a separate active diagnostic against one commissioned Matter
+node; it is not run as part of snapshot collection:
+
+```text
+td_cli ha-matter-ws device ping --node-id NODE_ID [--attempts N]
+```
+
+The node ID is required and attempts default to one. See the
+[web-server data-flow guide](codebase_webpage_web_server_data_flow.md#device-diagnostics)
+for the dashboard's separately gated device-action API.
 
 Native Thread network products are explicit, schema-gated commands and are not
 included in `all`:
@@ -145,7 +157,7 @@ unavailable or non-Thread Matter node are not treated as zero values.
 ### `mdns`
 
 ```text
-td_cli mdns [--browse-timeout SECONDS] [--haptcp] [--mattertcpsupported] [--ext-pan-id ID] [SCOPE]
+td_cli mdns [--browse-timeout SECONDS] [--ext-pan-id ID] [--haptcp] [--write-scope-snapshots] [--mattertcpsupported] [SCOPE]
 ```
 
 The owning mDNS parser uses a 3-second idle timeout unless
@@ -159,6 +171,9 @@ and a disagreement is logged. The `HOBAT_EXT_PAN_ID` environment fallback
 applies only at collection, never during merge. IDs accept 16 hex digits,
 `0x`-prefixed or byte-separated hex, or exact decimal text. Use strings for
 large IDs in JavaScript; unsafe numeric values lose precision.
+
+`--write-scope-snapshots` writes the `br`, `hap`, and `matter` snapshots from
+the same records collected by a `thread` browse.
 
 Final collector snapshots have sibling `.network.json` files containing
 provenance and the snapshot SHA-256. Merge excludes known cross-instance and
@@ -174,11 +189,20 @@ td_cli process-eve ...
 ### `health`
 
 ```text
+td_cli health process-dataset --dataset DATASET [--allow-partial] [--dry-run] [--json]
+                              [--export-latest [FILE]]
+td_cli health compare --before-assessment ID --after-assessment ID [--dry-run] [--json]
 td_cli health purge [--keep-days DAYS] [--dry-run] [--yes] [--json]
 td_cli health purge-all [--dry-run] [--yes] [--json]
 td_cli health purge-by-device --device EXTADDR [--network NETWORK_ID]
                               [--dry-run] [--yes] [--json]
 ```
+
+`process-dataset` assesses approved cached snapshots without starting
+collection. `compare` compares two stored assessments. The processing command
+also supports roster administration and policy options; see
+[Thread Network Health](thread_network_health.md) for its full contract and
+examples.
 
 Age purge defaults to 30 retained days and uses an exclusive UTC cutoff.
 `purge-all` removes health-domain records and roster entries but preserves the
@@ -200,6 +224,17 @@ must not already exist or be inside the active data directory. Restore requires
 confirmation, validates checksums and database integrity, stages the complete
 replacement, and refuses an active database writer. Stop the web server and all
 writers before restore. Backups are unredacted and can contain credentials.
+
+### `system device ping`
+
+```text
+td_cli system device ping --address IP [--family {auto,ipv4,ipv6}]
+                           [--attempts N] [--timeout SECONDS]
+                           [--deadline SECONDS]
+```
+
+This runs a bounded host ping to a literal IP address. It is separate from
+OTBR or Matter device actions.
 
 ### `merge-dataset`
 
@@ -365,16 +400,26 @@ Examples:
 
 ```
 usage: td_cli otbr-cli [-h]
-                       {thread-network-info,router-table,meshdiag,networkdiag,topology}
+                       {thread-network-info,router-table,bbr,meshdiag,networkdiag,device,topology}
                        ...
 
 positional arguments:
-  {thread-network-info,router-table,topology,meshdiag,networkdiag}
-    thread-network-info        Scan and save thread network info
+  {thread-network-info,router-table,bbr,meshdiag,networkdiag,device,topology}
+    thread-network-info         Scan and save thread network info
     router-table                Scan and save router table
-    meshdiag                    Mesh diagnostic scans
-    networkdiag                 Network diagnostic scans
-    topology                    Run full otbr-cli topology sweep: thread-network-info, router-table, meshdiag topology, networkdiag multicast-network, networkdiag fetch-all, meshdiag routerneighbortable, meshdiag childtable
+    bbr                         Explicitly collect Primary Backbone Router
+                                state
+    meshdiag                    Scan and save mesh diagnostic data
+    networkdiag                 Scan and save network diagnostic data
+    device                      Run explicit active Thread device commands
+    topology                    Run full otbr-cli topology sweep: thread-
+                                network-info, router-table, meshdiag topology,
+                                networkdiag multicast-network, networkdiag
+                                fetch-all, meshdiag routerneighbortable,
+                                meshdiag childtable
+
+options:
+  -h, --help                    show this help message and exit
 ```
 
 ### `otbr-cli topology`
@@ -430,24 +475,27 @@ options:
 ### `mdns`
 
 ```
-usage: td_cli mdns [-h] [--browse-timeout SECONDS] [--haptcp]
-                   [--mattertcpsupported]
-                   [SCOPE]
+usage: td_cli mdns [-h] [--browse-timeout BROWSE_TIMEOUT]
+                   [--ext-pan-id EXT_PAN_ID] [--haptcp]
+                   [--write-scope-snapshots] [--mattertcpsupported]
+                   [{thread,br,hap,matter}]
 
 positional arguments:
-  SCOPE                 Scope filter: thread | br | hap | matter (default:
-                        thread)
+  {thread,br,hap,matter}
+                        mDNS scope to query; provide one to run a scan
 
 options:
   -h, --help            show this help message and exit
-  --browse-timeout SECONDS
-                        Seconds of idle time before auto-exit (default: 5, or
-                        TD_MDNS_BROWSE_TIMEOUT env var)
-  --haptcp              Also browse _hap._tcp.local. (Wi-Fi HomeKit
-                        accessories). Applies when scope is 'thread' or 'hap'.
-                        Off by default.
-  --mattertcpsupported  Include _matter._tcp records where T=1 (TCP
-                        supported). By default those records are excluded.
+  --browse-timeout BROWSE_TIMEOUT
+                        Browse timeout in seconds forwarded to
+                        mdns_thread_scopes
+  --ext-pan-id EXT_PAN_ID
+                        Extended PAN ID to use when mDNS cannot observe it
+  --haptcp              Include _hap._tcp service scope
+  --write-scope-snapshots
+                        Write br, hap, and matter snapshots from one thread
+                        browse
+  --mattertcpsupported  Include _matterc._udp scope
 ```
 
 ### `otbr-restapi`

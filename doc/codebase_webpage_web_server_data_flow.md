@@ -30,9 +30,16 @@ buildDatasetRows -> buildDeviceProjections -> runAdaptor
 
 The browser never calls OTBR directly. Live work is owned by Python collectors
 started through `td_cli`; the browser consumes files from the configured data
-directory through the server allowlist.
+directory through the server allowlist. Source-availability discovery is a
+separate bounded probe path in the Python web server, not a collector refresh.
 See the [data-flow ownership table](merge_thread_device_info.md#ownership) for
 the field, identity, authority, and projection owners in both runtimes.
+
+The dashboard also uses API paths outside snapshot assembly. Health processing
+consumes approved cached files and writes assessments to `hobat_v1.db`; health
+GET routes read stored projections from that database. Device diagnostics run
+as transient actions and do not update snapshots or health history. Device
+labels use their own static-map API.
 
 ## Server Routes
 
@@ -40,12 +47,22 @@ the field, identity, authority, and projection owners in both runtimes.
 |---|---|---|
 | `GET /` | `handle_root` | Redirect to `/tdash.html` |
 | `GET /api/catalog` | `handle_catalog_api` | Return the validated dataset catalog without caching |
-| `GET /api/capabilities` | `handle_capabilities_api` | Report available source files and actions |
+| `GET /api/capabilities` | `handle_capabilities_api` | Report cached files and source availability |
 | `GET /api/data/{filename}` | `handle_data_api` | Serve, refresh, or start a job for an allowed data file |
 | `GET /api/job/{job_id}` | `handle_job_api` | Return job state and final/checkpoint metadata |
 | `DELETE /api/job/{job_id}` | `handle_job_cancel_api` | Request cancellation of a running job |
 | `GET /api/jobs` | `handle_jobs_api` | Return a no-store projection of all active generic, health, and device-action jobs |
 | `DELETE /api/jobs` | `handle_jobs_cancel_api` | Request deterministic, idempotent cancellation of all active jobs |
+| `GET /api/health/summary` | `handle_health_summary_api` | Read a pinned or latest grouped assessment |
+| `GET /api/health/findings` | `handle_health_findings_api` | Read filtered or paginated findings for an assessment |
+| `GET /api/health/devices/{device_id}` | `handle_health_device_api` | Read one device's findings and approved health evidence |
+| `GET /api/health/observations` | `handle_health_observations_api` | Read bounded observation history |
+| `GET /api/health/comparisons` | `handle_health_comparisons_api` | List stored assessment comparisons |
+| `GET /api/health/comparisons/{comparison_id}` | `handle_health_comparison_api` | Read a pinned comparison and item page |
+| `GET /api/health/roster` | `handle_health_roster_api` | Read a paginated network device roster projection |
+| `GET /api/health/roster/{device_id}` | `handle_health_roster_device_api` | Read one device's approved roster fields |
+| `GET /api/health/latest` | `handle_health_latest_api` | Read the latest eligible assessment |
+| `GET /api/health/capabilities` | `handle_health_capabilities_api` | Report health-store read capabilities |
 | `POST /api/health/process-dataset` | `handle_health_process_dataset_api` | Process one approved cached dataset into a health assessment |
 | `GET /api/device-actions` | `handle_device_actions_capabilities_api` | Return the effective global device-action policy and enabled action names |
 | `POST /api/device-actions` | `handle_device_actions_api` | Validate and start one allowed transient device diagnostic action |
@@ -65,6 +82,30 @@ This removes cross-origin browser authorization; it is not authentication or a
 network-access boundary. Direct HTTP clients such as `curl` and `wget` can still
 call reachable API routes, including mutation routes. Use firewall or
 authenticated reverse-proxy controls when access must be restricted.
+
+`GET /api/capabilities` inspects cached files and source availability. When no
+file is cached for OTBR CLI, OTBR REST, or Home Assistant Matter, the server
+performs a bounded reachability probe through its Python source clients; these
+probes are coalesced and cached for 60 seconds. They do not collect snapshots or
+invoke `td_cli`. `GET /api/device-actions` is separate and reports the effective
+policy for active Ping and Reset Counters operations.
+
+### Health and Device-Action Flows
+
+```text
+Dashboard -> POST /api/health/process-dataset -> web server
+                 -> td_cli health process-dataset -> hobat_v1.db
+Dashboard -> GET /api/health/* -> web server -> query-only hobat_v1.db read
+Dashboard -> POST /api/device-actions -> validate -> source action
+                                                           -> transient job/result (memory)
+```
+
+Health processing is cache-only: the server starts a background `td_cli` job
+with `--allow-partial`, which writes health history to `hobat_v1.db` without
+starting a collector, changing a snapshot, or probing a device. Health GET
+routes are query-only and return no-store responses. Device-action results and
+jobs are transient; they are not persisted in snapshots, checkpoints, labels,
+or health data.
 
 ## Device Diagnostics
 
@@ -214,13 +255,16 @@ last-write-wins.
 
 | Layer | Owners | Responsibility |
 |---|---|---|
-| Controls | `tdash.html`, `tdash-ui.js` | Source/dataset selection, Sync/Cancel, views, filters, settings, insights, activity logs, and pending jobs |
+| Controls | `tdash.html`, `tdash-ui.js` | Source/dataset selection, Sync/Cancel, views, filters, settings, insights, device actions, activity logs, and pending jobs |
 | Browser activity | `tdash-activity.js` | Bounded in-memory activity, route/metadata sanitization, subscriptions, and tracked HTTP requests |
+| Source and catalog capabilities | `tdash-capabilities.js`, `tdash-catalog-fallback.js` | Source/file availability and bundled fallback for catalog loading |
 | Fetch and assembly | `tdash-dataset.js`, `tdash-dataset-registry.js` | Catalog lookup, cache policy, jobs, checkpoints, extractors, and final/partial datasets |
-| Field and merge contract | `tdash-device-fields.js`, `tdash-merge.js`, `tdash-utils.js` | Preferred fields, aliases, identities, normalization, precedence, conflicts, and provenance |
+| Field and merge contract | `tdash-device-fields.js`, `tdash-source-authority.js`, `tdash-merge.js`, `tdash-utils.js` | Preferred fields, aliases, identities, normalization, precedence, conflicts, and provenance |
 | Adaptation | `tdash-adaptors.js`, `tdash-adaptor-*.js`, `tdash-adaptor-model.js` | Source-specific records to canonical devices, relationships, and details |
 | View model | `tdash-device-projection.js`, `tdash-topology-view-model.js`, `tdash-filters.js`, `tdash-search.js` | Derived device state, indexed visibility, diagnostic matching, and search state |
 | Presentation | `tdash-layouts.js`, `tdash-topology-utils.js`, `tdash-topology-renderer.js`, `tdash-table-renderer.js` | Seed layouts, vis-network lifecycle, topology interaction, and sortable tables |
+| Device diagnostics | `tdash-device-diagnostics.js` | Device-action eligibility, target selection, and result presentation inputs |
+| Health | `tdash-health.js` | Assessment, findings, roster, comparison, and health-job API/rendering workflows |
 | Status | `tdash-view-status.js` | Active-view status ownership and suppression of stale publishers |
 | Styling | `tdash.css`, `tdash-constants.js` | Responsive layout, controls, palettes, node/edge styles, and vis options |
 
