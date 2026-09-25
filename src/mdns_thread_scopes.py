@@ -37,6 +37,19 @@ from mdns_matter import (
 TD_MDNS_BROWSE_TIMEOUT_ENV_NAME = "TD_MDNS_BROWSE_TIMEOUT"
 # seconds (default if env var not set)"
 TD_MDNS_BROWSE_TIMEOUT_DEFAULT_VALUE = 3
+MDNS_SPLIT_SCOPE_SERVICE_TYPES = {
+    "br": frozenset({"_meshcop._udp.local."}),
+    "hap": frozenset({"_hap._udp.local.", "_hap._tcp.local."}),
+    "matter": frozenset({"_matterc._udp.local.", "_matter._tcp.local."}),
+}
+
+
+def _records_for_service_types(records, service_types):
+    return [
+        record
+        for record in records
+        if isinstance(record, dict) and record.get("scope") in service_types
+    ]
 
 # ---------------------------------------------------------------------------
 # Enricher dispatch table
@@ -429,8 +442,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""scope argument:
   (none)   browse all thread scopes (default)
-  thread   browse Thread-related scopes (_meshcop._udp, _trel._udp, _hap._udp, _matterc._udp, _matter._tcp)
-  br       browse Thread Border Router scopes (_meshcop._udp, _trel._udp)
+      thread   browse Thread-related scopes (_meshcop._udp, _hap._udp, _matterc._udp, _matter._tcp)
+      br       browse Thread Border Router scopes (_meshcop._udp)
   hap      browse Apple HomeKit HAP scopes (_hap._udp)
   matter   browse Matter scopes (_matter._tcp, _matterc._udp)
 
@@ -463,6 +476,14 @@ options:
         "Applies when scope is 'thread' or 'hap'. Off by default.",
     )
     parser.add_argument(
+        "--write-scope-snapshots",
+        action="store_true",
+        help=(
+            "When browsing thread, also write the br, hap, and matter snapshots "
+            "from the same collected records"
+        ),
+    )
+    parser.add_argument(
         "--mattertcpsupported",
         action="store_true",
         default=False,
@@ -478,6 +499,9 @@ options:
     )
     args = parser.parse_args(argv)
 
+    if args.write_scope_snapshots and args.scope != "thread":
+        parser.error("--write-scope-snapshots can only be used with the thread scope")
+
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
@@ -491,7 +515,6 @@ options:
     ]
 
     scopes_br = ["_meshcop._udp.local."]
-    scopes_br_trel = ["_trel._udp.local."]
     scopes_apple_hap = ["_hap._udp.local."]
     scopes_matter = ["_matterc._udp.local.", "_matter._tcp.local."]
 
@@ -570,6 +593,8 @@ options:
         zeroconf.close()
 
         records = listener.get_records()
+        if args.write_scope_snapshots:
+            records = _records_for_service_types(records, selected_scopes)
 
         save_final_json(
             convert_keys_to_camel_case(records),
@@ -579,6 +604,28 @@ options:
             writer=save_json_atomic,
             ext_pan_id=args.ext_pan_id,
         )
+
+        if args.write_scope_snapshots:
+            for scope_tag, service_types in MDNS_SPLIT_SCOPE_SERVICE_TYPES.items():
+                scope_records = _records_for_service_types(records, service_types)
+                scope_output_file = resolve_data_file_path(
+                    MDNS_SCOPE_FILENAMES[scope_tag], td_data_dir
+                )
+                save_final_json(
+                    convert_keys_to_camel_case(scope_records),
+                    scope_output_file,
+                    CollectionWriteOutcome.complete(
+                        valid_empty_reason="completed-browse"
+                    ),
+                    indent=2,
+                    writer=save_json_atomic,
+                    ext_pan_id=args.ext_pan_id,
+                )
+                logging.info(
+                    "Saved %d mDNS record(s) to %s",
+                    len(scope_records),
+                    scope_output_file,
+                )
 
         logging.info(f"Saved {len(records)} mDNS record(s) to {output_file}")
         logging.debug(json.dumps(records, indent=2))

@@ -253,3 +253,76 @@ def test_rest_fetch_dispatchers_do_not_checkpoint_without_output_path() -> None:
     devices_write.assert_not_called()
     diagnostics_write.assert_not_called()
     mesh_write.assert_not_called()
+    diagnostics_client.list_devices.assert_called_once_with(raw=False)
+    diagnostics_client.fetch_device_collection.assert_not_called()
+    mesh_client.list_devices.assert_called_once_with(raw=False)
+    mesh_client.fetch_device_collection.assert_not_called()
+
+
+@pytest.mark.parametrize("resource", ["diagnostics", "mesh-diagnostics"])
+def test_rest_fetch_all_refreshes_device_collection_by_default(resource):
+    client = Mock()
+    client.fetch_device_collection.return_value = [{"id": "dev-1", "rloc16": "0x4000"}]
+    client.fetch_all_devices_diagnostics.return_value = {
+        "items": [],
+        "deviceResults": [],
+        "partial": False,
+    }
+    client.fetch_mesh_diagnostics_all_devices.return_value = {
+        "items": [],
+        "deviceResults": [],
+        "partial": False,
+    }
+
+    if resource == "diagnostics":
+        args = SimpleNamespace(
+            diagnostics_command="fetch-all",
+            no_enrich_mac_counters=True,
+            no_update_devices=False,
+            device_ids=None,
+            destination_type="extended",
+            task_timeout=8,
+            poll_interval=2.0,
+            poll_timeout=8.0,
+            no_progress=True,
+            no_fallback=True,
+            preset="recommended",
+            types=None,
+            items_only=True,
+            resolved_output_path=None,
+        )
+        module = diagnostics_module
+        dispatch = lambda: module.dispatch_diagnostics(
+            client, args, raw_arg=False, fields=None
+        )
+    else:
+        args = SimpleNamespace(
+            mesh_diag_command="fetch-all",
+            poll_timeout=8.0,
+            poll_interval=2.0,
+            destination_type="extended",
+            task_timeout=8,
+            types=None,
+            no_update_devices=False,
+            routers_only=False,
+            device_ids=None,
+            no_progress=True,
+            no_fallback=True,
+            items_only=True,
+            resolved_output_path=None,
+        )
+        module = mesh_module
+        dispatch = lambda: module.dispatch_mesh_diagnostics(
+            client, args, raw_arg=False
+        )
+
+    with patch.object(module, "emit_rest_command_output", side_effect=lambda payload, *_args, **_kwargs: payload):
+        dispatch()
+
+    if resource == "diagnostics":
+        client.fetch_device_collection.assert_called_once_with(
+            device_count=255, items_only=True
+        )
+    else:
+        client.fetch_device_collection.assert_called_once_with(items_only=True)
+    client.list_devices.assert_not_called()

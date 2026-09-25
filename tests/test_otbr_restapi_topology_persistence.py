@@ -142,6 +142,98 @@ def test_topology_skip_devices_keeps_device_inputs_unsaved(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("skipped_steps", "expected_saved_paths", "diagnostics_calls", "mesh_calls"),
+    [
+        (
+            [],
+            [
+                OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+                OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+                OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+                OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+            ],
+            1,
+            1,
+        ),
+        (
+            ["--skip-diagnostics"],
+            [
+                OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+                OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+            ],
+            0,
+            1,
+        ),
+        (
+            ["--skip-mesh-diagnostics"],
+            [
+                OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+                OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+            ],
+            1,
+            0,
+        ),
+        (["--skip-diagnostics", "--skip-mesh-diagnostics"], [], 0, 0),
+    ],
+)
+def test_topology_skip_devices_no_update_writes_only_enabled_stage_outputs(
+    tmp_path, skipped_steps, expected_saved_paths, diagnostics_calls, mesh_calls
+):
+    args = cli_module.build_parser().parse_args(
+        [
+            "--no-progress",
+            "topology",
+            "--skip-devices",
+            "--no-update-devices",
+            "--no-enrich-mac-counters",
+            *skipped_steps,
+        ]
+    )
+    args.td_data_dir = tmp_path
+    client = MagicMock()
+    client.list_devices.return_value = [{"id": "listed", "rloc16": "0x4000"}]
+    client.fetch_all_devices_diagnostics.return_value = {
+        "items": [{"id": "diag-1"}],
+        "deviceResults": [],
+        "partial": False,
+    }
+    client.fetch_mesh_diagnostics_all_devices.return_value = {
+        "items": [{"id": "mesh-1"}],
+        "deviceResults": [],
+        "partial": False,
+    }
+    saved_paths = []
+
+    with patch.object(
+        topology_module,
+        "emit_rest_payload_output",
+        side_effect=lambda _payload, path, _logger: saved_paths.append(path.name),
+    ):
+        assert topology_module.dispatch_topology(client, args, raw_arg=False) is None
+
+    client.list_devices.assert_called_once_with(raw=False)
+    client.fetch_device_collection.assert_not_called()
+    assert client.fetch_all_devices_diagnostics.call_count == diagnostics_calls
+    assert client.fetch_mesh_diagnostics_all_devices.call_count == mesh_calls
+    assert OTBR_RESTAPI_DEVICES_FETCH_FILENAME not in saved_paths
+    assert saved_paths == expected_saved_paths
+
+
+@pytest.mark.parametrize(
+    ("command", "command_attribute"),
+    [
+        (["diagnostics", "fetch-all"], "diagnostics_command"),
+        (["mesh-diagnostics", "fetch-all"], "mesh_diag_command"),
+    ],
+)
+def test_rest_fetch_all_parsers_accept_no_update_devices(command, command_attribute):
+    args = cli_module.build_parser().parse_args([*command, "--no-update-devices"])
+
+    assert getattr(args, command_attribute) == "fetch-all"
+    assert args.no_update_devices is True
+
+
+@pytest.mark.parametrize(
     ("command_args", "expected_updates"),
     [
         ([], 1),

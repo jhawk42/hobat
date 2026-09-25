@@ -713,23 +713,30 @@ def _add_topology_commands(
     topo_p.add_argument(
         "--skip-devices",
         action="store_true",
-        help="Skip Step 1 (device refresh via updateDeviceCollectionTask)",
+        help=(
+            "Skip Step 1 and do not write the devices-fetch JSON; read the current "
+            "device list for later steps. Diagnostics may still refresh it unless "
+            "--no-update-devices is also set"
+        ),
     )
     topo_p.add_argument(
         "--skip-diagnostics",
         action="store_true",
-        help="Skip Step 2 (network diagnostics fetch-all)",
+        help="Skip Step 2 (no diagnostics item or outcome JSON is written)",
     )
     topo_p.add_argument(
         "--skip-mesh-diagnostics",
         action="store_true",
-        help="Skip Step 3 (mesh diagnostics fetch-all)",
+        help="Skip Step 3 (no mesh-diagnostics item or outcome JSON is written)",
     )
     topo_p.add_argument(
         "--no-update-devices",
         action="store_true",
         default=False,
-        help="Skip updateDeviceCollectionTask before diagnostics/mesh steps",
+        help=(
+            "Do not enqueue updateDeviceCollectionTask for diagnostics/mesh steps; "
+            "use the current device list. Does not skip enabled steps or their outputs"
+        ),
     )
     topo_p.add_argument(
         "--no-enrich-mac-counters",

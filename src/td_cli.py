@@ -290,6 +290,12 @@ def _add_otbr_cli_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Include _hap._tcp service scope",
     )
     mdns_p.add_argument(
+        "--write-scope-snapshots",
+        action="store_true",
+        default=False,
+        help="Write br, hap, and matter snapshots from one thread browse",
+    )
+    mdns_p.add_argument(
         "--mattertcpsupported",
         action="store_true",
         default=False,
@@ -904,6 +910,8 @@ def _dispatch_mdns(
         mdns_argv += ["--browse-timeout", str(args.browse_timeout)]
     if getattr(args, "haptcp", False):
         mdns_argv.append("--haptcp")
+    if getattr(args, "write_scope_snapshots", False):
+        mdns_argv.append("--write-scope-snapshots")
     if getattr(args, "mattertcpsupported", False):
         mdns_argv.append("--mattertcpsupported")
     if args.ext_pan_id is not None:

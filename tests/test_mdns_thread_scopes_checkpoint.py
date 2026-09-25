@@ -20,6 +20,132 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
+    @staticmethod
+    def _scope_record(scope: str, name: str) -> dict:
+        return {
+            "record_key": f"{scope}|{name}",
+            "scope": scope,
+            "name": name,
+            "service_info": {"type": scope},
+        }
+
+    def _run_mocked_thread_browse(self, argv: list[str], records: list[dict]):
+        listener = MagicMock()
+        listener.get_records.return_value = records
+
+        with patch.object(
+            mdns, "_resolve_optional_omr_ipv6addr_prefix", return_value=None
+        ), patch.object(
+            mdns, "MDNSDumpListener", return_value=listener
+        ) as listener_class, patch.object(
+            mdns, "Zeroconf"
+        ), patch.object(
+            mdns, "ServiceBrowser"
+        ) as service_browser, patch.object(
+            mdns.threading, "Thread"
+        ), patch.object(
+            mdns, "save_final_json"
+        ) as save_final_json:
+            result = mdns.main([*argv, "--datadir", str(self.data_dir)])
+
+        self.assertIsNone(result)
+        return listener_class, service_browser, save_final_json
+
+    def test_thread_scope_snapshots_partition_one_browse_and_exclude_trel(self) -> None:
+        br_type = "_meshcop._udp.local."
+        hap_type = "_hap._udp.local."
+        hap_tcp_type = "_hap._tcp.local."
+        matter_commissioning_type = "_matterc._udp.local."
+        matter_operational_type = "_matter._tcp.local."
+        trel_type = "_trel._udp.local."
+        records = [
+            self._scope_record(br_type, "br.local."),
+            self._scope_record(hap_type, "hap.local."),
+            self._scope_record(hap_tcp_type, "hap-tcp.local."),
+            self._scope_record(matter_commissioning_type, "commissioning.local."),
+            self._scope_record(matter_operational_type, "operational.local."),
+            self._scope_record(trel_type, "trel.local."),
+        ]
+
+        listener_class, service_browser, save_final_json = self._run_mocked_thread_browse(
+            [
+                "thread",
+                "--write-scope-snapshots",
+                "--haptcp",
+                "--mattertcpsupported",
+                "--ext-pan-id",
+                "78b9775b001c1cbe",
+            ],
+            records,
+        )
+
+        listener_class.assert_called_once_with(
+            include_matter_tcp_supported=True,
+            omr_ipv6addr_prefix=None,
+            checkpoint_output_file=self.data_dir / "td-mdns-scopes-thread.partial.json",
+        )
+        browsed_types = [call.args[1] for call in service_browser.call_args_list]
+        self.assertEqual(
+            browsed_types,
+            [br_type, hap_type, matter_commissioning_type, matter_operational_type, hap_tcp_type],
+        )
+        self.assertNotIn(trel_type, browsed_types)
+
+        snapshots = {
+            Path(call.args[1]).name: call.args[0]
+            for call in save_final_json.call_args_list
+        }
+        self.assertEqual(
+            set(snapshots),
+            {mdns.MDNS_SCOPE_FILENAMES[name] for name in ("thread", "br", "hap", "matter")},
+        )
+        self.assertEqual(
+            [record["name"] for record in snapshots[mdns.MDNS_SCOPE_FILENAMES["thread"]]],
+            ["br.local.", "hap.local.", "hap-tcp.local.", "commissioning.local.", "operational.local."],
+        )
+        self.assertEqual(
+            [record["name"] for record in snapshots[mdns.MDNS_SCOPE_FILENAMES["br"]]],
+            ["br.local."],
+        )
+        self.assertEqual(
+            [record["name"] for record in snapshots[mdns.MDNS_SCOPE_FILENAMES["hap"]]],
+            ["hap.local.", "hap-tcp.local."],
+        )
+        self.assertEqual(
+            [record["name"] for record in snapshots[mdns.MDNS_SCOPE_FILENAMES["matter"]]],
+            ["commissioning.local.", "operational.local."],
+        )
+        self.assertTrue(all(trel_type not in record["scope"] for data in snapshots.values() for record in data))
+        for call in save_final_json.call_args_list:
+            self.assertEqual(call.kwargs["ext_pan_id"], "78b9775b001c1cbe")
+            self.assertIs(call.kwargs["writer"], mdns.save_json_atomic)
+
+    def test_thread_scope_snapshots_write_empty_scope_files(self) -> None:
+        _, _, save_final_json = self._run_mocked_thread_browse(
+            ["thread", "--write-scope-snapshots"], []
+        )
+
+        self.assertEqual(save_final_json.call_count, 4)
+        self.assertEqual(
+            {Path(call.args[1]).name for call in save_final_json.call_args_list},
+            {mdns.MDNS_SCOPE_FILENAMES[name] for name in ("thread", "br", "hap", "matter")},
+        )
+        self.assertTrue(all(call.args[0] == [] for call in save_final_json.call_args_list))
+
+    def test_matter_tcp_support_filter_is_preserved(self) -> None:
+        info = SimpleNamespace(properties={b"T": b"1"})
+
+        self.assertTrue(
+            mdns.MDNSDumpListener()._is_matter_tcp_excluded(
+                "_matter._tcp.local.", info
+            )
+        )
+        self.assertFalse(
+            mdns.MDNSDumpListener(include_matter_tcp_supported=True)._is_matter_tcp_excluded(
+                "_matter._tcp.local.", info
+            )
+        )
+
     def test_add_service_writes_checkpoint_snapshot_immediately(self) -> None:
         checkpoint_path = self.data_dir / "td-mdns-scopes-thread.partial.json"
         listener = mdns.MDNSDumpListener(checkpoint_output_file=checkpoint_path)
