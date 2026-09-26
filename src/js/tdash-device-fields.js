@@ -23,9 +23,10 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "ipv6Addresses", aliases: ["ipv6_addrs", "addresses"], transform: "stringArray" },
   { path: "role", aliases: [], transform: "identity" },
   { path: "type", aliases: [], transform: "identity" },
+  { path: "threadVersionDecimal", aliases: ["thread_version_decimal"], transform: "number" },
   { path: "threadVersion", aliases: ["thread_version"], transform: "identity" },
   { path: "threadStackVersion", aliases: ["thread_stack_version"], transform: "identity" },
-  { path: "version", aliases: ["ver"], transform: "identity" },
+  { path: "version", aliases: [], transform: "identity" },
   { path: "vendorName", aliases: ["vendor_name"], transform: "identity" },
   { path: "vendorModel", aliases: ["vendor_model"], transform: "identity" },
   { path: "vendorSwVersion", aliases: ["vendor_sw_version"], transform: "identity" },
@@ -106,6 +107,10 @@ const FIELD_DEFINITIONS_BY_PATH = Object.fromEntries(
   FIELD_DEFINITIONS.map((definition) => [definition.path, definition]),
 );
 const LEGACY_METRIC_ALIAS_FIRST = new Set(["frameErrorRate", "messageErrorRate"]);
+
+export function decodeShortThreadVersion(decimal) {
+  return ({ 2: "1.1", 3: "1.2", 4: "1.3", 5: "1.4" })[decimal] ?? "Unknown";
+}
 
 export function canonicalExtPanId(value) {
   let number;
@@ -272,6 +277,88 @@ function toNumber(value) {
   return value;
 }
 
+function isNormalizationEmpty(value) {
+  return value === null || value === undefined || value === "";
+}
+
+function appendNormalizationConflict(record, path, current, incoming) {
+  if (!path || isNormalizationEmpty(current) || isNormalizationEmpty(incoming) || current === incoming) return;
+  if (!Array.isArray(record._merge_conflicts)) record._merge_conflicts = [];
+  const entry = { path, current: cloneValue(current), incoming: cloneValue(incoming) };
+  if (record._merge_conflicts.length < 20 && !record._merge_conflicts.some((item) => JSON.stringify(item) === JSON.stringify(entry))) {
+    record._merge_conflicts.push(entry);
+  }
+}
+
+function normalizeSourceThreadVersion(record, source) {
+  let decimalValue = record.threadVersionDecimal;
+  if (isNormalizationEmpty(decimalValue)) decimalValue = record.thread_version_decimal;
+  let wireValue;
+
+  if (source === "cli" && Object.prototype.hasOwnProperty.call(record, "ver")) {
+    const legacyValue = record.ver;
+    delete record.ver;
+    if (isNormalizationEmpty(decimalValue)) decimalValue = legacyValue;
+    else appendNormalizationConflict(record, "threadVersionDecimal", decimalValue, legacyValue);
+  }
+
+  if (source === "cli" && Number.isSafeInteger(record.version)) {
+    const legacyValue = record.version;
+    delete record.version;
+    if (isNormalizationEmpty(decimalValue)) decimalValue = legacyValue;
+    else appendNormalizationConflict(record, "threadVersionDecimal", decimalValue, legacyValue);
+  }
+
+  if (source === "rest") {
+    let currentVersion = record.threadVersion;
+    let versionKey = "threadVersion";
+    if (isNormalizationEmpty(currentVersion)) {
+      currentVersion = record.thread_version;
+      versionKey = "thread_version";
+    }
+    if (Number.isSafeInteger(currentVersion)) {
+      wireValue = currentVersion;
+      delete record[versionKey];
+      if (isNormalizationEmpty(decimalValue)) decimalValue = wireValue;
+      else appendNormalizationConflict(record, "threadVersionDecimal", decimalValue, wireValue);
+      if (record.type === "threadNetworkDiagnostic" && Number.isSafeInteger(record.version)) {
+        const legacyValue = record.version;
+        delete record.version;
+        if (decimalValue !== legacyValue) {
+          appendNormalizationConflict(record, "threadVersionDecimal", decimalValue, legacyValue);
+        }
+      }
+    } else if (record.type === "threadNetworkDiagnostic" && Number.isSafeInteger(record.version)) {
+      wireValue = record.version;
+      delete record.version;
+      if (isNormalizationEmpty(decimalValue)) decimalValue = wireValue;
+      else appendNormalizationConflict(record, "threadVersionDecimal", decimalValue, wireValue);
+    }
+  } else if (source === "thread-tools" && Number.isSafeInteger(record.version)) {
+    wireValue = record.version;
+    delete record.version;
+    if (isNormalizationEmpty(decimalValue)) decimalValue = wireValue;
+    else appendNormalizationConflict(record, "threadVersionDecimal", decimalValue, wireValue);
+  }
+
+  if (isNormalizationEmpty(decimalValue)) return;
+  record.threadVersionDecimal = decimalValue;
+  if (source !== "cli" && source !== "rest" && source !== "thread-tools") return;
+
+  const parsedDecimal = typeof decimalValue === "number"
+    ? decimalValue
+    : (typeof decimalValue === "string" && /^\d+$/.test(decimalValue) ? Number(decimalValue) : NaN);
+  const decoded = Number.isSafeInteger(parsedDecimal)
+    ? decodeShortThreadVersion(parsedDecimal)
+    : "Unknown";
+  const existingDecoded = record.threadVersion;
+  if (wireValue !== undefined || isNormalizationEmpty(existingDecoded)) {
+    record.threadVersion = decoded;
+  } else {
+    appendNormalizationConflict(record, "threadVersion", existingDecoded, decoded);
+  }
+}
+
 export function normalizeRouterId(value) {
   let routerId;
   if (typeof value === "number" && Number.isInteger(value)) routerId = value;
@@ -352,20 +439,26 @@ export function normalizeInputRecord(record, options = {}) {
   if (!isPlainObject(record)) return record;
   const result = cloneValue(record);
   TRANSPORT_FIELDS.forEach((field) => delete result[field]);
+  normalizeSourceThreadVersion(result, options.source);
 
   FIELD_DEFINITIONS.forEach((definition) => {
     if (definition.transform === "relationshipMetric" && options.canonicalMetrics !== true) return;
     const candidates = [definition.path, ...definition.aliases];
-    let selected;
+    const foundValues = [];
     for (const candidate of candidates) {
       const found = getPath(result, candidate);
-      if (found.found) {
-        selected = { path: candidate, value: found.value };
-        break;
-      }
+      if (found.found) foundValues.push({ path: candidate, value: found.value });
     }
-    if (!selected) return;
+    if (foundValues.length === 0) return;
+    const selected = foundValues.find((item) => !isNormalizationEmpty(item.value)) ?? foundValues[0];
     const transformed = transformValue(definition.transform, selected.value, options.source, options.canonicalMetrics);
+    if (["eui", "threadVersion", "threadVersionDecimal", "threadStackVersion"].includes(definition.path)) {
+      foundValues.forEach((item) => {
+        if (item.path === selected.path || isNormalizationEmpty(item.value)) return;
+        const incoming = transformValue(definition.transform, item.value, options.source, options.canonicalMetrics);
+        appendNormalizationConflict(result, definition.path, transformed, incoming);
+      });
+    }
     if (["routerId", "strictBoolean"].includes(definition.transform) && transformed === null) {
       candidates.forEach((candidate) => deletePath(result, candidate));
       return;

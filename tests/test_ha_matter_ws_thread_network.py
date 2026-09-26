@@ -79,6 +79,24 @@ def test_schema_12_fixture_validates_and_projects_native_thread_products() -> No
     assert_snapshot_safe({"borderRouters": routers, "batches": batches})
 
 
+def test_thread_diagnostic_tlvs_use_canonical_eui_and_thread_version_fields() -> None:
+    batch = _minimal_batch()
+    batch["nodes"] = [{
+        "eui64": "0011223344556677",
+        "version": 4,
+        "threadStackVersion": "OpenThread test build",
+    }]
+
+    [node] = validate_thread_diagnostics_batch(batch)["nodes"]
+
+    assert node["eui"] == "0011223344556677"
+    assert node["threadVersionDecimal"] == 4
+    assert node["threadVersion"] == "1.3"
+    assert node["threadStackVersion"] == "OpenThread test build"
+    assert "eui64" not in node
+    assert "version" not in node
+
+
 def test_schema_13_fixture_preserves_native_topology_and_optional_fields() -> None:
     topology = validate_native_topology(_fixture()["topology"])
 

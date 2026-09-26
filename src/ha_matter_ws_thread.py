@@ -584,6 +584,46 @@ def validate_thread_diagnostics_batch(
     return result
 
 
+def _normalize_thread_diagnostic_fields(record: dict[str, Any]) -> dict[str, Any]:
+    from td_record_merge import append_merge_conflict
+    from util_network import decode_short_thread_version
+
+    legacy_eui = record.pop("eui64", None)
+    if record.get("eui") is None:
+        if legacy_eui is not None:
+            record["eui"] = legacy_eui
+    elif legacy_eui is not None and record["eui"] != legacy_eui:
+        append_merge_conflict(record, "eui", record["eui"], legacy_eui)
+
+    decimal_value = record.get("threadVersionDecimal")
+    wire_values = []
+    thread_version = record.get("threadVersion")
+    if isinstance(thread_version, int) and not isinstance(thread_version, bool):
+        wire_values.append(thread_version)
+        record.pop("threadVersion", None)
+    legacy_version = record.pop("version", None)
+    if isinstance(legacy_version, int) and not isinstance(legacy_version, bool):
+        wire_values.append(legacy_version)
+
+    for wire_value in wire_values:
+        if decimal_value is None:
+            decimal_value = wire_value
+        elif decimal_value != wire_value:
+            append_merge_conflict(
+                record, "threadVersionDecimal", decimal_value, wire_value
+            )
+
+    if decimal_value is not None:
+        record["threadVersionDecimal"] = decimal_value
+        decoded = decode_short_thread_version(decimal_value)
+        existing = record.get("threadVersion")
+        if existing is None or existing == "":
+            record["threadVersion"] = decoded
+        elif existing != decoded:
+            append_merge_conflict(record, "threadVersion", existing, decoded)
+    return record
+
+
 def _validate_diagnostic_node(
     value: Any, path: str, limits: ThreadValidationLimits
 ) -> dict[str, Any]:
@@ -767,7 +807,10 @@ def _validate_diagnostic_node(
         "childTable": child_table,
         "channelPages": channel_pages,
         "maxChildTimeout": _safe_uint,
+        "eui": lambda item, item_path: _hex(item, item_path, 16),
         "eui64": lambda item, item_path: _hex(item, item_path, 16),
+        "threadVersion": uint16,
+        "threadVersionDecimal": uint16,
         "version": uint16,
         "vendorName": lambda item, item_path: _text(item, item_path, limits.max_text_bytes),
         "vendorModel": lambda item, item_path: _text(item, item_path, limits.max_text_bytes),
@@ -787,4 +830,6 @@ def _validate_diagnostic_node(
         "supplyVoltage": uint16,
         "unknown": unknown_tlvs,
     }
-    return _project_object(value, path, validators, limits=limits)
+    return _normalize_thread_diagnostic_fields(
+        _project_object(value, path, validators, limits=limits)
+    )

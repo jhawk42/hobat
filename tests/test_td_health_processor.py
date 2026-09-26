@@ -51,7 +51,7 @@ def test_roster_extracts_only_explicit_valid_source_facts() -> None:
     )
     values = {fact.field_key: json.loads(fact.value_json) for fact in facts}
     assert values["extAddress"] == "8672766ae0578187"
-    assert values["eui64"] == "1122334455667788"
+    assert values["eui"] == "1122334455667788"
     assert values["isBorderRouter"] is False
     assert values["mode.rxOnWhenIdle"] is False
     assert values["ipv6Addresses"] == ["fd00::1", "fd00::2"]
@@ -297,17 +297,17 @@ def test_roster_alias_collision_does_not_merge_device_ids(tmp_path) -> None:
     network_id = "extpan:78b9775b001c1cbe"
     with closing(store._connect()) as connection:
         assert connection.execute(
-            "SELECT COUNT(*) FROM device_identity_conflicts WHERE network_id=? AND field_key='eui64'",
+            "SELECT COUNT(*) FROM device_identity_conflicts WHERE network_id=? AND field_key='eui'",
             (network_id,),
         ).fetchone()[0] == 2
     service = TDHealthReadService(tmp_path)
     assert service.roster(network_id=network_id)["total"] == 2
     first = service.roster_device(network_id=network_id, device_id="extaddr:8672766ae0578187")
-    assert first["fields"]["eui64"]["conflictState"] == "alias-collision"
+    assert first["fields"]["eui"]["conflictState"] == "alias-collision"
     store.purge_device("extaddr:8672766ae0578188", network_id=network_id)
     assert service.roster(network_id=network_id)["total"] == 1
     first = service.roster_device(network_id=network_id, device_id="extaddr:8672766ae0578187")
-    assert first["fields"]["eui64"]["conflictState"] == "none"
+    assert first["fields"]["eui"]["conflictState"] == "none"
 
 
 def test_missing_final_is_rejected_without_allow_partial(tmp_path) -> None:

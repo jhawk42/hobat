@@ -73,8 +73,10 @@ def derive_mode_device(record: dict[str, Any]) -> str:
     return ""
 
 
-def normalize_identifiers(record: dict[str, Any], omr_prefix: str) -> dict[str, Any]:
-    normalized = normalize_input_record(record)
+def normalize_identifiers(
+    record: dict[str, Any], omr_prefix: str, source: str | None = None
+) -> dict[str, Any]:
+    normalized = normalize_input_record(record, source=source)
     record.clear()
     record.update(normalized)
 

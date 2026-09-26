@@ -153,6 +153,41 @@ Preferred names are independent from value precedence: an OTBR REST camelCase
 field name can be canonical while a richer OTBR CLI observation supplies the
 retained value.
 
+## Thread Version and EUI
+
+`threadVersion` is the decoded Thread protocol version (`1.1`, `1.2`, `1.3`,
+or `1.4`). `threadVersionDecimal` preserves the numeric protocol encoding from
+CLI `ver:<decimal>` text or TLV 24. The CLI token `ver:` is parser input only;
+it is never a record key. OTBR REST uses `eui` and numeric `threadVersion` on
+the current wire contract; the collector preserves the number as
+`threadVersionDecimal` and emits the decoded `threadVersion`.
+
+Source-specific input adapters may translate legacy TLV spellings such as
+`eui64` and diagnostic `version`, but the shared field model does not make
+`ver` or generic `version` aliases. The generic device-record `version` field
+is reserved for the existing Matter record-version fact. `threadStackVersion`
+is a separate Thread stack/build string, and `vendorSwVersion` is firmware or
+application software version. A source without an observed decimal does not
+receive a fabricated `threadVersionDecimal`; unsupported decimals are retained
+and decode to `Unknown`.
+
+`eui` is the canonical EUI field; `eui64` and `EUI64` are input aliases only.
+It is identity data distinct from `extAddress` and is not an extended-address
+substitute in merge identity.
+
+When canonical and source-alias values coexist, canonical values win. Different
+non-empty values are retained as bounded `_merge_conflicts` entries with
+`path`, `current`, and `incoming` fields.
+
+## FTD and REED Capability
+
+An observed child FTD remains `role: "child"` with
+`mode.fullThreadDevice: true` and derived `mode.device: "FTD"`. The browser
+projection may expose `isReed` as capability evidence while it is attached as
+a child. This does not establish current router state: FTD mode, child RLOC16,
+or either Thread-version field must not fabricate `isRouter` or
+`isBorderRouter`. No `role: "REED"` value is introduced.
+
 ## Provenance and Conflicts
 
 Merged records retain contributing filenames:

@@ -10,6 +10,7 @@ import pytest
 
 from td_device_fields import (
     FIELD_DEFINITIONS,
+    PREFERRED_FIELD_NAMES,
     get_device_identity_keys,
     is_placeholder_ext_address,
     normalize_input_record,
@@ -24,7 +25,7 @@ MODEL = json.loads(MODEL_PATH.read_text(encoding="utf-8"))
 
 CATEGORIES = {"device", "derived", "extension", "relationship", "metadata", "error"}
 JSON_TYPES = {"null", "boolean", "number", "string", "array", "object"}
-SOURCES = {"rest", "cli", "mdns", "eve"}
+SOURCES = {"rest", "cli", "mdns", "eve", "ha-matter-ws", "thread-tools"}
 TRANSFORMS = {
     "identity",
     "identifier",
@@ -120,6 +121,8 @@ def validate_model(model: dict[str, Any]) -> list[str]:
                 case_ids.add(case_id)
             if not isinstance(case.get("input"), dict) or not isinstance(case.get("expected"), dict):
                 errors.append(f"{case_id} requires input and expected objects")
+            if case.get("source") is not None and case["source"] not in SOURCES:
+                errors.append(f"{case_id}.source is invalid")
 
     return errors
 
@@ -139,6 +142,21 @@ def test_python_runtime_metadata_matches_model() -> None:
     }
     actual = {field["path"]: field for field in FIELD_DEFINITIONS}
     assert actual == expected
+
+
+def test_thread_version_aliases_do_not_reinterpret_generic_version() -> None:
+    assert PREFERRED_FIELD_NAMES["thread_version_decimal"] == "threadVersionDecimal"
+    assert PREFERRED_FIELD_NAMES["thread_version"] == "threadVersion"
+    assert "ver" not in PREFERRED_FIELD_NAMES
+    assert normalize_input_record({
+        "thread_version_decimal": 4,
+        "thread_version": "1.3",
+        "version": 2,
+    }) == {
+        "threadVersionDecimal": 4,
+        "threadVersion": "1.3",
+        "version": 2,
+    }
 
 
 def test_snapshot_files_exist() -> None:
@@ -223,7 +241,7 @@ def test_relationship_collections_are_distinct() -> None:
 )
 def test_python_field_model_normalization(case: dict[str, Any]) -> None:
     original = deepcopy(case["input"])
-    actual = normalize_input_record(case["input"])
+    actual = normalize_input_record(case["input"], source=case.get("source"))
     assert actual == case["expected"]
     assert case["input"] == original
     assert normalize_input_record(actual) == actual

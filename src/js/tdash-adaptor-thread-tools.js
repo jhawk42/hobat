@@ -15,6 +15,7 @@ import {
   getColumnValue,
   normalizeNestedArrayFields,
 } from './tdash-utils.js';
+import { normalizeInputRecord } from './tdash-device-fields.js';
 import {
   chooseNodeId, buildLabel,
   buildMainRouterRloc16, buildChildRloc16,
@@ -83,6 +84,7 @@ export function adaptThreadToolsNative(fileMap) {
 
   function upsertThreadToolsNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
+    const normalizedSource = normalizeInputRecord(rawNode, { source: 'thread-tools' });
     const rloc16Val = macAddrToRloc16(rawNode.macAddr)
       || toText(rawNode.rloc16)
       || (existing ? toText(existing.rloc16) : '');
@@ -124,9 +126,13 @@ export function adaptThreadToolsNative(fileMap) {
       peerAddress: toText(rawNode.peerAddress) || (existing ? toText(existing.peerAddress) : ''),
       type: toText(rawNode.type) || inferredType || (existing ? toText(existing.type) : ''),
       role: toText(rawNode.role).trim().toLowerCase() || (existing ? existing.role : ''),
-      version: toText(rawNode.version) || (existing ? toText(existing.version) : ''),
-      threadStackVersion: toText(rawNode.threadStackVersion)
-        || (existing ? toText(existing.threadStackVersion || existing.thread_stack_version) : ''),
+      eui: toText(normalizedSource.eui) || (existing ? toText(existing.eui) : ''),
+      threadVersionDecimal: Number.isSafeInteger(normalizedSource.threadVersionDecimal)
+        ? normalizedSource.threadVersionDecimal
+        : (existing ? existing.threadVersionDecimal : undefined),
+      threadVersion: toText(normalizedSource.threadVersion) || (existing ? toText(existing.threadVersion) : ''),
+      threadStackVersion: toText(normalizedSource.threadStackVersion)
+        || (existing ? toText(existing.threadStackVersion) : ''),
       ipv6Addresses: Array.isArray(rawNode.addrs)
         ? rawNode.addrs
         : (existing ? (existing.ipv6Addresses || existing.ipv6_addrs || []) : []),
@@ -182,7 +188,10 @@ export function adaptThreadToolsNative(fileMap) {
     });
 
     const existing = rawByIdForDetails.get(nodeId) || {};
-    rawByIdForDetails.set(nodeId, mergeForDisplay(existing, effectiveNode));
+    rawByIdForDetails.set(
+      nodeId,
+      mergeForDisplay(existing, normalizeInputRecord(effectiveNode, { source: 'thread-tools' })),
+    );
   });
 
   diagnostics.forEach((node, index) => {

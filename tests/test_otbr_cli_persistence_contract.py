@@ -215,6 +215,27 @@ def test_networkdiag_fetch_all_collector_saves_after_all_stages(monkeypatch, tmp
     assert events == ["router-table", "meshdiag", "ipv6", "multicast", "routers", "children", ("save", output_path), "returned"]
 
 
+def test_networkdiag_snapshot_writes_canonical_thread_version_fields(tmp_path):
+    output_path = tmp_path / OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+    record = {
+        "extaddr": "0011223344556677",
+        "thread_version_decimal": 4,
+        "thread_version": "1.3",
+        "ver": 4,
+        "eui64": "8899aabbccddeeff",
+    }
+
+    networkdiag.save_topology_to_json_file({"0x0400": record}, output_path)
+
+    [saved] = json.loads(output_path.read_text(encoding="utf-8"))
+    assert saved["threadVersionDecimal"] == 4
+    assert saved["threadVersion"] == "1.3"
+    assert saved["eui"] == "8899aabbccddeeff"
+    assert "ver" not in saved
+    assert "version" not in saved
+    assert "eui64" not in saved
+
+
 def test_networkdiag_fetch_all_persists_internal_collections_before_return(
     monkeypatch, tmp_path
 ):

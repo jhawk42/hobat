@@ -108,13 +108,33 @@ class OTBRClientTests(unittest.TestCase):
             self.client.enqueue_get_network_diagnostic_task(
                 destination="abcd1234abcd1234",
                 destination_type="extended",
-                types=["extAddress", "eui64", "version", 34],
+                types=["extAddress", "eui", "threadVersion", 34],
             )
 
         request_body = json.loads(urlopen.call_args.args[0].data)
         attributes = request_body["data"][0]["attributes"]
         self.assertEqual(
             attributes["types"], ["extAddress", "eui", "threadVersion", "mleCounters"]
+        )
+
+    def test_legacy_network_diagnostic_type_names_remain_input_only(self) -> None:
+        payload = b'{"data":[{"id":"action-1","type":"getNetworkDiagnosticTask","attributes":{}}]}'
+
+        with patch.object(
+            client_module,
+            "urlopen",
+            return_value=FakeResponse(payload, "application/vnd.api+json"),
+        ) as urlopen:
+            self.client.enqueue_get_network_diagnostic_task(
+                destination="abcd1234abcd1234",
+                destination_type="extended",
+                types=["eui64", "version"],
+            )
+
+        request_body = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(
+            request_body["data"][0]["attributes"]["types"],
+            ["eui", "threadVersion"],
         )
 
     def test_reset_counter_task_uses_otbr_wire_type_names(self) -> None:

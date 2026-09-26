@@ -149,7 +149,7 @@ def decode_short_thread_version(version):
         case 5:
             return "1.4"
         case _:
-            return f"unknown"
+            return "Unknown"
 
 
 def _parse_prefix_token(output):

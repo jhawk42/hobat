@@ -41,4 +41,24 @@ assert.deepEqual(explicit.metrics.routerNeighbors, {
 assert.equal(buildDeviceProjection({ rloc16: "0x1000" }).roleEvidence, "rloc16-derived");
 assert.equal(buildDeviceProjection({ rloc16: "0x1001", isRouter: false }).isRouter, false);
 assert.equal(buildDeviceProjections([{ rloc16: "0x1000" }, { rloc16: "0x1000" }]).size, 2);
+const childFtd = buildDeviceProjection({
+  rloc16: "0x1001", role: "child", mode: { device: "FTD", fullThreadDevice: true },
+});
+const childMtd = buildDeviceProjection({
+  rloc16: "0x1002", role: "child", mode: { device: "MTD", fullThreadDevice: false },
+});
+const routerFtd = buildDeviceProjection({
+  rloc16: "0x1000", role: "router", mode: { device: "FTD", fullThreadDevice: true },
+});
+const unknownChild = buildDeviceProjection({ rloc16: "0x1003", role: "child" });
+assert.equal(childFtd.deviceType, "FTD");
+assert.equal(childFtd.isReed, true);
+assert.equal(childFtd.isRouter, false);
+assert.equal(childFtd.isBorderRouter, false);
+assert.equal(childMtd.isReed, false);
+assert.equal(childMtd.isRouter, false);
+assert.equal(routerFtd.isReed, false);
+assert.equal(routerFtd.isRouter, true);
+assert.equal(unknownChild.isReed, false);
+assert.equal(unknownChild.isRouter, false);
 console.log(JSON.stringify({ checked }));

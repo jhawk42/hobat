@@ -21,6 +21,9 @@ import { adaptThreadToolsNative } from './src/js/tdash-adaptors.js';
 const diagnostics = [{
   macAddr: 0x2800,
   extMacAddr: 'parent',
+  eui64: '0011223344556677',
+  version: 4,
+  threadStackVersion: 'OpenThread test build',
   mode: { ftd: true },
   children: [
     { macAddr: 0x2818, extAddress: 'mtd-child', isDeviceTypeMtd: false },
@@ -54,11 +57,16 @@ if (mtdRow.isDeviceTypeFtd !== false || ftdRow.isDeviceTypeFtd !== true) {
 if (mtdNode.modeDevice !== 'MTD' || mtdNode.shape !== 'dot' || mtdNode.isRouter) {
   throw new Error(`Unexpected MTD node: ${JSON.stringify(mtdNode)}`);
 }
-if (ftdNode.modeDevice !== 'FTD' || ftdNode.shape !== 'dot' || ftdNode.isRouter) {
+if (ftdNode.modeDevice !== 'FTD' || ftdNode.shape !== 'dot' || ftdNode.isRouter || ftdNode.role === 'REED') {
   throw new Error(`Unexpected FTD child node: ${JSON.stringify(ftdNode)}`);
 }
 if (router.shape !== 'hexagon' || !router.isRouter) {
   throw new Error(`Unexpected router node: ${JSON.stringify(router)}`);
+}
+const routerDetails = result.rawByIdForDetails.get('0x2800');
+if (routerDetails.threadVersionDecimal !== 4 || routerDetails.threadVersion !== '1.3'
+    || routerDetails.version !== undefined || routerDetails.eui !== '0011223344556677') {
+  throw new Error(`Unexpected canonical Thread fields: ${JSON.stringify(routerDetails)}`);
 }
 """
 

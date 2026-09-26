@@ -6,6 +6,8 @@ import ipaddress
 from copy import deepcopy
 from typing import Any, Mapping
 
+from td_record_merge import append_merge_conflict, value_is_empty
+
 
 FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "extAddress", "aliases": ("extaddr", "extMacAddr", "extMacAddress", "extAddressHex", "ext_address", "Extended MAC"), "transform": "identifier"},
@@ -30,9 +32,10 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "ipv6Addresses", "aliases": ("ipv6_addrs", "addresses"), "transform": "stringArray"},
     {"path": "role", "aliases": (), "transform": "identity"},
     {"path": "type", "aliases": (), "transform": "identity"},
+    {"path": "threadVersionDecimal", "aliases": ("thread_version_decimal",), "transform": "number"},
     {"path": "threadVersion", "aliases": ("thread_version",), "transform": "identity"},
     {"path": "threadStackVersion", "aliases": ("thread_stack_version",), "transform": "identity"},
-    {"path": "version", "aliases": ("ver",), "transform": "identity"},
+    {"path": "version", "aliases": (), "transform": "identity"},
     {"path": "vendorName", "aliases": ("vendor_name",), "transform": "identity"},
     {"path": "vendorModel", "aliases": ("vendor_model",), "transform": "identity"},
     {"path": "vendorSwVersion", "aliases": ("vendor_sw_version",), "transform": "identity"},
@@ -282,6 +285,97 @@ def _normalize_role_evidence(record: dict[str, Any], source: str | None = None) 
         record["leaderEvidence"] = "leader-router-id-match"
 
 
+def _normalize_source_thread_version(record: dict[str, Any], source: str | None) -> None:
+    decimal_value = record.get("threadVersionDecimal")
+    if value_is_empty(decimal_value):
+        decimal_value = record.get("thread_version_decimal")
+    wire_value = None
+
+    if source == "cli" and "ver" in record:
+        legacy_value = record.pop("ver")
+        if value_is_empty(decimal_value):
+            decimal_value = legacy_value
+        elif not value_is_empty(legacy_value) and decimal_value != legacy_value:
+            append_merge_conflict(record, "threadVersionDecimal", decimal_value, legacy_value)
+
+    if source == "cli":
+        legacy_version = record.get("version")
+        if isinstance(legacy_version, int) and not isinstance(legacy_version, bool):
+            record.pop("version")
+            if value_is_empty(decimal_value):
+                decimal_value = legacy_version
+            elif decimal_value != legacy_version:
+                append_merge_conflict(
+                    record, "threadVersionDecimal", decimal_value, legacy_version
+                )
+
+    if source == "rest":
+        current_version = record.get("threadVersion")
+        version_key = "threadVersion"
+        if value_is_empty(current_version):
+            current_version = record.get("thread_version")
+            version_key = "thread_version"
+        if isinstance(current_version, int) and not isinstance(current_version, bool):
+            wire_value = current_version
+            record.pop(version_key, None)
+            if value_is_empty(decimal_value):
+                decimal_value = wire_value
+            elif decimal_value != wire_value:
+                append_merge_conflict(record, "threadVersionDecimal", decimal_value, wire_value)
+            if (
+                record.get("type") == "threadNetworkDiagnostic"
+                and isinstance(record.get("version"), int)
+                and not isinstance(record.get("version"), bool)
+            ):
+                legacy_value = record.pop("version")
+                if decimal_value != legacy_value:
+                    append_merge_conflict(
+                        record, "threadVersionDecimal", decimal_value, legacy_value
+                    )
+        elif (
+            record.get("type") == "threadNetworkDiagnostic"
+            and isinstance(record.get("version"), int)
+            and not isinstance(record.get("version"), bool)
+        ):
+            wire_value = record.pop("version")
+            if value_is_empty(decimal_value):
+                decimal_value = wire_value
+            elif decimal_value != wire_value:
+                append_merge_conflict(record, "threadVersionDecimal", decimal_value, wire_value)
+    elif source == "thread-tools":
+        legacy_value = record.get("version")
+        if isinstance(legacy_value, int) and not isinstance(legacy_value, bool):
+            wire_value = record.pop("version")
+            if value_is_empty(decimal_value):
+                decimal_value = wire_value
+            elif decimal_value != wire_value:
+                append_merge_conflict(record, "threadVersionDecimal", decimal_value, wire_value)
+
+    if value_is_empty(decimal_value):
+        return
+
+    record["threadVersionDecimal"] = decimal_value
+    if source not in {"cli", "rest", "thread-tools"}:
+        return
+
+    try:
+        parsed_decimal = int(decimal_value)
+    except (TypeError, ValueError):
+        parsed_decimal = None
+    if parsed_decimal is None or isinstance(decimal_value, bool):
+        decoded = "Unknown"
+    else:
+        from util_network import decode_short_thread_version
+
+        decoded = decode_short_thread_version(parsed_decimal)
+
+    existing_decoded = record.get("threadVersion")
+    if wire_value is not None or value_is_empty(existing_decoded):
+        record["threadVersion"] = decoded
+    elif existing_decoded != decoded:
+        append_merge_conflict(record, "threadVersion", existing_decoded, decoded)
+
+
 def _normalize_route(value: Any) -> Any:
     if not isinstance(value, dict):
         return deepcopy(value)
@@ -330,19 +424,33 @@ def normalize_input_record(
     for key in TRANSPORT_FIELDS:
         result.pop(key, None)
 
+    _normalize_source_thread_version(result, source)
+
     for definition in FIELD_DEFINITIONS:
         if definition["transform"] == "relationshipMetric":
             continue
         preferred = definition["path"]
         candidates = (preferred, *definition["aliases"])
-        selected = next(
-            ((candidate, value) for candidate in candidates if (found := _get_path(result, candidate))[0] for value in (found[1],)),
-            None,
-        )
-        if selected is None:
+        found_values = [
+            (candidate, found[1])
+            for candidate in candidates
+            if (found := _get_path(result, candidate))[0]
+        ]
+        if not found_values:
             continue
+        selected = next(
+            (item for item in found_values if not value_is_empty(item[1])),
+            found_values[0],
+        )
         selected_path, value = selected
         transformed = _transform_value(definition["transform"], value, source)
+        if preferred in {"eui", "threadVersion", "threadVersionDecimal", "threadStackVersion"}:
+            for candidate, incoming in found_values:
+                if candidate == selected_path or value_is_empty(incoming):
+                    continue
+                normalized_incoming = _transform_value(definition["transform"], incoming, source)
+                if not value_is_empty(transformed) and normalized_incoming != transformed:
+                    append_merge_conflict(result, preferred, transformed, normalized_incoming)
         if definition["transform"] in {"routerId", "strictBoolean"} and transformed is None:
             for candidate in candidates:
                 _delete_path(result, candidate)

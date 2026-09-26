@@ -866,7 +866,7 @@ def fetch_network_diag_topology_meshdiag_topology(
                     "rloc16": rloc16,
                     "device_label": extaddr_map.get(extaddr, f"found-{rloc16}"),
                     "thread_version": router.get("thread_version"),
-                    "ver": router.get("ver"),
+                    "thread_version_decimal": router.get("thread_version_decimal"),
                     "role": "router",
                     "is_router": True,
                     "is_border_router": router.get("is_border_router", False),
@@ -1782,7 +1782,6 @@ def save_topology_to_json_file(
             "eui64": data.get("eui64"),
             "thread_stack_version": data.get("thread_stack_version", "Unknown"),
             "thread_version": data.get("thread_version", "Unknown"),
-            "ver": data.get("ver", "Unknown"),
             "mode": data.get("mode", {}),
             "ipv6_addrs": data.get("ipv6_addrs", []),
             "type": data.get("type", "Unknown"),
@@ -1807,6 +1806,8 @@ def save_topology_to_json_file(
             "mle_counters": data.get("mle_counters", {}),
             "time_statistics": data.get("time_statistics", {}),
         }
+        if data.get("thread_version_decimal") is not None:
+            network_node["thread_version_decimal"] = data["thread_version_decimal"]
         for evidence_field in (
             "_error",
             "last_attempt_responded",

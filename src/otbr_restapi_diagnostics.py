@@ -345,26 +345,34 @@ def dispatch_diagnostics(
             raw=raw_arg,
             with_meta=args.with_meta,
         )
-        if raw_arg is True or getattr(args, "no_enrich_mac_counters", False):
+        if raw_arg is True:
             return finish(diagnostics)
+
+        no_enrich = getattr(args, "no_enrich_mac_counters", False)
 
         if args.with_meta and isinstance(diagnostics, dict):
             items = diagnostics.get("items")
             if isinstance(items, list):
-                _apply_mac_enrichment(items)
-                _apply_time_stats_enrichment(items)
-                _apply_border_router_enrichment(items)
+                if not no_enrich:
+                    _apply_mac_enrichment(items)
+                    _apply_time_stats_enrichment(items)
+                    _apply_border_router_enrichment(items)
                 _apply_role_evidence_normalization(items)
             return finish(convert_keys_to_camel_case(diagnostics))
 
         if isinstance(diagnostics, list):
-            _apply_mac_enrichment(diagnostics)
-            _apply_time_stats_enrichment(diagnostics)
-            _apply_border_router_enrichment(diagnostics)
+            if not no_enrich:
+                _apply_mac_enrichment(diagnostics)
+                _apply_time_stats_enrichment(diagnostics)
+                _apply_border_router_enrichment(diagnostics)
             _apply_role_evidence_normalization(diagnostics)
         return finish(convert_keys_to_camel_case(diagnostics))
     if args.diagnostics_command == "get":
-        return finish(client.get_diagnostic(args.diagnostics_id, raw=raw_arg))
+        result = client.get_diagnostic(args.diagnostics_id, raw=raw_arg)
+        if raw_arg is True or not isinstance(result, dict):
+            return finish(result)
+        result = normalize_input_record(result, source="rest")
+        return finish(convert_keys_to_camel_case(result))
     if args.diagnostics_command == "fetch":
         primary_types = resolve_types(args)
         fallback_types = resolve_fallback_types(args)

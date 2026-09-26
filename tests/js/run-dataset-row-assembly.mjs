@@ -124,6 +124,36 @@ const canonicalResult = buildDatasetRows(entry(), [[{
 assert.ok(Array.isArray(canonicalResult.rows[0].route.routeData));
 assert.equal(Object.hasOwn(canonicalResult.rows[0].route, "route_data"), false);
 
+const cliVersionResult = buildDatasetRows(entry({
+  source: "otbr-cli",
+  value: "cli_version_fields",
+  files: ["td-otbr-cli-networkdiag-fetch-all.json"],
+}), [[{
+  extAddress: "0011223344556677",
+  rloc16: "0x0400",
+  eui64: "8899aabbccddeeff",
+  ver: 4,
+  thread_version: "1.3",
+}]]);
+assert.equal(cliVersionResult.rows[0].eui, "8899aabbccddeeff");
+assert.equal(cliVersionResult.rows[0].threadVersionDecimal, 4);
+assert.equal(cliVersionResult.rows[0].threadVersion, "1.3");
+assert.equal(Object.hasOwn(cliVersionResult.rows[0], "ver"), false);
+assert.equal(Object.hasOwn(cliVersionResult.rows[0], "eui64"), false);
+
+const restVersionResult = buildDatasetRows(entry({
+  source: "otbr-restapi",
+  value: "rest_version_fields",
+  files: ["td-otbr-restapi-diagnostics-fetch-all.json"],
+}), [[{
+  type: "threadNetworkDiagnostic",
+  eui: "8899aabbccddeeff",
+  threadVersion: 4,
+}]]);
+assert.equal(restVersionResult.rows[0].threadVersionDecimal, 4);
+assert.equal(restVersionResult.rows[0].threadVersion, "1.3");
+assert.equal(Object.hasOwn(restVersionResult.rows[0], "version"), false);
+
 const processedEveEntry = DATASET_REGISTRY.find(
   (dataset) => dataset.value === "eve_topology_processed",
 );

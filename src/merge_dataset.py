@@ -63,6 +63,7 @@ from td_const import (
     OTBR_RESTAPI_DIAGNOSTICS_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_LIST_FILENAME,
     OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    THREAD_TOOLS_DIAGNOSTICS_FILENAME,
     TD_DATA_DIR_ARG_HELP,
 )
 from util_data import (
@@ -123,6 +124,18 @@ from merge_policy_identity import (
     filter_candidate_ids_for_extaddr_consistency,
 )
 
+def _field_source_for_filename(filename: str) -> str | None:
+    if filename.startswith("td-otbr-cli-"):
+        return "cli"
+    if filename.startswith("td-otbr-restapi-"):
+        return "rest"
+    if filename.startswith("td-ha-matter-ws-"):
+        return "ha-matter-ws"
+    if filename == THREAD_TOOLS_DIAGNOSTICS_FILENAME:
+        return "thread-tools"
+    return None
+
+
 PRIORITY_FIELDS = [
     # === TIER 1: Primary Identity (Essential P0) ===
     # Ordered by stability: extaddr (immutable) > OMR IPv6 (stable) > rloc16 (changes rapidly)
@@ -133,7 +146,7 @@ PRIORITY_FIELDS = [
     "omrIpv6Address",          # More stable than rloc16
     "rloc16",                  # May change rapidly, partition-scoped
     "routerId",                # REST API
-    "eui64",                   # Alternative to extaddr
+    "eui",                     # EUI alias; distinct from extAddress
     "id",                      # REST API UUID
     "ID",                      # Alias
     
@@ -160,8 +173,8 @@ PRIORITY_FIELDS = [
     "status",
     "mode.device",
     "mode.deviceTypeFTD",      # FTD vs MTD indicator
-    "ver",
     "version",
+    "threadVersionDecimal",
     "threadVersion",
     "threadStackVersion",      # REST API alias
     
@@ -650,7 +663,9 @@ def build_merged_records(
             continue
         records_read_by_source[filename] = len(records)
         for raw_record in records:
-            record = normalize_identifiers(raw_record, omr_prefix)
+            record = normalize_identifiers(
+                raw_record, omr_prefix, source=_field_source_for_filename(filename)
+            )
 
             record_extaddr = record.get("extAddress")
             if isinstance(record_extaddr, str):
@@ -1141,7 +1156,11 @@ def build_merge_output(
                 continue
             records = extract_records(filename, input_data[filename])
             for raw_record in records:
-                record = normalize_identifiers(raw_record, supporting_data.omr_prefix)
+                record = normalize_identifiers(
+                    raw_record,
+                    supporting_data.omr_prefix,
+                    source=_field_source_for_filename(filename),
+                )
                 record.setdefault("_source_files", [filename])
                 passthrough_records.append(record)
         output_records = passthrough_records

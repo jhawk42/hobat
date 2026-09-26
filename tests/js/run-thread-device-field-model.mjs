@@ -17,10 +17,10 @@ const results = {};
 results._fieldDefinitions = FIELD_DEFINITIONS;
 for (const modelCase of model.normalizationCases) {
   const inputBefore = JSON.stringify(modelCase.input);
-  const normalized = normalizeInputRecord(modelCase.input);
+  const normalized = normalizeInputRecord(modelCase.input, { source: modelCase.source });
   results[modelCase.id] = {
     normalized,
-    idempotent: JSON.stringify(normalizeInputRecord(normalized)) === JSON.stringify(normalized),
+    idempotent: JSON.stringify(normalizeInputRecord(normalized, { source: modelCase.source })) === JSON.stringify(normalized),
     inputUnchanged: JSON.stringify(modelCase.input) === inputBefore,
     identityKeys: Object.fromEntries(
       Object.keys(modelCase.identityKeys ?? {}).map((strategy) => [

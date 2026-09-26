@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "modelVersion": "1.1.0",
+  "modelVersion": "1.2.0",
   "snapshotFiles": [
     "td-otbr-cli-networkdiag-fetch-all.json",
     "td-otbr-cli-meshdiag-topology.json",
@@ -31,9 +31,10 @@
     {"path":"ipv6Addresses","category":"device","jsonTypes":["array"],"sources":["rest","cli"],"aliases":["ipv6_addrs","addresses"],"transform":"stringArray","mergePolicy":"array"},
     {"path":"role","category":"device","jsonTypes":["string"],"sources":["rest","cli"],"aliases":[],"transform":"identity","mergePolicy":"scalar"},
     {"path":"type","category":"device","jsonTypes":["string"],"sources":["rest","cli"],"aliases":[],"transform":"identity","mergePolicy":"scalar"},
-    {"path":"threadVersion","category":"device","jsonTypes":["string","number"],"sources":["rest","cli"],"aliases":["thread_version"],"transform":"identity","mergePolicy":"scalar"},
+    {"path":"threadVersionDecimal","category":"device","jsonTypes":["number"],"sources":["rest","cli","ha-matter-ws","thread-tools"],"aliases":["thread_version_decimal"],"transform":"number","mergePolicy":"scalar","notes":"Raw numeric Thread protocol version encoding; distinct from stack and firmware versions."},
+    {"path":"threadVersion","category":"device","jsonTypes":["string","number"],"sources":["rest","cli","ha-matter-ws","thread-tools"],"aliases":["thread_version"],"transform":"identity","mergePolicy":"scalar","notes":"Decoded Thread protocol version."},
     {"path":"threadStackVersion","category":"device","jsonTypes":["string"],"sources":["rest","cli"],"aliases":["thread_stack_version"],"transform":"identity","mergePolicy":"scalar"},
-    {"path":"version","category":"device","jsonTypes":["string","number"],"sources":["rest","cli"],"aliases":["ver"],"transform":"identity","mergePolicy":"scalar"},
+    {"path":"version","category":"device","jsonTypes":["string","number"],"sources":["ha-matter-ws"],"aliases":[],"transform":"identity","mergePolicy":"scalar","notes":"Matter record version only; not a Thread protocol version."},
     {"path":"vendorName","category":"device","jsonTypes":["string"],"sources":["rest","cli"],"aliases":["vendor_name"],"transform":"identity","mergePolicy":"scalar"},
     {"path":"vendorModel","category":"device","jsonTypes":["string"],"sources":["rest","cli"],"aliases":["vendor_model"],"transform":"identity","mergePolicy":"scalar"},
     {"path":"vendorSwVersion","category":"device","jsonTypes":["string"],"sources":["rest","cli"],"aliases":["vendor_sw_version"],"transform":"identity","mergePolicy":"scalar"},
@@ -91,6 +92,7 @@
     {"id":"unspecified-omr-is-not-identity","input":{"extAddress":"AA11BB22CC33DD44","omrIpv6Address":"::"},"expected":{"extAddress":"aa11bb22cc33dd44","omrIpv6Address":"::"},"identityKeys":{"by-identity":["extAddress:aa11bb22cc33dd44"],"by-rloc16":[]}},
     {"id":"expanded-unspecified-omr-is-not-identity","input":{"omr_ipv6_addr":"0:0:0:0:0:0:0:0"},"expected":{"omrIpv6Address":"0:0:0:0:0:0:0:0"},"identityKeys":{"by-identity":[],"by-rloc16":[]}},
     {"id":"mode-and-role-transforms","input":{"mode":{"deviceType":1,"networkData":0,"rxOn":1},"leader":true,"br":0,"is_router":true},"expected":{"mode":{"fullThreadDevice":true,"fullNetworkData":false,"rxOnWhenIdle":true,"device":"FTD"},"isLeader":true,"isBorderRouter":false,"isRouter":true,"leaderEvidence":"explicit"}},
+    {"id":"child-ftd-is-capability-not-router-state","input":{"role":"child","mode":{"fullThreadDevice":true}},"expected":{"role":"child","mode":{"fullThreadDevice":true,"device":"FTD"}}},
     {"id":"leader-router-id-match","input":{"router_id":"0x3e","leader_data":{"leader_router_id":"62"}},"expected":{"routerId":62,"leaderData":{"leaderRouterId":62},"isLeader":true,"leaderEvidence":"leader-router-id-match"}},
     {"id":"invalid-role-identifiers","input":{"routerId":"63","leaderData":{"leaderRouterId":"broken"},"isPrimaryBBR":"true"},"expected":{"leaderData":{}}},
     {"id":"explicit-leader-conflict","input":{"routerId":35,"leaderData":{"leaderRouterId":"0x23"},"isLeader":false},"expected":{"routerId":35,"leaderData":{"leaderRouterId":35},"isLeader":false,"leaderEvidence":"explicit","roleEvidenceConflicts":[{"role":"isLeader","explicit":false,"derived":true}]}},
@@ -98,6 +100,16 @@
     {"id":"relationships-remain-distinct","input":{"children":[{"extaddr":"AA11"}],"router_child_table":[{"rloc16":"0X1001"}],"router_neighbor_table":[{"extAddress":"BB22"}],"child_ipv6_addresses":["FD00::2"]},"expected":{"children":[{"extAddress":"aa11"}],"childTable":[{"rloc16":"0x1001"}],"routerNeighbors":[{"extAddress":"bb22"}],"childIpv6Addresses":["fd00::2"]}},
     {"id":"native-haws-aliases","input":{"extAddressHex":" AA11BB22CC33DD44 ","hostname":"border-router.local.","node_id":7},"expected":{"extAddress":"aa11bb22cc33dd44","deviceLabel":"border-router.local.","nodeId":7}},
     {"id":"cli-extension-preservation","input":{"device_label":"Kitchen","tlv_values":{"1":"aa"},"total_children":"2","1_links":["0x1000"],"_error":"timeout","unknownVendorField":{"kept":true}},"expected":{"deviceLabel":"Kitchen","tlvValues":{"1":"aa"},"totalChildren":2,"links1":["0x1000"],"error":"timeout","unknownVendorField":{"kept":true}}},
-    {"id":"transport-envelope-exclusion","input":{"data":{"id":"transport"},"attributes":{"state":"router"},"relationships":{},"meta":{"count":1},"extAddress":"AA11"},"expected":{"extAddress":"aa11"}}
+    {"id":"transport-envelope-exclusion","input":{"data":{"id":"transport"},"attributes":{"state":"router"},"relationships":{},"meta":{"count":1},"extAddress":"AA11"},"expected":{"extAddress":"aa11"}},
+    {"id":"cli-version-decimal-from-legacy-token","source":"cli","input":{"ver":"4"},"expected":{"threadVersionDecimal":4,"threadVersion":"1.3"}},
+    {"id":"cli-nested-version-from-legacy-snapshot","source":"cli","input":{"childTable":[{"version":4,"threadVersion":"1.3"},{"version":5}]},"expected":{"childTable":[{"threadVersionDecimal":4,"threadVersion":"1.3"},{"threadVersionDecimal":5,"threadVersion":"1.4"}]}},
+    {"id":"cli-version-decimal-explicit","source":"cli","input":{"thread_version_decimal":99},"expected":{"threadVersionDecimal":99,"threadVersion":"Unknown"}},
+    {"id":"rest-version-decimal-from-current-wire","source":"rest","input":{"type":"threadNetworkDiagnostic","eui64":"0011223344556677","threadVersion":4},"expected":{"type":"threadNetworkDiagnostic","eui":"0011223344556677","threadVersionDecimal":4,"threadVersion":"1.3"}},
+    {"id":"rest-version-decimal-from-legacy-wire","source":"rest","input":{"type":"threadNetworkDiagnostic","version":5},"expected":{"type":"threadNetworkDiagnostic","threadVersionDecimal":5,"threadVersion":"1.4"}},
+    {"id":"rest-version-wire-conflict-is-recorded","source":"rest","input":{"type":"threadNetworkDiagnostic","threadVersion":4,"version":5},"expected":{"type":"threadNetworkDiagnostic","threadVersionDecimal":4,"threadVersion":"1.3","_merge_conflicts":[{"path":"threadVersionDecimal","current":4,"incoming":5}]}},
+    {"id":"matter-version-remains-independent","source":"ha-matter-ws","input":{"version":7,"threadVersion":"1.3"},"expected":{"version":7,"threadVersion":"1.3"}},
+    {"id":"thread-tools-version-is-source-scoped","source":"thread-tools","input":{"version":4,"eui64":"0011223344556677"},"expected":{"threadVersionDecimal":4,"threadVersion":"1.3","eui":"0011223344556677"}},
+    {"id":"cli-decoded-version-conflict-is-recorded","source":"cli","input":{"ver":4,"threadVersion":"1.2"},"expected":{"threadVersionDecimal":4,"threadVersion":"1.2","_merge_conflicts":[{"path":"threadVersion","current":"1.2","incoming":"1.3"}]}},
+    {"id":"eui-alias-conflict-is-recorded","input":{"eui":"0011223344556677","eui64":"8899aabbccddeeff"},"expected":{"eui":"0011223344556677","_merge_conflicts":[{"path":"eui","current":"0011223344556677","incoming":"8899aabbccddeeff"}]}}
   ]
 }

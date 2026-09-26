@@ -276,8 +276,8 @@ DIAG_TLV_CHANNEL_PAGES = "channelPages"       # TLV 17
 DIAG_TLV_MAX_CHILD_TIMEOUT = "maxChildTimeout"    # TLV 19 (omittable)
 DIAG_TLV_LDEV_ID_SUBJECT = "lDevIdSubject"      # TLV 20
 DIAG_TLV_IDEV_ID_CERT = "iDevIdCert"         # TLV 21
-DIAG_TLV_EUI64 = "eui64"              # TLV 23
-DIAG_TLV_VERSION = "version"            # TLV 24
+DIAG_TLV_EUI = "eui"                 # TLV 23
+DIAG_TLV_THREAD_VERSION = "threadVersion"  # TLV 24
 DIAG_TLV_VENDOR_NAME = "vendorName"         # TLV 25
 DIAG_TLV_VENDOR_MODEL = "vendorModel"        # TLV 26
 DIAG_TLV_VENDOR_SW_VERSION = "vendorSwVersion"    # TLV 27
@@ -301,8 +301,8 @@ RECOMMENDED_DIAGNOSTIC_TLVS: list[str] = [
     DIAG_TLV_MLE_COUNTERS,
     DIAG_TLV_CHILD_TABLE,
     DIAG_TLV_THREAD_STACK_VER,
-    DIAG_TLV_EUI64,
-    DIAG_TLV_VERSION,
+    DIAG_TLV_EUI,
+    DIAG_TLV_THREAD_VERSION,
     DIAG_TLV_VENDOR_NAME,
     DIAG_TLV_VENDOR_MODEL,
     DIAG_TLV_VENDOR_SW_VERSION,
@@ -325,7 +325,7 @@ MINIMAL_DIAGNOSTIC_TLVS: list[str] = [
     DIAG_TLV_RLOC16,
     DIAG_TLV_MODE,
     DIAG_TLV_IPV6_ADDRESSES,
-    DIAG_TLV_EUI64,
+    DIAG_TLV_EUI,
     DIAG_TLV_THREAD_STACK_VER,
 ]
 
@@ -378,8 +378,8 @@ RESETTABLE_DIAGNOSTIC_TLVS: frozenset[str] = frozenset({
 })
 
 _NETWORK_DIAGNOSTIC_TYPE_ALIASES: dict[str, str] = {
-    DIAG_TLV_EUI64: "eui",
-    DIAG_TLV_VERSION: "threadVersion",
+    "eui64": DIAG_TLV_EUI,
+    "version": DIAG_TLV_THREAD_VERSION,
 }
 
 _NETWORK_DIAGNOSTIC_TYPE_IDS: dict[int, str] = {
@@ -400,8 +400,8 @@ _NETWORK_DIAGNOSTIC_TYPE_IDS: dict[int, str] = {
     19: DIAG_TLV_MAX_CHILD_TIMEOUT,
     20: DIAG_TLV_LDEV_ID_SUBJECT,
     21: DIAG_TLV_IDEV_ID_CERT,
-    23: "eui",
-    24: "threadVersion",
+    23: DIAG_TLV_EUI,
+    24: DIAG_TLV_THREAD_VERSION,
     25: DIAG_TLV_VENDOR_NAME,
     26: DIAG_TLV_VENDOR_MODEL,
     27: DIAG_TLV_VENDOR_SW_VERSION,
@@ -2432,7 +2432,8 @@ class OTBRRestApiClient:
                 raise OTBRUsageError(
                     "network diagnostic types must be strings or integer TLV IDs"
                 )
-            normalized.append(wire_name)
+            if wire_name not in normalized:
+                normalized.append(wire_name)
         return normalized
 
     def _validate_non_empty_string(self, value: str, field_name: str) -> str:

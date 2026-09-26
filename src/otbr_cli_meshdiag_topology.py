@@ -50,7 +50,7 @@ def parse_meshdiag_topology_output(
     """
     Parses the meshdiag topology ip6-addrs children output into a list of router dictionaries.
 
-    Extracts: id, rloc16, extaddr, ver, br flag, 3_links, 2_links, 1_links, ipv6_addrs, children
+    Extracts: id, rloc16, extaddr, Thread version, br flag, links, addresses, children
 
     Args:
         output: meshdiag topology ip6-addrs children text
@@ -83,9 +83,13 @@ def parse_meshdiag_topology_output(
             router["router_id"] = match.group(1)
             router["rloc16"] = match.group(2)
             router["extaddr"] = match.group(3)
-            router["ver"] = match.group(4) if match.group(4) else None
-            router["thread_version"] = util_network.decode_short_thread_version(
-                int(router["ver"])) if router["ver"] else "Unknown"
+            if match.group(4):
+                router["thread_version_decimal"] = int(match.group(4))
+                router["thread_version"] = util_network.decode_short_thread_version(
+                    router["thread_version_decimal"]
+                )
+            else:
+                router["thread_version"] = "Unknown"
 
             # Check for BR (border router) flag
             router["br"] = "- br" in first_line or "br -" in first_line

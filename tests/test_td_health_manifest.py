@@ -26,7 +26,7 @@ def test_manifest_contains_only_approved_datasets() -> None:
     manifest = load_health_manifest()
 
     assert manifest.schema_version == 2
-    assert manifest.roster_policy.digest == "52176e13b7493071e15e53ff713a5cfbc33ff0817f4b00aee47391c97b16cf65"
+    assert manifest.roster_policy.digest == "52268993f7b0ba9701db9ed8253b21efc84b29a3480634e5735c2bbd811c9f7c"
     assert set(manifest.datasets) == EXPECTED_DATASETS
     assert manifest.dataset("otbr_cli_networkdiag_fetch_all").files == (
         "td-otbr-cli-networkdiag-fetch-all.json",

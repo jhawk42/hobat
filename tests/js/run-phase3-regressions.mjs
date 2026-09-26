@@ -9,6 +9,9 @@ import {
   getTableColumnsForCategory,
   getTableFilterLabel,
 } from "../../src/js/tdash-table-renderer.js";
+import { DEVICE_DETAILS_SECTIONS, TABLE_PRIORITY_COLUMNS } from "../../src/js/tdash-constants.js";
+import { getColumnValue } from "../../src/js/tdash-utils.js";
+import { SEARCH_TARGET_FIELDS, parseSearchQuery, rowMatchesSearch } from "../../src/js/tdash-search.js";
 
 const explicitRouter = { isRouter: true, role: "Router", children: [{}] };
 const leader = { role: "leader" };
@@ -34,13 +37,36 @@ assert.deepEqual(rangeEvaluation.matchedRecords, [{ averageRssi: -75 }]);
 
 assert.deepEqual(collectColumns([{ rloc16: "0x1000", room: "Lab" }]).filter((column) => column === "room"), ["room"]);
 assert.deepEqual(
-  collectColumns([{ br: true, ver: "1.2" }, { isBorderRouter: true, version: "1.3" }])
-    .filter((column) => ["br", "isBorderRouter", "ver", "version"].includes(column)),
-  ["isBorderRouter", "version"],
+  collectColumns([{ br: true, threadVersion: "1.2" }, { isBorderRouter: true, version: 7 }])
+    .filter((column) => ["br", "isBorderRouter", "ver", "version", "threadVersion"].includes(column)),
+  ["isBorderRouter", "version", "threadVersion"],
 );
 assert.equal(getTableFilterLabel(null, "All nodes"), "All nodes");
 assert.equal(getTableFilterLabel({ selectedOptions: [] }, "All diagnostics"), "All diagnostics");
 assert.equal(getTableFilterLabel({ selectedOptions: [{ text: "Routers" }] }, "All nodes"), "Routers");
+const identityDetails = DEVICE_DETAILS_SECTIONS.find((section) => section.sectionId === "identity-list").fields;
+const highlightDetails = DEVICE_DETAILS_SECTIONS.find((section) => section.sectionId === "highlights-list").fields;
+assert.ok(identityDetails.includes("eui"));
+assert.ok(!identityDetails.includes("eui64"));
+assert.ok(highlightDetails.includes("threadVersion"));
+assert.ok(highlightDetails.includes("threadVersionDecimal"));
+assert.ok(highlightDetails.includes("threadStackVersion"));
+assert.ok(!highlightDetails.includes("ver"));
+assert.ok(TABLE_PRIORITY_COLUMNS.includes("eui"));
+assert.ok(TABLE_PRIORITY_COLUMNS.includes("threadVersion"));
+assert.ok(!TABLE_PRIORITY_COLUMNS.includes("eui64"));
+assert.ok(!TABLE_PRIORITY_COLUMNS.includes("ver"));
+assert.ok(!TABLE_PRIORITY_COLUMNS.includes("threadVersionDecimal"));
+assert.ok(SEARCH_TARGET_FIELDS.includes("eui"));
+assert.ok(SEARCH_TARGET_FIELDS.includes("threadVersion"));
+assert.ok(SEARCH_TARGET_FIELDS.includes("version"));
+assert.ok(!SEARCH_TARGET_FIELDS.includes("eui64"));
+assert.ok(!SEARCH_TARGET_FIELDS.includes("ver"));
+const canonicalThreadRow = { eui: "8899aabbccddeeff", threadVersion: "1.3", threadVersionDecimal: 4 };
+assert.equal(getColumnValue(canonicalThreadRow, "threadVersion"), "1.3");
+assert.equal(rowMatchesSearch(canonicalThreadRow, parseSearchQuery("1.3")), true);
+assert.equal(rowMatchesSearch({ threadVersionDecimal: 4 }, parseSearchQuery("4")), false);
+assert.equal(rowMatchesSearch({ eui: "8899aabbccddeeff" }, parseSearchQuery("8899")), true);
 assert.deepEqual(
   getTableColumnCategories([
     { extAddress: "0011223344556677", hostname: "Border Router", modelName: "BorderRouter" },

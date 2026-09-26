@@ -472,7 +472,7 @@ class SQLiteHealthStore:
         connection.execute("DELETE FROM device_identity_conflicts WHERE network_id=?", (network_id,))
         rows = connection.execute(
             """SELECT * FROM device_last_known WHERE network_id=?
-               AND field_key IN ('eui64', 'rloc16', 'routerId')
+               AND field_key IN ('eui', 'eui64', 'rloc16', 'routerId')
                AND roster_policy_digest=? AND source_observed_at IS NOT NULL
                ORDER BY field_key, value_json, device_id""",
             (network_id, policy.digest),

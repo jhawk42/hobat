@@ -113,7 +113,7 @@ def fetch_meshdiag_child_table_for_device(parent_rloc16, router=None, extaddr_ma
                 router_child_table_data.append(current_child)
 
             match = re.match(
-                r"rloc16:(0x[0-9a-fA-F]+)\s+ext-addr:([0-9a-fA-F]+)\s+ver:(\d+)",
+                r"rloc16:(0x[0-9a-fA-F]+)\s+ext-addr:([0-9a-fA-F]+)(?:\s+ver:(\d+))?",
                 stripped,
             )
             if not match:
@@ -131,11 +131,15 @@ def fetch_meshdiag_child_table_for_device(parent_rloc16, router=None, extaddr_ma
                 "device_label": extaddr_map.get(child_extaddr, "Unknown")
                 if extaddr_map
                 else "Unknown",
-                "ver": int(match.group(3)),
-                "thread_version": util_network.decode_short_thread_version(
-                    int(match.group(3))                )
-                if match.group(3) else "Unknown",
             }
+            if match.group(3):
+                thread_version_decimal = int(match.group(3))
+                current_child["thread_version_decimal"] = thread_version_decimal
+                current_child["thread_version"] = util_network.decode_short_thread_version(
+                    thread_version_decimal
+                )
+            else:
+                current_child["thread_version"] = "Unknown"
             continue
 
         if current_child is None:

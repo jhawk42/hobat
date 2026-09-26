@@ -920,7 +920,7 @@
     }
   ],
   "rosterPolicy": {
-    "version": "roster-v1",
+    "version": "roster-v2",
     "aliasCollisionWindowSeconds": 604800,
     "maxStringLength": 256,
     "maxAddresses": 32,
@@ -997,7 +997,7 @@
         ],
         "freshnessSeconds": 2592000
       },
-      "eui64": {
+      "eui": {
         "sources": [
           {
             "filename": "td-otbr-restapi-devices-fetch.json",

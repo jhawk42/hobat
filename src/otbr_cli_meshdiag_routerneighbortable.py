@@ -121,7 +121,7 @@ def fetch_meshdiag_router_neighbor_table_for_device(rloc16, router=None, extaddr
                 router_neighbor_table_data.append(current_neighbor)
 
             match = re.match(
-                r"rloc16:(0x[0-9a-fA-F]+)\s+ext-addr:([0-9a-fA-F]+)\s+ver:(\d+)",
+                r"rloc16:(0x[0-9a-fA-F]+)\s+ext-addr:([0-9a-fA-F]+)(?:\s+ver:(\d+))?",
                 stripped,
             )
             if not match:
@@ -138,11 +138,15 @@ def fetch_meshdiag_router_neighbor_table_for_device(rloc16, router=None, extaddr
                 "device_label": extaddr_map.get(match.group(2).lower(), "Unknown")
                 if extaddr_map
                 else "Unknown",
-                "ver": int(match.group(3)),
-                "thread_version": util_network.decode_short_thread_version(
-                    int(match.group(3))                )
-                if match.group(3) else "Unknown",
             }
+            if match.group(3):
+                thread_version_decimal = int(match.group(3))
+                current_neighbor["thread_version_decimal"] = thread_version_decimal
+                current_neighbor["thread_version"] = util_network.decode_short_thread_version(
+                    thread_version_decimal
+                )
+            else:
+                current_neighbor["thread_version"] = "Unknown"
             continue
 
         # if we are here, we should be processing a neighbor entry, if not, skip

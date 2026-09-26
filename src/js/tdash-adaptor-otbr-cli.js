@@ -186,10 +186,13 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
       rloc16: toText(rawNode.rloc16) || (existing ? existing.rloc16 : ''),
       sourceId: toText(rawNode.id) || (existing ? existing.sourceId || existing.source_id : ''),
       extAddress: toText(rawNode.extaddr) || (existing ? existing.extAddress || existing.extaddr : ''),
+      eui: toText(rawNode.eui) || (existing ? existing.eui : ''),
       type: toText(rawNode.type) || (existing ? existing.type : ''),
       role: toText(rawNode.role).trim().toLowerCase() || (existing ? existing.role : ''),
-      threadVersion: toText(rawNode.thread_version) || (existing ? existing.threadVersion || existing.thread_version : ''),
-      threadStackVersion: toText(rawNode.thread_stack_version) || (existing ? existing.threadStackVersion || existing.thread_stack_version : ''),
+      threadVersionDecimal: Number.isSafeInteger(rawNode.threadVersionDecimal)
+        ? rawNode.threadVersionDecimal : (existing ? existing.threadVersionDecimal : undefined),
+      threadVersion: toText(rawNode.threadVersion) || (existing ? existing.threadVersion : ''),
+      threadStackVersion: toText(rawNode.threadStackVersion) || (existing ? existing.threadStackVersion : ''),
       ipv6Addresses: mergedIpv6,
       totalChildren: Number.isFinite(rawNode.total_children)
         ? rawNode.total_children : (rawChildren.length || (existing ? existing.totalChildren || existing.total_children : 0)),

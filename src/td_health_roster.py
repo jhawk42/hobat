@@ -52,7 +52,7 @@ def _raw_value(record: Mapping[str, Any], path: str) -> Any:
 
 
 def _source_value(record: Mapping[str, Any], field: str) -> Any:
-    aliases = ("eui", "eui64", "EUI64") if field == "eui64" else _ALIASES.get(field, (field,))
+    aliases = _ALIASES.get(field, (field,))
     for alias in aliases:
         value = _raw_value(record, alias)
         if value is not None:
@@ -61,7 +61,7 @@ def _source_value(record: Mapping[str, Any], field: str) -> Any:
 
 
 def _validated(field: str, value: Any, policy: RosterPolicy) -> Any:
-    if field in {"extAddress", "eui64"}:
+    if field in {"extAddress", "eui"}:
         if not isinstance(value, str):
             return None
         canonical = value.strip().lower().replace(":", "").replace("-", "")
@@ -123,7 +123,7 @@ def extract_roster_facts(
         value = _validated(field, _source_value(record, field), policy)
         if value is None:
             continue
-        value_class = "identity" if field == "extAddress" else "alias" if field == "eui64" else "address" if field in {"omrIpv6Address", "ipv6Addresses"} else "inventory" if field in _INVENTORY_FIELDS else "presentation" if field == "deviceLabel" else "transient"
+        value_class = "identity" if field == "extAddress" else "alias" if field == "eui" else "address" if field in {"omrIpv6Address", "ipv6Addresses"} else "inventory" if field in _INVENTORY_FIELDS else "presentation" if field == "deviceLabel" else "transient"
         facts.append(RosterFact(device_id, field, json.dumps(value, sort_keys=True, separators=(",", ":")),
                                 value_class, filename, rank, "high" if rank >= 3 else "medium"))
     return tuple(sorted(facts, key=lambda fact: (fact.device_id, fact.field_key)))

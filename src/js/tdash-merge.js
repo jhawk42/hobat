@@ -16,10 +16,11 @@ import {
 // ── Row normalisation (used by table renderer + merge strategies) ────────────
 
 export function normalizeRows(rawData, sourceName = "") {
+  const fieldSource = fieldSourceForFile(sourceName);
   if (Array.isArray(rawData)) {
     return rawData.map((row, index) => {
       if (isPlainObject(row))
-        return withRowProvenance(normalizeSourceRelationships(row, sourceName), sourceName);
+        return withRowProvenance(normalizeSourceRelationships(row, sourceName, fieldSource), sourceName);
       return withRowProvenance({ row_index: index, value: row }, sourceName);
     });
   }
@@ -28,7 +29,7 @@ export function normalizeRows(rawData, sourceName = "") {
       const row = rawData[key];
       if (isPlainObject(row))
         return withRowProvenance(
-          normalizeRowMergeAliases({ _row_key: key, ...row }),
+          normalizeRowMergeAliases({ _row_key: key, ...row }, { source: fieldSource }),
           sourceName,
         );
       return withRowProvenance({ _row_key: key, value: row }, sourceName);
@@ -37,8 +38,16 @@ export function normalizeRows(rawData, sourceName = "") {
   return [withRowProvenance({ value: rawData }, sourceName)];
 }
 
-function normalizeSourceRelationships(row, sourceName) {
-  const normalized = normalizeRowMergeAliases(row);
+function fieldSourceForFile(filename) {
+  if (filename.startsWith("td-otbr-cli-")) return "cli";
+  if (filename.startsWith("td-otbr-restapi-")) return "rest";
+  if (filename.startsWith("td-ha-matter-ws-")) return "ha-matter-ws";
+  if (filename === "diagnostics.json") return "thread-tools";
+  return undefined;
+}
+
+function normalizeSourceRelationships(row, sourceName, fieldSource) {
+  const normalized = normalizeRowMergeAliases(row, { source: fieldSource });
   if (sourceName !== "td-otbr-restapi-mesh-diagnostics-fetch-all.json")
     return normalized;
 

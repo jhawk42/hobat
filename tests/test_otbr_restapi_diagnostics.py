@@ -94,7 +94,12 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["macCounters"]["ifOutTotalPkts"], 5)
 
     def test_list_no_enrich_flag_returns_raw_mac_counters(self) -> None:
-        payload = [{"macCounters": {"ifInUcastPkts": 1}}]
+        payload = [{
+            "type": "threadNetworkDiagnostic",
+            "eui64": "0011223344556677",
+            "threadVersion": 4,
+            "macCounters": {"ifInUcastPkts": 1},
+        }]
         self.client.list_diagnostics.return_value = payload
 
         result = diagnostics_module.dispatch_diagnostics(
@@ -104,8 +109,48 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
             fields=None,
         )
 
-        self.assertIs(result, payload)
+        self.assertIsNot(result, payload)
         self.assertNotIn("iftotalpkts", result[0]["macCounters"])
+        self.assertEqual(result[0]["eui"], "0011223344556677")
+        self.assertEqual(result[0]["threadVersionDecimal"], 4)
+        self.assertEqual(result[0]["threadVersion"], "1.3")
+        self.assertNotIn("eui64", result[0])
+
+    def test_get_normalizes_thread_diagnostic_fields_by_default(self) -> None:
+        args = SimpleNamespace(diagnostics_command="get", diagnostics_id="diag-1")
+        payload = {
+            "id": "diag-1",
+            "type": "threadNetworkDiagnostic",
+            "eui": "0011223344556677",
+            "threadVersion": 4,
+        }
+        self.client.get_diagnostic.return_value = payload
+
+        result = diagnostics_module.dispatch_diagnostics(
+            self.client,
+            args,
+            _RAW_UNSET,
+            fields=None,
+        )
+
+        self.assertEqual(result["eui"], "0011223344556677")
+        self.assertEqual(result["threadVersionDecimal"], 4)
+        self.assertEqual(result["threadVersion"], "1.3")
+        self.assertNotIn("version", result)
+
+    def test_get_raw_preserves_wire_payload(self) -> None:
+        args = SimpleNamespace(diagnostics_command="get", diagnostics_id="diag-1")
+        payload = {"version": 4, "eui64": "0011223344556677"}
+        self.client.get_diagnostic.return_value = payload
+
+        result = diagnostics_module.dispatch_diagnostics(
+            self.client,
+            args,
+            True,
+            fields=None,
+        )
+
+        self.assertIs(result, payload)
 
     def test_list_raw_true_skips_enrichment(self) -> None:
         payload = [{"macCounters": {"ifInUcastPkts": 1}}]

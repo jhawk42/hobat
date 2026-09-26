@@ -31,7 +31,7 @@ def test_multicast_to_json_output_has_all_fields():
     device = list(parsed.values())[0]
     
     # Verify all new TLV fields are present
-    assert "eui64" in device, "eui64 field missing"
+    assert "eui64" in device, "parser eui64 field missing"
     assert "connectivity" in device, "connectivity field missing"
     assert "leader_data" in device, "leader_data field missing"
     assert "vendor_name" in device, "vendor_name field missing"
@@ -40,7 +40,7 @@ def test_multicast_to_json_output_has_all_fields():
     assert "route" in device, "route field missing"
     
     # Verify values
-    assert device["eui64"] == "f434f0fffe1e1774", f"Wrong eui64: {device['eui64']}"
+    assert device["eui64"] == "f434f0fffe1e1774", f"Wrong parser eui64: {device['eui64']}"
     assert device["vendor_name"] == "Apple", f"Wrong vendor_name: {device['vendor_name']}"
     assert device["vendor_model"] == "Default", f"Wrong vendor_model: {device['vendor_model']}"
     assert device["connectivity"]["link_quality_3"] == 13

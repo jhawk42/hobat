@@ -22,9 +22,7 @@ import { toText, getColumnValue, isPlainObject } from "./tdash-utils.js";
  * - Search is case-insensitive and supports partial matches
  * 
  * **Field Naming:**
- * - Uses camelCase-first targets with legacy snake_case fallbacks
- * - Examples: extAddress/extaddr, omrIpv6Addr/omr_ipv6_addr, threadStackVersion/thread_stack_version
- * - Both variants are searchable to support all dataset types
+ * - Uses canonical camelCase field names from the shared device field model
  * 
  * @type {Readonly<string[]>}
  * @constant
@@ -34,7 +32,7 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   // === Identity & Addresses ===
   "rloc16",
   "extAddress",
-  "eui64",
+  "eui",
   "deviceLabel",
   "name",
   "room",
@@ -54,7 +52,6 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   "isLeader",
   
   // === Versions ===
-  "ver",
   "version",
   "threadVersion",
   "threadStackVersion",

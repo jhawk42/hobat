@@ -22,7 +22,7 @@ COVERAGE_PILLARS = (
 )
 ALLOWED_COVERAGE_STATES = frozenset({"sufficient", "limited", "missing"})
 ROSTER_FIELDS = (
-    "extAddress", "omrIpv6Address", "rloc16", "deviceLabel", "eui64", "routerId",
+    "extAddress", "omrIpv6Address", "rloc16", "deviceLabel", "eui", "routerId",
     "ipv6Addresses", "type", "isBorderRouter", "isRouter", "isLeader",
     "isPrimaryBBR", "role", "state", "mode.device", "mode.rxOnWhenIdle",
     "mode.fullThreadDevice", "mode.fullNetworkData", "threadVersion",
