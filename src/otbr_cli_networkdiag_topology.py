@@ -1,4 +1,5 @@
 import argparse
+import ipaddress
 import os
 import re
 import json
@@ -36,7 +37,12 @@ from util_data import (
     save_json_atomic,
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
-from td_device_fields import get_canonical_rloc16, is_placeholder_ext_address, normalize_input_record
+from td_device_fields import (
+    get_canonical_ext_address,
+    get_canonical_rloc16,
+    is_placeholder_ext_address,
+    normalize_input_record,
+)
 from extaddr_device_label_map import load_extaddr_device_label_map
 from otbr_cli_router_table import fetch_and_parse_router_table
 
@@ -253,7 +259,7 @@ def fetch_network_diag_multicast(
         else None
     )
 
-    # Multiple attempts gives {DETAILED, MEDIUM, SIMPLE} as some devices may not respond to the more detailed TLVs
+    # With two attempts, multicast queries DETAILED then BASIC TLVs.
     attempts_max = 2
     delay_start = 0.1  # between retries 0.10 0.20 0.50 1.0 1.5 1.75 2.0 seconds
     tlv_detail_level = 8
@@ -268,7 +274,7 @@ def fetch_network_diag_multicast(
             case 1:
                 tlv_detail_level = 8  # BASIC
             case 2:
-                tlv_detail_level = 9  # MEDIUM
+                tlv_detail_level = 9  # MEDIUM; unreachable while attempts_max is 2
             case _:
                 tlv_detail_level = 8  # BASIC
 
@@ -1229,6 +1235,10 @@ def fetch_child_with_retries(
 ) -> ChildFetchOutcome:
     if prior_state.get("last_attempt_tlv_detail_level", -1) >= policy.satisfied_detail_level:
         return ChildFetchOutcome(target, policy.mode, (), (), "already-satisfied")
+    if policy.mode == "fast" and _has_fast_child_diagnostic_coverage(
+        prior_state, target.child_rloc16
+    ):
+        return ChildFetchOutcome(target, policy.mode, (), (), "already-satisfied")
 
     observations = []
     attempted = []
@@ -1255,6 +1265,45 @@ def fetch_child_with_retries(
             delay(attempt.delay_after_failure_s)
 
     return ChildFetchOutcome(target, policy.mode, tuple(observations), tuple(attempted), "responded")
+
+
+def _has_fast_child_diagnostic_coverage(
+    record: object, child_rloc16: str
+) -> bool:
+    if not isinstance(record, dict):
+        return False
+
+    extaddr = get_canonical_ext_address(record)
+    if (
+        not re.fullmatch(r"[0-9a-f]{16}", extaddr)
+        or is_placeholder_ext_address(extaddr)
+    ):
+        return False
+
+    expected_rloc16 = get_canonical_rloc16({"rloc16": child_rloc16})
+    if not expected_rloc16 or get_canonical_rloc16(record) != expected_rloc16:
+        return False
+
+    mode = record.get("mode")
+    required_mode_fields = ("rx_on_when_idle", "device_type", "network_data")
+    if not isinstance(mode, dict) or any(
+        type(mode.get(field)) is not int or mode[field] not in (0, 1)
+        for field in required_mode_fields
+    ):
+        return False
+
+    ipv6_addrs = record.get("ipv6_addrs")
+    if not isinstance(ipv6_addrs, list) or not ipv6_addrs:
+        return False
+    try:
+        for address in ipv6_addrs:
+            if not isinstance(address, str) or not address.strip():
+                return False
+            ipaddress.IPv6Address(address)
+    except ValueError:
+        return False
+
+    return True
 
 
 def ping_child_after_diagnostic_exhaustion(

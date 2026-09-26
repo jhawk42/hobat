@@ -52,24 +52,59 @@ def _write_checkpoint_best_effort(payload: Any, checkpoint_path: Path) -> None:
 
 
 def filter_router_device_ids(devices: list[Any], device_ids: list[str]) -> list[str]:
-    rloc16_by_id: dict[str, int] = {}
+    devices_by_id: dict[str, dict[str, Any]] = {}
     for device in devices:
         if not isinstance(device, dict):
             continue
-        dev_id = device.get("id")
-        rloc16_raw = device.get("rloc16")
-        if dev_id is None or rloc16_raw is None:
+        device_id = device.get("id")
+        if not isinstance(device_id, str) or not device_id:
             continue
-        try:
-            rloc16_by_id[dev_id] = int(rloc16_raw, 16) if isinstance(rloc16_raw, str) else int(rloc16_raw)
-        except (ValueError, TypeError):
-            pass
+        devices_by_id[device_id] = device
 
     result: list[str] = []
-    for dev_id in device_ids:
-        rloc16 = rloc16_by_id.get(dev_id)
-        if rloc16 is None or (rloc16 & ROUTER_RLOC16_MASK) == ROUTER_RLOC16_VALUE:
-            result.append(dev_id)
+    for device_id in device_ids:
+        device = devices_by_id.get(device_id)
+        role_value = device.get("role") if device is not None else None
+        if role_value is not None:
+            if not isinstance(role_value, str):
+                logging.warning(
+                    "Skipping device %s for --routers-only: unrecognized role %r",
+                    device_id,
+                    role_value,
+                )
+                continue
+            role = role_value.strip().lower()
+            if role == "router":
+                result.append(device_id)
+                continue
+            if role == "child":
+                continue
+            if role:
+                logging.warning(
+                    "Skipping device %s for --routers-only: unrecognized role %r",
+                    device_id,
+                    role_value,
+                )
+                continue
+
+        rloc16_raw = device.get("rloc16") if device is not None else None
+        try:
+            if rloc16_raw is None:
+                raise ValueError("RLOC16 is missing")
+            rloc16 = (
+                int(rloc16_raw, 16)
+                if isinstance(rloc16_raw, str)
+                else int(rloc16_raw)
+            )
+        except (ValueError, TypeError, OverflowError):
+            logging.warning(
+                "Skipping device %s for --routers-only: role and valid RLOC16 unavailable",
+                device_id,
+            )
+            continue
+
+        if (rloc16 & ROUTER_RLOC16_MASK) == ROUTER_RLOC16_VALUE:
+            result.append(device_id)
     return result
 
 
@@ -143,7 +178,7 @@ def dispatch_mesh_diagnostics(
     if cmd == "fetch-all":
         types = parse_mesh_diag_types(args.types or list(MESH_DIAGNOSTIC_TLVS))
         do_update = not getattr(args, "no_update_devices", False)
-        routers_only = getattr(args, "routers_only", False)
+        routers_only = getattr(args, "routers_only", True)
 
         if do_update:
             devices = client.fetch_device_collection(items_only=True)
@@ -181,13 +216,12 @@ def dispatch_mesh_diagnostics(
             poll_interval=poll_interval,
             poll_timeout=poll_timeout,
             clear_diagnostics=not getattr(args, "preserve_diagnostics", False),
+            items_only=getattr(args, "items_only", False),
             progressive_fallback=not getattr(args, "no_fallback", False),
             on_progress=progress_fn,
             on_checkpoint=_on_checkpoint,
             raw=raw_arg,
         )
-        if getattr(args, "items_only", False):
-            return finish(outcome["items"])
         return finish(outcome)
 
     raise ValueError("Unsupported mesh-diagnostics command")

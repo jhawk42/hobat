@@ -2,13 +2,15 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import pytest
+
 import otbr_restapi_actions as actions_module
 import otbr_restapi_devices as devices_module
 import otbr_restapi_diagnostics as diagnostics_module
 import otbr_restapi_mesh_diagnostics as mesh_module
 import otbr_restapi_node as node_module
 import otbr_restapi_cli as cli_module
-from otbr_restapi_util import emit_rest_command_output
+from otbr_restapi_util import OTBRUsageError, emit_rest_command_output
 from util_data import read_network_scope
 
 
@@ -206,6 +208,68 @@ def test_diagnostics_dispatch_owns_final_output_after_normalization():
     save.assert_called_once()
 
 
+def test_diagnostics_fetch_all_preserves_roles_for_explicit_device_ids():
+    devices = [
+        {"id": "1111111111111111", "role": "child"},
+        {"id": "2222222222222222", "role": "router"},
+    ]
+    outcome = {"items": [], "deviceResults": [], "partial": False}
+    client = Mock()
+    client.list_devices.return_value = devices
+    client.fetch_all_devices_diagnostics.return_value = outcome
+    args = cli_module.build_parser().parse_args(
+        [
+            "--no-progress",
+            "diagnostics",
+            "fetch-all",
+            "--device-ids",
+            "1111111111111111",
+            "2222222222222222",
+            "--no-update-devices",
+            "--preserve-diagnostics",
+            "--no-basic-fallback",
+        ]
+    )
+
+    with patch.object(diagnostics_module, "emit_rest_command_output", return_value=outcome):
+        result = diagnostics_module.dispatch_diagnostics(client, args, False, None)
+
+    assert result is outcome
+    client.list_devices.assert_called_once_with(raw=False)
+    selected_devices = client.fetch_all_devices_diagnostics.call_args.args[0]
+    assert selected_devices == devices
+    assert [device["role"] for device in selected_devices] == ["child", "router"]
+    assert client.fetch_all_devices_diagnostics.call_args.kwargs["progressive_fallback"] is True
+    assert client.fetch_all_devices_diagnostics.call_args.kwargs["include_basic_fallback"] is False
+
+
+@pytest.mark.parametrize(
+    "policy_args",
+    [
+        ["--no-fallback"],
+        ["--fallback-preset", "medium"],
+        ["--types", "extAddress"],
+        ["--preset", "minimal"],
+    ],
+)
+def test_no_basic_fallback_requires_progressive_policy(policy_args):
+    args = cli_module.build_parser().parse_args(
+        [
+            "--no-progress",
+            "diagnostics",
+            "fetch-all",
+            "--no-basic-fallback",
+            *policy_args,
+        ]
+    )
+    client = Mock()
+
+    with pytest.raises(OTBRUsageError, match="requires the default or recommended progressive"):
+        diagnostics_module.dispatch_diagnostics(client, args, False, None)
+
+    client.list_devices.assert_not_called()
+
+
 def test_actions_dispatch_owns_final_output():
     payload = [{"id": "action-1"}]
     client = Mock()
@@ -242,3 +306,134 @@ def test_mesh_diagnostics_dispatch_owns_final_output():
 
     assert result is payload
     save.assert_called_once()
+
+
+def test_router_filter_prefers_explicit_role_and_falls_back_to_rloc16(caplog):
+    devices = [
+        {"id": "router-role", "role": "router"},
+        {"id": "child-role", "role": "child"},
+        {
+            "id": "reed-child",
+            "role": "child",
+            "mode": {
+                "fullThreadDevice": True,
+                "rxOnWhenIdle": True,
+                "fullNetworkData": True,
+            },
+        },
+        {"id": "rloc-router", "rloc16": "0x1400"},
+        {"id": "rloc-child", "rloc16": "0x1401"},
+        {"id": "invalid-rloc", "rloc16": "invalid"},
+        {"id": "unclassified-no-rloc"},
+        {"id": "unknown-role", "role": "leader", "rloc16": "0x1800"},
+    ]
+
+    selected = mesh_module.filter_router_device_ids(
+        devices,
+        [device["id"] for device in devices] + ["missing-device"],
+    )
+
+    assert selected == ["router-role", "rloc-router"]
+    assert "reed-child" not in selected
+    assert "invalid-rloc" in caplog.text
+    assert "unclassified-no-rloc" in caplog.text
+    assert "unknown-role" in caplog.text
+    assert "missing-device" in caplog.text
+
+
+def test_mesh_fetch_all_routers_only_uses_strict_filter():
+    devices = [
+        {"id": "router-role", "role": "router"},
+        {"id": "child-role", "role": "child"},
+        {"id": "rloc-router", "rloc16": "0x1400"},
+        {"id": "unclassified", "rloc16": "invalid"},
+    ]
+    outcome = {"items": [], "deviceResults": [], "partial": False}
+    client = Mock()
+    client.list_devices.return_value = devices
+    client.fetch_mesh_diagnostics_all_devices.return_value = outcome
+    args = cli_module.build_parser().parse_args(
+        [
+            "--no-progress",
+            "mesh-diagnostics",
+            "fetch-all",
+            "--no-update-devices",
+        ]
+    )
+    assert args.routers_only is True
+
+    with patch.object(mesh_module, "emit_rest_command_output", return_value=outcome):
+        result = mesh_module.dispatch_mesh_diagnostics(client, args, False)
+
+    assert result is outcome
+    client.list_devices.assert_called_once_with(raw=False)
+    assert client.fetch_mesh_diagnostics_all_devices.call_args.args[0] == [
+        "router-role",
+        "rloc-router",
+    ]
+
+
+def test_mesh_fetch_all_all_devices_opt_out_bypasses_router_filter():
+    devices = [
+        {"id": "router-role", "role": "router"},
+        {"id": "child-role", "role": "child"},
+        {"id": "rloc-router", "rloc16": "0x1400"},
+    ]
+    outcome = {"items": [], "deviceResults": [], "partial": False}
+    client = Mock()
+    client.list_devices.return_value = devices
+    client.fetch_mesh_diagnostics_all_devices.return_value = outcome
+    args = cli_module.build_parser().parse_args(
+        [
+            "--no-progress",
+            "mesh-diagnostics",
+            "fetch-all",
+            "--no-update-devices",
+            "--all-devices",
+        ]
+    )
+
+    with patch.object(mesh_module, "emit_rest_command_output", return_value=outcome):
+        result = mesh_module.dispatch_mesh_diagnostics(client, args, False)
+
+    assert result is outcome
+    assert args.routers_only is False
+    client.fetch_mesh_diagnostics_all_devices.assert_called_once()
+    assert client.fetch_mesh_diagnostics_all_devices.call_args.args[0] == [
+        "router-role",
+        "child-role",
+        "rloc-router",
+    ]
+
+
+def test_mesh_fetch_all_forwards_items_only_and_returns_item_array():
+    items = [{"id": "diag-mesh", "extAddress": "router-role", "children": []}]
+    client = Mock()
+    client.list_devices.return_value = [{"id": "router-role", "role": "router"}]
+    client.fetch_mesh_diagnostics_all_devices.return_value = items
+    args = cli_module.build_parser().parse_args(
+        [
+            "--no-progress",
+            "mesh-diagnostics",
+            "fetch-all",
+            "--no-update-devices",
+            "--items-only",
+            "--preserve-diagnostics",
+        ]
+    )
+
+    with patch.object(mesh_module, "emit_rest_command_output", return_value=items):
+        result = mesh_module.dispatch_mesh_diagnostics(client, args, False)
+
+    assert result is items
+    client.fetch_mesh_diagnostics_all_devices.assert_called_once()
+    assert client.fetch_mesh_diagnostics_all_devices.call_args.kwargs["items_only"] is True
+    assert client.fetch_mesh_diagnostics_all_devices.call_args.kwargs["clear_diagnostics"] is False
+
+
+def test_mesh_fetch_all_routers_only_selector_remains_accepted():
+    args = cli_module.build_parser().parse_args(
+        ["mesh-diagnostics", "fetch-all", "--routers-only"]
+    )
+
+    assert args.routers_only is True

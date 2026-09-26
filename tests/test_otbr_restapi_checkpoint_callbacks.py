@@ -117,12 +117,9 @@ def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path
     def _fake_fetch_mesh_all(*_args, **kwargs):
         on_checkpoint = kwargs.get("on_checkpoint")
         assert on_checkpoint is not None
+        assert kwargs.get("items_only") is True
         on_checkpoint([{"id": "mesh-1"}], 1, 1, "dev-1", "completed")
-        return {
-            "items": [{"id": "mesh-1"}],
-            "deviceResults": [{"deviceId": "dev-1", "status": "completed"}],
-            "partial": False,
-        }
+        return [{"id": "mesh-1"}]
 
     client.fetch_mesh_diagnostics_all_devices.side_effect = _fake_fetch_mesh_all
 
@@ -215,11 +212,7 @@ def test_rest_fetch_dispatchers_do_not_checkpoint_without_output_path() -> None:
 
     mesh_client = Mock()
     mesh_client.list_devices.return_value = [{"id": "dev-1", "rloc16": "0x4000"}]
-    mesh_client.fetch_mesh_diagnostics_all_devices.return_value = {
-        "items": [{"id": "mesh-1"}],
-        "deviceResults": [],
-        "partial": False,
-    }
+    mesh_client.fetch_mesh_diagnostics_all_devices.return_value = [{"id": "mesh-1"}]
     mesh_args = SimpleNamespace(
         mesh_diag_command="fetch-all",
         poll_timeout=8.0,

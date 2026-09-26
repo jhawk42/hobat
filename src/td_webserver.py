@@ -250,14 +250,17 @@ def _build_file_action_map(default_max_age_s: int) -> dict[str, FileAction]:
             max_age_s=default_max_age_s,
             action=[
                 "otbr-restapi", "mesh-diagnostics", "fetch-all",
-                "--routers-only", "--items-only",
+                "--routers-only", "--items-only", "--preserve-diagnostics",
             ],
             action_cost_s=1200,
             force_async=True,
         ),
         OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME: FileAction(
             max_age_s=default_max_age_s,
-            action=["otbr-restapi", "diagnostics", "fetch-all", "--items-only"],
+            action=[
+                "otbr-restapi", "diagnostics", "fetch-all",
+                "--items-only", "--no-basic-fallback",
+            ],
             action_cost_s=1200,
             force_async=True,
         ),

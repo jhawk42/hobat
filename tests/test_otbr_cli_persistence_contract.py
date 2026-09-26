@@ -345,6 +345,33 @@ def test_networkdiag_multicast_collector_checkpoint_final_and_return_order(monke
     assert events == ["collect", checkpoint_path, output_path, "returned"]
 
 
+def test_multicast_networkdiag_uses_detailed_then_basic_tlvs(monkeypatch):
+    commands = []
+    delays = []
+    monkeypatch.setattr(
+        networkdiag.util_ot_ctl,
+        "exec_ot_ctl",
+        lambda command: commands.append(command) or "",
+    )
+    monkeypatch.setattr(networkdiag, "parse_multicast_diag_output", lambda *_args: {})
+    monkeypatch.setattr(networkdiag.time, "sleep", delays.append)
+
+    result = networkdiag.fetch_network_diag_multicast(
+        "ff03::1",
+        extaddr_map={},
+        thread_network_info={},
+        router_table_by_router_id={},
+        primary_bbr_observation=None,
+    )
+
+    assert result == {}
+    assert commands == [
+        f"networkdiagnostic get ff03::1 {networkdiag.TLV_VALUES_DETAILED}",
+        f"networkdiagnostic get ff03::1 {networkdiag.TLV_VALUES_BASIC}",
+    ]
+    assert delays == [0.1]
+
+
 @pytest.mark.parametrize(
     "collector_name",
     [

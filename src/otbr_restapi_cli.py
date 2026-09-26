@@ -389,6 +389,15 @@ def _add_diagnostics_commands(
         help="Disable per-device TLV fallback retry on failure",
     )
     diagnostics_fetch_all.add_argument(
+        "--no-basic-fallback",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the final basic TLV retry while retaining role-specific initial and medium tiers. "
+            "Applies only to default/recommended progressive fetch-all"
+        ),
+    )
+    diagnostics_fetch_all.add_argument(
         "--fallback-preset",
         choices=["medium", "minimal", "basic"],
         default=None,
@@ -653,15 +662,22 @@ def _add_mesh_diagnostics_commands(
             "By default the device list is refreshed first"
         ),
     )
-    mesh_fetch_all_p.add_argument(
+    router_selection = mesh_fetch_all_p.add_mutually_exclusive_group()
+    router_selection.add_argument(
         "--routers-only",
+        dest="routers_only",
         action="store_true",
-        default=False,
         help=(
-            "Restrict queries to router devices only (rloc16 lower-10-bits == 0). "
-            "Avoids wasting task slots on child devices for mesh-diagnostic TLVs"
+            "Query router devices only (default). Child devices are excluded from mesh diagnostics"
         ),
     )
+    router_selection.add_argument(
+        "--all-devices",
+        dest="routers_only",
+        action="store_false",
+        help="Include child devices as well as routers",
+    )
+    mesh_fetch_all_p.set_defaults(routers_only=True)
     mesh_fetch_all_p.add_argument(
         "--preserve-diagnostics",
         action="store_true",

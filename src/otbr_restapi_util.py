@@ -1324,6 +1324,7 @@ class OTBRRestApiClient:
         items_only: bool = False,
         fallback_types: Sequence[str | int] | None = None,
         progressive_fallback: bool = False,
+        include_basic_fallback: bool = True,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
         on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None = None,
         raw: object = _RAW_UNSET,
@@ -1340,6 +1341,8 @@ class OTBRRestApiClient:
             poll_timeout: Wall-clock seconds per device before timeout.
             skip_on_failure: If True (default), log and skip devices that fail or
                              time out; if False, raise on first failure.
+            include_basic_fallback: Include the final basic TLV retry when
+                                    progressive_fallback is enabled.
             raw: Return raw diagnostic envelopes.
 
         Returns:
@@ -1406,11 +1409,13 @@ class OTBRRestApiClient:
                 )
                 fallback_sets: list[Sequence[str | int]] = []
                 if progressive_fallback:
-                    fallback_sets.extend(
-                        (CHILD_MEDIUM_DIAGNOSTIC_TLVS, BASIC_DIAGNOSTIC_TLVS)
+                    fallback_sets.append(
+                        CHILD_MEDIUM_DIAGNOSTIC_TLVS
                         if is_child
-                        else (ROUTER_MEDIUM_DIAGNOSTIC_TLVS, BASIC_DIAGNOSTIC_TLVS)
+                        else ROUTER_MEDIUM_DIAGNOSTIC_TLVS
                     )
+                    if include_basic_fallback:
+                        fallback_sets.append(BASIC_DIAGNOSTIC_TLVS)
                 elif fallback_types:
                     fallback_sets.append(fallback_types)
                 type_sets = [primary_types, *fallback_sets]
@@ -1680,8 +1685,9 @@ class OTBRRestApiClient:
         Fetch mesh diagnostics for a list of device IDs, one device at a time.
 
         When progressive_fallback is enabled, a failed combined request is
-        retried as individual mesh TLVs. A final basic diagnostic can establish
-        responsiveness, but does not satisfy mesh coverage.
+        retried as individual mesh TLVs. Structured outcomes may issue one final
+        basic diagnostic as a responsiveness check; items-only mode omits it
+        because it cannot add mesh coverage.
         """
         invalid = [diagnostic_type for diagnostic_type in types if diagnostic_type not in MESH_DIAGNOSTIC_TLVS]
         if invalid or not types:
@@ -1689,7 +1695,7 @@ class OTBRRestApiClient:
                 f"Invalid mesh-diagnostic TLV(s): {invalid!r}. "
                 f"Allowed: {sorted(MESH_DIAGNOSTIC_TLVS)!r}"
             )
-        if progressive_fallback and not self._resolve_raw(raw):
+        if not self._resolve_raw(raw):
             started_at = datetime.now(timezone.utc).isoformat()
             results: list[Any] = []
             device_results: list[dict[str, Any]] = []
@@ -1790,14 +1796,16 @@ class OTBRRestApiClient:
                         raw=False,
                     )
                     merge_context(context, required_types)
-                    split_types = [
-                        diagnostic_type
-                        for diagnostic_type in required_types
-                        if merged is None or diagnostic_type not in merged
-                    ]
+                    if progressive_fallback:
+                        split_types = [
+                            diagnostic_type
+                            for diagnostic_type in required_types
+                            if diagnostic_type not in merged
+                        ]
                 except (OTBRActionFailedError, OTBRInvalidResponseError) as exc:
                     record_error(exc)
-                    split_types = required_types
+                    if progressive_fallback:
+                        split_types = required_types
                 except OTBRClientError as exc:
                     record_error(exc)
                     fallback_allowed = False
@@ -1831,8 +1839,10 @@ class OTBRRestApiClient:
                 ]
                 if (
                     fallback_allowed
+                    and progressive_fallback
                     and len(mesh_coverage) < len(required_types)
                     and not responsive
+                    and not items_only
                 ):
                     attempted_types.append(list(BASIC_DIAGNOSTIC_TLVS))
                     try:

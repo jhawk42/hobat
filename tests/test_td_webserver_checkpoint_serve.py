@@ -152,7 +152,13 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(devices.action_cost_s, 40)
         self.assertEqual(
             diagnostics.action,
-            ["otbr-restapi", "diagnostics", "fetch-all", "--items-only"],
+            [
+                "otbr-restapi",
+                "diagnostics",
+                "fetch-all",
+                "--items-only",
+                "--no-basic-fallback",
+            ],
         )
         self.assertEqual(
             mesh.action,
@@ -162,6 +168,7 @@ class TestCheckpointFileServing(unittest.IsolatedAsyncioTestCase):
                 "fetch-all",
                 "--routers-only",
                 "--items-only",
+                "--preserve-diagnostics",
             ],
         )
         self.assertGreaterEqual(diagnostics.action_cost_s, 1200)

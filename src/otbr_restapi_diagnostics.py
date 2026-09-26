@@ -16,6 +16,7 @@ from otbr_restapi_util import (
     OTBRActionTimeoutError,
     OTBRInvalidResponseError,
     OTBRRestApiClient,
+    OTBRUsageError,
     emit_rest_command_output,
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
@@ -386,6 +387,13 @@ def dispatch_diagnostics(
     if args.diagnostics_command == "fetch-all":
         resolved_types = resolve_types(args)
         fallback_types = resolve_fallback_types(args)
+        progressive_fallback = use_progressive_fallback(args)
+        no_basic_fallback = getattr(args, "no_basic_fallback", False)
+        if no_basic_fallback and not progressive_fallback:
+            raise OTBRUsageError(
+                "--no-basic-fallback requires the default or recommended progressive fetch-all policy; "
+                "do not combine it with --types, a non-recommended --preset, --fallback-preset, or --no-fallback"
+            )
         do_enrich = not getattr(args, "no_enrich_mac_counters", False)
         do_update = not getattr(args, "no_update_devices", False)
 
@@ -397,7 +405,22 @@ def dispatch_diagnostics(
         else:
             devices = client.list_devices(raw=False)
 
-        selected_devices = getattr(args, "device_ids", None) or devices
+        requested_device_ids = getattr(args, "device_ids", None)
+        if requested_device_ids:
+            devices_by_id = {
+                device["id"].lower(): device
+                for device in devices
+                if isinstance(device, dict)
+                and isinstance(device.get("id"), str)
+            }
+            selected_devices = [
+                devices_by_id.get(device_id.lower(), device_id)
+                if isinstance(device_id, str)
+                else device_id
+                for device_id in requested_device_ids
+            ]
+        else:
+            selected_devices = devices
 
         checkpoint_path = None
         if output_path:
@@ -426,7 +449,8 @@ def dispatch_diagnostics(
             poll_timeout=args.poll_timeout,
             clear_diagnostics=not getattr(args, "preserve_diagnostics", False),
             fallback_types=fallback_types,
-            progressive_fallback=use_progressive_fallback(args),
+            progressive_fallback=progressive_fallback,
+            include_basic_fallback=not no_basic_fallback,
             raw=raw_arg,
             on_progress=progress_fn,
             on_checkpoint=_on_checkpoint,

@@ -148,6 +148,101 @@ def test_fetch_child_with_retries_is_pure_and_obeys_terminal_states() -> None:
         )
 
 
+def test_fast_child_coverage_requires_all_requested_fields() -> None:
+    complete = {
+        "extaddr": "0011223344556677",
+        "rloc16": "0x1001",
+        "mode": {
+            "rx_on_when_idle": 0,
+            "device_type": 0,
+            "network_data": 0,
+        },
+        "ipv6_addrs": ["fd00::1"],
+    }
+    incomplete_records = [
+        {key: value for key, value in complete.items() if key != "extaddr"},
+        {**complete, "extaddr": "found-0x1001"},
+        {**complete, "rloc16": "0x1002"},
+        {
+            **complete,
+            "mode": {"rx_on_when_idle": 0, "device_type": 0},
+        },
+        {**complete, "ipv6_addrs": []},
+        {**complete, "ipv6_addrs": ["not-an-ipv6-address"]},
+    ]
+
+    assert topology._has_fast_child_diagnostic_coverage(complete, "0x1001")
+    assert not topology._has_fast_child_diagnostic_coverage(complete, "0x1002")
+    assert all(
+        not topology._has_fast_child_diagnostic_coverage(record, "0x1001")
+        for record in incomplete_records
+    )
+
+
+def test_fast_coverage_does_not_skip_opt_in_detailed_child_policy() -> None:
+    _, detail = topology.build_child_fetch_policies(True, True)
+    calls: list[int] = []
+    prior_multicast_record = {
+        "extaddr": "0011223344556677",
+        "rloc16": "0x1001",
+        "mode": {
+            "rx_on_when_idle": 0,
+            "device_type": 0,
+            "network_data": 0,
+        },
+        "ipv6_addrs": ["fd00::1"],
+    }
+
+    outcome = topology.fetch_child_with_retries(
+        _target(),
+        detail,
+        prior_multicast_record,
+        lambda _target, attempt: calls.append(attempt.detail_level) or None,
+        lambda _seconds: None,
+    )
+
+    assert calls == [1, 2, 3]
+    assert [attempt.detail_level for attempt in outcome.attempted] == [1, 2, 3]
+    assert outcome.terminal_reason == "exhausted"
+
+
+def test_multicast_covered_child_skips_fast_fetch_and_preserves_identity(monkeypatch) -> None:
+    child_record = {
+        "extaddr": "0011223344556677",
+        "rloc16": "0x1001",
+        "device_label": "Garage Outlet",
+        "mode": {
+            "rx_on_when_idle": 0,
+            "device_type": 0,
+            "network_data": 0,
+            "device": "MTD",
+        },
+        "ipv6_addrs": ["fd00::1"],
+        "tlv_values": "0 1 2 8",
+    }
+    topology_map = {
+        "0x1000": {"rloc16": "0x1000", "children": [{"rloc16": "0x1001"}]},
+        "0x1001": child_record.copy(),
+    }
+    original_child = child_record.copy()
+    monkeypatch.setattr(
+        topology,
+        "fetch_network_diag_for_device",
+        lambda *_args: pytest.fail("complete multicast child data should skip fast fetch"),
+    )
+    monkeypatch.setattr(
+        topology,
+        "save_topology_to_json_file",
+        lambda *_args: pytest.fail("an already-covered child should not change the topology"),
+    )
+
+    topology.fetch_network_diag_topology_expand_children(
+        True, ["0x1000"], topology_map, {}, {}, {}, None, None, {}, None
+    )
+
+    assert topology_map["0x1001"] == original_child
+
+
 def test_child_expansion_reconciles_move_and_checkpoints_once(monkeypatch) -> None:
     network_topology_map = {
         "0x1000": {"rloc16": "0x1000", "children": [{"rloc16": "0x1001"}]},
