@@ -424,6 +424,22 @@ def test_multicast_networkdiag_uses_detailed_then_basic_tlvs(monkeypatch):
     assert delays == [0.1]
 
 
+def test_multicast_basic_retry_retains_detailed_thread_version(monkeypatch):
+    detailed = (Path(__file__).parent / "logs" / "test_tlvs_7c00.txt").read_text(encoding="utf-8")
+    basic = (
+        "DIAG_GET.rsp/ans from fd00::1: 00088e3b369df65e949601027c00\n"
+        "Ext Address: 8e3b369df65e9496\nRloc16: 0x7c00\n"
+    )
+    responses = iter((detailed, basic))
+    monkeypatch.setattr(networkdiag.util_ot_ctl, "exec_ot_ctl", lambda _command: next(responses))
+    monkeypatch.setattr(networkdiag.time, "sleep", lambda _delay: None)
+
+    result = networkdiag.fetch_network_diag_multicast("ff03::1")
+
+    assert result["0x7c00"]["thread_version_decimal"] == 4
+    assert result["0x7c00"]["thread_version"] == "1.3"
+
+
 @pytest.mark.parametrize(
     "collector_name",
     [

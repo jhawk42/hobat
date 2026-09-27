@@ -89,6 +89,8 @@ def test_multicast_to_json_output_has_all_fields():
         
         # Verify values in JSON (note: keys are normalized to camelCase)
         assert json_device["eui"] == "f434f0fffe1e1774"
+        assert json_device["threadVersionDecimal"] == 4
+        assert json_device["threadVersion"] == "1.3"
         assert json_device["vendorName"] == "Apple"
         assert json_device["vendorModel"] == "Default"
         assert json_device["vendorSwVersion"] == "Default"

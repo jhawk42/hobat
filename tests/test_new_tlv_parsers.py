@@ -291,6 +291,27 @@ def test_multicast_integration():
     assert device.get("eui64") == "f434f0fffe1e1774"
     assert device.get("vendor_name") == "Apple"
     assert device.get("rloc16") == "0x7c00"
+    assert device["thread_version_decimal"] == 4
+    assert device["thread_version"] == "1.3"
+
+
+def test_multicast_thread_version_requires_valid_tlv_24() -> None:
+    for payload in (
+        "00080011223344556677",
+        "180100",
+        "180200",
+        "190418020004",
+    ):
+        output = f"DIAG_GET.rsp/ans from fd00::1: {payload}\nExt Address: 0011223344556677\n"
+        device = parse_multicast_diag_output(output)["0011223344556677"]
+        assert "thread_version_decimal" not in device
+        assert "thread_version" not in device
+
+    payload = "00ff0008001122334455667718020005"
+    output = f"DIAG_GET.rsp/ans from fd00::1: {payload}\nExt Address: 0011223344556677\n"
+    device = parse_multicast_diag_output(output)["0011223344556677"]
+    assert device["thread_version_decimal"] == 5
+    assert device["thread_version"] == "1.4"
 
 
 def test_multicast_missing_rloc16_does_not_discard_later_responder() -> None:

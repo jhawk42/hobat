@@ -8,6 +8,7 @@ import logging
 from collections.abc import Mapping
 
 from otbr_cli_networkdiag_util import device_type_from_mode
+from util_network import decode_short_thread_version
 from util_mac_counters import derive_mac_counter_metrics, enrich_mac_counters
 
 
@@ -703,6 +704,32 @@ def parse_route_data(output):
     return route
 
 
+def _parse_thread_version_tlv(payload_hex: str) -> int | None:
+    if not re.fullmatch(r"[0-9a-fA-F]+", payload_hex):
+        return None
+    try:
+        payload = bytes.fromhex(payload_hex)
+    except ValueError:
+        return None
+
+    offset = 0
+    while offset + 2 <= len(payload):
+        tlv_type = payload[offset]
+        length = payload[offset + 1]
+        offset += 2
+        if length == 255:
+            if offset + 2 > len(payload):
+                return None
+            length = int.from_bytes(payload[offset:offset + 2], "big")
+            offset += 2
+        if offset + length > len(payload):
+            return None
+        if tlv_type == 24:
+            return int.from_bytes(payload[offset:offset + 2], "big") if length == 2 else None
+        offset += length
+    return None
+
+
 def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) -> dict:
     """
     Parses multicast network diagnostic output containing responses from multiple devices.
@@ -727,6 +754,8 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
             "rloc16": str,                # from TLV 1, e.g. "0x2000"
             "device_label": str,          # from extaddr_map or f"found-{rloc16}"
             "eui64": str,                 # from TLV 23, factory-assigned global ID
+            "thread_version_decimal": int,
+            "thread_version": str,
             "thread_stack_version": str,  # from TLV 28 or "Unknown"
             "mode": dict,                 # from TLV 2, parse_mode_flags()
             "ipv6_addrs": list,           # from TLV 8, parse_ipv6_address_list()
@@ -767,6 +796,7 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
         responder_ipv6 = ""
         if ": " in first_line:
             responder_ipv6 = first_line.split(": ")[0].strip()
+        thread_version_decimal = _parse_thread_version_tlv(first_line.rpartition(": ")[2])
 
         # Extract Ext Address (TLV 0) - required field
         extaddr_match = re.search(r"Ext Address:\s*([0-9a-fA-F]{16})", block)
@@ -829,6 +859,9 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
             "mle_counters": mle_counters,
             "time_statistics": time_statistics,
         }
+        if thread_version_decimal is not None:
+            device_record["thread_version_decimal"] = thread_version_decimal
+            device_record["thread_version"] = decode_short_thread_version(thread_version_decimal)
 
         # Store in result dict, keyed by extaddr (last duplicate wins for now)
         result[extaddr] = device_record
