@@ -20,6 +20,7 @@ def _dispatch(argv: list[str]) -> int:
         (["health"], "usage: td_cli health"),
         (["system"], "usage: td_cli system"),
         (["system", "backups"], "usage: td_cli system backups"),
+        (["system", "database"], "usage: td_cli system database"),
         (["system", "device"], "usage: td_cli system device"),
     ],
 )
@@ -27,6 +28,18 @@ def test_command_without_subcommand_prints_help(argv, usage, capsys):
     assert td_cli.main(argv) == 0
 
     assert usage in capsys.readouterr().out
+
+
+def test_system_database_repack_is_forwarded_to_system_cli():
+    with patch.object(td_cli.td_system_cli, "main", return_value=7) as system_main:
+        rc = _dispatch([
+            "--datadir", "/tmp/td", "system", "database", "repack",
+        ])
+
+    system_main.assert_called_once_with([
+        "--datadir", "/tmp/td", "database", "repack",
+    ])
+    assert rc == 7
 
 
 def test_mdns_without_scope_prints_help_without_browsing(capsys):

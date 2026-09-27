@@ -211,6 +211,17 @@ shared observations but invalidates assessments derived from affected
 observations. Purge does not remove identities from collector snapshots,
 exports, or existing backups.
 
+### `system database repack`
+
+```text
+td_cli [--datadir DIRECTORY] system database repack
+```
+
+Rebuilds `hobat_v1.db` in the effective data directory with SQLite `VACUUM;`,
+reclaiming unused pages without changing stored records or the schema. The
+database must already exist. Repacking requires exclusive database access; if
+another process is using it, stop that process and retry.
+
 ### `system backups`
 
 ```text

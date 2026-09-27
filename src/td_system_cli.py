@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Sequence
 
 from td_system_backups import create_backup, restore_backup
+from td_system_database import DatabaseRepackError, repack_database
 from td_system_ping import run_ping
 from util_data import resolve_data_dir
 
@@ -27,6 +29,15 @@ def build_parser() -> argparse.ArgumentParser:
     restore.add_argument("--input", required=True, type=Path, metavar="BACKUP")
     restore.add_argument("--yes", action="store_true")
     restore.add_argument("--json", action="store_true", dest="json_output")
+    database = commands.add_parser(
+        "database", description="Hobat SQLite database maintenance."
+    )
+    database_actions = database.add_subparsers(
+        dest="database_action", required=True
+    )
+    database_actions.add_parser(
+        "repack", help="Repack the Hobat SQLite database."
+    )
     device = commands.add_parser("device", description="Host device diagnostic commands.")
     device_actions = device.add_subparsers(dest="device_action", required=True)
     ping = device_actions.add_parser("ping", description="Probe one literal IP address.")
@@ -48,6 +59,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(document, sort_keys=True))
         return exit_code
     data_dir = resolve_data_dir(args.datadir)
+    if args.system_command == "database" and args.database_action == "repack":
+        try:
+            database_path = repack_database(data_dir)
+        except DatabaseRepackError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        print(f"Repacked Hobat database at {database_path}")
+        return 0
     if args.backup_action == "create":
         manifest = create_backup(data_dir, args.output)
         location = args.output.resolve()

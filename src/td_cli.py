@@ -420,6 +420,15 @@ def _add_system_commands(subparsers: argparse._SubParsersAction) -> None:
     device = system_commands.add_parser("device", help="Host device diagnostic commands")
     device_actions = device.add_subparsers(dest="device_action", required=False)
     device_actions.add_parser("ping", help="Probe one literal IP address", add_help=False)
+    database = system_commands.add_parser(
+        "database", help="Hobat SQLite database maintenance"
+    )
+    database_actions = database.add_subparsers(
+        dest="database_action", required=False
+    )
+    database_actions.add_parser(
+        "repack", help="Repack the Hobat SQLite database", add_help=False
+    )
 
 
 # type: ignore[type-arg]
@@ -1000,11 +1009,16 @@ def _dispatch_system(
         if system_parser is not None:
             _print_child_subparser_help(system_parser, "device")
         return 0
-    action = (
-        [args.system_command, args.device_action]
-        if args.system_command == "device"
-        else [args.system_command, args.backup_action]
-    )
+    if args.system_command == "database" and args.database_action is None:
+        if system_parser is not None:
+            _print_child_subparser_help(system_parser, "database")
+        return 0
+    if args.system_command == "device":
+        action = [args.system_command, args.device_action]
+    elif args.system_command == "database":
+        action = [args.system_command, args.database_action]
+    else:
+        action = [args.system_command, args.backup_action]
     return _normalize_module_rc(
         td_system_cli.main(_forward_with_datadir(args, action + extra_args)),
         "td_system_cli.main",

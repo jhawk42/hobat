@@ -143,7 +143,7 @@ explicitly absent. It does not replace OTBR network-wide collection.
 | `td_health_observation_store.py`, `td_health_sqlite.py`, `td_health_history.py` | Observation persistence boundary, SQLite transactions, current assessment, and bounded retention |
 | `td_health_graph.py`, `td_health_roster.py`, `td_health_comparison.py` | Topology evidence graph, expected/observed roster operations, and stored-assessment comparisons |
 | `td_health_read.py`, `td_webserver.py` health routes | Query-only SQLite projections, assessment pinning, grouped findings, bounded history, and no-store HTTP responses |
-| `td_system_backups.py`, `td_system_cli.py`, `td_system_ping.py` | Versioned data-directory backup/restore and bounded host ping |
+| `td_system_backups.py`, `td_system_cli.py`, `td_system_database.py`, `td_system_ping.py` | Data-directory backup/restore, SQLite database repacking, and bounded host ping |
 | `util_data.py` | Data-directory resolution and atomic JSON/text writes |
 | `util_network.py`, `util_convert.py`, `util_mac_counters.py` | Network, address conversion, and counter helpers |
 | `profile_wrapper_td_cli.py`, `profile_wrapper_td_webserver.py` | Development profiling wrappers |
