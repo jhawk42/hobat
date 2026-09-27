@@ -191,6 +191,34 @@ def test_devices_dispatch_owns_final_output():
     save.assert_called_once()
 
 
+def test_devices_dispatch_normalizes_border_router_alias_conflicts(tmp_path):
+    payload = [{
+        "id": "dev-1",
+        "isBorderRouter": False,
+        "is_border_router": True,
+        "br": False,
+    }]
+    client = Mock()
+    client.list_devices.return_value = payload
+    output_path = tmp_path / "td-otbr-restapi-devices-list.json"
+    args = SimpleNamespace(
+        devices_command="list",
+        with_meta=False,
+        resolved_output_path=str(output_path),
+    )
+
+    result = devices_module.dispatch_devices(client, args, raw_arg=False, fields=None)
+
+    assert result[0]["isBorderRouter"] is False
+    assert "br" not in result[0]
+    assert "is_border_router" not in result[0]
+    assert result[0]["_merge_conflicts"] == [
+        {"path": "isBorderRouter", "current": False, "incoming": True}
+    ]
+    [saved] = json.loads(output_path.read_text(encoding="utf-8"))
+    assert saved == result[0]
+
+
 def test_diagnostics_dispatch_owns_final_output_after_normalization():
     payload = {"diagnostic_id": "diag-1"}
     client = Mock()
@@ -241,6 +269,58 @@ def test_diagnostics_fetch_all_preserves_roles_for_explicit_device_ids():
     assert [device["role"] for device in selected_devices] == ["child", "router"]
     assert client.fetch_all_devices_diagnostics.call_args.kwargs["progressive_fallback"] is True
     assert client.fetch_all_devices_diagnostics.call_args.kwargs["include_basic_fallback"] is False
+
+
+def test_diagnostics_fetch_all_checkpoint_and_final_preserve_address_override(tmp_path):
+    output_path = tmp_path / "td-otbr-restapi-diagnostics-fetch-all.json"
+    source_record = {
+        "id": "device-1",
+        "isBorderRouter": False,
+        "ipv6Addresses": ["fdde:ad00:beef:0:0:ff:fe00:fc11"],
+    }
+    client = Mock()
+    client.list_devices.return_value = [{"id": "device-1"}]
+
+    def fetch_all(*_args, **kwargs):
+        kwargs["on_checkpoint"]([dict(source_record)], 1, 1, "device-1", "completed")
+        return {
+            "items": [dict(source_record)],
+            "deviceResults": [{"deviceId": "device-1", "status": "completed"}],
+            "partial": False,
+        }
+
+    client.fetch_all_devices_diagnostics.side_effect = fetch_all
+    args = SimpleNamespace(
+        diagnostics_command="fetch-all",
+        no_enrich_mac_counters=False,
+        no_update_devices=True,
+        device_ids=None,
+        destination_type="extended",
+        task_timeout=8,
+        poll_interval=2.0,
+        poll_timeout=8.0,
+        no_progress=True,
+        no_fallback=True,
+        no_basic_fallback=False,
+        preset="recommended",
+        fallback_preset=None,
+        types=None,
+        preserve_diagnostics=False,
+        items_only=True,
+        resolved_output_path=str(output_path),
+    )
+
+    diagnostics_module.dispatch_diagnostics(client, args, False, None)
+
+    checkpoint_path = tmp_path / "td-otbr-restapi-diagnostics-fetch-all.partial.json"
+    for path in (checkpoint_path, output_path):
+        [saved] = json.loads(path.read_text(encoding="utf-8"))
+        assert saved["isBorderRouter"] is True
+        assert "br" not in saved
+        assert "is_border_router" not in saved
+        assert saved["_merge_conflicts"] == [
+            {"path": "isBorderRouter", "current": False, "incoming": True}
+        ]
 
 
 @pytest.mark.parametrize(

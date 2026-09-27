@@ -166,7 +166,7 @@ export const NODE_FILTER_OPTIONS = Object.freeze([
     label: "Border Routers",
     group: null,
     topoNodeField: "isBorderRouter",
-    tableRowField: "br",
+    tableRowField: "isBorderRouter",
   },
   {
     value: "main-routers",
@@ -911,7 +911,6 @@ export const DEVICE_DETAILS_SECTIONS = Object.freeze([
       "Role",
       "role",
       "routingRole",
-      "br",
       "isBorderRouter",
       "isLeader",
       "isRouter",
@@ -1393,7 +1392,6 @@ export const TABLE_PRIORITY_COLUMNS = [
   // === TIER 3: Device Role & Status ===
   "type",
   "Role",
-  "br",
   "isRouter",
   "isBorderRouter",
   "isLeader",

@@ -8,7 +8,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from td_device_fields import FIELD_DEFINITIONS, get_canonical_ext_address
+from td_device_fields import (
+    FIELD_DEFINITIONS,
+    get_canonical_ext_address,
+    normalize_input_record,
+)
 from td_health_manifest import HealthDataset, RosterPolicy
 from td_health_observation_model import device_id_from_ext_address
 
@@ -52,6 +56,8 @@ def _raw_value(record: Mapping[str, Any], path: str) -> Any:
 
 
 def _source_value(record: Mapping[str, Any], field: str) -> Any:
+    if field == "isBorderRouter":
+        return normalize_input_record(record).get(field)
     aliases = _ALIASES.get(field, (field,))
     for alias in aliases:
         value = _raw_value(record, alias)

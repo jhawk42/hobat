@@ -34,7 +34,7 @@ import {
   registerRouterNeighborRows,
 } from './tdash-adaptor-model.js';
 
-import { asArray, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories } from './tdash-adaptor-shared.js';
+import { asArray, borderRouterEvidenceFields, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories, mergeBorderRouterEvidence, resolveBorderRouterEvidence } from './tdash-adaptor-shared.js';
 
 
 
@@ -84,6 +84,8 @@ export function adaptThreadToolsNative(fileMap) {
 
   function upsertThreadToolsNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
+    const borderRouterResolution = resolveBorderRouterEvidence(rawNode, existing);
+    const isBorderRouter = borderRouterResolution.value;
     const normalizedSource = normalizeInputRecord(rawNode, { source: 'thread-tools' });
     const rloc16Val = macAddrToRloc16(rawNode.macAddr)
       || toText(rawNode.rloc16)
@@ -157,13 +159,13 @@ export function adaptThreadToolsNative(fileMap) {
         ?? (existing ? toFiniteNumber(existing.routerPct || existing.router_pct) : undefined),
       detachedDisabledPct: toFiniteNumber(rawNode.timeStatistics?.detachedDisabledPct)
         ?? (existing ? toFiniteNumber(existing.detachedDisabledPct || existing.detached_disabled_pct) : undefined),
-      br: rawNode.br === true || (existing ? existing.br === true : false),
+      ...borderRouterEvidenceFields(borderRouterResolution),
       fromThreadToolsNative: true,
       shape: style.shape || (existing ? existing.shape : (modeFtd === false ? NODE_SHAPES.child : NODE_SHAPES.router)),
       color: style.color || (existing ? existing.color : NODE_COLORS.router),
     };
     merged.isFtdRouter = merged.modeDevice === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
-    if (merged.br) {
+    if (merged.isBorderRouter === true) {
       merged.color = NODE_COLORS.borderRouter;
     } else if (merged.shape === NODE_SHAPES.child) {
       merged.color = NODE_COLORS.child;

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import otbr_cli_meshdiag_childtable as childtable
@@ -33,6 +35,21 @@ def test_meshdiag_topology_omits_decimal_when_not_reported():
 
     assert "thread_version_decimal" not in router
     assert router["thread_version"] == "Unknown"
+
+
+def test_meshdiag_topology_snapshot_uses_canonical_border_router_field(monkeypatch, tmp_path):
+    output = "\n".join([
+        "id: 01 rloc16:0x0400 ext-addr:0011223344556677 - me - br",
+        "id: 02 rloc16:0x0800 ext-addr:8899aabbccddeeff - me",
+    ])
+    output_path = tmp_path / "td-otbr-cli-meshdiag-topology.json"
+    monkeypatch.setattr(topology, "fetch_meshdiag_topology", lambda: output)
+
+    topology.get_meshdiag_topology(output_path=output_path)
+
+    records = json.loads(output_path.read_text(encoding="utf-8"))
+    assert [record["isBorderRouter"] for record in records] == [True, False]
+    assert all("br" not in record and "is_border_router" not in record for record in records)
 
 
 @pytest.mark.parametrize(

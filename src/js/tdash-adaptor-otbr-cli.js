@@ -33,7 +33,7 @@ import {
   registerRouterNeighborRows,
 } from './tdash-adaptor-model.js';
 
-import { asArray, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories } from './tdash-adaptor-shared.js';
+import { asArray, borderRouterEvidenceFields, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories, mergeBorderRouterEvidence, resolveBorderRouterEvidence } from './tdash-adaptor-shared.js';
 
 const FILE_MESHDIAG              = 'td-otbr-cli-meshdiag-topology.json';
 
@@ -120,6 +120,8 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
 
   function upsertNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
+    const borderRouterResolution = resolveBorderRouterEvidence(rawNode, existing);
+    const isBorderRouter = borderRouterResolution.value;
     const rawIpv6 = Array.isArray(rawNode.ipv6_addrs) ? rawNode.ipv6_addrs : [];
     const existingIpv6 = existing && Array.isArray(existing.ipv6_addrs) ? existing.ipv6_addrs : [];
     const mergedIpv6 = rawIpv6.length > 0 ? rawIpv6 : existingIpv6;
@@ -227,7 +229,7 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
         : (existing && Number.isFinite(existing.routerPct || existing.router_pct) ? (existing.routerPct || existing.router_pct) : undefined),
       detachedDisabledPct: rawDetachedDisabledPct !== undefined ? rawDetachedDisabledPct
         : (existing && Number.isFinite(existing.detachedDisabledPct || existing.detached_disabled_pct) ? (existing.detachedDisabledPct || existing.detached_disabled_pct) : undefined),
-      br: rawNode.br === true || (existing ? existing.br === true : false),
+      ...borderRouterEvidenceFields(borderRouterResolution),
       isLeader: rawNode.isLeader === true || (existing ? existing.isLeader === true : false),
       isPrimaryBBR: rawNode.isPrimaryBBR === true || (existing ? existing.isPrimaryBBR === true : false),
       fromMeshdiag: (style.source === 'meshdiag') || (existing ? (existing.fromMeshdiag || existing.from_meshdiag) === true : false),
@@ -237,7 +239,7 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
     };
     merged.isFtdRouter = merged.modeDevice === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
     // Apply role-based color overrides
-    if (merged.br) {
+    if (merged.isBorderRouter === true) {
       merged.color = NODE_COLORS.borderRouter;
     } else if (merged.shape === NODE_SHAPES.child) {
       // Child nodes (ellipse shape) should always use child color, not router default
@@ -259,7 +261,7 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
     if (meshRawId) meshIdToUnifiedId.set(meshRawId, uid);
     upsertNode(uid, node, {
       source: 'meshdiag', shape: NODE_SHAPES.router,
-      color: node.br ? NODE_COLORS.borderRouter : NODE_COLORS.router
+      color: mergeBorderRouterEvidence(node) === true ? NODE_COLORS.borderRouter : NODE_COLORS.router
     });
   });
 
@@ -593,7 +595,8 @@ export function adaptRouterTable(fileMap) {
   rows.forEach((row) => {
     const nodeId = toText(row.rloc16) || getCanonicalExtaddr(row);
     if (!nodeId) return;
-    const isBr = toText(nodeId).toLowerCase().endsWith('00');
+    const borderRouterResolution = resolveBorderRouterEvidence(row);
+    const isBorderRouter = borderRouterResolution.value;
     nodeMap.set(nodeId, {
       id: nodeId,
       device_label: toText(row.device_label),
@@ -601,9 +604,9 @@ export function adaptRouterTable(fileMap) {
       extaddr: getCanonicalExtaddr(row),
       type: 'router',
       mode_device: 'FTD',
-      br: isBr,
+      ...borderRouterEvidenceFields(borderRouterResolution),
       shape: NODE_SHAPES.router,
-      color: isBr ? NODE_COLORS.borderRouter : NODE_COLORS.router
+      color: isBorderRouter === true ? NODE_COLORS.borderRouter : NODE_COLORS.router
     });
     rawByIdForDetails.set(nodeId, row);
   });

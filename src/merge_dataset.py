@@ -166,7 +166,6 @@ PRIORITY_FIELDS = [
     "Role",                    # Eve format
     "isRouter",                # REST API alias
     "isBorderRouter",          # REST API alias
-    "br",                      # CLI - is border router
     "leader",                  # Leader status
     "isLeader",                # REST API alias
     "isPrimaryBBR",            # Is primary backbone router

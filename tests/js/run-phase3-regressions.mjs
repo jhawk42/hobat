@@ -9,8 +9,9 @@ import {
   getTableColumnsForCategory,
   getTableFilterLabel,
 } from "../../src/js/tdash-table-renderer.js";
-import { DEVICE_DETAILS_SECTIONS, TABLE_PRIORITY_COLUMNS } from "../../src/js/tdash-constants.js";
+import { DEVICE_DETAILS_SECTIONS, NODE_FILTER_OPTIONS, NODE_SHAPES, TABLE_PRIORITY_COLUMNS } from "../../src/js/tdash-constants.js";
 import { getColumnValue } from "../../src/js/tdash-utils.js";
+import { buildVisNodeData } from "../../src/js/tdash-topology-utils.js";
 import { SEARCH_TARGET_FIELDS, parseSearchQuery, rowMatchesSearch } from "../../src/js/tdash-search.js";
 
 const explicitRouter = { isRouter: true, role: "Router", children: [{}] };
@@ -20,6 +21,28 @@ const borderRouter = { isBorderRouter: true };
 assert.equal(isRowVisibleByNodeFilter(explicitRouter, "main-routers"), true);
 assert.equal(isRowVisibleByNodeFilter(leader, "main-routers"), true);
 assert.equal(isRowVisibleByNodeFilter(borderRouter, "border-routers"), true);
+assert.equal(isRowVisibleByNodeFilter({ br: true }, "border-routers"), true);
+assert.equal(isRowVisibleByNodeFilter({ isBorderRouter: false }, "border-routers"), false);
+assert.equal(isRowVisibleByNodeFilter({}, "border-routers"), false);
+assert.equal(getRowRoleProjection({ role: "border router", type: "router" }).isBorderRouter, false);
+assert.equal(getRowRoleProjection({ isBorderRouter: false, role: "border router", type: "router" }).isBorderRouter, false);
+const topologyProjection = buildVisNodeData(
+  new Map([
+    ["canonical-br", { id: "canonical-br", isRouter: true, isBorderRouter: true }],
+    ["explicit-false", { id: "explicit-false", isRouter: true, isBorderRouter: false }],
+    ["role-only", { id: "role-only", isRouter: true, role: "border router" }],
+  ]),
+  new Set(),
+  new Map(),
+  (node) => node.id,
+);
+const topologyById = new Map(topologyProjection.map((node) => [node.id, node]));
+assert.equal(topologyById.get("canonical-br").isBorderRouter, true);
+assert.equal(topologyById.get("canonical-br").shape, NODE_SHAPES.borderRouter);
+assert.equal(topologyById.get("explicit-false").isBorderRouter, false);
+assert.equal(topologyById.get("explicit-false").shape, NODE_SHAPES.router);
+assert.equal(topologyById.get("role-only").isBorderRouter, false);
+assert.equal(topologyById.get("role-only").shape, NODE_SHAPES.router);
 assert.equal(isRowVisibleByNodeFilter(explicitRouter, "routers-with-children"), true);
 assert.equal(getRowRoleProjection(reedChild).isChild, true);
 assert.equal(isRowVisibleByNodeFilter(reedChild, "main-routers"), false);
@@ -46,13 +69,20 @@ assert.equal(getTableFilterLabel({ selectedOptions: [] }, "All diagnostics"), "A
 assert.equal(getTableFilterLabel({ selectedOptions: [{ text: "Routers" }] }, "All nodes"), "Routers");
 const identityDetails = DEVICE_DETAILS_SECTIONS.find((section) => section.sectionId === "identity-list").fields;
 const highlightDetails = DEVICE_DETAILS_SECTIONS.find((section) => section.sectionId === "highlights-list").fields;
+const borderRouterFilter = NODE_FILTER_OPTIONS.find((option) => option.value === "border-routers");
 assert.ok(identityDetails.includes("eui"));
 assert.ok(!identityDetails.includes("eui64"));
 assert.ok(highlightDetails.includes("threadVersion"));
 assert.ok(highlightDetails.includes("threadVersionDecimal"));
 assert.ok(highlightDetails.includes("threadStackVersion"));
 assert.ok(!highlightDetails.includes("ver"));
+assert.ok(highlightDetails.includes("isBorderRouter"));
+assert.ok(!highlightDetails.includes("br"));
+assert.equal(borderRouterFilter.topoNodeField, "isBorderRouter");
+assert.equal(borderRouterFilter.tableRowField, "isBorderRouter");
 assert.ok(TABLE_PRIORITY_COLUMNS.includes("eui"));
+assert.ok(TABLE_PRIORITY_COLUMNS.includes("isBorderRouter"));
+assert.ok(!TABLE_PRIORITY_COLUMNS.includes("br"));
 assert.ok(TABLE_PRIORITY_COLUMNS.includes("threadVersion"));
 assert.ok(!TABLE_PRIORITY_COLUMNS.includes("eui64"));
 assert.ok(!TABLE_PRIORITY_COLUMNS.includes("ver"));
@@ -60,6 +90,8 @@ assert.ok(!TABLE_PRIORITY_COLUMNS.includes("threadVersionDecimal"));
 assert.ok(SEARCH_TARGET_FIELDS.includes("eui"));
 assert.ok(SEARCH_TARGET_FIELDS.includes("threadVersion"));
 assert.ok(SEARCH_TARGET_FIELDS.includes("version"));
+assert.ok(SEARCH_TARGET_FIELDS.includes("isBorderRouter"));
+assert.ok(!SEARCH_TARGET_FIELDS.includes("br"));
 assert.ok(!SEARCH_TARGET_FIELDS.includes("eui64"));
 assert.ok(!SEARCH_TARGET_FIELDS.includes("ver"));
 const canonicalThreadRow = { eui: "8899aabbccddeeff", threadVersion: "1.3", threadVersionDecimal: 4 };
@@ -110,6 +142,8 @@ assert.deepEqual(haMatterRows[0].matter, {
 
 const counts = computeRowCounts([{ role: "Router", isRouter: true }, { role: "SleepyEndDevice" }, { isBorderRouter: true }]);
 assert.deepEqual([counts.borderRouters, counts.routers, counts.children], [1, 1, 1]);
+const explicitBorderRouterCount = computeRowCounts([{ isBorderRouter: true, rloc16: "0x1001" }]);
+assert.equal(explicitBorderRouterCount.borderRouters, 1);
 assert.equal(formatAge(null), "unknown");
 assert.equal(formatAge("not-a-date"), "unknown");
 assert.equal(formatAge(new Date(Date.now() - 30_000).toISOString()), "just now");

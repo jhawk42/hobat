@@ -402,7 +402,10 @@ def get_meshdiag_topology(
             len(enhanced_links),
             output_path,
         )
-        converted = [normalize_input_record(record, source="cli") for record in convert_keys_to_camel_case(enhanced_links)]
+        converted = [
+            convert_keys_to_camel_case(normalize_input_record(record, source="cli"))
+            for record in enhanced_links
+        ]
         logging.info(
             "Saved %d entries after converting keys to camel case for meshdiag topology data.",
             len(converted),

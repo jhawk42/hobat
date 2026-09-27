@@ -86,7 +86,7 @@ export function buildDeviceProjection(row, index = 0) {
   const isBorderRouter = getColumnValue(row, "isBorderRouter") === true;
   const isReed = deviceType === "FTD" && (role ? role === "child" : !isRouter && !isBorderRouter);
   const diagnostics = deriveDiagnostics(row, metrics, normalizedType, derivedRouter,
-    derivedRouter && isBorderRouter, deviceType === "FTD" && (role ? role === "child" : !derivedRouter && !isBorderRouter), relationships);
+    isBorderRouter, deviceType === "FTD" && (role ? role === "child" : !derivedRouter && !isBorderRouter), relationships);
   return {
     deviceId,
     extAddress: toText(getColumnValue(row, "extAddress")),

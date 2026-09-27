@@ -129,13 +129,14 @@ export function registerDetails(model, deviceId, rawRecord, ownership = "replace
     throw new Error(`Cannot register details for unknown device: ${deviceId}`);
   }
   if (!isPlainObject(rawRecord)) return;
+  const canonicalRecord = normalizeInputRecord(rawRecord);
   const existing = model.detailsByDeviceId.get(deviceId) ?? {};
   if (ownership === "replace") {
-    model.detailsByDeviceId.set(deviceId, { ...rawRecord });
+    model.detailsByDeviceId.set(deviceId, canonicalRecord);
   } else if (ownership === "merge") {
-    model.detailsByDeviceId.set(deviceId, { ...existing, ...rawRecord });
+    model.detailsByDeviceId.set(deviceId, { ...existing, ...canonicalRecord });
   } else if (ownership === "preserve") {
-    model.detailsByDeviceId.set(deviceId, mergeMissing(existing, rawRecord));
+    model.detailsByDeviceId.set(deviceId, mergeMissing(existing, canonicalRecord));
   } else {
     throw new Error(`Unknown details ownership policy: ${ownership}`);
   }
@@ -218,8 +219,8 @@ export function emitAdaptorResult(model) {
   const nodeData = [];
   const nodeMap = new Map();
   model.devicesById.forEach((device, deviceId) => {
-    nodeData.push(removeDuplicateAliases({ ...device.presentation, id: deviceId }));
-    nodeMap.set(deviceId, removeDuplicateAliases(device.nodeRecord));
+    nodeData.push(removeDuplicateAliases(normalizeInputRecord({ ...device.presentation, id: deviceId })));
+    nodeMap.set(deviceId, removeDuplicateAliases(normalizeInputRecord(device.nodeRecord)));
   });
   const edgeData = model.relationships.map((relationship) => ({
     ...relationship.presentation,

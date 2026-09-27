@@ -12,7 +12,7 @@ import { toText, getColumnValue, isPlainObject } from "./tdash-utils.js";
  * 
  * **Field Categories:**
  * - **Identity & Addresses** - Core identifiers like rloc16, extAddress, deviceLabel, routerId
- * - **Device Type & Role** - Role, type, br, leader, isBorderRouter
+ * - **Device Type & Role** - Role, type, leader, isBorderRouter
  * - **Versions** - Thread stack version, software version
  * - **Other** - mode.device, scope, status
  * 
@@ -48,7 +48,6 @@ export const SEARCH_TARGET_FIELDS = Object.freeze([
   "Role",
   "isRouter",
   "isBorderRouter",
-  "br",
   "isLeader",
   
   // === Versions ===

@@ -830,7 +830,6 @@ export function sortDetailsWithPriority(details) {
     // === TIER 3: Device Role & Status ===
     "type",
     "Role",
-    "br",
     "isBorderRouter",
     "isRouter",
     "isLeader",

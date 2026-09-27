@@ -50,3 +50,13 @@ class WebServerRouteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status, 200)
         self.assertEqual(await response.read(), self.data_content)
+
+    async def test_data_api_preserves_canonical_border_router_snapshot_bytes(self) -> None:
+        content = b'[{"isBorderRouter":false}]'
+        filename = "td-otbr-cli-meshdiag-topology.json"
+        (self.data_dir / filename).write_bytes(content)
+
+        response = await self.client.get(f"/api/data/{filename}")
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(await response.read(), content)

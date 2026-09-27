@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from otbr_restapi_util import OTBRRestApiClient, emit_rest_command_output
+from td_device_fields import normalize_input_record
 from td_json_key_normalizer import convert_keys_to_camel_case
 from util_data import (
     CollectionWriteOutcome,
@@ -15,11 +16,33 @@ from util_data import (
 )
 
 
-def _write_checkpoint_best_effort(payload: Any, checkpoint_path: Path) -> None:
+def _normalize_device_record(record: Any) -> Any:
+    if not isinstance(record, dict):
+        return record
+    normalized = normalize_input_record(record, source="rest")
+    return record if normalized == record else normalized
+
+
+def _normalize_device_payload(payload: Any) -> Any:
+    if isinstance(payload, list):
+        normalized = [_normalize_device_record(record) for record in payload]
+        return payload if all(new is old for new, old in zip(normalized, payload)) else normalized
+    if not isinstance(payload, dict):
+        return payload
+    if isinstance(payload.get("items"), list):
+        items = _normalize_device_payload(payload["items"])
+        return payload if items is payload["items"] else {**payload, "items": items}
+    return _normalize_device_record(payload)
+
+
+def _write_checkpoint_best_effort(
+    payload: Any, checkpoint_path: Path, *, normalize: bool = True
+) -> None:
     try:
         records = payload.get("items", []) if isinstance(payload, dict) else payload
+        payload_to_save = _normalize_device_payload(payload) if normalize else payload
         save_checkpoint_json(
-            convert_keys_to_camel_case(payload),
+            convert_keys_to_camel_case(payload_to_save),
             checkpoint_path,
             CollectionWriteOutcome.partial(has_usable_data=bool(records)),
             writer=save_json_atomic,
@@ -47,6 +70,8 @@ def dispatch_devices(
     output_path = getattr(args, "resolved_output_path", None)
 
     def finish(result: Any) -> Any:
+        if raw_arg is not True:
+            result = _normalize_device_payload(result)
         return emit_rest_command_output(result, output_path, logger=logging.getLogger(__name__))
 
     if args.devices_command == "list":
@@ -70,7 +95,9 @@ def dispatch_devices(
             checkpoint_path = output_file.parent / create_checkpoint_filename(
                 output_file.name
             )
-            _write_checkpoint_best_effort(result, checkpoint_path)
+            _write_checkpoint_best_effort(
+                result, checkpoint_path, normalize=raw_arg is not True
+            )
         return finish(result)
 
     raise ValueError("Unsupported devices command")

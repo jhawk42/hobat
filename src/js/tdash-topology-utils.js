@@ -500,9 +500,7 @@ export function buildVisNodeData(
       rloc16Text.endsWith("00") ||
       toText(node.type).toLowerCase() === "router" ||
       toText(node.role).toLowerCase() === "router";
-    const isBorderRouter =
-      (isRouter && (node.br === true || node.isBorderRouter === true || node.is_border_router === true)) ||
-      toText(node.role).toLowerCase() === "border router";
+    const isBorderRouter = node.isBorderRouter === true;
     const unknown = isUnknownNodeName(displayName) && !isRouter && !isBorderRouter;
     const isChildFtd = !isRouter && modeDevice === "FTD";
     const isChildMtd = !isRouter && modeDevice === "MTD";

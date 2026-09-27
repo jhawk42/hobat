@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from td_device_fields import normalize_input_record
 from td_health_observation_model import Completeness, HealthStatus
 from td_health_comparison import source_time_for_sample
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
@@ -58,6 +59,58 @@ def test_roster_extracts_only_explicit_valid_source_facts() -> None:
     assert "omrIpv6Address" not in values
     assert "deviceLabel" not in values
     assert "mode.fullThreadDevice" not in values
+    missing_border_router = extract_roster_facts(
+        {"extAddress": "8672766ae0578187"},
+        filename=filename, dataset=dataset, policy=manifest.roster_policy,
+    )
+    assert all(fact.field_key != "isBorderRouter" for fact in missing_border_router)
+    fallback_border_router = extract_roster_facts(
+        {
+            "extAddress": "8672766ae0578187",
+            "isBorderRouter": "maybe",
+            "is_border_router": False,
+            "br": True,
+        },
+        filename=filename, dataset=dataset, policy=manifest.roster_policy,
+    )
+    fallback_values = {
+        fact.field_key: json.loads(fact.value_json)
+        for fact in fallback_border_router
+    }
+    assert fallback_values["isBorderRouter"] is False
+    null_canonical_facts = extract_roster_facts(
+        {
+            "extAddress": "8672766ae0578187",
+            "isBorderRouter": None,
+            "is_border_router": "maybe",
+            "br": "yes",
+        },
+        filename=filename, dataset=dataset, policy=manifest.roster_policy,
+    )
+    null_canonical_values = {
+        fact.field_key: json.loads(fact.value_json)
+        for fact in null_canonical_facts
+    }
+    assert null_canonical_values["isBorderRouter"] is True
+    conflicting_aliases = {
+        "isBorderRouter": False,
+        "is_border_router": True,
+        "br": True,
+    }
+    normalized_conflict = normalize_input_record(conflicting_aliases)
+    assert normalized_conflict["isBorderRouter"] is False
+    assert normalized_conflict["_merge_conflicts"] == [
+        {"path": "isBorderRouter", "current": False, "incoming": True}
+    ]
+    conflict_facts = extract_roster_facts(
+        {"extAddress": "8672766ae0578187", **conflicting_aliases},
+        filename=filename, dataset=dataset, policy=manifest.roster_policy,
+    )
+    conflict_values = {
+        fact.field_key: json.loads(fact.value_json)
+        for fact in conflict_facts
+    }
+    assert conflict_values["isBorderRouter"] is False
     observed_omr = extract_roster_facts(
         {"extAddress": "8672766ae0578187", "omrIpv6Address": "fd6b:32e0:d18::1"},
         filename=filename, dataset=dataset, policy=manifest.roster_policy,

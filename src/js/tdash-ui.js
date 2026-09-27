@@ -3217,7 +3217,7 @@ function isChildRow(r) {
 // Link counts are halved because each undirected link appears in both endpoints.
 // Returns null for link fields when no row carries the link-count fields.
 // Returns null for classification fields when no row carries Thread topology fields
-// (rloc16 / br / type), which is the case for non-Thread sources such as mDNS.
+// (rloc16 / isBorderRouter / type), which is the case for non-Thread sources such as mDNS.
 function updateDeviceStatusBar(counts) {
   const set = (id, val) => {
     const el = document.getElementById(id);

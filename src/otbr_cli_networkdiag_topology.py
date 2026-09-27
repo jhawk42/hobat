@@ -532,7 +532,6 @@ def _build_unknown_device_record(
                 record["is_border_router"] = is_border_router
                 record["type"] = "border router"
                 record["role"] = "border router"
-                record["br"] = is_border_router
 
         record["children"] = []
         record["mac_counters"] = {}
@@ -617,7 +616,6 @@ def _enrich_device_role_and_prefix_flags(
         )
         if is_border_router:
             record["is_border_router"] = True
-            record["br"] = is_border_router
             record["type"] = "border router"
             record["role"] = "border router"
 
@@ -869,8 +867,8 @@ def fetch_network_diag_topology_meshdiag_topology(
                     "thread_version_decimal": router.get("thread_version_decimal"),
                     "role": "router",
                     "is_router": True,
-                    "is_border_router": router.get("is_border_router", False),
-                    "br": router.get("br", False),
+                    "is_border_router": router.get("is_border_router"),
+                    "br": router.get("br"),
                     "omr_ipv6_addr": router.get("omr_ipv6_addr"),
                     "mode": router.get("mode"),
                     "ipv6_addrs": ipv6_addrs,
@@ -1786,8 +1784,9 @@ def save_topology_to_json_file(
             "ipv6_addrs": data.get("ipv6_addrs", []),
             "type": data.get("type", "Unknown"),
             "role": data.get("role", "Unknown"),
-            "br": data.get("br", None),
-            "is_border_router": data.get("is_border_router", None),
+            "isBorderRouter": data.get("isBorderRouter"),
+            "is_border_router": data.get("is_border_router"),
+            "br": data.get("br"),
             "is_router": data.get("is_router", None),
             "leader": data.get("leader", None),
             "router_id": data.get("router_id"),
@@ -1827,7 +1826,10 @@ def save_topology_to_json_file(
                 network_node["_merge_conflicts"] = data["_merge_conflicts"]
         network_map.append(network_node)
 
-    payload = [normalize_input_record(record, source="cli") for record in convert_keys_to_camel_case(network_map)]
+    payload = [
+        convert_keys_to_camel_case(normalize_input_record(record, source="cli"))
+        for record in network_map
+    ]
     has_failures = any(
         isinstance(record, dict)
         and (

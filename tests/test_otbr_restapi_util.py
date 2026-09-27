@@ -561,6 +561,19 @@ class TestEmitRestPayloadOutput:
         saved_data = json.loads(output_file.read_text())
         assert saved_data == payload
 
+    def test_raw_mode_preserves_wire_keys(self, tmp_path):
+        payload = {
+            "data": {
+                "id": "diag-1",
+                "attributes": {"is_border_router": False},
+            }
+        }
+        output_file = tmp_path / "raw.json"
+
+        emit_rest_payload_output(payload, output_file, raw=True)
+
+        assert json.loads(output_file.read_text()) == payload
+
 
 class TestExitCodeForRestException:
     """Tests for exit_code_for_rest_exception helper."""

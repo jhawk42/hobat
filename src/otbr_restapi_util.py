@@ -2694,6 +2694,8 @@ def emit_rest_payload_output(
     payload: Any,
     output_path: str | Path | None,
     logger = None,
+    *,
+    raw: bool = False,
 ) -> None:
     """Save REST API payload to JSON file and log the operation.
     
@@ -2739,7 +2741,7 @@ def emit_rest_payload_output(
     
     output_file = Path(output_path)
     
-    payload_to_save = convert_keys_to_camel_case(payload)
+    payload_to_save = payload if raw else convert_keys_to_camel_case(payload)
 
     outcome = (
         CollectionWriteOutcome.partial(
@@ -2770,13 +2772,17 @@ def emit_rest_command_output(
     *,
     plain_text: bool = False,
     logger=None,
+    raw: bool = False,
 ) -> Any:
     """Persist a command result when an output path is resolved, then return it."""
     if output_path is None:
         return payload
 
     if not plain_text:
-        emit_rest_payload_output(payload, output_path, logger)
+        if raw:
+            emit_rest_payload_output(payload, output_path, logger, raw=True)
+        else:
+            emit_rest_payload_output(payload, output_path, logger)
         return payload
 
     from util_data import save_text_atomic

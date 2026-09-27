@@ -19,7 +19,7 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "mode.rxOnWhenIdle", "aliases": ("mode.rxOn", "mode.rx_on_when_idle"), "transform": "boolean"},
     {"path": "mode.device", "aliases": (), "transform": "identity"},
     {"path": "isLeader", "aliases": ("leader",), "transform": "strictBoolean"},
-    {"path": "isBorderRouter", "aliases": ("br", "is_border_router"), "transform": "boolean"},
+    {"path": "isBorderRouter", "aliases": ("is_border_router", "br"), "transform": "boolean"},
     {"path": "isRouter", "aliases": ("is_router",), "transform": "boolean"},
     {"path": "isPrimaryBBR", "aliases": (), "transform": "strictBoolean"},
     {"path": "leaderEvidence", "aliases": (), "transform": "identity"},
@@ -437,6 +437,28 @@ def normalize_input_record(
             if (found := _get_path(result, candidate))[0]
         ]
         if not found_values:
+            continue
+        if preferred == "isBorderRouter":
+            supported_values = [
+                (candidate, normalized)
+                for candidate, incoming in found_values
+                if isinstance(
+                    normalized := _transform_value(definition["transform"], incoming, source),
+                    bool,
+                )
+            ]
+            if not supported_values:
+                for candidate in candidates:
+                    _delete_path(result, candidate)
+                continue
+            _, transformed = supported_values[0]
+            for candidate, incoming in supported_values[1:]:
+                if incoming is not transformed:
+                    append_merge_conflict(result, preferred, transformed, incoming)
+            _set_path(result, preferred, transformed)
+            for candidate in candidates:
+                if candidate != preferred:
+                    _delete_path(result, candidate)
             continue
         selected = next(
             (item for item in found_values if not value_is_empty(item[1])),

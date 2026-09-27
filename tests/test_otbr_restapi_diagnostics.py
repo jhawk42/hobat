@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import otbr_restapi_cli as cli_module
 import otbr_restapi_diagnostics as diagnostics_module
@@ -99,6 +102,7 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
             "eui64": "0011223344556677",
             "threadVersion": 4,
             "macCounters": {"ifInUcastPkts": 1},
+            "ipv6Addresses": ["fdde:ad00:beef:0:0:ff:fe00:fc11"],
         }]
         self.client.list_diagnostics.return_value = payload
 
@@ -115,6 +119,7 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
         self.assertEqual(result[0]["threadVersionDecimal"], 4)
         self.assertEqual(result[0]["threadVersion"], "1.3")
         self.assertNotIn("eui64", result[0])
+        self.assertIs(result[0]["isBorderRouter"], True)
 
     def test_get_normalizes_thread_diagnostic_fields_by_default(self) -> None:
         args = SimpleNamespace(diagnostics_command="get", diagnostics_id="diag-1")
@@ -138,6 +143,100 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
         self.assertEqual(result["threadVersion"], "1.3")
         self.assertNotIn("version", result)
 
+    def test_get_applies_positive_border_router_address_evidence(self) -> None:
+        args = SimpleNamespace(diagnostics_command="get", diagnostics_id="diag-1")
+        self.client.get_diagnostic.return_value = {
+            "isBorderRouter": False,
+            "ipv6Addresses": ["fdde:ad00:beef:0:0:ff:fe00:fc11"],
+        }
+
+        result = diagnostics_module.dispatch_diagnostics(
+            self.client,
+            args,
+            _RAW_UNSET,
+            fields=None,
+        )
+
+        self.assertIs(result["isBorderRouter"], True)
+        self.assertEqual(result["_merge_conflicts"], [
+            {"path": "isBorderRouter", "current": False, "incoming": True}
+        ])
+
+    def test_get_keeps_explicit_false_without_positive_address_match(self) -> None:
+        args = SimpleNamespace(diagnostics_command="get", diagnostics_id="diag-1")
+        self.client.get_diagnostic.return_value = {
+            "isBorderRouter": False,
+            "ipv6Addresses": ["fdde:ad00:beef::1"],
+        }
+
+        result = diagnostics_module.dispatch_diagnostics(
+            self.client,
+            args,
+            _RAW_UNSET,
+            fields=None,
+        )
+
+        self.assertIs(result["isBorderRouter"], False)
+        self.assertNotIn("_merge_conflicts", result)
+
+    def test_fetch_applies_positive_border_router_address_evidence(self) -> None:
+        args = SimpleNamespace(
+            diagnostics_command="fetch",
+            device_id="device-1",
+            destination_type="extended",
+            task_timeout=8,
+            poll_interval=2.0,
+            poll_timeout=8.0,
+            no_enrich_mac_counters=True,
+        )
+        payload = {
+            "isBorderRouter": False,
+            "ipv6Addresses": ["fdde:ad00:beef:0:0:ff:fe00:fc11"],
+        }
+
+        with (
+            patch.object(diagnostics_module, "resolve_types", return_value=[]),
+            patch.object(diagnostics_module, "resolve_fallback_types", return_value=[]),
+            patch.object(diagnostics_module, "fetch_device_with_fallback", return_value=payload),
+        ):
+            result = diagnostics_module.dispatch_diagnostics(
+                self.client,
+                args,
+                _RAW_UNSET,
+                fields=None,
+            )
+
+        self.assertIs(result["isBorderRouter"], True)
+        self.assertEqual(result["_merge_conflicts"], [
+            {"path": "isBorderRouter", "current": False, "incoming": True}
+        ])
+
+    def test_fetch_keeps_missing_without_positive_address_match(self) -> None:
+        args = SimpleNamespace(
+            diagnostics_command="fetch",
+            device_id="device-1",
+            destination_type="extended",
+            task_timeout=8,
+            poll_interval=2.0,
+            poll_timeout=8.0,
+            no_enrich_mac_counters=False,
+        )
+        payload = {"ipv6Addresses": ["fdde:ad00:beef::1"]}
+
+        with (
+            patch.object(diagnostics_module, "resolve_types", return_value=[]),
+            patch.object(diagnostics_module, "resolve_fallback_types", return_value=[]),
+            patch.object(diagnostics_module, "fetch_device_with_fallback", return_value=payload),
+        ):
+            result = diagnostics_module.dispatch_diagnostics(
+                self.client,
+                args,
+                _RAW_UNSET,
+                fields=None,
+            )
+
+        self.assertNotIn("isBorderRouter", result)
+
     def test_get_raw_preserves_wire_payload(self) -> None:
         args = SimpleNamespace(diagnostics_command="get", diagnostics_id="diag-1")
         payload = {"version": 4, "eui64": "0011223344556677"}
@@ -151,6 +250,110 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
         )
 
         self.assertIs(result, payload)
+
+    def test_fetch_raw_preserves_wire_payload(self) -> None:
+        args = SimpleNamespace(
+            diagnostics_command="fetch",
+            device_id="device-1",
+            destination_type="extended",
+            task_timeout=8,
+            poll_interval=2.0,
+            poll_timeout=8.0,
+            no_enrich_mac_counters=False,
+        )
+        payload = {
+            "data": {
+                "id": "diag-1",
+                "attributes": {"is_border_router": False, "ipv6_addrs": []},
+            }
+        }
+
+        with (
+            patch.object(diagnostics_module, "resolve_types", return_value=[]),
+            patch.object(diagnostics_module, "resolve_fallback_types", return_value=[]),
+            patch.object(diagnostics_module, "fetch_device_with_fallback", return_value=payload),
+        ):
+            result = diagnostics_module.dispatch_diagnostics(
+                self.client,
+                args,
+                True,
+                fields=None,
+            )
+
+        self.assertIs(result, payload)
+        self.assertIn("data", result)
+        self.assertIn("attributes", result["data"])
+        self.assertIn("is_border_router", result["data"]["attributes"])
+
+    def test_fetch_all_raw_preserves_final_and_checkpoint_envelopes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "diagnostics.json"
+            checkpoint_item = {
+                "data": {
+                    "id": "diag-checkpoint",
+                    "attributes": {"is_border_router": False},
+                }
+            }
+            final_item = {
+                "data": {
+                    "id": "diag-final",
+                    "attributes": {"is_border_router": True},
+                }
+            }
+            outcome = {
+                "items": [final_item],
+                "deviceResults": [{"status": "completed"}],
+                "partial": False,
+            }
+            self.client.list_devices.return_value = [{"id": "device-1"}]
+
+            def fetch_all(_devices, **kwargs):
+                kwargs["on_checkpoint"](
+                    [checkpoint_item], 1, 1, "device-1", "completed"
+                )
+                return outcome
+
+            self.client.fetch_all_devices_diagnostics.side_effect = fetch_all
+            args = SimpleNamespace(
+                diagnostics_command="fetch-all",
+                resolved_output_path=str(output_path),
+                no_basic_fallback=False,
+                no_enrich_mac_counters=False,
+                no_update_devices=True,
+                device_ids=None,
+                destination_type="extended",
+                task_timeout=8,
+                poll_interval=2.0,
+                poll_timeout=8.0,
+                preserve_diagnostics=True,
+                no_progress=True,
+                items_only=False,
+                types=None,
+                preset="recommended",
+            )
+
+            with (
+                patch.object(diagnostics_module, "resolve_types", return_value=[]),
+                patch.object(diagnostics_module, "resolve_fallback_types", return_value=[]),
+                patch.object(diagnostics_module, "use_progressive_fallback", return_value=False),
+            ):
+                result = diagnostics_module.dispatch_diagnostics(
+                    self.client,
+                    args,
+                    True,
+                    fields=None,
+                )
+
+            self.assertIs(result, outcome)
+            self.assertIn("data", result["items"][0])
+            self.assertEqual(
+                json.loads(output_path.read_text(encoding="utf-8")), outcome
+            )
+            [checkpoint_path] = Path(tmpdir).glob("*.partial.json")
+            self.assertEqual(
+                json.loads(checkpoint_path.read_text(encoding="utf-8")),
+                [checkpoint_item],
+            )
 
     def test_list_raw_true_skips_enrichment(self) -> None:
         payload = [{"macCounters": {"ifInUcastPkts": 1}}]
@@ -202,6 +405,64 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
 
         self.assertIsNot(result, payload)
         self.assertEqual(result[0]["ipv6Addresses"], [None, 123, "fdde:ad00:beef::fc11"])
+
+    def test_border_router_address_evidence_overrides_false_and_records_conflict(self) -> None:
+        record = {
+            "isBorderRouter": False,
+            "is_border_router": True,
+            "br": False,
+            "ipv6Addresses": ["fdde:ad00:beef:0:0:ff:fe00:fc11"],
+        }
+
+        diagnostics_module.enrich_border_router(record)
+
+        self.assertIs(record["isBorderRouter"], True)
+        self.assertNotIn("br", record)
+        self.assertNotIn("is_border_router", record)
+        self.assertEqual(record["_merge_conflicts"], [
+            {"path": "isBorderRouter", "current": False, "incoming": True}
+        ])
+
+    def test_border_router_enrichment_preserves_false_without_positive_evidence(self) -> None:
+        record = {
+            "isBorderRouter": False,
+            "ipv6Addresses": ["fdde:ad00:beef::1"],
+        }
+
+        diagnostics_module.enrich_border_router(record)
+
+        self.assertIs(record["isBorderRouter"], False)
+        self.assertNotIn("_merge_conflicts", record)
+        self.assertNotIn("br", record)
+
+    def test_border_router_enrichment_keeps_missing_evidence_absent(self) -> None:
+        record = {"ipv6Addresses": ["fdde:ad00:beef::1"]}
+
+        diagnostics_module.enrich_border_router(record)
+
+        self.assertNotIn("isBorderRouter", record)
+
+    def test_diagnostics_checkpoint_normalizes_border_router_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checkpoint_path = Path(tmpdir) / "diagnostics.partial.json"
+            diagnostics_module._write_checkpoint_best_effort(
+                [{
+                    "isBorderRouter": False,
+                    "is_border_router": True,
+                    "br": False,
+                }],
+                checkpoint_path,
+                "otbr-restapi diagnostics fetch-all",
+                "device",
+            )
+
+            [saved] = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            self.assertIs(saved["isBorderRouter"], False)
+            self.assertNotIn("br", saved)
+            self.assertNotIn("is_border_router", saved)
+            self.assertEqual(saved["_merge_conflicts"], [
+                {"path": "isBorderRouter", "current": False, "incoming": True}
+            ])
 
 
 class DiagnosticsListParserTests(unittest.TestCase):

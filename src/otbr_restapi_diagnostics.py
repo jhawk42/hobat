@@ -21,6 +21,7 @@ from otbr_restapi_util import (
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
 from td_device_fields import normalize_input_record
+from td_record_merge import append_merge_conflict
 from util_data import (
     CollectionWriteOutcome,
     create_checkpoint_filename,
@@ -117,6 +118,9 @@ def _apply_time_stats_enrichment(diagnostics: list[Any]) -> list[Any]:
 
 
 def enrich_border_router(record: dict[str, Any]) -> None:
+    normalized = normalize_input_record(record, source="rest")
+    record.clear()
+    record.update(normalized)
 
     # isRouter 
     rloc16 = record.get("rloc16")
@@ -134,12 +138,11 @@ def enrich_border_router(record: dict[str, Any]) -> None:
 
     # isBorderRouter - check for presence of border router indicators in IPv6 addresses (e.g., "br" or "border-router" in address labels or types)
     is_border_router = util_network.is_border_router_from_ipv6_addrs(addrs)
-    if is_border_router is not None:
-        if is_border_router:
-            record["isBorderRouter"] = True
-            record["is_border_router"] = True
-            record["role"] = "border router"
-            record["br"] = True
+    if is_border_router is True:
+        if record.get("isBorderRouter") is False:
+            append_merge_conflict(record, "isBorderRouter", False, True)
+        record["isBorderRouter"] = True
+        record["role"] = "border router"
 
     
 def _apply_border_router_enrichment(diagnostics: list[Any]) -> list[Any]:
@@ -303,10 +306,31 @@ def _write_checkpoint_best_effort(
     checkpoint_path: Path,
     command_name: str,
     stage: str,
+    *,
+    raw: bool = False,
 ) -> None:
     try:
+        if raw:
+            payload_to_save = payload
+        elif isinstance(payload, list):
+            payload_to_save = [
+                normalize_input_record(record, source="rest")
+                if isinstance(record, dict) else record
+                for record in payload
+            ]
+        elif isinstance(payload, dict) and isinstance(payload.get("items"), list):
+            payload_to_save = {
+                **payload,
+                "items": [
+                    normalize_input_record(record, source="rest")
+                    if isinstance(record, dict) else record
+                    for record in payload["items"]
+                ],
+            }
+        else:
+            payload_to_save = payload
         save_checkpoint_json(
-            convert_keys_to_camel_case(payload),
+            payload_to_save if raw else convert_keys_to_camel_case(payload_to_save),
             checkpoint_path,
             CollectionWriteOutcome.partial(has_usable_data=bool(payload)),
             writer=save_json_atomic,
@@ -337,6 +361,10 @@ def dispatch_diagnostics(
     output_path = getattr(args, "resolved_output_path", None)
 
     def finish(result: Any) -> Any:
+        if raw_arg is True:
+            return emit_rest_command_output(
+                result, output_path, logger=logging.getLogger(__name__), raw=True
+            )
         return emit_rest_command_output(result, output_path, logger=logging.getLogger(__name__))
 
     if args.diagnostics_command == "list":
@@ -356,7 +384,7 @@ def dispatch_diagnostics(
                 if not no_enrich:
                     _apply_mac_enrichment(items)
                     _apply_time_stats_enrichment(items)
-                    _apply_border_router_enrichment(items)
+                _apply_border_router_enrichment(items)
                 _apply_role_evidence_normalization(items)
             return finish(convert_keys_to_camel_case(diagnostics))
 
@@ -364,7 +392,7 @@ def dispatch_diagnostics(
             if not no_enrich:
                 _apply_mac_enrichment(diagnostics)
                 _apply_time_stats_enrichment(diagnostics)
-                _apply_border_router_enrichment(diagnostics)
+            _apply_border_router_enrichment(diagnostics)
             _apply_role_evidence_normalization(diagnostics)
         return finish(convert_keys_to_camel_case(diagnostics))
     if args.diagnostics_command == "get":
@@ -372,6 +400,7 @@ def dispatch_diagnostics(
         if raw_arg is True or not isinstance(result, dict):
             return finish(result)
         result = normalize_input_record(result, source="rest")
+        _apply_border_router_enrichment([result])
         return finish(convert_keys_to_camel_case(result))
     if args.diagnostics_command == "fetch":
         primary_types = resolve_types(args)
@@ -387,9 +416,12 @@ def dispatch_diagnostics(
             poll_timeout=args.poll_timeout,
             raw=raw_arg,
         )
+        if raw_arg is True:
+            return finish(result)
         if not getattr(args, "no_enrich_mac_counters", False):
             _apply_mac_enrichment([result])
         if isinstance(result, dict):
+            _apply_border_router_enrichment([result])
             result = normalize_input_record(result, source="rest")
         return finish(convert_keys_to_camel_case(result))
     if args.diagnostics_command == "fetch-all":
@@ -440,11 +472,14 @@ def dispatch_diagnostics(
         def _on_checkpoint(results, _idx, _total, _device_id, _status):
             if checkpoint_path is None:
                 return
+            if raw_arg is not True:
+                _apply_border_router_enrichment(results)
             _write_checkpoint_best_effort(
                 results,
                 checkpoint_path,
                 "otbr-restapi diagnostics fetch-all",
                 "device",
+                raw=raw_arg is True,
             )
 
         progress_fn = make_progress_fn(len(selected_devices), not getattr(args, "no_progress", False))
@@ -464,10 +499,15 @@ def dispatch_diagnostics(
             on_checkpoint=_on_checkpoint,
         )
         diagnostics = outcome["items"]
-        if do_enrich:
-            _apply_mac_enrichment(diagnostics)
-            _apply_time_stats_enrichment(diagnostics)
+        if raw_arg is not True:
+            if do_enrich:
+                _apply_mac_enrichment(diagnostics)
+                _apply_time_stats_enrichment(diagnostics)
             _apply_border_router_enrichment(diagnostics)
+        if raw_arg is True:
+            if getattr(args, "items_only", False):
+                return finish(diagnostics)
+            return finish(outcome)
         _apply_role_evidence_normalization(diagnostics)
         if getattr(args, "items_only", False):
             return finish(convert_keys_to_camel_case(diagnostics))

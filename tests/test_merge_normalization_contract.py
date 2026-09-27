@@ -50,3 +50,28 @@ def test_offline_merge_normalizes_legacy_cli_thread_fields(tmp_path: Path) -> No
     assert "eui64" not in record
     assert "ver" not in record
     assert "version" not in record
+
+
+def test_offline_merge_emits_canonical_border_router_with_alias_conflict(tmp_path: Path) -> None:
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    records, _report = build_merged_records(
+        tmp_path,
+        "",
+        [filename],
+        {},
+        input_data={filename: [{
+            "extaddr": "0011223344556677",
+            "rloc16": "0x0400",
+            "isBorderRouter": False,
+            "is_border_router": True,
+            "br": False,
+        }]},
+    )
+
+    [record] = records
+    assert record["isBorderRouter"] is False
+    assert "is_border_router" not in record
+    assert "br" not in record
+    assert record["_merge_conflicts"] == [
+        {"path": "isBorderRouter", "current": False, "incoming": True}
+    ]

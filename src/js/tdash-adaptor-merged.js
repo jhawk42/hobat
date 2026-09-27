@@ -33,7 +33,7 @@ import {
   registerRouterNeighborRows,
 } from './tdash-adaptor-model.js';
 
-import { asArray, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories } from './tdash-adaptor-shared.js';
+import { asArray, borderRouterEvidenceFields, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories, mergeBorderRouterEvidence, resolveBorderRouterEvidence } from './tdash-adaptor-shared.js';
 
 
 
@@ -66,6 +66,8 @@ export function adaptMergedDetailed(fileMap) {
 
   function upsertMergedNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
+    const borderRouterResolution = resolveBorderRouterEvidence(rawNode, existing);
+    const isBorderRouter = borderRouterResolution.value;
     const rawMergedChildren = Array.isArray(rawNode.children) ? rawNode.children : [];
     const mergedTotalLink3 = Number.isFinite(rawNode.totalLink3) ? rawNode.totalLink3
       : (Number.isFinite(rawNode.total_link_3) ? rawNode.total_link_3
@@ -152,13 +154,13 @@ export function adaptMergedDetailed(fileMap) {
         ? rawNode.timeStatistics.routerPct : (existing?.routerPct || existing?.router_pct),
       detachedDisabledPct: Number.isFinite(rawNode.timeStatistics?.detachedDisabledPct)
         ? rawNode.timeStatistics.detachedDisabledPct : (existing?.detachedDisabledPct || existing?.detached_disabled_pct),
-      br: rawNode.br === true || (existing ? existing.br === true : false),
+      ...borderRouterEvidenceFields(borderRouterResolution),
       fromMergedDetailed: true,
       shape: style.shape || (existing ? existing.shape : NODE_SHAPES.router),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
     merged.isFtdRouter = merged.modeDevice === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
-    if (merged.br) merged.color = NODE_COLORS.borderRouter;
+    if (merged.isBorderRouter === true) merged.color = NODE_COLORS.borderRouter;
     nodeMap.set(nodeId, merged);
   }
 
@@ -396,7 +398,8 @@ export function adaptRawArray(fileMap) {
     if (!isPlainObject(row)) return;
     const nodeId = chooseNodeId(row, 'raw-node', index + 1);
     const rloc16Text = toText(row.rloc16).toLowerCase();
-    const isBr = row.br === true || (rloc16Text.endsWith('00') && row.br === true);
+    const borderRouterResolution = resolveBorderRouterEvidence(row);
+    const isBorderRouter = borderRouterResolution.value;
     const isChildLike = toText(row.type).toLowerCase().includes('child');
     nodeMap.set(nodeId, {
       id: nodeId,
@@ -413,9 +416,9 @@ export function adaptRawArray(fileMap) {
       iftotaldiscards_totalpkts_ratio: row.mac_counters?.iftotaldiscards_totalpkts_ratio,
       partitionidchanges: row.mle_counters?.partitionidchanges,
       parentchanges: row.mle_counters?.parentchanges,
-      br: row.br === true,
+      ...borderRouterEvidenceFields(borderRouterResolution),
       shape: isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router,
-      color: isBr ? NODE_COLORS.borderRouter
+      color: isBorderRouter === true ? NODE_COLORS.borderRouter
         : (isChildLike ? NODE_COLORS.child : NODE_COLORS.router)
     });
     rawByIdForDetails.set(nodeId, row);

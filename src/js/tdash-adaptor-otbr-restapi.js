@@ -33,7 +33,7 @@ import {
   registerRouterNeighborRows,
 } from './tdash-adaptor-model.js';
 
-import { asArray, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories } from './tdash-adaptor-shared.js';
+import { asArray, borderRouterEvidenceFields, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories, mergeBorderRouterEvidence, resolveBorderRouterEvidence } from './tdash-adaptor-shared.js';
 
 const FILE_RESTAPI_DEVICES       = 'td-otbr-restapi-devices.json';
 
@@ -124,6 +124,8 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
 
   function upsertOtbrRestApiNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
+    const borderRouterResolution = resolveBorderRouterEvidence(rawNode, existing);
+    const isBorderRouter = borderRouterResolution.value;
     const getRawMetric = (path) => toFiniteNumber(getColumnValue(rawNode, path));
     const roleText = toText(rawNode.role).toLowerCase();
     const isChildLike = roleText === 'child' || roleText.includes('sleepy');
@@ -157,7 +159,7 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
         ?? (existing ? existing.routerPct || existing.router_pct : undefined),
       detachedDisabledPct: getRawMetric('timeStatistics.detachedDisabledPct')
         ?? (existing ? existing.detachedDisabledPct || existing.detached_disabled_pct : undefined),
-      br: rawNode.br === true || (existing ? existing.br === true : false),
+      ...borderRouterEvidenceFields(borderRouterResolution),
       isLeader: rawNode.isLeader === true || (existing ? existing.isLeader === true : false),
       isPrimaryBBR: rawNode.isPrimaryBBR === true || (existing ? existing.isPrimaryBBR === true : false),
       fromOtbrRestapi: true,
@@ -165,7 +167,7 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
       color: style.color || (existing ? existing.color : NODE_COLORS.router)
     };
     merged.isFtdRouter = merged.modeDevice === 'FTD' && merged.rloc16.toLowerCase().endsWith('00');
-    if (merged.br) merged.color = NODE_COLORS.borderRouter;
+    if (merged.isBorderRouter === true) merged.color = NODE_COLORS.borderRouter;
     nodeMap.set(nodeId, merged);
   }
 

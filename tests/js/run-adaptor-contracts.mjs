@@ -106,6 +106,56 @@ assertResult(eve, {
 });
 assert.deepEqual(eve.rawByIdForDetails.get("eve-a"), eveRows["0x1000"]);
 
+const borderRouterEvidence = run("eve-enhanced", ["eve.json"], [[
+  { id: "legacy-border-router", type: "router", role: "border router", br: "yes" },
+  { id: "explicit-non-border-router", type: "router", role: "border router", isBorderRouter: false },
+  { id: "missing-border-router-evidence", type: "router", role: "border router", deviceLabel: "Border Router" },
+]]);
+const legacyBorderRouter = borderRouterEvidence.nodeMap.get("legacy-border-router");
+const explicitNonBorderRouter = borderRouterEvidence.nodeMap.get("explicit-non-border-router");
+const missingBorderRouterEvidence = borderRouterEvidence.nodeMap.get("missing-border-router-evidence");
+assert.equal(legacyBorderRouter.isBorderRouter, true);
+assert.equal("br" in legacyBorderRouter, false);
+assert.equal(explicitNonBorderRouter.isBorderRouter, false);
+assert.equal("isBorderRouter" in missingBorderRouterEvidence, false);
+assert.equal("br" in missingBorderRouterEvidence, false);
+for (const record of borderRouterEvidence.rawByIdForDetails.values()) {
+  assert.equal("br" in record, false);
+  assert.equal("is_border_router" in record, false);
+}
+
+for (const observations of [
+  [false, true],
+  [true, false],
+]) {
+  const duplicateEvidence = run("eve-enhanced", ["eve.json"], [[
+    {
+      id: "conflicting-border-router",
+      extaddr: "cc00112233445566",
+      type: "router",
+      isBorderRouter: observations[0],
+    },
+    {
+      id: "conflicting-border-router",
+      extaddr: "cc00112233445566",
+      type: "router",
+      isBorderRouter: observations[1],
+    },
+  ]]);
+  const expectedConflict = [
+    { path: "isBorderRouter", current: true, incoming: false },
+  ];
+  for (const record of [
+    duplicateEvidence.nodeData[0],
+    duplicateEvidence.nodeMap.get("conflicting-border-router"),
+    duplicateEvidence.rawByIdForDetails.get("conflicting-border-router"),
+  ]) {
+    assert.equal(record.isBorderRouter, true);
+    assert.deepEqual(record._merge_conflicts, expectedConflict);
+    assert.equal("br" in record, false);
+  }
+}
+
 const cachedEveRows = JSON.parse(fs.readFileSync("data/td-eve-topology.json", "utf8"));
 const cachedEve = run(
   "eve-enhanced",

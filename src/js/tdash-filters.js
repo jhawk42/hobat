@@ -326,10 +326,7 @@ export function scanTableCapabilities(rows) {
     const isRouter = rloc16Text.startsWith("0x") && rloc16Text.endsWith("00") && rloc16Text.length === 6;
     if (isRouter) hasRouters = true;
 
-    const brValue = getColumnValue(row, "br");
-    const isBorderRouter =
-      isRouter &&
-      (brValue === true || toText(brValue).toLowerCase() === "true");
+    const isBorderRouter = isExplicitTrue(getColumnValue(row, "isBorderRouter"));
     if (isBorderRouter) hasBorderRouters = true;
     if (isReedDevice(md, getColumnValue(row, "role"), isRouter, isBorderRouter))
       hasReedNodes = true;
@@ -778,12 +775,11 @@ export function getRowRoleProjection(row) {
   const rloc16 = toText(getColumnValue(row, "rloc16")).toLowerCase();
   const roleValues = [getColumnValue(row, "role"), getColumnValue(row, "type")]
     .map(normalizeRowRole);
-  const isBorderRouter = isExplicitTrue(getColumnValue(row, "isBorderRouter"))
-    || isExplicitTrue(getColumnValue(row, "br"))
-    || roleValues.includes("borderrouter");
+  const isBorderRouter = isExplicitTrue(getColumnValue(row, "isBorderRouter"));
   const isRouter = isBorderRouter
     || isExplicitTrue(getColumnValue(row, "isRouter"))
     || roleValues.includes("router")
+    || roleValues.includes("borderrouter")
     || roleValues.includes("leader")
     || (rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6);
   const isChild = roleValues.some((value) =>
@@ -791,7 +787,7 @@ export function getRowRoleProjection(row) {
   );
   const isReedRouter = rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6;
   const hasThreadClassification = Boolean(
-    rloc16 || getColumnValue(row, "br") != null || getColumnValue(row, "isRouter") != null
+    rloc16 || getColumnValue(row, "isRouter") != null
     || getColumnValue(row, "isBorderRouter") != null || getColumnValue(row, "type") != null
     || getColumnValue(row, "role") != null,
   );
@@ -1067,7 +1063,7 @@ function getNetworkInsightDisplayName(record, identity) {
 
 export function isEligibleThreadDiagnosticRecord(record) {
   if (!isPlainObject(record)) return false;
-  if (getCanonicalRloc16(record) || record.br === true) return true;
+  if (getCanonicalRloc16(record) || getColumnValue(record, "isBorderRouter") === true) return true;
   const type = toText(getColumnValue(record, "type")).toLowerCase();
   const role = toText(getColumnValue(record, "role")).toLowerCase();
   return THREAD_DEVICE_TYPES.has(type) || THREAD_DEVICE_TYPES.has(role);

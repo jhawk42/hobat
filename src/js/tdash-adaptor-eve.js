@@ -33,7 +33,7 @@ import {
   registerRouterNeighborRows,
 } from './tdash-adaptor-model.js';
 
-import { asArray, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories } from './tdash-adaptor-shared.js';
+import { asArray, borderRouterEvidenceFields, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories, mergeBorderRouterEvidence, resolveBorderRouterEvidence } from './tdash-adaptor-shared.js';
 
 
 
@@ -53,6 +53,8 @@ export function adaptEve(fileMap) {
 
   function upsertEveNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
+    const borderRouterResolution = resolveBorderRouterEvidence(rawNode, existing);
+    const isBorderRouter = borderRouterResolution.value;
     const merged = {
       id: nodeId,
       name: toText(rawNode.name) || (existing ? existing.name : ''),
@@ -85,13 +87,13 @@ export function adaptEve(fileMap) {
         ? rawNode.mleCounters.partIdChangesCount : (existing?.partitionIdChanges || existing?.partitionidchanges),
       parentChanges: Number.isFinite(rawNode.mleCounters?.newParentCount)
         ? rawNode.mleCounters.newParentCount : (existing?.parentChanges || existing?.parentchanges),
-      br: rawNode.br === true || (existing ? existing.br === true : false),
+      ...borderRouterEvidenceFields(borderRouterResolution),
       fromEve: true,
       shape: style.shape || (existing ? existing.shape : NODE_SHAPES.router),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
     // Apply role-based color overrides
-    if (merged.br) {
+    if (merged.isBorderRouter === true) {
       merged.color = NODE_COLORS.borderRouter;
     } else if (merged.shape === NODE_SHAPES.child) {
       // Child nodes (ellipse shape) should always use child color
@@ -108,7 +110,7 @@ export function adaptEve(fileMap) {
     upsertEveNode(eveNodeId, node, {
       source: 'eve',
       shape: isChildType ? NODE_SHAPES.child : NODE_SHAPES.router,
-      color: node.br ? NODE_COLORS.borderRouter
+      color: mergeBorderRouterEvidence(node) === true ? NODE_COLORS.borderRouter
         : (isChildType ? NODE_COLORS.child : NODE_COLORS.eve)
     });
   });
@@ -192,6 +194,8 @@ export function adaptEveNative(fileMap) {
 
   function upsertEveNativeNode(nodeId, rawNode, style) {
     const existing = nodeMap.get(nodeId);
+    const borderRouterResolution = resolveBorderRouterEvidence(rawNode, existing);
+    const isBorderRouter = borderRouterResolution.value;
     const rloc16Hex = nativeRloc16ToHex(rawNode.rloc16) || (existing ? existing.rloc16 : '');
     const merged = {
       id: nodeId,
@@ -210,13 +214,13 @@ export function adaptEveNative(fileMap) {
       mode_device: rawNode.type === 'router' ? 'FTD'
         : (rawNode.type === 'child' || rawNode.type === 'sleepy-child' ? 'MTD' : '')
         || (existing ? existing.mode_device : ''),
-      br: rawNode.br === true || (existing ? existing.br === true : false),
+      ...borderRouterEvidenceFields(borderRouterResolution),
       from_eve_native: true,
       shape: style.shape || (existing ? existing.shape : NODE_SHAPES.router),
       color: style.color || (existing ? existing.color : NODE_COLORS.eve)
     };
     // Apply role-based color overrides
-    if (merged.br) {
+    if (merged.isBorderRouter === true) {
       merged.color = NODE_COLORS.borderRouter;
     } else if (merged.shape === NODE_SHAPES.child) {
       // Child nodes (ellipse shape) should always use child color
@@ -234,7 +238,7 @@ export function adaptEveNative(fileMap) {
     upsertEveNativeNode(eveNodeId, node, {
       source: 'eve_native',
       shape: isChildType ? NODE_SHAPES.child : NODE_SHAPES.router,
-      color: node.br ? NODE_COLORS.borderRouter
+      color: mergeBorderRouterEvidence(node) === true ? NODE_COLORS.borderRouter
         : (isChildType ? NODE_COLORS.child : NODE_COLORS.eve)
     });
   });

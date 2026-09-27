@@ -223,6 +223,9 @@ def test_networkdiag_snapshot_writes_canonical_thread_version_fields(tmp_path):
         "thread_version": "1.3",
         "ver": 4,
         "eui64": "8899aabbccddeeff",
+        "isBorderRouter": False,
+        "is_border_router": True,
+        "br": False,
     }
 
     networkdiag.save_topology_to_json_file({"0x0400": record}, output_path)
@@ -234,6 +237,34 @@ def test_networkdiag_snapshot_writes_canonical_thread_version_fields(tmp_path):
     assert "ver" not in saved
     assert "version" not in saved
     assert "eui64" not in saved
+    assert saved["isBorderRouter"] is False
+    assert "br" not in saved
+    assert "is_border_router" not in saved
+    assert saved["_merge_conflicts"] == [
+        {"path": "isBorderRouter", "current": False, "incoming": True}
+    ]
+
+
+def test_networkdiag_checkpoint_writes_canonical_border_router_field(tmp_path):
+    checkpoint_path = tmp_path / "td-otbr-cli-networkdiag-fetch-all.partial.json"
+    record = {
+        "extaddr": "0011223344556677",
+        "isBorderRouter": False,
+        "is_border_router": True,
+        "br": False,
+    }
+
+    networkdiag.save_topology_to_json_file(
+        {"0x0400": record}, checkpoint_path, checkpoint=True
+    )
+
+    [saved] = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert saved["isBorderRouter"] is False
+    assert "br" not in saved
+    assert "is_border_router" not in saved
+    assert saved["_merge_conflicts"] == [
+        {"path": "isBorderRouter", "current": False, "incoming": True}
+    ]
 
 
 def test_networkdiag_fetch_all_persists_internal_collections_before_return(

@@ -10,7 +10,7 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "mode.rxOnWhenIdle", aliases: ["mode.rxOn", "mode.rx_on_when_idle"], transform: "boolean" },
   { path: "mode.device", aliases: [], transform: "identity" },
   { path: "isLeader", aliases: ["leader"], transform: "strictBoolean" },
-  { path: "isBorderRouter", aliases: ["br", "is_border_router"], transform: "boolean" },
+  { path: "isBorderRouter", aliases: ["is_border_router", "br"], transform: "boolean" },
   { path: "isRouter", aliases: ["is_router"], transform: "boolean" },
   { path: "isPrimaryBBR", aliases: [], transform: "strictBoolean" },
   { path: "leaderEvidence", aliases: [], transform: "identity" },
@@ -450,6 +450,27 @@ export function normalizeInputRecord(record, options = {}) {
       if (found.found) foundValues.push({ path: candidate, value: found.value });
     }
     if (foundValues.length === 0) return;
+    if (definition.path === "isBorderRouter") {
+      const supportedValues = foundValues.flatMap((item) => {
+        const normalized = transformValue(definition.transform, item.value, options.source, options.canonicalMetrics);
+        return typeof normalized === "boolean" ? [{ path: item.path, value: normalized }] : [];
+      });
+      if (supportedValues.length === 0) {
+        candidates.forEach((candidate) => deletePath(result, candidate));
+        return;
+      }
+      const selected = supportedValues[0];
+      supportedValues.slice(1).forEach((item) => {
+        if (item.value !== selected.value) {
+          appendNormalizationConflict(result, definition.path, selected.value, item.value);
+        }
+      });
+      setPath(result, definition.path, selected.value);
+      candidates.forEach((candidate) => {
+        if (candidate !== definition.path) deletePath(result, candidate);
+      });
+      return;
+    }
     const selected = foundValues.find((item) => !isNormalizationEmpty(item.value)) ?? foundValues[0];
     const transformed = transformValue(definition.transform, selected.value, options.source, options.canonicalMetrics);
     if (["eui", "threadVersion", "threadVersionDecimal", "threadStackVersion"].includes(definition.path)) {
