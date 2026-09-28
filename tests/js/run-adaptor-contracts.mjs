@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import path from "node:path";
 
 import {
   extractOtbrRestApiItems,
@@ -9,9 +8,13 @@ import {
 } from "../../src/js/tdash-adaptors.js";
 import { projectObservedTopologyLinkCounts } from "../../src/js/tdash-adaptor-model.js";
 import { getPreferredFieldPath } from "../../src/js/tdash-device-fields.js";
-import { DATASET_REGISTRY } from "../../src/js/tdash-dataset-registry.js";
-import { buildDatasetRows } from "../../src/js/tdash-dataset.js";
 
+if (process.argv.includes("--snapshot") && !process.argv.includes("--write-baseline")) {
+  const { createCachedAdaptorSnapshot } = await import("./run-adaptor-output-snapshot.mjs");
+  const output = `${JSON.stringify(createCachedAdaptorSnapshot())}\n`;
+  await new Promise((resolve) => process.stdout.write(output, resolve));
+  process.exit(0);
+}
 
 function run(adaptor, files, rawFiles, rows = []) {
   return runAdaptor({ entry: { adaptor, files }, rawFiles, rows });
@@ -703,33 +706,9 @@ const extracted = extractOtbrRestApiSources(new Map(restFiles.map((name, index) 
 assert.equal(extracted.diagnostics[0].shared, "mesh");
 assert.equal(extracted.diagnostics[0].basicOnly, true);
 
-if (process.argv.includes("--snapshot") || process.argv.includes("--write-baseline")) {
-  const snapshot = {};
-  for (const entry of DATASET_REGISTRY) {
-    const rawFiles = entry.files.map((filename) => {
-      const file = path.join("data", filename);
-      return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
-    });
-    const { rows, loadedFiles } = buildDatasetRows(entry, rawFiles);
-    if (!loadedFiles.length) continue;
-    const result = runAdaptor({ entry, rawFiles, rows });
-    const keys = (index) => [...index.keys()].map(String).sort();
-    snapshot[entry.value] = {
-      nodeIds: result.nodeData.map((node) => node.id),
-      edges: result.edgeData.map((edge) => [edge.id ?? null, edge.from, edge.to, edge.linkCategories ?? null]),
-      details: [...result.rawByIdForDetails].map(([id, record]) => [String(id), Object.keys(record).sort()]),
-      nodeMapKeys: keys(result.nodeMap),
-      neighborKeys: keys(result.routerNeighborByRloc16),
-      childKeys: result.routerChildByRloc16 ? keys(result.routerChildByRloc16) : null,
-      sourceNames: result.sourceNames,
-    };
-  }
-  const output = `${JSON.stringify(snapshot)}\n`;
-  if (process.argv.includes("--write-baseline")) {
-    fs.writeFileSync(new URL("../fixtures/adaptor_output_baseline.json", import.meta.url), output);
-  } else {
-    process.stdout.write(output);
-  }
+if (process.argv.includes("--write-baseline")) {
+  const { writeCachedAdaptorSnapshot } = await import("./run-adaptor-output-snapshot.mjs");
+  writeCachedAdaptorSnapshot();
 } else {
   process.stdout.write(`${JSON.stringify({ adaptorCount: 12 })}\n`);
 }

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -14,37 +12,18 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNNER = REPO_ROOT / "tests" / "js" / "run-adaptor-contracts.mjs"
 
 
-def test_all_adaptors_preserve_the_public_result_contract() -> None:
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("node is required for the JavaScript adaptor contract")
-
-    result = subprocess.run(
-        [node, str(RUNNER)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+def test_all_adaptors_preserve_the_public_result_contract(node_json) -> None:
+    result = node_json(
+        RUNNER, timeout=60,
     )
-
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"adaptorCount": 12}
+    assert result == {"adaptorCount": 12}
 
 
-def test_cached_adaptor_outputs_preserve_contract() -> None:
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("node is required for the JavaScript adaptor contract")
-
-    result = subprocess.run(
-        [node, str(RUNNER), "--snapshot"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
+def test_cached_adaptor_outputs_preserve_contract(node_json) -> None:
+    actual = node_json(
+        RUNNER, "--snapshot", timeout=60,
     )
     baseline = REPO_ROOT / "tests" / "fixtures" / "adaptor_output_baseline.json"
-    actual = json.loads(result.stdout)
     expected = json.loads(baseline.read_text(encoding="utf-8"))
     assert set(actual) == set(expected)
     for dataset, snapshot in actual.items():

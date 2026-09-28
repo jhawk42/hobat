@@ -21,22 +21,10 @@ const nodeCapabilityKeys = {
   "routers-with-children": "hasRoutersWithChildren", "routers-without-children": "hasRoutersWithoutChildren",
 };
 
-const dataDir = process.argv[2] ?? "data";
-const selected = process.argv[3]?.startsWith("--") ? null : process.argv[3];
-const useProjection = process.argv.includes("--projection");
-const results = {};
-for (const entry of DATASET_REGISTRY.filter((item) => !selected || item.value === selected)) {
-  const rawFiles = entry.files.map((file) => {
-    const filename = path.join(dataDir, file);
-    return fs.existsSync(filename) ? JSON.parse(fs.readFileSync(filename, "utf8")) : null;
-  });
-  const { rows, loadedFiles } = buildDatasetRows(entry, rawFiles);
-  if (loadedFiles.length === 0) continue;
-  const adapted = runAdaptor({ entry, rawFiles, rows });
+function buildDatasetSnapshot(loadedFiles, rows, adapted, topologyCapabilities, useProjection, shapeOnly) {
   const projections = useProjection ? buildDeviceProjections(rows) : undefined;
   const { edgeCategories, ...flags } = useProjection
     ? computeTableCapabilities(rows, projections) : scanTableCapabilities(rows);
-  const topologyCapabilities = computeTopologyCapabilities(adapted.nodeData, adapted.edgeData);
   const viewModel = createTopologyViewModel(adapted, projections);
   const projectionsByRow = projections ? [...projections.values()] : [];
   const rowId = (row, index) => getDeviceIdentityKeys(row)[0] ?? `row:${index}`;
@@ -57,12 +45,17 @@ for (const entry of DATASET_REGISTRY.filter((item) => !selected || item.value ==
     .map((option) => option.value);
   const visibility = {};
   for (const nodeMode of nodeModes) for (const linkMode of linkModes) for (const diagnosticMode of diagnosticModes) {
+    const combination = `${nodeMode}|${linkMode}|${diagnosticMode}`;
+    if (shapeOnly) {
+      visibility[combination] = null;
+      continue;
+    }
     const visible = computeTopologyVisibility(viewModel, createTopologyFilterState(nodeMode, linkMode, diagnosticMode));
-    visibility[`${nodeMode}|${linkMode}|${diagnosticMode}`] = {
+    visibility[combination] = {
       nodes: sorted(visible.visibleNodeIds), edges: sorted(visible.visibleEdgeIds),
     };
   }
-  results[entry.value] = {
+  return {
     loadedFiles,
     rowCount: rows.length,
     nodeCount: adapted.nodeData.length,
@@ -72,6 +65,33 @@ for (const entry of DATASET_REGISTRY.filter((item) => !selected || item.value ==
     offered: { nodeModes, linkModes, diagnosticModes },
     visibility,
   };
+}
+
+const dataDir = process.argv[2] ?? "data";
+const selected = process.argv[3]?.startsWith("--") ? null : process.argv[3];
+const useProjection = process.argv.includes("--projection");
+const shapeOnly = process.argv.includes("--shape-only");
+const comparePaths = process.argv.includes("--compare");
+const results = {};
+for (const entry of DATASET_REGISTRY.filter((item) => !selected || item.value === selected)) {
+  const rawFiles = entry.files.map((file) => {
+    const filename = path.join(dataDir, file);
+    return fs.existsSync(filename) ? JSON.parse(fs.readFileSync(filename, "utf8")) : null;
+  });
+  const { rows, loadedFiles } = buildDatasetRows(entry, rawFiles);
+  if (loadedFiles.length === 0) continue;
+  const adapted = runAdaptor({ entry, rawFiles, rows });
+  const topologyCapabilities = computeTopologyCapabilities(adapted.nodeData, adapted.edgeData);
+  if (comparePaths) {
+    results[entry.value] = {
+      legacy: buildDatasetSnapshot(loadedFiles, rows, adapted, topologyCapabilities, false, false),
+      projected: buildDatasetSnapshot(loadedFiles, rows, adapted, topologyCapabilities, true, false),
+    };
+  } else {
+    results[entry.value] = buildDatasetSnapshot(
+      loadedFiles, rows, adapted, topologyCapabilities, useProjection, shapeOnly,
+    );
+  }
 }
 const snapshot = JSON.stringify(results);
 if (process.argv.includes("--write")) {

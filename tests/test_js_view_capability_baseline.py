@@ -1,7 +1,6 @@
 """Snapshot the pre-projection dashboard filters over cached datasets."""
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -14,12 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/fixtures/view_capability_baseline.json"
 
 
-def test_cached_view_capabilities_cover_catalog_and_preserve_shape() -> None:
-    result = subprocess.run(
-        ["node", "tests/js/run-view-capability-snapshot.mjs", "data"],
-        cwd=ROOT, capture_output=True, text=True, check=True,
+def test_cached_view_capabilities_cover_catalog_and_preserve_shape(node_json) -> None:
+    actual = node_json(
+        "tests/js/run-view-capability-snapshot.mjs", "data", "--shape-only", timeout=60,
     )
-    actual = json.loads(result.stdout)
     expected = json.loads(FIXTURE.read_text(encoding="utf-8"))
 
     assert set(actual) == set(expected)
@@ -36,15 +33,13 @@ def test_cached_view_capabilities_cover_catalog_and_preserve_shape() -> None:
             for diagnostic in offered["diagnosticModes"]
         }
         assert set(snapshot["visibility"]) == combinations, dataset
+        assert all(value is None for value in snapshot["visibility"].values()), dataset
 
 
-def test_projected_view_capabilities_match_legacy_scan() -> None:
-    result = subprocess.run(
-        ["node", "tests/js/run-view-capability-snapshot.mjs", "data", "--projection"],
-        cwd=ROOT, capture_output=True, text=True, check=True,
+def test_projected_view_capabilities_match_legacy_scan(node_json) -> None:
+    comparisons = node_json(
+        "tests/js/run-view-capability-snapshot.mjs", "data", "--compare", timeout=90,
     )
-    legacy = subprocess.run(
-        ["node", "tests/js/run-view-capability-snapshot.mjs", "data"],
-        cwd=ROOT, capture_output=True, text=True, check=True,
-    )
-    assert json.loads(result.stdout) == json.loads(legacy.stdout)
+    for dataset, comparison in comparisons.items():
+        assert set(comparison) == {"legacy", "projected"}, dataset
+        assert comparison["projected"] == comparison["legacy"], dataset

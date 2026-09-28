@@ -5,7 +5,7 @@ import path from "node:path";
 import { DATASET_REGISTRY } from "../../src/js/tdash-dataset-registry.js";
 import { buildDatasetRows } from "../../src/js/tdash-dataset.js";
 import { buildDeviceProjection, buildDeviceProjections } from "../../src/js/tdash-device-projection.js";
-import { computeTableCapabilities } from "../../src/js/tdash-filters.js";
+import { scanTableCapabilities } from "../../src/js/tdash-filters.js";
 
 let checked = 0;
 for (const entry of DATASET_REGISTRY) {
@@ -15,13 +15,14 @@ for (const entry of DATASET_REGISTRY) {
   });
   const { rows, loadedFiles } = buildDatasetRows(entry, files);
   if (!loadedFiles.length) continue;
-  const projections = rows.map((row, index) => buildDeviceProjection(row, index));
-  const { edgeCategories, ...expected } = computeTableCapabilities(rows);
+  const projections = buildDeviceProjections(rows);
+  const projectionValues = [...projections.values()];
+  const { edgeCategories, ...expected } = scanTableCapabilities(rows);
   const actual = Object.fromEntries(Object.keys(expected).map((key) => [
-    key, projections.some((projection) => projection.diagnostics[key]),
+    key, projectionValues.some((projection) => projection.diagnostics[key] === true),
   ]));
   assert.deepEqual(actual, expected, entry.value);
-  assert.doesNotThrow(() => JSON.stringify([...buildDeviceProjections(rows).values()]));
+  assert.doesNotThrow(() => JSON.stringify(projectionValues));
   checked += 1;
 }
 assert.ok(checked > 0);
