@@ -44,6 +44,12 @@ class TestCommonOptions(unittest.TestCase):
         args = _parse(["--debug", "otbr-cli", "router-table"])
         self.assertTrue(args.debug)
 
+    def test_log_thread_secrets_flag(self):
+        args, _extras = _parse_known(
+            ["--log-thread-secrets", "otbr-restapi", "devices", "list"]
+        )
+        self.assertTrue(args.log_thread_secrets)
+
     def test_output_and_datadir(self):
         args = _parse(["--output", "out.json", "--datadir",
                       "/tmp/td", "merge-dataset"])
@@ -770,6 +776,27 @@ class TestDispatchOtherCommands(unittest.TestCase):
         self.assertLess(forwarded.index("--raw"), forwarded.index("devices"))
         self.assertEqual(rc, 0)
 
+    def test_restapi_secret_log_override_is_forwarded(self):
+        with patch.object(td_cli.otbr_restapi_cli, "main", return_value=0) as m:
+            rc = self._dispatch(
+                ["otbr-restapi", "--log-thread-secrets", "devices", "list"]
+            )
+        forwarded = m.call_args.args[0]
+        self.assertIn("--log-thread-secrets", forwarded)
+        self.assertLess(
+            forwarded.index("--log-thread-secrets"), forwarded.index("devices")
+        )
+        self.assertEqual(rc, 0)
+
+    def test_restapi_download_secret_log_override_is_forwarded(self):
+        with patch.object(td_cli.otbr_restapi_download, "main", return_value=0) as m:
+            rc = self._dispatch(
+                ["otbr-restapi", "--log-thread-secrets", "download"]
+            )
+        forwarded = m.call_args.args[0]
+        self.assertIn("--log-thread-secrets", forwarded)
+        self.assertEqual(rc, 0)
+
     def test_restapi_all_global_options_forwarded_before_resource(self):
         argv = [
             "otbr-restapi",
@@ -786,6 +813,7 @@ class TestDispatchOtherCommands(unittest.TestCase):
             "--no-progress",
             "--no-auto-output",
             "--debug",
+            "--log-thread-secrets",
             "--lab",
             "devices", "list",
         ]
@@ -808,6 +836,7 @@ class TestDispatchOtherCommands(unittest.TestCase):
             "--no-progress",
             "--no-auto-output",
             "--debug",
+            "--log-thread-secrets",
             "--lab",
         ):
             self.assertIn(option, forwarded)
@@ -885,6 +914,72 @@ class TestMain(unittest.TestCase):
         logging.getLogger().setLevel(logging.INFO)
         with patch.object(td_cli.otbr_cli_router_table, "main", return_value=0):
             td_cli.main(["--debug", "otbr-cli", "router-table"])
+        self.assertEqual(logging.getLogger().level, logging.DEBUG)
+
+    def test_environment_log_levels_are_trimmed_and_case_insensitive(self):
+        expected_levels = {
+            "  dEbUg ": logging.DEBUG,
+            " info ": logging.INFO,
+            "Warning": logging.WARNING,
+            " error  ": logging.ERROR,
+        }
+        for value, expected in expected_levels.items():
+            with self.subTest(value=value), patch.dict(os.environ, {"TD_DEBUG_LEVEL": value}):
+                with patch.object(td_cli, "dispatch", return_value=0):
+                    with redirect_stdout(io.StringIO()):
+                        self.assertEqual(td_cli.main(["otbr-cli", "router-table"]), 0)
+                self.assertEqual(logging.getLogger().level, expected)
+
+    def test_default_log_level_is_info(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            td_cli, "dispatch", return_value=0
+        ):
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(td_cli.main(["otbr-cli", "router-table"]), 0)
+        self.assertEqual(logging.getLogger().level, logging.INFO)
+
+    def test_invalid_environment_log_level_fails_before_dispatch(self):
+        for value in ("", "   ", "verbose", "10"):
+            with self.subTest(value=value), patch.dict(os.environ, {"TD_DEBUG_LEVEL": value}):
+                with patch.object(td_cli, "dispatch") as dispatch:
+                    with self.assertRaises(SystemExit) as error:
+                        td_cli.main(["otbr-cli", "router-table"])
+                self.assertEqual(error.exception.code, 2)
+                dispatch.assert_not_called()
+
+    def test_explicit_switches_override_environment_and_debug_wins(self):
+        cases = (
+            (["--debug"], logging.DEBUG),
+            (["--verbose"], logging.INFO),
+            (["--verbose", "--debug"], logging.DEBUG),
+        )
+        for switches, expected in cases:
+            with self.subTest(switches=switches), patch.dict(
+                os.environ, {"TD_DEBUG_LEVEL": "invalid"}
+            ), patch.object(td_cli, "dispatch", return_value=0):
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        td_cli.main(switches + ["otbr-cli", "router-table"]), 0
+                    )
+                self.assertEqual(logging.getLogger().level, expected)
+
+    def test_webserver_invalid_environment_level_fails_before_startup(self):
+        with patch.dict(os.environ, {"TD_DEBUG_LEVEL": "not-a-level"}), patch.object(
+            td_webserver.aiohttp.web, "run_app"
+        ) as run_app:
+            with self.assertRaises(SystemExit) as error:
+                td_webserver.main(["--port", "0"])
+
+        self.assertEqual(error.exception.code, 2)
+        run_app.assert_not_called()
+
+    def test_webserver_debug_switch_overrides_invalid_environment(self):
+        with patch.dict(os.environ, {"TD_DEBUG_LEVEL": "bad"}), patch.object(
+            td_webserver.aiohttp.web, "run_app"
+        ) as run_app:
+            self.assertEqual(td_webserver.main(["--debug", "--port", "0"]), 0)
+
+        run_app.assert_called_once()
         self.assertEqual(logging.getLogger().level, logging.DEBUG)
 
     def test_main_typo_restapi_subcommand_prints_help_and_returns_zero(self):

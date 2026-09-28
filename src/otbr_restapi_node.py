@@ -62,12 +62,11 @@ def dispatch_node(
     if args.node_command == "dataset" and args.dataset_kind == "active":
         if args.dataset_command == "get":
             result = client.get_active_dataset(plain_text=args.text, raw=raw_arg)
-            if output_path is not None:
-                result = (
-                    SENSITIVE_VALUE_REDACTION
-                    if args.text
-                    else redact_sensitive_payload(result)
-                )
+            result = (
+                SENSITIVE_VALUE_REDACTION
+                if args.text or isinstance(result, str)
+                else redact_sensitive_payload(result)
+            )
             return emit_rest_command_output(
                 result,
                 output_path,

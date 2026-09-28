@@ -15,12 +15,35 @@ PYTHONPATH=src python3 -m td_cli [global-options] <command> ...
 | Option | Description |
 |---|---|
 | `-h`, `--help` | Show help message and exit |
-| `--verbose`, `-v` | Enable verbose (INFO) logging |
-| `--debug`, `-d` | Enable debug logging |
+| `--verbose`, `-v` | Select INFO logging, overriding `TD_DEBUG_LEVEL` |
+| `--debug`, `-d` | Select DEBUG logging; takes precedence over `--verbose` and `TD_DEBUG_LEVEL` |
+| `--log-thread-secrets` | Opt in to unredacted Thread Network Key and PSKc in OTBR REST DEBUG response-body logs only |
 | `--output FILE`, `-o FILE` | Write command output to file |
 | `--datadir DIR` | Data directory for JSON reads/writes (takes precedence over `TD_DATA_DIR`). If omitted and `TD_DATA_DIR` is unset: use `/data` when present; otherwise create/use `./data` under the current run directory. |
 
 ---
+
+## Logging and Secret Redaction
+
+`TD_DEBUG_LEVEL` accepts `DEBUG`, `INFO`, `WARNING`, or `ERROR`, ignoring case
+and surrounding whitespace. The effective level is `--debug`/`-d`, then
+`--verbose`/`-v`, then `TD_DEBUG_LEVEL`, then INFO. If both CLI switches are
+present, `--debug` wins. An invalid environment value exits with usage status
+2 only when neither CLI level switch overrides it; help-only invocations do
+not validate it.
+
+For example:
+
+```bash
+TD_DEBUG_LEVEL=' debug ' PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi devices list
+```
+
+DEBUG can include HTTP traffic, response details, and `ot-ctl` diagnostics.
+Thread Network Key and PSKc values are redacted by default, including REST
+success/error bodies, captured child output, and active-dataset stdout. The
+explicit `--log-thread-secrets` option disables redaction only for OTBR REST
+DEBUG response-body logs; it never changes stdout or saved snapshots. Use it
+only when the process log destination, access, and retention are controlled.
 
 ## Command Summary
 
@@ -515,7 +538,8 @@ options:
 usage: td_cli otbr-restapi [-h] [--host HOST] [--port PORT] [--base-url URL]
                            [--timeout SECS] [--accept MIME] [--raw]
                            [--poll-interval FLOAT] [--poll-timeout FLOAT]
-                           [--no-progress] [--no-auto-output] [--lab]
+                           [--no-progress] [--no-auto-output]
+                           [--log-thread-secrets] [--lab]
                            {download,node,devices,diagnostics,actions,mesh-diagnostics,topology}
                            ...
 
@@ -546,6 +570,8 @@ options:
                         (forwarded)
   --no-progress         Suppress per-device progress output (forwarded)
   --no-auto-output      Disable automatic output file naming (forwarded)
+  --log-thread-secrets  Show Thread Network Key and PSKc in REST DEBUG
+                        response-body logs
   --lab                 Allow experimental otbr-restapi mutating commands
                         (node state set, node dataset active set, actions
                         enqueue add-thread-device, actions enqueue reset-

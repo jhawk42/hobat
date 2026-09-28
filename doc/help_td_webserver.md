@@ -1,6 +1,7 @@
 # td_webserver — Command Reference
 
-usage: python3 -m td_webserver [-h] [--verbose] [--debug] [--host HOST]
+usage: python3 -m td_webserver [-h] [--verbose] [--debug]
+                               [--log-thread-secrets] [--host HOST]
                                [--port PORT] [--file-cache-max-age SECONDS]
                                [--datadir DATADIR] [--disable-device-actions]
                                [--disable-device-reset]
@@ -15,6 +16,26 @@ missing dynamic files invoke `td_cli` unless the browser requests Cache Only.
 Short actions are awaited. Long or forced-background actions return HTTP 202
 and are polled through `/api/job/{job_id}`; running jobs can be cancelled with
 DELETE on the same route.
+
+Logging uses `--debug`/`-d`, then `--verbose`/`-v`, then
+`TD_DEBUG_LEVEL`, then INFO. The environment accepts `DEBUG`, `INFO`,
+`WARNING`, or `ERROR` case-insensitively with surrounding whitespace ignored.
+An invalid value exits with status 2 before server startup unless a CLI level
+switch overrides it; `--debug` wins if both switches are given. Child CLI
+processes inherit the environment and resolve their own level.
+
+DEBUG may include HTTP traffic and `ot-ctl` diagnostics, but Thread Network Key
+and PSKc values are redacted by default, including captured child output. The
+false-by-default `--log-thread-secrets` option is forwarded only to OTBR REST
+data jobs and disables redaction only in REST DEBUG response-body logs. It does
+not affect stdout, saved snapshots, or other child jobs. Opt in only when log
+access and retention are controlled; the option is not exposed through HTTP.
+
+Example:
+
+```bash
+TD_DEBUG_LEVEL=' debug ' PYTHONPATH=src python3 -m td_webserver --datadir ./data
+```
 
 Data files use `Cache-Control`, `Last-Modified`, and ETag revalidation. Static
 HTML, CSS, and JavaScript use `Cache-Control: no-cache`. Progressive
@@ -44,9 +65,11 @@ be behind authenticated access control or a firewall outside a trusted network.
 ```
 options:
   -h, --help         show this help message and exit
-  --verbose, -v      No-op: INFO logging is the default. Only --debug changes
-                     behaviour.
+  --verbose, -v      Select INFO logging, overriding TD_DEBUG_LEVEL
   --debug, -d        Enable debug logging
+  --log-thread-secrets
+                     Show Thread Network Key and PSKc in OTBR REST DEBUG
+                     response-body logs
   --host HOST        Host/address to bind to (default: '', env: HOST)
   --port PORT        Port to listen on (default: 9165, env: PORT)
   --file-cache-max-age SECONDS

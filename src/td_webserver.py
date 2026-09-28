@@ -37,6 +37,12 @@ from td_device_actions import (
     validate_request_against_record,
 )
 from td_source_capabilities import SourceCapabilityService
+from td_logging import (
+    configure_logging,
+    redact_command_args,
+    redact_sensitive_output,
+    redact_sensitive_text,
+)
 
 from util_data import (
     create_checkpoint_filename,
@@ -104,6 +110,7 @@ TD_DEVICE_ACTIONS_ENABLED_APP_KEY = aiohttp.web.AppKey(
 TD_DEVICE_RESET_ENABLED_APP_KEY = aiohttp.web.AppKey(
     "td_device_reset_enabled", bool
 )
+TD_LOG_THREAD_SECRETS_APP_KEY = aiohttp.web.AppKey("log_thread_secrets", bool)
 
 # Default max-age for data files in seconds; can be overridden per-file in FILE_ACTION_MAP.
 TD_DATA_FILE_CACHE_MAX_AGE_DEFAULT_DEV = 3600  # 1 hour in seconds
@@ -758,10 +765,11 @@ async def run_td_cli(
     timeout.
     """
     td_cli_path = Path(__file__).parent / "td_cli.py"
-    logging.debug("Spawning subprocess: %s %s %s", 
+    safe_action_args = redact_command_args(action_args)
+    logging.debug("Spawning subprocess: %s %s %s",
                   sys.executable,
-                  td_cli_path, 
-                  " ".join(action_args))
+                  td_cli_path,
+                  " ".join(safe_action_args))
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         str(td_cli_path),
@@ -783,7 +791,7 @@ async def run_td_cli(
     except asyncio.CancelledError:
         logging.info(
             "Subprocess cancelled; terminating process (args: %s)",
-            " ".join(action_args),
+            " ".join(safe_action_args),
         )
         try:
             if process.returncode is None:
@@ -803,7 +811,7 @@ async def run_td_cli(
         logging.warning(
             "Subprocess timed out after %.1f s (args: %s); killing process",
             timeout_s,
-            f"{sys.executable} {td_cli_path} {' '.join(action_args)}",
+            f"{sys.executable} {td_cli_path} {' '.join(safe_action_args)}",
             )
         process.kill()
         # reap the child to avoid zombie
@@ -817,12 +825,18 @@ async def run_td_cli(
             time.monotonic() - _t0,
             sys.executable,
             td_cli_path,
-            " ".join(action_args)
+            " ".join(safe_action_args)
         )
     if stdout:
-        logging.info("td_cli stdout: %s", stdout.decode(errors="replace"))
+        logging.info(
+            "td_cli stdout: %s",
+            redact_sensitive_output(stdout.decode(errors="replace")),
+        )
     if stderr:
-        logging.warning("td_cli stderr: %s", stderr.decode(errors="replace"))
+        logging.warning(
+            "td_cli stderr: %s",
+            redact_sensitive_output(stderr.decode(errors="replace")),
+        )
     return process.returncode  # type: ignore[return-value]
 
 
@@ -1047,7 +1061,10 @@ async def _dispatch_long_cost(
                 j = _job_registry.get(jid)
                 if j is not None:
                     j.status = JOB_STATUS_ERROR
-                    j.detail = f"{type(exc).__name__}: {exc}"[:512]
+                    j.detail = (
+                        f"{type(exc).__name__}: "
+                        f"{redact_sensitive_text(str(exc))}"
+                    )[:512]
                 return
 
             j = _job_registry.get(jid)
@@ -1113,7 +1130,11 @@ async def _dispatch_short_cost(
         try:
             exit_code = await _active_processes[filename]
         except Exception as exc:
-            logging.warning("In-flight task for %s failed: %s", filename, exc)
+            logging.warning(
+                "In-flight task for %s failed: %s",
+                filename,
+                redact_sensitive_text(str(exc)),
+            )
             raise
         if exit_code != 0:
             raise aiohttp.web.HTTPBadGateway(
@@ -1184,7 +1205,12 @@ async def handle_data_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
             reason=f"Cache-only data file not available: {filename}"
         )
     elif _should_regenerate(file_path, file_action, no_cache, request_max_age_s):
-        action_args: list[str] = file_action.action  # type: ignore[assignment]
+        action_args: list[str] = list(file_action.action)  # type: ignore[arg-type]
+        if (
+            request.app.get(TD_LOG_THREAD_SECRETS_APP_KEY, False)
+            and action_args[0] == "otbr-restapi"
+        ):
+            action_args.insert(1, "--log-thread-secrets")
         if file_action.force_async or file_action.action_cost_s > _LONG_COST_THRESHOLD_S:
             return await _dispatch_long_cost(filename, action_args, data_dir, file_action)
         await _dispatch_short_cost(filename, action_args, data_dir, file_action, no_cache)
@@ -2353,6 +2379,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--debug", "-d", action="store_true", help="Enable debug logging"
     )
     parser.add_argument(
+        "--log-thread-secrets",
+        action="store_true",
+        help=(
+            "Show Thread Network Key and PSKc in OTBR REST DEBUG response-body logs"
+        ),
+    )
+    parser.add_argument(
         "--host",
         default=os.environ.get("HOST", TD_WEB_HOST_ADDR),
         help=f"Host/address to bind to (default: '{TD_WEB_HOST_ADDR}', env: HOST)",
@@ -2395,23 +2428,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
-    )
-
     parser = build_parser()
     args = parser.parse_args(argv)
+    configure_logging(args, parser)
     cache_max_age_s, cache_max_age_source = _resolve_file_cache_max_age(args, parser)
     device_actions_enabled, device_reset_enabled = _resolve_device_action_enablement(
         args, parser
     )
     _set_default_file_cache_max_age(cache_max_age_s)
-
-    # Apply verbosity / debug flags
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-    elif args.verbose:
-        logging.getLogger().setLevel(logging.INFO)
 
     static_root = Path(__file__).resolve().parent
     td_data_dir_resolution = resolve_data_dir_with_source(
@@ -2431,6 +2455,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     app[TD_SOURCE_CAPABILITIES_APP_KEY] = SourceCapabilityService()
     app[TD_DEVICE_ACTIONS_ENABLED_APP_KEY] = device_actions_enabled
     app[TD_DEVICE_RESET_ENABLED_APP_KEY] = device_reset_enabled
+    app[TD_LOG_THREAD_SECRETS_APP_KEY] = args.log_thread_secrets
 
     async def _start_cleanup(app: aiohttp.web.Application) -> None:
         app[_CLEANUP_TASK_APP_KEY] = asyncio.create_task(

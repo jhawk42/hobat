@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -60,3 +61,65 @@ class WebServerRouteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status, 200)
         self.assertEqual(await response.read(), content)
+
+    async def test_secret_log_override_is_forwarded_only_to_rest_jobs(self) -> None:
+        with patch.object(td_webserver.aiohttp.web, "run_app") as run_app:
+            td_webserver.main([
+                "--datadir", str(self.data_dir), "--port", "0",
+                "--log-thread-secrets",
+            ])
+        app = run_app.call_args.args[0]
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        commands: list[list[str]] = []
+
+        async def fake_td_cli(args, data_dir, *, timeout_s=None):
+            commands.append(args)
+            output_name = (
+                td_webserver.OTBR_RESTAPI_DEVICES_LIST_FILENAME
+                if args[0] == "otbr-restapi"
+                else td_webserver.OTBR_CLI_ROUTER_TABLE_FILENAME
+            )
+            (data_dir / output_name).write_text("[]", encoding="utf-8")
+            return 0
+
+        try:
+            with patch.object(td_webserver, "run_td_cli", side_effect=fake_td_cli):
+                rest_response = await client.get(
+                    f"/api/data/{td_webserver.OTBR_RESTAPI_DEVICES_LIST_FILENAME}"
+                )
+                cli_response = await client.get(
+                    f"/api/data/{td_webserver.OTBR_CLI_ROUTER_TABLE_FILENAME}"
+                )
+
+            self.assertEqual(rest_response.status, 200)
+            self.assertEqual(cli_response.status, 200)
+            self.assertEqual(commands[0][:2], ["otbr-restapi", "--log-thread-secrets"])
+            self.assertEqual(commands[1][0], "otbr-cli")
+            self.assertNotIn("--debug", commands[0])
+            self.assertNotIn("--debug", commands[1])
+        finally:
+            await client.close()
+
+    async def test_logging_level_does_not_change_cache_or_collector_arguments(self) -> None:
+        commands: list[list[str]] = []
+
+        async def fake_td_cli(args, data_dir, *, timeout_s=None):
+            commands.append(list(args))
+            (data_dir / td_webserver.OTBR_RESTAPI_DEVICES_LIST_FILENAME).write_text(
+                "[]", encoding="utf-8"
+            )
+            return 0
+
+        path = f"/api/data/{td_webserver.OTBR_RESTAPI_DEVICES_LIST_FILENAME}"
+        with patch.object(td_webserver, "run_td_cli", side_effect=fake_td_cli):
+            with patch.dict(os.environ, {"TD_DEBUG_LEVEL": "INFO"}):
+                first = await self.client.get(path, headers={"Cache-Control": "no-cache"})
+            with patch.dict(os.environ, {"TD_DEBUG_LEVEL": "DEBUG"}):
+                second = await self.client.get(path, headers={"Cache-Control": "no-cache"})
+                cached = await self.client.get(path)
+
+        self.assertEqual((first.status, second.status, cached.status), (200, 200, 200))
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0], commands[1])
+        self.assertNotIn("--debug", commands[0])

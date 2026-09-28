@@ -5,7 +5,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -20,6 +20,7 @@ from otbr_cli_util import (
     resolve_collector_runtime,
 )
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+import util_network
 
 
 class TestLoadExtaddrMapOrEmpty:
@@ -177,6 +178,27 @@ class TestResolveCollectorRuntime:
         # Path is resolved but file doesn't have to exist
         assert runtime.extaddr_map_path == custom_datadir / EXTADDR_DEVICE_LABEL_MAP_FILENAME
         assert not runtime.extaddr_map_path.exists()  # File not created
+
+
+def test_fetch_dataset_active_hides_secrets_even_if_ot_ctl_returns_them(caplog):
+    raw_output = (
+        "Network Name: mesh\n"
+        "Network Key: SECRET-NETWORK-KEY\n"
+        "PSKc: SECRET-PSKC\n"
+        "Channel: 15\n"
+        "Done"
+    )
+
+    with patch.object(util_network.util_ot_ctl, "exec_ot_ctl", return_value=raw_output) as execute:
+        with caplog.at_level(logging.DEBUG):
+            dataset = util_network.fetch_dataset_active()
+
+    execute.assert_called_once_with("dataset active -ns")
+    assert dataset == {"network_name": "mesh", "channel": "15"}
+    assert "SECRET-NETWORK-KEY" not in caplog.text
+    assert "SECRET-PSKC" not in caplog.text
+    assert "Network Name" in caplog.text
+    assert "Channel" in caplog.text
     
     def test_dataclass_is_frozen(self, tmp_path):
         """Should return frozen dataclass (immutable)."""

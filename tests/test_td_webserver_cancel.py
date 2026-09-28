@@ -5,7 +5,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp.web
 import td_webserver
@@ -131,6 +131,63 @@ class TestRunTdCliCancellation(unittest.IsolatedAsyncioTestCase):
                 await task
 
         self.assertTrue(fake_process.terminate_called)
+
+    async def test_run_td_cli_redacts_captured_secret_output(self) -> None:
+        fake_process = MagicMock()
+        fake_process.returncode = 0
+        fake_process.communicate = AsyncMock(
+            return_value=(
+                b'[time] DEBUG: HTTP Response body: '
+                b'{"networkKey":"SECRET-NETWORK-KEY",'
+                b'"nested":{"pskc":"SECRET-PSKC"},"name":"mesh"}\n'
+                b'[time] DEBUG: Saved data: '
+                b'{"nested":{"networkKey":"SECRET-NESTED"}}',
+                b"[time] WARNING: response parse failed: {\"pskc\": \"SECRET-STDERR\"}\n"
+                b"PSKc: SECRET-LABELED",
+            )
+        )
+
+        with patch.object(
+            td_webserver.asyncio,
+            "create_subprocess_exec",
+            return_value=fake_process,
+        ) as create_process, self.assertLogs(level="INFO") as captured:
+            self.assertEqual(
+                await td_webserver.run_td_cli(
+                    [
+                        "otbr-restapi",
+                        "--log-thread-secrets",
+                        "devices",
+                        "list",
+                    ],
+                    Path("/tmp"),
+                ),
+                0,
+            )
+
+        output = "\n".join(captured.output)
+        self.assertNotIn("SECRET-NETWORK-KEY", output)
+        self.assertNotIn("SECRET-PSKC", output)
+        self.assertNotIn("SECRET-NESTED", output)
+        self.assertNotIn("SECRET-STDERR", output)
+        self.assertNotIn("SECRET-LABELED", output)
+        self.assertIn('"name": "mesh"', output)
+        argv = create_process.call_args.args
+        self.assertNotIn("--debug", argv)
+        self.assertNotIn("TD_DEBUG_LEVEL", create_process.call_args.kwargs)
+
+    async def test_spawned_td_cli_inherits_log_level_environment(self) -> None:
+        with patch.dict(os.environ, {"TD_DEBUG_LEVEL": " invalid-level "}):
+            with self.assertLogs(level="DEBUG") as captured:
+                exit_code = await td_webserver.run_td_cli(
+                    ["otbr-cli", "router-table"], Path("/tmp")
+                )
+
+        self.assertEqual(exit_code, 2)
+        logs = "\n".join(captured.output)
+        self.assertIn("Invalid TD_DEBUG_LEVEL", logs)
+        self.assertNotIn("invalid-level", logs)
+        self.assertNotIn("otbr-cli --debug", logs)
 
 
 if __name__ == "__main__":

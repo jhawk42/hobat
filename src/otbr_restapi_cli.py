@@ -51,6 +51,7 @@ from otbr_restapi_util import (
     OTBRInvalidResponseError,
     OTBRRestApiClient,
     OTBRUsageError,
+    redact_sensitive_payload,
     _RAW_UNSET,
     build_fields_mapping,
     error_to_dict,
@@ -1328,7 +1329,7 @@ def emit_output(result: Any, output_path: str | None) -> None:
 
 
 def emit_error(exc: Exception) -> None:
-    payload = error_to_dict(exc)
+    payload = redact_sensitive_payload(error_to_dict(exc))
     print(json.dumps(payload, indent=4, sort_keys=True), file=sys.stderr)
 
 

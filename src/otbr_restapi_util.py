@@ -78,28 +78,99 @@ JSON_CONTENT_TYPES = {
     "application/vnd.api+json",
 }
 SENSITIVE_VALUE_REDACTION = "[Redacted]"
+SENSITIVE_TEXT_VALUE_PATTERN = re.compile(
+    r"(?i)([\"']?\b(?:credential|network[\s_-]*key|passphrase|password|"
+    r"pskc|pskd|secret|token)\b[\"']?\s*[:=]\s*)([\"']?)"
+    r"([^\"'\s,;}]+)([\"']?)"
+)
+THREAD_SECRET_TEXT_VALUE_PATTERN = re.compile(
+    r"(?i)([\"']?\b(?:credential|passphrase|password|pskd|secret|token)"
+    r"\b[\"']?\s*[:=]\s*)([\"']?)([^\"'\s,;}]+)([\"']?)"
+)
 
 
 def redact_sensitive_payload(
-    payload: Any, *, replacement: str = SENSITIVE_VALUE_REDACTION
+    payload: Any,
+    *,
+    replacement: str = SENSITIVE_VALUE_REDACTION,
+    reveal_thread_secrets: bool = False,
 ) -> Any:
     """Return a copy with values for sensitive keys recursively redacted."""
+    sensitive_markers = SENSITIVE_BODY_KEY_MARKERS
+    if reveal_thread_secrets:
+        sensitive_markers = tuple(
+            marker
+            for marker in sensitive_markers
+            if marker not in {"networkkey", "pskc"}
+        )
     if isinstance(payload, dict):
         redacted = {}
         for key, value in payload.items():
             normalized_key = str(key).replace("_", "").replace("-", "").lower()
-            redacted[key] = (
-                replacement
-                if any(marker in normalized_key for marker in SENSITIVE_BODY_KEY_MARKERS)
-                else redact_sensitive_payload(value, replacement=replacement)
+            redacted[key] = replacement if any(
+                marker in normalized_key for marker in sensitive_markers
+            ) else redact_sensitive_payload(
+                value,
+                replacement=replacement,
+                reveal_thread_secrets=reveal_thread_secrets,
             )
         return redacted
     if isinstance(payload, list):
         return [
-            redact_sensitive_payload(value, replacement=replacement)
+            redact_sensitive_payload(
+                value,
+                replacement=replacement,
+                reveal_thread_secrets=reveal_thread_secrets,
+            )
             for value in payload
         ]
     return payload
+
+
+def redact_sensitive_text(
+    text: str, *, reveal_thread_secrets: bool = False
+) -> str:
+    """Redact sensitive fields in JSON or labeled plain-text diagnostics."""
+    decoder = json.JSONDecoder()
+    fragments: list[str] = []
+    cursor = 0
+    search_from = 0
+    while search_from < len(text):
+        candidates = (
+            index
+            for index in (
+                text.find("{", search_from),
+                text.find("[", search_from),
+            )
+            if index >= 0
+        )
+        opening = min(candidates, default=-1)
+        if opening < 0:
+            break
+        try:
+            payload, end = decoder.raw_decode(text, opening)
+        except json.JSONDecodeError:
+            search_from = opening + 1
+            continue
+        fragments.append(text[cursor:opening])
+        fragments.append(
+            json.dumps(
+                redact_sensitive_payload(
+                    payload, reveal_thread_secrets=reveal_thread_secrets
+                ),
+                ensure_ascii=False,
+            )
+        )
+        cursor = end
+        search_from = end
+    fragments.append(text[cursor:])
+    rendered = "".join(fragments)
+    pattern = (
+        THREAD_SECRET_TEXT_VALUE_PATTERN
+        if reveal_thread_secrets
+        else SENSITIVE_TEXT_VALUE_PATTERN
+    )
+    return pattern.sub(r"\1\2[Redacted]\4", rendered)
 
 
 def resolve_default_rest_host(env: Mapping[str, str] | None = None) -> str:
@@ -474,6 +545,7 @@ class OTBRRestApiClient:
         default_raw: bool = False,
         retry_backoff_max: float = RETRY_BACKOFF_MAX,
         retry_jitter: float = RETRY_JITTER_DEFAULT,
+        log_thread_secrets: bool = False,
     ) -> None:
         resolved_host = resolve_default_rest_host() if host is None else host
         resolved_port = resolve_default_rest_port() if port is None else port
@@ -485,6 +557,22 @@ class OTBRRestApiClient:
         self._default_raw = default_raw
         self.retry_backoff_max = max(0.0, retry_backoff_max)
         self.retry_jitter = max(0.0, retry_jitter)
+        self.log_thread_secrets = log_thread_secrets
+
+    def _response_body_for_logging(
+        self, path: str, response_body: bytes, media_type: str | None
+    ) -> str:
+        body_text = response_body.decode("utf-8", errors="replace")
+        is_json = media_type in JSON_CONTENT_TYPES or body_text.lstrip().startswith(
+            ("{", "[")
+        )
+        if not self.log_thread_secrets and not is_json and path.endswith(
+            ("/node/dataset/active", "/node/dataset/pending")
+        ):
+            return "<redacted text/plain dataset response>"
+        return redact_sensitive_text(
+            body_text, reveal_thread_secrets=self.log_thread_secrets
+        )
 
     def _resolve_raw(self, raw: object) -> bool:
         """Resolve the raw parameter: if _RAW_UNSET, use the instance default_raw."""
@@ -2077,7 +2165,9 @@ class OTBRRestApiClient:
                     if response_body:
                         logging.debug(
                             "HTTP Response body: %s",
-                            response_body.decode("utf-8", errors="replace"),
+                            self._response_body_for_logging(
+                                path, response_body, media_type
+                            ),
                         )
 
                 if not response_body:
@@ -2108,7 +2198,13 @@ class OTBRRestApiClient:
                 if last_exc_body:
                     logging.debug(
                         "HTTP Error Response body: %s",
-                        last_exc_body.decode("utf-8", errors="replace"),
+                        self._response_body_for_logging(
+                            path,
+                            last_exc_body,
+                            self._parse_media_type(
+                                exc.headers.get("Content-Type")
+                            ),
+                        ),
                     )
                 if not can_retry:
                     raise self._build_http_error(exc, url, last_exc_body) from exc
@@ -2197,6 +2293,13 @@ class OTBRRestApiClient:
             if body_text is not None
             else None
         )
+        if payload is not None:
+            redacted_payload = redact_sensitive_payload(payload)
+            payload = json.loads(
+                redact_sensitive_text(json.dumps(redacted_payload))
+            )
+        if body_text is not None:
+            body_text = redact_sensitive_text(body_text)
         return OTBRHTTPError(
             status_code=exc.code,
             reason=exc.reason,
@@ -2636,6 +2739,14 @@ def add_common_rest_client_args(parser) -> None:
         default=None,
         help=TD_DATA_DIR_ARG_HELP,
     )
+    parser.add_argument(
+        "--log-thread-secrets",
+        action="store_true",
+        default=False,
+        help=(
+            "Show Thread Network Key and PSKc in OTBR REST DEBUG response-body logs"
+        ),
+    )
 
 
 def build_rest_client_from_args(args, **kwargs) -> OTBRRestApiClient:
@@ -2678,6 +2789,7 @@ def build_rest_client_from_args(args, **kwargs) -> OTBRRestApiClient:
         "base_url": args.base_url,
         "timeout": args.timeout,
         "accept": args.accept,
+        "log_thread_secrets": getattr(args, "log_thread_secrets", False),
     }
     
     # Merge with any additional kwargs

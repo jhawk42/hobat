@@ -63,6 +63,38 @@ def test_node_active_dataset_text_uses_atomic_text_mode():
     assert save.call_args.kwargs["plain_text"] is True
 
 
+def test_node_active_dataset_text_is_redacted_without_file_output():
+    client = Mock()
+    client.get_active_dataset.return_value = "Network Key: SECRET-NETWORK-KEY"
+    args = SimpleNamespace(
+        node_command="dataset",
+        dataset_kind="active",
+        dataset_command="get",
+        text=True,
+        resolved_output_path=None,
+    )
+
+    result = node_module.dispatch_node(client, args, raw_arg=False, fields=None)
+
+    assert result == "[Redacted]"
+
+
+def test_node_active_dataset_unexpected_text_is_redacted_without_file_output():
+    client = Mock()
+    client.get_active_dataset.return_value = "Network Key: SECRET-NETWORK-KEY"
+    args = SimpleNamespace(
+        node_command="dataset",
+        dataset_kind="active",
+        dataset_command="get",
+        text=False,
+        resolved_output_path=None,
+    )
+
+    result = node_module.dispatch_node(client, args, raw_arg=False, fields=None)
+
+    assert result == "[Redacted]"
+
+
 def test_node_active_dataset_json_redacts_file_output():
     client = Mock()
     client.get_active_dataset.return_value = {

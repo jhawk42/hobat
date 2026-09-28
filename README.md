@@ -82,6 +82,26 @@ Insights processes the currently loaded cached snapshot with partial input
 allowed. It writes health history in `hobat_v1.db`, but does not collect source
 data, update snapshots, or probe devices.
 
+### Troubleshooting Logs
+
+Set `TD_DEBUG_LEVEL` to `DEBUG`, `INFO`, `WARNING`, or `ERROR` (case-insensitive;
+surrounding whitespace is ignored) for either entry point. CLI precedence is
+`--debug`/`-d` > `--verbose`/`-v` > `TD_DEBUG_LEVEL` > INFO; `--debug` wins if
+both switches are supplied. Invalid values exit with status 2 only when no
+CLI level switch overrides them.
+
+```bash
+TD_DEBUG_LEVEL=' debug ' PYTHONPATH=src python3 -m td_cli --datadir ./data otbr-restapi devices list
+```
+
+DEBUG can show HTTP traffic and `ot-ctl` diagnostics, but Thread Network Key
+and PSKc values are redacted from REST success/error response-body logs,
+captured child output, and active-dataset stdout by default. The explicit
+`--log-thread-secrets` switch opts into those values only in OTBR REST DEBUG
+response-body logs. It does not change stdout, snapshots, or non-REST logs.
+On the webserver it is forwarded only to REST data jobs. Use this opt-in only
+with controlled process-log access and retention.
+
 The device summary's **Health:** control opens Network Insights. Its adjacent
 health status control optionally colors topology node borders from the current
 assessment; coloring is off by default, is not persisted, and resets when the

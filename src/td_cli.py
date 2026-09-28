@@ -43,6 +43,7 @@ import ha_matter_ws_cli
 
 import merge_dataset
 import merge_extaddr_device_label_map
+from td_logging import configure_logging, redact_sensitive_text
 
 class TDHelpFormatter(argparse.RawDescriptionHelpFormatter):
     """Formatter with a wider help column for long command names."""
@@ -340,6 +341,12 @@ def _add_otbr_restapi_commands(subparsers: argparse._SubParsersAction) -> None:
     restapi_p.add_argument("--debug", "-d", action="store_true", default=argparse.SUPPRESS,
         help="Enable OTBR REST API debug logging (forwarded)")
     restapi_p.add_argument(
+        "--log-thread-secrets",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Show Thread Network Key and PSKc in REST DEBUG response-body logs",
+    )
+    restapi_p.add_argument(
         "--lab",
         action="store_true",
         default=False,
@@ -532,10 +539,18 @@ def build_parser() -> argparse.ArgumentParser:
     # --- common options ---
     parser._optionals.title = "Options"
     parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Enable verbose (INFO) logging"
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Select INFO logging, overriding TD_DEBUG_LEVEL",
     )
     parser.add_argument(
         "--debug", "-d", action="store_true", help="Enable debug logging"
+    )
+    parser.add_argument(
+        "--log-thread-secrets",
+        action="store_true",
+        help="Show Thread Network Key and PSKc in OTBR REST DEBUG response-body logs",
     )
     parser.add_argument(
         "--output", "-o", metavar="FILE", help="Write command output to FILE"
@@ -786,6 +801,7 @@ def _restapi_globals(args: argparse.Namespace) -> list[str]:
         ("no_progress", "--no-progress"),
         ("no_auto_output", "--no-auto-output"),
         ("debug", "--debug"),
+        ("log_thread_secrets", "--log-thread-secrets"),
         ("lab", "--lab"),
     ):
         value = getattr(args, attribute, None)
@@ -837,8 +853,12 @@ def _dispatch_otbr_cli(
             try:
                 forwarded_argv = list(step_argv) if step_argv is not None else list(extra_args)
                 raw_rc = step_main(_forward_with_datadir(args, forwarded_argv))
-            except Exception:
-                logging.exception("topology step raised an exception: %s", module_name)
+            except Exception as exc:
+                logging.error(
+                    "topology step raised an exception: %s: %s",
+                    module_name,
+                    redact_sensitive_text(str(exc)),
+                )
                 raw_rc = 1
             normalized_rc = _normalize_module_rc(raw_rc, module_name)
             if first_nonzero_rc == 0 and normalized_rc != 0:
@@ -941,8 +961,13 @@ def _dispatch_otbr_restapi(
         sub_parser.print_help()
         return 0
     if restapi_command == "download":
+        download_args = list(extra_args)
+        if getattr(args, "log_thread_secrets", False):
+            download_args.insert(0, "--log-thread-secrets")
         return _normalize_module_rc(
-            otbr_restapi_download.main(_forward_with_datadir(args, extra_args)),
+            otbr_restapi_download.main(
+                _forward_with_datadir(args, download_args)
+            ),
             "otbr_restapi_download.main",
         )
     if restapi_command in _RESTAPI_RESOURCE_COMMANDS:
@@ -1144,11 +1169,6 @@ def dispatch(
 def main(argv: Sequence[str] | None = None) -> int:
     """Main entry point with optional command-line arguments."""
 
-    # Default logging configuration; level may be raised to DEBUG after arg parsing
-    logging.basicConfig(
-        level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
-    )
-
     argv_list: list[str] = list(sys.argv[1:] if argv is None else argv)
 
     parser = build_parser()
@@ -1171,9 +1191,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(err_text, file=sys.stderr, end="")
             return exc.code if isinstance(exc.code, int) else 2
 
-    # Apply verbosity / debug flags
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
+    configure_logging(args, parser)
 
     single_record_json_output = (
         args.command == "merge-extaddr"
@@ -1195,8 +1213,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not single_record_json_output:
         print("Thread Network Topology CLI")
         print("")
-    # log args at debug level
-    logging.debug("Parsed arguments: %s", args)
     # Build a flattened sub-command string from parsed namespace fields so
     # nested commands (for example: networkdiag multicast-network) are visible.
     subcommand_parts: list[str] = []
@@ -1231,8 +1247,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Interrupted.", file=sys.stderr)
         return 130
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        logging.exception("Unhandled exception during command dispatch")
+        safe_error = redact_sensitive_text(str(exc))
+        print(f"Error: {safe_error}", file=sys.stderr)
+        logging.error("Unhandled exception during command dispatch: %s", safe_error)
         return 1
 
     # log complete message

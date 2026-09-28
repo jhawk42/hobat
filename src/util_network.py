@@ -1,4 +1,5 @@
 import ipaddress
+import json
 import util_ot_ctl
 import logging
 
@@ -430,7 +431,12 @@ def fetch_dataset_active(hide_sensitive_info=True):
     if hide_sensitive_info:
         command += " -ns"  # Add -ns flag to hide sensitive info in the output
     raw_output = util_ot_ctl.exec_ot_ctl(command).strip()
-    logging.debug(f"[DEBUG] Dataset Active Output:\n{raw_output}\n")
+    from td_logging import redact_sensitive_output
+
+    logging.debug(
+        "[DEBUG] Dataset Active Output:\n%s\n",
+        redact_sensitive_output(raw_output),
+    )
 
     dataset_info = {}
 
@@ -447,9 +453,14 @@ def fetch_dataset_active(hide_sensitive_info=True):
             key, value = line.split(":", 1)
             key = key.strip().lower().replace(" ", "_").replace("-", "_")
             value = value.strip()
+            if hide_sensitive_info and key in {"network_key", "pskc"}:
+                continue
             dataset_info[key] = value
 
-    logging.debug(f"[DEBUG] Parsed Dataset Info: {dataset_info}\n")
+    logging.debug(
+        "[DEBUG] Parsed Dataset Info: %s\n",
+        redact_sensitive_output(json.dumps(dataset_info)),
+    )
     return dataset_info
 
 

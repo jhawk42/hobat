@@ -48,8 +48,10 @@ def exec_ot_ctl_dispatch(cmd, container_name=None):
     else:
         command = local_cmd
 
-    # log the command being executed
-    logging.debug(f"[DEBUG] {command}")
+    from otbr_restapi_util import redact_sensitive_text
+
+    # Log the command being executed without inline dataset credentials.
+    logging.debug("[DEBUG] %s", redact_sensitive_text(str(command)))
 
     try:
         # Run the command and capture output
@@ -70,16 +72,20 @@ def exec_ot_ctl_dispatch(cmd, container_name=None):
         return f"Error: command timed out after {timeout_sec}s"
     except subprocess.CalledProcessError as e:
         err_str = e.stderr.strip() if e.stderr else "Unknown error"
+        safe_err_str = redact_sensitive_text(err_str)
+        safe_output = redact_sensitive_text(e.output.strip()) if e.output else "No output"
 
         # log return code and output for debugging
         logging.error(
-            f"[ERROR] ot-ctl command failed: Return code: {e.returncode} Error: {err_str}")
-        logging.error(f"[ERROR] Command: {command}")
+            "[ERROR] ot-ctl command failed: Return code: %s Error: %s",
+            e.returncode,
+            safe_err_str,
+        )
+        logging.error("[ERROR] Command: %s", redact_sensitive_text(str(command)))
 
-        logging.error(
-            f"[ERROR] Output: {e.output.strip() if e.output else 'No output'}")
+        logging.error("[ERROR] Output: %s", safe_output)
 
-        return f"Error: {err_str}"
+        return f"Error: {safe_err_str}"
 
 
 def exec_ot_ctl(command, container_name=TD_OTBR_CONTAINER_NAME_DEFAULT):
