@@ -40,6 +40,11 @@ leaving Ping available; disabling actions also disables reset. Existing saved
 authentication, default-on diagnostics require the Web UI to be limited to
 trusted users by Home Assistant ingress or equivalent access control.
 
+Set the optional `TD_DEBUG_LEVEL` app setting to `DEBUG`, `INFO`, `WARNING`, or
+`ERROR` to control Hobat's default troubleshooting log level. Leave it unset to
+use Hobat's `INFO` default. Explicit `--debug` or `--verbose` server arguments
+continue to take precedence over this setting.
+
 The app's `/data` directory can also be backed up with `td_cli system backups
 create`. Collector-generated network credentials, including `networkKey` and
 `pskc`, are redacted before persistence, and backups may contain

@@ -28,5 +28,6 @@ schema:
   ha_matter_ws_port: port
   device_actions_enabled: bool
   device_reset_enabled: bool
+  TD_DEBUG_LEVEL: "list(DEBUG|INFO|WARNING|ERROR)?"
 webui: "http://[HOST]:[PORT:9165]/"
 watchdog: "tcp://[HOST]:[PORT:9165]"

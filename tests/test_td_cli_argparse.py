@@ -5,6 +5,9 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
+import subprocess
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -239,6 +242,13 @@ class TestTopLevelCommands(unittest.TestCase):
         self.assertIn("device_actions_enabled: bool", config_text)
         self.assertIn("device_reset_enabled: bool", config_text)
         self.assertIn(
+            'TD_DEBUG_LEVEL: "list(DEBUG|INFO|WARNING|ERROR)?"', config_text
+        )
+        self.assertNotIn(
+            "TD_DEBUG_LEVEL:",
+            config_text.split("options:", 1)[1].split("schema:", 1)[0],
+        )
+        self.assertIn(
             'export TD_DEVICE_ACTIONS_ENABLED="$(bashio::config \'device_actions_enabled\')"',
             run_script,
         )
@@ -246,6 +256,90 @@ class TestTopLevelCommands(unittest.TestCase):
             'export TD_DEVICE_RESET_ENABLED="$(bashio::config \'device_reset_enabled\')"',
             run_script,
         )
+        self.assertIn(
+            "if bashio::config.has_value 'TD_DEBUG_LEVEL'; then",
+            run_script,
+        )
+        self.assertIn(
+            'export TD_DEBUG_LEVEL="$(bashio::config \'TD_DEBUG_LEVEL\')"',
+            run_script,
+        )
+
+    def test_addon_debug_level_schema_choices_are_optional(self):
+        repository_root = Path(__file__).resolve().parents[1]
+        config_text = (repository_root / "addon_hobat" / "config.yaml").read_text(
+            encoding="utf-8"
+        )
+        schema_match = re.search(
+            r'^  TD_DEBUG_LEVEL: "list\(([^)]+)\)\?"$',
+            config_text,
+            re.MULTILINE,
+        )
+
+        self.assertIsNotNone(schema_match)
+        self.assertEqual(
+            set(schema_match.group(1).split("|")),
+            {"DEBUG", "INFO", "WARNING", "ERROR"},
+        )
+        options_block = config_text.split("options:", 1)[1].split("schema:", 1)[0]
+        self.assertNotIn("TD_DEBUG_LEVEL", options_block)
+
+    def test_addon_debug_level_launcher_export(self):
+        repository_root = Path(__file__).resolve().parents[1]
+        run_script = repository_root / "addon_hobat" / "run.sh"
+        launcher_stub = """
+import os
+print(os.environ.get("TD_DEBUG_LEVEL", "__UNSET__"))
+print(os.environ["TD_DEVICE_ACTIONS_ENABLED"])
+print(os.environ["TD_DEVICE_RESET_ENABLED"])
+"""
+        bash_stub = """
+bashio::config.has_value() {
+    [[ "$1" == TD_DEBUG_LEVEL && "${CONFIGURED:-0}" == 1 ]]
+}
+bashio::config() {
+    case "$1" in
+        TD_DEBUG_LEVEL) printf '%s' "$DEBUG_VALUE" ;;
+        ot_rest_listen_addr) printf '127.0.0.1' ;;
+        ot_rest_listen_port) printf '8081' ;;
+        ha_matter_ws_host) printf '127.0.0.1' ;;
+        ha_matter_ws_port) printf '5580' ;;
+        device_actions_enabled|device_reset_enabled) printf 'true' ;;
+    esac
+}
+APP_DIR="$1"
+source "$2"
+"""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_dir = Path(temp_dir)
+            (app_dir / "td_webserver.py").write_text(
+                launcher_stub, encoding="utf-8"
+            )
+            for value in (None, "DEBUG", "INFO", "WARNING", "ERROR"):
+                with self.subTest(value=value):
+                    environment = os.environ.copy()
+                    environment.pop("TD_DEBUG_LEVEL", None)
+                    environment["CONFIGURED"] = "0" if value is None else "1"
+                    environment["DEBUG_VALUE"] = value or ""
+                    completed = subprocess.run(
+                        [
+                            "bash",
+                            "-c",
+                            bash_stub,
+                            "addon-launcher",
+                            str(app_dir),
+                            str(run_script),
+                        ],
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+
+                    output = completed.stdout.splitlines()
+                    self.assertEqual(output[0], value or "__UNSET__")
+                    self.assertEqual(output[1:], ["true", "true"])
 
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,9 @@ export TD_HA_MATTER_WS_HOST="$(bashio::config 'ha_matter_ws_host')"
 export TD_HA_MATTER_WS_PORT="$(bashio::config 'ha_matter_ws_port')"
 export TD_DEVICE_ACTIONS_ENABLED="$(bashio::config 'device_actions_enabled')"
 export TD_DEVICE_RESET_ENABLED="$(bashio::config 'device_reset_enabled')"
+if bashio::config.has_value 'TD_DEBUG_LEVEL'; then
+    export TD_DEBUG_LEVEL="$(bashio::config 'TD_DEBUG_LEVEL')"
+fi
 
 # Navigate to the application directory
 cd "$APP_DIR"
