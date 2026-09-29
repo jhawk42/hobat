@@ -36,6 +36,8 @@ let _selectedTableRow = null;
 let _tableSort = null;
 let _tableHealthByDeviceId = new Map();
 let _tableHealthObservedAt = "";
+let _tableHealthAvailable = false;
+let _tableHealthColumnsEnabled = false;
 const MORE_INFO_CELL_MAX_LINES = 6;
 const MORE_INFO_CELL_MAX_CHARACTERS = 60;
 const HEALTH_COLUMNS = ["Health Status", "Health Reason", "Health Observed"];
@@ -45,6 +47,13 @@ export function setMoreInfoEnabled(val) {
 }
 export function isMoreInfoEnabled() {
   return _moreInfoEnabled;
+}
+export function setTableHealthColumnsEnabled(enabled) {
+  _tableHealthColumnsEnabled = enabled === true;
+  _tableColumns = collectColumns(_tableRows);
+}
+export function isTableHealthColumnsEnabled() {
+  return _tableHealthColumnsEnabled;
 }
 
 function categoryLabel(sectionId) {
@@ -88,9 +97,10 @@ export function getTableColumnsForCategory(rows, category) {
   return [...new Set(fields)].filter((field) => rows.some((row) => hasNestedPath(row, field)));
 }
 
-export function setTableHealthFindings(findings = [], observedAt = "") {
+export function setTableHealthFindings(findings = [], observedAt = "", available = false) {
   _tableHealthByDeviceId = new Map();
   _tableHealthObservedAt = observedAt;
+  _tableHealthAvailable = available === true;
   const severity = { unknown: 0, strong: 1, moderate: 2, poor: 3 };
   findings.forEach((finding) => {
     (finding.deviceIds || []).forEach((deviceId) => {
@@ -323,7 +333,9 @@ export function collectColumns(rows) {
       }
     });
   });
-  const healthColumns = _tableHealthByDeviceId.size > 0 ? HEALTH_COLUMNS : [];
+  const healthColumns = _tableHealthColumnsEnabled && _tableHealthAvailable
+    ? HEALTH_COLUMNS
+    : [];
   const pinned = [...new Set(TABLE_PRIORITY_COLUMNS.map(getPreferredFieldName))].filter(
     (col) => seen.has(col) || rows.some((row) => hasNestedPath(row, col)),
   );
@@ -501,12 +513,14 @@ export function applyTableFilters({ preserveSelection = false } = {}) {
     : null;
   if (preserveSelection && !selectedRow) _selectedTableRow = null;
   if (!preserveSelection) _selectedTableRow = null;
-  const activeColumns = _tableColumnCategory === "all"
-    ? (_moreInfoEnabled
-      ? _tableColumns
-      : [...HEALTH_COLUMNS, ...TABLE_PRIORITY_COLUMNS]
-        .filter((col) => _tableColumns.includes(col)))
+  const visibleHealthColumns = _tableHealthColumnsEnabled && _tableHealthAvailable
+    ? HEALTH_COLUMNS
+    : [];
+  const selectedColumns = _tableColumnCategory === "all"
+    ? (_moreInfoEnabled ? _tableColumns : TABLE_PRIORITY_COLUMNS)
     : getTableColumnsForCategory(_tableRows, _tableColumnCategory);
+  const activeColumns = [...new Set([...visibleHealthColumns, ...selectedColumns])]
+    .filter((column) => _tableColumns.includes(column));
   const detailsListEl = document.getElementById("details-list");
   if (detailsListEl) detailsListEl.innerHTML = "";
   const summaryListEl = document.getElementById("summary-list");
@@ -554,14 +568,16 @@ export function applyTableFilters({ preserveSelection = false } = {}) {
 }
 
 export function renderTableForDataset(dataset, statusDatasetToken = dataset) {
-  if (dataset.healthAssessment) {
-    setTableHealthFindings(
-      (dataset.healthAssessment.findingGroups || []).flatMap(
-        (group) => group.findings || [],
-      ),
-      dataset.healthAssessment.observedAt,
-    );
-  }
+  const healthAssessment = dataset.healthAssessment;
+  const hasMatchingHealthAssessment = dataset.entry?.healthEligible === true &&
+    healthAssessment?.datasetId === dataset.entry.value;
+  setTableHealthFindings(
+    hasMatchingHealthAssessment
+      ? (healthAssessment.findingGroups || []).flatMap((group) => group.findings || [])
+      : [],
+    hasMatchingHealthAssessment ? healthAssessment.observedAt : "",
+    hasMatchingHealthAssessment,
+  );
   const rows = dataset.rows;
   const columns = collectColumns(rows);
 

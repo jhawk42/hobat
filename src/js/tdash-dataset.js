@@ -1,4 +1,4 @@
-import { DATASET_REGISTRY } from "./tdash-dataset-registry.js";
+import { DATASET_REGISTRY, getDatasetCatalog } from "./tdash-dataset-registry.js";
 import { MERGE_STRATEGIES } from "./tdash-constants.js";
 import {
   toText,
@@ -165,6 +165,18 @@ export const MERGE_STRATEGY_HANDLERS = Object.freeze({
   [MERGE_STRATEGIES.byRloc16]: mergeRowsByRloc16,
   [MERGE_STRATEGIES.byIdentity]: mergeRowsByIdentity,
 });
+
+export function getDatasetAuxiliaryFiles(entry) {
+  if (!["otbr-cli", "otbr-restapi"].includes(entry?.source)) return [];
+  const profiles = getDatasetCatalog().healthProfiles ?? {};
+  const profileNames = entry.healthProfile && profiles[entry.healthProfile]
+    ? [entry.healthProfile]
+    : Object.keys(profiles).filter((name) => name.startsWith(`${entry.source}-`));
+  const identityFiles = new Set(profileNames
+    .map((name) => profiles[name]?.identityFile)
+    .filter((filename) => typeof filename === "string" && filename));
+  return [...identityFiles].filter((filename) => !(entry.files ?? []).includes(filename));
+}
 
 export function buildDatasetRows(entry, rawFiles, options = {}) {
   const loadedFileIndexes = [];
@@ -689,6 +701,7 @@ function _buildPartialDataset(entry, rawFiles, loadStartTime) {
   return {
     entry,
     rawFiles: canonicalRawFiles,
+    auxiliaryFiles: {},
     rows,
     deviceProjections: buildDeviceProjections(rows),
     loadedFiles,
@@ -756,11 +769,12 @@ export async function loadDataset(entryValue, options = {}) {
 
   // Null-filled array updated as each file resolves; shared with _buildPartialDataset.
   const rawFilesInProgress = entry.files.map(() => null);
+  const auxiliaryFileNames = getDatasetAuxiliaryFiles(entry);
 
   let settled;
+  let auxiliarySettled;
   try {
-    // fetch via /api/data/{filename} with per-file cache headers.
-    settled = await Promise.allSettled(
+    const datasetRequests = Promise.allSettled(
       entry.files.map((f, fileIdx) => {
         const reqHeaders = {};
         if (forceFresh || _forceFresh) {
@@ -815,6 +829,32 @@ export async function loadDataset(entryValue, options = {}) {
         );
       }),
     );
+    const auxiliaryRequests = Promise.allSettled(auxiliaryFileNames.map((filename) => {
+      const reqHeaders = {};
+      if (forceFresh || _forceFresh) {
+        reqHeaders["Cache-Control"] = "no-cache";
+      } else if (_onlyCache) {
+        reqHeaders["Cache-Control"] =
+          `only-if-cached, max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`;
+      } else {
+        const cached = fileMaxAgeCache.get(filename);
+        if (cached) reqHeaders["Cache-Control"] = `max-age=${cached.maxAge}`;
+      }
+      return fetchJson(`/api/data/${filename}`, reqHeaders, sessionId).then(
+        ({ data, responseMaxAge, lastModifiedAt }) => {
+          if (responseMaxAge !== null || lastModifiedAt !== null) {
+            const previous = fileMaxAgeCache.get(filename);
+            fileMaxAgeCache.set(filename, {
+              maxAge: responseMaxAge ?? previous?.maxAge ?? 0,
+              fetchedAt: Date.now(),
+              lastModifiedAt: lastModifiedAt ?? previous?.lastModifiedAt ?? null,
+            });
+          }
+          return data;
+        },
+      );
+    }));
+    [settled, auxiliarySettled] = await Promise.all([datasetRequests, auxiliaryRequests]);
   } finally {
     // Clear the elapsed time update interval on completion or cancellation.
     clearInterval(elapsedUpdateInterval);
@@ -822,7 +862,7 @@ export async function loadDataset(entryValue, options = {}) {
 
   _assertFetchSessionActive(sessionId);
 
-  const cancelledByResult = settled.some(
+  const cancelledByResult = [...settled, ...auxiliarySettled].some(
     (result) =>
       result.status === "rejected" && isFetchCancelledError(result.reason),
   );
@@ -838,6 +878,8 @@ export async function loadDataset(entryValue, options = {}) {
   const rawFiles = [];
   const loadedFiles = [];
   const failedFiles = [];
+  const auxiliaryFiles = {};
+  const loadedAuxiliaryFiles = [];
 
   settled.forEach((result, i) => {
     if (result.status === "fulfilled") {
@@ -848,6 +890,19 @@ export async function loadDataset(entryValue, options = {}) {
     } else {
       rawFiles.push(null);
       failedFiles.push(entry.files[i]);
+    }
+  });
+
+  auxiliarySettled.forEach((result, index) => {
+    const filename = auxiliaryFileNames[index];
+    if (result.status === "fulfilled") {
+      auxiliaryFiles[filename] = normalizeDatasetPayload(
+        result.value,
+        NORMALIZE_OPTIONS_CANONICAL_OUTPUT,
+      );
+      loadedAuxiliaryFiles.push(filename);
+    } else if (isFetchCancelledError(result.reason)) {
+      throw new FetchCancelledError(`Fetch cancelled for dataset "${entry.label}".`);
     }
   });
 
@@ -867,7 +922,7 @@ export async function loadDataset(entryValue, options = {}) {
 
   // Use the oldest lastModifiedAt across all loaded files (most stale piece of the dataset)
   let oldestLastModifiedAt = null;
-  for (const f of loadedFiles) {
+  for (const f of [...loadedFiles, ...loadedAuxiliaryFiles]) {
     const cached = fileMaxAgeCache.get(f);
     if (cached?.lastModifiedAt != null) {
       if (oldestLastModifiedAt === null || cached.lastModifiedAt < oldestLastModifiedAt) {
@@ -879,6 +934,7 @@ export async function loadDataset(entryValue, options = {}) {
   currentDataset = {
     entry,
     rawFiles: canonicalRawFiles,
+    auxiliaryFiles,
     rows: assembled.rows,
     deviceProjections: buildDeviceProjections(assembled.rows),
     loadedFiles: assembled.loadedFiles,
@@ -902,6 +958,12 @@ export async function loadDataset(entryValue, options = {}) {
   // Warn about any files that failed to load but don't hard-fail
   if (failedFiles.length > 0) {
     console.warn("Some dataset files could not be loaded:", failedFiles);
+  }
+  const failedAuxiliaryFiles = auxiliarySettled.flatMap((result, index) =>
+    result.status === "rejected" ? [auxiliaryFileNames[index]] : [],
+  );
+  if (failedAuxiliaryFiles.length > 0) {
+    console.warn("Some auxiliary dataset files could not be loaded:", failedAuxiliaryFiles);
   }
   return currentDataset;
 }

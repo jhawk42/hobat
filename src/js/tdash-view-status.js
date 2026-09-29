@@ -1,11 +1,39 @@
-export function networkInstanceStatus(filenames, capabilities) {
-  const instances = filenames.map((name) => capabilities?.files?.[name]?.networkInstance).filter(Boolean);
-  if (!instances.length) return "Network instance: unknown";
-  const known = new Set(instances.map((scope) => scope.extPanId).filter(Boolean));
-  if (known.size > 1) return "Network instance: mixed";
+export function resolveNetworkInstance(filenames, capabilities) {
+  const instances = filenames
+    .map((filename) => ({
+      filename,
+      ...capabilities?.files?.[filename]?.networkInstance,
+    }))
+    .filter((instance) => Object.keys(instance).length > 1);
+  const known = new Set(instances.map((instance) => instance.extPanId?.toLowerCase()).filter(Boolean));
+  if (known.size > 1) {
+    return {
+      status: "mixed",
+      extPanId: null,
+      provenance: "mixed",
+      sources: instances.filter((instance) => instance.extPanId).map((instance) => instance.filename),
+    };
+  }
+  if (!instances.length) {
+    return { status: "unknown", extPanId: null, provenance: "unknown", sources: [] };
+  }
   const scope = instances.find((item) => item.extPanId && item.provenance === "observed")
     ?? instances.find((item) => item.extPanId) ?? instances[0];
-  return `Network instance: ${scope.extPanId ?? "unknown"} (${scope.provenance})`;
+  return {
+    status: scope.extPanId ? "known" : "unknown",
+    extPanId: scope.extPanId ?? null,
+    provenance: scope.provenance ?? "unknown",
+    sources: instances.filter((instance) =>
+      !scope.extPanId || instance.extPanId?.toLowerCase() === scope.extPanId.toLowerCase(),
+    ).map((instance) => instance.filename),
+  };
+}
+
+export function networkInstanceStatus(filenames, capabilities) {
+  const scope = resolveNetworkInstance(filenames, capabilities);
+  if (scope.status === "mixed") return "Network instance: mixed";
+  if (!scope.extPanId) return "Network instance: unknown";
+  return `Network instance: ${scope.extPanId} (${scope.provenance})`;
 }
 
 export function createViewStatusOwner(presentStatus = () => {}) {

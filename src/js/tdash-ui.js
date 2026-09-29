@@ -44,12 +44,14 @@ import {
   applyTableFilters,
   getTableColumnCategories,
   setTableHealthFindings,
+  setTableHealthColumnsEnabled,
   setTableColumnCategory,
   setMoreInfoEnabled,
   isMoreInfoEnabled,
 } from "./tdash-table-renderer.js";
 import { runAdaptor } from "./tdash-adaptors.js";
 import { projectObservedTopologyLinkCounts } from "./tdash-adaptor-model.js";
+import { buildThreadNetworkModel } from "./tdash-thread-network.js";
 import { EDGE_LQ_STYLES } from "./tdash-constants.js";
 import {
   PHYSICS_PROFILE_MESH_BASELINE,
@@ -65,6 +67,10 @@ import {
   formatAgo,
   formatDuration,
   toFiniteNumber,
+  flattenObjectEntries,
+  shouldExcludeDetailPath,
+  sortDetailsWithPriority,
+  populateNodeDetailsLists,
   getColumnValue,
   toText,
   DEVICE_SELECTION_EVENT,
@@ -111,6 +117,7 @@ import {
   projectVisibleHealthFindingGroups,
   projectHealthSummaryRows,
   reconcileHealthInsightsSelection,
+  toggleHealthFindingSelection,
   renderDeviceHealth,
   renderHealthFindingDetails,
   renderHealthInsights,
@@ -128,8 +135,14 @@ import {
 
 configureViewStatusPresenter((status) => {
   const statusEl = document.getElementById("view-status-line-content");
+  const statusFiles = currentDataset
+    ? [...new Set([
+      ...(currentDataset.loadedFiles ?? currentDataset.entry.files ?? []),
+      ...Object.keys(currentDataset.auxiliaryFiles ?? {}),
+    ])]
+    : [];
   if (statusEl) statusEl.textContent = currentDataset?.entry
-    ? `${status} | ${networkInstanceStatus(currentDataset.loadedFiles ?? currentDataset.entry.files, sourceCapabilities)}`
+    ? `${status} | ${networkInstanceStatus(statusFiles, sourceCapabilities)}`
     : status;
 });
 
@@ -226,8 +239,34 @@ let _lastFetchStartedAt = null;
 let _currentSearchQuery = "";
 let sourceCapabilities = EMPTY_CAPABILITIES;
 let _fetchInProgress = false;
-let logsSubview = "logs";
-let healthTopologyColoringEnabled = false;
+let operationsSubview = "logs";
+let threadNetworkModelCache = null;
+let currentDeviceStatusCounts = null;
+const HEALTH_COLORING_PREFERENCE_KEY = "tdash.healthColoringEnabled";
+const HEALTH_COLUMNS_PREFERENCE_KEY = "tdash.healthColumnsEnabled";
+
+function readBooleanPreference(key) {
+  try {
+    const stored = globalThis.localStorage.getItem(key);
+    return stored === "true" ? true : stored === "false" ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBooleanPreference(key, value) {
+  try {
+    globalThis.localStorage.setItem(key, String(value));
+  } catch {
+    // Keep the current-page choice when browser storage is unavailable.
+  }
+}
+
+const storedHealthColoringPreference = readBooleanPreference(HEALTH_COLORING_PREFERENCE_KEY);
+let healthTopologyColoringEnabled = storedHealthColoringPreference === true;
+let healthColoringPreferenceSet = storedHealthColoringPreference !== null;
+let healthTableColumnsEnabled = readBooleanPreference(HEALTH_COLUMNS_PREFERENCE_KEY) === true;
+setTableHealthColumnsEnabled(healthTableColumnsEnabled);
 const JOBS_POLL_MIN_DELAY_MS = 2000;
 const JOBS_POLL_EMPTY_DELAY_MS = 10000;
 const JOBS_POLL_MAX_DELAY_MS = 60_000;
@@ -333,6 +372,23 @@ document.addEventListener(DEVICE_SELECTION_EVENT, (event) => {
   if (record && selection.direct) {
     setContextDetailsMode("device");
     contextDetailsController.setCollapsed(false);
+    const details = sortDetailsWithPriority(
+      flattenObjectEntries(record).filter(
+        ([key]) => !shouldExcludeDetailPath(key, "table"),
+      ),
+    );
+    document.getElementById("summary-list")?.replaceChildren();
+    if (details.length) {
+      populateNodeDetailsLists(details);
+    } else {
+      clearSelectedDeviceDetails();
+      const summaryList = document.getElementById("summary-list");
+      if (summaryList) {
+        const empty = document.createElement("li");
+        empty.textContent = "No details available for selected device.";
+        summaryList.appendChild(empty);
+      }
+    }
   }
   publishDeviceSelection(record, { resolved: true });
 }, true);
@@ -406,11 +462,11 @@ setDatasetActivityObserver(({ type, metadata }) => {
 });
 
 subscribeActivity(() => {
-  if (currentView === "logs" && logsSubview === "logs") renderWorkspaceLogs();
+  if (currentView === "operations" && operationsSubview === "logs") renderWorkspaceLogs();
 });
 
 function jobsPanelIsVisible() {
-  return currentView === "logs" && logsSubview === "jobs";
+  return currentView === "operations" && operationsSubview === "jobs";
 }
 
 function stopJobsPolling() {
@@ -571,30 +627,307 @@ async function cancelWorkspaceJob(job) {
   }
 }
 
-function setLogsSubview(nextSubview) {
-  if (!new Set(["logs", "jobs"]).has(nextSubview)) return;
-  logsSubview = nextSubview;
-  [
-    ["logs", "btn-activity-log", "workspace-log-panel"],
-    ["jobs", "btn-jobs", "workspace-jobs-panel"],
-  ].forEach(([subview, buttonId, panelId]) => {
-    const active = subview === nextSubview;
-    const buttonEl = document.getElementById(buttonId);
-    const panelEl = document.getElementById(panelId);
-    if (panelEl) panelEl.hidden = !active;
-    if (buttonEl) {
-      buttonEl.classList.toggle("active", active);
-      buttonEl.setAttribute("aria-selected", String(active));
-      buttonEl.tabIndex = active ? 0 : -1;
+function getCurrentThreadNetworkViewData(includeAdaptor = false) {
+  if (!currentDataset) {
+    return { model: buildThreadNetworkModel(null, sourceCapabilities, null), error: "" };
+  }
+  if (threadNetworkModelCache?.dataset === currentDataset
+      && threadNetworkModelCache.capabilities === sourceCapabilities
+      && (!includeAdaptor || threadNetworkModelCache.hasAdaptor)) {
+    return threadNetworkModelCache;
+  }
+
+  let adaptorResult = null;
+  let adaptorError = "";
+  if (includeAdaptor) {
+    try {
+      const rawAdaptorResult = runAdaptor(currentDataset);
+      const relationshipProjection = projectObservedTopologyLinkCounts(
+        currentDataset.rows,
+        rawAdaptorResult,
+      );
+      adaptorResult = {
+        ...rawAdaptorResult,
+        relationshipCapabilityPresent: relationshipProjection.hasRelationshipCapability,
+      };
+    } catch {
+      adaptorError = "Relationship details are unavailable for this dataset.";
     }
-  });
-  stopJobsPolling();
-  if (nextSubview === "logs") renderWorkspaceLogs();
-  if (nextSubview === "jobs" && currentView === "logs") void refreshWorkspaceJobs();
+  }
+  threadNetworkModelCache = {
+    dataset: currentDataset,
+    capabilities: sourceCapabilities,
+    statusCounts: currentDeviceStatusCounts,
+    hasAdaptor: includeAdaptor,
+    model: buildThreadNetworkModel(
+      currentDataset,
+      sourceCapabilities,
+      adaptorResult,
+      currentDeviceStatusCounts,
+    ),
+    error: adaptorError,
+  };
+  return threadNetworkModelCache;
 }
 
-document.getElementById("btn-activity-log")?.addEventListener("click", () => setLogsSubview("logs"));
-document.getElementById("btn-jobs")?.addEventListener("click", () => setLogsSubview("jobs"));
+function threadRoleTargetLabel(holder) {
+  if (!holder.canSelect) return "Unidentified";
+  const identifier = holder.rloc16 !== "n/a" ? holder.rloc16 : holder.extAddress;
+  return holder.deviceLabel !== "n/a"
+    ? `${holder.deviceLabel} (${identifier})`
+    : identifier;
+}
+
+function appendThreadNetworkSourceTooltips(target, sourceFiles) {
+  const filenames = [...new Set((sourceFiles ?? []).filter((filename) => toText(filename).trim()))];
+  if (!filenames.length) return;
+  const group = document.createElement("span");
+  group.className = "thread-network-source-list";
+  group.setAttribute("aria-label", "Source files");
+  filenames.forEach((filename) => {
+    const tooltip = document.createElement("span");
+    tooltip.className = "thread-network-source-tooltip";
+    tooltip.tabIndex = 0;
+    tooltip.setAttribute("role", "img");
+    tooltip.setAttribute("aria-label", `Source file: ${filename}`);
+    tooltip.title = filename;
+    tooltip.textContent = "i";
+    group.appendChild(tooltip);
+  });
+  target.appendChild(group);
+}
+
+function appendThreadNetworkSource(target, fact) {
+  if (!fact.provenance && !fact.sources?.length) return;
+  const note = document.createElement("small");
+  note.className = "thread-network-source";
+  if (fact.provenance) {
+    const provenance = document.createElement("span");
+    provenance.textContent = `Provenance: ${fact.provenance}`;
+    note.appendChild(provenance);
+  }
+  if (fact.sources?.length) {
+    if (fact.provenance) {
+      const separator = document.createElement("span");
+      separator.setAttribute("aria-hidden", "true");
+      separator.textContent = " · ";
+      note.appendChild(separator);
+    }
+    const sourceLabel = document.createElement("span");
+    sourceLabel.textContent = "Source: ";
+    note.appendChild(sourceLabel);
+    appendThreadNetworkSourceTooltips(note, fact.sources);
+  }
+  target.appendChild(note);
+}
+
+function appendThreadNetworkFacts(target, facts) {
+  const list = document.createElement("dl");
+  list.className = "thread-network-facts";
+  facts.forEach((fact) => {
+    const item = document.createElement("div");
+    item.className = "thread-network-fact";
+    const label = document.createElement("dt");
+    label.textContent = fact.label;
+    const value = document.createElement("dd");
+    value.textContent = toText(fact.value) || "n/a";
+    item.append(label, value);
+    appendThreadNetworkSource(item, fact);
+    list.appendChild(item);
+  });
+  target.appendChild(list);
+}
+
+function appendThreadNetworkSummarySection(target, title, entries) {
+  const section = document.createElement("section");
+  section.className = "thread-network-section";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  section.appendChild(heading);
+  const list = document.createElement("dl");
+  list.className = "thread-network-counts";
+  entries.forEach(([label, value]) => {
+    const item = document.createElement("div");
+    item.className = "thread-network-count";
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const definition = document.createElement("dd");
+    definition.textContent = toText(value) || "n/a";
+    item.append(term, definition);
+    list.appendChild(item);
+  });
+  section.appendChild(list);
+  target.appendChild(section);
+}
+
+function appendThreadRoleTable(target, title, roleHolders) {
+  const section = document.createElement("section");
+  section.className = "thread-network-section";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  section.appendChild(heading);
+  if (!roleHolders.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "n/a";
+    section.appendChild(empty);
+    target.appendChild(section);
+    return;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "thread-network-table-wrap";
+  const table = document.createElement("table");
+  table.className = "thread-network-table";
+  const headers = ["Device", "extAddress", "rloc16", "deviceLabel", "threadVersion", "threadStackVersion", "Source"];
+  const head = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  headers.forEach((text) => {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = text;
+    headerRow.appendChild(cell);
+  });
+  head.appendChild(headerRow);
+  table.appendChild(head);
+
+  const body = document.createElement("tbody");
+  roleHolders.forEach((holder) => {
+    const row = document.createElement("tr");
+    const deviceCell = document.createElement("td");
+    if (holder.canSelect) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Open device";
+      button.title = `Show details for ${threadRoleTargetLabel(holder)}`;
+      button.addEventListener("click", () => publishDeviceSelection(holder.record, { direct: true }));
+      deviceCell.appendChild(button);
+    } else {
+      deviceCell.textContent = "Unidentified";
+    }
+    row.appendChild(deviceCell);
+    [holder.extAddress, holder.rloc16, holder.deviceLabel, holder.threadVersion,
+      holder.threadStackVersion].forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value || "n/a";
+      row.appendChild(cell);
+    });
+    const sourceCell = document.createElement("td");
+    if (holder.sourceFiles.length) appendThreadNetworkSourceTooltips(sourceCell, holder.sourceFiles);
+    else sourceCell.textContent = "n/a";
+    row.appendChild(sourceCell);
+    body.appendChild(row);
+  });
+  table.appendChild(body);
+  wrapper.appendChild(table);
+  section.appendChild(wrapper);
+  target.appendChild(section);
+}
+
+function renderThreadNetworkPanel() {
+  const content = document.getElementById("thread-network-content");
+  if (!content) return;
+  content.replaceChildren();
+  if (!currentDataset) {
+    const empty = document.createElement("p");
+    empty.textContent = "Load a dataset to view Thread Network information.";
+    content.appendChild(empty);
+    return;
+  }
+
+  const { model, error } = getCurrentThreadNetworkViewData(true);
+  if (!model.loaded) {
+    const empty = document.createElement("p");
+    empty.textContent = "No dataset loaded.";
+    content.appendChild(empty);
+    return;
+  }
+  const datasetLabel = document.createElement("p");
+  datasetLabel.className = "thread-network-dataset";
+  datasetLabel.textContent = `Dataset: ${model.datasetLabel || "n/a"}`;
+  content.appendChild(datasetLabel);
+
+  const networkSection = document.createElement("section");
+  networkSection.className = "thread-network-section";
+  const networkHeading = document.createElement("h3");
+  networkHeading.textContent = "Thread Network";
+  networkSection.appendChild(networkHeading);
+  appendThreadNetworkFacts(networkSection, model.networkFacts);
+  content.appendChild(networkSection);
+
+  appendThreadRoleTable(content, "Leader", model.roleHolders.leaders);
+  appendThreadRoleTable(content, "Primary BBR", model.roleHolders.primaryBbrs);
+  appendThreadNetworkSummarySection(content, "Devices", [
+    ["Total Devices", model.deviceCounts.total],
+    ["Thread Border Routers", model.deviceCounts.borderRouters],
+    ["Routers", model.deviceCounts.routers],
+    ["Router Eligible End Devices", model.deviceCounts.reed],
+    ["End Devices", model.deviceCounts.endDevices],
+  ]);
+  appendThreadNetworkSummarySection(content, "Links", [
+    ["Total Links", model.links.total],
+    ["LQI3", model.links.lqi[3].count === "n/a"
+      ? "n/a" : `${model.links.lqi[3].count} (${model.links.lqi[3].percent}%)`],
+    ["LQI2", model.links.lqi[2].count === "n/a"
+      ? "n/a" : `${model.links.lqi[2].count} (${model.links.lqi[2].percent}%)`],
+    ["LQI1", model.links.lqi[1].count === "n/a"
+      ? "n/a" : `${model.links.lqi[1].count} (${model.links.lqi[1].percent}%)`],
+  ]);
+  if (error) {
+    const notice = document.createElement("p");
+    notice.className = "thread-network-error";
+    notice.textContent = error;
+    content.appendChild(notice);
+  }
+}
+
+const OPERATIONS_SUBVIEWS = Object.freeze([
+  ["thread-network", "btn-thread-network", "workspace-thread-network-panel"],
+  ["logs", "btn-activity-log", "workspace-log-panel"],
+  ["jobs", "btn-jobs", "workspace-jobs-panel"],
+]);
+
+function renderOperationsSubview() {
+  OPERATIONS_SUBVIEWS.forEach(([subview, buttonId, panelId]) => {
+    const active = subview === operationsSubview;
+    const button = document.getElementById(buttonId);
+    const panel = document.getElementById(panelId);
+    if (panel) panel.hidden = !active;
+    if (button) {
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+    }
+  });
+  if (currentView !== "operations") return;
+  if (operationsSubview === "thread-network") renderThreadNetworkPanel();
+  if (operationsSubview === "logs") renderWorkspaceLogs();
+  if (operationsSubview === "jobs") void refreshWorkspaceJobs();
+}
+
+function setOperationsSubview(nextSubview) {
+  if (!OPERATIONS_SUBVIEWS.some(([subview]) => subview === nextSubview)) return;
+  operationsSubview = nextSubview;
+  stopJobsPolling();
+  renderOperationsSubview();
+}
+
+OPERATIONS_SUBVIEWS.forEach(([subview, buttonId], index) => {
+  const button = document.getElementById(buttonId);
+  button?.addEventListener("click", () => setOperationsSubview(subview));
+  button?.addEventListener("keydown", (event) => {
+    const navigationKeys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!navigationKeys.includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home" ? 0
+      : event.key === "End" ? OPERATIONS_SUBVIEWS.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + OPERATIONS_SUBVIEWS.length)
+          % OPERATIONS_SUBVIEWS.length;
+    const [nextSubview, nextButtonId] = OPERATIONS_SUBVIEWS[nextIndex];
+    setOperationsSubview(nextSubview);
+    document.getElementById(nextButtonId)?.focus();
+  });
+});
+
 document.getElementById("btn-clear-logs")?.addEventListener("click", clearActivityEntries);
 document.getElementById("btn-refresh-jobs")?.addEventListener("click", () => {
   stopJobsPolling();
@@ -669,9 +1002,15 @@ const lastRenderedDatasetByView = new Map();
 
 function renderCurrentView({ force = false } = {}) {
   if (!currentDataset) return;
+  if (force) threadNetworkModelCache = null;
+  updateHealthPresentationControls();
   renderNetworkInsights();
   const view = currentView;
-  if (view !== "topology" && view !== "table") return;
+  if (view !== "topology" && view !== "table") {
+    updateDeviceStatusBar(computeRowCounts(currentDataset.rows));
+    if (view === "operations") renderOperationsSubview();
+    return;
+  }
   activateViewStatus(view, currentDataset);
   if (!force && lastRenderedDatasetByView.get(view) === currentDataset) {
     if (view === "topology") {
@@ -918,10 +1257,10 @@ const WORKSPACE_VIEWS = Object.freeze([
   },
   { view: "settings", buttonId: "btn-settings", panelId: "view-settings" },
   {
-    view: "logs",
-    buttonId: "btn-logs",
-    panelId: "view-logs",
-    onActivate: renderWorkspaceLogs,
+    view: "operations",
+    buttonId: "btn-operations",
+    panelId: "view-operations",
+    onActivate: renderOperationsSubview,
   },
 ]);
 
@@ -929,7 +1268,7 @@ function switchView(newView) {
   const nextView = WORKSPACE_VIEWS.find(({ view }) => view === newView);
   if (!nextView) return;
   if (newView === currentView) return;
-  if (currentView === "logs") stopJobsPolling();
+  if (currentView === "operations") stopJobsPolling();
   if (currentView === "insights" && newView !== "insights") {
     healthInsightsViewState.detailsOpen = false;
     findingDeviceReturnContext = null;
@@ -954,6 +1293,11 @@ function switchView(newView) {
 
   const moreInfoButton = document.getElementById("btn-more-info");
   if (moreInfoButton) moreInfoButton.hidden = newView !== "table";
+  const healthEligible = currentDataset?.entry?.healthEligible === true;
+  const healthColumnsButton = document.getElementById("btn-health-columns");
+  if (healthColumnsButton) healthColumnsButton.hidden = newView !== "table" || !healthEligible;
+  const healthColoringButton = document.getElementById("btn-health-coloring");
+  if (healthColoringButton) healthColoringButton.hidden = newView !== "topology" || !healthEligible;
   const tableCategoryLabel = document.getElementById("table-column-category-label");
   const tableCategorySelect = document.getElementById("table-column-category");
   if (tableCategoryLabel) tableCategoryLabel.hidden = newView !== "table";
@@ -974,8 +1318,9 @@ function switchView(newView) {
   if (currentDataset && nextView.rendersDataset) {
     renderCurrentView();
   }
+  if (newView === "insights") enableHealthColoringOnFirstInsightsVisit();
+  updateHealthPresentationControls();
   nextView.onActivate?.();
-  if (newView === "logs" && logsSubview === "jobs") void refreshWorkspaceJobs();
 }
 
 WORKSPACE_VIEWS.forEach(({ view, buttonId }, index) => {
@@ -1040,6 +1385,14 @@ function setMoreInfo(enabled) {
 document
   .getElementById("btn-more-info")
   .addEventListener("click", () => setMoreInfo(!isMoreInfoEnabled()));
+
+document.getElementById("btn-health-coloring")?.addEventListener("click", () => {
+  setHealthColoringEnabled(!healthTopologyColoringEnabled);
+});
+
+document.getElementById("btn-health-columns")?.addEventListener("click", () => {
+  setHealthColumnsEnabled(!healthTableColumnsEnabled);
+});
 
 const tableColumnCategoryEl = document.getElementById("table-column-category");
 function populateTableColumnCategories(rows) {
@@ -1943,26 +2296,81 @@ function renderNetworkInsights() {
 }
 
 function applyHealthAssessmentPresentation(assessment) {
-  const findings = assessment
-    ? projectVisibleHealthFindingGroups(assessment.findingGroups).flatMap(
+  const matchingAssessment = assessment && currentDataset?.entry?.healthEligible === true &&
+    assessment.datasetId === currentDataset.entry.value
+    ? assessment
+    : null;
+  const findings = matchingAssessment
+    ? projectVisibleHealthFindingGroups(matchingAssessment.findingGroups).flatMap(
       (group) => group.findings || [],
     )
     : [];
-  setTopologyHealthFindings(findings, healthTopologyColoringEnabled);
-  setTableHealthFindings(findings, assessment?.observedAt ?? "");
+  setTopologyHealthFindings(findings, healthTopologyColoringEnabled && matchingAssessment !== null);
+  setTableHealthFindings(findings, matchingAssessment?.observedAt ?? "", matchingAssessment !== null);
+  updateHealthPresentationControls();
+}
+
+function getCurrentHealthAssessment() {
+  const entry = currentDataset?.entry;
+  const assessment = healthInsightsState.assessment;
+  return entry?.healthEligible === true && assessment?.datasetId === entry.value &&
+    !healthInsightsState.error
+    ? assessment
+    : null;
+}
+
+function setHealthColoringEnabled(enabled) {
+  healthTopologyColoringEnabled = enabled === true;
+  healthColoringPreferenceSet = true;
+  writeBooleanPreference(HEALTH_COLORING_PREFERENCE_KEY, healthTopologyColoringEnabled);
+  applyHealthAssessmentPresentation(getCurrentHealthAssessment());
+  renderNetworkInsights();
+  renderHealthStatusSummary();
+}
+
+function enableHealthColoringOnFirstInsightsVisit() {
+  if (currentView !== "insights" || healthColoringPreferenceSet || !getCurrentHealthAssessment()) return;
+  setHealthColoringEnabled(true);
+}
+
+function setHealthColumnsEnabled(enabled) {
+  healthTableColumnsEnabled = enabled === true;
+  writeBooleanPreference(HEALTH_COLUMNS_PREFERENCE_KEY, healthTableColumnsEnabled);
+  setTableHealthColumnsEnabled(healthTableColumnsEnabled);
+  if (currentView === "table" && currentDataset) {
+    applyTableFilters({ preserveSelection: true });
+  }
+  updateHealthPresentationControls();
+}
+
+function updateHealthPresentationControls() {
+  const healthEligible = currentDataset?.entry?.healthEligible === true;
+  const available = getCurrentHealthAssessment() !== null;
+  const coloringButton = document.getElementById("btn-health-coloring");
+  if (coloringButton) {
+    coloringButton.hidden = currentView !== "topology" || !healthEligible;
+    coloringButton.disabled = !available;
+    coloringButton.setAttribute("aria-pressed", String(healthTopologyColoringEnabled));
+    coloringButton.classList.toggle("active", healthTopologyColoringEnabled);
+    coloringButton.title = available
+      ? `${healthTopologyColoringEnabled ? "Hide" : "Show"} health coloring`
+      : "Health coloring is unavailable until an assessment is loaded for this dataset";
+  }
+  const columnsButton = document.getElementById("btn-health-columns");
+  if (columnsButton) {
+    columnsButton.hidden = currentView !== "table" || !healthEligible;
+    columnsButton.disabled = !available;
+    columnsButton.setAttribute("aria-pressed", String(healthTableColumnsEnabled));
+    columnsButton.classList.toggle("active", healthTableColumnsEnabled);
+    columnsButton.title = available
+      ? `${healthTableColumnsEnabled ? "Hide" : "Show"} health columns in table view`
+      : "Health columns are unavailable until an assessment is loaded for this dataset";
+  }
 }
 
 function renderHealthStatusSummary() {
   renderHealthStatus(document.getElementById("health-status-summary"), {
     ...healthInsightsState,
-    topologyColoringEnabled: healthTopologyColoringEnabled,
-  }, {
-    openInsights: () => switchView("insights"),
-    toggleTopologyColoring: () => {
-      healthTopologyColoringEnabled = !healthTopologyColoringEnabled;
-      renderNetworkInsights();
-      renderHealthStatusSummary();
-    },
   });
 }
 
@@ -2000,9 +2408,8 @@ function renderHealthRefreshStatus() {
 }
 
 function selectHealthFindingGroup(groupId) {
-  const group = resolveHealthFindingGroup(groupId);
   healthInsightsViewState.selectedGroupId = groupId;
-  healthInsightsViewState.selectedFindingId = group?.findings?.[0]?.findingId ?? null;
+  healthInsightsViewState.selectedFindingId = null;
   healthInsightsViewState.detailsOpen = true;
   contextDetailsState.finding = {
     assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
@@ -2061,9 +2468,20 @@ function renderSelectedHealthFinding() {
     groupDeviceCount: group.deviceIds?.length ?? 0,
     inspectableDeviceIds: availableDeviceIds,
     selectFinding: (findingId) => {
-      healthInsightsViewState.selectedFindingId = findingId;
-      contextDetailsState.finding.findingId = findingId;
+      const selectedFindingId = toggleHealthFindingSelection(
+        healthInsightsViewState.selectedFindingId,
+        findingId,
+      );
+      healthInsightsViewState.selectedFindingId = selectedFindingId;
+      contextDetailsState.finding = {
+        assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
+        groupId: healthInsightsViewState.selectedGroupId,
+        findingId: selectedFindingId,
+      };
       renderSelectedHealthFinding();
+      requestAnimationFrame(() => document.querySelector(
+        `.health-affected-select[data-finding-id="${CSS.escape(findingId)}"]`,
+      )?.focus({ preventScroll: true }));
     },
     showTopology: (selectedGroupId) => navigateToHealthTargets(
       "topology", resolveHealthFindingGroup(selectedGroupId),
@@ -2207,14 +2625,18 @@ function returnToHealthFinding() {
     announceHealthInsight("The selected finding is no longer available.");
     return;
   }
+  const findingId = group.findings.some(({ findingId: candidateId }) => candidateId === context.findingId)
+    ? context.findingId
+    : null;
   healthInsightsViewState.selectedGroupId = context.groupId;
-  healthInsightsViewState.selectedFindingId = context.findingId;
+  healthInsightsViewState.selectedFindingId = findingId;
   healthInsightsViewState.detailsOpen = true;
-  contextDetailsState.finding = { ...context };
+  contextDetailsState.finding = { ...context, findingId };
   renderSelectedHealthFinding();
-  requestAnimationFrame(() => document.querySelector(
-    `.health-affected-select[data-finding-id="${CSS.escape(context.findingId || "")}"]`,
-  )?.focus());
+  const focusSelector = findingId
+    ? `.health-affected-select[data-finding-id="${CSS.escape(findingId)}"]`
+    : `.health-finding-select[data-group-id="${CSS.escape(context.groupId)}"]`;
+  requestAnimationFrame(() => document.querySelector(focusSelector)?.focus({ preventScroll: true }));
 }
 
 function restoreHealthNavigationContext() {
@@ -2335,6 +2757,16 @@ function renderDeviceInsights(record) {
   const identity = projection.deviceLabel || projection.name || projection.rloc16 ||
     projection.extAddress || "Selected device";
   appendDeviceInsightElement(contentEl, "h3", identity, "device-insights-title");
+
+  if (currentView !== "topology" && currentView !== "table") {
+    appendDeviceInsightElement(
+      contentEl,
+      "p",
+      "Diagnostic metrics are unavailable in this view.",
+      "device-insights-empty",
+    );
+    return;
+  }
 
   const evaluations = selectHighestQualifyingDiagnosticEvaluations(
     evaluateDiagnosticsForRecord(record, currentView)
@@ -2610,7 +3042,6 @@ async function refreshHealthAssessment() {
   const datasetChanged = healthInsightsState.datasetId !== entry?.value;
   if (datasetChanged) {
     healthInsightsTab = "findings";
-    healthTopologyColoringEnabled = false;
     healthInsightsState.assessment = null;
     healthInsightsViewState.assessmentId = null;
     healthInsightsViewState.view = "all";
@@ -2642,10 +3073,10 @@ async function refreshHealthAssessment() {
   document.getElementById("device-details").classList.remove("roster-selected");
   applyHealthAssessmentPresentation(null);
   if (entry?.healthEligible !== true) {
-    healthTopologyColoringEnabled = false;
     healthInsightsState.loading = false;
     renderHealthStatusSummary();
     renderNetworkInsights();
+    updateHealthPresentationControls();
     return;
   }
 
@@ -2684,6 +3115,7 @@ async function refreshHealthAssessment() {
     if (currentDataset?.entry?.value === assessment.datasetId) {
       currentDataset.healthAssessment = assessment;
     }
+    enableHealthColoringOnFirstInsightsVisit();
     applyHealthAssessmentPresentation(assessment);
     lastRenderedDatasetByView.delete("table");
     if (currentView === "table") renderCurrentView({ force: true });
@@ -2700,13 +3132,13 @@ async function refreshHealthAssessment() {
     }
   } catch (error) {
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
-    healthTopologyColoringEnabled = false;
     healthInsightsState.error = error.message;
   } finally {
     if (requestVersion === healthInsightsState.assessmentRequestVersion) {
       healthInsightsState.loading = false;
       renderHealthStatusSummary();
       renderNetworkInsights();
+      updateHealthPresentationControls();
       updateHealthRefreshControls();
     }
   }
@@ -2783,16 +3215,14 @@ async function runHealthRefresh() {
     }
   } catch (error) {
     if (version !== healthInsightsState.refreshVersion || currentDataset?.entry?.value !== datasetId) return;
-    healthTopologyColoringEnabled = false;
     healthInsightsState.refreshStatus = "error";
     healthInsightsState.refreshDetail = error.message;
   } finally {
     if (version === healthInsightsState.refreshVersion && currentDataset?.entry?.value === datasetId) {
-      if (["cancelled", "error"].includes(healthInsightsState.refreshStatus)) {
-        healthTopologyColoringEnabled = false;
-      }
+      applyHealthAssessmentPresentation(getCurrentHealthAssessment());
       renderHealthStatusSummary();
       renderNetworkInsights();
+      updateHealthPresentationControls();
       updateHealthRefreshControls();
     }
   }
@@ -3220,6 +3650,8 @@ function isChildRow(r) {
 // Returns null for classification fields when no row carries Thread topology fields
 // (rloc16 / isBorderRouter / type), which is the case for non-Thread sources such as mDNS.
 function updateDeviceStatusBar(counts) {
+  currentDeviceStatusCounts = counts ? { ...counts } : null;
+  threadNetworkModelCache = null;
   const set = (id, val) => {
     const el = document.getElementById(id);
     if (el) el.textContent = val != null ? String(val) : "—";

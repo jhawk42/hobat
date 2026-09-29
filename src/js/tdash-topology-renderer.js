@@ -69,6 +69,12 @@ const HEALTH_BORDER_COLORS = Object.freeze({
   strong: "#067647",
   unknown: "#667085",
 });
+const HEALTH_BACKGROUND_COLORS = Object.freeze({
+  poor: "#fee4e2",
+  moderate: "#fef0c7",
+  strong: "#d1fadf",
+  unknown: "#eaecf0",
+});
 
 const MESH_COMPACT_LAYOUT = Object.freeze({
   ftdMinEdgeLength: 280,
@@ -520,7 +526,10 @@ export function renderTopologyForDataset(
       healthUpdates.push({
         id: nodeId,
         borderWidth: status === "poor" ? 5 : 4,
-        color: { border: HEALTH_BORDER_COLORS[status] },
+        color: {
+          background: HEALTH_BACKGROUND_COLORS[status],
+          border: HEALTH_BORDER_COLORS[status],
+        },
       });
     });
     if (healthUpdates.length > 0) nodesDataset.update(healthUpdates);

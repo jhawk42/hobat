@@ -36,11 +36,15 @@ def test_load_dataset_has_stale_session_guards() -> None:
         "loadDataset must validate active session before mutating currentDataset"
     )
 
-    cancelled_block = text.find("const cancelledByResult = settled.some(")
+    cancelled_block = text.find(
+        "const cancelledByResult = [...settled, ...auxiliarySettled].some("
+    )
     cancelled_throw = text.find("throw new FetchCancelledError(", cancelled_block)
     assert cancelled_block != -1 and cancelled_throw != -1
-    assert cancelled_throw < current_dataset_set, (
-        "Cancellation detection must happen before currentDataset assignment"
+    final_dataset_set = text.find("\n  currentDataset = {", cancelled_throw)
+    assert final_dataset_set != -1
+    assert cancelled_throw < final_dataset_set, (
+        "Cancellation detection must happen before committing the final dataset"
     )
 
 

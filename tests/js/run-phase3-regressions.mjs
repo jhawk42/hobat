@@ -8,6 +8,8 @@ import {
   getTableColumnCategories,
   getTableColumnsForCategory,
   getTableFilterLabel,
+  setTableHealthColumnsEnabled,
+  setTableHealthFindings,
 } from "../../src/js/tdash-table-renderer.js";
 import { DEVICE_DETAILS_SECTIONS, NODE_FILTER_OPTIONS, NODE_SHAPES, TABLE_PRIORITY_COLUMNS } from "../../src/js/tdash-constants.js";
 import { getColumnValue } from "../../src/js/tdash-utils.js";
@@ -65,6 +67,24 @@ assert.deepEqual(
     .filter((column) => ["br", "isBorderRouter", "ver", "version", "threadVersion"].includes(column)),
   ["isBorderRouter", "version", "threadVersion"],
 );
+const healthTableRows = [{ extAddress: "0011223344556677", room: "Lab" }];
+setTableHealthFindings([
+  { deviceIds: ["extaddr:0011223344556677"], status: "moderate", title: "Health finding" },
+], "2026-09-29T00:00:00Z", true);
+assert.deepEqual(collectColumns(healthTableRows).filter((column) => column.startsWith("Health ")), []);
+setTableHealthColumnsEnabled(true);
+assert.deepEqual(
+  collectColumns(healthTableRows).filter((column) => column.startsWith("Health ")),
+  ["Health Status", "Health Reason", "Health Observed"],
+);
+setTableHealthFindings([], "2026-09-29T00:00:00Z", true);
+assert.deepEqual(
+  collectColumns(healthTableRows).filter((column) => column.startsWith("Health ")),
+  ["Health Status", "Health Reason", "Health Observed"],
+);
+setTableHealthFindings([], "", false);
+assert.deepEqual(collectColumns(healthTableRows).filter((column) => column.startsWith("Health ")), []);
+setTableHealthColumnsEnabled(false);
 assert.equal(getTableFilterLabel(null, "All nodes"), "All nodes");
 assert.equal(getTableFilterLabel({ selectedOptions: [] }, "All diagnostics"), "All diagnostics");
 assert.equal(getTableFilterLabel({ selectedOptions: [{ text: "Routers" }] }, "All nodes"), "Routers");

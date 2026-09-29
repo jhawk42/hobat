@@ -235,6 +235,8 @@
             <option value="all">All</option>
           </select>
           <button id="btn-more-info" title="Show all columns in table view" hidden>More Info</button>
+          <button id="btn-health-columns" type="button" title="Show health columns in table view" aria-pressed="false" hidden>Health</button>
+          <button id="btn-health-coloring" type="button" title="Health coloring is unavailable until an assessment is loaded" aria-pressed="false" hidden disabled>Health</button>
           <button id="btn-health-refresh" type="button" title="Process the cached dataset into a health assessment" hidden>Refresh Health</button>
           <button id="btn-details-panel-toggle" title="Collapse details panel" aria-label="Collapse details panel"
             aria-expanded="true">
@@ -398,15 +400,21 @@
             </fieldset>          </section>
         </div>
 
-        <div id="view-logs" class="workspace-view workspace-placeholder" role="tabpanel"
-          aria-labelledby="btn-logs" hidden>
-          <h2>Logs</h2>
-          <div class="workspace-log-tabs" role="tablist" aria-label="Logs workspace">
+        <div id="view-operations" class="workspace-view workspace-placeholder" role="tabpanel"
+          aria-labelledby="btn-operations" hidden>
+          <h2>Operations</h2>
+          <div class="operations-tabs" role="tablist" aria-label="Operations">
+            <button id="btn-thread-network" type="button" role="tab" aria-selected="false"
+              aria-controls="workspace-thread-network-panel" tabindex="-1">Thread Network</button>
             <button id="btn-activity-log" class="active" type="button" role="tab"
-              aria-selected="true" aria-controls="workspace-log-panel">Logs</button>
+              aria-selected="true" aria-controls="workspace-log-panel" tabindex="0">Logs</button>
             <button id="btn-jobs" type="button" role="tab" aria-selected="false"
               aria-controls="workspace-jobs-panel" tabindex="-1">Jobs</button>
           </div>
+          <section id="workspace-thread-network-panel" role="tabpanel"
+            aria-labelledby="btn-thread-network" hidden>
+            <div id="thread-network-content" class="thread-network-content"></div>
+          </section>
           <section id="workspace-log-panel" role="tabpanel" aria-labelledby="btn-activity-log">
             <div class="workspace-log-actions">
               <button id="btn-clear-logs" type="button" title="Clear browser activity">Clear Logs</button>
@@ -580,10 +588,10 @@
           tabindex="-1" aria-label="Application settings view" title="Application settings view"><span
             class="workspace-navigation-tab-icon" aria-hidden="true">⛭</span><span
             class="workspace-navigation-tab-label">Settings</span></button>
-        <button id="btn-logs" type="button" role="tab" aria-selected="false" aria-controls="view-logs"
-          tabindex="-1" aria-label="Browser activity logs view" title="Browser activity logs view"><span
+        <button id="btn-operations" type="button" role="tab" aria-selected="false" aria-controls="view-operations"
+          tabindex="-1" aria-label="Operations view" title="Operations view"><span
             class="workspace-navigation-tab-icon" aria-hidden="true">📋</span><span
-            class="workspace-navigation-tab-label">Logs</span></button>
+            class="workspace-navigation-tab-label">Operations</span></button>
       </div>
     </nav>
   </div>

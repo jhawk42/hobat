@@ -245,6 +245,7 @@ def test_health_summary_projection_sort_counts_and_selection_reconciliation() ->
         projectHealthFindingDetail,
         projectHealthSummaryRows,
         reconcileHealthInsightsSelection,
+        toggleHealthFindingSelection,
       } from "./src/js/tdash-health.js";
       const finding = (findingId, overrides = {}) => ({
         findingId,
@@ -287,9 +288,36 @@ def test_health_summary_projection_sort_counts_and_selection_reconciliation() ->
       const actionable = projectHealthSummaryRows(groups);
       const all = projectHealthSummaryRows(groups, {view: "all"});
       const detail = projectHealthFindingDetail(groups[1], "finding-2");
+      const affectedGroup = {
+        ...groups[1],
+        findings: [
+          finding("affected-1", {
+            summary: "Device A has one observed parent", deviceIds: ["extaddr:1"],
+            endpoints: [{deviceId: "extaddr:1", displayName: "Device A"}],
+          }),
+          finding("affected-2", {
+            summary: "Summary", deviceIds: ["extaddr:2"],
+            endpoints: [{deviceId: "extaddr:2", displayName: "Device B"}],
+          }),
+          finding("affected-3", {
+            summary: "Repeated item summary", deviceIds: ["extaddr:3"],
+            endpoints: [{deviceId: "extaddr:3", displayName: "Device C"}],
+          }),
+          finding("affected-4", {
+            summary: "Repeated item summary", deviceIds: ["extaddr:4"],
+            endpoints: [{deviceId: "extaddr:4", displayName: "Device D"}],
+          }),
+        ],
+      };
+      const highlights = projectHealthFindingDetail(affectedGroup);
+      const selectedDetail = projectHealthFindingDetail(affectedGroup, "affected-2");
       const retained = reconcileHealthInsightsSelection({
         assessmentId: "old", selectedGroupId: "poor-link",
         selectedFindingId: "finding-2", detailsOpen: true,
+      }, {assessmentId: "new", findingGroups: groups});
+      const removedFinding = reconcileHealthInsightsSelection({
+        assessmentId: "old", selectedGroupId: "poor-link",
+        selectedFindingId: "removed-finding", detailsOpen: true,
       }, {assessmentId: "new", findingGroups: groups});
       const cleared = reconcileHealthInsightsSelection({
         selectedGroupId: "missing", selectedFindingId: "missing", detailsOpen: true,
@@ -298,7 +326,18 @@ def test_health_summary_projection_sort_counts_and_selection_reconciliation() ->
         actionable: actionable.map((row) => [row.groupId, row.affected.label]),
         all: all.map((row) => row.groupId),
         detail: [detail.affected.label, detail.items[0].isExpanded, detail.shared.action],
+        highlights: {
+          expanded: highlights.items.map(({isExpanded}) => isExpanded),
+          summaries: highlights.items.map(({highlightSummary}) => highlightSummary),
+          selected: selectedDetail.items.map(({isExpanded}) => isExpanded),
+        },
+        toggles: [
+          toggleHealthFindingSelection(null, "affected-1"),
+          toggleHealthFindingSelection("affected-1", "affected-1"),
+          toggleHealthFindingSelection("affected-1", "affected-2"),
+        ],
         retained,
+        removedFinding,
         cleared,
       }));
     """
@@ -317,13 +356,22 @@ def test_health_summary_projection_sort_counts_and_selection_reconciliation() ->
     ]
     assert result["all"] == ["poor-link", "moderate-device", "strong-network"]
     assert result["detail"] == ["2 relationships", True, "Act"]
+    assert result["highlights"]["expanded"] == [False, False, False, False]
+    assert result["highlights"]["summaries"] == [
+      "Device A has one observed parent", None, None, None,
+    ]
+    assert result["highlights"]["selected"] == [False, True, False, False]
+    assert result["toggles"] == ["affected-1", None, "affected-2"]
     assert result["retained"]["assessmentId"] == "new"
     assert result["retained"]["selectedFindingId"] == "finding-2"
+    assert result["removedFinding"]["selectedGroupId"] == "poor-link"
+    assert result["removedFinding"]["selectedFindingId"] is None
+    assert result["removedFinding"]["detailsOpen"] is True
     assert result["cleared"]["selectedGroupId"] is None
     assert result["cleared"]["detailsOpen"] is False
 
 
-def test_health_status_controls_keep_navigation_and_coloring_independent() -> None:
+def test_health_status_summary_is_informational_not_a_coloring_control() -> None:
     script = r'''
       import { renderHealthStatus } from "./src/js/tdash-health.js";
 
@@ -346,24 +394,18 @@ def test_health_status_controls_keep_navigation_and_coloring_independent() -> No
       globalThis.document = { createElement: (tagName) => new Element(tagName) };
 
       const container = new Element("div");
-      let openedInsights = 0;
       let toggledColoring = 0;
       renderHealthStatus(container, {
         assessment: {
           status: "Moderate", completeness: "complete", observedAt: "2026-09-18T00:00:00Z",
         },
         loading: false, error: "", refreshStatus: "", topologyColoringEnabled: false,
-      }, {
-        openInsights: () => { openedInsights += 1; },
-        toggleTopologyColoring: () => { toggledColoring += 1; },
       });
       const [heading, status] = container.children;
-      heading.click();
       status.click();
       console.log(JSON.stringify({
         heading: [heading.tagName, heading.textContent],
-        status: [status.tagName, status.textContent, status.attributes["aria-pressed"], status.attributes["aria-label"]],
-        openedInsights,
+        status: [status.tagName, status.textContent, status.className, status.attributes["aria-pressed"] ?? null],
         toggledColoring,
       }));
     '''
@@ -376,15 +418,14 @@ def test_health_status_controls_keep_navigation_and_coloring_independent() -> No
     )
 
     result = json.loads(completed.stdout)
-    assert result["heading"] == ["button", "Health:"]
+    assert result["heading"] == ["span", "Health:"]
     assert result["status"] == [
-        "button",
-        "Moderate (coloring off)",
-        "false",
-        "Moderate health; topology coloring off",
+      "span",
+      "Moderate",
+      "health-status-state state-moderate",
+      None,
     ]
-    assert result["openedInsights"] == 1
-    assert result["toggledColoring"] == 1
+    assert result["toggledColoring"] == 0
 
 
 def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
@@ -424,6 +465,7 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
       assert action in ui_js
     assert "restoreHealthNavigationContext" in ui_js
     assert "renderHealthFindingDetails" in ui_js
+    assert "toggleHealthFindingSelection" in ui_js
     assert "initContextDetailsPanel" in ui_js
     assert 'tableRow.addEventListener("click", () => actions.selectGroup?.(row.groupId));' in health_js
     assert 'aria-current", "true"' in health_js
@@ -432,12 +474,38 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert "Health: refreshing" in health_js
     assert "Health: failed" in health_js
     assert "Health: cancelled" in health_js
-    assert "healthTopologyColoringEnabled = false" in ui_js
-    assert "setTopologyHealthFindings(findings, healthTopologyColoringEnabled)" in ui_js
+    assert "HEALTH_COLORING_PREFERENCE_KEY" in ui_js
+    assert "healthColoringPreferenceSet" in ui_js
+    assert "enableHealthColoringOnFirstInsightsVisit" in ui_js
+    assert 'currentView !== "insights"' in ui_js
+    assert 'selectedFindingId = null;' in ui_js
+    assert "setTopologyHealthFindings(findings, healthTopologyColoringEnabled && matchingAssessment !== null)" in ui_js
     assert "applyHealthAssessmentPresentation(assessment)" in ui_js
     assert "applyHealthAssessmentPresentation(null)" in ui_js
-    assert "topologyColoringEnabled" in health_js
-    assert 'aria-pressed", String(coloringEnabled)' in health_js
+    assert "HEALTH_BACKGROUND_COLORS" in topology_js
+    assert "background: HEALTH_BACKGROUND_COLORS[status]" in topology_js
+    view_toolbar = html.split('<div class="view-toggle-bar">', 1)[1].split(
+      '<div id="view-status-line-panel"', 1,
+    )[0]
+    assert 'id="btn-health-coloring"' in view_toolbar
+    assert 'id="btn-health-columns"' in view_toolbar
+    assert "coloringButton.hidden = currentView !== \"topology\" || !healthEligible" in ui_js
+    assert "columnsButton.hidden = currentView !== \"table\" || !healthEligible" in ui_js
+    render_current_view_start = ui_js.index("function renderCurrentView(")
+    render_current_view_end = ui_js.index("function getPhysicsProfileSelect", render_current_view_start)
+    render_current_view = ui_js[render_current_view_start:render_current_view_end]
+    assert "updateHealthPresentationControls();" in render_current_view
+    assert 'aria-controls", detailId' in health_js
+    assert "details.hidden = !item.isExpanded;" in health_js
+    assert "health-affected-chevron" in health_js
+    detail_renderer = health_js[health_js.index("export function renderHealthFindingDetails"):]
+    assert detail_renderer.index('"health-finding-detail-summary"') < detail_renderer.index(
+      '"health-finding-detail-priority"'
+    )
+    assert detail_renderer.index('"Recommended action"') < detail_renderer.index('"Investigate"')
+    assert detail_renderer.index('"Investigate"') < detail_renderer.index('"Affected items"')
+    assert ".health-finding-detail-priority" in css
+    assert '.health-affected-select[aria-expanded="true"] .health-affected-chevron' in css
     assert '<option value="all" selected>All</option>' in html
     assert 'view: "all"' in ui_js
     assert 'healthInsightsViewState.view = "all";' in ui_js
@@ -452,7 +520,8 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert 'replace(/^extAddress:/, "extaddr:")' in table_js
     assert 'replace(/^extAddress:/, "extaddr:")' in topology_js
     assert "viewModel.rawByIdForDetails.get(nodeId)" in topology_js
-    assert '[...HEALTH_COLUMNS, ...TABLE_PRIORITY_COLUMNS]' in table_js
+    assert "visibleHealthColumns" in table_js
+    assert "setTableHealthColumnsEnabled" in table_js
     assert '"Dataset Evidence Pillars"' in health_js
     assert "COVERAGE_STATUS_GLYPHS" in health_js
     assert 'sufficient: "\\u2713"' in health_js
@@ -466,7 +535,10 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert ".health-coverage-state.state-sufficient" in css
     assert ".health-coverage-state.state-limited" in css
     assert ".health-coverage-state.state-missing" in css
-    assert ".health-status-button" in css
-    assert ".health-status-navigation" in css
+    assert ".health-status-button" not in css
+    assert ".health-status-navigation" not in css
+    assert 'id="btn-health-coloring"' in html
+    assert 'id="btn-health-columns"' in html
+    assert 'aria-pressed="false"' in html
     assert "overflow-wrap: anywhere" in css
     assert "@media (max-width: 760px)" in css

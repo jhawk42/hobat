@@ -32,12 +32,12 @@ BEHAVIOR_IDS = (
     "btn-table",
     "btn-insights",
     "btn-settings",
-    "btn-logs",
+    "btn-operations",
     "view-topology",
     "view-table",
     "view-insights",
     "view-settings",
-    "view-logs",
+    "view-operations",
     "device-details",
     "btn-details-panel-toggle",
     "chk-auto-view",
@@ -150,7 +150,7 @@ def test_semantic_layout_and_workspace_hierarchy() -> None:
     assert parser.parent_by_id["view-table"] == "panel-view"
     assert parser.parent_by_id["view-insights"] == "panel-view"
     assert parser.parent_by_id["view-settings"] == "panel-view"
-    assert parser.parent_by_id["view-logs"] == "panel-view"
+    assert parser.parent_by_id["view-operations"] == "panel-view"
     assert parser.parent_by_id["btn-more-info"] == "panel-view"
     assert parser.parent_by_id["chk-auto-view"] == "overview-settings-section"
     assert parser.parent_by_id["device-details"] == "panel-context-details"
@@ -164,7 +164,7 @@ def test_workspace_switch_registry_owns_all_five_views() -> None:
     switch_end = ui_text.index("// ── Physics toggle", registry_start)
     switch_source = ui_text[registry_start:switch_end]
 
-    for view in ("topology", "table", "insights", "settings", "logs"):
+    for view in ("topology", "table", "insights", "settings", "operations"):
         assert f'view: "{view}"' in switch_source
     assert "panelEl.hidden = !isActive;" in switch_source
     assert 'buttonEl.setAttribute("aria-selected", String(isActive));' in switch_source
@@ -206,13 +206,15 @@ def test_workspace_lifecycle_and_activity_contract() -> None:
     assert "response.headers" not in ui_text[ui_text.index("function renderWorkspaceLogs"):ui_text.index("export function getSearchQuery")]
 
 
-def test_logs_workspace_exposes_activity_and_jobs_tabs() -> None:
+def test_operations_workspace_exposes_activity_and_jobs_tabs() -> None:
     html = _read_text(HTML)
     ui_text = _read_text(UI_JS)
 
     for element_id in (
+        "btn-thread-network",
         "btn-activity-log",
         "btn-jobs",
+        "workspace-thread-network-panel",
         "workspace-log-panel",
         "workspace-jobs-panel",
         "btn-clear-logs",
@@ -221,7 +223,10 @@ def test_logs_workspace_exposes_activity_and_jobs_tabs() -> None:
         "workspace-jobs-content",
     ):
         assert f'id="{element_id}"' in html
-    assert 'role="tablist" aria-label="Logs workspace"' in html
+    assert 'role="tablist" aria-label="Operations"' in html
+    assert '["thread-network", "btn-thread-network", "workspace-thread-network-panel"]' in ui_text
+    assert '["logs", "btn-activity-log", "workspace-log-panel"]' in ui_text
+    assert '["jobs", "btn-jobs", "workspace-jobs-panel"]' in ui_text
     assert 'aria-controls="workspace-log-panel"' in html
     assert 'aria-controls="workspace-jobs-panel"' in html
     assert 'trackedFetch("/api/jobs"' in ui_text

@@ -381,7 +381,7 @@ export function formatAge(timestamp, parsedTimestamp = Date.parse(timestamp)) {
   return `${value} ${label}${value === 1 ? "" : "s"} ago`;
 }
 
-export function renderHealthStatus(container, model, actions = {}) {
+export function renderHealthStatus(container, model) {
   if (!container) return;
   container.replaceChildren();
   const isRefreshing = ["running", "cancelling"].includes(model.refreshStatus);
@@ -412,23 +412,13 @@ export function renderHealthStatus(container, model, actions = {}) {
     appendText(container, "span", "Health: unavailable", "health-status-state");
     return;
   }
-  const heading = appendText(container, "button", "Health:", "health-status-button health-status-navigation");
-  heading.type = "button";
-  heading.addEventListener("click", () => actions.openInsights?.());
-  const coloringEnabled = model.topologyColoringEnabled === true;
-  const statusButton = appendText(
+  appendText(container, "span", "Health:", "health-status-label");
+  appendText(
     container,
-    "button",
-    `${status} (coloring ${coloringEnabled ? "on" : "off"})`,
-    `health-status-button health-status-state state-${status.toLowerCase()}`,
+    "span",
+    status,
+    `health-status-state state-${status.toLowerCase()}`,
   );
-  statusButton.type = "button";
-  statusButton.setAttribute("aria-pressed", String(coloringEnabled));
-  statusButton.setAttribute(
-    "aria-label",
-    `${status} health; topology coloring ${coloringEnabled ? "on" : "off"}`,
-  );
-  statusButton.addEventListener("click", () => actions.toggleTopologyColoring?.());
   appendText(container, "span", assessment.completeness, "health-status-detail");
   const displayedAt = model.refreshedAt ?? assessment.observedAt;
   const parsedDisplayedAt = Date.parse(displayedAt);
@@ -571,11 +561,19 @@ export function projectHealthFindingDetail(group, selectedFindingId = null) {
   if (!projectVisibleHealthFindingGroups([group]).length) return null;
   const findings = group.findings || [];
   const row = projectHealthSummaryRows([group], { view: "all" })[0];
+  const summary = findingSummary(group);
+  const findingSummaryCounts = new Map();
+  findings.forEach((finding) => {
+    const findingSummaryText = typeof finding.summary === "string" ? finding.summary.trim() : "";
+    if (findingSummaryText) {
+      findingSummaryCounts.set(findingSummaryText, (findingSummaryCounts.get(findingSummaryText) || 0) + 1);
+    }
+  });
   return {
     groupId: group.groupId,
     heading: group.title,
     status: group.status,
-    summary: findingSummary(group),
+    summary,
     scope: group.scope,
     confidence: group.confidence,
     evidenceLabel: row.evidenceLabel,
@@ -587,19 +585,31 @@ export function projectHealthFindingDetail(group, selectedFindingId = null) {
       verify: sharedFindingValue(findings, "verify"),
       sourceFiles: uniqueValues(findings.flatMap((finding) => finding.sourceFiles || [])).sort(),
     },
-    items: findings.map((finding) => ({
-      findingId: finding.findingId,
-      label: finding.endpoints?.map(
-        ({ deviceId, displayName }) => displayName || deviceId.replace(/^extaddr:/, ""),
-      ).join(", ") || finding.summary,
-      endpointIds: [...(finding.deviceIds || [])],
-      relationshipIds: [...(finding.relationshipIds || [])],
-      evidenceRows: Object.entries(finding.evidence || {})
-        .filter(([key]) => !["evidenceKind", "materiality", "presentationVariant"].includes(key)),
-      isExpanded: finding.findingId === selectedFindingId,
-      finding,
-    })),
+    items: findings.map((finding) => {
+      const findingSummaryText = typeof finding.summary === "string" ? finding.summary.trim() : "";
+      return {
+        findingId: finding.findingId,
+        label: finding.endpoints?.map(
+          ({ deviceId, displayName }) => displayName || deviceId.replace(/^extaddr:/, ""),
+        ).join(", ") || findingSummaryText,
+        highlightSummary: findingSummaryText
+          && findingSummaryText !== summary
+          && findingSummaryCounts.get(findingSummaryText) === 1
+          ? findingSummaryText
+          : null,
+        endpointIds: [...(finding.deviceIds || [])],
+        relationshipIds: [...(finding.relationshipIds || [])],
+        evidenceRows: Object.entries(finding.evidence || {})
+          .filter(([key]) => !["evidenceKind", "materiality", "presentationVariant"].includes(key)),
+        isExpanded: finding.findingId === selectedFindingId,
+        finding,
+      };
+    }),
   };
+}
+
+export function toggleHealthFindingSelection(selectedFindingId, findingId) {
+  return selectedFindingId === findingId ? null : findingId;
 }
 
 export function reconcileHealthInsightsSelection(viewState, assessment) {
@@ -960,31 +970,45 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
   }
 
   appendText(container, "p", model.summary, "health-finding-detail-summary");
+  const priority = document.createElement("div");
+  priority.className = "health-finding-detail-priority";
+  const statusClass = String(model.status || "").toLowerCase().replace(/[^a-z0-9-]/g, "");
+  appendText(priority, "span", model.status, `health-finding-detail-status state-${statusClass}`);
+  appendText(priority, "span", model.affected.label, "health-finding-detail-count");
+  container.appendChild(priority);
+
   const metadata = document.createElement("div");
   metadata.className = "health-finding-detail-meta";
-  [model.status, model.affected.label, model.scope, `${model.confidence} confidence`,
-    model.evidenceLabel, model.materialityLabel].forEach((value) => appendText(metadata, "span", value));
+  [model.scope, `${model.confidence} confidence`, model.evidenceLabel, model.materialityLabel]
+    .filter(Boolean)
+    .forEach((value) => appendText(metadata, "span", value));
   container.appendChild(metadata);
-
-  const actionBar = document.createElement("div");
-  actionBar.className = "health-finding-actions";
-  appendDetailAction(actionBar, "Show in topology", () => actions.showTopology?.(model.groupId),
-    actions.availableTargets > 0);
-  appendDetailAction(actionBar, "Show in table", () => actions.showTable?.(model.groupId),
-    actions.availableTargets > 0);
-  appendDetailAction(actionBar, "Inspect device", () => actions.inspectDevice?.(
-    model.items[0]?.endpointIds[0], model.items[0]?.findingId,
-  ), actions.groupDeviceCount === 1 && actions.availableTargets === 1);
-  appendDetailAction(actionBar, "Compare endpoints", () => actions.compareEndpoints?.(model.groupId),
-    actions.groupDeviceCount === 2 && actions.availableTargets === 2);
-  appendDetailAction(actionBar, "Apply related filter", () => actions.applyFilter?.(model.groupId));
-  container.appendChild(actionBar);
 
   appendSharedDetailSection(
     container,
     "Why it matters",
     model.shared.whyItMatters || "Varies by affected item.",
   );
+
+  appendSharedDetailSection(container, "Recommended action", model.shared.action || "Varies by affected item.");
+  appendSharedDetailSection(container, "Verify", model.shared.verify || "Varies by affected item.");
+
+  const investigation = document.createElement("section");
+  investigation.className = "health-finding-detail-section health-finding-investigation";
+  appendText(investigation, "h3", "Investigate");
+  const actionBar = document.createElement("div");
+  actionBar.className = "health-finding-actions";
+  appendDetailAction(actionBar, "Show in topology", () => actions.showTopology?.(model.groupId),
+    actions.availableTargets > 0);
+  appendDetailAction(actionBar, "Show in table", () => actions.showTable?.(model.groupId),
+    actions.availableTargets > 0);
+  appendDetailAction(actionBar, "Compare endpoints", () => actions.compareEndpoints?.(model.groupId),
+    actions.groupDeviceCount === 2 && actions.availableTargets === 2);
+  appendDetailAction(actionBar, "Apply related filter", () => actions.applyFilter?.(model.groupId));
+  if (actionBar.childNodes.length > 0) {
+    investigation.appendChild(actionBar);
+    container.appendChild(investigation);
+  }
 
   const affectedSection = document.createElement("section");
   affectedSection.className = "health-finding-detail-section";
@@ -994,11 +1018,33 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
   model.items.forEach((item) => {
     const listItem = document.createElement("li");
     listItem.className = "health-affected-item";
-    const selectButton = appendText(listItem, "button", item.label, "health-affected-select");
+    const selectButton = document.createElement("button");
+    selectButton.className = "health-affected-select";
     selectButton.type = "button";
     selectButton.dataset.findingId = item.findingId;
     selectButton.setAttribute("aria-expanded", String(item.isExpanded));
+    const detailId = `health-affected-details-${encodeURIComponent(item.findingId)}`;
+    selectButton.setAttribute("aria-controls", detailId);
+    selectButton.setAttribute("aria-label", item.highlightSummary
+      ? `${item.label}. ${item.highlightSummary}`
+      : item.label);
     selectButton.addEventListener("click", () => actions.selectFinding?.(item.findingId));
+
+    const buttonCopy = document.createElement("span");
+    buttonCopy.className = "health-affected-copy";
+    appendText(buttonCopy, "span", item.label, "health-affected-label");
+    if (item.highlightSummary) {
+      appendText(buttonCopy, "span", item.highlightSummary, "health-affected-summary");
+    }
+    selectButton.appendChild(buttonCopy);
+    const chevron = appendText(selectButton, "span", "", "health-affected-chevron");
+    chevron.setAttribute("aria-hidden", "true");
+    listItem.appendChild(selectButton);
+
+    const details = document.createElement("div");
+    details.id = detailId;
+    details.className = "health-affected-details";
+    details.hidden = !item.isExpanded;
     if (item.isExpanded) {
       const evidence = document.createElement("dl");
       evidence.className = "health-finding-evidence health-affected-evidence";
@@ -1006,23 +1052,28 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
         appendText(evidence, "dt", evidenceLabel(key));
         appendText(evidence, "dd", formatEvidenceValue(value));
       });
-      listItem.appendChild(evidence);
-      if (!model.shared.whyItMatters) appendText(listItem, "p", item.finding.whyItMatters);
-      if (!model.shared.action) appendText(listItem, "p", `Action: ${item.finding.action}`);
-      if (!model.shared.verify) appendText(listItem, "p", `Verify: ${item.finding.verify}`);
+      details.appendChild(evidence);
+      if (!model.shared.whyItMatters && item.finding.whyItMatters) {
+        appendText(details, "p", `Why it matters: ${item.finding.whyItMatters}`);
+      }
+      if (!model.shared.action && item.finding.action) {
+        appendText(details, "p", `Action: ${item.finding.action}`);
+      }
+      if (!model.shared.verify && item.finding.verify) {
+        appendText(details, "p", `Verify: ${item.finding.verify}`);
+      }
       if (item.endpointIds.length === 1 && actions.inspectableDeviceIds?.has(item.endpointIds[0])) {
-        appendDetailAction(listItem, "Inspect device", () => actions.inspectDevice?.(
+        appendDetailAction(details, "Inspect device", () => actions.inspectDevice?.(
           item.endpointIds[0], item.findingId,
         ));
       }
     }
+    listItem.appendChild(details);
     list.appendChild(listItem);
   });
   affectedSection.appendChild(list);
   container.appendChild(affectedSection);
 
-  appendSharedDetailSection(container, "Recommended action", model.shared.action || "Varies by affected item.");
-  appendSharedDetailSection(container, "Verify", model.shared.verify || "Varies by affected item.");
   if (model.shared.sourceFiles.length > 0) {
     appendSharedDetailSection(container, "Sources", model.shared.sourceFiles.join(", "));
   }

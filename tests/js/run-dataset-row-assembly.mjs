@@ -12,6 +12,7 @@ import {
 import {
   ROW_EXTRACTORS,
   buildDatasetRows,
+  getDatasetAuxiliaryFiles,
 } from "../../src/js/tdash-dataset.js";
 import { ADAPTOR_HANDLERS } from "../../src/js/tdash-adaptors.js";
 
@@ -56,6 +57,13 @@ function representativeArrivalOrders(fileIndexes) {
 }
 
 assert.deepEqual(ROW_EXTRACTORS["raw-array"]([{ id: 1 }]), [{ id: 1 }]);
+const otbrCliEntry = DATASET_REGISTRY.find((entry) => entry.source === "otbr-cli");
+assert.deepEqual(getDatasetAuxiliaryFiles(otbrCliEntry), ["td-otbr-cli-thread-network-info.json"]);
+const otbrRestEntry = DATASET_REGISTRY.find((entry) => entry.source === "otbr-restapi");
+assert.deepEqual(getDatasetAuxiliaryFiles(otbrRestEntry), ["td-otbr-restapi-dataset-active.json"]);
+assert.deepEqual(getDatasetAuxiliaryFiles(entry({ source: "system" })), []);
+assert.equal(otbrCliEntry.files.includes("td-otbr-cli-thread-network-info.json"), false);
+assert.equal(otbrRestEntry.files.includes("td-otbr-restapi-dataset-active.json"), false);
 assert.deepEqual(ROW_EXTRACTORS["raw-array"]({ metadata: true }), []);
 assert.deepEqual(ROW_EXTRACTORS["eve-native"]({ nodes: [{ id: 1 }] }), [{ id: 1 }]);
 assert.deepEqual(ROW_EXTRACTORS["eve-native"]([{ id: 1 }]), [{ id: 1 }]);
