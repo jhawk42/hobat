@@ -708,6 +708,7 @@ function renderCurrentView({ force = false } = {}) {
       effectiveDataset.rows,
       adaptorResult,
     ).rows;
+    populateTableColumnCategories(tableRows);
     renderTableForDataset({ ...effectiveDataset, rows: tableRows }, currentDataset);
     updateDeviceStatusBar(computeRowCounts(currentDataset.rows));
   }
@@ -1059,7 +1060,7 @@ function populateTableColumnCategories(rows) {
     .some((option) => option.value === selectedCategory);
   const nextCategory = categoryIsAvailable ? selectedCategory : "all";
   tableColumnCategoryEl.value = nextCategory;
-  setTableColumnCategory(nextCategory);
+  setTableColumnCategory(nextCategory, rows);
 }
 
 if (tableColumnCategoryEl) {
@@ -3421,7 +3422,6 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     const tableColumnCategoryEl = document.getElementById("table-column-category");
     if (tableColumnCategoryEl) tableColumnCategoryEl.value = "all";
     setTableColumnCategory("all");
-    populateTableColumnCategories(currentDataset.rows);
 
   // Final reconciliation render: all files settled, isPartial is false.
   try {

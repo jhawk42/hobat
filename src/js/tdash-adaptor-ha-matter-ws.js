@@ -28,6 +28,7 @@ import {
   emitAdaptorResult,
   registerDetails,
   registerDevice,
+  registerRelationshipCapability,
   registerRelationship,
   registerRouterChildRows,
   registerRouterNeighborRows,
@@ -386,6 +387,9 @@ export function adaptHaMatterWsNetworkTopology(fileMap) {
   const wrapper = fileMap.values().next().value;
   const topology = isPlainObject(wrapper?.topology) ? wrapper.topology : {};
   const model = createAdaptorModel(['ha-matter-ws-network-topology']);
+  if (Array.isArray(topology.connections)) {
+    registerRelationshipCapability(model, "nativeTopologyConnections");
+  }
 
   asArray(topology.nodes).forEach((node) => {
     if (!isPlainObject(node)) return;
@@ -487,6 +491,9 @@ export function adaptHaMatterWsMergeTopology(fileMap, extractedRows) {
   const model = createAdaptorModelFromResult(baseResult);
   const topology = fileMap.get('td-ha-matter-ws-network-topology.json')?.topology;
   if (!isPlainObject(topology)) return emitAdaptorResult(model);
+  if (Array.isArray(topology.connections)) {
+    registerRelationshipCapability(model, "nativeTopologyConnections");
+  }
 
   const nativeIds = new Map();
   asArray(topology.nodes).forEach((node) => {

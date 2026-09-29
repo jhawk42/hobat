@@ -6,7 +6,12 @@ import {
   extractOtbrRestApiSources,
   runAdaptor,
 } from "../../src/js/tdash-adaptors.js";
-import { projectObservedTopologyLinkCounts } from "../../src/js/tdash-adaptor-model.js";
+import {
+  createAdaptorModelFromResult,
+  emitAdaptorResult,
+  projectObservedTopologyLinkCounts,
+} from "../../src/js/tdash-adaptor-model.js";
+import { emitThroughAdaptorModel } from "../../src/js/tdash-adaptor-shared.js";
 import { getPreferredFieldPath } from "../../src/js/tdash-device-fields.js";
 
 if (process.argv.includes("--snapshot") && !process.argv.includes("--write-baseline")) {
@@ -572,6 +577,7 @@ const nativeTopologyProjection = projectObservedTopologyLinkCounts(
   nativeTopologyPayload.topology.nodes,
   nativeTopology,
 );
+assert.ok(nativeTopology.relationshipCapabilities.datasetWide.has("nativeTopologyConnections"));
 assert.deepEqual(
   [
     nativeTopologyProjection.rows[0].observedTopologyLinks,
@@ -607,6 +613,19 @@ const mergedHaMatterProjection = projectObservedTopologyLinkCounts(
   mergedHaMatterTopology,
 );
 assert.equal(mergedHaMatterProjection.rows[0].observedTopologyLinks, 3);
+assert.ok(mergedHaMatterTopology.relationshipCapabilities.datasetWide.has("nativeTopologyConnections"));
+
+const nativeTopologyModelRoundTrip = emitAdaptorResult(
+  createAdaptorModelFromResult(nativeTopology),
+);
+assert.ok(nativeTopologyModelRoundTrip.relationshipCapabilities.datasetWide.has("nativeTopologyConnections"));
+const nativeTopologyWrapperRoundTrip = emitThroughAdaptorModel({
+  ...nativeTopology,
+  nodeData: nativeTopology.nodeData.map((node) => ({ ...node })),
+  nodeMap: new Map(nativeTopology.nodeMap),
+  rawByIdForDetails: new Map(nativeTopology.rawByIdForDetails),
+});
+assert.ok(nativeTopologyWrapperRoundTrip.relationshipCapabilities.datasetWide.has("nativeTopologyConnections"));
 
 const devicesEnvelope = { data: [
   { id: "device-a", attributes: { extAddress: "aa00112233445566", hostName: "Device A", role: "router" } },
@@ -666,11 +685,15 @@ const projectedCounts = projectObservedTopologyLinkCounts([
   ]),
   rawByIdForDetails: new Map(),
   edgeData: [
-    { id: "route-a-b", from: "a", to: "b", lqLevel: 3 },
-    { id: "parallel-a-b", from: "a", to: "b", lqLevel: 1 },
-    { id: "reverse-b-a", from: "b", to: "a", lqLevel: 2 },
-    { id: "route-a-b", from: "a", to: "b", lqLevel: 3 },
+    { id: "route-a-b", from: "a", to: "b", lqLevel: 3, linkCategories: ["router_neighbor"] },
+    { id: "parallel-a-b", from: "a", to: "b", lqLevel: 1, linkCategories: ["router_neighbor"] },
+    { id: "reverse-b-a", from: "b", to: "a", lqLevel: 2, linkCategories: ["router_neighbor"] },
+    { id: "route-a-b", from: "a", to: "b", lqLevel: 3, linkCategories: ["router_neighbor"] },
   ],
+  relationshipCapabilities: {
+    datasetWide: new Set(["routerNeighbors"]),
+    byDeviceId: new Map(),
+  },
 });
 assert.equal(projectedCounts.hasRelationshipEvidence, true);
 assert.equal(projectedCounts.rows[0].totalLinks, 99);
@@ -693,11 +716,124 @@ assert.deepEqual(
 assert.equal("observedTopologyLinks" in projectedCounts.rows[3], false);
 
 const noEvidenceProjection = projectObservedTopologyLinkCounts(
-  [{ extAddress: "aa00112233445566" }],
-  { edgeData: [], nodeData: [{ id: "a" }], nodeMap: new Map([["a", { extAddress: "aa00112233445566" }]]) },
+  [{
+    extAddress: "aa00112233445566",
+    observedTopologyLinks: 7,
+    observedTopologyLinksLq3: 3,
+    observedTopologyLinksLq2: 2,
+    observedTopologyLinksLq1: 2,
+  }],
+  {
+    edgeData: [],
+    nodeData: [{ id: "a" }],
+    nodeMap: new Map([["a", { extAddress: "aa00112233445566" }]]),
+  },
 );
 assert.equal(noEvidenceProjection.hasRelationshipEvidence, false);
+assert.equal(noEvidenceProjection.hasRelationshipCapability, false);
 assert.equal("observedTopologyLinks" in noEvidenceProjection.rows[0], false);
+assert.equal("observedTopologyLinksLq3" in noEvidenceProjection.rows[0], false);
+assert.equal("observedTopologyLinksLq2" in noEvidenceProjection.rows[0], false);
+assert.equal("observedTopologyLinksLq1" in noEvidenceProjection.rows[0], false);
+
+const layoutAnchorProjection = projectObservedTopologyLinkCounts([
+  { extAddress: "aa00112233445566" },
+  { extAddress: "bb00112233445566" },
+], {
+  nodeData: [{ id: "a" }, { id: "b" }],
+  nodeMap: new Map([
+    ["a", { extAddress: "aa00112233445566" }],
+    ["b", { extAddress: "bb00112233445566" }],
+  ]),
+  edgeData: [{ id: "layout-anchor", from: "a", to: "b", hidden: true, linkCategories: [] }],
+  relationshipCapabilities: {
+    datasetWide: new Set(["children"]),
+    byDeviceId: new Map(),
+  },
+});
+assert.equal(layoutAnchorProjection.hasRelationshipEvidence, false);
+assert.deepEqual(
+  layoutAnchorProjection.rows.map((row) => row.observedTopologyLinks),
+  [0, 0],
+);
+
+const routerTableWithNextHop = run("router-table", ["td-otbr-cli-router-table.json"], [[
+  { rloc16: "0x0400", extAddress: "aa00112233445566", nextHop: "2" },
+  { rloc16: "0x0800", extAddress: "bb00112233445566", nextHop: "1" },
+]]);
+assert.equal(routerTableWithNextHop.edgeData.length, 1);
+const routerTableProjection = projectObservedTopologyLinkCounts(
+  [
+    { rloc16: "0x0400", extAddress: "aa00112233445566" },
+    { rloc16: "0x0800", extAddress: "bb00112233445566" },
+  ],
+  routerTableWithNextHop,
+);
+assert.equal(routerTableProjection.hasRelationshipCapability, false);
+assert.equal(routerTableProjection.rows.some((row) => "observedTopologyLinks" in row), false);
+
+const mdnsScopeRows = run("raw-array", ["td-mdns-scopes-thread.json"], [[
+  { recordKey: "_meshcop._udp.local.|Border Router", scope: "_meshcop._udp.local.", name: "Border Router" },
+]]);
+const mdnsScopeProjection = projectObservedTopologyLinkCounts(mdnsScopeRows.rawByIdForDetails.values(), mdnsScopeRows);
+assert.equal(mdnsScopeProjection.hasRelationshipCapability, false);
+
+const rawArrayEmptyChildren = run("raw-array", ["relationship-rows.json"], [[
+  { extAddress: "cc00112233445566", children: [] },
+]]);
+const rawArrayEmptyProjection = projectObservedTopologyLinkCounts(
+  [{ extAddress: "cc00112233445566" }],
+  rawArrayEmptyChildren,
+);
+assert.equal(rawArrayEmptyProjection.hasRelationshipCapability, true);
+assert.equal(rawArrayEmptyProjection.rows[0].observedTopologyLinks, 0);
+assert.equal(rawArrayEmptyProjection.rows[0].observedTopologyLinksLq3, 0);
+const rawArrayRoundTrip = emitAdaptorResult(createAdaptorModelFromResult(rawArrayEmptyChildren));
+assert.equal(rawArrayRoundTrip.relationshipCapabilities.byDeviceId.size, 1);
+
+const failedEmptyRelationships = run("raw-array", ["failed-relationships.json"], [[
+  { extAddress: "dd00112233445566", children: [], tableAttempt: { status: "timeout" } },
+  { extAddress: "ee00112233445566", routes: [], error: { type: "CollectionFailed" } },
+]]);
+const failedEmptyProjection = projectObservedTopologyLinkCounts(
+  [
+    { extAddress: "dd00112233445566" },
+    { extAddress: "ee00112233445566" },
+  ],
+  failedEmptyRelationships,
+);
+assert.equal(failedEmptyProjection.hasRelationshipCapability, false);
+assert.equal(failedEmptyProjection.rows.some((row) => "observedTopologyLinks" in row), false);
+
+const missingRawArray = run("raw-array", ["missing.json"], [null]);
+const loadedEmptyRawArray = run("raw-array", ["empty.json"], [[]]);
+assert.equal(missingRawArray.relationshipCapabilities.byDeviceId.size, 0);
+assert.equal(loadedEmptyRawArray.relationshipCapabilities.byDeviceId.size, 0);
+
+function projectPerRouterNeighborTable(tableAttempt) {
+  const result = run(
+    "meshdiag-networkdiag",
+    ["td-otbr-cli-meshdiag-topology.json", "td-otbr-cli-meshdiag-router-neighbortables.json"],
+    [[{ rloc16: "0x1000", extAddress: "dd00112233445566", role: "router" }], [{
+      rloc16: "0x1000",
+      router_neighbor_table: [],
+      tableAttempt,
+    }]],
+  );
+  return projectObservedTopologyLinkCounts(
+    [{ rloc16: "0x1000", extAddress: "dd00112233445566" }],
+    result,
+  );
+}
+
+const successfulEmptyNeighborTable = projectPerRouterNeighborTable({ status: "success" });
+assert.equal(successfulEmptyNeighborTable.hasRelationshipCapability, true);
+assert.equal(successfulEmptyNeighborTable.rows[0].observedTopologyLinks, 0);
+for (const status of ["timeout", "error", "protocol-error"]) {
+  const failedEmptyNeighborTable = projectPerRouterNeighborTable({ status });
+  assert.equal(failedEmptyNeighborTable.hasRelationshipCapability, false);
+  assert.equal("observedTopologyLinks" in failedEmptyNeighborTable.rows[0], false);
+}
 
 assert.deepEqual(extractOtbrRestApiItems({ extAddress: "AA", attributes: { role: "router" } }), [
   { extAddress: "AA", attributes: { role: "router" }, role: "router" },

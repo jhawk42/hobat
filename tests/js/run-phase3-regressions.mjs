@@ -11,6 +11,7 @@ import {
 } from "../../src/js/tdash-table-renderer.js";
 import { DEVICE_DETAILS_SECTIONS, NODE_FILTER_OPTIONS, NODE_SHAPES, TABLE_PRIORITY_COLUMNS } from "../../src/js/tdash-constants.js";
 import { getColumnValue } from "../../src/js/tdash-utils.js";
+import { projectObservedTopologyLinkCounts } from "../../src/js/tdash-adaptor-model.js";
 import { buildVisNodeData } from "../../src/js/tdash-topology-utils.js";
 import { SEARCH_TARGET_FIELDS, parseSearchQuery, rowMatchesSearch } from "../../src/js/tdash-search.js";
 
@@ -110,6 +111,47 @@ assert.deepEqual(
   ["matter-list"],
 );
 assert.deepEqual(getTableColumnCategories([]), []);
+const supportedEmptyTableProjection = projectObservedTopologyLinkCounts(
+  [{ extAddress: "aa00112233445566" }],
+  {
+    edgeData: [],
+    nodeData: [{ id: "device-a" }],
+    nodeMap: new Map([["device-a", { extAddress: "aa00112233445566" }]]),
+    relationshipCapabilities: {
+      datasetWide: new Set(["children"]),
+      byDeviceId: new Map(),
+    },
+  },
+);
+assert.deepEqual(
+  getTableColumnCategories(supportedEmptyTableProjection.rows).map(({ value }) => value),
+  ["identity-list", "connections-list"],
+);
+assert.deepEqual(
+  getTableColumnsForCategory(supportedEmptyTableProjection.rows, "connections-list"),
+  [
+    "extAddress",
+    "observedTopologyLinks",
+    "observedTopologyLinksLq3",
+    "observedTopologyLinksLq2",
+    "observedTopologyLinksLq1",
+  ],
+);
+const unsupportedLinkProjection = projectObservedTopologyLinkCounts(
+  [{ extAddress: "aa00112233445566", observedTopologyLinks: 4 }],
+  {
+    edgeData: [{ id: "unqualified-edge", from: "device-a", to: "device-b" }],
+    nodeData: [{ id: "device-a" }, { id: "device-b" }],
+    nodeMap: new Map([
+      ["device-a", { extAddress: "aa00112233445566" }],
+      ["device-b", { extAddress: "bb00112233445566" }],
+    ]),
+  },
+);
+assert.deepEqual(
+  getTableColumnCategories(unsupportedLinkProjection.rows).map(({ value }) => value),
+  ["identity-list"],
+);
 assert.deepEqual(
   getTableColumnsForCategory(
     [{ rloc16: "0x1234", extAddress: "0011223344556677", deviceLabel: "Desk Light", matter: { nodeId: 123, serialNumber: "SN-1", matterVersion: "1.4.1", lastInterview: "2026-08-02T10:30:00Z" }, deviceTypes: ["0x0302"], room: "Lab" }],

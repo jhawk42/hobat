@@ -70,8 +70,8 @@ export function getTableColumnCategories(rows = []) {
     .map((section) => ({ value: section.sectionId, label: categoryLabel(section.sectionId) }));
 }
 
-export function setTableColumnCategory(category) {
-  _tableColumnCategory = category === "all" || getTableColumnCategories(_tableRows)
+export function setTableColumnCategory(category, rows = _tableRows) {
+  _tableColumnCategory = category === "all" || getTableColumnCategories(rows)
     .some(({ value }) => value === category)
     ? category
     : "all";

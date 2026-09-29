@@ -9,6 +9,97 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const OBSERVED_TOPOLOGY_LINK_FIELDS = [
+  "observedTopologyLinks",
+  "observedTopologyLinksLq3",
+  "observedTopologyLinksLq2",
+  "observedTopologyLinksLq1",
+];
+
+const RELATIONSHIP_COLLECTIONS = [
+  { family: "routes", path: ["route", "routeData"] },
+  { family: "routes", path: ["routes"] },
+  { family: "routes", path: ["routeTable"] },
+  { family: "routerNeighbors", path: ["routerNeighbors"], tableSource: "routerneighbortables" },
+  { family: "routerNeighbors", path: ["neighborTable"] },
+  { family: "children", path: ["children"] },
+  { family: "childTable", path: ["childTable"], tableSource: "routerchildtables" },
+  { family: "linkTables", path: ["links1"] },
+  { family: "linkTables", path: ["links2"] },
+  { family: "linkTables", path: ["links3"] },
+];
+
+function getNestedValue(record, path) {
+  return path.reduce(
+    (value, key) => isPlainObject(value) ? value[key] : undefined,
+    record,
+  );
+}
+
+function hasErrorEnvelope(record) {
+  return isPlainObject(record.error) || isPlainObject(record._error);
+}
+
+function relationshipCollectionIsSupported(model, record, definition, value) {
+  if (!Array.isArray(value)) return false;
+  if (!definition.tableSource) {
+    if (isPlainObject(record.tableAttempt)) {
+      return record.tableAttempt.status === "success";
+    }
+    return !hasErrorEnvelope(record);
+  }
+
+  if (isPlainObject(record.tableAttempt)) {
+    return record.tableAttempt.status === "success";
+  }
+  if (hasErrorEnvelope(record)) return false;
+  if (value.length > 0) return true;
+
+  return !model.sourceNames.includes(definition.tableSource);
+}
+
+function relationshipFamiliesForRecord(model, record) {
+  const families = new Set();
+  RELATIONSHIP_COLLECTIONS.forEach((definition) => {
+    const value = getNestedValue(record, definition.path);
+    if (relationshipCollectionIsSupported(model, record, definition, value)) {
+      families.add(definition.family);
+    }
+  });
+  return families;
+}
+
+function cloneRelationshipCapabilities(capabilities) {
+  return {
+    datasetWide: new Set(capabilities?.datasetWide ?? []),
+    byDeviceId: new Map(
+      [...(capabilities?.byDeviceId ?? new Map())]
+        .map(([deviceId, families]) => [deviceId, new Set(families)]),
+    ),
+  };
+}
+
+function registerIndexedTableCapabilities(model, tableIndex, family) {
+  if (!(tableIndex instanceof Map)) return;
+  tableIndex.forEach((record, ownerRloc16) => {
+    if (!isPlainObject(record)) return;
+    const canonicalRecord = normalizeInputRecord(record);
+    const definition = RELATIONSHIP_COLLECTIONS.find((candidate) => candidate.family === family
+      && candidate.tableSource);
+    if (!definition || !relationshipCollectionIsSupported(
+      model,
+      canonicalRecord,
+      definition,
+      getNestedValue(canonicalRecord, definition.path),
+    )) return;
+    const rlocRecord = { rloc16: record.rloc16 ?? ownerRloc16 };
+    const identityKey = getDeviceIdentityKeys(rlocRecord)
+      .find((key) => key.startsWith("rloc16:"));
+    const deviceId = identityKey ? model.identityToDeviceId.get(identityKey) : undefined;
+    if (deviceId) registerRelationshipCapability(model, family, deviceId);
+  });
+}
+
 function mergeMissing(existing, incoming) {
   const merged = { ...existing };
   Object.entries(incoming).forEach(([key, value]) => {
@@ -75,8 +166,27 @@ export function createAdaptorModel(sourceNames = []) {
     routerChildrenByRloc16: new Map(),
     sourceNames: [...new Set(sourceNames.filter((name) => typeof name === "string" && name))],
     relationshipIds: new Set(),
+    relationshipCapabilities: {
+      datasetWide: new Set(),
+      byDeviceId: new Map(),
+    },
     includeRouterChildIndex: false,
   };
+}
+
+export function registerRelationshipCapability(model, family, deviceId = null) {
+  if (typeof family !== "string" || !family) return;
+  if (!model.relationshipCapabilities) {
+    model.relationshipCapabilities = { datasetWide: new Set(), byDeviceId: new Map() };
+  }
+  if (deviceId === null || deviceId === undefined) {
+    model.relationshipCapabilities.datasetWide.add(family);
+    return;
+  }
+  const key = String(deviceId);
+  const families = model.relationshipCapabilities.byDeviceId.get(key) ?? new Set();
+  families.add(family);
+  model.relationshipCapabilities.byDeviceId.set(key, families);
 }
 
 export function registerDevice(model, record, options = {}) {
@@ -140,6 +250,9 @@ export function registerDetails(model, deviceId, rawRecord, ownership = "replace
   } else {
     throw new Error(`Unknown details ownership policy: ${ownership}`);
   }
+  relationshipFamiliesForRecord(model, canonicalRecord).forEach((family) => {
+    registerRelationshipCapability(model, family, deviceId);
+  });
 }
 
 export function registerRelationship(model, relationship) {
@@ -239,6 +352,7 @@ export function emitAdaptorResult(model) {
     rawByIdForDetails: new Map(model.detailsByDeviceId),
     routerNeighborByRloc16: new Map(model.routerNeighborsByRloc16),
     sourceNames: [...model.sourceNames],
+    relationshipCapabilities: cloneRelationshipCapabilities(model.relationshipCapabilities),
   };
   if (model.includeRouterChildIndex) {
     result.routerChildByRloc16 = new Map(model.routerChildrenByRloc16);
@@ -274,11 +388,23 @@ function resolveProjectedDeviceId(index, record) {
  * Rows without a canonical topology identity or relationship evidence are left unchanged.
  */
 export function projectObservedTopologyLinkCounts(rows, adaptorResult) {
-  if (!Array.isArray(rows) || !Array.isArray(adaptorResult?.edgeData)) {
-    return { rows, hasRelationshipEvidence: false };
+  if (!Array.isArray(rows)) {
+    return {
+      rows,
+      hasRelationshipCapability: false,
+      hasRelationshipEvidence: false,
+    };
   }
-  const edgeData = adaptorResult.edgeData;
-  if (edgeData.length === 0) return { rows, hasRelationshipEvidence: false };
+  const edgeData = Array.isArray(adaptorResult?.edgeData) ? adaptorResult.edgeData : [];
+  const relationshipCapabilities = adaptorResult?.relationshipCapabilities;
+  const datasetWideCapabilities = relationshipCapabilities?.datasetWide instanceof Set
+    ? relationshipCapabilities.datasetWide
+    : new Set();
+  const capabilitiesByDeviceId = relationshipCapabilities?.byDeviceId instanceof Map
+    ? relationshipCapabilities.byDeviceId
+    : new Map();
+  const hasRelationshipCapability = datasetWideCapabilities.size > 0
+    || capabilitiesByDeviceId.size > 0;
 
   const identityToDeviceId = new Map();
   const deviceIds = new Set([
@@ -298,9 +424,15 @@ export function projectObservedTopologyLinkCounts(rows, adaptorResult) {
     );
   });
 
+  const coveredDeviceIds = new Set(capabilitiesByDeviceId.keys());
+  if (datasetWideCapabilities.size > 0) {
+    deviceIds.forEach((deviceId) => coveredDeviceIds.add(String(deviceId)));
+  }
+
   const countsByDeviceId = new Map();
   const seenEdgeIds = new Set();
-  edgeData.forEach((edge, index) => {
+  if (hasRelationshipCapability) edgeData.forEach((edge, index) => {
+    if (!Array.isArray(edge.linkCategories) || edge.linkCategories.length === 0) return;
     const edgeId = String(edge.id ?? `${edge.from}|${edge.to}|${index}`);
     if (seenEdgeIds.has(edgeId)) return;
     seenEdgeIds.add(edgeId);
@@ -319,14 +451,25 @@ export function projectObservedTopologyLinkCounts(rows, adaptorResult) {
     });
   });
 
+  const withoutExistingProjection = (row) => {
+    if (!isPlainObject(row)
+      || !OBSERVED_TOPOLOGY_LINK_FIELDS.some((field) => Object.hasOwn(row, field))) return row;
+    const copy = { ...row };
+    OBSERVED_TOPOLOGY_LINK_FIELDS.forEach((field) => delete copy[field]);
+    return copy;
+  };
+
   return {
     rows: rows.map((row) => {
-      if (!isPlainObject(row)) return row;
-      const deviceId = resolveProjectedDeviceId(identityToDeviceId, row);
-      if (!deviceId) return row;
+      const cleanRow = withoutExistingProjection(row);
+      if (!isPlainObject(cleanRow) || !hasRelationshipCapability) return cleanRow;
+      const deviceId = resolveProjectedDeviceId(identityToDeviceId, cleanRow);
+      if (!deviceId) return cleanRow;
+      const counts = countsByDeviceId.get(deviceId);
+      if (!counts && !coveredDeviceIds.has(deviceId)) return cleanRow;
       return {
-        ...row,
-        ...(countsByDeviceId.get(deviceId) ?? {
+        ...cleanRow,
+        ...(counts ?? {
           observedTopologyLinks: 0,
           observedTopologyLinksLq3: 0,
           observedTopologyLinksLq2: 0,
@@ -334,7 +477,8 @@ export function projectObservedTopologyLinkCounts(rows, adaptorResult) {
         }),
       };
     }),
-    hasRelationshipEvidence: true,
+    hasRelationshipCapability,
+    hasRelationshipEvidence: hasRelationshipCapability && seenEdgeIds.size > 0,
   };
 }
 
@@ -388,10 +532,19 @@ export function createAdaptorModelFromResult(result) {
 
   if (result.routerNeighborByRloc16 instanceof Map) {
     model.routerNeighborsByRloc16 = new Map(result.routerNeighborByRloc16);
+    registerIndexedTableCapabilities(model, model.routerNeighborsByRloc16, "routerNeighbors");
   }
   if (result.routerChildByRloc16 instanceof Map) {
     model.routerChildrenByRloc16 = new Map(result.routerChildByRloc16);
     model.includeRouterChildIndex = true;
+    registerIndexedTableCapabilities(model, model.routerChildrenByRloc16, "childTable");
+  }
+  if (result.relationshipCapabilities) {
+    const capabilities = cloneRelationshipCapabilities(result.relationshipCapabilities);
+    capabilities.datasetWide.forEach((family) => registerRelationshipCapability(model, family));
+    capabilities.byDeviceId.forEach((families, deviceId) => {
+      families.forEach((family) => registerRelationshipCapability(model, family, deviceId));
+    });
   }
   return model;
 }

@@ -206,7 +206,7 @@ def test_table_category_control_is_registry_driven_and_precedes_more_info() -> N
     assert "getTableColumnCategories" in table_text
     assert "DEVICE_DETAILS_SECTIONS" in table_text
     assert "function populateTableColumnCategories(rows)" in ui_text
-    assert "populateTableColumnCategories(currentDataset.rows);" in ui_text
+    assert "populateTableColumnCategories(tableRows);" in ui_text
     assert 'applyTableFilters({ preserveSelection: true })' in ui_text
     assert "let _tableSort = null;" in table_text
     assert "function sortedTableRows(rows)" in table_text
