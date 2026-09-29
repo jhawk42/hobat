@@ -74,6 +74,29 @@ def test_observed_instance_wins_over_higher_order_operator(tmp_path: Path) -> No
     assert report["networkInstance"]["excluded"][0]["filename"] == "first.json"
 
 
+def test_operator_only_scopes_do_not_select_or_exclude_merge_network(tmp_path: Path) -> None:
+    names = ("first.json", "second.json")
+    for name, pan, rloc16 in zip(
+        names,
+        ("1111111111111111", "78b9775b001c1cbe"),
+        ("0x1234", "0x5678"),
+    ):
+        _write_json(tmp_path / name, [{"rloc16": rloc16}])
+        write_network_scope(
+            tmp_path / name,
+            NetworkScope(pan, None, "operator", None, "now", (name,)),
+        )
+
+    records, report = merge_dataset.build_merged_records(
+        tmp_path, "", list(names), {}
+    )
+
+    assert len(records) == 2
+    assert report["networkInstance"]["extPanId"] is None
+    assert report["networkInstance"]["provenance"] == "unknown"
+    assert report["networkInstance"]["excluded"] == []
+
+
 def test_conflicted_scope_does_not_join_unknown_compatibility_path(tmp_path: Path) -> None:
     _write_json(tmp_path / "observed.json", [{"rloc16": "0x1234"}])
     _write_json(tmp_path / "mixed.json", [{"rloc16": "0x5678"}])

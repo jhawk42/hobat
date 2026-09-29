@@ -7,7 +7,7 @@ defaults are selected only when neither `--datadir` nor `TD_DATA_DIR` is set.
 | --- | --- | --- | --- |
 | `td_logging.py` | `TD_DEBUG_LEVEL` | `INFO` | Sets the default logging level for both entry points. Accepted values are `DEBUG`, `INFO`, `WARNING`, and `ERROR` (case-insensitive; surrounding whitespace is ignored). CLI logging switches take precedence: `--debug`/`-d`, then `--verbose`/`-v`, then this environment variable. Invalid values fail only when no CLI level switch overrides them. |
 | `util_data.py` | `TD_DATA_DIR` | Unset by default; used when `--datadir` is not provided, then `/data` (if present), else `./data` | Sets the data directory path used for reading/writing tdash JSON data files, including composite CLI workflows such as `td_cli otbr-cli topology`. |
-| `util_data.py` | `HOBAT_EXT_PAN_ID` | Unset | Collector-only fallback for snapshots with no observed Extended PAN ID. `--ext-pan-id` overrides it where available. Does not select a merge output network. |
+| `util_data.py` | `TD_EXT_PAN_ID` | Unset | Collector-only fallback for snapshots with no observed Extended PAN ID. `--ext-pan-id` overrides it where available. Does not select a merge output network. |
 | `td_webserver.py` | `HOST` | `""` (bind all interfaces) | Sets the default host/interface that the web server binds to when `--host` is not passed. |
 | `td_webserver.py` | `PORT` | `9165` | Sets the default web server port when `--port` is not passed. |
 | `td_webserver.py` | `TD_FILE_CACHE_MAX_AGE` | `86400` | Sets the default max-age (seconds) used for data file cache headers and freshness checks when `--file-cache-max-age` is not passed. |

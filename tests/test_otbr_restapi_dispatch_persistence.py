@@ -11,7 +11,7 @@ import otbr_restapi_mesh_diagnostics as mesh_module
 import otbr_restapi_node as node_module
 import otbr_restapi_cli as cli_module
 from otbr_restapi_util import OTBRUsageError, emit_rest_command_output
-from util_data import read_network_scope
+from util_data import CollectionWriteOutcome, read_network_scope, save_final_json
 
 
 def test_node_dispatch_saves_json_before_return():
@@ -130,7 +130,7 @@ def test_active_dataset_get_auto_output_publishes_observed_scope(tmp_path, monke
         "extPanId": "78b9775b001c1cbe",
         "networkKey": "SECRET-NETWORK-KEY",
     }
-    monkeypatch.setenv("HOBAT_EXT_PAN_ID", "78b9775b001c1cbe")
+    monkeypatch.setenv("TD_EXT_PAN_ID", "1111111111111111")
 
     with patch.object(cli_module, "build_client", return_value=client):
         assert cli_module.main([
@@ -144,6 +144,48 @@ def test_active_dataset_get_auto_output_publishes_observed_scope(tmp_path, monke
     assert scope["extPanId"] == "78b9775b001c1cbe"
     assert json.loads(output.read_text(encoding="utf-8"))["networkKey"] == "[Redacted]"
     client.get_active_dataset.assert_called_once_with(plain_text=False, raw=True)
+
+
+def test_final_snapshot_scope_uses_td_ext_pan_id_as_operator_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("TD_EXT_PAN_ID", "78b9775b001c1cbe")
+    monkeypatch.delenv("HOBAT_EXT_PAN_ID", raising=False)
+    output = tmp_path / "td-otbr-restapi-dataset-active.json"
+
+    assert save_final_json({}, output, CollectionWriteOutcome.complete())
+
+    scope, error = read_network_scope(output)
+    assert error is None
+    assert scope["provenance"] == "operator"
+    assert scope["extPanId"] == "78b9775b001c1cbe"
+
+
+def test_explicit_ext_pan_id_argument_precedes_environment_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("TD_EXT_PAN_ID", "1111111111111111")
+    output = tmp_path / "td-otbr-restapi-dataset-active.json"
+
+    assert save_final_json(
+        {}, output, CollectionWriteOutcome.complete(), ext_pan_id="78b9775b001c1cbe"
+    )
+
+    scope, error = read_network_scope(output)
+    assert error is None
+    assert scope["provenance"] == "operator"
+    assert scope["extPanId"] == "78b9775b001c1cbe"
+
+
+def test_legacy_environment_name_is_ignored_and_missing_scope_is_unknown(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("TD_EXT_PAN_ID", raising=False)
+    monkeypatch.setenv("HOBAT_EXT_PAN_ID", "78b9775b001c1cbe")
+    output = tmp_path / "td-otbr-restapi-dataset-active.json"
+
+    assert save_final_json({}, output, CollectionWriteOutcome.complete())
+
+    scope, error = read_network_scope(output)
+    assert error is None
+    assert scope["provenance"] == "unknown"
+    assert scope["extPanId"] is None
 
 
 def test_active_dataset_auto_output_respects_output_modes(tmp_path):

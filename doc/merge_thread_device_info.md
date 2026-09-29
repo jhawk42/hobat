@@ -41,14 +41,16 @@ interpreted as hex. Browser status uses the same identity through
 
 Final collector snapshots have a sibling `.network.json` scope with provenance
 `observed`, `operator`, or `unknown`. Observed evidence wins over an operator
-`--ext-pan-id` or `HOBAT_EXT_PAN_ID`; a disagreement is logged. Missing both
-is not a collection error. The [data-directory guide](codebase_datadirectory.md)
-describes the sidecar and digest. Offline merge chooses the first observed
-scope in source-priority order, then an operator scope if none was observed.
-Known cross-instance snapshots, internally conflicting scopes, and invalid or
+`--ext-pan-id` or `TD_EXT_PAN_ID`; a disagreement is logged. Missing both is
+not a collection error. The [data-directory guide](codebase_datadirectory.md)
+describes the sidecar and digest. Offline merge chooses only the first observed
+scope in source-priority order; operator and unknown scopes never select the
+merge output network. When an observed output identity exists, snapshots with
+a different scoped identity, internally conflicting scopes, and invalid or
 digest-mismatched sidecars are excluded with counts and reasons in the merge
-report. A missing sidecar is treated as unknown, not excluded. The selected
-instance and provenance appear in the report and dashboard status.
+report. Operator scopes can be checked against an observed output identity but
+cannot select one. A missing sidecar is treated as unknown, not excluded. The
+selected instance and provenance appear in the report and dashboard status.
 
 That exclusion applies to offline merge, not to browser dataset assembly. A
 browser recipe can display records from different known instances; the view

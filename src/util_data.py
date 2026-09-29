@@ -14,6 +14,8 @@ from td_const import (
     TD_DATA_DIR_LOCAL_DEFAULT,
 )
 
+TD_EXT_PAN_ID_ENV_VAR = "TD_EXT_PAN_ID"
+
 
 class TDDataDirSource(str, Enum):
     """Origin used to resolve the effective data directory."""
@@ -506,7 +508,13 @@ def save_final_json(
 
         write_network_scope(
             filename,
-            resolve_network_scope(filename, data, ext_pan_id if ext_pan_id is not None else os.environ.get("HOBAT_EXT_PAN_ID")),
+            resolve_network_scope(
+                filename,
+                data,
+                ext_pan_id
+                if ext_pan_id is not None
+                else os.environ.get(TD_EXT_PAN_ID_ENV_VAR),
+            ),
         )
     return True
 

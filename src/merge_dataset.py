@@ -640,10 +640,16 @@ def build_merged_records(
         loaded[filename] = (data, records)
         scopes[filename], errors[filename] = read_network_scope(base_dir / filename) if (base_dir / filename).exists() else (None, "missing-sidecar")
 
-    chosen = next((scopes[name] for provenance in ("observed", "operator")
-                   for name in ordered_input_files if scopes[name] is not None
-                   and scopes[name].get("provenance") == provenance
-                   and scopes[name].get("extPanId")), None)
+    chosen = next(
+        (
+            scopes[name]
+            for name in ordered_input_files
+            if scopes[name] is not None
+            and scopes[name].get("provenance") == "observed"
+            and scopes[name].get("extPanId")
+        ),
+        None,
+    )
     output_id = chosen["extPanId"] if chosen else None
     excluded: list[dict[str, Any]] = []
     for filename in ordered_input_files:

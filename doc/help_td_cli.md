@@ -190,8 +190,9 @@ The owning mDNS parser uses a 3-second idle timeout unless
 `--ext-pan-id` supplies an operator identity only when the selected scope has no
 observed MeshCoP Extended PAN ID. It also works on
 `td_cli otbr-cli thread-network-info --ext-pan-id ID`; an observed value wins
-and a disagreement is logged. The `HOBAT_EXT_PAN_ID` environment fallback
-applies only at collection, never during merge. IDs accept 16 hex digits,
+and a disagreement is logged. The `TD_EXT_PAN_ID` environment fallback applies
+only when writing collector scopes; operator values never select the merge
+output network. IDs accept 16 hex digits,
 `0x`-prefixed or byte-separated hex, or exact decimal text. Use strings for
 large IDs in JavaScript; unsafe numeric values lose precision.
 
