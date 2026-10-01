@@ -53,10 +53,20 @@ def test_failed_repeat_sync_cannot_complete_against_prior_dataset() -> None:
     ui_text = _read_text(UI_JS)
 
     assert "return currentDataset;" in dataset_text
-    assert 'Failed: ${failedFiles.join(", ")}`;\n    if (progressEl) progressEl.value = 0;\n    return null;' in dataset_text
+    assert "currentDataset = acceptedDataset;" in dataset_text
+    assert "acceptedDataset;" in dataset_text
+    assert "acceptedDataset = currentDataset;" in dataset_text
+    assert "if (failedFiles.length === 0) acceptedDataset = currentDataset;" in dataset_text
+    assert 'result.status === "fulfilled" && result.value != null' in dataset_text
     assert "loadedDataset = await loadDataset(selectedValue" in ui_text
     assert "if (!loadedDataset || currentDataset !== loadedDataset)" in ui_text
-    assert "Dataset unavailable: could not load" in ui_text
+    assert "Still displaying ${datasetIdentityLabel(currentDataset)}." in ui_text
+    assert "No dataset is available to display." in ui_text
+    assert "function clearRenderedDatasetViews(emptyDataset)" in ui_text
+    assert "fetchAttemptVersion" in ui_text
+    assert "? sameDataset && refreshIntent" in ui_text
+    assert "clearRenderedDatasetViews({" in ui_text
+    assert "Number.POSITIVE_INFINITY" in ui_text
 
 
 def test_completed_job_fetches_the_new_snapshot_without_redispatching() -> None:

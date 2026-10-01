@@ -14,6 +14,7 @@ import {
 import {
   currentDataset,
   loadDataset,
+  restoreLastKnownGoodDataset,
   loadStaticLabelMap,
   setStaticDeviceLabel,
   enrichRows,
@@ -91,6 +92,7 @@ import { parseSearchQuery, filterRowsBySearch } from "./tdash-search.js";
 import {
   activateViewStatus,
   configureViewStatusPresenter,
+  invalidateViewStatuses,
   networkInstanceStatus,
   supersedeViewStatus,
 } from "./tdash-view-status.js";
@@ -133,6 +135,14 @@ import {
   deviceActionStatusLabel,
 } from "./tdash-device-diagnostics.js";
 
+let fetchFailureState = null;
+
+function datasetIdentityLabel(dataset) {
+  const source = DATASOURCE_REGISTRY.find((entry) => entry.value === dataset?.entry?.source);
+  const label = dataset?.entry?.label ?? dataset?.entry?.value ?? "unknown dataset";
+  return `${source?.label ?? dataset?.entry?.source ?? "unknown source"} / ${label}`;
+}
+
 configureViewStatusPresenter((status) => {
   const statusEl = document.getElementById("view-status-line-content");
   const statusFiles = currentDataset
@@ -141,9 +151,14 @@ configureViewStatusPresenter((status) => {
       ...Object.keys(currentDataset.auxiliaryFiles ?? {}),
     ])]
     : [];
-  if (statusEl) statusEl.textContent = currentDataset?.entry
+  const statusParts = [currentDataset?.entry
     ? `${status} | ${networkInstanceStatus(statusFiles, sourceCapabilities)}`
-    : status;
+    : status];
+  if (currentDataset?.isPartial) {
+    statusParts.push(`Incomplete preview: ${datasetIdentityLabel(currentDataset)}`);
+  }
+  if (fetchFailureState) statusParts.push(fetchFailureState);
+  if (statusEl) statusEl.textContent = statusParts.filter(Boolean).join(" | ");
 });
 
 // ── Build datasource <select> ────────────────────────────────────────
@@ -239,6 +254,7 @@ let _lastFetchStartedAt = null;
 let _currentSearchQuery = "";
 let sourceCapabilities = EMPTY_CAPABILITIES;
 let _fetchInProgress = false;
+let fetchAttemptVersion = 0;
 let operationsSubview = "logs";
 let threadNetworkModelCache = null;
 let currentDeviceStatusCounts = null;
@@ -1069,6 +1085,13 @@ function renderCurrentView({ force = false } = {}) {
   }
 
   lastRenderedDatasetByView.set(view, currentDataset);
+}
+
+function clearRenderedDatasetViews(emptyDataset) {
+  renderTopologyForDataset(emptyDataset, _physicsEnabled, _physicsProfileName, emptyDataset);
+  renderTableForDataset(emptyDataset, emptyDataset);
+  lastRenderedDatasetByView.clear();
+  invalidateViewStatuses();
 }
 
 function getPhysicsProfileSelect() {
@@ -3673,7 +3696,9 @@ function _pinFetchStatusLineMessage(message, pinDurationMs = _CANCELLED_PARTIAL_
   const statusEl = document.getElementById("fetch-status-line-content");
   if (statusEl) statusEl.textContent = message;
   window.tdashDebug = window.tdashDebug || {};
-  window.tdashDebug.fetchStatusPinnedUntil = Date.now() + pinDurationMs;
+  window.tdashDebug.fetchStatusPinnedUntil = Date.now() + (
+    fetchFailureState ? Number.POSITIVE_INFINITY : pinDurationMs
+  );
 }
 
 function _setStatusSpans(ids, text) {
@@ -3724,6 +3749,8 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
 
   const sessionId = startFetchSession();
   const selectedDataset = DATASET_REGISTRY.find((entry) => entry.value === selectedValue);
+  const attemptVersion = ++fetchAttemptVersion;
+  const refreshIntent = forceFresh || document.getElementById("chk-force-fresh")?.checked === true;
   supersedeViewStatus(`Loading ${selectedDataset?.label ?? selectedValue}…`);
   recordWorkspaceActivity("dataset-sync", "Dataset sync started", {
     dataset: selectedValue,
@@ -3807,14 +3834,40 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
         }
       }
     } else {
+      restoreLastKnownGoodDataset();
       recordWorkspaceActivity("dataset-sync", "Dataset sync failed", {
         dataset: selectedValue,
         error: err?.message || String(err),
       });
       console.error("loadDataset threw:", err);
+      const attempted = datasetIdentityLabel({ entry: selectedDataset ?? { value: selectedValue, label: selectedValue } });
+      const displayed = currentDataset
+        ? `Still displaying ${datasetIdentityLabel(currentDataset)}.`
+        : "No dataset is available to display.";
+      const sameDataset = currentDataset?.entry?.value === selectedValue;
+      fetchFailureState = currentDataset && sameDataset && refreshIntent
+        ? `Refresh failed for ${datasetIdentityLabel(currentDataset)}; the prior snapshot remains displayed and freshness is unconfirmed.`
+        : `Sync failed for ${attempted}. ${displayed}`;
+      if (currentDataset) {
+        renderCurrentView();
+        updateFetchStatusBar(_lastFetchStartedAt);
+      } else {
+        clearRenderedDatasetViews({
+          ...(selectedDataset ?? {}),
+          entry: selectedDataset ?? { value: selectedValue, label: selectedValue },
+          rows: [],
+          rawFiles: [],
+          loadedFiles: [],
+          deviceProjections: new Map(),
+          auxiliaryFiles: {},
+        });
+        _setStatusSpans(_FETCH_STATUS_IDS, "—");
+        _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+      }
+      const statusEl = document.getElementById("fetch-status-line-content");
+      if (statusEl) statusEl.textContent = fetchFailureState;
+      _pinFetchStatusLineMessage(fetchFailureState, Number.POSITIVE_INFINITY);
       supersedeViewStatus(`Error loading "${selectedValue}": ${err?.message || String(err)}`);
-      _setStatusSpans(_FETCH_STATUS_IDS, "—");
-      _setStatusSpans(_DEVICE_STATUS_IDS, "—");
     }
     return;
   } finally {
@@ -3826,9 +3879,40 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
   // Require the result produced by this attempt, not a prior snapshot of the same dataset.
   if (!loadedDataset || currentDataset !== loadedDataset) {
     if (_incrementalRenderTimer !== null) { clearTimeout(_incrementalRenderTimer); _incrementalRenderTimer = null; }
-    _setStatusSpans(_FETCH_STATUS_IDS, "—");
-    _setStatusSpans(_DEVICE_STATUS_IDS, "—");
-    supersedeViewStatus(`Dataset unavailable: could not load "${selectedValue}".`);
+    const fetchStatusEl = document.getElementById("fetch-status-line-content");
+    const failureDetails = fetchStatusEl?.textContent || `Could not load "${selectedValue}".`;
+    const attempted = datasetIdentityLabel({ entry: selectedDataset ?? { value: selectedValue, label: selectedValue } });
+    const displayed = currentDataset
+      ? `Still displaying ${datasetIdentityLabel(currentDataset)}.`
+      : "No dataset is available to display.";
+    const sameDataset = currentDataset?.entry?.value === selectedValue;
+    fetchFailureState = currentDataset
+      ? sameDataset && refreshIntent
+        ? `Refresh failed for ${datasetIdentityLabel(currentDataset)}; the prior snapshot remains displayed and freshness is unconfirmed.`
+        : `Could not load ${attempted}. ${displayed}`
+      : `Could not load ${attempted}. No dataset is available to display.`;
+    if (failureDetails && !failureDetails.startsWith("Loading")) {
+      fetchFailureState += ` ${failureDetails}`;
+    }
+    if (currentDataset) {
+      renderCurrentView();
+      updateFetchStatusBar(_lastFetchStartedAt);
+    } else {
+      clearRenderedDatasetViews({
+        ...(selectedDataset ?? {}),
+        entry: selectedDataset ?? { value: selectedValue, label: selectedValue },
+        rows: [],
+        rawFiles: [],
+        loadedFiles: [],
+        deviceProjections: new Map(),
+        auxiliaryFiles: {},
+      });
+      _setStatusSpans(_FETCH_STATUS_IDS, "—");
+      _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+    }
+    if (fetchStatusEl) fetchStatusEl.textContent = fetchFailureState;
+    _pinFetchStatusLineMessage(fetchFailureState, Number.POSITIVE_INFINITY);
+    supersedeViewStatus(currentDataset ? "Retained last complete dataset." : "No dataset loaded.");
     recordWorkspaceActivity("dataset-sync", "Dataset sync produced no usable data", {
       dataset: selectedValue,
     });
@@ -3847,11 +3931,16 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
     if (tableColumnCategoryEl) tableColumnCategoryEl.value = "all";
     setTableColumnCategory("all");
 
-  // Final reconciliation render: all files settled, isPartial is false.
+  // Final reconciliation render after every primary request has settled.
   try {
     sourceCapabilities = await loadSourceCapabilities();
   } catch (error) {
     console.warn("Unable to refresh source capabilities", error);
+  }
+  if (attemptVersion !== fetchAttemptVersion) return;
+  if (!currentDataset.isPartial) {
+    fetchFailureState = null;
+    if (window.tdashDebug) window.tdashDebug.fetchStatusPinnedUntil = 0;
   }
   resetDeviceDetailsPanelTabsToDefault();
   renderCurrentView();
@@ -3870,12 +3959,18 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
   // Clear any "⚠ Partial" message from incremental renders; warn if some files unavailable.
   const _fetchStatusEl = document.getElementById("fetch-status-line-content");
   if (_fetchStatusEl) {
-    const failedCount = (currentDataset.entry?.files?.length ?? 0) - (currentDataset.loadedFiles?.length ?? 0);
-    _fetchStatusEl.textContent = failedCount > 0
-      ? `⚠ ${failedCount} file(s) unavailable — showing partial data`
+    const failedFiles = (currentDataset.entry?.files ?? [])
+      .filter((filename) => !currentDataset.loadedFiles?.includes(filename));
+    _fetchStatusEl.textContent = failedFiles.length > 0
+      ? `⚠ Incomplete dataset ${datasetIdentityLabel(currentDataset)}: ${currentDataset.loadedFiles?.length ?? 0} of ${currentDataset.entry.files.length} required files loaded; ${failedFiles.length} required file(s) unavailable. Showing partial data.`
       : "";
+    if (failedFiles.length > 0) {
+      _pinFetchStatusLineMessage(_fetchStatusEl.textContent, Number.POSITIVE_INFINITY);
+    }
   }
-  recordWorkspaceActivity("dataset-sync", "Dataset sync completed", {
+  recordWorkspaceActivity("dataset-sync", currentDataset.isPartial
+    ? "Dataset sync incomplete"
+    : "Dataset sync completed", {
     dataset: selectedValue,
     durationMs: currentDataset.fetchDurationMs,
     loadedFiles: currentDataset.loadedFiles?.length ?? 0,

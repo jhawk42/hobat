@@ -24,6 +24,12 @@ import { trackedFetch } from "./tdash-activity.js";
 // export let — live binding: reassigning currentDataset inside this module
 // is immediately visible to all importers (ES module semantics, not a copy).
 export let currentDataset = null;
+let acceptedDataset = null;
+
+export function restoreLastKnownGoodDataset() {
+  currentDataset = acceptedDataset;
+  return currentDataset;
+}
 
 // Map<lowercased-extaddr-string, device_label-string> — loaded at startup
 let staticExtaddrLabelMap = new Map();
@@ -882,7 +888,7 @@ export async function loadDataset(entryValue, options = {}) {
   const loadedAuxiliaryFiles = [];
 
   settled.forEach((result, i) => {
-    if (result.status === "fulfilled") {
+    if (result.status === "fulfilled" && result.value != null) {
       rawFiles.push(
         normalizeDatasetPayload(result.value, NORMALIZE_OPTIONS_MERGE_INTERNAL),
       );
@@ -907,8 +913,16 @@ export async function loadDataset(entryValue, options = {}) {
   });
 
   if (loadedFiles.length === 0) {
-    statusEl.textContent = `Error: could not load any file for "${entry.label}". Failed: ${failedFiles.join(", ")}`;
+    statusEl.textContent = `Error: could not load any required file for "${entry.label}".`;
+    currentDataset = acceptedDataset;
     if (progressEl) progressEl.value = 0;
+    return null;
+  }
+
+  if (failedFiles.length > 0 && acceptedDataset) {
+    currentDataset = acceptedDataset;
+    statusEl.textContent = `Incomplete dataset "${entry.label}": ${loadedFiles.length} of ${entry.files.length} required files loaded.`;
+    if (progressEl) progressEl.value = (loadedFiles.length / entry.files.length) * progressEl.max;
     return null;
   }
 
@@ -940,7 +954,7 @@ export async function loadDataset(entryValue, options = {}) {
     loadedFiles: assembled.loadedFiles,
     fetchDurationMs,
     fileLastModifiedAt: oldestLastModifiedAt,
-    isPartial: false,
+    isPartial: failedFiles.length > 0,
     fetchMetrics: {
       progressiveEnabled,
       timeToFirstRenderMs: firstIncrementalRenderAtMs,
@@ -950,9 +964,13 @@ export async function loadDataset(entryValue, options = {}) {
     },
   };
 
+  if (failedFiles.length === 0) acceptedDataset = currentDataset;
+
   // Set progress bar to 100% when fetch completes
   if (progressEl) {
-    progressEl.value = progressEl.max;
+    progressEl.value = failedFiles.length > 0
+      ? (loadedFiles.length / entry.files.length) * progressEl.max
+      : progressEl.max;
   }
 
   // Warn about any files that failed to load but don't hard-fail
