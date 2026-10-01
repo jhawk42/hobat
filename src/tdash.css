@@ -895,8 +895,15 @@ button.active {
 .topology-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 12px;
   align-items: start;
+}
+
+.topology-title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
 }
 
 /* Position device details panel on wider screens */
@@ -943,7 +950,11 @@ button.active {
 
 .topology-canvas-wrap {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
+  min-width: 0;
+  container: topology / inline-size;
 }
 
 #topology-view {
@@ -2286,36 +2297,34 @@ td .td-array-idx {
   color: var(--fg, inherit);
 }
 
-/* ── LQ Legend ────────────────────────────────────────────── */
+/* ── Topology legend ──────────────────────────────────────── */
 
 .lq-legend {
   position: absolute;
-  top: 50px;
+  top: 56px;
   left: 10px;
   z-index: 10;
-  display: inline-flex;
-  flex-direction: column;
-  gap: 4px;
   padding: 6px 10px;
   background: rgba(255, 255, 255, 0.88);
   border: 1px solid var(--line);
   border-radius: 4px;
   font-size: 12px;
-  pointer-events: none;
 }
 
-.lq-legend.hidden {
-  display: none;
-}
-
-.lq-legend.shrunk {
-  padding: 3px 5px;
-  gap: 2px;
-  font-size: 11px;
-}
-
-.lq-legend-title {
+.lq-legend summary {
+  cursor: pointer;
   font-weight: 600;
+}
+
+.lq-legend summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.lq-legend-items {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .lq-legend-item {
@@ -2359,23 +2368,22 @@ td .td-array-idx {
   border-top-width: var(--lq-style-width-otbr, 4px);
 }
 
-.legend-toggle {
+.topology-controls {
   position: absolute;
   top: 10px;
   left: 10px;
   z-index: 9;
   pointer-events: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  max-width: calc(100% - 20px);
 }
 
-#btn-legend-toggle {
-  font-size: 14px;
-  height: 40px;
-  min-width: 40px;
-  padding-top: 0;
-  padding-bottom: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+#topology-controls #btn-physics {
+  flex: 0 0 40px;
 }
 
 #btn-health-coloring:disabled,
@@ -2386,6 +2394,57 @@ td .td-array-idx {
 
 #physics-profile-select {
   font-size: 14px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@container topology (max-width: 420px) {
+  .topology-canvas-wrap .topology-toolbar-row {
+    display: grid;
+    grid-template-columns: max-content minmax(0, max-content) 40px;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .topology-canvas-wrap .topology-controls,
+  .topology-canvas-wrap .lq-legend {
+    position: relative;
+    inset: auto;
+    width: max-content;
+    max-width: 100%;
+  }
+
+  .topology-canvas-wrap .topology-controls {
+    display: contents;
+  }
+
+  .topology-canvas-wrap #physics-profile-select {
+    grid-column: 2;
+    width: auto;
+    padding: 4px 22px 4px 6px;
+    background-position: right 3px center;
+    background-size: 16px 16px;
+  }
+
+  .topology-canvas-wrap #btn-physics {
+    grid-column: 3;
+  }
+
+  .topology-canvas-wrap .lq-legend {
+    grid-column: 1;
+    grid-row: 1;
+    padding: 4px 6px;
+  }
+
+  .topology-canvas-wrap #topology-view {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: auto;
+    min-height: 360px;
+    flex: 0 0 64vh;
+  }
 }
 
 .lq-high {
@@ -2509,9 +2568,20 @@ td:last-child {
     height: 100%;
   }
 
+  .topology-layout {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
   #topology-view {
     height: 100%;
     min-height: 0;
+  }
+
+  @container topology (max-width: 420px) {
+    .topology-canvas-wrap #topology-view {
+      min-height: 0;
+      flex: 1 1 0;
+    }
   }
 
   #view-table {
@@ -2668,6 +2738,55 @@ td:last-child {
   #panel-context-details #device-details {
     height: 100%;
     max-height: none;
+  }
+}
+
+@media (min-width: 721px) and (max-height: 600px) {
+  .dashboard-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    grid-template-rows: auto auto;
+    align-content: start;
+  }
+
+  #panel-functions,
+  #panel-workspace,
+  #panel-navigation,
+  #panel-context-details,
+  #panel-view {
+    height: auto;
+  }
+
+  #panel-view {
+    grid-template-rows: auto auto auto;
+  }
+
+  #view-topology,
+  #view-table,
+  .topology-layout,
+  .topology-canvas-wrap {
+    height: auto;
+  }
+
+  .topology-layout {
+    grid-template-rows: auto auto;
+  }
+
+  .topology-canvas-wrap {
+    min-height: 400px;
+  }
+
+  #topology-view {
+    height: 64vh;
+    min-height: 320px;
+  }
+
+  @container topology (max-width: 420px) {
+    .topology-canvas-wrap #topology-view {
+      min-height: 240px;
+      flex: 1 1 0;
+    }
   }
 }
 
@@ -2845,7 +2964,7 @@ td:last-child {
       border-color: var(--accent);
     }
 
-    #btn-legend-toggle:hover {
+    .lq-legend summary:hover {
       background: rgba(31, 41, 55, 0.9);
     }
   }

@@ -34,6 +34,11 @@ BEHAVIOR_IDS = (
     "btn-settings",
     "btn-operations",
     "view-topology",
+    "topology-title",
+    "topology-canvas-wrap",
+    "topology-toolbar-row",
+    "topology-controls",
+    "lq-legend",
     "view-table",
     "view-insights",
     "view-settings",
@@ -74,6 +79,7 @@ class _IdParentParser(HTMLParser):
         self.stack: list[tuple[str, str | None, frozenset[str]]] = []
         self.parent_by_id: dict[str, str | None] = {}
         self.tag_by_id: dict[str, str] = {}
+        self.attributes_by_id: dict[str, dict[str, str | None]] = {}
         self.inside_dashboard_shell_by_id: dict[str, bool] = {}
         self.id_order: list[str] = []
 
@@ -88,6 +94,7 @@ class _IdParentParser(HTMLParser):
         if element_id:
             self.parent_by_id[element_id] = parent_id
             self.tag_by_id[element_id] = tag
+            self.attributes_by_id[element_id] = attributes
             self.inside_dashboard_shell_by_id[element_id] = any(
                 "dashboard-shell" in ancestor_classes
                 for _, _, ancestor_classes in self.stack
@@ -155,7 +162,40 @@ def test_semantic_layout_and_workspace_hierarchy() -> None:
     assert parser.parent_by_id["chk-auto-view"] == "overview-settings-section"
     assert parser.parent_by_id["device-details"] == "panel-context-details"
     assert parser.parent_by_id["health-finding-details"] == "panel-context-details"
-    assert parser.parent_by_id["topology-view"] == "view-topology"
+    assert parser.parent_by_id["topology-view"] == "topology-canvas-wrap"
+
+
+def test_topology_controls_use_container_layout_and_native_legend_disclosure() -> None:
+    parser = _IdParentParser()
+    html = _read_text(HTML)
+    css = _read_text(CSS)
+    ui_text = _read_text(UI_JS)
+    parser.feed(html)
+
+    assert parser.tag_by_id["topology-title"] == "h2"
+    assert parser.parent_by_id["topology-title"] == "view-topology"
+    assert parser.parent_by_id["topology-toolbar-row"] == "topology-canvas-wrap"
+    assert parser.parent_by_id["topology-controls"] == "topology-toolbar-row"
+    assert parser.tag_by_id["lq-legend"] == "details"
+    assert parser.parent_by_id["lq-legend"] == "topology-toolbar-row"
+    assert "open" not in parser.attributes_by_id["lq-legend"]
+    assert html.index('id="lq-legend"') < html.index('id="topology-controls"')
+    assert html.index('id="topology-controls"') < html.index('id="topology-view"')
+    assert "<summary>Link quality</summary>" in html
+    assert 'aria-label="Physics simulation"' in html
+    assert "container: topology / inline-size;" in css
+    assert "@container topology (max-width: 420px)" in css
+    assert "grid-template-columns: max-content minmax(0, max-content) 40px;" in css
+    assert "display: contents;" in css
+    assert "padding: 4px 22px 4px 6px;" in css
+    assert "background-size: 16px 16px;" in css
+    assert "@media (min-width: 721px) and (max-height: 600px)" in css
+    assert 'aria-pressed="true"' in html
+    assert 'btn.setAttribute("aria-pressed", String(enabled));' in ui_text
+    assert 'btn.title = "Pause physics simulation";' in ui_text
+    assert 'btn.title = "Resume physics simulation";' in ui_text
+    assert "min-height: 400px;" in css
+    assert "min-height: 240px;" in css
 
 
 def test_workspace_switch_registry_owns_all_five_views() -> None:

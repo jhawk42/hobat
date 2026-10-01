@@ -1353,12 +1353,15 @@ WORKSPACE_VIEWS.forEach(({ view, buttonId }, index) => {
 function setPhysics(enabled) {
   _physicsEnabled = enabled;
   const btn = document.getElementById("btn-physics");
+  btn.setAttribute("aria-pressed", String(enabled));
   if (enabled) {
     btn.classList.add("active");
     btn.textContent = "⏸"; // U+23F8 PAUSE
+    btn.title = "Pause physics simulation";
   } else {
     btn.classList.remove("active");
     btn.textContent = "▶"; // U+25B6 PLAY
+    btn.title = "Resume physics simulation";
   }
   const net = getVisNetwork();
   if (net) net.setOptions({ physics: { enabled } });
@@ -1422,17 +1425,6 @@ if (tableColumnCategoryEl) {
     if (currentDataset && currentView === "table") {
       applyTableFilters({ preserveSelection: true });
     }
-  });
-}
-
-// ── Legend toggle ────────────────────────────────────────────────────────────
-
-const lqLegendEl = document.getElementById("lq-legend");
-const btnLegendToggle = document.getElementById("btn-legend-toggle");
-if (btnLegendToggle) {
-  btnLegendToggle.addEventListener("click", () => {
-    lqLegendEl.classList.toggle("hidden");
-    btnLegendToggle.classList.toggle("active");
   });
 }
 

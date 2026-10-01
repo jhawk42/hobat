@@ -252,39 +252,42 @@
 
         <div id="view-topology" class="workspace-view" role="tabpanel" aria-labelledby="btn-topology">
           <div class="topology-layout">
-            <div class="topology-canvas-wrap">
+            <h2 id="topology-title" class="topology-title">Thread topology</h2>
+            <div id="topology-canvas-wrap" class="topology-canvas-wrap">
+              <div id="topology-toolbar-row" class="topology-toolbar-row">
+                <details id="lq-legend" class="lq-legend">
+                  <summary>Link quality</summary>
+                  <div class="lq-legend-items">
+                    <span class="lq-legend-item lq-high">
+                      <span class="lq-legend-line lq-legend-line-high" aria-hidden="true"></span>
+                      <span>High (LQ3)</span>
+                    </span>
+                    <span class="lq-legend-item lq-medium">
+                      <span class="lq-legend-line lq-legend-line-medium" aria-hidden="true"></span>
+                      <span>Medium (LQ2)</span>
+                    </span>
+                    <span class="lq-legend-item lq-low">
+                      <span class="lq-legend-line lq-legend-line-low" aria-hidden="true"></span>
+                      <span>Low (LQ1)</span>
+                    </span>
+                  </div>
+                </details>
+                <div id="topology-controls" class="topology-controls">
+                  <select id="physics-profile-select" title="Physics profile selector" aria-label="Physics profile">
+                    <option value="auto">auto</option>
+                    <option value="mesh-compact">mesh compact</option>
+                    <option value="mesh-ring">mesh ring</option>
+                    <option value="mesh-tree-vertical">tree vert</option>
+                    <option value="mesh-tree-horizontal">tree horiz</option>
+                    <option value="mesh-balanced">hub spoke</option>
+                  </select>
+                  <button id="btn-physics" title="Pause physics simulation" aria-label="Physics simulation"
+                    aria-pressed="true">
+                    ⏸
+                  </button>
+                </div>
+              </div>
               <div id="topology-view"></div>
-              <div id="legend-toggle" class="legend-toggle">
-                <button id="btn-legend-toggle" title="Toggle link quality legend" aria-expanded="false">
-                  Legend
-                </button>
-                <select id="physics-profile-select" title="Physics profile selector" aria-label="Physics profile">
-                  <option value="auto">auto</option>
-                  <option value="mesh-compact">mesh compact</option>
-                  <option value="mesh-ring">mesh ring</option>
-                  <option value="mesh-tree-vertical">tree vert</option>
-                  <option value="mesh-tree-horizontal">tree horiz</option>
-                  <option value="mesh-balanced">hub spoke</option>
-                </select>
-                <button id="btn-physics" title="Toggle physics simulation" aria-label="Pause physics simulation">
-                  ⏸
-                </button>
-              </div>
-              <div id="lq-legend" class="lq-legend hidden">
-                <span class="lq-legend-title">Link Quality</span>
-                <span class="lq-legend-item lq-high">
-                  <span class="lq-legend-line lq-legend-line-high" aria-hidden="true"></span>
-                  <span>High (LQ3)</span>
-                </span>
-                <span class="lq-legend-item lq-medium">
-                  <span class="lq-legend-line lq-legend-line-medium" aria-hidden="true"></span>
-                  <span>Medium (LQ2)</span>
-                </span>
-                <span class="lq-legend-item lq-low">
-                  <span class="lq-legend-line lq-legend-line-low" aria-hidden="true"></span>
-                  <span>Low (LQ1)</span>
-                </span>
-              </div>
             </div>
           </div>
         </div>
