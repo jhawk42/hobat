@@ -6,6 +6,7 @@ import {
   extractOtbrRestApiSources,
   runAdaptor,
 } from "../../src/js/tdash-adaptors.js";
+import { mergeRowsByStrategy, normalizeRows } from "../../src/js/tdash-merge.js";
 import {
   createAdaptorModelFromResult,
   emitAdaptorResult,
@@ -714,6 +715,40 @@ assert.deepEqual(
   [0, 0],
 );
 assert.equal("observedTopologyLinks" in projectedCounts.rows[3], false);
+
+const s1Contract = JSON.parse(fs.readFileSync(
+  "tests/fixtures/device_merge_contract.json",
+  "utf8",
+)).cases.find((item) => item.id === "s1-03-relationship-reconciliation");
+assert.ok(s1Contract, "S1-03 shared relationship fixture exists");
+const s1MergedRows = mergeRowsByStrategy(
+  s1Contract.inputs.sources.map((source) => normalizeRows(source.records, source.name)),
+  s1Contract.inputs.strategy,
+);
+const s1Adapted = run(
+  "merged-detailed",
+  ["td-merged-topology-all.json"],
+  [s1MergedRows],
+  s1MergedRows,
+);
+assert.deepEqual(
+  s1Adapted.nodeData.map((node) => node.id),
+  ["0x1000", "0x3000", "0x2000", "0x1001", "0x3001"],
+);
+assert.deepEqual(
+  s1Adapted.edgeData.map((edge) => [edge.from, edge.to, edge.linkCategories]),
+  [
+    ["0x1000", "0x2000", ["router_neighbor"]],
+    ["0x1000", "0x1001", ["default_children"]],
+    ["0x3000", "0x3001", ["default_children"]],
+  ],
+);
+assert.equal(new Set(s1Adapted.edgeData.map((edge) => edge.id)).size, 3);
+const s1LinkProjection = projectObservedTopologyLinkCounts(s1MergedRows, s1Adapted);
+assert.deepEqual(
+  s1LinkProjection.rows.map((row) => [row.extAddress, row.observedTopologyLinks]),
+  [["aa00112233445566", 2], ["bb00112233445566", 1]],
+);
 
 const noEvidenceProjection = projectObservedTopologyLinkCounts(
   [{

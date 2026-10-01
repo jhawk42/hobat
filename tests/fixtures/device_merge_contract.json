@@ -327,6 +327,67 @@
       }
     },
     {
+      "id": "s1-03-relationship-reconciliation",
+      "area": "child",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "Repeated child and neighbor observations reconcile across source files without crossing parent scope.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {
+            "name": "alpha.json",
+            "records": [
+              {
+                "rloc16": "0x1000",
+                "extAddress": "aa00112233445566",
+                "children": [{"rloc16": "0x1001", "childId": 1, "linkMargin": 20}],
+                "routerNeighbors": [{"rloc16": "0x2000", "linkQualityIn": 3}]
+              },
+              {
+                "rloc16": "0x3000",
+                "extAddress": "bb00112233445566",
+                "children": [{"rloc16": "0x3001", "childId": 1, "linkMargin": 18}]
+              }
+            ]
+          },
+          {
+            "name": "beta.json",
+            "records": [
+              {
+                "rloc16": "0x1000",
+                "extAddress": "aa00112233445566",
+                "children": [{"rloc16": "0x1001", "extAddress": "cc00112233445566", "childId": 1, "averageRssi": -70}],
+                "routerNeighbors": [{"rloc16": "0x2000", "extAddress": "dd00112233445566", "linkQualityOut": 2}]
+              },
+              {
+                "rloc16": "0x3000",
+                "extAddress": "bb00112233445566",
+                "children": [{"rloc16": "0x3001", "extAddress": "ee00112233445566", "childId": 1, "averageRssi": -68}]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0x1000",
+            "extAddress": "aa00112233445566",
+            "children": [{"rloc16": "0x1001", "extAddress": "cc00112233445566", "childId": 1, "linkMargin": 20, "averageRssi": -70}],
+            "routerNeighbors": [{"rloc16": "0x2000", "extAddress": "dd00112233445566", "linkQualityIn": 3, "linkQualityOut": 2}],
+            "_source_files": ["alpha.json", "beta.json"]
+          },
+          {
+            "rloc16": "0x3000",
+            "extAddress": "bb00112233445566",
+            "children": [{"rloc16": "0x3001", "extAddress": "ee00112233445566", "childId": 1, "linkMargin": 18, "averageRssi": -68}],
+            "_source_files": ["alpha.json", "beta.json"]
+          }
+        ]
+      }
+    },
+    {
       "id": "route-sequence-wraparound-250-to-5",
       "area": "route",
       "operation": "merge",
