@@ -141,10 +141,10 @@ def test_device_with_empty_vendor_fields():
     
     device = list(parsed.values())[0]
     
-    # Verify empty vendor fields are None (not empty strings)
-    assert device["vendor_name"] is None, f"Expected None, got {device['vendor_name']}"
-    assert device["vendor_model"] is None, f"Expected None, got {device['vendor_model']}"
-    assert device["vendor_sw_version"] is None, f"Expected None, got {device['vendor_sw_version']}"
+    # Present, zero-length vendor TLVs remain distinct from omitted fields.
+    assert device["vendor_name"] == ""
+    assert device["vendor_model"] == ""
+    assert device["vendor_sw_version"] == ""
     
     # Other fields should still be present
     assert device["eui64"] == "f4ce36a9111c02c1"

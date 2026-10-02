@@ -198,6 +198,7 @@ def _iter_leaf_paths(value: Any, prefix: str = ""):
 
 def test_maintained_snapshot_paths_are_classified() -> None:
     catalog_paths = {field["path"] for field in MODEL["fields"]}
+    source_owned_extensions = set(MODEL.get("sourceOwnedExtensionPaths", []))
     aliases = {
         alias: field["path"]
         for field in MODEL["fields"]
@@ -211,6 +212,12 @@ def test_maintained_snapshot_paths_are_classified() -> None:
 
     def is_classified(path: str) -> bool:
         canonical = aliases.get(path, path)
+        if any(
+            canonical == extension
+            or canonical.startswith(f"{extension}.")
+            for extension in source_owned_extensions
+        ):
+            return True
         return any(
             canonical == catalog_path or canonical.startswith(f"{catalog_path}.")
             for catalog_path in catalog_paths

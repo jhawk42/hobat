@@ -267,6 +267,222 @@ def test_networkdiag_checkpoint_writes_canonical_border_router_field(tmp_path):
     ]
 
 
+def test_networkdiag_final_and_checkpoint_persist_canonical_response_history(tmp_path):
+    history = [{
+        "observation_id": "collection:multicast:0:0",
+        "collection_id": "collection",
+        "capture_sequence": 0,
+        "capture_stage": "multicast-network",
+        "capture_target": "ff03::1",
+        "capture_attempt_index": 0,
+        "response_index": 0,
+        "response_group_id": "fd00::1|query:1234",
+        "responder_ipv6": "fd00::1",
+        "query_id": 0x1234,
+        "answer_index": 0,
+        "final_answer": True,
+        "request_association": "query-id",
+        "attributed_request_attempt_index": 0,
+        "attributed_request": {
+            "capture_stage": "multicast-network",
+            "capture_target": "ff03::1",
+            "attempt_index": 0,
+        },
+        "requested_type_ids": [0, 1, 2, 8],
+        "received_type_ids": [0, 1, 2, 8, 32, 33],
+        "malformed_type_ids": [],
+        "undecoded_type_ids": [],
+        "parse_status": "valid",
+    }]
+    record = {
+        "extaddr": "0011223344556677",
+        "tlv_response_history": history,
+    }
+    final_path = tmp_path / OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
+    checkpoint_path = tmp_path / f"{OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME}.partial.json"
+
+    networkdiag.save_topology_to_json_file({"0x0400": record}, final_path)
+    networkdiag.save_topology_to_json_file(
+        {"0x0400": record}, checkpoint_path, checkpoint=True
+    )
+
+    for path in (final_path, checkpoint_path):
+        [saved] = json.loads(path.read_text(encoding="utf-8"))
+        [observation] = saved["tlvResponseHistory"]
+        assert observation["observationId"] == "collection:multicast:0:0"
+        assert observation["collectionId"] == "collection"
+        assert observation["captureSequence"] == 0
+        assert observation["captureAttemptIndex"] == 0
+        assert observation["queryId"] == 0x1234
+        assert observation["answerIndex"] == 0
+        assert observation["finalAnswer"] is True
+        assert observation["requestedTypeIds"] == [0, 1, 2, 8]
+        assert observation["receivedTypeIds"] == [0, 1, 2, 8, 32, 33]
+        assert observation["attributedRequest"]["captureStage"] == "multicast-network"
+        assert "tlv_response_history" not in saved
+
+
+def test_standalone_multicast_persists_per_attempt_response_history(monkeypatch, tmp_path):
+    payload = (
+        "00080011223344556677"
+        "01020400"
+        "02010f"
+        "0810fd000000000000000000000000000001"
+        "18020005"
+        "20028000"
+        "21021234"
+    )
+    output = (
+        "DIAG_GET.rsp/ans from fd00::1: " + payload + "\n"
+        "Ext Address: 0011223344556677\n"
+        "Rloc16: 0x0400\n"
+        "Mode:\n    RxOnWhenIdle: 1\n    DeviceType: 1\n    NetworkData: 1\n"
+        "IP6 Address List:\n    - fd00::1\n"
+    )
+    monkeypatch.setattr(
+        networkdiag.util_ot_ctl,
+        "exec_ot_ctl",
+        lambda _command: output,
+    )
+    final_path = tmp_path / "td-otbr-cli-networkdiag-multicast-network.json"
+    checkpoint_path = tmp_path / "td-otbr-cli-networkdiag-multicast-network.partial.json"
+
+    networkdiag.fetch_network_diag_topology_multicast_network(
+        {},
+        {},
+        {},
+        {},
+        checkpoint_filepath=checkpoint_path,
+        final_output_path=final_path,
+    )
+
+    for path in (final_path, checkpoint_path):
+        [saved] = json.loads(path.read_text(encoding="utf-8"))
+        assert len(saved["tlvResponseHistory"]) == 2
+        assert [entry["captureAttemptIndex"] for entry in saved["tlvResponseHistory"]] == [0, 1]
+        assert len({entry["observationId"] for entry in saved["tlvResponseHistory"]}) == 2
+        assert all(entry["receivedTypeIds"] == [0, 1, 2, 8, 24, 32, 33] for entry in saved["tlvResponseHistory"])
+
+
+def test_late_multicast_query_id_backfill_reaches_peer_final_and_checkpoint_records(
+    monkeypatch, tmp_path
+):
+    first_output = (
+        "DIAG_GET.rsp/ans from fd00::1: "
+        "000800112233445566770102040002010f"
+        "0810fd000000000000000000000000000001"
+        "2002800021021234\n"
+        "Ext Address: 0011223344556677\n"
+        "Rloc16: 0x0400\n"
+        "Mode:\n    RxOnWhenIdle: 1\n    DeviceType: 1\n    NetworkData: 1\n"
+        "IP6 Address List:\n    - fd00::1\n"
+    )
+    late_detailed_output = (
+        "DIAG_GET.rsp/ans from fd00::2: "
+        "00088899aabbccddeeff0102080002010f"
+        "0810fd000000000000000000000000000002"
+        "190441636d652002800121021234\n"
+        "Ext Address: 8899aabbccddeeff\n"
+        "Rloc16: 0x0800\n"
+        "Mode:\n    RxOnWhenIdle: 1\n    DeviceType: 1\n    NetworkData: 1\n"
+        "IP6 Address List:\n    - fd00::2\n"
+        "Vendor Name: Acme\n"
+    )
+    outputs = iter((first_output, late_detailed_output))
+    monkeypatch.setattr(networkdiag.util_ot_ctl, "exec_ot_ctl", lambda _command: next(outputs))
+    monkeypatch.setattr(networkdiag.time, "sleep", lambda _seconds: None)
+    final_path = tmp_path / "td-otbr-cli-networkdiag-multicast-network.json"
+    checkpoint_path = tmp_path / "td-otbr-cli-networkdiag-multicast-network.partial.json"
+
+    networkdiag.fetch_network_diag_topology_multicast_network(
+        {},
+        {},
+        {},
+        {},
+        checkpoint_filepath=checkpoint_path,
+        final_output_path=final_path,
+    )
+
+    final_records = {
+        record["extAddress"]: record
+        for record in json.loads(final_path.read_text(encoding="utf-8"))
+    }
+    checkpoint_records = {
+        record["extAddress"]: record
+        for record in json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    }
+    for records in (final_records, checkpoint_records):
+        associations = set()
+        for extaddr in ("0011223344556677", "8899aabbccddeeff"):
+            [observation] = records[extaddr]["tlvResponseHistory"]
+            assert observation["queryId"] == 0x1234
+            associations.add(observation["requestAssociation"])
+            assert observation["attributedRequestAttemptIndex"] == 0
+            assert observation["requestedTypeIds"] == [
+                int(value) for value in networkdiag.TLV_VALUES_DETAILED.split()
+            ]
+        assert associations == {"query-id", "request-set"}
+
+
+def test_exhausted_direct_router_checkpoints_both_no_response_attempts(monkeypatch):
+    collection = networkdiag.create_diagnostic_collection_context()
+    target = networkdiag.util_network.build_rloc16_ipv6_address(
+        networkdiag.util_network.build_rloc_ipv6_address_prefix("fd00::/64"),
+        "0400",
+    )
+    for attempt_index in (0, 1):
+        request = networkdiag.register_diagnostic_request(
+            collection,
+            "direct-router",
+            target,
+            attempt_index,
+            networkdiag.get_tlv_values_for_detail_level(10 if attempt_index == 0 else 9),
+            "0x0400",
+        )
+        networkdiag.build_unframed_tlv_response_observation(
+            "Done",
+            collection,
+            request,
+            "direct-router",
+            target,
+            attempt_index,
+        )
+
+    monkeypatch.setattr(
+        networkdiag,
+        "fetch_network_diag_for_device",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(networkdiag.time, "sleep", lambda _seconds: None)
+    checkpoints = []
+    monkeypatch.setattr(
+        networkdiag,
+        "save_topology_to_json_file",
+        lambda payload, _path, **_kwargs: checkpoints.append(json.loads(json.dumps(payload))),
+    )
+    topology_map = {}
+
+    networkdiag.fetch_network_diag_topology_detail_routers(
+        ["0x0400"],
+        topology_map,
+        {},
+        {},
+        {},
+        None,
+        networkdiag.util_network.build_rloc_ipv6_address_prefix("fd00::/64"),
+        {},
+        "fetch-all.partial.json",
+        collection,
+    )
+
+    assert len(checkpoints) == 1
+    assert [item["capture_attempt_index"] for item in checkpoints[0]["0x0400"]["tlv_response_history"]] == [0, 1]
+    assert all(
+        item["parse_status"] == "no-response"
+        for item in checkpoints[0]["0x0400"]["tlv_response_history"]
+    )
+
+
 def test_networkdiag_fetch_all_persists_internal_collections_before_return(
     monkeypatch, tmp_path
 ):
@@ -288,6 +504,7 @@ def test_networkdiag_fetch_all_persists_internal_collections_before_return(
         primary_bbr_observation=None,
         checkpoint_filepath=None,
         final_output_path=None,
+        collection_context=None,
     ):
         internal_calls.append(
             ("multicast", checkpoint_filepath, final_output_path)
@@ -405,7 +622,11 @@ def test_multicast_networkdiag_uses_detailed_then_basic_tlvs(monkeypatch):
         "exec_ot_ctl",
         lambda command: commands.append(command) or "",
     )
-    monkeypatch.setattr(networkdiag, "parse_multicast_diag_output", lambda *_args: {})
+    monkeypatch.setattr(
+        networkdiag,
+        "parse_multicast_diag_output",
+        lambda *_args, **_kwargs: {},
+    )
     monkeypatch.setattr(networkdiag.time, "sleep", delays.append)
 
     result = networkdiag.fetch_network_diag_multicast(

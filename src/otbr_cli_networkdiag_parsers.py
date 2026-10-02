@@ -3,9 +3,12 @@
 Each function receives the raw text output from ot-ctl networkdiagnostic get
 and extracts a specific TLV field, returning a structured dict or value.
 """
-import re
+import ipaddress
 import logging
+import re
+import uuid
 from collections.abc import Mapping
+from copy import deepcopy
 
 from otbr_cli_networkdiag_util import device_type_from_mode
 from util_network import decode_short_thread_version
@@ -23,6 +26,16 @@ RAW_MAC_COUNTER_FIELDS: Mapping[str, str] = {
     "IfOutBroadcastPkts": "ifoutbroadcastpkts",
     "IfOutDiscards": "ifoutdiscards",
 }
+
+FORMATTED_DIAGNOSTIC_TLV_TYPES = frozenset({2, 4, 5, 6, 9, 16, 34})
+RAW_DIAGNOSTIC_TLV_TYPES = frozenset({0, 1, 8, 23, 24, 25, 26, 27, 28, 32, 33})
+SINGLE_VALUE_DIAGNOSTIC_TLV_TYPES = frozenset({
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 16, 17, 18, 19,
+    23, 24, 25, 26, 27, 28, 32, 33, 34,
+})
+DIAGNOSTIC_TLV_CONTROL_TYPES = frozenset({32, 33})
+DIAGNOSTIC_STRING_TLV_MAX_LENGTHS = {25: 32, 26: 32, 27: 16, 28: 64}
+DIAGNOSTIC_RESPONSE_PREFIX = "DIAG_GET.rsp/ans from "
 
 
 def parse_ipv6_address_list(output):
@@ -561,8 +574,7 @@ def parse_vendor_name(output):
     """
     match = re.search(r"Vendor Name:[ \t]*([^\r\n]*)$", output, re.MULTILINE)
     if match:
-        vendor_name = match.group(1).strip()
-        return vendor_name if vendor_name else None
+        return match.group(1).strip()
     return None
 
 
@@ -577,8 +589,7 @@ def parse_vendor_model(output):
     """
     match = re.search(r"Vendor Model:[ \t]*([^\r\n]*)$", output, re.MULTILINE)
     if match:
-        vendor_model = match.group(1).strip()
-        return vendor_model if vendor_model else None
+        return match.group(1).strip()
     return None
 
 
@@ -593,8 +604,7 @@ def parse_vendor_sw_version(output):
     """
     match = re.search(r"Vendor SW Version:[ \t]*([^\r\n]*)$", output, re.MULTILINE)
     if match:
-        vendor_sw_version = match.group(1).strip()
-        return vendor_sw_version if vendor_sw_version else None
+        return match.group(1).strip()
     return None
 
 
@@ -704,33 +714,563 @@ def parse_route_data(output):
     return route
 
 
-def _parse_thread_version_tlv(payload_hex: str) -> int | None:
-    if not re.fullmatch(r"[0-9a-fA-F]+", payload_hex):
-        return None
-    try:
-        payload = bytes.fromhex(payload_hex)
-    except ValueError:
-        return None
+def parse_diagnostic_tlv_payload(payload_hex: str) -> dict:
+    """Parse and validate a complete Network Diagnostic TLV byte stream."""
+    if not isinstance(payload_hex, str) or len(payload_hex) % 2 or not re.fullmatch(
+        r"[0-9a-fA-F]*", payload_hex
+    ):
+        return {
+            "status": "malformed",
+            "error": "malformed-hex",
+            "tlvs": [],
+            "received_type_ids": [],
+        }
 
+    payload = bytes.fromhex(payload_hex)
+    tlvs = []
     offset = 0
-    while offset + 2 <= len(payload):
-        tlv_type = payload[offset]
-        length = payload[offset + 1]
+    while offset < len(payload):
+        if len(payload) - offset < 2:
+            return {
+                "status": "malformed",
+                "error": "truncated-header",
+                "tlvs": [],
+                "received_type_ids": [],
+            }
+
+        tlv_type, length = payload[offset], payload[offset + 1]
         offset += 2
-        if length == 255:
-            if offset + 2 > len(payload):
-                return None
+        if length == 0xFF:
+            if len(payload) - offset < 2:
+                return {
+                    "status": "malformed",
+                    "error": "truncated-extended-length",
+                    "tlvs": [],
+                    "received_type_ids": [],
+                }
             length = int.from_bytes(payload[offset:offset + 2], "big")
             offset += 2
-        if offset + length > len(payload):
-            return None
-        if tlv_type == 24:
-            return int.from_bytes(payload[offset:offset + 2], "big") if length == 2 else None
-        offset += length
+
+        end = offset + length
+        if end > len(payload):
+            return {
+                "status": "malformed",
+                "error": "truncated-value",
+                "tlvs": [],
+                "received_type_ids": [],
+            }
+
+        tlvs.append({"type": tlv_type, "value": payload[offset:end]})
+        offset = end
+
+    return {
+        "status": "valid",
+        "error": None,
+        "tlvs": tlvs,
+        "received_type_ids": [tlv["type"] for tlv in tlvs],
+    }
+
+
+def decode_diagnostic_tlvs(parsed: dict) -> dict:
+    """Validate known TLV value shapes and decode approved scalar values."""
+    result = {
+        "values": {},
+        "malformed_type_ids": [],
+        "undecoded_type_ids": [],
+        "query_id": None,
+        "answer_index": None,
+        "is_final_answer": None,
+    }
+    if parsed.get("status") != "valid":
+        return result
+
+    tlvs = parsed.get("tlvs", [])
+    counts = {}
+    for tlv in tlvs:
+        counts[tlv["type"]] = counts.get(tlv["type"], 0) + 1
+
+    for tlv in tlvs:
+        tlv_type = tlv["type"]
+        value = tlv["value"]
+        if tlv_type in SINGLE_VALUE_DIAGNOSTIC_TLV_TYPES and counts[tlv_type] != 1:
+            if tlv_type not in result["malformed_type_ids"]:
+                result["malformed_type_ids"].append(tlv_type)
+            continue
+
+        error = _diagnostic_tlv_value_error(tlv_type, value)
+        if error is not None:
+            if tlv_type not in result["malformed_type_ids"]:
+                result["malformed_type_ids"].append(tlv_type)
+            continue
+
+        if tlv_type not in RAW_DIAGNOSTIC_TLV_TYPES:
+            if tlv_type not in FORMATTED_DIAGNOSTIC_TLV_TYPES and tlv_type not in result["undecoded_type_ids"]:
+                result["undecoded_type_ids"].append(tlv_type)
+            continue
+
+        if tlv_type == 0:
+            result["values"]["extaddr"] = value.hex()
+        elif tlv_type == 1:
+            result["values"]["rloc16"] = f"0x{int.from_bytes(value, 'big'):04x}"
+        elif tlv_type == 8:
+            result["values"]["ipv6_addrs"] = [
+                str(ipaddress.IPv6Address(value[offset:offset + 16]))
+                for offset in range(0, len(value), 16)
+            ]
+        elif tlv_type == 23:
+            result["values"]["eui64"] = value.hex()
+        elif tlv_type == 24:
+            version = int.from_bytes(value, "big")
+            result["values"]["thread_version_decimal"] = version
+            result["values"]["thread_version"] = decode_short_thread_version(version)
+        elif tlv_type in DIAGNOSTIC_STRING_TLV_MAX_LENGTHS:
+            key = {
+                25: "vendor_name",
+                26: "vendor_model",
+                27: "vendor_sw_version",
+                28: "thread_stack_version",
+            }[tlv_type]
+            try:
+                result["values"][key] = value.decode("utf-8")
+            except UnicodeDecodeError:
+                if tlv_type not in result["malformed_type_ids"]:
+                    result["malformed_type_ids"].append(tlv_type)
+        elif tlv_type == 32:
+            answer = int.from_bytes(value, "big")
+            result["answer_index"] = answer & 0x7FFF
+            result["is_final_answer"] = bool(answer & 0x8000)
+        elif tlv_type == 33:
+            result["query_id"] = int.from_bytes(value, "big")
+
+    return result
+
+
+def _diagnostic_tlv_value_error(tlv_type: int, value: bytes) -> str | None:
+    exact_lengths = {
+        0: {8},
+        1: {2},
+        2: {1},
+        3: {4},
+        6: {8},
+        9: {36},
+        14: {1},
+        15: {2},
+        19: {4},
+        23: {8},
+        24: {2},
+        32: {2},
+        33: {2},
+        34: {66},
+    }
+    if tlv_type in exact_lengths and len(value) not in exact_lengths[tlv_type]:
+        return "invalid-value-length"
+    if tlv_type == 4 and len(value) not in (7, 10):
+        return "invalid-connectivity-length"
+    if tlv_type == 5:
+        if len(value) < 9:
+            return "truncated-route64"
+        allocated_router_count = sum(byte.bit_count() for byte in value[1:9])
+        standard_length = 9 + allocated_router_count
+        long_routes_length = 9 + (allocated_router_count * 3 + 1) // 2
+        if len(value) not in (standard_length, long_routes_length):
+            return "invalid-route64-entry-count"
+    if tlv_type == 8 and len(value) % 16:
+        return "invalid-ipv6-address-list-length"
+    if tlv_type == 16 and len(value) % 3:
+        return "invalid-child-table-length"
+    if tlv_type in DIAGNOSTIC_STRING_TLV_MAX_LENGTHS:
+        if len(value) > DIAGNOSTIC_STRING_TLV_MAX_LENGTHS[tlv_type]:
+            return "string-too-long"
+        try:
+            value.decode("utf-8")
+        except UnicodeDecodeError:
+            return "invalid-utf8"
     return None
 
 
-def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) -> dict:
+def parse_network_diagnostic_response_frames(output: str) -> list[dict]:
+    """Split CLI response envelopes in output order without parsing TLV textually."""
+    if not isinstance(output, str):
+        return []
+
+    frames = []
+    current = None
+
+    def finish_frame() -> None:
+        if current is not None:
+            current["text"] = "\n".join(current.pop("lines"))
+            frames.append(current.copy())
+
+    for line in output.splitlines():
+        if line.startswith(DIAGNOSTIC_RESPONSE_PREFIX):
+            finish_frame()
+            header = line[len(DIAGNOSTIC_RESPONSE_PREFIX):]
+            match = re.match(r"^(.+):(?:\s+(.*))?$", header)
+            current = {
+                "response_index": len(frames),
+                "responder_ipv6": match.group(1).strip() if match else None,
+                "payload_hex": (
+                    match.group(2).strip()
+                    if match and match.group(2) else None
+                ),
+                "lines": [line],
+            }
+        elif current is not None:
+            current["lines"].append(line)
+
+    finish_frame()
+    return frames
+
+
+def create_diagnostic_collection_context() -> dict:
+    """Create response-correlation state scoped to one collector invocation."""
+    return {
+        "collection_id": uuid.uuid4().hex,
+        "request_attempts": [],
+        "query_origins": {},
+        "observations": [],
+        "parsed_records": [],
+        "response_group_records": {},
+    }
+
+
+def register_diagnostic_request(
+    collection_context: dict | None,
+    capture_stage: str,
+    capture_target: str,
+    attempt_index: int,
+    requested_tlv_values: str,
+    query_target_rloc16: str | None = None,
+) -> dict | None:
+    if collection_context is None:
+        return None
+    requested_type_ids = []
+    for token in requested_tlv_values.split():
+        try:
+            requested_type_ids.append(int(token, 10))
+        except ValueError:
+            return None
+    request = {
+        "request_id": f"{capture_stage}:{capture_target}:{attempt_index}:{len(collection_context['request_attempts'])}",
+        "capture_stage": capture_stage,
+        "capture_target": capture_target,
+        "attempt_index": attempt_index,
+        "requested_type_ids": requested_type_ids,
+        "query_target_rloc16": query_target_rloc16,
+    }
+    collection_context["request_attempts"].append(request)
+    return request
+
+
+def _attribute_response_observation(
+    observation: dict,
+    request: dict | None,
+    association: str,
+) -> None:
+    observation["request_association"] = association
+    observation["attributed_request_attempt_index"] = (
+        request.get("attempt_index") if request else None
+    )
+    observation["attributed_request"] = (
+        {
+            "capture_stage": request["capture_stage"],
+            "capture_target": request["capture_target"],
+            "attempt_index": request["attempt_index"],
+            "query_target_rloc16": request.get("query_target_rloc16"),
+        }
+        if request else None
+    )
+    requested_types = list(request["requested_type_ids"]) if request else None
+    received_types = set(observation.get("received_type_ids", []))
+    application_types = received_types - DIAGNOSTIC_TLV_CONTROL_TYPES
+    observation["requested_type_ids"] = requested_types
+    observation["omitted_type_ids"] = (
+        sorted(set(requested_types) - received_types)
+        if requested_types is not None else None
+    )
+    observation["unrequested_type_ids"] = (
+        sorted(application_types - set(requested_types))
+        if requested_types is not None else None
+    )
+
+
+def build_tlv_response_observation(
+    frame: dict | None,
+    parsed: dict,
+    decoded: dict,
+    collection_context: dict,
+    request_context: dict | None,
+    capture_stage: str,
+    capture_target: str,
+    capture_attempt_index: int,
+    response_index: int | None,
+    *,
+    no_response: bool = False,
+) -> dict:
+    responder = frame.get("responder_ipv6") if frame else None
+    query_id = decoded.get("query_id")
+    attributed_request = None
+    association = "uncorrelated"
+
+    if no_response and request_context is not None:
+        attributed_request = request_context
+        association = "no-response"
+    elif (
+        query_id is None
+        and request_context is not None
+        and request_context.get("query_target_rloc16") is not None
+        and _request_target_matches_responder(request_context, responder)
+    ):
+        attributed_request = request_context
+        association = "responder-target"
+    elif query_id is not None:
+        origin_id = collection_context["query_origins"].get(query_id)
+        if origin_id is not None:
+            attributed_request = next(
+                (request for request in collection_context["request_attempts"] if request["request_id"] == origin_id),
+                None,
+            )
+            association = "query-id" if attributed_request else "unknown"
+        else:
+            received_application_types = set(parsed.get("received_type_ids", [])) - DIAGNOSTIC_TLV_CONTROL_TYPES
+            compatible_requests = [
+                request
+                for request in collection_context["request_attempts"]
+                if request["capture_stage"] == capture_stage
+                and request["capture_target"] == capture_target
+                and request.get("query_target_rloc16") is None
+                and request["attempt_index"] <= capture_attempt_index
+                and _request_target_matches_responder(request, responder)
+                and received_application_types.issubset(set(request["requested_type_ids"]))
+            ]
+            uniquely_identifying_requests = []
+            for request in compatible_requests:
+                other_requested = set().union(*(
+                    set(other["requested_type_ids"])
+                    for other in collection_context["request_attempts"]
+                    if other is not request
+                    and other["capture_stage"] == capture_stage
+                    and other["capture_target"] == capture_target
+                )) if len(collection_context["request_attempts"]) > 1 else set()
+                if received_application_types & (set(request["requested_type_ids"]) - other_requested):
+                    uniquely_identifying_requests.append(request)
+            if len(uniquely_identifying_requests) == 1:
+                attributed_request = uniquely_identifying_requests[0]
+                collection_context["query_origins"][query_id] = attributed_request["request_id"]
+                association = "request-set"
+            else:
+                association = "ambiguous" if compatible_requests else "unknown"
+    elif parsed.get("status") == "valid" and 33 in parsed.get("received_type_ids", []):
+        association = "unknown"
+
+    received_type_ids = list(parsed.get("received_type_ids", []))
+    parse_status = parsed.get("status", "raw-unavailable")
+    if parse_status == "valid" and decoded.get("malformed_type_ids"):
+        parse_status = "valid-with-malformed-tlvs"
+    observation_id = (
+        f"{collection_context['collection_id']}:{capture_stage}:{capture_target}:"
+        f"{capture_attempt_index}:{response_index if response_index is not None else 'none'}"
+    )
+    group_id = (
+        f"{responder}|query:{query_id:04x}"
+        if responder and query_id is not None
+        else observation_id
+    )
+    if query_id is not None and attributed_request is not None:
+        for prior_observation in collection_context["observations"]:
+            if (
+                prior_observation.get("query_id") == query_id
+                and prior_observation.get("request_association") in ("unknown", "ambiguous", "uncorrelated")
+            ):
+                _attribute_response_observation(
+                    prior_observation, attributed_request, "query-id"
+                )
+    observation = {
+        "observation_id": observation_id,
+        "collection_id": collection_context["collection_id"],
+        "capture_sequence": len(collection_context["observations"]),
+        "capture_stage": capture_stage,
+        "capture_target": capture_target,
+        "capture_attempt_index": capture_attempt_index,
+        "query_target_rloc16": (
+            request_context.get("query_target_rloc16") if request_context else None
+        ),
+        "response_index": response_index,
+        "response_group_id": group_id,
+        "responder_ipv6": responder,
+        "query_id": query_id,
+        "answer_index": decoded.get("answer_index"),
+        "final_answer": decoded.get("is_final_answer"),
+        "request_association": association,
+        "attributed_request_attempt_index": None,
+        "attributed_request": None,
+        "requested_type_ids": None,
+        "received_type_ids": received_type_ids,
+        "omitted_type_ids": None,
+        "unrequested_type_ids": None,
+        "malformed_type_ids": list(decoded.get("malformed_type_ids", [])),
+        "undecoded_type_ids": list(decoded.get("undecoded_type_ids", [])),
+        "parse_status": "no-response" if no_response else parse_status,
+    }
+    _attribute_response_observation(observation, attributed_request, association)
+    collection_context["observations"].append(observation)
+    logging.debug(
+        "Network diagnostic response stage=%s target=%s captureAttempt=%s response=%s "
+        "requestTypes=%s receivedTypes=%s parseStatus=%s undecodedTypes=%s association=%s",
+        capture_stage,
+        capture_target,
+        capture_attempt_index,
+        response_index,
+        observation["requested_type_ids"],
+        received_type_ids,
+        observation["parse_status"],
+        observation["undecoded_type_ids"],
+        association,
+    )
+    return observation
+
+
+def _request_target_matches_responder(request: dict, responder: str | None) -> bool:
+    if not responder:
+        return False
+    try:
+        target = ipaddress.IPv6Address(request["capture_target"])
+        response_address = ipaddress.IPv6Address(responder)
+    except (ipaddress.AddressValueError, TypeError):
+        return False
+    return target.is_multicast or target == response_address
+
+
+def _same_ipv6_address(left: object, right: object) -> bool:
+    if not isinstance(left, str) or not isinstance(right, str):
+        return False
+    try:
+        return ipaddress.IPv6Address(left) == ipaddress.IPv6Address(right)
+    except ipaddress.AddressValueError:
+        return False
+
+
+def _diagnostic_response_group_key(
+    responder: str | None,
+    query_id: int | None,
+) -> str | None:
+    if not responder or query_id is None:
+        return None
+    try:
+        canonical_responder = ipaddress.IPv6Address(responder).compressed
+    except ipaddress.AddressValueError:
+        return None
+    return f"{canonical_responder}|{query_id:04x}"
+
+
+def build_unframed_tlv_response_observation(
+    output: str,
+    collection_context: dict,
+    request_context: dict,
+    capture_stage: str,
+    capture_target: str,
+    capture_attempt_index: int,
+) -> dict:
+    no_response = (
+        not output.strip()
+        or output.strip().lower() in {"done", "done."}
+        or bool(re.match(r"\s*(?:Error\b|ResponseTimeout\b)", output, re.IGNORECASE))
+    )
+    empty_parse = {"status": "raw-unavailable", "received_type_ids": []}
+    return build_tlv_response_observation(
+        None,
+        empty_parse,
+        {},
+        collection_context,
+        request_context,
+        capture_stage,
+        capture_target,
+        capture_attempt_index,
+        None,
+        no_response=no_response,
+    )
+
+
+def _parse_thread_version_tlv(payload_hex: str) -> int | None:
+    parsed = parse_diagnostic_tlv_payload(payload_hex)
+    if parsed["status"] != "valid":
+        return None
+    return decode_diagnostic_tlvs(parsed)["values"].get("thread_version_decimal")
+
+
+def _values_match_raw_and_formatted(field: str, formatted: object, raw: object) -> bool:
+    if field in {"extaddr", "eui64"} and isinstance(formatted, str) and isinstance(raw, str):
+        return formatted.lower() == raw.lower()
+    if field == "rloc16" and isinstance(formatted, str) and isinstance(raw, str):
+        return formatted.lower() == raw.lower()
+    if field == "ipv6_addrs" and isinstance(formatted, list) and isinstance(raw, list):
+        try:
+            return [str(ipaddress.IPv6Address(item)) for item in formatted] == [
+                str(ipaddress.IPv6Address(item)) for item in raw
+            ]
+        except ValueError:
+            return formatted == raw
+    if field in {"thread_stack_version", "vendor_name", "vendor_model", "vendor_sw_version"}:
+        return str(formatted).strip() == str(raw).strip()
+    return formatted == raw
+
+
+def _raw_or_formatted_value(
+    field: str,
+    formatted: object,
+    raw_values: dict,
+    *,
+    formatted_present: bool,
+) -> object:
+    if field not in raw_values:
+        return formatted
+    raw = raw_values[field]
+    if formatted_present:
+        if not _values_match_raw_and_formatted(field, formatted, raw):
+            logging.debug(
+                "Network diagnostic raw/formatted mismatch field=%s formatted=%r raw=%r; retaining formatted value",
+                field,
+                formatted,
+                raw,
+            )
+        return formatted
+    return raw
+
+
+def _merge_response_histories(existing: object, incoming: object) -> list:
+    histories = []
+    positions = {}
+    for source in (existing, incoming):
+        if not isinstance(source, list):
+            continue
+        for observation in source:
+            if not isinstance(observation, dict):
+                continue
+            identity = observation.get("observation_id", observation.get("observationId"))
+            if identity is not None:
+                if identity in positions:
+                    histories[positions[identity]] = observation
+                    continue
+                positions[identity] = len(histories)
+            histories.append(observation)
+    if histories and all(
+        isinstance(item.get("capture_sequence"), int)
+        for item in histories
+    ):
+        histories.sort(key=lambda item: item["capture_sequence"])
+    return histories
+
+
+def parse_multicast_diag_output(
+    output: str,
+    extaddr_map: dict | None = None,
+    *,
+    collection_context: dict | None = None,
+    request_context: dict | None = None,
+    capture_stage: str = "multicast",
+    capture_target: str | None = None,
+    capture_attempt_index: int | None = None,
+) -> dict:
     """
     Parses multicast network diagnostic output containing responses from multiple devices.
 
@@ -777,54 +1317,95 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
         extaddr_map = {}
 
     result = {}
+    response_groups = {}
+    frames = parse_network_diagnostic_response_frames(output)
 
-    # Split output by response marker, discarding the first element (preamble)
-    blocks = output.split("DIAG_GET.rsp/ans from ")
-    blocks = blocks[1:]  # Discard preamble
+    for frame in frames:
+        block = frame["text"]
+        raw_parse = (
+            parse_diagnostic_tlv_payload(frame["payload_hex"])
+            if frame["payload_hex"] is not None
+            else {"status": "raw-unavailable", "error": None, "tlvs": [], "received_type_ids": []}
+        )
+        decoded = decode_diagnostic_tlvs(raw_parse)
+        raw_values = decoded["values"]
+        responder = frame.get("responder_ipv6")
+        query_id = decoded.get("query_id")
+        response_group_key = _diagnostic_response_group_key(responder, query_id)
+        prior_group_record = (
+            collection_context.get("response_group_records", {}).get(response_group_key)
+            if collection_context is not None and response_group_key is not None
+            else None
+        )
+        if prior_group_record is None and response_group_key is not None:
+            prior_group_record = response_groups.get(response_group_key)
+        observation = None
+        if collection_context is not None and request_context is not None:
+            observation = build_tlv_response_observation(
+                frame,
+                raw_parse,
+                decoded,
+                collection_context,
+                request_context,
+                capture_stage,
+                capture_target or request_context["capture_target"],
+                capture_attempt_index if capture_attempt_index is not None else request_context["attempt_index"],
+                frame["response_index"],
+            )
 
-    for block in blocks:
-        if not block.strip():
-            continue
-
-        # Split on first newline to extract responder IPv6
-        lines = block.split("\n", 1)
-        if not lines:
-            continue
-
-        # Extract responder IPv6 from first line (format: "<ipv6>: <hex-data>")
-        first_line = lines[0]
-        responder_ipv6 = ""
-        if ": " in first_line:
-            responder_ipv6 = first_line.split(": ")[0].strip()
-        thread_version_decimal = _parse_thread_version_tlv(first_line.rpartition(": ")[2])
-
-        # Extract Ext Address (TLV 0) - required field
         extaddr_match = re.search(r"Ext Address:\s*([0-9a-fA-F]{16})", block)
-        if not extaddr_match:
-            logging.warning(
-                f"Malformed multicast response block (no Ext Address): {block[:100]}...")
+        formatted_extaddr = extaddr_match.group(1).lower() if extaddr_match else None
+        extaddr = _raw_or_formatted_value(
+            "extaddr", formatted_extaddr, raw_values,
+            formatted_present=formatted_extaddr is not None,
+        )
+        if extaddr is None and isinstance(prior_group_record, dict):
+            extaddr = prior_group_record.get("extaddr")
+        if not isinstance(extaddr, str) or not re.fullmatch(r"[0-9a-f]{16}", extaddr):
+            continuation_candidates = []
+            responder = frame.get("responder_ipv6")
+            query_id = decoded.get("query_id")
+            if responder and query_id is not None:
+                for prior_extaddr, prior_record in result.items():
+                    if not _values_match_raw_and_formatted(
+                        "responder_ipv6",
+                        prior_record.get("responder_ipv6"),
+                        responder,
+                    ):
+                        continue
+                    prior_history = prior_record.get("tlv_response_history", [])
+                    if any(
+                        isinstance(item, dict) and item.get("query_id") == query_id
+                        for item in prior_history
+                    ):
+                        continuation_candidates.append(prior_extaddr)
+            if len(continuation_candidates) == 1:
+                extaddr = continuation_candidates[0]
+        if not isinstance(extaddr, str) or not re.fullmatch(r"[0-9a-f]{16}", extaddr):
+            logging.warning("Malformed multicast response block without a usable Ext Address")
             continue
 
-        extaddr = extaddr_match.group(1).lower()
-
-        # Extract Rloc16 (TLV 1)
         rloc16_match = re.search(r"Rloc16:\s*(0x[0-9a-fA-F]{4})", block)
-        rloc16 = rloc16_match.group(1) if rloc16_match else "Unknown"
+        formatted_rloc16 = rloc16_match.group(1).lower() if rloc16_match else None
+        rloc16 = _raw_or_formatted_value(
+            "rloc16", formatted_rloc16, raw_values,
+            formatted_present=formatted_rloc16 is not None,
+        ) or "Unknown"
+        if rloc16 == "Unknown" and isinstance(prior_group_record, dict):
+            rloc16 = prior_group_record.get("rloc16", "Unknown")
 
-        # Extract Thread Stack Version (TLV 28)
-        thread_version_match = re.search(
-            r"Thread Stack Version:\s*(.+?)(?:\n|$)", block)
-        thread_stack_version = thread_version_match.group(
-            1).strip() if thread_version_match else "Unknown"
+        stack_match = re.search(r"Thread Stack Version:\s*([^\r\n]*)", block)
+        formatted_stack = stack_match.group(1).strip() if stack_match else None
+        thread_stack_version = _raw_or_formatted_value(
+            "thread_stack_version", formatted_stack, raw_values,
+            formatted_present=formatted_stack is not None,
+        )
+        if thread_stack_version is None:
+            thread_stack_version = "Unknown"
 
-        # Resolve device label from extaddr_map
         device_label = extaddr_map.get(extaddr, f"found-{rloc16}")
-
-        # Parse mode flags and IPv6 addresses (always present in request)
         mode = parse_mode_flags(block)
         ipv6_addrs = parse_ipv6_address_list(block)
-
-        # Parse optional TLV data (may be present depending on response)
         eui64 = parse_eui64(block)
         connectivity = parse_connectivity(block)
         leader_data = parse_leader_data(block)
@@ -837,7 +1418,26 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
         mle_counters = parse_mle_counters(block)
         time_statistics = parse_time_statistics(block)
 
-        # Build device record
+        ipv6_addrs = _raw_or_formatted_value(
+            "ipv6_addrs", ipv6_addrs, raw_values,
+            formatted_present="IP6 Address List:" in block,
+        )
+        eui64 = _raw_or_formatted_value(
+            "eui64", eui64, raw_values, formatted_present=eui64 is not None,
+        )
+        vendor_name = _raw_or_formatted_value(
+            "vendor_name", vendor_name, raw_values,
+            formatted_present=vendor_name is not None,
+        )
+        vendor_model = _raw_or_formatted_value(
+            "vendor_model", vendor_model, raw_values,
+            formatted_present=vendor_model is not None,
+        )
+        vendor_sw_version = _raw_or_formatted_value(
+            "vendor_sw_version", vendor_sw_version, raw_values,
+            formatted_present=vendor_sw_version is not None,
+        )
+
         device_record = {
             "extaddr": extaddr,
             "rloc16": rloc16,
@@ -852,19 +1452,53 @@ def parse_multicast_diag_output(output: str, extaddr_map: dict | None = None) ->
             "vendor_model": vendor_model,
             "vendor_sw_version": vendor_sw_version,
             "route": route,
-            "responder_ipv6": responder_ipv6,
+            "responder_ipv6": frame["responder_ipv6"] or "",
             "children": children,
             "total_children": len(children),
             "mac_counters": mac_counters,
             "mle_counters": mle_counters,
             "time_statistics": time_statistics,
         }
-        if thread_version_decimal is not None:
-            device_record["thread_version_decimal"] = thread_version_decimal
-            device_record["thread_version"] = decode_short_thread_version(thread_version_decimal)
+        if "thread_version_decimal" in raw_values:
+            device_record["thread_version_decimal"] = raw_values["thread_version_decimal"]
+            device_record["thread_version"] = raw_values["thread_version"]
+        if observation is not None:
+            device_record["tlv_response_history"] = [observation]
 
-        # Store in result dict, keyed by extaddr (last duplicate wins for now)
-        result[extaddr] = device_record
+        previous = result.get(extaddr)
+        if not isinstance(previous, dict) and isinstance(prior_group_record, dict):
+            previous = prior_group_record
+        if isinstance(previous, dict):
+            from otbr_cli_networkdiag_util import reconcile_device_record
+
+            merged_record = reconcile_device_record(
+                deepcopy(previous), device_record
+            )
+            current_responder_history = (
+                [
+                    item
+                    for item in collection_context.get("observations", [])
+                    if isinstance(item, dict)
+                    and _same_ipv6_address(item.get("responder_ipv6"), responder)
+                ]
+                if collection_context is not None
+                else device_record.get("tlv_response_history", [])
+            )
+            histories = _merge_response_histories(
+                merged_record.get("tlv_response_history"),
+                current_responder_history,
+            )
+            if histories:
+                merged_record["tlv_response_history"] = histories
+            result[extaddr] = merged_record
+        else:
+            result[extaddr] = device_record
+        if collection_context is not None and response_group_key is not None:
+            collection_context.setdefault("response_group_records", {})[
+                response_group_key
+            ] = deepcopy(result[extaddr])
+        if response_group_key is not None:
+            response_groups[response_group_key] = deepcopy(result[extaddr])
 
     logging.info(f"Parsed {len(result)} unique devices from multicast output")
     return result

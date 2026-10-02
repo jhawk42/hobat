@@ -315,6 +315,57 @@ def test_exhausted_child_inserts_one_fallback_but_retains_known_record(monkeypat
     assert len(checkpoints) == 2
 
 
+def test_exhausted_child_still_merges_late_non_target_response(monkeypatch) -> None:
+    collection = topology.create_diagnostic_collection_context()
+    checkpoints = []
+
+    def fetch(*_args, collection_context=None, **_kwargs):
+        collection_context["parsed_records"].append({
+            "rloc16": "0x2000",
+            "extaddr": "8899aabbccddeeff",
+            "device_label": "Late Router",
+            "responder_ipv6": "fd00::2000",
+            "ipv6_addrs": ["fd00::2000"],
+            "tlv_response_history": [{
+                "observation_id": "collection:child:0:late-router",
+                "capture_stage": "direct-child-fast",
+            }],
+        })
+        return None
+
+    monkeypatch.setattr(topology, "fetch_network_diag_for_device", fetch)
+    monkeypatch.setattr(topology.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        topology,
+        "save_topology_to_json_file",
+        lambda payload, _path, **_kwargs: checkpoints.append(dict(payload)),
+    )
+    topology_map = {
+        "0x1000": {"rloc16": "0x1000", "children": [{"rloc16": "0x1001"}]}
+    }
+
+    topology.fetch_network_diag_topology_expand_children(
+        True,
+        ["0x1000"],
+        topology_map,
+        {},
+        {},
+        {},
+        None,
+        None,
+        {},
+        "checkpoint.json",
+        collection_context=collection,
+    )
+
+    assert topology_map["0x1001"]["network_diagnostic_status"] == "no-response"
+    assert topology_map["0x2000"]["extaddr"] == "8899aabbccddeeff"
+    assert topology_map["0x2000"]["tlv_response_history"][0]["observation_id"] == (
+        "collection:child:0:late-router"
+    )
+    assert checkpoints
+
+
 def test_reconciliation_reports_unchanged_and_replaces_found_placeholder() -> None:
     target = _target()
     unchanged = topology.ChildFetchOutcome(target, "detail", (), (), "already-satisfied")

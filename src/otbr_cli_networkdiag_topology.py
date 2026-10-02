@@ -60,6 +60,8 @@ from otbr_cli_networkdiag_util import (
     get_tlv_values_for_detail_level,
 )
 from otbr_cli_networkdiag_parsers import (
+    build_unframed_tlv_response_observation,
+    create_diagnostic_collection_context,
     parse_ipv6_address_list,
     parse_mode_flags,
     parse_child_table,
@@ -74,6 +76,8 @@ from otbr_cli_networkdiag_parsers import (
     parse_vendor_sw_version,
     parse_route_data,
     parse_multicast_diag_output,
+    parse_network_diagnostic_response_frames,
+    register_diagnostic_request,
 )
 
 from otbr_cli_meshdiag_topology import (
@@ -82,7 +86,16 @@ from otbr_cli_meshdiag_topology import (
 
 
 def fetch_network_diag_for_device(
-    rloc16, rloc_prefix, extaddr_map=None, router_table_by_router_id=None, ipv6_addresses=None, tlv_detail_level=6
+    rloc16,
+    rloc_prefix,
+    extaddr_map=None,
+    router_table_by_router_id=None,
+    ipv6_addresses=None,
+    tlv_detail_level=6,
+    *,
+    collection_context: dict | None = None,
+    capture_stage: str = "direct-router",
+    capture_attempt_index: int = 0,
 ):
     """
     Queries and parses network diagnostic data for a single router.
@@ -117,13 +130,93 @@ def fetch_network_diag_for_device(
     # TLV 27: Vendor SW Version, TLV 28: Vendor App URL (Thread Stack Version)
     # TLV 5: Route64, TLV 16: Child Table, TLV 9: MAC Counters
     # TLV 34: MLE Counters, Time Statistics
+    canonical_rloc16 = get_canonical_rloc16({"rloc16": rloc16})
+    request_context = register_diagnostic_request(
+        collection_context,
+        capture_stage,
+        ipv6_rloc_addr,
+        capture_attempt_index,
+        tlv_values,
+        canonical_rloc16,
+    )
     output = util_ot_ctl.exec_ot_ctl(
         f"networkdiagnostic get {ipv6_rloc_addr} {tlv_values}"
     )
     logging.debug(
         f"Diagnostic for RLOC {rloc16} (IPv6: {ipv6_rloc_addr}):\n{output}\n")
 
-    # Extract Ext Address (TLV 0)
+    response_frames = parse_network_diagnostic_response_frames(output)
+    unframed_observation = None
+    if collection_context is not None and request_context is not None and not response_frames:
+        unframed_observation = build_unframed_tlv_response_observation(
+            output if isinstance(output, str) else "",
+            collection_context,
+            request_context,
+            capture_stage,
+            ipv6_rloc_addr,
+            capture_attempt_index,
+        )
+
+    parsed_responses = parse_multicast_diag_output(
+        output if isinstance(output, str) else "",
+        extaddr_map,
+        collection_context=collection_context,
+        request_context=request_context,
+        capture_stage=capture_stage,
+        capture_target=ipv6_rloc_addr,
+        capture_attempt_index=capture_attempt_index,
+    )
+    if collection_context is not None:
+        collection_context.setdefault("parsed_records", []).extend(
+            deepcopy(list(parsed_responses.values()))
+        )
+
+    if response_frames:
+        expected_rloc16 = canonical_rloc16
+        matching_records = [
+            record
+            for record in parsed_responses.values()
+            if _ipv6_addresses_equal(record.get("responder_ipv6"), ipv6_rloc_addr)
+        ]
+        target_frame_seen = any(
+            _ipv6_addresses_equal(frame.get("responder_ipv6"), ipv6_rloc_addr)
+            for frame in response_frames
+        )
+        if not matching_records:
+            if not target_frame_seen and collection_context is not None and request_context is not None:
+                from otbr_cli_networkdiag_parsers import build_tlv_response_observation
+
+                build_tlv_response_observation(
+                    None,
+                    {"status": "valid", "received_type_ids": []},
+                    {},
+                    collection_context,
+                    request_context,
+                    capture_stage,
+                    ipv6_rloc_addr,
+                    capture_attempt_index,
+                    None,
+                    no_response=True,
+                )
+            return None
+
+        network_topology_node = matching_records[-1]
+        network_topology_node["tlv_values"] = tlv_values
+        histories = network_topology_node.get("tlv_response_history", [])
+        has_valid_ipv6_tlv = any(
+            8 in observation.get("received_type_ids", [])
+            and 8 not in observation.get("malformed_type_ids", [])
+            and observation.get("parse_status") in ("valid", "valid-with-malformed-tlvs")
+            for observation in histories
+        )
+        if not network_topology_node.get("ipv6_addrs") and not has_valid_ipv6_tlv:
+            network_topology_node["ipv6_addrs"] = ipv6_addresses.get(rloc16, [])
+        _enrich_device_route_data_with_router_info(
+            network_topology_node, router_table_by_router_id
+        )
+        return network_topology_node
+
+    # Extract Ext Address (TLV 0) from formatted output when no raw envelope exists.
     extaddr_match = re.search(r"Ext Address: ([0-9a-fA-F]{16})", output)
 
     # If extaddr is not found, return None (caller will handle with default values)
@@ -178,6 +271,8 @@ def fetch_network_diag_for_device(
         "mle_counters": mle_counters,
         "time_statistics": time_stats,
     }
+    if unframed_observation is not None:
+        network_topology_node["tlv_response_history"] = [unframed_observation]
 
    # Enrich device_record routes with router rloc
     _enrich_device_route_data_with_router_info(
@@ -185,6 +280,15 @@ def fetch_network_diag_for_device(
     )
 
     return network_topology_node
+
+
+def _ipv6_addresses_equal(left: object, right: object) -> bool:
+    if not isinstance(left, str) or not isinstance(right, str):
+        return False
+    try:
+        return ipaddress.IPv6Address(left) == ipaddress.IPv6Address(right)
+    except ValueError:
+        return False
 
 
 def _attach_router_id(record: dict, router_table_by_router_id: dict | None) -> None:
@@ -214,6 +318,112 @@ def _collect_primary_bbr_observation() -> dict | None:
         return None
 
 
+def _merge_tlv_response_history(record: dict, observations: list[dict]) -> None:
+    existing = record.get("tlv_response_history", [])
+    if not isinstance(existing, list):
+        existing = []
+    merged = []
+    positions = {}
+    for observation in [*existing, *observations]:
+        if not isinstance(observation, dict):
+            continue
+        identity = observation.get("observation_id", observation.get("observationId"))
+        if identity is not None:
+            if identity in positions:
+                merged[positions[identity]] = observation
+                continue
+            positions[identity] = len(merged)
+        merged.append(observation)
+    if merged and all(
+        isinstance(item.get("capture_sequence"), int)
+        for item in merged
+    ):
+        merged.sort(key=lambda item: item["capture_sequence"])
+    if merged:
+        record["tlv_response_history"] = merged
+
+
+def _response_history_for_responder(
+    collection_context: dict | None,
+    responder_ipv6: object,
+) -> list[dict]:
+    if collection_context is None or not isinstance(responder_ipv6, str):
+        return []
+    return [
+        observation
+        for observation in collection_context.get("observations", [])
+        if isinstance(observation, dict)
+        and _ipv6_addresses_equal(observation.get("responder_ipv6"), responder_ipv6)
+    ]
+
+
+def _history_for_query_target(
+    collection_context: dict | None,
+    capture_stage: str | Sequence[str],
+    rloc16: str,
+    target_address: str | None = None,
+) -> list[dict]:
+    if collection_context is None:
+        return []
+    canonical_rloc16 = get_canonical_rloc16({"rloc16": rloc16})
+    stages = {capture_stage} if isinstance(capture_stage, str) else set(capture_stage)
+    return [
+        observation
+        for observation in collection_context.get("observations", [])
+        if isinstance(observation, dict)
+        and observation.get("capture_stage") in stages
+        and observation.get("query_target_rloc16") == canonical_rloc16
+        and (
+            observation.get("parse_status") == "no-response"
+            or (
+                target_address is not None
+                and _ipv6_addresses_equal(
+                    observation.get("responder_ipv6"), target_address
+                )
+            )
+        )
+    ]
+
+
+def _refresh_response_histories(
+    records: dict | Sequence[dict],
+    collection_context: dict | None,
+) -> bool:
+    if collection_context is None:
+        return False
+    observations_by_id = {
+        observation.get("observation_id"): observation
+        for observation in collection_context.get("observations", [])
+        if isinstance(observation, dict) and observation.get("observation_id")
+    }
+    observations_by_extaddr: dict[str, list[dict]] = {}
+    for parsed_record in collection_context.get("parsed_records", []):
+        if not isinstance(parsed_record, dict):
+            continue
+        extaddr = get_canonical_ext_address(parsed_record)
+        if not extaddr:
+            continue
+        for observation in parsed_record.get("tlv_response_history", []):
+            if not isinstance(observation, dict):
+                continue
+            identity = observation.get("observation_id", observation.get("observationId"))
+            latest = observations_by_id.get(identity)
+            if latest is not None:
+                observations_by_extaddr.setdefault(extaddr, []).append(latest)
+
+    changed = False
+    record_values = records.values() if isinstance(records, dict) else records
+    for record in record_values:
+        if not isinstance(record, dict):
+            continue
+        extaddr = get_canonical_ext_address(record)
+        observations = observations_by_extaddr.get(extaddr, []) if extaddr else []
+        old_history = deepcopy(record.get("tlv_response_history", []))
+        _merge_tlv_response_history(record, observations)
+        changed |= record.get("tlv_response_history", []) != old_history
+    return changed
+
+
 def fetch_network_diag_multicast(
     multicast_addr: str,
     extaddr_map: dict | None = None,
@@ -221,6 +431,8 @@ def fetch_network_diag_multicast(
     router_table_by_router_id: dict | None = None,
     primary_bbr_observation: dict | None = None,
     checkpoint_filepath: str | None = None,
+    collection_context: dict | None = None,
+    capture_stage: str = "multicast",
 ) -> dict:
     """
     Queries network diagnostic data via multicast with retry and merge strategy.
@@ -244,6 +456,8 @@ def fetch_network_diag_multicast(
     """
     if extaddr_map is None:
         extaddr_map = {}
+    if collection_context is None:
+        collection_context = create_diagnostic_collection_context()
 
     # Get OMR prefix from thread_network_info
     omr_ipv6addr_prefix = (
@@ -264,6 +478,16 @@ def fetch_network_diag_multicast(
     delay_start = 0.1  # between retries 0.10 0.20 0.50 1.0 1.5 1.75 2.0 seconds
     tlv_detail_level = 8
     consolidated = {}  # Keyed by extaddr during collection
+    request_contexts = [
+        register_diagnostic_request(
+            collection_context,
+            capture_stage,
+            multicast_addr,
+            attempt_idx,
+            get_tlv_values_for_detail_level(10 if attempt_idx == 0 else 8),
+        )
+        for attempt_idx in range(attempts_max)
+    ]
 
     # Retry loop with progressively simpler TLV sets
     for attempt_idx in range(attempts_max):
@@ -280,6 +504,7 @@ def fetch_network_diag_multicast(
 
         # Get TLV values for current detail level
         tlv_values = get_tlv_values_for_detail_level(tlv_detail_level)
+        request_context = request_contexts[attempt_idx]
 
         logging.info(
             f"Multicast attempt {attempt_idx + 1}/{attempts_max} to {multicast_addr} "
@@ -294,7 +519,18 @@ def fetch_network_diag_multicast(
             f"[DEBUG] Multicast output (attempt {attempt_idx + 1}):\n{output}\n")
 
         # Parse multicast output
-        parsed = parse_multicast_diag_output(output, extaddr_map)
+        parsed = parse_multicast_diag_output(
+            output,
+            extaddr_map,
+            collection_context=collection_context,
+            request_context=request_context,
+            capture_stage=capture_stage,
+            capture_target=multicast_addr,
+            capture_attempt_index=attempt_idx,
+        )
+        collection_context.setdefault("parsed_records", []).extend(
+            deepcopy(list(parsed.values()))
+        )
 
         # Merge results into consolidated dict (keyed by extaddr)
         for device_record in parsed.values():
@@ -329,6 +565,8 @@ def fetch_network_diag_multicast(
                 reconcile_device_record(consolidated[extaddr], device_record)
             else:
                 consolidated[extaddr] = device_record
+
+        _refresh_response_histories(consolidated.values(), collection_context)
 
         logging.info(
             f"Multicast attempt {attempt_idx + 1}: {len(parsed)} responses, "
@@ -384,6 +622,7 @@ def fetch_network_diag_topology_multicast_network(
     primary_bbr_observation: dict | None = None,
     checkpoint_filepath: str | None = None,
     final_output_path: str | None = None,
+    collection_context: dict | None = None,
 ) -> dict:
     """
     Queries network diagnostic data via multicast to all Thread devices in the mesh (ff03::1).
@@ -406,7 +645,9 @@ def fetch_network_diag_topology_multicast_network(
         thread_network_info=thread_network_info,
         router_table_by_router_id=router_table_by_router_id,
         primary_bbr_observation=primary_bbr_observation,
-        checkpoint_filepath=checkpoint_filepath
+        checkpoint_filepath=checkpoint_filepath,
+        collection_context=collection_context,
+        capture_stage="multicast-network",
     )
     if checkpoint_filepath is not None:
         save_topology_to_json_file(result, checkpoint_filepath, checkpoint=True)
@@ -427,6 +668,7 @@ def fetch_network_diag_topology_multicast_neighbors(
     primary_bbr_observation: dict | None = None,
     checkpoint_filepath: str | None = None,
     final_output_path: str | None = None,
+    collection_context: dict | None = None,
 ) -> dict:
     """
     Queries network diagnostic data via multicast to immediate one-hop neighbors (ff02::1).
@@ -451,7 +693,9 @@ def fetch_network_diag_topology_multicast_neighbors(
         thread_network_info=thread_network_info,
         router_table_by_router_id=router_table_by_router_id,
         primary_bbr_observation=primary_bbr_observation,
-        checkpoint_filepath=checkpoint_filepath
+        checkpoint_filepath=checkpoint_filepath,
+        collection_context=collection_context,
+        capture_stage="multicast-neighbors",
     )
     if checkpoint_filepath is not None:
         save_topology_to_json_file(result, checkpoint_filepath, checkpoint=True)
@@ -922,6 +1166,7 @@ def fetch_network_diag_topology_multicast(
     extaddr_to_rloc: dict,
     checkpoint_filepath: str | None,
     final_output_path: str | os.PathLike | None = None,
+    collection_context: dict | None = None,
 ) -> dict:
     """Fetches, atomically persists, and merges multicast topology data.
 
@@ -934,6 +1179,7 @@ def fetch_network_diag_topology_multicast(
         router_table_by_router_id,
         primary_bbr_observation,
         final_output_path=final_output_path,
+        collection_context=collection_context,
     )
 
     if network_topology_map_multicast:
@@ -945,6 +1191,7 @@ def fetch_network_diag_topology_multicast(
         for _, device_record in network_topology_map_multicast.items():
             _upsert_device_record(network_topology_map,
                                   device_record, extaddr_to_rloc)
+        _refresh_response_histories(network_topology_map, collection_context)
         logging.info(
             f"After merging multicast data, topology map has {len(network_topology_map)} devices (keyed by rloc16)"
         )
@@ -969,9 +1216,14 @@ def fetch_network_diag_topology_detail_routers(
     meshlocal_prefix: str | None,
     extaddr_to_rloc: dict,
     checkpoint_filepath: str | None,
+    collection_context: dict | None = None,
 ) -> None:
     """Fetches per-router diagnostics and merges results into the topology map."""
     for rloc16 in router_rlocs:
+        parsed_record_start = (
+            len(collection_context.get("parsed_records", []))
+            if collection_context is not None else 0
+        )
         try:
             # Attempt logic for networkdiagnostic get in case of transient errors or unresponsive nodes, 
             # Retry N times with some delay before giving up and adding with default values
@@ -1046,6 +1298,14 @@ def fetch_network_diag_topology_detail_routers(
                     router_table_by_router_id,
                     ipv6_addresses,
                     tlv_detail_level,
+                    **(
+                        {
+                            "collection_context": collection_context,
+                            "capture_stage": "direct-router",
+                            "capture_attempt_index": attempt_idx,
+                        }
+                        if collection_context is not None else {}
+                    ),
                 )
                 if network_topology_node is not None:
                     break
@@ -1061,12 +1321,67 @@ def fetch_network_diag_topology_detail_routers(
                     )
                     time.sleep(l_delay)
 
+        if collection_context is not None:
+            canonical_rloc16 = get_canonical_rloc16({"rloc16": rloc16})
+            for captured_record in collection_context.get("parsed_records", [])[parsed_record_start:]:
+                captured_rloc16 = get_canonical_rloc16(captured_record)
+                if not captured_rloc16 or captured_rloc16 == canonical_rloc16:
+                    continue
+                captured_record = deepcopy(captured_record)
+                _attach_router_id(captured_record, router_table_by_router_id)
+                _enrich_device_role_and_prefix_flags(
+                    captured_record, meshlocal_prefix, omr_ipv6addr_prefix
+                )
+                _enrich_device_route_data_with_router_info(
+                    captured_record, router_table_by_router_id
+                )
+                before = deepcopy(network_topology_map.get(captured_rloc16))
+                _upsert_device_record(
+                    network_topology_map, captured_record, extaddr_to_rloc
+                )
+                if network_topology_map.get(captured_rloc16) != before:
+                    save_topology_to_json_file(
+                        network_topology_map, checkpoint_filepath, checkpoint=True
+                    )
+
         if network_topology_node is None:
             # extaddr not found, use default values
+            fallback_created = rloc16 not in network_topology_map
             network_topology_map[rloc16] = _build_unknown_device_record(
                 rloc16, "router", ipv6_addresses, omr_ipv6addr_prefix, meshlocal_prefix
             )
+            _merge_tlv_response_history(
+                network_topology_map[rloc16],
+                _history_for_query_target(
+                    collection_context,
+                    "direct-router",
+                    rloc16,
+                    util_network.build_rloc16_ipv6_address(
+                        meshlocal_prefix,
+                        util_network.strip_rloc16_hex_prefix(rloc16),
+                    ) if meshlocal_prefix else None,
+                ),
+            )
+            history_changed = _refresh_response_histories(
+                network_topology_map, collection_context
+            )
+            if fallback_created or history_changed:
+                save_topology_to_json_file(
+                    network_topology_map, checkpoint_filepath, checkpoint=True
+                )
         else:
+            _merge_tlv_response_history(
+                network_topology_node,
+                _history_for_query_target(
+                    collection_context,
+                    "direct-router",
+                    rloc16,
+                    util_network.build_rloc16_ipv6_address(
+                        meshlocal_prefix,
+                        util_network.strip_rloc16_hex_prefix(rloc16),
+                    ) if meshlocal_prefix else None,
+                ),
+            )
             # router node found
             # Enrich device record with role classification and prefix-based flags
             try:
@@ -1085,6 +1400,9 @@ def fetch_network_diag_topology_detail_routers(
             _upsert_device_record(
                 network_topology_map, network_topology_node, extaddr_to_rloc
             )
+            history_changed = _refresh_response_histories(
+                network_topology_map, collection_context
+            )
 
             if is_new_record:
                 logging.info(
@@ -1093,8 +1411,7 @@ def fetch_network_diag_topology_detail_routers(
                 logging.info(
                     f"Found {len(network_topology_map)} unique devices so far"
                 )
-                # Checkpoint to file after each new record added to topology map
-                # used in progressive loading in dashboard UI
+            if is_new_record or history_changed:
                 save_topology_to_json_file(
                     network_topology_map, checkpoint_filepath, checkpoint=True
                 )
@@ -1464,6 +1781,7 @@ def fetch_network_diag_topology_expand_children(
     child_fetch_fast_mode_default: bool = True,
     child_fetch_detail_mode_default: bool = False,
     children_ping_fallback: bool = False,
+    collection_context: dict | None = None,
 ) -> None:
     """Expands child-node diagnostics and merges child records into the topology map."""
     if not expand_children:
@@ -1482,22 +1800,59 @@ def fetch_network_diag_topology_expand_children(
                 logging.warning("Child node %s in topology map is not a dict. Skipping.", target.child_rloc16)
                 break
 
-            outcome = fetch_child_with_retries(
-                target,
-                policy,
-                prior_state,
-                lambda current_target, attempt: fetch_network_diag_for_device(
+            parsed_record_start = (
+                len(collection_context.get("parsed_records", []))
+                if collection_context is not None else 0
+            )
+
+            def fetch_child(current_target, attempt):
+                fetch_arguments = (
                     current_target.child_rloc16,
                     meshlocal_prefix,
                     extaddr_map,
                     router_table_by_router_id,
                     ipv6_addresses,
                     attempt.detail_level,
-                ),
+                )
+                if collection_context is None:
+                    return fetch_network_diag_for_device(*fetch_arguments)
+                return fetch_network_diag_for_device(
+                    *fetch_arguments,
+                    collection_context=collection_context,
+                    capture_stage=f"direct-child-{policy.mode}",
+                    capture_attempt_index=attempt.index,
+                )
+
+            outcome = fetch_child_with_retries(
+                target,
+                policy,
+                prior_state,
+                fetch_child,
                 time.sleep,
             )
             final_outcome = outcome
+            if collection_context is not None:
+                for captured_record in collection_context.get("parsed_records", [])[parsed_record_start:]:
+                    captured_rloc16 = get_canonical_rloc16(captured_record)
+                    if not captured_rloc16 or captured_rloc16 == target.child_rloc16:
+                        continue
+                    captured_record = deepcopy(captured_record)
+                    _enrich_device_role_and_prefix_flags(
+                        captured_record, meshlocal_prefix, omr_ipv6addr_prefix
+                    )
+                    before = deepcopy(network_topology_map.get(captured_rloc16))
+                    _upsert_device_record(
+                        network_topology_map, captured_record, extaddr_to_rloc
+                    )
+                    if network_topology_map.get(captured_rloc16) != before:
+                        save_topology_to_json_file(
+                            network_topology_map, checkpoint_filepath, checkpoint=True
+                        )
             if outcome.terminal_reason == "exhausted":
+                if _refresh_response_histories(network_topology_map, collection_context):
+                    save_topology_to_json_file(
+                        network_topology_map, checkpoint_filepath, checkpoint=True
+                    )
                 continue
             mutation = reconcile_child_fetch_outcome(
                 outcome,
@@ -1507,6 +1862,26 @@ def fetch_network_diag_topology_expand_children(
                 omr_ipv6addr_prefix,
                 meshlocal_prefix,
             )
+            if collection_context is not None:
+                child_record = network_topology_map.get(target.child_rloc16)
+                if isinstance(child_record, dict):
+                    old_history = deepcopy(child_record.get("tlv_response_history", []))
+                    _merge_tlv_response_history(
+                        child_record,
+                        _history_for_query_target(
+                            collection_context,
+                            ("direct-child-fast", "direct-child-detail"),
+                            target.child_rloc16,
+                            util_network.build_rloc16_ipv6_address(
+                                meshlocal_prefix,
+                                util_network.strip_rloc16_hex_prefix(target.child_rloc16),
+                            ) if meshlocal_prefix else None,
+                        ),
+                    )
+                    if child_record.get("tlv_response_history", []) != old_history:
+                        mutation = ChildMutation(True, "updated", target.child_rloc16)
+                if _refresh_response_histories(network_topology_map, collection_context):
+                    mutation = ChildMutation(True, "updated", target.child_rloc16)
             notify_child_checkpoint(
                 mutation, network_topology_map, checkpoint_filepath,
                 save_topology_to_json_file,
@@ -1528,6 +1903,26 @@ def fetch_network_diag_topology_expand_children(
             meshlocal_prefix,
             ping_outcome,
         )
+        if collection_context is not None:
+            child_record = network_topology_map.get(target.child_rloc16)
+            if isinstance(child_record, dict):
+                old_history = deepcopy(child_record.get("tlv_response_history", []))
+                _merge_tlv_response_history(
+                    child_record,
+                    _history_for_query_target(
+                        collection_context,
+                        ("direct-child-fast", "direct-child-detail"),
+                        target.child_rloc16,
+                        util_network.build_rloc16_ipv6_address(
+                            meshlocal_prefix,
+                            util_network.strip_rloc16_hex_prefix(target.child_rloc16),
+                        ) if meshlocal_prefix else None,
+                    ),
+                )
+                if child_record.get("tlv_response_history", []) != old_history:
+                    mutation = ChildMutation(True, "updated", target.child_rloc16)
+            if _refresh_response_histories(network_topology_map, collection_context):
+                mutation = ChildMutation(True, "updated", target.child_rloc16)
         notify_child_checkpoint(
             mutation, network_topology_map, checkpoint_filepath,
             save_topology_to_json_file,
@@ -1544,6 +1939,7 @@ def fetch_network_diag_topology(
     children_ping_fallback: bool = False,
     checkpoint_filepath=None,
     final_output_path=None,
+    collection_context: dict | None = None,
 ):
     """Maps the full network topology and returns a Python dictionary.
 
@@ -1558,6 +1954,8 @@ def fetch_network_diag_topology(
 
     # 1. Initialize topology map and extaddr tracking
     network_topology_map = {}
+    if collection_context is None:
+        collection_context = create_diagnostic_collection_context()
 
     # Create checkpoint filename for saving intermediate results during topology mapping.
     if checkpoint_filepath is None and td_data_dir is not None:
@@ -1640,6 +2038,7 @@ def fetch_network_diag_topology(
         extaddr_to_rloc,
         checkpoint_filepath,
         final_output_path=multicast_output_path,
+        collection_context=collection_context,
     )
 
     # 7b. Query per-router details and merge
@@ -1653,6 +2052,7 @@ def fetch_network_diag_topology(
         meshlocal_prefix,
         extaddr_to_rloc,
         checkpoint_filepath,
+        collection_context,
     )
 
     # 8. Expand child nodes from router child tables
@@ -1670,12 +2070,14 @@ def fetch_network_diag_topology(
         child_fetch_fast_mode_default,
         child_fetch_detail_mode_default,
         children_ping_fallback,
+        collection_context,
     )
 
     logging.info(
         f"Poll consolidation complete: {len(network_topology_map)} unique devices found in topology map."
     )
 
+    _refresh_response_histories(network_topology_map, collection_context)
     if final_output_path is not None:
         save_topology_to_json_file(network_topology_map, final_output_path)
 
@@ -1814,6 +2216,7 @@ def save_topology_to_json_file(
             "network_diagnostic_status",
             "reachability",
             "ping",
+            "tlv_response_history",
         ):
             if evidence_field in data:
                 network_node[evidence_field] = data[evidence_field]

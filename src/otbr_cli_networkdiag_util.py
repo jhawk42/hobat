@@ -189,7 +189,41 @@ def reconcile_device_record(existing: dict, incoming: dict) -> dict:
         if field in ("extAddress", "deviceLabel", "rloc16", "lastAttemptResponded", "lastAttemptTlvDetailLevel"):
             continue
         old = current.get(field)
-        if field == "ipv6Addresses" and isinstance(new, list):
+        if field in ("tlvResponseHistory", "tlv_response_history") and isinstance(new, list):
+            old_history = old if isinstance(old, list) else []
+            merged_history = []
+            observation_positions = {}
+            for observation in [*old_history, *new]:
+                if not isinstance(observation, dict):
+                    continue
+                observation_id = observation.get(
+                    "observationId", observation.get("observation_id")
+                )
+                if observation_id is not None:
+                    if observation_id in observation_positions:
+                        merged_history[observation_positions[observation_id]] = observation
+                        continue
+                    observation_positions[observation_id] = len(merged_history)
+                merged_history.append(observation)
+            if merged_history and all(
+                isinstance(item.get("capture_sequence"), int)
+                for item in merged_history
+            ):
+                merged_history.sort(key=lambda item: item["capture_sequence"])
+            if merged_history != old_history:
+                apply(field, merged_history)
+        elif field in ("vendorName", "vendorModel", "vendorSwVersion"):
+            if new == "":
+                if isinstance(old, str) and old not in ("", "Unknown"):
+                    append_merge_conflict(existing, field, old, new)
+                elif old != "":
+                    apply(field, new)
+            elif not value_is_empty(new):
+                if value_is_empty(old) or old == "Unknown":
+                    apply(field, new)
+                elif old != new:
+                    append_merge_conflict(existing, field, old, new)
+        elif field == "ipv6Addresses" and isinstance(new, list):
             if new:
                 apply(field, merge_lists(old if isinstance(old, list) else [], new))
         elif field in ("mode", "route", "children"):
