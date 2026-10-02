@@ -5,6 +5,7 @@ collects data from dataset sources like OTBR `ot-ctl`, the OTBR REST API, Home A
 Server, mDNS, Eve exports, and Thread Tools exports, then presents topology and
 table views in a browser.
 
+[![OTBR CLI topology with a selected device and its details panel alongside the network graph.](https://raw.githubusercontent.com/jhawk42/smarthome/main/hobat/images/hobat-topology-selected-device-thumbnail.png)](https://raw.githubusercontent.com/jhawk42/smarthome/main/hobat/images/hobat-topology-selected-device.png)
 
 ## Capabilities
 
