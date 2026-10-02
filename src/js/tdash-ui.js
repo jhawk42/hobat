@@ -1278,13 +1278,13 @@ const WORKSPACE_VIEWS = Object.freeze([
       renderNetworkInsights();
     },
   },
-  { view: "settings", buttonId: "btn-settings", panelId: "view-settings" },
   {
     view: "operations",
     buttonId: "btn-operations",
     panelId: "view-operations",
     onActivate: renderOperationsSubview,
   },
+  { view: "settings", buttonId: "btn-settings", panelId: "view-settings" },
 ]);
 
 function switchView(newView) {
@@ -4138,4 +4138,3 @@ document.getElementById("btn-fetch-toggle-status-chk-cache")?.addEventListener("
 
 // ── Collapsible Filters Panel ────────────────────────────────────────────────
 // (Handled by unified collapse logic above)
-

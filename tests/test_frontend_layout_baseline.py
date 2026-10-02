@@ -200,12 +200,15 @@ def test_topology_controls_use_container_layout_and_native_legend_disclosure() -
 
 def test_workspace_switch_registry_owns_all_five_views() -> None:
     ui_text = _read_text(UI_JS)
+    html = _read_text(HTML)
     registry_start = ui_text.index("const WORKSPACE_VIEWS")
     switch_end = ui_text.index("// ── Physics toggle", registry_start)
     switch_source = ui_text[registry_start:switch_end]
 
     for view in ("topology", "table", "insights", "settings", "operations"):
         assert f'view: "{view}"' in switch_source
+    assert html.index('id="btn-operations"') < html.index('id="btn-settings"')
+    assert switch_source.index('view: "operations"') < switch_source.index('view: "settings"')
     assert "panelEl.hidden = !isActive;" in switch_source
     assert 'buttonEl.setAttribute("aria-selected", String(isActive));' in switch_source
     assert "buttonEl.tabIndex = isActive ? 0 : -1;" in switch_source
