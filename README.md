@@ -116,6 +116,27 @@ Missing and Offline come from stored assessment findings, not device age.
 Selecting a device opens its stored facts in the details panel. Roster reads
 do not collect data or modify enrollment; roster administration remains CLI-only.
 
+In **Comparison** mode, **1D**, **3D**, and **1W** are the primary choices;
+each resolves its baseline against the latest retained **After** assessment.
+The default is 1D. **Custom** reveals independent Before/After selectors for
+any retained assessment pair and is collapsed until opened. Selecting a preset
+after a historical Custom choice returns to the latest After. The 1M control is
+not shown; its server candidate resolution and automatic 30-day persistence
+remain unchanged. Partial assessments remain manually selectable; partial
+assessments or gaps longer than seven days may result in Unknown.
+
+The comparison summary shows the selected UTC endpoints and actual elapsed
+time; **Details** expands comparison metadata. **All scopes** and **Result**
+(default **Changed**) filter the entire comparison before paging. The table
+reports the visible row range and matching-row count separately from the
+unfiltered total, with First, Previous, direct page selection, Next, and Last
+controls. Pages contain 25 rows; the table scrolls independently. Pair,
+filter, page, and disclosure state are retained across supported Snapshot/
+Comparison and Show in table/Return navigation. Processing stores adjacent
+and complete-only interval pairs in `hobat_v1.db`; reads can also derive an
+unstored pair without writing. See [Thread Network Health](doc/thread_network_health.md)
+for API, retention, and comparison details.
+
 The **Logs** workspace contains local **Logs** and **Jobs** tabs. Logs retains
 the newest 200 sanitized browser activity entries in memory only. Jobs lists
 active dataset, health, and device-action work and supports individual or

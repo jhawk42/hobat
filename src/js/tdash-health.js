@@ -118,9 +118,144 @@ export function fetchHealthComparisons(networkId, datasetId, offset = 0, signal)
   return healthRequest(`api/health/comparisons?${query}`, signal);
 }
 
-export function fetchHealthComparison(comparisonId, offset = 0, signal) {
-  const query = new URLSearchParams({ limit: "25", offset: String(offset) });
+export function fetchHealthComparison(comparisonId, offset = 0, signal, filters = {}) {
+  const query = new URLSearchParams({
+    limit: "25",
+    offset: String(offset),
+    scope: filters.scope || "all",
+    result: filters.result || "changed",
+  });
   return healthRequest(`api/health/comparisons/${encodeURIComponent(comparisonId)}?${query}`, signal);
+}
+
+export function fetchHealthComparisonEndpoints(
+  networkId, datasetId, side, offset = 0, signal, options = {},
+) {
+  const query = new URLSearchParams({
+    network: networkId,
+    dataset: datasetId,
+    side,
+    limit: "25",
+    offset: String(offset),
+  });
+  if (options.afterAssessmentId) query.set("after", options.afterAssessmentId);
+  if (options.selectedAssessmentId) query.set("selected", options.selectedAssessmentId);
+  return healthRequest(`api/health/comparison-endpoints?${query}`, signal);
+}
+
+export function fetchHealthComparisonPair(query, offset = 0, signal) {
+  const parameters = new URLSearchParams({
+    network: query.networkId,
+    dataset: query.datasetId,
+    before: query.beforeAssessmentId,
+    after: query.afterAssessmentId,
+    limit: "25",
+    offset: String(offset),
+    scope: query.scope || "all",
+    result: query.result || "changed",
+  });
+  return healthRequest(`api/health/comparison?${parameters}`, signal);
+}
+
+export function isHealthComparisonEndpointPageForQuery(page, query) {
+  const validEndpoint = (endpoint) => !endpoint || (
+    endpoint.networkId === query.networkId && endpoint.datasetId === query.datasetId
+    && typeof endpoint.assessmentId === "string" && endpoint.assessmentId.length > 0
+    && typeof endpoint.observedAt === "string" && Number.isFinite(Date.parse(endpoint.observedAt))
+    && typeof endpoint.assessedAt === "string" && Number.isFinite(Date.parse(endpoint.assessedAt))
+    && ["complete", "partial"].includes(endpoint.completeness)
+  );
+  return page?.schemaVersion === 1 && page.networkId === query.networkId
+    && page.datasetId === query.datasetId && page.side === query.side
+    && (page.afterAssessmentId || null) === (query.afterAssessmentId || null)
+    && page.comparisonVersion === query.comparisonVersion
+    && page.comparisonPolicyDigest === query.comparisonPolicyDigest
+    && Number.isInteger(page.total) && page.total >= 0
+    && page.limit === 25 && page.offset === query.offset
+    && Array.isArray(page.items) && page.items.length <= page.limit
+    && page.offset + page.items.length <= page.total
+    && page.items.every((endpoint) => Boolean(endpoint) && validEndpoint(endpoint))
+    && validEndpoint(page.selected)
+    && validEndpoint(page.defaultAfter)
+    && validEndpoint(page.defaultBefore)
+    && validEndpoint(page.predecessor)
+    && Array.isArray(page.shortcuts)
+    && page.shortcuts.every((shortcut) => (
+      ["1d", "3d", "1w", "1m"].includes(shortcut?.interval)
+      && Number.isInteger(shortcut.durationSeconds) && shortcut.durationSeconds > 0
+      && validEndpoint(shortcut.candidate)
+    ))
+    && (!page.selected || page.selected.assessmentId === query.selectedAssessmentId);
+}
+
+export function findHealthComparisonEndpointMetadata(
+  assessmentId, pages, comparison, pinnedBefore = null,
+) {
+  if (!assessmentId) return null;
+  if (pinnedBefore?.assessmentId === assessmentId) return pinnedBefore;
+  for (const side of ["before", "after"]) {
+    const page = pages?.[side];
+    const match = page?.items.find((item) => item.assessmentId === assessmentId);
+    if (match) return match;
+    if (page?.selected?.assessmentId === assessmentId) return page.selected;
+    for (const key of ["defaultAfter", "defaultBefore", "predecessor"]) {
+      if (page?.[key]?.assessmentId === assessmentId) return page[key];
+    }
+  }
+  if (comparison?.beforeAssessmentId === assessmentId) {
+    return { assessmentId, observedAt: comparison.beforeObservedAt };
+  }
+  if (comparison?.afterAssessmentId === assessmentId) {
+    return { assessmentId, observedAt: comparison.afterObservedAt };
+  }
+  return null;
+}
+
+export function isHealthComparisonPairForQuery(comparison, query) {
+  return comparison?.schemaVersion === 1
+    && comparison.networkId === query.networkId
+    && comparison.datasetId === query.datasetId
+    && comparison.beforeAssessmentId === query.beforeAssessmentId
+    && comparison.afterAssessmentId === query.afterAssessmentId
+    && comparison.comparisonPolicyDigest === query.comparisonPolicyDigest
+    && comparison.comparisonVersion === query.comparisonVersion
+    && ["stored", "derived"].includes(comparison.origin)
+    && (comparison.origin !== "derived" || comparison.createdAt === null)
+    && Number.isInteger(comparison.itemCount) && comparison.itemCount >= 0
+    && Number.isInteger(comparison.filteredItemCount)
+    && comparison.filteredItemCount >= 0
+    && comparison.filteredItemCount <= comparison.itemCount
+    && Number.isInteger(comparison.limit) && comparison.limit === 25
+    && Number.isInteger(comparison.offset) && comparison.offset === query.offset
+    && Array.isArray(comparison.items) && comparison.items.length <= comparison.limit
+    && (comparison.items.length === 0
+      ? comparison.offset > 0 || comparison.filteredItemCount === 0
+      : comparison.offset + comparison.items.length <= comparison.filteredItemCount)
+    && comparison.items.every((item) => (
+      typeof item.itemId === "string" && typeof item.scope === "string"
+      && typeof item.subjectId === "string"
+    ));
+}
+
+export function isHealthComparisonDetailForQuery(comparison, query) {
+  return comparison?.schemaVersion === 1
+    && comparison.comparisonId === query.comparisonId
+    && comparison.networkId === query.networkId
+    && comparison.datasetId === query.datasetId
+    && Number.isInteger(comparison.itemCount) && comparison.itemCount >= 0
+    && Number.isInteger(comparison.filteredItemCount)
+    && comparison.filteredItemCount >= 0
+    && comparison.filteredItemCount <= comparison.itemCount
+    && Number.isInteger(comparison.limit) && comparison.limit > 0
+    && Number.isInteger(comparison.offset) && comparison.offset === query.offset
+    && comparison.offset >= 0
+    && Array.isArray(comparison.items)
+    && comparison.items.length <= comparison.limit
+    && comparison.items.length <= comparison.itemCount
+    && (comparison.items.length === 0
+      ? comparison.offset > 0 || comparison.filteredItemCount === 0
+      : comparison.offset + comparison.items.length <= comparison.filteredItemCount
+        && comparison.offset + comparison.items.length <= comparison.itemCount);
 }
 
 export function isComparisonPageForAssessment(page, assessment, offset) {
@@ -135,6 +270,182 @@ export function isComparisonPageForAssessment(page, assessment, offset) {
       && item.comparisonId.length > 0);
 }
 
+const COMPARISON_HEADER_FIELDS = [
+  "comparisonVersion",
+  "beforeAssessmentId",
+  "afterAssessmentId",
+  "beforeObservationId",
+  "afterObservationId",
+  "baselineState",
+  "comparable",
+  "itemCount",
+];
+
+function comparisonHeaderMatches(left, right) {
+  if (!left || !right) return left === right;
+  return COMPARISON_HEADER_FIELDS.every((field) => left[field] === right[field]);
+}
+
+function comparisonHeaderSnapshot(header) {
+  if (!header) return null;
+  return Object.fromEntries(COMPARISON_HEADER_FIELDS.map((field) => [field, header[field]]));
+}
+
+function sameComparisonQuery(left, right) {
+  return Boolean(left && right && left.networkId === right.networkId &&
+    left.datasetId === right.datasetId && left.comparisonId === right.comparisonId &&
+    left.scope === right.scope && left.result === right.result && left.offset === right.offset);
+}
+
+export function createHealthComparisonDetailController({
+  state,
+  getAssessment,
+  getSelection,
+  getSummary,
+  getOffset,
+  setOffset,
+  updateSelection,
+  fetchDetail = fetchHealthComparison,
+  onChange = () => {},
+}) {
+  function makeQuery(assessment, selection, offset) {
+    return {
+      networkId: assessment.networkId,
+      datasetId: assessment.datasetId,
+      comparisonId: selection.comparisonId,
+      scope: selection.scope,
+      result: selection.result,
+      offset,
+    };
+  }
+
+  function isCurrent(query, version) {
+    const assessment = getAssessment();
+    const selection = getSelection();
+    return version === state.comparisonDetailRequestVersion &&
+      assessment?.networkId === query.networkId &&
+      assessment?.datasetId === query.datasetId &&
+      selection.comparisonId === query.comparisonId &&
+      selection.scope === query.scope &&
+      selection.result === query.result;
+  }
+
+  async function select(comparisonId, offset = 0, headerRetries = 0) {
+    const version = ++state.comparisonDetailRequestVersion;
+    state.comparisonDetailError = "";
+    if (!comparisonId) {
+      state.comparison = null;
+      state.comparisonQueryIdentity = null;
+      state.comparisonDetailRequestIdentity = null;
+      state.comparisonDetailRequestHeader = null;
+      state.comparisonDetailLoading = false;
+      setOffset(0);
+      onChange();
+      return;
+    }
+    const assessment = getAssessment();
+    if (!assessment) return;
+    const selection = getSelection();
+    const query = makeQuery(assessment, { ...selection, comparisonId }, offset);
+    const summary = getSummary(comparisonId);
+    if (sameComparisonQuery(state.comparisonQueryIdentity, query) &&
+        state.comparison?.comparisonId === comparisonId &&
+        (!summary || comparisonHeaderMatches(summary, state.comparison))) {
+      state.comparisonDetailLoading = false;
+      onChange();
+      return;
+    }
+
+    state.comparison = null;
+    state.comparisonQueryIdentity = null;
+    state.comparisonDetailRequestIdentity = query;
+    state.comparisonDetailRequestHeader = comparisonHeaderSnapshot(summary);
+    state.comparisonDetailLoading = true;
+    onChange();
+    try {
+      const comparison = await fetchDetail(comparisonId, offset, undefined, {
+        scope: query.scope,
+        result: query.result,
+      });
+      if (!isCurrent(query, version)) return;
+      if (!isHealthComparisonDetailForQuery(comparison, query)) {
+        throw new Error("Invalid stored comparison response.");
+      }
+      const currentSummary = getSummary(comparisonId);
+      if (currentSummary && !comparisonHeaderMatches(currentSummary, comparison)) {
+        if (headerRetries < 1) {
+          await select(comparisonId, offset, headerRetries + 1);
+          return;
+        }
+        throw new Error("Comparison changed while it was being read. Retry the request.");
+      }
+      if (offset > 0 && comparison.items.length === 0) {
+        setOffset(0);
+        await select(comparisonId, 0, headerRetries);
+        return;
+      }
+      state.comparison = comparison;
+      state.comparisonQueryIdentity = query;
+    } catch (error) {
+      if (!isCurrent(query, version)) return;
+      state.comparisonDetailError = error.message;
+    } finally {
+      if (isCurrent(query, version)) {
+        state.comparisonDetailLoading = false;
+        state.comparisonDetailRequestIdentity = null;
+        state.comparisonDetailRequestHeader = null;
+        onChange();
+      }
+    }
+  }
+
+  function reconcileSummary() {
+    const selection = getSelection();
+    if (!selection.comparisonId) return;
+    const summary = getSummary(selection.comparisonId);
+    if (!summary) return;
+    const activeRequest = state.comparisonDetailRequestIdentity;
+    const activeRequestStale = state.comparisonDetailLoading &&
+      activeRequest?.comparisonId === selection.comparisonId &&
+      !comparisonHeaderMatches(state.comparisonDetailRequestHeader, summary);
+    const cachedDetailStale = state.comparison?.comparisonId === selection.comparisonId &&
+      !comparisonHeaderMatches(summary, state.comparison);
+    if (activeRequestStale || cachedDetailStale) {
+      return select(selection.comparisonId, getOffset());
+    }
+  }
+
+  function invalidate() {
+    state.comparisonDetailRequestVersion += 1;
+    state.comparison = null;
+    state.comparisonQueryIdentity = null;
+    state.comparisonDetailRequestIdentity = null;
+    state.comparisonDetailRequestHeader = null;
+    state.comparisonDetailLoading = false;
+    state.comparisonDetailError = "";
+  }
+
+  function cancelPending() {
+    state.comparisonDetailRequestVersion += 1;
+    state.comparisonDetailRequestIdentity = null;
+    state.comparisonDetailRequestHeader = null;
+    state.comparisonDetailLoading = false;
+  }
+
+  function changeFilter(filter, value) {
+    const selection = getSelection();
+    if (selection[filter] === value) return;
+    updateSelection(filter, value);
+    setOffset(0);
+    if (selection.comparisonId) {
+      return select(selection.comparisonId, 0);
+    }
+    onChange();
+  }
+
+  return { select, reconcileSummary, invalidate, cancelPending, changeFilter };
+}
+
 function formatComparisonTime(timestamp, now) {
   if (typeof timestamp !== "string" || !timestamp.trim()) return "unknown";
   const observedAt = Date.parse(timestamp);
@@ -146,61 +457,371 @@ function formatComparisonTime(timestamp, now) {
   return [days > 0 && `${days}d`, hours > 0 && `${hours}h`, `${minutes}m`].filter(Boolean).join(" ");
 }
 
+function formatUtcComparisonTimestamp(timestamp) {
+  if (typeof timestamp !== "string" || !timestamp.trim()) return "unknown";
+  const observedAt = Date.parse(timestamp);
+  if (!Number.isFinite(observedAt)) return "unknown";
+  return new Date(observedAt).toISOString().slice(0, 19).replace("T", " ");
+}
+
+function appendEndpointPicker(controls, side, page, selectedId, selected, loading, actions) {
+  const label = appendText(controls, "label", side === "before" ? "Before" : "After",
+    "health-comparison-endpoint-control");
+  const picker = document.createElement("select");
+  picker.setAttribute("aria-label", side === "before" ? "Before assessment" : "After assessment");
+  picker.disabled = loading || !page || !page.total;
+  const now = Date.now();
+  const appendOption = (endpoint, isSelected = false) => {
+    const option = document.createElement("option");
+    option.value = endpoint.assessmentId;
+    option.textContent = `${formatComparisonTime(endpoint.observedAt, now)} · ${formatUtcComparisonTimestamp(endpoint.observedAt)}`
+      + `${endpoint.completeness === "partial" ? " · Partial" : ""}`
+      + `${isSelected ? " (selected)" : ""}`;
+    option.title = `${endpoint.assessmentId} · observed ${endpoint.observedAt}`
+      + ` · assessed ${endpoint.assessedAt} · ${endpoint.completeness}`;
+    picker.appendChild(option);
+  };
+  (page?.items || []).forEach((endpoint) => appendOption(endpoint));
+  if (selectedId && selected && !page?.items.some((item) => item.assessmentId === selectedId)) {
+    appendOption(selected, true);
+  }
+  picker.value = selectedId || "";
+  picker.addEventListener("change", () => actions.endpointSelect?.(side, picker.value));
+  label.appendChild(picker);
+}
+
+function appendEndpointHistoryNavigation(container, side, page, loading, actions) {
+  const navigation = appendText(container, "div", "", "health-comparison-endpoint-navigation");
+  const title = side === "before" ? "Before assessments" : "After assessments";
+  const previous = appendText(navigation, "button", `Previous ${title}`);
+  previous.type = "button";
+  previous.disabled = loading || !page || page.offset === 0;
+  previous.addEventListener("click", () => actions.endpointPage?.(
+    side, Math.max(0, page.offset - page.limit),
+  ));
+  const next = appendText(navigation, "button", `Next ${title}`);
+  next.type = "button";
+  next.disabled = loading || !page || page.offset + page.items.length >= page.total;
+  next.addEventListener("click", () => actions.endpointPage?.(
+    side, page.offset + page.limit,
+  ));
+  return navigation;
+}
+
+function appendComparisonPresets(controls, viewState, actions, liveStatus) {
+  const group = appendText(controls, "div", "", "health-comparison-presets");
+  appendText(group, "span", "Compare:", "health-comparison-presets-label");
+  const shortcuts = viewState.latestPresetPage?.shortcuts || [];
+  const loading = viewState.presetLoading || viewState.endpointLoading?.after;
+  const labels = [
+    ["1d", "1D", "1 day"],
+    ["3d", "3D", "3 days"],
+    ["1w", "1W", "7 days"],
+  ];
+  const statusMessages = [];
+  labels.forEach(([interval, label, duration]) => {
+    const shortcut = shortcuts.find((item) => item.interval === interval);
+    const candidate = shortcut?.candidate;
+    const unavailable = `Not enough history for ${label}: no retained baseline at least ${duration} before the latest assessment.`;
+    const button = appendText(group, "button", label);
+    button.type = "button";
+    button.disabled = Boolean(loading || !viewState.afterAssessmentId || !candidate);
+    button.setAttribute("aria-pressed", String(viewState.intent === interval));
+    button.title = loading
+      ? `${label} comparison is resolving against the latest assessment.`
+      : candidate
+        ? `Compare against the latest assessment at least ${duration} before the latest After.`
+        : unavailable;
+    button.setAttribute("aria-label", button.disabled && !loading ? unavailable
+      : `Compare with the latest assessment at least ${duration} before the latest After`);
+    if (!loading && !candidate) statusMessages.push(unavailable);
+    button.addEventListener("click", () => {
+      if (!button.disabled) actions.preset?.(interval);
+    });
+  });
+  const custom = appendText(group, "button", "Custom");
+  custom.type = "button";
+  custom.setAttribute("aria-pressed", String(viewState.intent === "custom"));
+  custom.setAttribute("aria-expanded", String(viewState.customOpen === true));
+  custom.setAttribute("aria-controls", "health-comparison-custom-controls");
+  custom.addEventListener("click", () => actions.customOpen?.(viewState.customOpen !== true));
+  if (loading) statusMessages.push("Resolving the selected interval against the latest assessment.");
+  if (viewState.presetError) statusMessages.push(viewState.presetError);
+  liveStatus.textContent = statusMessages.join(" ");
+}
+
+function formatElapsedInterval(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "unknown";
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  const parts = [];
+  if (days) parts.push(`${days} ${days === 1 ? "day" : "days"}`);
+  if (hours) parts.push(`${hours} ${hours === 1 ? "hour" : "hours"}`);
+  if (minutes || !parts.length) parts.push(`${minutes} ${minutes === 1 ? "minute" : "minutes"}`);
+  return parts.join(" ");
+}
+
+function formatComparisonCount(value) {
+  return new Intl.NumberFormat().format(value);
+}
+
+function appendComparisonRowPagination(container, comparison, loading, actions) {
+  const pageCount = Math.ceil(comparison.filteredItemCount / comparison.limit);
+  if (pageCount < 1) return;
+  const currentPage = Math.floor(comparison.offset / comparison.limit) + 1;
+  const navigation = appendText(container, "nav", "", "health-comparison-row-pagination");
+  navigation.setAttribute("aria-label", "Comparison result pages");
+  const appendPageButton = (label, action, offset, disabled) => {
+    const button = appendText(navigation, "button", label);
+    button.type = "button";
+    button.disabled = loading || disabled;
+    button.setAttribute("data-comparison-page-action", action);
+    button.addEventListener("click", () => actions.items?.(offset, action));
+    return button;
+  };
+  appendPageButton("First", "first", 0, currentPage === 1);
+  appendPageButton("Previous", "previous", Math.max(0, comparison.offset - comparison.limit),
+    currentPage === 1);
+  const pagePicker = document.createElement("select");
+  pagePicker.setAttribute("aria-label", "Comparison result page");
+  pagePicker.setAttribute("data-comparison-page-action", "page");
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    const option = document.createElement("option");
+    option.value = String(pageNumber);
+    option.textContent = `Page ${formatComparisonCount(pageNumber)} of ${formatComparisonCount(pageCount)}`;
+    pagePicker.appendChild(option);
+  }
+  pagePicker.value = String(currentPage);
+  pagePicker.disabled = loading || pageCount === 1;
+  pagePicker.addEventListener("change", () => {
+    const selectedPage = Number(pagePicker.value);
+    if (Number.isInteger(selectedPage) && selectedPage >= 1 && selectedPage <= pageCount) {
+      actions.items?.((selectedPage - 1) * comparison.limit, "page");
+    }
+  });
+  navigation.appendChild(pagePicker);
+  appendPageButton("Next", "next", comparison.offset + comparison.limit,
+    currentPage >= pageCount);
+  appendPageButton("Last", "last", (pageCount - 1) * comparison.limit,
+    currentPage >= pageCount);
+}
+
 export function renderHealthComparison(container, page, comparison, viewState = {}, actions = {}) {
   if (!container) return;
-  container.replaceChildren();
-  if (viewState.loading) {
+  const focusedDisclosureId = document.activeElement?.getAttribute?.("aria-controls");
+  const focusedPageAction = document.activeElement?.getAttribute?.("data-comparison-page-action");
+  const restoreDisclosureFocus = () => {
+    if (!container.querySelectorAll) return;
+    if (focusedDisclosureId) {
+      const replacement = Array.from(container.querySelectorAll("button[aria-controls]"))
+        .find((button) => button.getAttribute("aria-controls") === focusedDisclosureId);
+      replacement?.focus?.({ preventScroll: true });
+    }
+    if (viewState.focusTarget) {
+      const pageControls = Array.from(container.querySelectorAll("[data-comparison-page-action]"));
+      const replacement = pageControls.find(
+        (control) => control.getAttribute("data-comparison-page-action") === viewState.focusTarget,
+      );
+      const focusTarget = replacement && !replacement.disabled
+        ? replacement
+        : pageControls.find((control) => control.getAttribute("data-comparison-page-action") === "page"
+          && !control.disabled);
+      focusTarget?.focus?.({ preventScroll: true });
+      if (focusTarget) actions.focusRestored?.();
+    } else if (focusedPageAction) {
+      const pageControls = Array.from(container.querySelectorAll("[data-comparison-page-action]"));
+      const replacement = pageControls.find(
+        (control) => control.getAttribute("data-comparison-page-action") === focusedPageAction,
+      );
+      replacement?.focus?.({ preventScroll: true });
+    }
+  };
+  const endpointSelection = viewState.endpointSelection === true;
+  const liveStatusClass = "visually-hidden health-comparison-shortcut-status";
+  let liveStatus = endpointSelection
+    ? Array.from(container.children).find((child) => child.className === liveStatusClass)
+    : null;
+  if (liveStatus) {
+    Array.from(container.children).forEach((child) => {
+      if (child !== liveStatus) child.remove();
+    });
+  } else if (endpointSelection) {
+    container.replaceChildren();
+    liveStatus = document.createElement("span");
+    liveStatus.className = liveStatusClass;
+    liveStatus.setAttribute("role", "status");
+    liveStatus.setAttribute("aria-live", "polite");
+    liveStatus.setAttribute("aria-atomic", "true");
+    container.appendChild(liveStatus);
+  } else {
+    container.replaceChildren();
+  }
+  if (liveStatus) liveStatus.textContent = "";
+  if (endpointSelection && viewState.listLoading
+      && !viewState.endpointPages?.after && !viewState.endpointPages?.before) {
+    liveStatus.textContent = "Loading retained assessments.";
+    appendText(container, "p", "Loading retained assessments…");
+    restoreDisclosureFocus();
+    return;
+  }
+  if (!endpointSelection && viewState.listLoading && !page) {
     appendText(container, "p", "Loading stored comparisons…");
+    restoreDisclosureFocus();
     return;
   }
-  if (viewState.error) {
-    appendText(container, "p", viewState.error);
+  if (!endpointSelection && viewState.listError && !page) {
+    appendText(container, "p", viewState.listError);
+    restoreDisclosureFocus();
     return;
   }
-  if (!page || !Array.isArray(page.items)) {
+  if (!endpointSelection && (!page || !Array.isArray(page.items))) {
     appendText(container, "p", "Stored comparisons are unavailable.");
+    restoreDisclosureFocus();
     return;
   }
-  if (!page.total) {
+  if (!endpointSelection && viewState.listError) appendText(container, "p", viewState.listError);
+  if (!endpointSelection && !page.total) {
     appendText(container, "p", "No stored comparisons for this dataset.");
+    restoreDisclosureFocus();
     return;
   }
-  const picker = document.createElement("select");
-  picker.setAttribute("aria-label", "Stored comparison");
-  const now = Date.now();
-  const comparisonLabel = (item) => `Before: ${formatComparisonTime(item.beforeObservedAt, now)} · After: ${formatComparisonTime(item.afterObservedAt, now)}`;
-  const prompt = document.createElement("option");
-  prompt.value = "";
-  prompt.textContent = "Select a comparison";
-  picker.appendChild(prompt);
-  page.items.forEach((item) => {
-    const option = document.createElement("option");
-    option.value = item.comparisonId;
-    option.textContent = comparisonLabel(item);
-    picker.appendChild(option);
-  });
-  if (comparison && !page.items.some((item) => item.comparisonId === comparison.comparisonId)) {
-    const pinned = document.createElement("option");
-    pinned.value = comparison.comparisonId;
-    pinned.textContent = `${comparisonLabel(comparison)} (selected)`;
-    picker.appendChild(pinned);
+  const selectedComparisonId = endpointSelection
+    ? comparison?.comparisonId || ""
+    : viewState.comparisonId || comparison?.comparisonId || "";
+  const controls = appendText(container, "div", "", "health-comparison-controls");
+  if (endpointSelection) {
+    appendComparisonPresets(controls, viewState, actions, liveStatus);
+    const customControls = appendText(container, "div", "", "health-comparison-custom");
+    customControls.id = "health-comparison-custom-controls";
+    customControls.hidden = viewState.customOpen !== true;
+    if (!customControls.hidden) {
+      for (const side of ["before", "after"]) {
+        const endpointGroup = appendText(customControls, "div", "", "health-comparison-endpoint-group");
+        appendEndpointPicker(endpointGroup, side, viewState.endpointPages?.[side],
+          viewState[`${side}AssessmentId`], viewState[side],
+          viewState.endpointLoading?.[side], actions);
+        appendEndpointHistoryNavigation(endpointGroup, side, viewState.endpointPages?.[side],
+          viewState.endpointLoading?.[side], actions);
+      }
+    }
+  } else {
+    const picker = document.createElement("select");
+    picker.setAttribute("aria-label", "Stored comparison");
+    const now = Date.now();
+    const comparisonLabel = (item) => `Before: ${formatComparisonTime(item.beforeObservedAt, now)} · After: ${formatComparisonTime(item.afterObservedAt, now)}`;
+    const prompt = document.createElement("option");
+    prompt.value = "";
+    prompt.textContent = "Select a comparison";
+    picker.appendChild(prompt);
+    page.items.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = item.comparisonId;
+      option.textContent = comparisonLabel(item);
+      picker.appendChild(option);
+    });
+    if (selectedComparisonId && !page.items.some((item) => item.comparisonId === selectedComparisonId)) {
+      const pinned = document.createElement("option");
+      pinned.value = selectedComparisonId;
+      const selectedComparison = comparison?.comparisonId === selectedComparisonId ? comparison : null;
+      pinned.textContent = selectedComparison
+        ? `${comparisonLabel(selectedComparison)} (selected)`
+        : `${selectedComparisonId} (selected)`;
+      picker.appendChild(pinned);
+    }
+    picker.value = selectedComparisonId;
+    picker.addEventListener("change", () => actions.select?.(picker.value));
+    controls.appendChild(picker);
   }
-  picker.value = comparison?.comparisonId || "";
-  picker.addEventListener("change", () => actions.select?.(picker.value));
-  container.appendChild(picker);
-  const nav = appendText(container, "div", "", "health-comparison-navigation");
-  const previous = appendText(nav, "button", "Previous pairs");
-  previous.type = "button";
-  previous.disabled = page.offset === 0;
-  previous.addEventListener("click", () => actions.page?.(Math.max(0, page.offset - page.limit)));
-  const next = appendText(nav, "button", "Next pairs");
-  next.type = "button";
-  next.disabled = page.offset + page.items.length >= page.total;
-  next.addEventListener("click", () => actions.page?.(page.offset + page.limit));
-  if (!comparison) return;
-  appendText(container, "h3", `Before ${comparison.beforeObservedAt} · After ${comparison.afterObservedAt}`);
-  const reasons = comparison.reasons?.join(", ") || "none";
-  appendText(container, "p", `Baseline: ${comparison.baselineState} · Gap: ${comparison.gapState || "unknown"} · Reset: ${comparison.resetState} · ${comparison.comparable ? "Comparable" : `Unknown (${reasons})`}`);
+  if (endpointSelection) {
+    if (viewState.endpointErrors?.before) {
+      appendText(container, "p", viewState.endpointErrors.before, "error");
+    }
+    if (viewState.endpointErrors?.after) {
+      appendText(container, "p", viewState.endpointErrors.after, "error");
+    }
+    if (viewState.presetError) {
+      appendText(container, "p", viewState.presetError, "error");
+    }
+    if (viewState.endpointUnavailable) {
+      appendText(container, "p", "A selected assessment is no longer retained. Select new endpoints.",
+        "health-comparison-endpoint-unavailable");
+    } else if (viewState.endpointPages?.after?.total === 0) {
+      appendText(container, "p", "No retained assessments are available for this network and dataset.");
+    } else if (viewState.presetLoading) {
+      appendText(container, "p", "Resolving the latest retained After assessment…");
+    } else if (!viewState.afterAssessmentId) {
+      if (!viewState.presetError && !viewState.listLoading) {
+        appendText(container, "p", "No retained After assessment is available.");
+      }
+    } else if (!viewState.beforeAssessmentId) {
+      appendText(container, "p", "Not enough history for the selected interval. Open Custom to choose retained endpoints.");
+    }
+  } else {
+    const nav = appendText(container, "div", "", "health-comparison-navigation");
+    const previous = appendText(nav, "button", "Previous pairs");
+    previous.type = "button";
+    previous.disabled = page.offset === 0;
+    previous.addEventListener("click", () => actions.page?.(Math.max(0, page.offset - page.limit)));
+    const next = appendText(nav, "button", "Next pairs");
+    next.type = "button";
+    next.disabled = page.offset + page.items.length >= page.total;
+    next.addEventListener("click", () => actions.page?.(page.offset + page.limit));
+  }
+  if (viewState.endpointPairLoading || viewState.detailLoading) {
+    appendText(container, "p", "Loading comparison rows…");
+    restoreDisclosureFocus();
+    return;
+  }
+  if (viewState.endpointPairError || viewState.detailError) {
+    appendText(container, "p", viewState.endpointPairError || viewState.detailError);
+    restoreDisclosureFocus();
+    return;
+  }
+  if (!comparison || (!endpointSelection && comparison.comparisonId !== selectedComparisonId)) {
+    restoreDisclosureFocus();
+    return;
+  }
+  if (endpointSelection && (
+    comparison.beforeAssessmentId !== viewState.beforeAssessmentId
+    || comparison.afterAssessmentId !== viewState.afterAssessmentId
+  )) {
+    restoreDisclosureFocus();
+    return;
+  }
+  const heading = appendText(container, "p",
+    `Before ${formatUtcComparisonTimestamp(comparison.beforeObservedAt)}`
+    + ` → After ${formatUtcComparisonTimestamp(comparison.afterObservedAt)} UTC`
+    + ` · ${formatElapsedInterval(comparison.elapsedSeconds)}`,
+    "health-comparison-pair-summary");
+  heading.title = `Before ${comparison.beforeObservedAt} · After ${comparison.afterObservedAt}`;
+  const status = appendText(container, "p", comparison.comparable ? "Comparable" : "Unknown",
+    "health-comparison-primary-status");
+  status.setAttribute("role", "status");
+  if (comparison.resetState === "unknown") {
+    appendText(container, "p", "Reset status unknown.", "health-comparison-caveat");
+  }
+  if (!comparison.comparable && comparison.reasons?.length) {
+    appendText(container, "p", comparison.reasons.join(", "), "health-comparison-caveat");
+  }
+  const detailsToggle = appendText(container, "button", "Details");
+  detailsToggle.type = "button";
+  detailsToggle.setAttribute("aria-expanded", String(viewState.detailsOpen === true));
+  detailsToggle.setAttribute("aria-controls", "health-comparison-details");
+  detailsToggle.addEventListener("click", () => actions.detailsOpen?.(viewState.detailsOpen !== true));
+  const details = appendText(container, "div", "", "health-comparison-details");
+  details.id = "health-comparison-details";
+  details.hidden = viewState.detailsOpen !== true;
+  if (!details.hidden) {
+    appendText(details, "p", `Baseline: ${comparison.baselineState} · Gap: ${comparison.gapState || "unknown"} · Reset: ${comparison.resetState}`);
+    appendText(details, "p", `Reasons: ${comparison.reasons?.join(", ") || "none"}`);
+    appendText(details, "p", `Before observed ${comparison.beforeObservedAt} · After observed ${comparison.afterObservedAt}`);
+    if (comparison.origin === "derived") {
+      appendText(details, "p", "Derived from retained endpoint evidence; not stored.",
+        "health-comparison-origin");
+    }
+  }
+  const filterRow = appendText(container, "div", "", "health-comparison-filter-row");
   const filter = document.createElement("select");
   filter.setAttribute("aria-label", "Comparison scope");
   ["all", "network", "device", "relationship"].forEach((scope) => {
@@ -211,9 +832,44 @@ export function renderHealthComparison(container, page, comparison, viewState = 
   });
   filter.value = viewState.scope || "all";
   filter.addEventListener("change", () => actions.scope?.(filter.value));
-  container.appendChild(filter);
+  filterRow.appendChild(filter);
+  const resultFilter = document.createElement("select");
+  resultFilter.setAttribute("aria-label", "Result");
+  [
+    ["changed", "Changed"],
+    ["unchanged", "Unchanged"],
+    ["unknown", "Unknown"],
+    ["all", "All results"],
+  ].forEach(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    resultFilter.appendChild(option);
+  });
+  resultFilter.value = viewState.result || "changed";
+  resultFilter.disabled = endpointSelection
+    ? !viewState.beforeAssessmentId || !viewState.afterAssessmentId
+    : !selectedComparisonId;
+  resultFilter.addEventListener("change", () => actions.result?.(resultFilter.value));
+  filterRow.appendChild(resultFilter);
+  const count = appendText(
+    filterRow, "span",
+    comparison.filteredItemCount === 0
+      ? "0 matching rows"
+      : comparison.items.length
+        ? `${formatComparisonCount(comparison.offset + 1)}–${formatComparisonCount(comparison.offset + comparison.items.length)} of ${formatComparisonCount(comparison.filteredItemCount)} matching rows`
+        : `No rows on this page · ${formatComparisonCount(comparison.filteredItemCount)} matching rows`,
+    "health-comparison-row-count",
+  );
+  count.setAttribute("role", "status");
+  count.setAttribute("aria-live", "polite");
+  appendText(
+    filterRow, "span",
+    `${formatComparisonCount(comparison.itemCount)} total rows`,
+    "health-comparison-total-count",
+  );
   if (!comparison.items?.length) {
-    appendText(container, "p", "No items on this page.");
+    appendText(container, "p", "No rows match the selected comparison filters.");
   } else {
     const wrap = appendText(container, "div", "", "health-comparison-table-wrap");
     const table = document.createElement("table");
@@ -223,8 +879,7 @@ export function renderHealthComparison(container, page, comparison, viewState = 
     head.appendChild(header);
     table.appendChild(head);
     const body = document.createElement("tbody");
-    const visible = comparison.items.filter((item) => !viewState.scope || viewState.scope === "all" || item.scope === viewState.scope);
-    visible.forEach((item) => {
+    comparison.items.forEach((item) => {
         const row = document.createElement("tr");
         const format = (value) => value == null ? "Unknown" : typeof value === "string" ? value : JSON.stringify(value);
         const subject = appendText(row, "td", item.subjectId);
@@ -243,17 +898,12 @@ export function renderHealthComparison(container, page, comparison, viewState = 
       });
     table.appendChild(body);
     wrap.appendChild(table);
-    if (!visible.length) appendText(container, "p", "No items match this scope on the current page.");
   }
-  const pages = appendText(container, "div", "", "health-comparison-navigation");
-  const back = appendText(pages, "button", "Previous items");
-  back.type = "button";
-  back.disabled = comparison.offset === 0;
-  back.addEventListener("click", () => actions.items?.(Math.max(0, comparison.offset - comparison.limit)));
-  const forward = appendText(pages, "button", "Next items");
-  forward.type = "button";
-  forward.disabled = comparison.offset + comparison.items.length >= comparison.itemCount;
-  forward.addEventListener("click", () => actions.items?.(comparison.offset + comparison.limit));
+  appendText(container, "span", `${comparison.limit} rows per page`, "health-comparison-page-size");
+  appendComparisonRowPagination(
+    container, comparison, viewState.itemsLoading === true, actions,
+  );
+  restoreDisclosureFocus();
 }
 
 const ROSTER_COLUMNS = [

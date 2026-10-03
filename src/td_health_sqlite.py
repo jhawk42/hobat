@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Iterator
 
 from td_health_comparison import (
-    COMPARISON_VERSION, METRIC_CATALOG, ROUTE64_SAMPLE_CONTRACT_VERSION,
-    ComparisonItem, ComparisonInterval,
-    derive_comparison, source_roles_for_dataset,
+    COMPARISON_INTERVALS, COMPARISON_VERSION, METRIC_CATALOG, ROUTE64_SAMPLE_CONTRACT_VERSION,
+    ComparisonItem, ComparisonInterval, ComparisonPolicy, comparison_id,
+    derive_comparison, resolve_interval_candidate, source_roles_for_dataset,
 )
 from td_health_manifest import load_health_manifest
 from td_health_observation_model import (
@@ -676,6 +676,281 @@ class SQLiteHealthStore:
             ).fetchall()
             return [dict(row) for row in rows], total
 
+    @staticmethod
+    def _utc_instant(value: str) -> datetime:
+        try:
+            parsed = datetime.fromisoformat(value)
+        except (TypeError, ValueError) as exc:
+            raise sqlite3.DatabaseError("Invalid stored health timestamp") from exc
+        if parsed.utcoffset() is None:
+            raise sqlite3.DatabaseError("Stored health timestamp has no timezone")
+        return parsed.astimezone(timezone.utc)
+
+    def assessment_endpoint_page(
+        self, *, network_id: str, dataset_id: str, side: str, limit: int, offset: int,
+        after_assessment_id: str | None = None, selected_assessment_id: str | None = None,
+    ) -> dict:
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN")
+            records = [
+                dict(row) for row in connection.execute(
+                    """SELECT a.assessment_id, a.assessed_at, o.observation_id,
+                              o.network_id, o.network_name, o.datasource_id, o.dataset_id,
+                              o.observed_at, o.completeness
+                       FROM assessments a JOIN observations o USING (observation_id)
+                       WHERE o.network_id=? AND o.dataset_id=?""",
+                    (network_id, dataset_id),
+                )
+            ]
+            instants = {
+                row["assessment_id"]: (
+                    self._utc_instant(row["observed_at"]),
+                    self._utc_instant(row["assessed_at"]),
+                )
+                for row in records
+            }
+            records.sort(
+                key=lambda row: (
+                    *instants[row["assessment_id"]],
+                    row["assessment_id"],
+                ),
+                reverse=True,
+            )
+            by_id = {row["assessment_id"]: row for row in records}
+            if selected_assessment_id and selected_assessment_id not in by_id:
+                raise KeyError("Selected assessment endpoint not found")
+            if side == "before":
+                if not after_assessment_id or after_assessment_id not in by_id:
+                    raise KeyError("After assessment endpoint not found")
+                after_instant = instants[after_assessment_id][0]
+                candidates = [
+                    row for row in records
+                    if instants[row["assessment_id"]][0] < after_instant
+                ]
+                if selected_assessment_id and selected_assessment_id not in {
+                    row["assessment_id"] for row in candidates
+                }:
+                    raise ValueError("Selected Before assessment must precede After")
+            else:
+                if after_assessment_id is not None:
+                    raise ValueError("after assessment is only valid for the before side")
+                candidates = records
+            latest_after = records[0] if records else None
+            default_before = None
+            if latest_after:
+                after_instant = instants[latest_after["assessment_id"]][0]
+                default_before = next(
+                    (row for row in records
+                     if instants[row["assessment_id"]][0] < after_instant),
+                    None,
+                )
+            predecessor = None
+            if side == "before" and after_assessment_id:
+                after_instant = instants[after_assessment_id][0]
+                predecessor = next(
+                    (row for row in records
+                     if instants[row["assessment_id"]][0] < after_instant),
+                    None,
+                )
+
+            def public(row: dict | None) -> dict | None:
+                if row is None:
+                    return None
+                return {
+                    "assessmentId": row["assessment_id"],
+                    "observationId": row["observation_id"],
+                    "networkId": row["network_id"],
+                    "networkName": row["network_name"],
+                    "datasourceId": row["datasource_id"],
+                    "datasetId": row["dataset_id"],
+                    "observedAt": row["observed_at"],
+                    "assessedAt": row["assessed_at"],
+                    "completeness": row["completeness"],
+                }
+
+            selected_after = (
+                by_id.get(after_assessment_id) if side == "before" else
+                by_id.get(selected_assessment_id) if selected_assessment_id else latest_after
+            )
+            shortcuts = []
+            if selected_after:
+                for interval, duration_seconds in COMPARISON_INTERVALS.items():
+                    try:
+                        candidate = resolve_interval_candidate(
+                            records, after_observed_at=selected_after["observed_at"],
+                            interval=interval,
+                        )
+                    except ValueError as exc:
+                        raise sqlite3.DatabaseError(
+                            "Invalid stored health interval metadata"
+                        ) from exc
+                    shortcuts.append({
+                        "interval": interval,
+                        "durationSeconds": duration_seconds,
+                        "candidate": public(candidate),
+                    })
+
+            return {
+                "schemaVersion": 1,
+                "networkId": network_id,
+                "datasetId": dataset_id,
+                "side": side,
+                "afterAssessmentId": after_assessment_id,
+                "total": len(candidates),
+                "limit": limit,
+                "offset": offset,
+                "items": [public(row) for row in candidates[offset:offset + limit]],
+                "selected": public(by_id.get(selected_assessment_id)),
+                "defaultAfter": public(latest_after),
+                "defaultBefore": public(default_before),
+                "predecessor": public(predecessor),
+                "selectedAfter": public(selected_after),
+                "shortcuts": shortcuts,
+            }
+
+    @staticmethod
+    def _comparison_page_on_connection(
+        connection: sqlite3.Connection, *, comparison_id_value: str, limit: int,
+        offset: int, scope: str, result: str,
+    ) -> tuple[dict, list[dict]] | None:
+        row = connection.execute(
+            """SELECT c.*, EXISTS(SELECT 1 FROM observations o
+               WHERE o.observation_id=c.before_observation_id) AS before_retained,
+               EXISTS(SELECT 1 FROM observations o
+               WHERE o.observation_id=c.after_observation_id) AS after_retained
+               FROM comparisons c WHERE comparison_id=?""", (comparison_id_value,),
+        ).fetchone()
+        if row is None:
+            return None
+        pruned = not row["before_retained"] or not row["after_retained"]
+        effective_result = "CASE WHEN ? OR comparable=0 THEN 'unknown' ELSE change END"
+        filters = []
+        parameters: list[object] = []
+        if scope != "all":
+            filters.append("scope=?")
+            parameters.append(scope)
+        if result != "all":
+            filters.append(f"{effective_result}=?")
+            parameters.extend((pruned, result))
+        where = " AND ".join(filters) or "1"
+        count = connection.execute(
+            f"SELECT COUNT(*) FROM comparison_items WHERE comparison_id=? AND {where}",
+            (comparison_id_value, *parameters),
+        ).fetchone()[0]
+        items = connection.execute(
+            f"""SELECT * FROM comparison_items WHERE comparison_id=? AND {where}
+                ORDER BY scope, subject_id, item_kind, metric, item_id LIMIT ? OFFSET ?""",
+            (comparison_id_value, *parameters, limit, offset),
+        ).fetchall()
+        return {**dict(row), "filtered_item_count": count}, [dict(item) for item in items]
+
+    def compare_endpoint_pair(
+        self, *, network_id: str, dataset_id: str, before_assessment_id: str,
+        after_assessment_id: str, limit: int, offset: int, scope: str, result: str,
+    ) -> tuple[str, dict, list[dict]] | None:
+        policy = ComparisonPolicy()
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN")
+            endpoint_rows = {}
+            for assessment_id_value in (before_assessment_id, after_assessment_id):
+                row = connection.execute(
+                    """SELECT a.assessment_id, o.observation_id, o.network_id,
+                              o.dataset_id, o.observed_at
+                       FROM assessments a JOIN observations o USING (observation_id)
+                       WHERE a.assessment_id=?""", (assessment_id_value,),
+                ).fetchone()
+                if row is None:
+                    return None
+                endpoint_rows[assessment_id_value] = dict(row)
+            before_row = endpoint_rows[before_assessment_id]
+            after_row = endpoint_rows[after_assessment_id]
+            if any(row["network_id"] != network_id or row["dataset_id"] != dataset_id
+                   for row in endpoint_rows.values()):
+                raise ValueError("Assessment endpoints must belong to the requested network and dataset")
+            before_time = self._utc_instant(before_row["observed_at"])
+            after_time = self._utc_instant(after_row["observed_at"])
+            if (before_assessment_id == after_assessment_id
+                    or before_row["observation_id"] == after_row["observation_id"]
+                    or before_time >= after_time):
+                raise ValueError("Before assessment must precede After assessment")
+            for source in connection.execute(
+                """SELECT source_observed_at FROM observation_sources
+                   WHERE observation_id IN (?, ?) AND source_observed_at IS NOT NULL""",
+                (before_row["observation_id"], after_row["observation_id"]),
+            ):
+                self._utc_instant(source["source_observed_at"])
+            deterministic_id = comparison_id(
+                before_assessment_id, after_assessment_id, policy
+            )
+            stored = connection.execute(
+                """SELECT 1 FROM comparisons WHERE comparison_id=?
+                   AND comparison_version=? AND comparison_policy_digest=?""",
+                (deterministic_id, COMPARISON_VERSION, policy.digest),
+            ).fetchone()
+            if stored:
+                page = self._comparison_page_on_connection(
+                    connection, comparison_id_value=deterministic_id, limit=limit,
+                    offset=offset, scope=scope, result=result,
+                )
+                if page is not None:
+                    return "stored", page[0], page[1]
+
+            before = self._endpoint(connection, before_assessment_id)
+            after = self._endpoint(connection, after_assessment_id)
+            if before is None or after is None:
+                return None
+            interval, items = self._derive_pair(connection, before, after)
+            reset_states = {
+                item.reset_evidence.state for item in items if item.reset_evidence
+            }
+            reset_state = (
+                "reset-detected" if "reset-detected" in reset_states else
+                "unknown" if "unknown" in reset_states else
+                "same-epoch" if "same-epoch" in reset_states else
+                "not-applicable"
+            )
+            return "derived", {
+                "comparison_id": interval.comparison_id,
+                "comparison_version": COMPARISON_VERSION,
+                "before_assessment_id": interval.before_assessment_id,
+                "after_assessment_id": interval.after_assessment_id,
+                "before_observation_id": interval.baseline_observation_id,
+                "after_observation_id": interval.after_observation_id,
+                "before_observed_at": interval.before_observed_at,
+                "after_observed_at": interval.after_observed_at,
+                "network_id": network_id,
+                "dataset_id": dataset_id,
+                "datasource_id": after[0].datasource_id,
+                "profile_id": after[1].profile_id,
+                "source_signature": interval.source_signature,
+                "sample_contract_version": after[1].sample_contract_version,
+                "evaluator_version": after[1].evaluator_version,
+                "before_assessment_digest": before[1].policy_digest,
+                "after_assessment_digest": after[1].policy_digest,
+                "endpoint_policy_digest": interval.endpoint_policy_digest,
+                "comparison_policy_digest": interval.comparison_policy_digest,
+                "elapsed_seconds": interval.elapsed_seconds,
+                "gap_state": interval.gap_state,
+                "reset_state": reset_state,
+                "baseline_state": interval.baseline_state,
+                "reset_witness_json": json.dumps({
+                    item.item_id: {
+                        "witness": item.reset_evidence.witness,
+                        "before": item.reset_evidence.before_value,
+                        "after": item.reset_evidence.after_value,
+                    }
+                    for item in items if item.reset_evidence
+                }, sort_keys=True),
+                "reasons_json": json.dumps(interval.compatibility.reasons),
+                "comparable": int(interval.compatibility.comparable),
+                "item_count": len(items),
+                "created_at": None,
+                "before_retained": 1,
+                "after_retained": 1,
+                "derived_items": items,
+                "filtered_item_count": 0,
+            }, []
+
     def roster_rows(self, *, network_id: str, limit: int, offset: int
                     ) -> tuple[list[dict], int]:
         with closing(self._connect()) as connection:
@@ -811,8 +1086,10 @@ class SQLiteHealthStore:
             return [self._roster_device_rows(connection, network_id, row["device_id"])
                     for row in rows]
 
-    def comparison_row(self, comparison_id: str, *, limit: int, offset: int
-                       ) -> tuple[dict, list[dict]] | None:
+    def comparison_row(
+        self, comparison_id: str, *, limit: int, offset: int,
+        scope: str = "all", result: str = "all",
+    ) -> tuple[dict, list[dict]] | None:
         with closing(self._connect()) as connection:
             connection.execute("BEGIN")
             row = connection.execute(
@@ -824,39 +1101,122 @@ class SQLiteHealthStore:
             ).fetchone()
             if row is None:
                 return None
+            pruned = not row["before_retained"] or not row["after_retained"]
+            effective_result = "CASE WHEN ? OR comparable=0 THEN 'unknown' ELSE change END"
+            filters = []
+            parameters: list[object] = []
+            if scope != "all":
+                filters.append("scope=?")
+                parameters.append(scope)
+            if result != "all":
+                filters.append(f"{effective_result}=?")
+                parameters.extend((pruned, result))
+            where = " AND ".join(filters) or "1"
+            count = connection.execute(
+                f"SELECT COUNT(*) FROM comparison_items WHERE comparison_id=? AND {where}",
+                (comparison_id, *parameters),
+            ).fetchone()[0]
             items = connection.execute(
-                """SELECT * FROM comparison_items WHERE comparison_id=?
-                   ORDER BY scope, subject_id, item_kind, metric, item_id LIMIT ? OFFSET ?""",
-                (comparison_id, limit, offset),
+                f"""SELECT * FROM comparison_items WHERE comparison_id=? AND {where}
+                    ORDER BY scope, subject_id, item_kind, metric, item_id LIMIT ? OFFSET ?""",
+                (comparison_id, *parameters, limit, offset),
             ).fetchall()
-            return dict(row), [dict(item) for item in items]
+            return {**dict(row), "filtered_item_count": count}, [dict(item) for item in items]
 
     def _auto_compare(self, connection: sqlite3.Connection, observation: Observation,
                       assessment: Assessment) -> None:
-        duplicate = connection.execute(
-            """SELECT 1 FROM observations WHERE network_id=? AND dataset_id=?
-               AND observed_at=? AND observation_id<>? LIMIT 1""",
-            (observation.network_id, observation.dataset_id, observation.observed_at,
-             observation.observation_id),
-        ).fetchone()
-        if duplicate:
+        if observation.completeness is not Completeness.COMPLETE:
             return
-        baseline = connection.execute(
-            """SELECT a.assessment_id FROM assessments a JOIN observations o USING (observation_id)
-               WHERE o.network_id=? AND o.dataset_id=? AND o.completeness='complete'
-               AND o.observed_at<? ORDER BY o.observed_at DESC, a.assessed_at DESC,
-               a.assessment_id DESC LIMIT 1""",
-            (observation.network_id, observation.dataset_id, observation.observed_at),
-        ).fetchone()
-        if baseline and observation.completeness is Completeness.COMPLETE:
-            before = self._endpoint(connection, baseline["assessment_id"])
-            after = self._endpoint(connection, assessment.assessment_id)
-            if before and after:
-                interval, items = self._derive_pair(connection, before, after)
-                if not connection.execute(
-                    "SELECT 1 FROM comparisons WHERE comparison_id=?", (interval.comparison_id,),
-                ).fetchone():
-                    self._store_comparison(connection, before, after, interval, items)
+        try:
+            after_time = self._utc_instant(observation.observed_at)
+        except sqlite3.DatabaseError:
+            raise
+        candidates = [
+            dict(row) for row in connection.execute(
+                """SELECT a.assessment_id, a.assessed_at, o.observation_id,
+                          o.observed_at, o.completeness
+                   FROM assessments a JOIN observations o USING (observation_id)
+                   WHERE o.network_id=? AND o.dataset_id=?""",
+                (observation.network_id, observation.dataset_id),
+            )
+        ]
+        try:
+            candidate_times = {
+                row["assessment_id"]: (
+                    self._utc_instant(row["observed_at"]),
+                    self._utc_instant(row["assessed_at"]),
+                )
+                for row in candidates
+            }
+        except sqlite3.DatabaseError:
+            raise
+        if any(
+            row["observation_id"] != observation.observation_id
+            and candidate_times[row["assessment_id"]][0] == after_time
+            for row in candidates
+        ):
+            return
+
+        candidates.sort(
+            key=lambda row: (
+                *candidate_times[row["assessment_id"]],
+                row["assessment_id"],
+            ),
+            reverse=True,
+        )
+        adjacent = next(
+            (row for row in candidates
+             if row["completeness"] == "complete"
+             and candidate_times[row["assessment_id"]][0] < after_time),
+            None,
+        )
+        target_ids = []
+        if adjacent:
+            target_ids.append(adjacent["assessment_id"])
+        for interval in COMPARISON_INTERVALS:
+            try:
+                candidate = resolve_interval_candidate(
+                    candidates, after_observed_at=observation.observed_at,
+                    interval=interval, complete_only=True,
+                )
+            except ValueError as exc:
+                raise sqlite3.DatabaseError(
+                    "Invalid stored health interval metadata"
+                ) from exc
+            if candidate is not None:
+                target_ids.append(candidate["assessment_id"])
+        unique_target_ids = list(dict.fromkeys(target_ids))
+        after: tuple[Observation, Assessment] | None = None
+        policy = ComparisonPolicy()
+        for before_assessment_id in unique_target_ids:
+            expected_id = comparison_id(
+                before_assessment_id, assessment.assessment_id, policy
+            )
+            present = connection.execute(
+                """SELECT comparison_version, comparison_policy_digest
+                   FROM comparisons WHERE comparison_id=?""",
+                (expected_id,),
+            ).fetchone()
+            if present:
+                if (present["comparison_version"] != COMPARISON_VERSION
+                        or present["comparison_policy_digest"] != policy.digest):
+                    raise sqlite3.DatabaseError(
+                        "Stored health comparison identity has inconsistent policy metadata"
+                    )
+                continue
+            before = self._endpoint(connection, before_assessment_id)
+            if before is None:
+                raise sqlite3.DatabaseError(
+                    "Retained comparison baseline could not be reconstructed"
+                )
+            if after is None:
+                after = self._endpoint(connection, assessment.assessment_id)
+            if after is None:
+                raise sqlite3.DatabaseError(
+                    "Retained comparison endpoint could not be reconstructed"
+                )
+            interval, items = self._derive_pair(connection, before, after)
+            self._store_comparison(connection, before, after, interval, items)
 
     def reconcile_current_assessments(self, active_dataset_ids: tuple[str, ...]) -> int:
         if not active_dataset_ids:

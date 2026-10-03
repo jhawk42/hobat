@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 
 import { computeRowCounts, evaluateDiagnosticOption, getRowRoleProjection, isRowVisibleByNodeFilter } from "../../src/js/tdash-filters.js";
 import { buildDatasetRows } from "../../src/js/tdash-dataset.js";
-import { formatAge, isComparisonPageForAssessment } from "../../src/js/tdash-health.js";
+import {
+  createHealthComparisonDetailController,
+  formatAge,
+  isComparisonPageForAssessment,
+} from "../../src/js/tdash-health.js";
 import {
   collectColumns,
   getTableColumnCategories,
@@ -219,5 +223,220 @@ assert.equal(isComparisonPageForAssessment({ ...page, offset: 25 }, assessment, 
 assert.equal(isComparisonPageForAssessment({ ...page, total: 0 }, assessment, 0), false);
 assert.equal(isComparisonPageForAssessment({ ...page, items: [{ ...page.items[0], networkId: "extpan:0000000000000000" }] }, assessment, 0), false);
 assert.equal(isComparisonPageForAssessment({ ...page, items: [{ ...page.items[0], datasetId: "other" }] }, assessment, 0), false);
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+function comparisonHeader(overrides = {}) {
+  return {
+    comparisonId: "comparison:one",
+    comparisonVersion: 1,
+    beforeAssessmentId: "assessment:before",
+    afterAssessmentId: "assessment:after",
+    beforeObservationId: "observation:before",
+    afterObservationId: "observation:after",
+    baselineState: "available",
+    comparable: true,
+    itemCount: 1,
+    ...overrides,
+  };
+}
+
+function comparisonDetail(header, query, items = [{}]) {
+  return {
+    schemaVersion: 1,
+    ...header,
+    networkId: assessment.networkId,
+    datasetId: assessment.datasetId,
+    filteredItemCount: header.filteredItemCount ?? header.itemCount,
+    limit: 25,
+    offset: query.offset,
+    items,
+  };
+}
+
+function comparisonControllerFixture(fetchDetail) {
+  const state = {
+    comparison: null,
+    comparisonQueryIdentity: null,
+    comparisonDetailLoading: false,
+    comparisonDetailError: "",
+    comparisonDetailRequestVersion: 0,
+    comparisonDetailRequestIdentity: null,
+    comparisonDetailRequestHeader: null,
+  };
+  const selection = {
+    comparisonId: "comparison:one",
+    scope: "all",
+    result: "changed",
+  };
+  let offset = 0;
+  let summary = comparisonHeader();
+  const controller = createHealthComparisonDetailController({
+    state,
+    getAssessment: () => assessment,
+    getSelection: () => ({ ...selection }),
+    getSummary: () => summary,
+    getOffset: () => offset,
+    setOffset: (value) => { offset = value; },
+    updateSelection: (filter, value) => { selection[filter] = value; },
+    fetchDetail,
+  });
+  return {
+    state,
+    selection,
+    controller,
+    setSummary: (value) => { summary = value; },
+    getOffset: () => offset,
+  };
+}
+
+{
+  const requests = [];
+  const fixture = comparisonControllerFixture((id, requestedOffset, _signal, filters) => {
+    const response = deferred();
+    requests.push({ id, offset: requestedOffset, filters, response });
+    return response.promise;
+  });
+  const first = fixture.controller.select("comparison:one", 0);
+  const second = fixture.controller.changeFilter("result", "unchanged");
+  assert.equal(fixture.getOffset(), 0);
+  assert.deepEqual(requests.map(({ filters }) => filters.result), ["changed", "unchanged"]);
+  requests[0].response.resolve(comparisonDetail(comparisonHeader(), { offset: 0 }));
+  await first;
+  assert.equal(fixture.state.comparison, null);
+  requests[1].response.resolve(comparisonDetail(comparisonHeader(), { offset: 0 }));
+  await second;
+  assert.equal(fixture.state.comparison?.items.length, 1);
+  assert.equal(fixture.state.comparisonQueryIdentity.result, "unchanged");
+}
+
+{
+  const requests = [];
+  const fixture = comparisonControllerFixture((id, requestedOffset, _signal, filters) => {
+    const response = deferred();
+    requests.push({ id, offset: requestedOffset, filters, response });
+    return response.promise;
+  });
+  const first = fixture.controller.select("comparison:one", 0);
+  fixture.selection.comparisonId = "comparison:two";
+  fixture.setSummary(comparisonHeader({ comparisonId: "comparison:two" }));
+  const second = fixture.controller.select("comparison:two", 0);
+  requests[0].response.resolve(comparisonDetail(comparisonHeader(), { offset: 0 }));
+  await first;
+  assert.equal(fixture.state.comparison, null);
+  requests[1].response.resolve(comparisonDetail(
+    comparisonHeader({ comparisonId: "comparison:two" }),
+    { offset: 0 },
+  ));
+  await second;
+  assert.equal(fixture.state.comparison?.comparisonId, "comparison:two");
+}
+
+{
+  const requests = [];
+  const fixture = comparisonControllerFixture((id, requestedOffset, _signal, filters) => {
+    const response = deferred();
+    requests.push({ id, offset: requestedOffset, filters, response });
+    return response.promise;
+  });
+  const initial = fixture.controller.select("comparison:one", 0);
+  requests[0].response.resolve(comparisonDetail(comparisonHeader(), { offset: 0 }));
+  await initial;
+  fixture.setSummary(comparisonHeader({ baselineState: "pruned", comparable: false }));
+  const refreshed = fixture.controller.reconcileSummary();
+  assert.equal(requests.length, 2);
+  requests[1].response.resolve(comparisonDetail(
+    comparisonHeader({ baselineState: "pruned", comparable: false }),
+    { offset: 0 },
+    [{ change: "unknown" }],
+  ));
+  await refreshed;
+  assert.equal(fixture.state.comparison?.baselineState, "pruned");
+  assert.equal(fixture.state.comparison.items[0].change, "unknown");
+}
+
+{
+  const requests = [];
+  const fixture = comparisonControllerFixture((id, requestedOffset, _signal, filters) => {
+    const response = deferred();
+    requests.push({ id, offset: requestedOffset, filters, response });
+    return response.promise;
+  });
+  const staleRequest = fixture.controller.select("comparison:one", 0);
+  const refreshedHeader = comparisonHeader({ baselineState: "pruned", comparable: false });
+  fixture.setSummary(refreshedHeader);
+  const currentRequest = fixture.controller.reconcileSummary();
+  assert.equal(requests.length, 2);
+  requests[0].response.resolve(comparisonDetail(comparisonHeader(), { offset: 0 }));
+  await staleRequest;
+  assert.equal(fixture.state.comparison, null);
+  requests[1].response.resolve(comparisonDetail(refreshedHeader, { offset: 0 }));
+  await currentRequest;
+  assert.equal(fixture.state.comparison?.baselineState, "pruned");
+}
+
+{
+  const requests = [];
+  const fixture = comparisonControllerFixture((id, requestedOffset, _signal, filters) => {
+    const response = deferred();
+    requests.push({ id, offset: requestedOffset, filters, response });
+    return response.promise;
+  });
+  const initial = fixture.controller.select("comparison:one", 0);
+  requests[0].response.resolve(comparisonDetail(comparisonHeader(), { offset: 0 }));
+  await initial;
+  fixture.setSummary(null);
+  const filtered = fixture.controller.changeFilter("scope", "device");
+  assert.equal(requests.length, 2);
+  requests[1].response.resolve(comparisonDetail(comparisonHeader(), { offset: 0 }));
+  await filtered;
+  assert.equal(fixture.state.comparison?.comparisonId, "comparison:one");
+  assert.equal(fixture.state.comparisonQueryIdentity.scope, "device");
+}
+
+{
+  const requests = [];
+  const fixture = comparisonControllerFixture((id, requestedOffset, _signal, filters) => {
+    const response = deferred();
+    requests.push({ id, offset: requestedOffset, filters, response });
+    return response.promise;
+  });
+  fixture.setSummary(comparisonHeader({ itemCount: 30 }));
+  const pageRequest = fixture.controller.select("comparison:one", 25);
+  requests[0].response.resolve(comparisonDetail(
+    comparisonHeader({ itemCount: 30 }),
+    { offset: 25 },
+    [],
+  ));
+  await Promise.resolve();
+  assert.deepEqual(requests.map(({ offset }) => offset), [25, 0]);
+  assert.equal(fixture.getOffset(), 0);
+  requests[1].response.resolve(comparisonDetail(
+    comparisonHeader({ itemCount: 30 }),
+    { offset: 0 },
+    Array.from({ length: 5 }, () => ({})),
+  ));
+  await pageRequest;
+  assert.equal(fixture.state.comparison?.offset, 0);
+  assert.equal(fixture.state.comparison.items.length, 5);
+}
+
+{
+  let fetchCount = 0;
+  const header = comparisonHeader();
+  const fixture = comparisonControllerFixture(async (_id, requestedOffset, _signal, filters) => {
+    fetchCount += 1;
+    return comparisonDetail(header, { offset: requestedOffset }, [{}]);
+  });
+  await fixture.controller.select("comparison:one", 0);
+  fixture.controller.cancelPending();
+  await fixture.controller.select("comparison:one", 0);
+  assert.equal(fetchCount, 1);
+  assert.equal(fixture.state.comparisonQueryIdentity.result, "changed");
+}
 
 process.stdout.write("phase3 regressions passed\n");

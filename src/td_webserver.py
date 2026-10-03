@@ -7,6 +7,7 @@ import mimetypes
 import os
 import argparse
 import logging
+import sqlite3
 import sys
 import time
 import uuid
@@ -23,6 +24,7 @@ from td_health_read import (
     MAX_PAGE_SIZE,
     HealthBusyError,
     HealthCorruptStoreError,
+    HealthEndpointUnavailableError,
     HealthUnavailableError,
     TDHealthReadService,
 )
@@ -1346,6 +1348,10 @@ async def _health_service_call(request: aiohttp.web.Request, method: str, **kwar
         ) from exc
     except HealthCorruptStoreError as exc:
         raise aiohttp.web.HTTPInternalServerError(reason=str(exc)) from exc
+    except HealthEndpointUnavailableError as exc:
+        raise aiohttp.web.HTTPNotFound(reason=str(exc)) from exc
+    except json.JSONDecodeError as exc:
+        raise aiohttp.web.HTTPInternalServerError(reason="Health store contains invalid JSON") from exc
     except HealthManifestError as exc:
         raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
     except ValueError as exc:
@@ -1368,6 +1374,62 @@ async def handle_health_comparisons_api(request: aiohttp.web.Request) -> aiohttp
         limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
         offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
     )
+    return _health_json_response(result)
+
+
+async def handle_health_comparison_endpoints_api(
+    request: aiohttp.web.Request,
+) -> aiohttp.web.Response:
+    network_id = request.query.get("network")
+    dataset_id = request.query.get("dataset")
+    side = request.query.get("side")
+    if not network_id or not dataset_id or side not in ("before", "after"):
+        raise aiohttp.web.HTTPBadRequest(
+            reason="network, dataset, and side=before|after are required"
+        )
+    after_assessment_id = request.query.get("after")
+    if side == "before" and not after_assessment_id:
+        raise aiohttp.web.HTTPBadRequest(reason="after is required for the before side")
+    if side == "after" and after_assessment_id:
+        raise aiohttp.web.HTTPBadRequest(reason="after is only valid for the before side")
+    result = await _health_service_call(
+        request, "comparison_endpoints", network_id=network_id, dataset_id=dataset_id,
+        side=side,
+        limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
+        offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
+        after_assessment_id=after_assessment_id,
+        selected_assessment_id=request.query.get("selected"),
+    )
+    return _health_json_response(result)
+
+
+async def handle_health_comparison_pair_api(
+    request: aiohttp.web.Request,
+) -> aiohttp.web.Response:
+    network_id = request.query.get("network")
+    dataset_id = request.query.get("dataset")
+    before_assessment_id = request.query.get("before")
+    after_assessment_id = request.query.get("after")
+    if not all((network_id, dataset_id, before_assessment_id, after_assessment_id)):
+        raise aiohttp.web.HTTPBadRequest(
+            reason="network, dataset, before, and after are required"
+        )
+    from td_health_read import COMPARISON_RESULTS, COMPARISON_SCOPES
+
+    scope = request.query.get("scope", "all")
+    result_filter = request.query.get("result", "all")
+    if (scope not in ("all", *COMPARISON_SCOPES)
+            or result_filter not in ("all", *COMPARISON_RESULTS)):
+        raise aiohttp.web.HTTPBadRequest(reason="Invalid comparison filter")
+    result = await _health_service_call(
+        request, "comparison_pair", network_id=network_id, dataset_id=dataset_id,
+        before_assessment_id=before_assessment_id, after_assessment_id=after_assessment_id,
+        limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
+        offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
+        scope=scope, result=result_filter,
+    )
+    if result is None:
+        raise aiohttp.web.HTTPNotFound(reason="Assessment endpoint not found")
     return _health_json_response(result)
 
 
@@ -1412,10 +1474,17 @@ async def handle_health_comparison_api(request: aiohttp.web.Request) -> aiohttp.
     comparison_id = request.match_info.get("comparison_id", "")
     if not comparison_id.startswith("comparison:"):
         raise aiohttp.web.HTTPBadRequest(reason="invalid comparison ID")
+    from td_health_read import COMPARISON_RESULTS, COMPARISON_SCOPES
+
+    scope = request.query.get("scope", "all")
+    result_filter = request.query.get("result", "all")
+    if scope not in ("all", *COMPARISON_SCOPES) or result_filter not in ("all", *COMPARISON_RESULTS):
+        raise aiohttp.web.HTTPBadRequest(reason="Invalid comparison filter")
     result = await _health_service_call(
         request, "comparison", comparison_id=comparison_id,
         limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
         offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
+        scope=scope, result=result_filter,
     )
     if result is None:
         raise aiohttp.web.HTTPNotFound(reason="Comparison not found")
@@ -2520,6 +2589,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.router.add_get("/api/health/findings", handle_health_findings_api)
     app.router.add_get("/api/health/devices/{device_id}", handle_health_device_api)
     app.router.add_get("/api/health/observations", handle_health_observations_api)
+    app.router.add_get(
+        "/api/health/comparison-endpoints", handle_health_comparison_endpoints_api
+    )
+    app.router.add_get("/api/health/comparison", handle_health_comparison_pair_api)
     app.router.add_get("/api/health/comparisons", handle_health_comparisons_api)
     app.router.add_get("/api/health/comparisons/{comparison_id}", handle_health_comparison_api)
     app.router.add_get("/api/health/roster", handle_health_roster_api)

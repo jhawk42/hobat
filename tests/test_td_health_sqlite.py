@@ -21,6 +21,7 @@ from td_health_observation_model import (
     SourceEvidence,
 )
 from td_health_observation_store import HealthStoreFutureSchemaError
+from td_health_comparison import COMPARISON_INTERVALS
 from td_health_read import TDHealthReadService
 from td_health_roster import RosterFact
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
@@ -497,6 +498,25 @@ def test_comparison_pair_is_atomic_idempotent_and_late_arrival_does_not_repoint(
     assert interval.comparison_id == store.compare_assessments("assessment-1", "assessment-3", dry_run=True)[0].comparison_id
 
 
+def test_auto_comparison_suppresses_equivalent_observation_instants(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    first, first_assessment = _result("1")
+    second, second_assessment = _result("2")
+    first = replace(
+        first, observed_at="2026-09-01T00:00:01Z", ingested_at="2026-09-01T00:00:01Z",
+    )
+    first_assessment = replace(first_assessment, assessed_at="2026-09-01T00:00:01Z")
+    second = replace(
+        second, observed_at="2026-09-01T02:00:01+02:00",
+        ingested_at="2026-09-01T02:00:01+02:00",
+    )
+    second_assessment = replace(second_assessment, assessed_at="2026-09-01T02:00:01+02:00")
+    store.save_processing_result(first, first_assessment)
+    store.save_processing_result(second, second_assessment)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone()[0] == 0
+
+
 def test_auto_comparison_persists_immutable_partition_and_rloc_changes(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     filename = "td-otbr-cli-networkdiag-fetch-all.json"
@@ -518,6 +538,109 @@ def test_auto_comparison_persists_immutable_partition_and_rloc_changes(tmp_path)
         ).fetchall()
     assert [(metric, json.loads(before), json.loads(after), change) for metric, before, after, change in rows] == [
         ("partition", 10, 20, "changed"), ("rloc16", "0x1234", "0x5678", "changed")]
+
+
+def test_auto_comparison_persists_unique_complete_interval_candidates_and_retries_idempotently(
+    tmp_path, monkeypatch,
+) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+
+    def endpoint(suffix: str, timestamp: str):
+        observation, assessment = _result(suffix)
+        return (
+            replace(observation, observed_at=timestamp, ingested_at=timestamp),
+            replace(assessment, assessed_at=timestamp),
+        )
+
+    history = [
+        ("1", "2026-01-01T00:00:00Z"),
+        ("2", "2026-01-24T00:00:00Z"),
+        ("3", "2026-01-28T00:00:00Z"),
+        ("4", "2026-01-29T00:00:00Z"),
+    ]
+    for suffix, timestamp in history:
+        store.save_processing_result(*endpoint(suffix, timestamp))
+    partial, partial_assessment = endpoint("5", "2026-01-30T00:00:00Z")
+    store.save_processing_result(
+        replace(partial, completeness=Completeness.PARTIAL), partial_assessment,
+    )
+    after = endpoint("6", "2026-01-31T00:00:00Z")
+    store.save_processing_result(*after)
+
+    with sqlite3.connect(store.path) as connection:
+        rows = connection.execute(
+            "SELECT before_assessment_id, comparison_id FROM comparisons "
+            "WHERE after_assessment_id=?",
+            (after[1].assessment_id,),
+        ).fetchall()
+    expected_before = {
+        "assessment-1", "assessment-2", "assessment-3", "assessment-4",
+    }
+    assert {before_id for before_id, _ in rows} == expected_before
+    assert len(rows) == len(COMPARISON_INTERVALS) == 4
+    assert len({comparison_id for _, comparison_id in rows}) == 4
+
+    derived = []
+    original_derive = store._derive_pair
+
+    def count_derivations(*args):
+        derived.append(args[1][1].assessment_id)
+        return original_derive(*args)
+
+    monkeypatch.setattr(store, "_derive_pair", count_derivations)
+    store.save_processing_result(*after)
+    assert derived == []
+
+
+def test_auto_comparison_retry_adds_candidates_from_late_arriving_history(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+
+    def endpoint(suffix: str, timestamp: str):
+        observation, assessment = _result(suffix)
+        return (
+            replace(observation, observed_at=timestamp, ingested_at=timestamp),
+            replace(assessment, assessed_at=timestamp),
+        )
+
+    after = endpoint("6", "2026-01-31T00:00:00Z")
+    store.save_processing_result(*after)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM comparisons WHERE after_assessment_id=?",
+            (after[1].assessment_id,),
+        ).fetchone()[0] == 0
+
+    for suffix, timestamp in (
+        ("1", "2026-01-01T00:00:00Z"),
+        ("2", "2026-01-24T00:00:00Z"),
+        ("3", "2026-01-28T00:00:00Z"),
+        ("4", "2026-01-29T00:00:00Z"),
+    ):
+        store.save_processing_result(*endpoint(suffix, timestamp))
+    partial, partial_assessment = endpoint("5", "2026-01-30T00:00:00Z")
+    store.save_processing_result(
+        replace(partial, completeness=Completeness.PARTIAL), partial_assessment,
+    )
+    with sqlite3.connect(store.path) as connection:
+        earlier_pairs = connection.execute(
+            "SELECT comparison_id FROM comparisons ORDER BY comparison_id"
+        ).fetchall()
+    store.save_processing_result(*after)
+    with sqlite3.connect(store.path) as connection:
+        final_pairs = connection.execute(
+            "SELECT before_assessment_id, comparison_id FROM comparisons "
+            "WHERE after_assessment_id=?",
+            (after[1].assessment_id,),
+        ).fetchall()
+        pairs_after_retry = connection.execute(
+            "SELECT comparison_id FROM comparisons WHERE after_assessment_id<>? "
+            "ORDER BY comparison_id",
+            (after[1].assessment_id,),
+        ).fetchall()
+    assert {before_id for before_id, _ in final_pairs} == {
+        "assessment-1", "assessment-2", "assessment-3", "assessment-4",
+    }
+    assert pairs_after_retry == earlier_pairs
 
 
 def test_pruned_comparison_is_read_only_and_device_purge_removes_it(tmp_path) -> None:
@@ -668,11 +791,19 @@ def test_pruned_numeric_delta_is_suppressed_without_mutating_persisted_item(tmp_
     first = service.comparison(comparison_id=comparison_id, limit=25, offset=0)
     numeric = next(item for item in first["items"] if item["metric"] == "routerRolePercent")
     assert numeric["delta"] == 10 and numeric["change"] == "changed"
+    assert first["filteredItemCount"] == first["itemCount"] == len(first["items"])
     store.save_processing_result(*endpoint("3", 65))
     effective = service.comparison(comparison_id=comparison_id, limit=25, offset=0)
     numeric = next(item for item in effective["items"] if item["metric"] == "routerRolePercent")
     assert effective["baselineState"] == "pruned"
     assert not numeric["comparable"] and numeric["change"] == "unknown"
+    assert effective["filteredItemCount"] == effective["itemCount"]
+    assert service.comparison(
+        comparison_id=comparison_id, limit=25, offset=0, result="changed"
+    )["filteredItemCount"] == 0
+    assert service.comparison(
+        comparison_id=comparison_id, limit=25, offset=0, result="unknown"
+    )["filteredItemCount"] == effective["itemCount"]
     assert numeric["delta"] is None and numeric["direction"] is None
     assert "baseline-pruned" in numeric["reasons"]
     with sqlite3.connect(store.path) as connection:
@@ -681,3 +812,93 @@ def test_pruned_numeric_delta_is_suppressed_without_mutating_persisted_item(tmp_
             (comparison_id,),
         ).fetchone()
         assert json.loads(stored[0]) == 10
+
+
+def test_comparison_filters_count_and_page_the_effective_population(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+
+    def endpoint(suffix, value):
+        observation, assessment = _result(suffix)
+        observation = replace(
+            observation,
+            sources=(SourceEvidence(filename, suffix, "final", "valid", observation.observed_at),),
+            metrics=(MetricSample(observation.devices[0].device_id, "routerRolePercent",
+                                  value, "percent", None, filename),),
+        )
+        return observation, replace(assessment, sample_contract_version="comparison-v1",
+                                    health_policy_digest="health-policy")
+
+    store.save_processing_result(*endpoint("1", 50))
+    store.save_processing_result(*endpoint("2", 60))
+    service = TDHealthReadService(tmp_path)
+    listing = service.comparisons(
+        network_id="extpan:78b9775b001c1cbe",
+        dataset_id="otbr_cli_networkdiag_fetch_all", limit=25, offset=0,
+    )
+    comparison_id = listing["items"][0]["comparisonId"]
+
+    with sqlite3.connect(store.path) as connection:
+        connection.row_factory = sqlite3.Row
+        original = dict(connection.execute(
+            "SELECT * FROM comparison_items WHERE comparison_id=?", (comparison_id,)
+        ).fetchone())
+        connection.execute("DELETE FROM comparison_items WHERE comparison_id=?", (comparison_id,))
+        for index in range(30):
+            item = {
+                **original,
+                "item_id": f"item:filter-test-{index:02d}",
+                "scope": ("device", "network", "relationship")[index % 3],
+                "subject_id": f"extaddr:{index:016x}",
+                "change": "changed" if index < 12 or index >= 19 else "unchanged",
+                "comparable": int(index < 19),
+                "direction": "improved" if index % 2 else "worsened",
+            }
+            columns = tuple(item)
+            connection.execute(
+                f"INSERT INTO comparison_items ({','.join(columns)}) "
+                f"VALUES ({','.join('?' for _ in columns)})",
+                tuple(item[column] for column in columns),
+            )
+        connection.execute(
+            "UPDATE comparisons SET item_count=30 WHERE comparison_id=?", (comparison_id,)
+        )
+
+    all_rows = service.comparison(comparison_id=comparison_id, limit=100, offset=0)
+    assert all_rows["itemCount"] == all_rows["filteredItemCount"] == 30
+    assert len(all_rows["items"]) == 30
+
+    changed_first = service.comparison(
+        comparison_id=comparison_id, limit=5, offset=0, result="changed",
+    )
+    changed_second = service.comparison(
+        comparison_id=comparison_id, limit=5, offset=5, result="changed",
+    )
+    changed_all = service.comparison(
+        comparison_id=comparison_id, limit=100, offset=0, result="changed",
+    )
+    assert changed_first["itemCount"] == 30
+    assert changed_first["filteredItemCount"] == 12
+    assert len(changed_first["items"]) == len(changed_second["items"]) == 5
+    assert [item["itemId"] for item in changed_first["items"] + changed_second["items"]] == [
+        item["itemId"] for item in changed_all["items"][:10]
+    ]
+    assert all(item["change"] == "changed" for item in changed_all["items"])
+
+    unchanged = service.comparison(
+        comparison_id=comparison_id, limit=100, offset=0, result="unchanged",
+    )
+    unknown = service.comparison(
+        comparison_id=comparison_id, limit=100, offset=0, result="unknown",
+    )
+    scoped = service.comparison(
+        comparison_id=comparison_id, limit=100, offset=0,
+        scope="device", result="changed",
+    )
+    assert unchanged["filteredItemCount"] == 7
+    assert all(item["change"] == "unchanged" for item in unchanged["items"])
+    assert unknown["filteredItemCount"] == 11
+    assert all(not item["comparable"] and item["change"] == "unknown" for item in unknown["items"])
+    assert scoped["filteredItemCount"] == 4
+    assert all(item["scope"] == "device" and item["change"] == "changed"
+               for item in scoped["items"])

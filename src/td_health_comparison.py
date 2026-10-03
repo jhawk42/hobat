@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from td_health_manifest import HealthDataset
@@ -15,6 +15,12 @@ from td_health_observation_model import Assessment, Completeness, Observation
 
 COMPARISON_VERSION = "comparison-v1"
 ROUTE64_SAMPLE_CONTRACT_VERSION = "comparison-v1-route64"
+COMPARISON_INTERVALS = {
+    "1d": 24 * 60 * 60,
+    "3d": 3 * 24 * 60 * 60,
+    "1w": 7 * 24 * 60 * 60,
+    "1m": 30 * 24 * 60 * 60,
+}
 REASON_ORDER = (
     "endpoint-missing", "endpoint-order-invalid", "network-mismatch",
     "dataset-mismatch", "profile-mismatch", "source-signature-mismatch",
@@ -73,6 +79,10 @@ class ComparisonInterval:
     before_observed_at: str | None
     after_observed_at: str | None
     baseline_state: str
+
+
+class UnsupportedSourceContractError(ValueError):
+    """An endpoint contains sources not described by the current manifest."""
 
 
 @dataclass(frozen=True)
@@ -543,7 +553,9 @@ def source_signature(observation: Observation, source_roles: Mapping[str, str]) 
     sources = []
     for source in observation.sources:
         if source.filename not in source_roles or source_roles[source.filename] not in {"required", "optional"}:
-            raise ValueError(f"Missing source role for {source.filename}")
+            raise UnsupportedSourceContractError(
+                f"Missing source role for {source.filename}"
+            )
         if not source.filename or "/" in source.filename or "\\" in source.filename or source.filename in {".", ".."}:
             raise ValueError("Source filename must be path-safe")
         sources.append((source.filename, source.kind, source_roles[source.filename]))
@@ -565,7 +577,34 @@ def _utc_timestamp(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     if parsed.utcoffset() is None:
         raise ValueError("Comparison timestamps require a timezone")
-    return parsed
+    return parsed.astimezone(timezone.utc)
+
+
+def resolve_interval_candidate(
+    candidates: list[Mapping[str, object]], *, after_observed_at: str,
+    interval: str, complete_only: bool = False,
+) -> Mapping[str, object] | None:
+    """Resolve the latest assessment at or before an elapsed-time cutoff."""
+    if interval not in COMPARISON_INTERVALS:
+        raise ValueError("Unknown comparison interval")
+    after_time = _utc_timestamp(after_observed_at)
+    cutoff = after_time - timedelta(seconds=COMPARISON_INTERVALS[interval])
+    eligible = []
+    for candidate in candidates:
+        if complete_only and candidate.get("completeness") != "complete":
+            continue
+        observed_at = candidate.get("observed_at")
+        assessed_at = candidate.get("assessed_at")
+        assessment_id = candidate.get("assessment_id")
+        if not isinstance(observed_at, str) or not isinstance(assessed_at, str) or not isinstance(assessment_id, str):
+            raise ValueError("Invalid comparison endpoint metadata")
+        observed_time = _utc_timestamp(observed_at)
+        assessed_time = _utc_timestamp(assessed_at)
+        if observed_time <= cutoff:
+            eligible.append((observed_time, assessed_time, assessment_id, candidate))
+    if not eligible:
+        return None
+    return max(eligible, key=lambda value: value[:3])[3]
 
 
 def compare_interval(
@@ -618,8 +657,14 @@ def compare_interval(
             reasons.add("dataset-mismatch")
         if before_assessment.profile_id != after_assessment.profile_id:
             reasons.add("profile-mismatch")
-        signature = source_signature(before_obs, source_roles)
-        if signature != source_signature(after_obs, source_roles):
+        try:
+            signature = source_signature(before_obs, source_roles)
+            after_signature = source_signature(after_obs, source_roles)
+        except UnsupportedSourceContractError:
+            signature = None
+            after_signature = None
+            reasons.add("source-signature-mismatch")
+        if signature != after_signature:
             reasons.add("source-signature-mismatch")
         supported_contracts = {COMPARISON_VERSION}
         if before_obs.dataset_id == after_obs.dataset_id == "otbr_cli_networkdiag_fetch_all":

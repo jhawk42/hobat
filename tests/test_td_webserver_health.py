@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 from unittest.mock import MagicMock
@@ -13,6 +15,7 @@ import aiohttp.web
 from aiohttp.test_utils import TestClient, TestServer
 
 import td_webserver
+from td_health_observation_model import SourceEvidence
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
@@ -27,6 +30,40 @@ def _request(data_dir, *, query=None, match_info=None):
 
 
 class HealthApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_derived_pair_reports_corrupt_source_timestamp_as_server_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+            filename = "td-otbr-cli-networkdiag-fetch-all.json"
+            before, before_assessment = _result("1")
+            after, after_assessment = _result("2")
+            before = replace(before, sources=(
+                SourceEvidence(filename, "before", "final", "valid", before.observed_at),
+            ))
+            after = replace(after, sources=(
+                SourceEvidence(filename, "after", "final", "valid", after.observed_at),
+            ))
+            store.save_processing_result(before, before_assessment)
+            store.save_processing_result(after, after_assessment)
+            with sqlite3.connect(store.path) as connection:
+                connection.execute("DELETE FROM comparison_items")
+                connection.execute("DELETE FROM comparisons")
+                connection.execute(
+                    "UPDATE observation_sources SET source_observed_at='broken' "
+                    "WHERE observation_id=?", (before.observation_id,),
+                )
+                connection.commit()
+            with self.assertRaises(aiohttp.web.HTTPInternalServerError):
+                await td_webserver.handle_health_comparison_pair_api(_request(
+                    data_dir,
+                    query={
+                        "network": after.network_id,
+                        "dataset": after.dataset_id,
+                        "before": before_assessment.assessment_id,
+                        "after": after_assessment.assessment_id,
+                    },
+                ))
+
     async def test_roster_routes_validate_network_and_return_no_store(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
@@ -233,6 +270,7 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
             "/api/health/findings?assessment=assessment-1",
             "/api/health/devices/extaddr:8672766ae0578187?assessment=assessment-1",
             "/api/health/observations?network=extpan:78b9775b001c1cbe&limit=5&offset=0",
+            "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe&dataset=otbr_cli_networkdiag_fetch_all&side=after",
             "/api/health/latest?dataset=otbr_cli_networkdiag_fetch_all",
             "/api/health/capabilities",
         )
@@ -246,7 +284,21 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_comparisons_are_bounded_pinned_and_never_written_by_get(self) -> None:
         store = SQLiteHealthStore(self.data_dir / HOBAT_DATABASE_FILENAME)
+        store.save_processing_result(*_result("1"))
         store.save_processing_result(*_result("2"))
+        endpoint_page = await self.client.get(
+            "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe"
+            "&dataset=otbr_cli_networkdiag_fetch_all&side=after&limit=1&offset=0"
+        )
+        self.assertEqual(endpoint_page.status, 200)
+        endpoints = await endpoint_page.json()
+        self.assertEqual(endpoints["defaultAfter"]["assessmentId"], "assessment-2")
+        self.assertEqual(endpoints["defaultBefore"]["assessmentId"], "assessment-1")
+        before_page = await self.client.get(
+            "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe"
+            "&dataset=otbr_cli_networkdiag_fetch_all&side=before&after=assessment-2"
+        )
+        self.assertEqual((await before_page.json())["total"], 1)
         listing = await self.client.get(
             "/api/health/comparisons?network=extpan:78b9775b001c1cbe"
             "&dataset=otbr_cli_networkdiag_fetch_all&limit=1&offset=0"
@@ -256,13 +308,47 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
         body = await listing.json()
         self.assertEqual((body["schemaVersion"], body["total"], len(body["items"])), (1, 1, 1))
         comparison_id = body["items"][0]["comparisonId"]
+        selected_pair = await self.client.get(
+            "/api/health/comparison?network=extpan:78b9775b001c1cbe"
+            "&dataset=otbr_cli_networkdiag_fetch_all&before=assessment-1&after=assessment-2"
+            "&limit=25&offset=0&scope=all&result=all"
+        )
+        self.assertEqual(selected_pair.status, 200)
+        selected = await selected_pair.json()
+        self.assertEqual((selected["origin"], selected["createdAt"] is not None), ("stored", True))
         detail = await self.client.get(f"/api/health/comparisons/{comparison_id}?limit=1&offset=0")
         self.assertEqual(detail.status, 200)
         pinned = await detail.json()
         self.assertEqual(pinned["comparisonId"], comparison_id)
         self.assertEqual(len(pinned["items"]), 1)
         self.assertGreaterEqual(pinned["itemCount"], 1)
+        self.assertEqual(pinned["filteredItemCount"], pinned["itemCount"])
+        changed = await self.client.get(
+            f"/api/health/comparisons/{comparison_id}?scope=all&result=changed"
+        )
+        self.assertEqual(changed.status, 200)
+        self.assertLessEqual((await changed.json())["filteredItemCount"], pinned["itemCount"])
+        for query in ("scope=invalid", "result=improved"):
+            invalid_filter = await self.client.get(
+                f"/api/health/comparisons/{comparison_id}?{query}"
+            )
+            self.assertEqual(invalid_filter.status, 400)
         self.assertEqual((await self.client.get("/api/health/comparisons/comparison:missing")).status, 404)
+        for query in (
+            "network=extpan:78b9775b001c1cbe&dataset=otbr_cli_networkdiag_fetch_all&side=before",
+            "network=extpan:78b9775b001c1cbe&dataset=otbr_cli_networkdiag_fetch_all&side=other",
+        ):
+            self.assertEqual(
+                (await self.client.get(f"/api/health/comparison-endpoints?{query}")).status,
+                400,
+            )
+        self.assertEqual(
+            (await self.client.get(
+                "/api/health/comparison?network=extpan:78b9775b001c1cbe"
+                "&dataset=otbr_cli_networkdiag_fetch_all&before=assessment-1&after=assessment-1"
+            )).status,
+            400,
+        )
         self.assertEqual((await self.client.get("/api/health/comparisons?dataset=otbr_cli_networkdiag_fetch_all")).status, 400)
         self.assertEqual((await self.client.get("/api/health/comparisons?network=extpan:78b9775b001c1cbe&dataset=otbr_cli_networkdiag_fetch_all&limit=101")).status, 400)
         self.assertEqual(store.comparison_rows(network_id="extpan:78b9775b001c1cbe",

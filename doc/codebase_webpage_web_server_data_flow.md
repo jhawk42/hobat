@@ -57,8 +57,10 @@ labels use their own static-map API.
 | `GET /api/health/findings` | `handle_health_findings_api` | Read filtered or paginated findings for an assessment |
 | `GET /api/health/devices/{device_id}` | `handle_health_device_api` | Read one device's findings and approved health evidence |
 | `GET /api/health/observations` | `handle_health_observations_api` | Read bounded observation history |
+| `GET /api/health/comparison-endpoints` | `handle_health_comparison_endpoints_api` | Page retained Before/After candidates and resolve defaults/shortcuts |
+| `GET /api/health/comparison` | `handle_health_comparison_pair_api` | Read or derive one arbitrary endpoint pair without writing |
 | `GET /api/health/comparisons` | `handle_health_comparisons_api` | List stored assessment comparisons |
-| `GET /api/health/comparisons/{comparison_id}` | `handle_health_comparison_api` | Read a pinned comparison and item page |
+| `GET /api/health/comparisons/{comparison_id}` | `handle_health_comparison_api` | Read a pinned comparison; apply effective Result/scope filters and counts before paging |
 | `GET /api/health/roster` | `handle_health_roster_api` | Read a paginated network device roster projection |
 | `GET /api/health/roster/{device_id}` | `handle_health_roster_device_api` | Read one device's approved roster fields |
 | `GET /api/health/latest` | `handle_health_latest_api` | Read the latest eligible assessment |
@@ -105,7 +107,25 @@ with `--allow-partial`, which writes health history to `hobat_v1.db` without
 starting a collector, changing a snapshot, or probing a device. Health GET
 routes are query-only and return no-store responses. Device-action results and
 jobs are transient; they are not persisted in snapshots, checkpoints, labels,
-or health data.
+or health data. On eligible complete observations, the shared processing path
+stores the adjacent comparison and unique complete-only 1/3/7/30-day interval
+pairs in the same SQLite transaction, subject to the existing 2,000-pair cap.
+
+The endpoint inventory GET pages retained assessment metadata and resolves
+defaults and interval candidates over the full history. The arbitrary pair GET
+uses an exact stored pair or derives one from retained evidence in a query-only
+transaction; neither GET invokes health processing. Comparison reads accept
+optional Result and scope filters and return the matching-row count alongside
+the unfiltered comparison count. The health read service and SQLite store apply
+both filters before `LIMIT`/`OFFSET` in one read transaction, including the
+effective Unknown classification for non-comparable or baseline-pruned items.
+The dashboard explicitly requests its Changed default; callers that omit the
+filters retain the unfiltered API behavior. See
+[Thread Network Health](thread_network_health.md#read-api-and-dashboard) for
+route parameters, latest-After preset selection, Custom endpoint selection,
+filter/count semantics, and lifecycle. Preset intent, disclosure state, visible
+row ranges, and direct 25-row pagination are browser-owned UI state; they do
+not change the query-only server contract or comparison policy.
 
 ## Device Diagnostics
 

@@ -1539,9 +1539,11 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .health-roster-navigation { display: flex; gap: 8px; }
 
 #health-mode-switch,
-.health-comparison-navigation {
+.health-comparison-navigation,
+.health-comparison-row-pagination {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin: 10px 0;
 }
@@ -1554,9 +1556,69 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 }
 
 #health-comparison { margin: 12px 0; }
-#health-comparison select { max-width: 100%; }
+#health-comparison select { max-width: 100%; min-width: min(12rem, 100%); }
+.health-comparison-controls,
+.health-comparison-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+  margin: 10px 0;
+}
+.health-comparison-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.health-comparison-presets-label,
+.health-comparison-row-count,
+.health-comparison-total-count { color: var(--muted); }
+.health-comparison-presets button[aria-pressed="true"] {
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.health-comparison-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  max-width: 100%;
+  min-width: 0;
+}
+.health-comparison-custom[hidden],
+.health-comparison-details[hidden] { display: none; }
+.health-comparison-endpoint-group {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+.health-comparison-endpoint-control {
+  display: flex;
+  flex: 1 1 18rem;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.health-comparison-endpoint-control select { width: 100%; min-width: 0; }
+.health-comparison-endpoint-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.health-comparison-endpoint-unavailable,
+.health-comparison-origin { overflow-wrap: anywhere; }
+.health-comparison-row-count { overflow-wrap: anywhere; margin-left: auto; }
+.health-comparison-page-size { color: var(--muted); font-size: 0.9em; }
+.health-comparison-pair-summary { margin: 8px 0 2px; font-size: 0.95em; }
+.health-comparison-primary-status { font-weight: 700; margin: 4px 0; }
+.health-comparison-caveat { margin: 4px 0; color: var(--muted); }
+.health-comparison-details { margin: 6px 0 10px; padding-left: 10px; border-left: 2px solid var(--line); }
+.health-comparison-filter-row select { min-width: min(12rem, 100%); }
 .health-comparison-table-wrap { overflow: auto; max-height: min(58vh, 680px); }
-.health-comparison-table-wrap table { width: 100%; border-collapse: collapse; }
+.health-comparison-table-wrap table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.health-comparison-table-wrap thead { position: sticky; top: 0; z-index: 1; background: var(--surface-raised); }
 .health-comparison-table-wrap th,
 .health-comparison-table-wrap td {
   padding: 6px 8px;

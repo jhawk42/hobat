@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from dataclasses import replace
 
+import pytest
+
+from td_health_observation_model import Completeness, MetricSample, SourceEvidence
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_read import TDHealthReadService
 from td_health_sqlite import SQLiteHealthStore
@@ -47,6 +51,219 @@ def test_assessment_projection_groups_losslessly_and_resolves_labels(tmp_path) -
     assert device["displayName"] == "Office Router"
     assert device["deviceId"] == "extaddr:8672766ae0578187"
     assert "device_id" not in device
+
+
+def test_comparison_endpoint_pages_and_query_only_pair_projection(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    before, before_assessment = _result("1")
+    after, after_assessment = _result("2")
+    store.save_processing_result(before, before_assessment)
+    store.save_processing_result(after, after_assessment)
+    service = TDHealthReadService(tmp_path)
+
+    after_page = service.comparison_endpoints(
+        network_id=after.network_id, dataset_id=after.dataset_id,
+        side="after", limit=1, offset=0,
+    )
+    assert after_page["items"][0]["assessmentId"] == after_assessment.assessment_id
+    assert after_page["defaultAfter"]["assessmentId"] == after_assessment.assessment_id
+    assert after_page["defaultBefore"]["assessmentId"] == before_assessment.assessment_id
+    before_page = service.comparison_endpoints(
+        network_id=after.network_id, dataset_id=after.dataset_id, side="before",
+        after_assessment_id=after_assessment.assessment_id, limit=25, offset=0,
+    )
+    assert before_page["total"] == 1
+    assert before_page["predecessor"]["assessmentId"] == before_assessment.assessment_id
+
+    query = {
+        "network_id": after.network_id,
+        "dataset_id": after.dataset_id,
+        "before_assessment_id": before_assessment.assessment_id,
+        "after_assessment_id": after_assessment.assessment_id,
+        "limit": 25,
+        "offset": 0,
+        "scope": "all",
+        "result": "all",
+    }
+    stored = service.comparison_pair(**query)
+    assert stored is not None and stored["origin"] == "stored"
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DELETE FROM comparison_items")
+        connection.execute("DELETE FROM comparisons")
+        connection.commit()
+        before_counts = connection.execute(
+            "SELECT (SELECT COUNT(*) FROM comparisons), "
+            "(SELECT COUNT(*) FROM comparison_items)"
+        ).fetchone()
+
+    derived = service.comparison_pair(**query)
+    assert derived is not None and derived["origin"] == "derived"
+    assert derived["createdAt"] is None
+    assert {
+        key: value for key, value in stored.items() if key not in {"origin", "createdAt"}
+    } == {
+        key: value for key, value in derived.items() if key not in {"origin", "createdAt"}
+    }
+    with sqlite3.connect(store.path) as connection:
+        after_counts = connection.execute(
+            "SELECT (SELECT COUNT(*) FROM comparisons), "
+            "(SELECT COUNT(*) FROM comparison_items)"
+        ).fetchone()
+    assert after_counts == before_counts == (0, 0)
+
+
+def test_endpoint_inventory_orders_equivalent_utc_instants_and_rejects_same_time_before(
+    tmp_path,
+) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    first, first_assessment = _result("1")
+    first = replace(first, observed_at="2026-09-01T00:00:02+02:00")
+    first_assessment = replace(first_assessment, assessed_at="2026-09-01T00:00:02+02:00")
+    same_time, same_time_assessment = _result("2")
+    same_time = replace(same_time, observed_at="2026-08-31T22:00:02Z")
+    same_time_assessment = replace(
+        same_time_assessment, assessed_at="2026-08-31T22:00:02Z"
+    )
+    later, later_assessment = _result("3")
+    later = replace(later, observed_at="2026-09-01T00:00:03+02:00")
+    later_assessment = replace(later_assessment, assessed_at="2026-09-01T00:00:03+02:00")
+    store.save_processing_result(first, first_assessment)
+    store.save_processing_result(same_time, same_time_assessment)
+    store.save_processing_result(later, later_assessment)
+
+    service = TDHealthReadService(tmp_path)
+    page = service.comparison_endpoints(
+        network_id=later.network_id, dataset_id=later.dataset_id,
+        side="after", limit=25, offset=0,
+    )
+    assert [item["assessmentId"] for item in page["items"]] == [
+        later_assessment.assessment_id,
+        same_time_assessment.assessment_id,
+        first_assessment.assessment_id,
+    ]
+    before_page = service.comparison_endpoints(
+        network_id=later.network_id, dataset_id=later.dataset_id,
+        side="before", after_assessment_id=same_time_assessment.assessment_id,
+        limit=25, offset=0,
+    )
+    assert before_page["items"] == []
+    assert before_page["total"] == 0
+
+
+def test_shortcut_candidates_use_full_retained_history_and_include_partials(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    latest = None
+    for day in range(1, 32):
+        observation, assessment = _result(str(day))
+        timestamp = f"2026-01-{day:02d}T00:00:00Z"
+        observation = replace(
+            observation, observed_at=timestamp, ingested_at=timestamp,
+            completeness=Completeness.PARTIAL if day == 1 else Completeness.COMPLETE,
+        )
+        assessment = replace(assessment, assessed_at=timestamp)
+        store.save_processing_result(observation, assessment)
+        if day == 31:
+            latest = assessment
+    assert latest is not None
+
+    page = TDHealthReadService(tmp_path).comparison_endpoints(
+        network_id="extpan:78b9775b001c1cbe",
+        dataset_id="otbr_cli_networkdiag_fetch_all", side="after",
+        limit=25, offset=0, selected_assessment_id=latest.assessment_id,
+    )
+    assert page["selectedAfter"]["assessmentId"] == latest.assessment_id
+    assert len(page["items"]) == 25
+    assert "assessment-1" not in {item["assessmentId"] for item in page["items"]}
+    shortcuts = {item["interval"]: item for item in page["shortcuts"]}
+    assert shortcuts["1d"]["candidate"]["assessmentId"] == "assessment-30"
+    assert shortcuts["1m"]["candidate"]["assessmentId"] == "assessment-1"
+    assert shortcuts["1m"]["candidate"]["completeness"] == "partial"
+
+
+def test_derived_reset_witness_matches_stored_header(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    before, before_assessment = _result("1")
+    after, after_assessment = _result("2")
+    before = replace(
+        before,
+        sources=(SourceEvidence(filename, "before", "final", "valid", before.observed_at),),
+        metrics=(MetricSample(
+            before.devices[0].device_id, "parentChanges", 9, "count", None, filename,
+        ),),
+    )
+    after = replace(
+        after,
+        sources=(SourceEvidence(filename, "after", "final", "valid", after.observed_at),),
+        metrics=(MetricSample(
+            after.devices[0].device_id, "parentChanges", 2, "count", None, filename,
+        ),),
+    )
+    store.save_processing_result(before, before_assessment)
+    store.save_processing_result(after, after_assessment)
+    service = TDHealthReadService(tmp_path)
+    query = {
+        "network_id": after.network_id,
+        "dataset_id": after.dataset_id,
+        "before_assessment_id": before_assessment.assessment_id,
+        "after_assessment_id": after_assessment.assessment_id,
+        "limit": 25,
+        "offset": 0,
+        "scope": "all",
+        "result": "all",
+    }
+    stored = service.comparison_pair(**query)
+    assert stored is not None
+    assert stored["resetState"] == "reset-detected"
+    assert stored["resetWitness"]
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DELETE FROM comparison_items")
+        connection.execute("DELETE FROM comparisons")
+        connection.commit()
+    derived = service.comparison_pair(**query)
+    assert derived is not None
+    assert derived["resetState"] == stored["resetState"]
+    assert derived["resetWitness"] == stored["resetWitness"]
+    assert [
+        (item["itemId"], item["resetState"], item["resetWitness"])
+        for item in derived["items"]
+    ] == [
+        (item["itemId"], item["resetState"], item["resetWitness"])
+        for item in stored["items"]
+    ]
+
+
+def test_derived_comparison_rejects_corrupt_source_timestamps(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    before, before_assessment = _result("1")
+    after, after_assessment = _result("2")
+    before = replace(
+        before,
+        sources=(SourceEvidence(filename, "before", "final", "valid", before.observed_at),),
+    )
+    after = replace(
+        after,
+        sources=(SourceEvidence(filename, "after", "final", "valid", after.observed_at),),
+    )
+    store.save_processing_result(before, before_assessment)
+    store.save_processing_result(after, after_assessment)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DELETE FROM comparison_items")
+        connection.execute("DELETE FROM comparisons")
+        connection.execute(
+            "UPDATE observation_sources SET source_observed_at='broken' "
+            "WHERE observation_id=?", (before.observation_id,),
+        )
+        connection.commit()
+
+    with pytest.raises(sqlite3.DatabaseError, match="Invalid stored health timestamp"):
+        TDHealthReadService(tmp_path).comparison_pair(
+            network_id=after.network_id, dataset_id=after.dataset_id,
+            before_assessment_id=before_assessment.assessment_id,
+            after_assessment_id=after_assessment.assessment_id,
+            limit=25, offset=0,
+        )
 
 
 def test_pinned_roster_includes_observed_without_facts_and_designation_only(tmp_path) -> None:

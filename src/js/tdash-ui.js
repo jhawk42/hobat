@@ -112,14 +112,19 @@ import {
   fetchHealthRoster,
   fetchHealthRosterDevice,
   fetchHealthComparisons,
-  fetchHealthComparison,
+  fetchHealthComparisonEndpoints,
+  fetchHealthComparisonPair,
+  findHealthComparisonEndpointMetadata,
   isComparisonPageForAssessment,
+  isHealthComparisonEndpointPageForQuery,
+  isHealthComparisonPairForQuery,
   fetchHealthSupport,
   projectHealthFindingDetail,
   projectVisibleHealthFindingGroups,
   projectHealthSummaryRows,
   reconcileHealthInsightsSelection,
   toggleHealthFindingSelection,
+  createHealthComparisonDetailController,
   renderDeviceHealth,
   renderHealthFindingDetails,
   renderHealthInsights,
@@ -313,9 +318,31 @@ const healthInsightsState = {
   rosterLoading: false,
   comparisonPage: null,
   comparison: null,
-  comparisonLoading: false,
-  comparisonError: "",
-  comparisonRequestVersion: 0,
+  comparisonListLoading: false,
+  comparisonListError: "",
+  comparisonListRequestVersion: 0,
+  comparisonDetailLoading: false,
+  comparisonDetailError: "",
+  comparisonDetailRequestVersion: 0,
+  comparisonQueryIdentity: null,
+  comparisonDetailRequestIdentity: null,
+  comparisonDetailRequestHeader: null,
+  comparisonEndpointPages: { before: null, after: null },
+  comparisonLatestPresetPage: null,
+  comparisonPinnedBefore: null,
+  comparisonEndpointLoading: { before: false, after: false },
+  comparisonEndpointErrors: { before: "", after: "" },
+  comparisonEndpointRequestVersions: { before: 0, after: 0 },
+  comparisonEndpointRevision: 0,
+  comparisonEndpointDefaultsPending: true,
+  comparisonEndpointPairLoading: false,
+  comparisonEndpointPairError: "",
+  comparisonEndpointPairRequestVersion: 0,
+  comparisonEndpointPairRequestIdentity: null,
+  comparisonEndpointUnavailable: false,
+  comparisonPresetLoading: false,
+  comparisonPresetError: "",
+  comparisonPresetRequestVersion: 0,
   refreshJobId: null,
   refreshVersion: 0,
   refreshStatus: "",
@@ -334,10 +361,39 @@ const healthInsightsViewState = {
   detailsOpen: false,
   sortWasChanged: false,
   mode: "snapshot",
+  comparisonId: null,
   comparisonScope: "all",
+  comparisonResult: "changed",
   comparisonOffset: 0,
   comparisonItemOffset: 0,
+  comparisonIntent: "1d",
+  comparisonCustomOpen: false,
+  comparisonDetailsOpen: false,
+  comparisonFocusTarget: null,
+  comparisonTableScrollTop: 0,
+  beforeAssessmentId: null,
+  afterAssessmentId: null,
+  beforeHistoryOffset: 0,
+  afterHistoryOffset: 0,
 };
+const healthComparisonDetailController = createHealthComparisonDetailController({
+  state: healthInsightsState,
+  getAssessment: () => healthInsightsState.assessment,
+  getSelection: () => ({
+    comparisonId: healthInsightsViewState.comparisonId,
+    scope: healthInsightsViewState.comparisonScope,
+    result: healthInsightsViewState.comparisonResult,
+  }),
+  getSummary: (comparisonId) => healthInsightsState.comparisonPage?.items.find(
+    (item) => item.comparisonId === comparisonId,
+  ) ?? null,
+  getOffset: () => healthInsightsViewState.comparisonItemOffset,
+  setOffset: (offset) => { healthInsightsViewState.comparisonItemOffset = offset; },
+  updateSelection: (filter, value) => {
+    healthInsightsViewState[filter === "scope" ? "comparisonScope" : "comparisonResult"] = value;
+  },
+  onChange: () => renderNetworkInsights(),
+});
 let healthInsightsTab = "findings";
 const healthRosterViewState = {
   assessmentId: null,
@@ -2208,6 +2264,8 @@ function renderNetworkInsights() {
     const newRosterWrap = document.querySelector(".health-roster-table-wrap");
     if (newRosterWrap) newRosterWrap.scrollTop = healthRosterViewState.tableScrollTop;
     const comparisonAvailable = healthInsightsState.capabilities?.comparisonReadModel === 1;
+    const endpointSelectionAvailable =
+      healthInsightsState.capabilities?.comparisonEndpointSelection === 1;
     const comparisonMode = comparisonAvailable && healthInsightsViewState.mode === "comparison";
     const modeSwitch = document.getElementById("health-mode-switch");
     modeSwitch.hidden = !comparisonAvailable;
@@ -2222,18 +2280,69 @@ function renderNetworkInsights() {
     }
     const comparisonEl = document.getElementById("health-comparison");
     comparisonEl.hidden = !comparisonMode;
-    if (comparisonMode) {
+    if (comparisonMode && currentView === "insights") {
       renderHealthComparison(comparisonEl, healthInsightsState.comparisonPage,
         healthInsightsState.comparison, {
-          loading: healthInsightsState.loading || healthInsightsState.comparisonLoading,
-          error: healthInsightsState.comparisonError,
+          listLoading: healthInsightsState.loading || healthInsightsState.comparisonListLoading,
+          listError: healthInsightsState.comparisonListError,
+          endpointSelection: endpointSelectionAvailable,
+          endpointPages: healthInsightsState.comparisonEndpointPages,
+          latestPresetPage: healthInsightsState.comparisonLatestPresetPage,
+          endpointLoading: healthInsightsState.comparisonEndpointLoading,
+          endpointErrors: healthInsightsState.comparisonEndpointErrors,
+          before: healthInsightsState.comparisonEndpointPages.before?.selected
+            || healthInsightsState.comparisonEndpointPages.before?.items.find(
+              (item) => item.assessmentId === healthInsightsViewState.beforeAssessmentId,
+            )
+            || healthInsightsState.comparisonEndpointPages.after?.defaultBefore,
+          after: healthInsightsState.comparisonEndpointPages.after?.selected
+            || healthInsightsState.comparisonEndpointPages.after?.items.find(
+              (item) => item.assessmentId === healthInsightsViewState.afterAssessmentId,
+            )
+            || healthInsightsState.comparisonEndpointPages.after?.defaultAfter,
+          beforeAssessmentId: healthInsightsViewState.beforeAssessmentId,
+          afterAssessmentId: healthInsightsViewState.afterAssessmentId,
+          beforeHistoryOffset: healthInsightsViewState.beforeHistoryOffset,
+          afterHistoryOffset: healthInsightsViewState.afterHistoryOffset,
+          endpointPairLoading: healthInsightsState.comparisonEndpointPairLoading,
+          endpointPairError: healthInsightsState.comparisonEndpointPairError,
+          endpointUnavailable: healthInsightsState.comparisonEndpointUnavailable,
+          presetLoading: healthInsightsState.comparisonPresetLoading,
+          presetError: healthInsightsState.comparisonPresetError,
+          comparisonPolicyDigest: healthInsightsState.capabilities?.comparisonPolicyDigest,
+          comparisonVersion: healthInsightsState.capabilities?.comparisonVersion,
+          detailLoading: healthInsightsState.comparisonDetailLoading,
+          detailError: healthInsightsState.comparisonDetailError,
+          comparisonId: healthInsightsViewState.comparisonId,
+          intent: healthInsightsViewState.comparisonIntent,
+          customOpen: healthInsightsViewState.comparisonCustomOpen,
+          detailsOpen: healthInsightsViewState.comparisonDetailsOpen,
+          itemsLoading: healthInsightsState.comparisonEndpointPairLoading
+            || healthInsightsState.comparisonDetailLoading,
+          focusTarget: healthInsightsViewState.comparisonFocusTarget,
+          tableScrollTop: healthInsightsViewState.comparisonTableScrollTop,
           scope: healthInsightsViewState.comparisonScope,
+          result: healthInsightsViewState.comparisonResult,
         }, {
           select: selectComparison, page: loadComparisonPage, items: loadComparisonItems,
-          scope: (scope) => { healthInsightsViewState.comparisonScope = scope; renderNetworkInsights(); },
+          focusRestored: () => { healthInsightsViewState.comparisonFocusTarget = null; },
+          endpointSelect: selectComparisonEndpoint,
+          endpointPage: loadComparisonEndpointPage,
+          preset: selectComparisonPreset,
+          customOpen: setComparisonCustomOpen,
+          detailsOpen: (open) => {
+            healthInsightsViewState.comparisonDetailsOpen = open;
+            renderNetworkInsights();
+          },
+          scope: (scope) => changeComparisonFilter("scope", scope),
+          result: (result) => changeComparisonFilter("result", result),
           canInspect: (deviceId) => Boolean(findCurrentDeviceRecord(deviceId)),
           inspect: (deviceId) => navigateToHealthTargets("table", { deviceIds: [deviceId] }),
         });
+    }
+    const updatedComparisonWrap = document.querySelector(".health-comparison-table-wrap");
+    if (currentView === "insights" && !comparisonEl.hidden && updatedComparisonWrap) {
+      updatedComparisonWrap.scrollTop = healthInsightsViewState.comparisonTableScrollTop;
     }
     if (tableWrapEl) tableWrapEl.scrollTop = healthInsightsViewState.tableScrollTop;
     renderSelectedHealthFinding();
@@ -2531,7 +2640,11 @@ function countAvailableHealthTargets(group) {
 function rememberHealthNavigationContext() {
   if (healthNavigationContext) return;
   const tableWrap = document.getElementById("health-finding-table-wrap");
+  const comparisonWrap = document.querySelector(".health-comparison-table-wrap");
   if (tableWrap) healthInsightsViewState.tableScrollTop = tableWrap.scrollTop;
+  if (comparisonWrap) {
+    healthInsightsViewState.comparisonTableScrollTop = comparisonWrap.scrollTop;
+  }
   healthNavigationContext = {
     view: currentView,
     search: document.getElementById("search-input")?.value ?? "",
@@ -2539,6 +2652,8 @@ function rememberHealthNavigationContext() {
     linkFilter: document.getElementById("link-filter")?.value ?? "default_links",
     diagnosticFilter: document.getElementById("diagnostic-filter")?.value ?? "all",
     selectedRecord: deviceInsightsState.record,
+    networkId: healthInsightsState.assessment?.networkId ?? null,
+    datasetId: healthInsightsState.assessment?.datasetId ?? null,
     insights: currentView === "insights" ? {
       assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
       view: healthInsightsViewState.view,
@@ -2550,10 +2665,20 @@ function rememberHealthNavigationContext() {
       tableScrollTop: healthInsightsViewState.tableScrollTop,
       detailsOpen: healthInsightsViewState.detailsOpen,
       mode: healthInsightsViewState.mode,
+      comparisonId: healthInsightsViewState.comparisonId,
       comparisonScope: healthInsightsViewState.comparisonScope,
+      comparisonResult: healthInsightsViewState.comparisonResult,
       comparisonOffset: healthInsightsViewState.comparisonOffset,
       comparisonItemOffset: healthInsightsViewState.comparisonItemOffset,
-      comparisonId: healthInsightsState.comparison?.comparisonId ?? null,
+      comparisonIntent: healthInsightsViewState.comparisonIntent,
+      comparisonCustomOpen: healthInsightsViewState.comparisonCustomOpen,
+      comparisonDetailsOpen: healthInsightsViewState.comparisonDetailsOpen,
+      comparisonFocusTarget: healthInsightsViewState.comparisonFocusTarget,
+      comparisonTableScrollTop: healthInsightsViewState.comparisonTableScrollTop,
+      beforeAssessmentId: healthInsightsViewState.beforeAssessmentId,
+      afterAssessmentId: healthInsightsViewState.afterAssessmentId,
+      beforeHistoryOffset: healthInsightsViewState.beforeHistoryOffset,
+      afterHistoryOffset: healthInsightsViewState.afterHistoryOffset,
     } : null,
   };
   document.getElementById("btn-health-return")?.removeAttribute("hidden");
@@ -2658,6 +2783,9 @@ function restoreHealthNavigationContext() {
   if (!healthNavigationContext) return;
   const context = healthNavigationContext;
   healthNavigationContext = null;
+  const assessment = healthInsightsState.assessment;
+  const contextIdentityMatches = context.networkId === assessment?.networkId &&
+    context.datasetId === assessment?.datasetId;
   document.getElementById("node-filter").value = context.nodeFilter;
   document.getElementById("link-filter").value = context.linkFilter;
   document.getElementById("diagnostic-filter").value = context.diagnosticFilter;
@@ -2665,6 +2793,13 @@ function restoreHealthNavigationContext() {
   _currentSearchQuery = parseSearchQuery(context.search);
   if (context.insights) {
     Object.assign(healthInsightsViewState, context.insights);
+    if (!contextIdentityMatches) {
+      healthComparisonDetailController.invalidate();
+    }
+    if (!contextIdentityMatches) {
+      healthInsightsViewState.mode = "snapshot";
+      resetComparisonEndpointState();
+    }
     Object.assign(
       healthInsightsViewState,
       reconcileHealthInsightsSelection(healthInsightsViewState, healthInsightsState.assessment),
@@ -2673,9 +2808,7 @@ function restoreHealthNavigationContext() {
     document.getElementById("health-status-filter").value = healthInsightsViewState.filters.status;
     document.getElementById("health-scope-filter").value = healthInsightsViewState.filters.scope;
     document.getElementById("health-evidence-filter").value = healthInsightsViewState.filters.evidenceKind;
-    if (context.insights.comparisonId && healthInsightsState.comparison?.comparisonId !== context.insights.comparisonId) {
-      void selectComparison(context.insights.comparisonId, context.insights.comparisonItemOffset);
-    }
+    healthInsightsState.comparisonDetailError = "";
   }
   lastRenderedDatasetByView.delete("topology");
   lastRenderedDatasetByView.delete("table");
@@ -2704,14 +2837,17 @@ function resetHealthWorkflow() {
   healthInsightsViewState.tableScrollTop = 0;
   healthInsightsViewState.detailsOpen = false;
   healthInsightsViewState.mode = "snapshot";
+  healthInsightsViewState.comparisonId = null;
   healthInsightsViewState.comparisonScope = "all";
+  healthInsightsViewState.comparisonResult = "changed";
   healthInsightsViewState.comparisonOffset = 0;
   healthInsightsViewState.comparisonItemOffset = 0;
-  healthInsightsState.comparisonRequestVersion += 1;
+  resetComparisonEndpointState();
+  healthInsightsState.comparisonListRequestVersion += 1;
+  healthComparisonDetailController.invalidate();
   healthInsightsState.comparisonPage = null;
-  healthInsightsState.comparison = null;
-  healthInsightsState.comparisonLoading = false;
-  healthInsightsState.comparisonError = "";
+  healthInsightsState.comparisonListLoading = false;
+  healthInsightsState.comparisonListError = "";
   contextDetailsState.finding = { assessmentId: null, groupId: null, findingId: null };
   setContextDetailsMode("device");
   contextDetailsController.setCollapsed(true);
@@ -2725,6 +2861,7 @@ function resetHealthWorkflow() {
   document.getElementById("btn-health-return")?.setAttribute("hidden", "");
   switchView("insights");
   renderNetworkInsights();
+  if (endpointSelectionEnabled()) void initializeComparisonEndpoints();
 }
 
 const deviceInsightsState = {
@@ -2991,69 +3128,461 @@ function applyRosterFilter() {
 async function loadComparisonPage(offset) {
   const assessment = healthInsightsState.assessment;
   if (!assessment) return;
-  const version = ++healthInsightsState.comparisonRequestVersion;
-  healthInsightsState.comparisonError = "";
-  healthInsightsState.comparisonLoading = true;
+  const version = ++healthInsightsState.comparisonListRequestVersion;
+  healthInsightsState.comparisonListError = "";
+  healthInsightsState.comparisonListLoading = true;
   renderNetworkInsights();
   try {
     const page = await fetchHealthComparisons(assessment.networkId, assessment.datasetId, offset);
-    if (version !== healthInsightsState.comparisonRequestVersion ||
+    if (version !== healthInsightsState.comparisonListRequestVersion ||
       healthInsightsState.assessment?.datasetId !== assessment.datasetId ||
       healthInsightsState.assessment?.networkId !== assessment.networkId) return;
     if (!isComparisonPageForAssessment(page, assessment, offset)) throw new Error("Invalid stored comparison page.");
     healthInsightsState.comparisonPage = page;
     healthInsightsViewState.comparisonOffset = offset;
+    healthComparisonDetailController.reconcileSummary();
   } catch (error) {
-    if (version !== healthInsightsState.comparisonRequestVersion) return;
-    healthInsightsState.comparisonError = error.message;
+    if (version !== healthInsightsState.comparisonListRequestVersion) return;
+    healthInsightsState.comparisonListError = error.message;
+  } finally {
+    if (version === healthInsightsState.comparisonListRequestVersion) {
+      healthInsightsState.comparisonListLoading = false;
+      renderNetworkInsights();
+    }
   }
-  healthInsightsState.comparisonLoading = false;
-  renderNetworkInsights();
 }
 
-async function loadComparisonItems(offset) {
-  const comparisonId = healthInsightsState.comparison?.comparisonId;
-  if (comparisonId) await selectComparison(comparisonId, offset);
+function endpointSelectionEnabled() {
+  return healthInsightsState.capabilities?.comparisonEndpointSelection === 1;
 }
 
-async function selectComparison(comparisonId, offset = 0) {
+function endpointMetadata(assessmentId) {
+  return findHealthComparisonEndpointMetadata(
+    assessmentId,
+    healthInsightsState.comparisonEndpointPages,
+    healthInsightsState.comparison,
+    healthInsightsState.comparisonPinnedBefore,
+  );
+}
+
+function clearEndpointComparison() {
+  healthInsightsState.comparisonEndpointPairRequestVersion += 1;
+  healthInsightsState.comparisonEndpointPairRequestIdentity = null;
+  healthInsightsState.comparisonEndpointPairLoading = false;
+  healthInsightsState.comparisonEndpointPairError = "";
+  healthInsightsState.comparisonEndpointUnavailable = false;
+  healthInsightsState.comparison = null;
+  healthInsightsState.comparisonQueryIdentity = null;
+}
+
+function resetComparisonEndpointState() {
+  healthInsightsState.comparisonEndpointRevision += 1;
+  healthInsightsState.comparisonPresetRequestVersion += 1;
+  healthInsightsState.comparisonPresetLoading = false;
+  healthInsightsState.comparisonPresetError = "";
+  invalidateComparisonEndpointRequests();
+  healthInsightsState.comparisonEndpointPages = { before: null, after: null };
+  healthInsightsState.comparisonLatestPresetPage = null;
+  healthInsightsState.comparisonPinnedBefore = null;
+  healthInsightsState.comparisonEndpointDefaultsPending = true;
+  healthInsightsState.comparisonEndpointUnavailable = false;
+  healthInsightsViewState.beforeAssessmentId = null;
+  healthInsightsViewState.afterAssessmentId = null;
+  healthInsightsViewState.beforeHistoryOffset = 0;
+  healthInsightsViewState.afterHistoryOffset = 0;
+  healthInsightsViewState.comparisonId = null;
+  healthInsightsViewState.comparisonScope = "all";
+  healthInsightsViewState.comparisonResult = "changed";
+  healthInsightsViewState.comparisonOffset = 0;
+  healthInsightsViewState.comparisonItemOffset = 0;
+  healthInsightsViewState.comparisonIntent = "1d";
+  healthInsightsViewState.comparisonCustomOpen = false;
+  healthInsightsViewState.comparisonDetailsOpen = false;
+  healthInsightsViewState.comparisonFocusTarget = null;
+  healthInsightsViewState.comparisonTableScrollTop = 0;
+  clearEndpointComparison();
+}
+
+function resetComparisonTableScroll() {
+  healthInsightsViewState.comparisonTableScrollTop = 0;
+  const wrap = document.querySelector(".health-comparison-table-wrap");
+  if (wrap) wrap.scrollTop = 0;
+}
+
+function invalidateComparisonEndpointRequests(sides = ["before", "after"]) {
+  for (const side of sides) {
+    healthInsightsState.comparisonEndpointRequestVersions[side] += 1;
+    healthInsightsState.comparisonEndpointLoading[side] = false;
+    healthInsightsState.comparisonEndpointErrors[side] = "";
+  }
+}
+
+async function requestComparisonEndpointPage(side, offset, options = {}) {
   const assessment = healthInsightsState.assessment;
-  const version = ++healthInsightsState.comparisonRequestVersion;
-  healthInsightsState.comparisonError = "";
-  if (!comparisonId) {
-    healthInsightsState.comparison = null;
-    healthInsightsState.comparisonLoading = false;
+  if (!assessment || !endpointSelectionEnabled()) return null;
+  const afterAssessmentId = side === "before"
+    ? (options.afterAssessmentId ?? healthInsightsViewState.afterAssessmentId)
+    : null;
+  if (side === "before" && !afterAssessmentId) return null;
+  const selectedAssessmentId = options.selectedAssessmentId
+    ?? healthInsightsViewState[side === "before" ? "beforeAssessmentId" : "afterAssessmentId"];
+  const query = {
+    networkId: assessment.networkId,
+    datasetId: assessment.datasetId,
+    side,
+    afterAssessmentId,
+    selectedAssessmentId,
+    comparisonVersion: healthInsightsState.capabilities?.comparisonVersion,
+    comparisonPolicyDigest: healthInsightsState.capabilities?.comparisonPolicyDigest,
+    offset,
+  };
+  const version = ++healthInsightsState.comparisonEndpointRequestVersions[side];
+  const revision = healthInsightsState.comparisonEndpointRevision;
+  healthInsightsState.comparisonEndpointLoading[side] = true;
+  healthInsightsState.comparisonEndpointErrors[side] = "";
+  renderNetworkInsights();
+  try {
+    const page = await fetchHealthComparisonEndpoints(
+      assessment.networkId, assessment.datasetId, side, offset, undefined, {
+        afterAssessmentId,
+        selectedAssessmentId,
+      },
+    );
+    if (version !== healthInsightsState.comparisonEndpointRequestVersions[side]
+        || revision !== healthInsightsState.comparisonEndpointRevision
+        || healthInsightsState.assessment?.networkId !== query.networkId
+        || healthInsightsState.assessment?.datasetId !== query.datasetId
+        || healthInsightsViewState[
+          side === "before" ? "beforeAssessmentId" : "afterAssessmentId"
+        ] !== selectedAssessmentId
+        || (side === "before"
+          && healthInsightsViewState.afterAssessmentId !== afterAssessmentId)) return null;
+    if (!isHealthComparisonEndpointPageForQuery(page, query)) {
+      throw new Error("Invalid assessment endpoint page.");
+    }
+    healthInsightsState.comparisonEndpointPages[side] = page;
+    if (side === "before" && options.resolveSelection && !selectedAssessmentId) {
+      healthInsightsViewState.beforeAssessmentId = page.predecessor?.assessmentId ?? null;
+    }
+    healthInsightsViewState[side === "before" ? "beforeHistoryOffset" : "afterHistoryOffset"] = offset;
+    return page;
+  } catch (error) {
+    if (version !== healthInsightsState.comparisonEndpointRequestVersions[side]
+        || revision !== healthInsightsState.comparisonEndpointRevision) return null;
+    healthInsightsState.comparisonEndpointErrors[side] = error.message;
+    if (selectedAssessmentId && error.status === 404) {
+      healthInsightsState.comparisonPinnedBefore = null;
+      healthInsightsViewState.beforeAssessmentId = null;
+      healthInsightsViewState.afterAssessmentId = null;
+      clearEndpointComparison();
+      healthInsightsState.comparisonEndpointUnavailable = true;
+    }
+    return null;
+  } finally {
+    if (version === healthInsightsState.comparisonEndpointRequestVersions[side]
+        && revision === healthInsightsState.comparisonEndpointRevision) {
+      healthInsightsState.comparisonEndpointLoading[side] = false;
+      renderNetworkInsights();
+    }
+  }
+}
+
+async function loadComparisonEndpointPair(offset = 0) {
+  const assessment = healthInsightsState.assessment;
+  const beforeAssessmentId = healthInsightsViewState.beforeAssessmentId;
+  const afterAssessmentId = healthInsightsViewState.afterAssessmentId;
+  const policyDigest = healthInsightsState.capabilities?.comparisonPolicyDigest;
+  const comparisonVersion = healthInsightsState.capabilities?.comparisonVersion;
+  if (!assessment || !beforeAssessmentId || !afterAssessmentId || !policyDigest
+      || !comparisonVersion || !endpointSelectionEnabled()) {
+    clearEndpointComparison();
     healthInsightsViewState.comparisonItemOffset = 0;
     renderNetworkInsights();
     return;
   }
-  healthInsightsState.comparisonLoading = true;
+  const query = {
+    networkId: assessment.networkId,
+    datasetId: assessment.datasetId,
+    beforeAssessmentId,
+    afterAssessmentId,
+    comparisonPolicyDigest: policyDigest,
+    comparisonVersion,
+    scope: healthInsightsViewState.comparisonScope,
+    result: healthInsightsViewState.comparisonResult,
+    offset,
+  };
+  const version = ++healthInsightsState.comparisonEndpointPairRequestVersion;
+  healthInsightsState.comparisonEndpointPairRequestIdentity = query;
+  healthInsightsState.comparisonEndpointPairLoading = true;
+  healthInsightsState.comparisonEndpointPairError = "";
+  healthInsightsState.comparison = null;
+  healthInsightsState.comparisonQueryIdentity = null;
+  healthInsightsViewState.comparisonItemOffset = offset;
   renderNetworkInsights();
+  const isCurrent = () => version === healthInsightsState.comparisonEndpointPairRequestVersion
+    && healthInsightsState.assessment?.networkId === query.networkId
+    && healthInsightsState.assessment?.datasetId === query.datasetId
+    && healthInsightsViewState.beforeAssessmentId === query.beforeAssessmentId
+    && healthInsightsViewState.afterAssessmentId === query.afterAssessmentId
+    && healthInsightsViewState.comparisonScope === query.scope
+    && healthInsightsViewState.comparisonResult === query.result
+    && healthInsightsState.capabilities?.comparisonPolicyDigest === query.comparisonPolicyDigest
+    && healthInsightsState.capabilities?.comparisonVersion === query.comparisonVersion;
   try {
-    const comparison = await fetchHealthComparison(comparisonId, offset);
-    if (version !== healthInsightsState.comparisonRequestVersion ||
-      healthInsightsState.assessment?.datasetId !== assessment?.datasetId ||
-      healthInsightsState.assessment?.networkId !== assessment?.networkId) return;
-    if (comparison?.schemaVersion !== 1 || comparison.comparisonId !== comparisonId ||
-        comparison.networkId !== assessment.networkId || comparison.datasetId !== assessment.datasetId ||
-      !Array.isArray(comparison.items) || comparison.offset !== offset ||
-      !Number.isInteger(comparison.limit) || comparison.limit < 1 ||
-      !Number.isInteger(comparison.itemCount) || comparison.itemCount < offset + comparison.items.length) {
-      throw new Error("Invalid stored comparison response.");
+    const comparison = await fetchHealthComparisonPair(query, offset);
+    if (!isCurrent()) return;
+    if (!isHealthComparisonPairForQuery(comparison, query)) {
+      throw new Error("Invalid comparison response for the selected endpoints.");
+    }
+    if (offset > 0 && comparison.items.length === 0 && comparison.filteredItemCount > 0) {
+      healthInsightsViewState.comparisonItemOffset = 0;
+      await loadComparisonEndpointPair(0);
+      return;
     }
     healthInsightsState.comparison = comparison;
-    healthInsightsViewState.comparisonItemOffset = offset;
+    healthInsightsState.comparisonQueryIdentity = query;
   } catch (error) {
-    if (version !== healthInsightsState.comparisonRequestVersion) return;
-    healthInsightsState.comparisonError = error.message;
+    if (!isCurrent()) return;
+    if (error.status === 404) {
+      clearEndpointComparison();
+      healthInsightsState.comparisonEndpointUnavailable = true;
+      healthInsightsState.comparisonEndpointPairError =
+        "A selected assessment is no longer retained. Select new endpoints.";
+      renderNetworkInsights();
+    } else {
+      healthInsightsState.comparisonEndpointPairError = error.message;
+    }
+  } finally {
+    if (isCurrent()) {
+      healthInsightsState.comparisonEndpointPairLoading = false;
+      healthInsightsState.comparisonEndpointPairRequestIdentity = null;
+      renderNetworkInsights();
+    }
   }
-  healthInsightsState.comparisonLoading = false;
+}
+
+async function selectComparisonPreset(
+  interval, { preserveOffset = false, preserveDisclosure = false } = {},
+) {
+  if (!["1d", "3d", "1w"].includes(interval) || !endpointSelectionEnabled()) return;
+  const assessment = healthInsightsState.assessment;
+  if (!assessment) return;
+  const previousPair = {
+    before: healthInsightsViewState.beforeAssessmentId,
+    after: healthInsightsViewState.afterAssessmentId,
+    offset: healthInsightsViewState.comparisonItemOffset,
+  };
+  const customWasOpen = healthInsightsViewState.comparisonCustomOpen;
+  const requestVersion = ++healthInsightsState.comparisonPresetRequestVersion;
+  const revision = ++healthInsightsState.comparisonEndpointRevision;
+  invalidateComparisonEndpointRequests();
+  healthInsightsState.comparisonPresetLoading = true;
+  healthInsightsState.comparisonPresetError = "";
+  healthInsightsViewState.comparisonIntent = interval;
+  healthInsightsViewState.comparisonCustomOpen = preserveDisclosure && customWasOpen;
+  healthInsightsViewState.comparisonFocusTarget = null;
+  resetComparisonTableScroll();
+  healthInsightsViewState.afterAssessmentId = null;
+  healthInsightsViewState.beforeAssessmentId = null;
+  healthInsightsViewState.comparisonItemOffset = 0;
+  healthInsightsState.comparisonEndpointDefaultsPending = true;
+  healthInsightsState.comparisonEndpointPages = { before: null, after: null };
+  healthInsightsState.comparisonPinnedBefore = null;
+  clearEndpointComparison();
   renderNetworkInsights();
+  const isCurrent = () => requestVersion === healthInsightsState.comparisonPresetRequestVersion
+    && revision === healthInsightsState.comparisonEndpointRevision
+    && healthInsightsState.assessment?.networkId === assessment.networkId
+    && healthInsightsState.assessment?.datasetId === assessment.datasetId;
+  try {
+    const latestPage = await fetchHealthComparisonEndpoints(
+      assessment.networkId, assessment.datasetId, "after", 0,
+    );
+    const query = {
+      networkId: assessment.networkId,
+      datasetId: assessment.datasetId,
+      side: "after",
+      afterAssessmentId: null,
+      selectedAssessmentId: null,
+      comparisonVersion: healthInsightsState.capabilities?.comparisonVersion,
+      comparisonPolicyDigest: healthInsightsState.capabilities?.comparisonPolicyDigest,
+      offset: 0,
+    };
+    if (!isCurrent()) return;
+    if (!isHealthComparisonEndpointPageForQuery(latestPage, query)) {
+      throw new Error("Invalid latest assessment endpoint page.");
+    }
+    healthInsightsState.comparisonLatestPresetPage = latestPage;
+    const after = latestPage.defaultAfter;
+    const candidate = latestPage.shortcuts.find((item) => item.interval === interval)?.candidate ?? null;
+    healthInsightsViewState.afterAssessmentId = after?.assessmentId ?? null;
+    healthInsightsViewState.beforeAssessmentId = candidate?.assessmentId ?? null;
+    healthInsightsState.comparisonPinnedBefore = candidate;
+    healthInsightsState.comparisonEndpointPages.after = latestPage;
+    healthInsightsState.comparisonEndpointDefaultsPending = false;
+    if (!after) return;
+    const [afterPage, beforePage] = await Promise.all([
+      requestComparisonEndpointPage("after", 0, { selectedAssessmentId: after.assessmentId }),
+      candidate
+        ? requestComparisonEndpointPage("before", 0, {
+          afterAssessmentId: after.assessmentId,
+          selectedAssessmentId: candidate.assessmentId,
+        })
+        : Promise.resolve(null),
+    ]);
+    if (!isCurrent() || !afterPage) return;
+    if (candidate && !beforePage) return;
+    if (candidate) {
+      const offset = preserveOffset
+        && previousPair.before === candidate.assessmentId
+        && previousPair.after === after.assessmentId
+        ? previousPair.offset
+        : 0;
+      await loadComparisonEndpointPair(offset);
+    }
+  } catch (error) {
+    if (isCurrent()) healthInsightsState.comparisonPresetError = error.message;
+  } finally {
+    if (isCurrent()) {
+      healthInsightsState.comparisonPresetLoading = false;
+      renderNetworkInsights();
+    }
+  }
+}
+
+function initializeComparisonEndpoints() {
+  return selectComparisonPreset("1d");
+}
+
+function setComparisonCustomOpen(open) {
+  healthInsightsViewState.comparisonCustomOpen = open;
+  renderNetworkInsights();
+  if (open && healthInsightsViewState.afterAssessmentId
+      && !healthInsightsState.comparisonEndpointPages.before
+      && !healthInsightsState.comparisonEndpointLoading.before) {
+    void requestComparisonEndpointPage("before", 0, {
+      afterAssessmentId: healthInsightsViewState.afterAssessmentId,
+      selectedAssessmentId: healthInsightsViewState.beforeAssessmentId,
+    });
+  }
+}
+
+async function selectComparisonEndpoint(side, assessmentId) {
+  if (!assessmentId) return;
+  healthInsightsState.comparisonPresetRequestVersion += 1;
+  healthInsightsState.comparisonPresetLoading = false;
+  healthInsightsState.comparisonPresetError = "";
+  healthInsightsViewState.comparisonIntent = "custom";
+  healthInsightsViewState.comparisonCustomOpen = true;
+  if (side === "before") {
+    invalidateComparisonEndpointRequests(["before"]);
+  } else {
+    healthInsightsState.comparisonEndpointRevision += 1;
+    invalidateComparisonEndpointRequests();
+  }
+  renderNetworkInsights();
+  if (side === "before") {
+    if (assessmentId === healthInsightsViewState.beforeAssessmentId) return;
+    resetComparisonTableScroll();
+    healthInsightsViewState.comparisonFocusTarget = null;
+    healthInsightsState.comparisonPinnedBefore = null;
+    healthInsightsViewState.beforeAssessmentId = assessmentId;
+    clearEndpointComparison();
+    healthInsightsViewState.comparisonItemOffset = 0;
+    const page = await requestComparisonEndpointPage(
+      "before", healthInsightsViewState.beforeHistoryOffset, {
+        afterAssessmentId: healthInsightsViewState.afterAssessmentId,
+        selectedAssessmentId: assessmentId,
+      },
+    );
+    if (!page) return;
+    await loadComparisonEndpointPair(0);
+    return;
+  }
+  if (assessmentId === healthInsightsViewState.afterAssessmentId) return;
+  resetComparisonTableScroll();
+  healthInsightsViewState.comparisonFocusTarget = null;
+  const beforeId = healthInsightsViewState.beforeAssessmentId;
+  const before = endpointMetadata(beforeId);
+  const after = endpointMetadata(assessmentId);
+  const preserveBefore = Boolean(before?.observedAt && after?.observedAt
+    && Date.parse(before.observedAt) < Date.parse(after.observedAt));
+  const revision = healthInsightsState.comparisonEndpointRevision;
+  healthInsightsViewState.afterAssessmentId = assessmentId;
+  if (healthInsightsState.comparisonEndpointPages.after) {
+    healthInsightsState.comparisonEndpointPages.after = {
+      ...healthInsightsState.comparisonEndpointPages.after,
+      shortcuts: [],
+    };
+  }
+  if (!preserveBefore) {
+    healthInsightsViewState.beforeAssessmentId = null;
+    healthInsightsState.comparisonPinnedBefore = null;
+  }
+  healthInsightsViewState.comparisonItemOffset = 0;
+  clearEndpointComparison();
+  void requestComparisonEndpointPage("after", healthInsightsViewState.afterHistoryOffset, {
+    selectedAssessmentId: assessmentId,
+  });
+  const beforePage = await requestComparisonEndpointPage(
+    "before", 0, {
+      afterAssessmentId: assessmentId,
+      selectedAssessmentId: preserveBefore ? beforeId : null,
+      resolveSelection: !preserveBefore,
+    },
+  );
+  if (revision !== healthInsightsState.comparisonEndpointRevision || !beforePage) return;
+  if (preserveBefore && !beforePage.selected) {
+    healthInsightsState.comparisonEndpointUnavailable = true;
+    healthInsightsViewState.beforeAssessmentId = null;
+    clearEndpointComparison();
+    renderNetworkInsights();
+    return;
+  }
+  if (revision === healthInsightsState.comparisonEndpointRevision) {
+    await loadComparisonEndpointPair(0);
+  }
+}
+
+async function loadComparisonEndpointPage(side, offset) {
+  if (!endpointSelectionEnabled()) return;
+  const currentId = healthInsightsViewState[side === "before" ? "beforeAssessmentId" : "afterAssessmentId"];
+  await requestComparisonEndpointPage(side, offset, { selectedAssessmentId: currentId });
+}
+
+async function loadComparisonItems(offset, focusTarget = null) {
+  resetComparisonTableScroll();
+  healthInsightsViewState.comparisonFocusTarget = focusTarget;
+  if (endpointSelectionEnabled()) return loadComparisonEndpointPair(offset);
+  const comparisonId = healthInsightsViewState.comparisonId;
+  if (comparisonId) await selectComparison(comparisonId, offset);
+}
+
+function changeComparisonFilter(filter, value) {
+  resetComparisonTableScroll();
+  healthInsightsViewState.comparisonFocusTarget = null;
+  if (endpointSelectionEnabled()) {
+    const key = filter === "scope" ? "comparisonScope" : "comparisonResult";
+    if (healthInsightsViewState[key] === value) return;
+    healthInsightsViewState[key] = value;
+    healthInsightsViewState.comparisonItemOffset = 0;
+    return loadComparisonEndpointPair(0);
+  }
+  healthComparisonDetailController.changeFilter(filter, value);
+}
+
+function selectComparison(comparisonId, offset = 0) {
+  if (comparisonId && !healthInsightsState.assessment) return;
+  if (comparisonId !== healthInsightsViewState.comparisonId) resetComparisonTableScroll();
+  healthInsightsViewState.comparisonId = comparisonId;
+  healthInsightsViewState.comparisonItemOffset = offset;
+  return healthComparisonDetailController.select(comparisonId, offset);
 }
 
 async function refreshHealthAssessment() {
   const entry = currentDataset?.entry;
   const previousAssessmentId = healthInsightsState.assessment?.assessmentId;
+  const previousNetworkId = healthInsightsState.assessment?.networkId;
   const datasetChanged = healthInsightsState.datasetId !== entry?.value;
   if (datasetChanged) {
     healthInsightsTab = "findings";
@@ -3066,13 +3595,20 @@ async function refreshHealthAssessment() {
     healthInsightsViewState.tableScrollTop = 0;
     healthInsightsViewState.detailsOpen = false;
     healthInsightsViewState.mode = "snapshot";
+    healthInsightsViewState.comparisonId = null;
     healthInsightsViewState.comparisonScope = "all";
+    healthInsightsViewState.comparisonResult = "changed";
     healthInsightsViewState.comparisonOffset = 0;
     healthInsightsViewState.comparisonItemOffset = 0;
     healthInsightsState.comparisonPage = null;
-    healthInsightsState.comparison = null;
-    healthInsightsState.comparisonLoading = false;
-    healthInsightsState.comparisonRequestVersion += 1;
+    healthInsightsState.capabilities = null;
+    resetComparisonEndpointState();
+    healthInsightsState.comparisonListLoading = false;
+    healthInsightsState.comparisonListError = "";
+    healthInsightsState.comparisonListRequestVersion += 1;
+    healthComparisonDetailController.invalidate();
+    healthNavigationContext = null;
+    document.getElementById("btn-health-return")?.setAttribute("hidden", "");
     findingDeviceReturnContext = null;
     setContextDetailsMode("device");
   }
@@ -3102,6 +3638,22 @@ async function refreshHealthAssessment() {
   try {
     const assessment = await fetchHealthAssessment(entry.value);
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    if (previousNetworkId && previousNetworkId !== assessment.networkId) {
+      healthInsightsViewState.mode = "snapshot";
+      healthInsightsViewState.comparisonId = null;
+      healthInsightsViewState.comparisonScope = "all";
+      healthInsightsViewState.comparisonResult = "changed";
+      healthInsightsViewState.comparisonOffset = 0;
+      healthInsightsViewState.comparisonItemOffset = 0;
+      healthInsightsState.comparisonPage = null;
+      resetComparisonEndpointState();
+      healthInsightsState.comparisonListLoading = false;
+      healthInsightsState.comparisonListError = "";
+      healthInsightsState.comparisonListRequestVersion += 1;
+      healthComparisonDetailController.invalidate();
+      healthNavigationContext = null;
+      document.getElementById("btn-health-return")?.setAttribute("hidden", "");
+    }
     healthInsightsState.assessment = assessment;
     if (previousAssessmentId !== assessment.assessmentId) {
       healthInsightsState.rosterDetail = null;
@@ -3140,7 +3692,37 @@ async function refreshHealthAssessment() {
       healthInsightsState.capabilities = support.capabilities;
       healthInsightsState.observations = support.observations;
       if (support.capabilities?.comparisonReadModel === 1) {
-        await loadComparisonPage(healthInsightsViewState.comparisonOffset);
+        if (support.capabilities.comparisonEndpointSelection === 1) {
+          if (healthInsightsViewState.comparisonIntent !== "custom") {
+            await selectComparisonPreset(
+              healthInsightsViewState.comparisonIntent,
+              { preserveOffset: true, preserveDisclosure: true },
+            );
+          } else if (healthInsightsState.comparisonEndpointDefaultsPending
+              && !healthInsightsState.comparisonEndpointUnavailable) {
+            await initializeComparisonEndpoints();
+          } else if (!healthInsightsState.comparisonEndpointUnavailable) {
+            const endpointRevision = ++healthInsightsState.comparisonEndpointRevision;
+            const [afterPage, beforePage] = await Promise.all([
+              requestComparisonEndpointPage("after", healthInsightsViewState.afterHistoryOffset, {
+                selectedAssessmentId: healthInsightsViewState.afterAssessmentId,
+              }),
+              healthInsightsViewState.afterAssessmentId
+                ? requestComparisonEndpointPage("before", healthInsightsViewState.beforeHistoryOffset, {
+                  afterAssessmentId: healthInsightsViewState.afterAssessmentId,
+                  selectedAssessmentId: healthInsightsViewState.beforeAssessmentId,
+                })
+                : Promise.resolve(null),
+            ]);
+            if (afterPage && (beforePage || !healthInsightsViewState.beforeAssessmentId)
+                && endpointRevision === healthInsightsState.comparisonEndpointRevision
+                && !healthInsightsState.comparisonEndpointUnavailable) {
+              await loadComparisonEndpointPair(healthInsightsViewState.comparisonItemOffset);
+            }
+          }
+        } else {
+          await loadComparisonPage(healthInsightsViewState.comparisonOffset);
+        }
       }
     } catch (error) {
       console.warn("Health history metadata is unavailable:", error);
@@ -3316,7 +3898,17 @@ document.getElementById("health-mode-snapshot")?.addEventListener("click", () =>
 document.getElementById("health-mode-comparison")?.addEventListener("click", () => {
   healthInsightsViewState.mode = "comparison";
   renderNetworkInsights();
-  if (!healthInsightsState.comparisonPage) void loadComparisonPage(0);
+  if (endpointSelectionEnabled()) {
+    if (healthInsightsState.comparisonEndpointDefaultsPending) {
+      void initializeComparisonEndpoints();
+    } else if (!healthInsightsState.comparisonEndpointPages.after) {
+      void requestComparisonEndpointPage("after", 0, {
+        selectedAssessmentId: healthInsightsViewState.afterAssessmentId,
+      });
+    }
+  } else if (!healthInsightsState.comparisonPage) {
+    void loadComparisonPage(0);
+  }
 });
 [
   ["health-status-filter", "status"],
@@ -3327,6 +3919,11 @@ document.getElementById("health-mode-comparison")?.addEventListener("click", () 
   renderNetworkInsights();
 }));
 document.getElementById("btn-health-return")?.addEventListener("click", restoreHealthNavigationContext);
+document.addEventListener("scroll", (event) => {
+  if (currentView !== "insights"
+      || !event.target?.matches?.(".health-comparison-table-wrap")) return;
+  healthInsightsViewState.comparisonTableScrollTop = event.target.scrollTop;
+}, true);
 document.getElementById("btn-health-finding-close")?.addEventListener("click", () => {
   closeHealthFindingDetails();
 });

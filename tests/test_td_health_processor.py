@@ -211,9 +211,39 @@ def test_route64_comparison_persists_covered_removal_and_unknown_gap(tmp_path) -
     service = TDHealthReadService(tmp_path)
     listing = service.comparisons(network_id="extpan:78b9775b001c1cbe",
                                   dataset_id="otbr_cli_networkdiag_fetch_all", limit=25, offset=0)
-    assert listing["total"] == 3
-    newer = service.comparison(comparison_id=listing["items"][0]["comparisonId"], limit=25, offset=0)
-    older = service.comparison(comparison_id=listing["items"][2]["comparisonId"], limit=25, offset=0)
+    assert listing["total"] == 4
+    assert any(
+        item["beforeObservedAt"].startswith("2026-09-01T")
+        and item["afterObservedAt"].startswith("2026-09-04T")
+        for item in listing["items"]
+    )
+    adjacent_before_after = [
+        item for item in listing["items"]
+        if (
+            item["beforeObservedAt"].startswith("2026-09-03T")
+            and item["afterObservedAt"].startswith("2026-09-04T")
+        ) or (
+            item["beforeObservedAt"].startswith("2026-09-01T")
+            and item["afterObservedAt"].startswith("2026-09-02T")
+        )
+    ]
+    assert len(adjacent_before_after) == 2
+    newer = service.comparison(
+        comparison_id=next(
+            item["comparisonId"] for item in adjacent_before_after
+            if item["beforeObservedAt"].startswith("2026-09-03T")
+        ),
+        limit=25,
+        offset=0,
+    )
+    older = service.comparison(
+        comparison_id=next(
+            item["comparisonId"] for item in adjacent_before_after
+            if item["afterObservedAt"].startswith("2026-09-02T")
+        ),
+        limit=25,
+        offset=0,
+    )
     removed = next(item for item in older["items"] if item["subjectId"] == link_id)
     unknown = next(item for item in newer["items"] if item["subjectId"] == link_id)
     assert (removed["transition"], removed["change"], removed["sourceFiles"]) == (
@@ -225,7 +255,7 @@ def test_route64_comparison_persists_covered_removal_and_unknown_gap(tmp_path) -
     dry = store.purge_device("extaddr:2222222222222222", dry_run=True)
     applied = store.purge_device("extaddr:2222222222222222")
     assert dry.deleted == applied.deleted
-    assert applied.deleted["comparisons"] == 3
+    assert applied.deleted["comparisons"] == 4
     assert service.comparison(comparison_id=removed_id, limit=25, offset=0) is None
 
 

@@ -21,9 +21,18 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
           this.tagName = tagName;
           this.children = [];
           this.listeners = {};
+          this.parentNode = null;
         }
-        appendChild(child) { this.children.push(child); return child; }
-        replaceChildren() { this.children = []; }
+        appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+        replaceChildren() {
+          this.children.forEach((child) => { child.parentNode = null; });
+          this.children = [];
+        }
+        remove() {
+          if (!this.parentNode) return;
+          this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+          this.parentNode = null;
+        }
         setAttribute(name, value) { this[name] = value; }
         addEventListener(name, listener) { this.listeners[name] = listener; }
       }
@@ -37,21 +46,35 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
         {comparisonId: "pair-3", beforeObservedAt: null, afterObservedAt: "invalid"},
       ]};
       const comparison = {comparisonId: "pinned", beforeObservedAt: "2026-09-24T11:00:00Z",
-        afterObservedAt: "2026-09-24T11:59:00Z", items: [], reasons: []};
+        afterObservedAt: "2026-09-24T11:59:00Z", itemCount: 0, filteredItemCount: 0,
+        offset: 0, limit: 25, items: [], reasons: []};
       const selected = [];
       const paged = [];
+      const resultFilters = [];
       const container = new Element("section");
       renderHealthComparison(container, page, comparison, {}, {
         select: (id) => selected.push(id), page: (offset) => paged.push(offset),
+        result: (value) => resultFilters.push(value),
       });
-      const [picker, navigation, heading] = container.children;
+      const controls = container.children.find((item) => item.className === "health-comparison-controls");
+      const picker = controls.children[0];
+      const filterRow = container.children.find((item) => item.className === "health-comparison-filter-row");
+      const resultFilter = filterRow.children[1];
+      const navigation = container.children.find((item) => item.className === "health-comparison-navigation");
+      const heading = container.children.find((item) => item.className === "health-comparison-pair-summary");
       const selectedValue = picker.value;
       picker.value = "pair-1";
       picker.listeners.change();
+      resultFilter.value = "unknown";
+      resultFilter.listeners.change();
       navigation.children[1].listeners.click();
       console.log(JSON.stringify({
         options: picker.children.map(({value, textContent}) => [value, textContent]),
-        selectedValue, selected, paged, heading: heading.textContent,
+        resultOptions: resultFilter.children.map(({value, textContent}) => [value, textContent]),
+        selectedValue, selected, resultFilters, paged, heading: heading.textContent,
+      headingTitle: heading.title,
+      count: filterRow.children.find((item) => item.className === "health-comparison-row-count").textContent,
+      total: filterRow.children.find((item) => item.className === "health-comparison-total-count").textContent,
       }));
     """
     completed = subprocess.run(
@@ -68,10 +91,546 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
             ["pair-3", "Before: unknown · After: unknown"],
             ["pinned", "Before: 1h 0m · After: 1m (selected)"],
         ],
+        "resultOptions": [
+            ["changed", "Changed"],
+            ["unchanged", "Unchanged"],
+            ["unknown", "Unknown"],
+            ["all", "All results"],
+        ],
         "selectedValue": "pinned",
         "selected": ["pair-1"],
+        "resultFilters": ["unknown"],
         "paged": [3],
-        "heading": "Before 2026-09-24T11:00:00Z · After 2026-09-24T11:59:00Z",
+        "heading": "Before 2026-09-24 11:00:00 → After 2026-09-24 11:59:00 UTC · unknown",
+        "headingTitle": "Before 2026-09-24T11:00:00Z · After 2026-09-24T11:59:00Z",
+        "count": "0 matching rows",
+        "total": "0 total rows",
+    }
+
+
+def test_comparison_detail_query_and_page_validation() -> None:
+    script = r"""
+      import {
+        fetchHealthComparison,
+        isHealthComparisonDetailForQuery,
+      } from "./src/js/tdash-health.js";
+
+      const requested = [];
+      globalThis.fetch = async (path) => {
+        requested.push(path);
+        return {ok: true, json: async () => ({})};
+      };
+      await fetchHealthComparison("comparison:a/b", 25, undefined, {
+        scope: "relationship", result: "unknown",
+      });
+      await fetchHealthComparison("comparison:old-signature", 0);
+      const query = {
+        comparisonId: "comparison:one", networkId: "extpan:one",
+        datasetId: "dataset-one", offset: 0,
+      };
+      const row = {itemId: "item:one"};
+      const page = {
+        schemaVersion: 1, comparisonId: query.comparisonId, networkId: query.networkId,
+        datasetId: query.datasetId, offset: 0, limit: 25, itemCount: 30,
+        filteredItemCount: 12, items: [row],
+      };
+      console.log(JSON.stringify({
+        requested,
+        valid: isHealthComparisonDetailForQuery(page, query),
+        tooManyMatches: isHealthComparisonDetailForQuery({...page, filteredItemCount: 31}, query),
+        invalidZeroPage: isHealthComparisonDetailForQuery({...page, items: []}, query),
+        recoveredEmpty: isHealthComparisonDetailForQuery({...page, offset: 25, items: []},
+          {...query, offset: 25}),
+        noMatches: isHealthComparisonDetailForQuery({...page, filteredItemCount: 0, items: []}, query),
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result == {
+        "requested": [
+            "api/health/comparisons/comparison%3Aa%2Fb?limit=25&offset=25&scope=relationship&result=unknown",
+            "api/health/comparisons/comparison%3Aold-signature?limit=25&offset=0&scope=all&result=changed",
+        ],
+        "valid": True,
+        "tooManyMatches": False,
+        "invalidZeroPage": False,
+        "recoveredEmpty": True,
+        "noMatches": True,
+    }
+
+
+def test_endpoint_selectors_use_pinned_ids_and_pair_read_contract() -> None:
+    script = r"""
+      import {
+        fetchHealthComparisonEndpoints,
+        fetchHealthComparisonPair,
+        isHealthComparisonEndpointPageForQuery,
+        isHealthComparisonPairForQuery,
+        renderHealthComparison,
+      } from "./src/js/tdash-health.js";
+
+      Date.now = () => Date.parse("2026-09-24T12:00:00Z");
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.listeners = {};
+          this.parentNode = null;
+        }
+        appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+        replaceChildren() {
+          this.children.forEach((child) => { child.parentNode = null; });
+          this.children = [];
+        }
+        remove() {
+          if (!this.parentNode) return;
+          this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+          this.parentNode = null;
+        }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+      }
+      globalThis.document = {createElement: (tagName) => new Element(tagName)};
+      const requested = [];
+      globalThis.fetch = async (path) => {
+        requested.push(path);
+        return {ok: true, json: async () => ({})};
+      };
+      await fetchHealthComparisonEndpoints("extpan:net", "dataset", "before", 25,
+        undefined, {afterAssessmentId: "assessment-after", selectedAssessmentId: "assessment-before"});
+      await fetchHealthComparisonPair({
+        networkId: "extpan:net", datasetId: "dataset",
+        beforeAssessmentId: "assessment-before", afterAssessmentId: "assessment-after",
+        comparisonPolicyDigest: "policy-digest", comparisonVersion: "comparison-v1",
+        scope: "all", result: "changed",
+      }, 0);
+
+      const endpoint = (assessmentId, observedAt, completeness = "complete") => ({
+        assessmentId, networkId: "extpan:net", datasetId: "dataset",
+        observedAt, assessedAt: observedAt, completeness,
+      });
+      const before = endpoint("assessment-before", "2026-09-01T00:00:00.123Z", "partial");
+      const after = endpoint("assessment-after", "2026-09-02T02:00:00.123+02:00");
+      const beforePageItem = endpoint("assessment-page", "2026-08-30T00:00:00Z");
+      const query = {
+        networkId: "extpan:net", datasetId: "dataset", side: "before",
+        afterAssessmentId: after.assessmentId, selectedAssessmentId: before.assessmentId,
+        comparisonVersion: "comparison-v1", comparisonPolicyDigest: "policy-digest", offset: 0,
+      };
+      const endpointPage = {
+        schemaVersion: 1, networkId: query.networkId, datasetId: query.datasetId,
+        side: query.side, afterAssessmentId: query.afterAssessmentId,
+        comparisonVersion: query.comparisonVersion,
+        comparisonPolicyDigest: query.comparisonPolicyDigest,
+        total: 2, limit: 25, offset: 0, items: [beforePageItem], selected: before,
+        defaultAfter: after, defaultBefore: before, predecessor: before,
+        shortcuts: [
+          {interval: "1d", durationSeconds: 86400, candidate: before},
+          {interval: "3d", durationSeconds: 259200, candidate: null},
+          {interval: "1w", durationSeconds: 604800, candidate: null},
+          {interval: "1m", durationSeconds: 2592000, candidate: beforePageItem},
+        ],
+      };
+      const comparison = {
+        schemaVersion: 1, networkId: query.networkId, datasetId: query.datasetId,
+        beforeAssessmentId: before.assessmentId, afterAssessmentId: after.assessmentId,
+        beforeObservedAt: before.observedAt, afterObservedAt: after.observedAt,
+        elapsedSeconds: 86400,
+        comparisonPolicyDigest: query.comparisonPolicyDigest,
+        comparisonVersion: query.comparisonVersion, origin: "derived", createdAt: null,
+        itemCount: 0, filteredItemCount: 0, limit: 25, offset: 0, items: [],
+      };
+      const selections = [];
+      const shortcuts = [];
+      const pages = [];
+      const container = new Element("section");
+      const viewState = {
+        endpointSelection: true,
+        latestPresetPage: endpointPage,
+        endpointPages: {
+          before: {...endpointPage, side: "before"},
+          after: {...endpointPage, side: "after", afterAssessmentId: null, items: [after],
+            selected: after, total: 1},
+        },
+        endpointLoading: {before: false, after: false},
+        endpointErrors: {before: "", after: ""},
+        before, after, beforeAssessmentId: before.assessmentId,
+        afterAssessmentId: after.assessmentId, result: "changed", scope: "all",
+        endpointPairLoading: false,
+        customOpen: true, intent: "1d",
+      };
+      const actions = {
+        endpointSelect: (side, id) => selections.push([side, id]),
+        endpointPage: (side, offset) => pages.push([side, offset]),
+        preset: (interval) => shortcuts.push([interval]),
+      };
+      renderHealthComparison(container, null, comparison, viewState, actions);
+      const controls = container.children.find((item) => item.className === "health-comparison-controls");
+      const customControls = container.children.find((item) => item.className === "health-comparison-custom");
+      const liveStatus = container.children.find(
+        (item) => item.className === "visually-hidden health-comparison-shortcut-status",
+      );
+      const beforeGroup = customControls.children[0];
+      const afterGroup = customControls.children[1];
+      const beforeSelect = beforeGroup.children[0].children[0];
+      const afterSelect = afterGroup.children[0].children[0];
+      const buttons = controls.children[0].children.filter((item) => item.tagName === "button");
+      const heading = container.children.find((item) => item.className === "health-comparison-pair-summary");
+      beforeSelect.value = after.assessmentId;
+      beforeSelect.listeners.change();
+      beforeGroup.children[1].children[1].listeners.click();
+      buttons[0].listeners.click();
+      buttons[1].listeners.click();
+      const firstLiveStatus = liveStatus;
+      viewState.endpointLoading.after = true;
+      renderHealthComparison(container, null, comparison, viewState, actions);
+      const loadingStatus = container.children.find(
+        (item) => item.className === "visually-hidden health-comparison-shortcut-status",
+      );
+      const loadingButtons = container.children.find(
+        (item) => item.className === "health-comparison-controls",
+      ).children[0].children.filter((item) => item.tagName === "button");
+      loadingButtons[0].listeners.click();
+      console.log(JSON.stringify({
+        endpointValid: isHealthComparisonEndpointPageForQuery(endpointPage, query),
+        endpointRejectsWrongAfter: isHealthComparisonEndpointPageForQuery(endpointPage,
+          {...query, afterAssessmentId: "assessment-other"}),
+        pairValid: isHealthComparisonPairForQuery(comparison, {...query,
+          beforeAssessmentId: before.assessmentId, afterAssessmentId: after.assessmentId,
+          scope: "all", result: "changed", offset: 0}),
+        presetLabels: buttons.map((item) => item.textContent),
+        selectedPreset: buttons[0]["aria-pressed"],
+        customDisclosure: [controls.children[0].children[4]["aria-expanded"],
+          controls.children[0].children[4]["aria-controls"], customControls.hidden],
+        beforeOptions: beforeSelect.children.map((item) => [
+          item.value, item.textContent, item.title,
+        ]),
+        afterOptions: afterSelect.children.map((item) => [
+          item.value, item.textContent, item.title,
+        ]),
+        heading: heading.textContent,
+        headingTitle: heading.title,
+        liveRegionConfigured: [liveStatus.role, liveStatus["aria-live"], liveStatus["aria-atomic"]],
+        liveRegionPreserved: firstLiveStatus === loadingStatus,
+        loadingButtonsDisabled: loadingButtons.slice(0, 3).every((item) => item.disabled),
+        loadingStatus: loadingStatus.textContent,
+        selections, pages, shortcuts,
+        derivedMarker: container.children.find((item) => item.className === "health-comparison-details")
+          .children.some((item) => item.className === "health-comparison-origin"),
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result["endpointValid"] is True
+    assert result["endpointRejectsWrongAfter"] is False
+    assert result["pairValid"] is True
+    assert result["presetLabels"] == ["1D", "3D", "1W", "Custom"]
+    assert result["selectedPreset"] == "true"
+    assert result["customDisclosure"] == ["true", "health-comparison-custom-controls", False]
+    assert result["beforeOptions"][1][0] == "assessment-before"
+    assert result["afterOptions"][0][0] == "assessment-after"
+    assert result["heading"] == "Before 2026-09-01 00:00:00 → After 2026-09-02 00:00:00 UTC · 1 day"
+    assert result["headingTitle"] == "Before 2026-09-01T00:00:00.123Z · After 2026-09-02T02:00:00.123+02:00"
+    assert result["liveRegionConfigured"] == ["status", "polite", "true"]
+    assert result["liveRegionPreserved"] is True
+    assert result["loadingButtonsDisabled"] is True
+    assert "Resolving the selected interval against the latest assessment." in result["loadingStatus"]
+    assert result["selections"] == [["before", "assessment-after"]]
+    assert result["pages"] == [["before", 25]]
+    assert result["shortcuts"] == [["1d"]]
+    assert result["derivedMarker"] is False
+
+
+def test_health_comparison_row_ranges_and_direct_pagination() -> None:
+    script = r"""
+      import {renderHealthComparison} from "./src/js/tdash-health.js";
+
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.listeners = {};
+          this.parentNode = null;
+        }
+        appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+        replaceChildren() { this.children = []; }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+      }
+      globalThis.document = {createElement: (tagName) => new Element(tagName)};
+      const find = (root, className) => {
+        if (root.className === className) return root;
+        for (const child of root.children) {
+          const match = find(child, className);
+          if (match) return match;
+        }
+        return null;
+      };
+      const row = (index) => ({
+        itemId: `item-${index}`, scope: "device", subjectId: `device-${index}`,
+        itemKind: "sample", sampleCount: 1, beforeValue: 1, afterValue: 2,
+        delta: 1, unit: "count", comparable: true, change: "increased",
+        sourceFiles: ["snapshot.json"], resetState: "known",
+      });
+      const makeComparison = (offset, size, filteredItemCount = 482, itemCount = 1626) => ({
+        comparisonId: "pair", beforeObservedAt: "2026-10-01T00:00:00Z",
+        afterObservedAt: "2026-10-02T00:00:00Z", elapsedSeconds: 86400,
+        itemCount, filteredItemCount, offset, limit: 25,
+        items: Array.from({length: size}, (_, index) => row(offset + index)),
+        comparable: true, baselineState: "available", gapState: "within-policy",
+        resetState: "known", reasons: [], origin: "stored",
+      });
+      const list = {total: 1, offset: 0, limit: 25, items: [{
+        comparisonId: "pair", beforeObservedAt: "2026-10-01T00:00:00Z",
+        afterObservedAt: "2026-10-02T00:00:00Z",
+      }]};
+      const requested = [];
+      const render = (comparison, viewState = {}) => {
+        const container = new Element("section");
+        renderHealthComparison(container, list, comparison, {
+          comparisonId: "pair", result: "changed", scope: "all", ...viewState,
+        }, {items: (offset, action) => requested.push([offset, action])});
+        return container;
+      };
+      const first = render(makeComparison(0, 25));
+      const firstRange = find(first, "health-comparison-row-count").textContent;
+      const firstTotal = find(first, "health-comparison-total-count").textContent;
+      const firstPager = find(first, "health-comparison-row-pagination");
+      const firstPage = firstPager.children[2];
+      const firstActions = firstPager.children.map((control, index) => index === 2
+        ? control.children.find((option) => option.value === control.value).textContent
+        : control.textContent);
+      firstPager.children[4].listeners.click();
+      firstPage.value = "8";
+      firstPage.listeners.change();
+
+      const last = render(makeComparison(475, 7));
+      const lastRange = find(last, "health-comparison-row-count").textContent;
+      const lastPage = find(last, "health-comparison-row-pagination").children[2].value;
+      find(last, "health-comparison-row-pagination").children[1].listeners.click();
+      find(last, "health-comparison-row-pagination").children[0].listeners.click();
+      const pending = render(makeComparison(0, 25), {itemsLoading: true});
+      const pendingDisabled = find(pending, "health-comparison-row-pagination")
+        .children.every((control) => control.disabled);
+      const zero = render(makeComparison(0, 0, 0));
+      const zeroRange = find(zero, "health-comparison-row-count").textContent;
+      const zeroHasPager = Boolean(find(zero, "health-comparison-row-pagination"));
+      const single = render(makeComparison(0, 25, 25, 1626));
+      const singleDisabled = find(single, "health-comparison-row-pagination")
+        .children.every((control) => control.disabled);
+      console.log(JSON.stringify({
+        firstRange, firstTotal, firstActions, firstPageCount: firstPage.children.length,
+        lastRange, lastPage, requested, pendingDisabled, zeroRange, zeroHasPager, singleDisabled,
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result == {
+        "firstRange": "1–25 of 482 matching rows",
+        "firstTotal": "1,626 total rows",
+        "firstActions": ["First", "Previous", "Page 1 of 20", "Next", "Last"],
+        "firstPageCount": 20,
+        "lastRange": "476–482 of 482 matching rows",
+        "lastPage": "20",
+        "requested": [[475, "last"], [175, "page"], [450, "previous"], [0, "first"]],
+        "pendingDisabled": True,
+        "zeroRange": "0 matching rows",
+        "zeroHasPager": False,
+        "singleDisabled": True,
+    }
+
+
+def test_comparison_presets_stay_latest_anchored_and_disclosures_keep_focus() -> None:
+    script = r"""
+      import {renderHealthComparison} from "./src/js/tdash-health.js";
+
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.listeners = {};
+          this.parentNode = null;
+        }
+        appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+        replaceChildren() {
+          this.children.forEach((child) => { child.parentNode = null; });
+          this.children = [];
+        }
+        remove() {
+          if (!this.parentNode) return;
+          this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+          this.parentNode = null;
+        }
+        setAttribute(name, value) { this[name] = value; }
+        getAttribute(name) { return this[name] ?? null; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+        focus() { globalThis.document.activeElement = this; }
+        querySelectorAll(selector) {
+          const matches = (element) => selector === "button[aria-controls]"
+            ? element.tagName === "button" && element.getAttribute("aria-controls")
+            : selector === "[data-comparison-page-action]"
+              ? Boolean(element.getAttribute("data-comparison-page-action"))
+              : false;
+          const result = [];
+          const visit = (element) => element.children.forEach((child) => {
+            if (matches(child)) result.push(child);
+            visit(child);
+          });
+          visit(this);
+          return result;
+        }
+      }
+      globalThis.document = {activeElement: null, createElement: (tagName) => new Element(tagName)};
+      const find = (root, className) => {
+        if (root.className === className) return root;
+        for (const child of root.children) {
+          const match = find(child, className);
+          if (match) return match;
+        }
+        return null;
+      };
+      const before = {assessmentId: "before", observedAt: "2026-10-01T00:00:00Z",
+        assessedAt: "2026-10-01T00:01:00Z", completeness: "complete"};
+      const latest = {assessmentId: "latest", observedAt: "2026-10-02T00:00:00Z",
+        assessedAt: "2026-10-02T00:01:00Z", completeness: "complete"};
+      const historical = {assessmentId: "historical", observedAt: "2026-09-10T00:00:00Z",
+        assessedAt: "2026-09-10T00:01:00Z", completeness: "complete"};
+      const latestPresetPage = {shortcuts: [
+        {interval: "1d", candidate: before},
+        {interval: "3d", candidate: before},
+        {interval: "1w", candidate: before},
+      ]};
+      const endpointPages = {
+        before: {offset: 0, limit: 25, total: 2, items: [before, historical], selected: before},
+        after: {offset: 0, limit: 25, total: 2, items: [historical, latest],
+          selected: historical, shortcuts: []},
+      };
+      const comparison = {
+        comparisonId: "pair", beforeAssessmentId: "before", afterAssessmentId: "latest",
+        beforeObservedAt: before.observedAt, afterObservedAt: latest.observedAt,
+        elapsedSeconds: 86400, itemCount: 0, filteredItemCount: 0,
+        limit: 25, offset: 0, items: [], comparable: false, resetState: "unknown",
+        baselineState: "available", gapState: "within-policy", reasons: ["reset-unknown"],
+        origin: "derived", createdAt: null,
+      };
+      const viewState = {
+        endpointSelection: true, latestPresetPage, endpointPages,
+        endpointLoading: {before: false, after: false}, endpointErrors: {before: "", after: ""},
+        before, after: latest, beforeAssessmentId: "before", afterAssessmentId: "latest",
+        intent: "1d", customOpen: false, detailsOpen: false, scope: "all", result: "changed",
+      };
+      const requestedPresets = [];
+      const selectedEndpoints = [];
+      const container = new Element("section");
+      const actions = {
+        preset: (interval) => requestedPresets.push(interval),
+        endpointSelect: (side, id) => selectedEndpoints.push([side, id]),
+        customOpen: () => {},
+        detailsOpen: () => {},
+      };
+      renderHealthComparison(container, null, comparison, viewState, actions);
+      const controls = find(container, "health-comparison-controls");
+      const presetButtons = controls.children[0].children.filter((element) => element.tagName === "button");
+      const custom = presetButtons[3];
+      const customControls = find(container, "health-comparison-custom");
+      const closedHasSelectors = Boolean(find(customControls, "health-comparison-endpoint-control"));
+      presetButtons[1].listeners.click();
+      document.activeElement = custom;
+      viewState.customOpen = true;
+      renderHealthComparison(container, null, comparison, viewState, actions);
+      const reopenedControls = find(container, "health-comparison-controls");
+      const reopenedCustom = reopenedControls.children[0].children
+        .filter((element) => element.tagName === "button")[3];
+      const openedCustomControls = find(container, "health-comparison-custom");
+      const customFocusRestored = document.activeElement === reopenedCustom;
+      const filterRow = find(container, "health-comparison-filter-row");
+      const detailToggle = container.children.find((element) => element.textContent === "Details");
+      document.activeElement = detailToggle;
+      viewState.detailsOpen = true;
+      renderHealthComparison(container, null, comparison, viewState, actions);
+      const expandedDetailsToggle = container.children.find((element) => element.textContent === "Details");
+      const expandedDetails = find(container, "health-comparison-details");
+      const status = container.children.find((element) => element.className === "health-comparison-primary-status");
+      console.log(JSON.stringify({
+        candidateButtonsEnabled: presetButtons.slice(0, 3).every((button) => !button.disabled),
+        selectedIntent: presetButtons.slice(0, 3).map((button) => button["aria-pressed"]),
+        customDisclosure: [custom["aria-expanded"], custom["aria-pressed"], customControls.hidden, closedHasSelectors],
+        customReopened: [reopenedCustom["aria-expanded"], openedCustomControls.hidden,
+          Boolean(find(openedCustomControls, "health-comparison-endpoint-control")),
+          customFocusRestored],
+        requestedPresets,
+        filterOrder: filterRow.children.slice(0, 2).map((select) => select["aria-label"]),
+        summary: find(container, "health-comparison-pair-summary").textContent,
+        status: status.textContent,
+        detailsExpanded: [expandedDetailsToggle["aria-expanded"], expandedDetails.hidden,
+          document.activeElement === expandedDetailsToggle,
+          expandedDetails.children.some((element) => element.className === "health-comparison-origin")],
+        selectedEndpoints,
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result == {
+        "candidateButtonsEnabled": True,
+        "selectedIntent": ["true", "false", "false"],
+        "customDisclosure": ["false", "false", True, False],
+        "customReopened": ["true", False, True, True],
+        "requestedPresets": ["3d"],
+        "filterOrder": ["Comparison scope", "Result"],
+        "summary": "Before 2026-10-01 00:00:00 → After 2026-10-02 00:00:00 UTC · 1 day",
+        "status": "Unknown",
+        "detailsExpanded": ["true", False, True, True],
+        "selectedEndpoints": [],
+    }
+
+
+def test_off_page_shortcut_candidate_remains_available_while_before_page_loads() -> None:
+    script = r"""
+      import {findHealthComparisonEndpointMetadata} from "./src/js/tdash-health.js";
+
+      const shortcutCandidate = {
+        assessmentId: "assessment-off-page",
+        observedAt: "2026-09-01T00:00:00Z",
+        assessedAt: "2026-09-01T00:01:00Z",
+        completeness: "partial",
+      };
+      const pages = {
+        before: {items: [], selected: null},
+        after: {items: [{assessmentId: "assessment-new-after",
+          observedAt: "2026-09-03T00:00:00Z"}]},
+      };
+      const before = findHealthComparisonEndpointMetadata(
+        shortcutCandidate.assessmentId, pages, null, shortcutCandidate,
+      );
+      const after = findHealthComparisonEndpointMetadata(
+        "assessment-new-after", pages, null, shortcutCandidate,
+      );
+      console.log(JSON.stringify({
+        selectedBefore: before?.assessmentId,
+        preserveBefore: Boolean(before?.observedAt && after?.observedAt
+          && Date.parse(before.observedAt) < Date.parse(after.observedAt)),
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+
+    assert json.loads(completed.stdout) == {
+        "selectedBefore": "assessment-off-page",
+        "preserveBefore": True,
     }
 
 
@@ -80,6 +639,7 @@ def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() 
       import {
         fetchHealthAssessment,
         fetchHealthDevice,
+        fetchHealthComparison,
         fetchHealthSupport,
         startHealthProcessing,
         fetchHealthJob,
@@ -94,6 +654,9 @@ def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() 
 
       await fetchHealthAssessment("dataset-id");
       await fetchHealthDevice("assessment-id", "extaddr:0011223344556677");
+      await fetchHealthComparison("comparison:one", 0, undefined, {
+        scope: "all", result: "changed",
+      });
       await fetchHealthSupport("extpan:0011223344556677");
       await startHealthProcessing("dataset-id");
       await fetchHealthJob("job-id");
@@ -117,7 +680,7 @@ def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() 
     )
     result = json.loads(completed.stdout)
 
-    assert len(result["requested"]) == 7
+    assert len(result["requested"]) == 8
     assert all(path.startswith("api/") for path in result["requested"])
     assert all(url.startswith("http://localhost:9165/api/") for url in result["resolved"][0])
     assert all(
@@ -464,6 +1027,10 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
       assert action in health_js
       assert action in ui_js
     assert "restoreHealthNavigationContext" in ui_js
+    assert "comparisonTableScrollTop: healthInsightsViewState.comparisonTableScrollTop" in ui_js
+    assert 'event.target?.matches?.(".health-comparison-table-wrap")' in ui_js
+    assert "healthInsightsViewState.comparisonTableScrollTop = event.target.scrollTop;" in ui_js
+    assert "updatedComparisonWrap.scrollTop = healthInsightsViewState.comparisonTableScrollTop;" in ui_js
     assert "renderHealthFindingDetails" in ui_js
     assert "toggleHealthFindingSelection" in ui_js
     assert "initContextDetailsPanel" in ui_js

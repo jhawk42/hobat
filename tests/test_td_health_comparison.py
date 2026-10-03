@@ -8,6 +8,7 @@ import pytest
 
 from td_health_comparison import (
     COMPARISON_VERSION,
+    COMPARISON_INTERVALS,
     ComparisonPolicy,
     classify_reset,
     compare_interval,
@@ -19,6 +20,7 @@ from td_health_comparison import (
     source_roles_for_dataset,
     source_signature,
     source_time_for_sample,
+    resolve_interval_candidate,
     supporting_changes,
 )
 from td_health_manifest import load_health_manifest
@@ -37,6 +39,53 @@ from td_health_observation_model import (
 
 ROLES = {"devices.json": "required", "outcome.json": "optional"}
 
+
+def test_interval_candidates_use_utc_cutoffs_ties_and_complete_only_policy() -> None:
+    candidates = [
+        {
+            "assessment_id": "at-cutoff",
+            "observed_at": "2026-01-09T10:00:00Z",
+            "assessed_at": "2026-01-09T10:00:00Z",
+            "completeness": "complete",
+        },
+        {
+            "assessment_id": "later-lexical-earlier-instant",
+            "observed_at": "2026-01-09T11:00:00+02:00",
+            "assessed_at": "2026-01-09T11:00:00+02:00",
+            "completeness": "complete",
+        },
+        {
+            "assessment_id": "latest",
+            "observed_at": "2026-01-09T10:30:00Z",
+            "assessed_at": "2026-01-09T10:30:00Z",
+            "completeness": "complete",
+        },
+        {
+            "assessment_id": "same-time-later-assessed",
+            "observed_at": "2026-01-09T10:30:00Z",
+            "assessed_at": "2026-01-09T10:31:00Z",
+            "completeness": "complete",
+        },
+        {
+            "assessment_id": "partial-later",
+            "observed_at": "2026-01-09T10:45:00Z",
+            "assessed_at": "2026-01-09T10:45:00Z",
+            "completeness": "partial",
+        },
+    ]
+
+    assert COMPARISON_INTERVALS == {
+        "1d": 86_400, "3d": 259_200, "1w": 604_800, "1m": 2_592_000,
+    }
+    selected = resolve_interval_candidate(
+        candidates, after_observed_at="2026-01-10T15:00:00+02:00", interval="1d",
+    )
+    assert selected["assessment_id"] == "partial-later"
+    complete = resolve_interval_candidate(
+        candidates, after_observed_at="2026-01-10T15:00:00+02:00",
+        interval="1d", complete_only=True,
+    )
+    assert complete["assessment_id"] == "same-time-later-assessed"
 
 def _endpoints() -> tuple[tuple[Observation, Assessment], tuple[Observation, Assessment]]:
     def endpoint(suffix: str, time: str) -> tuple[Observation, Assessment]:

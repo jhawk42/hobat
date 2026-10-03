@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from extaddr_device_label_map import load_extaddr_device_label_map
-from td_health_comparison import ordered_reasons
+from td_health_comparison import (
+    COMPARISON_VERSION, ComparisonPolicy, ComparisonItem, ordered_reasons,
+)
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from td_health_manifest import ROSTER_FIELDS, load_health_manifest
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
@@ -25,6 +27,8 @@ DEFAULT_PAGE_SIZE = 25
 ROSTER_PRESENCE = ("observed", "missing", "offline", "not-assessed")
 ROSTER_STATES = ("expected", "intentionally-offline", "intermittent", "retired", "untracked")
 ROSTER_SORTS = ("label", "presence", "rosterState", "lastObserved", "quality")
+COMPARISON_SCOPES = ("network", "device", "relationship")
+COMPARISON_RESULTS = ("changed", "unchanged", "unknown")
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
 # Scope-namespaced order bases leave room to insert new rule_ids without renumbering neighbors.
 NETWORK_ORDER_BASE = 1000
@@ -85,6 +89,10 @@ class HealthCorruptStoreError(HealthReadError):
     pass
 
 
+class HealthEndpointUnavailableError(HealthReadError):
+    pass
+
+
 def _decode_json(value: object, *, field: str) -> Any:
     if not isinstance(value, str):
         raise HealthCorruptStoreError(f"Invalid stored {field}")
@@ -92,6 +100,19 @@ def _decode_json(value: object, *, field: str) -> Any:
         return json.loads(value)
     except json.JSONDecodeError as exc:
         raise HealthCorruptStoreError(f"Invalid stored {field}") from exc
+
+
+def _validate_stored_timestamp(value: object, *, field: str, required: bool = False) -> None:
+    if value is None and not required:
+        return
+    if not isinstance(value, str):
+        raise HealthCorruptStoreError(f"Invalid stored {field}")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise HealthCorruptStoreError(f"Invalid stored {field}") from exc
+    if parsed.utcoffset() is None:
+        raise HealthCorruptStoreError(f"Invalid stored {field}")
 
 
 class TDHealthReadService:
@@ -591,6 +612,13 @@ class TDHealthReadService:
 
     @staticmethod
     def _comparison_header(row: dict[str, Any]) -> dict[str, Any]:
+        _validate_stored_timestamp(
+            row["before_observed_at"], field="comparison before timestamp", required=True,
+        )
+        _validate_stored_timestamp(
+            row["after_observed_at"], field="comparison after timestamp", required=True,
+        )
+        _validate_stored_timestamp(row["created_at"], field="comparison creation timestamp")
         pruned = not row["before_retained"] or not row["after_retained"]
         persisted_reasons = _decode_json(row["reasons_json"], field="comparison reasons")
         if not isinstance(persisted_reasons, list) or any(
@@ -643,8 +671,201 @@ class TDHealthReadService:
         return {"schemaVersion": 1, "total": total, "limit": limit, "offset": offset,
                 "items": [self._comparison_header(row) for row in rows]}
 
-    def comparison(self, *, comparison_id: str, limit: int, offset: int) -> dict[str, Any] | None:
-        record = self.store.comparison_row(comparison_id, limit=limit, offset=offset)
+    def comparison_endpoints(
+        self, *, network_id: str, dataset_id: str, side: str, limit: int, offset: int,
+        after_assessment_id: str | None = None, selected_assessment_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not network_id.startswith("extpan:") or len(network_id) != 23 or any(
+            character not in "0123456789abcdef" for character in network_id[7:]
+        ):
+            raise ValueError("network must be a canonical network ID")
+        load_health_manifest().dataset(dataset_id)
+        if side not in ("before", "after"):
+            raise ValueError("side must be before or after")
+        try:
+            result = self.store.assessment_endpoint_page(
+                network_id=network_id, dataset_id=dataset_id, side=side,
+                limit=limit, offset=offset, after_assessment_id=after_assessment_id,
+                selected_assessment_id=selected_assessment_id,
+            )
+        except KeyError as exc:
+            raise HealthEndpointUnavailableError(str(exc)) from exc
+        policy = ComparisonPolicy()
+        return {
+            **result,
+            "comparisonVersion": COMPARISON_VERSION,
+            "comparisonPolicyDigest": policy.digest,
+        }
+
+    @staticmethod
+    def _derived_item_row(item: ComparisonItem) -> dict[str, Any]:
+        reset = item.reset_evidence
+        before_present = item.before_value is not None and (
+            item.kind not in {"presence-transition", "relationship-change"}
+            or item.before_value is True
+        )
+        after_present = item.after_value is not None and (
+            item.kind not in {"presence-transition", "relationship-change"}
+            or item.after_value is True
+        )
+        return {
+            "item_id": item.item_id,
+            "scope": item.scope,
+            "subject_id": item.subject_id,
+            "item_kind": item.kind,
+            "metric": item.metric,
+            "unit": item.unit,
+            "denominator_kind": item.denominator_kind,
+            "before_value": item.before_value,
+            "after_value": item.after_value,
+            "delta": item.delta,
+            "direction": item.direction,
+            "change": item.change,
+            "transition_state": item.transition,
+            "sample_count": item.sample_count,
+            "comparable": int(item.compatibility.comparable),
+            "reasons_json": json.dumps(item.compatibility.reasons),
+            "source_files_json": json.dumps(item.source_files),
+            "before_source_time": item.before_source_time,
+            "after_source_time": item.after_source_time,
+            "reset_state": reset.state if reset else "not-applicable",
+            "reset_witness_json": json.dumps({
+                "witness": reset.witness,
+                "before": reset.before_value,
+                "after": reset.after_value,
+            } if reset else {}),
+            "before_device_id": item.subject_id if item.scope == "device" and before_present else None,
+            "after_device_id": item.subject_id if item.scope == "device" and after_present else None,
+            "before_relationship_id": item.subject_id if item.scope == "relationship" and before_present else None,
+            "after_relationship_id": item.subject_id if item.scope == "relationship" and after_present else None,
+        }
+
+    def _comparison_detail_projection(
+        self, *, origin: str, row: dict[str, Any], item_rows: list[dict[str, Any]],
+        limit: int, offset: int, scope: str, result: str,
+    ) -> dict[str, Any]:
+        header = self._comparison_header(row)
+        pruned = header["baselineState"] == "pruned"
+        derived = origin == "derived"
+        projected_items = []
+        filtered_count = 0 if derived else row["filtered_item_count"]
+        for item in item_rows:
+            item = self._derived_item_row(item) if isinstance(item, ComparisonItem) else item
+            _validate_stored_timestamp(
+                item["before_source_time"], field="comparison Before source timestamp",
+            )
+            _validate_stored_timestamp(
+                item["after_source_time"], field="comparison After source timestamp",
+            )
+            if scope != "all" and item["scope"] != scope:
+                continue
+            persisted_reasons = _decode_json(item["reasons_json"], field="item reasons")
+            if not isinstance(persisted_reasons, list) or any(
+                not isinstance(reason, str) for reason in persisted_reasons
+            ):
+                raise HealthCorruptStoreError("Invalid item reasons")
+            try:
+                reasons = list(ordered_reasons(set(persisted_reasons) | (
+                    {"baseline-pruned"} if pruned else set()
+                )))
+            except ValueError as exc:
+                raise HealthCorruptStoreError("Invalid item reasons") from exc
+            comparable = bool(item["comparable"]) and not pruned
+            effective_change = item["change"] if comparable else "unknown"
+            if result != "all" and effective_change != result:
+                continue
+            if derived:
+                filtered_count += 1
+                if not offset <= filtered_count - 1 < offset + limit:
+                    continue
+            projected_items.append({
+                    "itemId": item["item_id"], "scope": item["scope"],
+                    "subjectId": item["subject_id"], "itemKind": item["item_kind"],
+                    "metric": item["metric"], "unit": item["unit"],
+                    "denominatorKind": item["denominator_kind"],
+                    "beforeValue": _decode_json(item["before_json"], field="before value")
+                    if "before_json" in item else item["before_value"],
+                    "afterValue": _decode_json(item["after_json"], field="after value")
+                    if "after_json" in item else item["after_value"],
+                    "delta": None if pruned else (
+                        _decode_json(item["delta_json"], field="delta")
+                        if "delta_json" in item else item["delta"]
+                    ),
+                    "direction": None if pruned else item["direction"],
+                    "change": effective_change,
+                    "transition": None if pruned else (
+                        item["transition_state"] if "transition_state" in item
+                        else item["transition"]
+                    ),
+                    "sampleCount": item["sample_count"],
+                    "sourceFiles": _decode_json(item["source_files_json"], field="source files")
+                    if "source_files_json" in item else item["source_files"],
+                    "beforeSourceObservedAt": item["before_source_time"],
+                    "afterSourceObservedAt": item["after_source_time"],
+                    "resetState": item["reset_state"],
+                    "resetWitness": _decode_json(item["reset_witness_json"], field="item reset witness")
+                    if "reset_witness_json" in item else item["reset_witness"],
+                    "beforeDeviceId": item["before_device_id"],
+                    "afterDeviceId": item["after_device_id"],
+                    "beforeRelationshipId": item["before_relationship_id"],
+                    "afterRelationshipId": item["after_relationship_id"],
+                    "persistedComparable": bool(item["comparable"]),
+                    "persistedReasons": persisted_reasons,
+                    "comparable": comparable,
+                    "primaryReason": reasons[0] if reasons else None,
+                    "reasons": reasons,
+                })
+        if origin == "derived":
+            row["created_at"] = None
+        return {
+            **header, "filteredItemCount": filtered_count,
+            "limit": limit, "offset": offset, "items": projected_items,
+            "origin": origin,
+        }
+
+    def comparison_pair(
+        self, *, network_id: str, dataset_id: str, before_assessment_id: str,
+        after_assessment_id: str, limit: int, offset: int,
+        scope: str = "all", result: str = "all",
+    ) -> dict[str, Any] | None:
+        if not network_id.startswith("extpan:") or len(network_id) != 23 or any(
+            character not in "0123456789abcdef" for character in network_id[7:]
+        ):
+            raise ValueError("network must be a canonical network ID")
+        load_health_manifest().dataset(dataset_id)
+        if not before_assessment_id or not after_assessment_id:
+            raise ValueError("before and after assessment IDs are required")
+        if scope not in ("all", *COMPARISON_SCOPES):
+            raise ValueError("scope must be all, network, device, or relationship")
+        if result not in ("all", *COMPARISON_RESULTS):
+            raise ValueError("result must be all, changed, unchanged, or unknown")
+        record = self.store.compare_endpoint_pair(
+            network_id=network_id, dataset_id=dataset_id,
+            before_assessment_id=before_assessment_id,
+            after_assessment_id=after_assessment_id, limit=limit, offset=offset,
+            scope=scope, result=result,
+        )
+        if record is None:
+            return None
+        origin, row, item_rows = record
+        if origin == "derived":
+            item_rows = row.pop("derived_items")
+        return self._comparison_detail_projection(
+            origin=origin, row=row, item_rows=item_rows, limit=limit, offset=offset,
+            scope=scope, result=result,
+        )
+
+    def comparison(
+        self, *, comparison_id: str, limit: int, offset: int,
+        scope: str = "all", result: str = "all",
+    ) -> dict[str, Any] | None:
+        if scope not in ("all", *COMPARISON_SCOPES):
+            raise ValueError("scope must be all, network, device, or relationship")
+        if result not in ("all", *COMPARISON_RESULTS):
+            raise ValueError("result must be all, changed, unchanged, or unknown")
+        record = self.store.comparison_row(
+            comparison_id, limit=limit, offset=offset, scope=scope, result=result,
+        )
         if record is None:
             return None
         row, item_rows = record
@@ -661,6 +882,7 @@ class TDHealthReadService:
                 reasons = list(ordered_reasons(set(persisted_reasons) | ({"baseline-pruned"} if pruned else set())))
             except ValueError as exc:
                 raise HealthCorruptStoreError("Invalid item reasons") from exc
+            comparable = bool(item["comparable"]) and not pruned
             items.append({
                 "itemId": item["item_id"], "scope": item["scope"],
                 "subjectId": item["subject_id"], "itemKind": item["item_kind"],
@@ -670,7 +892,7 @@ class TDHealthReadService:
                 "afterValue": _decode_json(item["after_json"], field="after value"),
                 "delta": None if pruned else _decode_json(item["delta_json"], field="delta"),
                 "direction": None if pruned else item["direction"],
-                "change": "unknown" if pruned else item["change"],
+                "change": item["change"] if comparable else "unknown",
                 "transition": None if pruned else item["transition_state"],
                 "sampleCount": item["sample_count"],
                 "sourceFiles": _decode_json(item["source_files_json"], field="source files"),
@@ -684,10 +906,13 @@ class TDHealthReadService:
                 "afterRelationshipId": item["after_relationship_id"],
                 "persistedComparable": bool(item["comparable"]),
                 "persistedReasons": persisted_reasons,
-                "comparable": bool(item["comparable"]) and not pruned,
+                "comparable": comparable,
                 "primaryReason": reasons[0] if reasons else None, "reasons": reasons,
             })
-        return {**header, "limit": limit, "offset": offset, "items": items}
+        return {
+            **header, "filteredItemCount": row["filtered_item_count"],
+            "limit": limit, "offset": offset, "items": items,
+        }
 
     def device(self, *, assessment_id: str, device_id: str) -> dict | None:
         row = self.store.device_record(
@@ -715,11 +940,17 @@ class TDHealthReadService:
 
     def capabilities(self) -> dict[str, Any]:
         capabilities = self.store.store_capabilities()
+        policy = ComparisonPolicy()
         return {
             "schemaVersion": 1,
             "readOnly": True,
             "history": True,
             **({"comparisonReadModel": 1} if capabilities["schemaVersion"] >= 4 else {}),
+            **({
+                "comparisonEndpointSelection": 1,
+                "comparisonVersion": COMPARISON_VERSION,
+                "comparisonPolicyDigest": policy.digest,
+            } if capabilities["schemaVersion"] >= 4 else {}),
             "rosterMutation": "cli-only",
             "datasets": sorted(load_health_manifest().datasets),
             **capabilities,

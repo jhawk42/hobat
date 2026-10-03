@@ -286,7 +286,13 @@ Older assessments and metrics retain `legacy-unknown` sample semantics; only
 losslessly represented extAddress, role, and state device facts are backfilled
 with unknown source provenance. Existing assessments and findings are not
 rewritten. A comparison is stored atomically with an eligible new assessment;
-late-arriving observations do not move the current pointer backward.
+late-arriving observations do not move the current pointer backward. For each
+complete After observation, processing also resolves the 1-, 3-, 7-, and
+30-day targets from retained complete assessments and stores each unique
+missing pair alongside the existing adjacent pair. Candidate IDs are
+deduplicated, existing immutable pairs are not rebuilt, and all pairs share
+the assessment transaction. The interval durations are elapsed days, not
+calendar periods; long intervals can be stored as non-comparable Unknown.
 
 New observations also retain source-specific Thread device facts. Only complete
 observations advance the last-known projection; a repeated device file with an
@@ -323,9 +329,13 @@ removed transactionally. Their immutable observations and assessments remain
 available as history.
 
 The store retains at most 2,000 observations and 2,000 comparison headers.
+Up to five unique comparisons may be added for one processed assessment, so
+the unchanged comparison cap can shorten the stored-pair time horizon.
 Pruning occurs in the same write transaction and never deletes collector
 snapshots. Retained comparisons with pruned endpoints become Unknown on reads;
-their original endpoint IDs and timestamps remain unchanged. Automatic byte retention,
+their original endpoint IDs and timestamps remain unchanged. The new endpoint
+selectors list retained assessments only; use a stored comparison ID to
+inspect older pair headers whose endpoint was pruned. Automatic byte retention,
 redaction, scheduling, probes, duration, rates, trends, and firmware compliance
 are not implemented.
 
@@ -384,12 +394,14 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health compare \
   --before-assessment ASSESSMENT_ID --after-assessment ASSESSMENT_ID --dry-run --json
 ```
 
-Omit `--dry-run` to store the deterministic pair. Automatic pairs use the
-latest complete assessment strictly earlier than the new observation for the
-same network and dataset; identical observation times are not paired. The
-separate `comparison-v1` policy permits gaps of at most seven days and an
-uptime-continuity tolerance of 300 seconds. The result is discrete Before/After
-evidence, not a trend, rate, duration, or availability estimate. Counter
+Omit `--dry-run` to store the deterministic pair. Automatic processing stores
+the latest complete assessment strictly earlier than the new observation and
+the unique complete assessments selected at or before 1, 3, 7, and 30 elapsed
+days before it, for the same network and dataset. Identical observation times
+are not paired. The separate `comparison-v1` policy permits gaps of at most
+seven days and uses an uptime-continuity tolerance of 300 seconds. The result
+is discrete Before/After evidence, not a trend, rate, duration, or availability
+estimate. Counter
 decreases and missing or conflicting reset witnesses produce Unknown rather
 than a spike. A newer outcome file does not refresh an unchanged device file.
 Approved cached device sources do not provide an audited reset epoch or uptime
@@ -424,18 +436,60 @@ Stored roster addresses are sourced
 display values, not verified stable OMR aliases; prefix provenance is not yet
 persisted with those facts.
 
+`GET /api/health/comparison-endpoints?network=...&dataset=...&side=after&limit=25&offset=0`
+pages retained assessment endpoints. Use `side=before` with `after=ASSESSMENT_ID`
+to page only assessments strictly earlier than the selected After. The response
+also resolves defaults and shortcut candidates over the full retained history,
+independent of the page; `selected=ASSESSMENT_ID` pins an endpoint outside the
+visible page. Limits cannot exceed 100.
+
+`GET /api/health/comparison?network=...&dataset=...&before=ASSESSMENT_ID&after=ASSESSMENT_ID&limit=25&offset=0`
+reads an arbitrary retained endpoint pair. It uses a matching stored pair when
+available or derives the pair from retained evidence without writing. Optional
+`scope=all|network|device|relationship` and
+`result=all|changed|unchanged|unknown` filters are applied before paging.
+Responses identify `origin` as `stored` or `derived`; derived responses have
+`createdAt: null`. The older
 `GET /api/health/comparisons?network=...&dataset=...&limit=25&offset=0`
-lists stored summaries; `GET /api/health/comparisons/{comparison_id}?limit=25&offset=0`
-returns a pinned header and item page. Limits cannot exceed 100. Both routes
-are read-only and no-store. Responses distinguish stored comparability from a
-read-time `baseline-pruned` override; no GET creates or repairs a comparison.
-For health-eligible datasets with comparison read capability, Insights offers
-Snapshot and Comparison modes. Comparison lists stored pairs for the selected
-network and dataset; select a pair to see its exact Before and After endpoints,
-item values, source attribution, and server-provided comparability reasons.
-The scope control filters the current item page. Next/Previous pages keep the
-selected pair pinned; Reset returns to the Snapshot view and clears workflow
-filters. This view does not create pairs or infer deltas from roster values.
+and `GET /api/health/comparisons/{comparison_id}?limit=25&offset=0` routes
+remain available for stored pair history, including pruned endpoints. All four
+GET routes are read-only and no-store. Stored responses distinguish persisted
+comparability from a read-time `baseline-pruned` override; no GET creates or
+repairs a comparison.
+
+For health-eligible datasets with comparison endpoint-selection capability,
+Insights offers Snapshot and Comparison modes. Comparison opens with the 1D
+preset selected and Custom collapsed. The 1D, 3D, and 1W presets resolve
+against the latest retained After assessment, at or before exactly 1, 3, or 7
+elapsed days before its observation time. They do not fall back to a later or
+nearest assessment. Custom reveals independent Before and After selectors for
+any retained pair, including partial assessments; editing an endpoint loads
+that pair automatically. Opening or closing Custom does not change the
+selection. Missing preset candidates are disabled with an accessible
+explanation.
+
+Selector and summary timestamps are displayed in UTC to whole seconds while
+retaining full source timestamps in option and heading metadata. The 1M control
+alone is removed from the UI; its server-side 30-day candidate resolution and
+automatic persistence remain unchanged. Partial or over-seven-day pairs retain
+truthful Unknown behavior. The compact summary shows the selected endpoints
+and actual elapsed time; expandable Details exposes comparison metadata.
+
+Result defaults to Changed and offers Changed, Unchanged, Unknown, and All
+results. Changed includes both improved and worsened rows; Unknown includes
+non-comparable rows and rows whose baseline endpoint has been pruned. Result
+and scope combine across the entire comparison on the server before paging.
+Result follows Comparison scope in the filter controls. The UI shows the
+visible row range, full combined-filter match count, and unfiltered comparison
+count separately; for example, `1–25 of 482 matching rows` and `1,626 total
+rows`. First/Previous/direct page selection/Next/Last navigate the matching
+rows in 25-row pages; the footer remains outside the internally scrolling
+table. Filters and valid endpoints remain selected when changing pairs, pages,
+modes, or drilling down and returning; dataset changes, Reset, and reload
+restore Changed and All scopes. Changing a filter restarts item paging at the
+first matching row. This view does not create pairs or infer deltas from roster
+values. Old stored-pair APIs remain supported for clients that need to inspect
+a pruned pair by its ID.
 
 The aiohttp server exposes query-only, `Cache-Control: no-store` routes for the
 latest or pinned assessment, grouped or ungrouped findings, one attributed
