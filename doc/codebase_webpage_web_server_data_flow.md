@@ -123,9 +123,11 @@ The dashboard explicitly requests its Changed default; callers that omit the
 filters retain the unfiltered API behavior. See
 [Thread Network Health](thread_network_health.md#read-api-and-dashboard) for
 route parameters, latest-After preset selection, Custom endpoint selection,
-filter/count semantics, and lifecycle. Preset intent, disclosure state, visible
-row ranges, and direct 25-row pagination are browser-owned UI state; they do
-not change the query-only server contract or comparison policy.
+filter/count semantics, and lifecycle. Findings, Comparison, and Device Roster
+are browser-owned peer tabs; the selected tab, preset intent, disclosure
+state, visible row ranges, and direct 25-row pagination remain in the browser.
+Reset comparison only resets Comparison state. These navigation choices do not
+change the query-only server contract or comparison policy.
 
 ## Device Diagnostics
 

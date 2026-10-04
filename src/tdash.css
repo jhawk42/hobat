@@ -1326,17 +1326,19 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   font-size: 12px;
   color: var(--muted);
 }
-#health-insights-tabs { display: flex; gap: 4px; }
+#health-insights-tabs { display: flex; gap: 4px; min-width: 0; }
 #health-insights-tabs button {
-  max-width: 50%;
+  flex: 1 1 0;
+  max-width: none;
   min-width: 0;
   border: 0;
   border-bottom: 3px solid transparent;
   background: transparent;
-  padding: 9px 12px;
+  padding: 9px clamp(2px, 0.75vw, 8px);
   color: var(--muted);
   cursor: pointer;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  white-space: normal;
 }
 #health-insights-tabs button[aria-selected="true"] {
   border-bottom-color: var(--accent);
@@ -1538,7 +1540,7 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 }
 .health-roster-navigation { display: flex; gap: 8px; }
 
-#health-mode-switch,
+.health-comparison-panel-actions,
 .health-comparison-navigation,
 .health-comparison-row-pagination {
   display: flex;
@@ -1548,13 +1550,8 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   margin: 10px 0;
 }
 
-#health-mode-switch[hidden] { display: none; }
-
-#health-mode-switch button[aria-pressed="true"] {
-  border-color: var(--accent);
-  font-weight: 700;
-}
-
+#health-panel-comparison { min-width: 0; }
+.health-comparison-panel-actions { justify-content: flex-end; }
 #health-comparison { margin: 12px 0; }
 #health-comparison select { max-width: 100%; min-width: min(12rem, 100%); }
 .health-comparison-controls,

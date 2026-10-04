@@ -399,6 +399,12 @@ export function createHealthComparisonDetailController({
     }
   }
 
+  function retrySelected() {
+    const selection = getSelection();
+    if (!selection.comparisonId) return;
+    return select(selection.comparisonId, getOffset());
+  }
+
   function reconcileSummary() {
     const selection = getSelection();
     if (!selection.comparisonId) return;
@@ -443,7 +449,7 @@ export function createHealthComparisonDetailController({
     onChange();
   }
 
-  return { select, reconcileSummary, invalidate, cancelPending, changeFilter };
+  return { select, retrySelected, reconcileSummary, invalidate, cancelPending, changeFilter };
 }
 
 function formatComparisonTime(timestamp, now) {
@@ -611,6 +617,16 @@ export function renderHealthComparison(container, page, comparison, viewState = 
   if (!container) return;
   const focusedDisclosureId = document.activeElement?.getAttribute?.("aria-controls");
   const focusedPageAction = document.activeElement?.getAttribute?.("data-comparison-page-action");
+  const appendError = (message) => {
+    const error = appendText(container, "p", message, "error");
+    error.setAttribute("role", "alert");
+    return error;
+  };
+  const appendRetry = (retryAction = actions.retry) => {
+    const retry = appendText(container, "button", "Retry comparison read");
+    retry.type = "button";
+    retry.addEventListener("click", () => retryAction?.());
+  };
   const restoreDisclosureFocus = () => {
     if (!container.querySelectorAll) return;
     if (focusedDisclosureId) {
@@ -638,6 +654,40 @@ export function renderHealthComparison(container, page, comparison, viewState = 
     }
   };
   const endpointSelection = viewState.endpointSelection === true;
+  if (viewState.supportLoading) {
+    container.replaceChildren();
+    const status = appendText(container, "p", "Loading comparison availability…");
+    status.setAttribute("role", "status");
+    restoreDisclosureFocus();
+    return;
+  }
+  if (viewState.assessmentError && !viewState.assessmentAvailable) {
+    container.replaceChildren();
+    appendError(`The selected assessment is unavailable: ${viewState.assessmentError}`);
+    appendRetry();
+    restoreDisclosureFocus();
+    return;
+  }
+  if (viewState.supportError || viewState.capabilityKnown === false) {
+    container.replaceChildren();
+    appendError(viewState.supportError
+      ? `Comparison availability could not be loaded: ${viewState.supportError}`
+      : "Comparison availability could not be determined.");
+    appendRetry();
+    restoreDisclosureFocus();
+    return;
+  }
+  if (viewState.capabilityKnown === true && !viewState.comparisonReadModel) {
+    container.replaceChildren();
+    const status = appendText(
+      container,
+      "p",
+      "Comparison is unavailable because this health service does not support comparison reads.",
+    );
+    status.setAttribute("role", "status");
+    restoreDisclosureFocus();
+    return;
+  }
   const liveStatusClass = "visually-hidden health-comparison-shortcut-status";
   let liveStatus = endpointSelection
     ? Array.from(container.children).find((child) => child.className === liveStatusClass)
@@ -661,28 +711,34 @@ export function renderHealthComparison(container, page, comparison, viewState = 
   if (endpointSelection && viewState.listLoading
       && !viewState.endpointPages?.after && !viewState.endpointPages?.before) {
     liveStatus.textContent = "Loading retained assessments.";
-    appendText(container, "p", "Loading retained assessments…");
+    appendText(container, "p", "Loading retained assessments…").setAttribute("role", "status");
     restoreDisclosureFocus();
     return;
   }
   if (!endpointSelection && viewState.listLoading && !page) {
-    appendText(container, "p", "Loading stored comparisons…");
+    appendText(container, "p", "Loading stored comparisons…").setAttribute("role", "status");
     restoreDisclosureFocus();
     return;
   }
   if (!endpointSelection && viewState.listError && !page) {
-    appendText(container, "p", viewState.listError);
+    appendError(`Comparison read failed: ${viewState.listError}`);
+    appendRetry();
     restoreDisclosureFocus();
     return;
   }
   if (!endpointSelection && (!page || !Array.isArray(page.items))) {
-    appendText(container, "p", "Stored comparisons are unavailable.");
+    appendError("Stored comparison history is unavailable.");
+    appendRetry();
     restoreDisclosureFocus();
     return;
   }
-  if (!endpointSelection && viewState.listError) appendText(container, "p", viewState.listError);
+  if (!endpointSelection && viewState.listError) {
+    appendError(`Comparison read failed: ${viewState.listError}`);
+    appendRetry();
+  }
   if (!endpointSelection && !page.total) {
-    appendText(container, "p", "No stored comparisons for this dataset.");
+    const status = appendText(container, "p", "Not enough retained history for a comparison yet.");
+    status.setAttribute("role", "status");
     restoreDisclosureFocus();
     return;
   }
@@ -735,27 +791,45 @@ export function renderHealthComparison(container, page, comparison, viewState = 
   }
   if (endpointSelection) {
     if (viewState.endpointErrors?.before) {
-      appendText(container, "p", viewState.endpointErrors.before, "error");
+      appendError(`Before assessment history read failed: ${viewState.endpointErrors.before}`);
+      appendRetry();
     }
     if (viewState.endpointErrors?.after) {
-      appendText(container, "p", viewState.endpointErrors.after, "error");
+      appendError(`After assessment history read failed: ${viewState.endpointErrors.after}`);
+      appendRetry();
     }
     if (viewState.presetError) {
-      appendText(container, "p", viewState.presetError, "error");
+      appendError(`Comparison preset read failed: ${viewState.presetError}`);
+      appendRetry();
     }
     if (viewState.endpointUnavailable) {
-      appendText(container, "p", "A selected assessment is no longer retained. Select new endpoints.",
-        "health-comparison-endpoint-unavailable");
+      const status = appendText(
+        container,
+        "p",
+        "A selected assessment is no longer retained. Select new endpoints.",
+        "health-comparison-endpoint-unavailable",
+      );
+      status.setAttribute("role", "status");
     } else if (viewState.endpointPages?.after?.total === 0) {
-      appendText(container, "p", "No retained assessments are available for this network and dataset.");
+      const status = appendText(
+        container, "p",
+        "Not enough history: no retained assessments are available for this network and dataset.",
+      );
+      status.setAttribute("role", "status");
     } else if (viewState.presetLoading) {
-      appendText(container, "p", "Resolving the latest retained After assessment…");
+      appendText(container, "p", "Resolving the latest retained After assessment…")
+        .setAttribute("role", "status");
     } else if (!viewState.afterAssessmentId) {
       if (!viewState.presetError && !viewState.listLoading) {
-        appendText(container, "p", "No retained After assessment is available.");
+        const status = appendText(container, "p", "Not enough history: no retained After assessment is available.");
+        status.setAttribute("role", "status");
       }
     } else if (!viewState.beforeAssessmentId) {
-      appendText(container, "p", "Not enough history for the selected interval. Open Custom to choose retained endpoints.");
+      const status = appendText(
+        container, "p",
+        "Not enough history for the selected interval. Open Custom to choose retained endpoints.",
+      );
+      status.setAttribute("role", "status");
     }
   } else {
     const nav = appendText(container, "div", "", "health-comparison-navigation");
@@ -769,12 +843,13 @@ export function renderHealthComparison(container, page, comparison, viewState = 
     next.addEventListener("click", () => actions.page?.(page.offset + page.limit));
   }
   if (viewState.endpointPairLoading || viewState.detailLoading) {
-    appendText(container, "p", "Loading comparison rows…");
+    appendText(container, "p", "Loading comparison rows…").setAttribute("role", "status");
     restoreDisclosureFocus();
     return;
   }
   if (viewState.endpointPairError || viewState.detailError) {
-    appendText(container, "p", viewState.endpointPairError || viewState.detailError);
+    appendError(`Comparison rows could not be loaded: ${viewState.endpointPairError || viewState.detailError}`);
+    appendRetry(endpointSelection ? actions.retry : actions.retryDetail);
     restoreDisclosureFocus();
     return;
   }

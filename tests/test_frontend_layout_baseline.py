@@ -165,6 +165,39 @@ def test_semantic_layout_and_workspace_hierarchy() -> None:
     assert parser.parent_by_id["topology-view"] == "topology-canvas-wrap"
 
 
+def test_health_insights_comparison_is_an_ordered_peer_tab() -> None:
+    parser = _IdParentParser()
+    html = _read_text(HTML)
+    ui_text = _read_text(UI_JS)
+    parser.feed(html)
+
+    tabs = [
+        ("health-tab-findings", "health-panel-findings"),
+        ("health-tab-comparison", "health-panel-comparison"),
+        ("health-tab-roster", "health-panel-roster"),
+    ]
+    assert [html.index(f'id="{button_id}"') for button_id, _ in tabs] == sorted(
+        html.index(f'id="{button_id}"') for button_id, _ in tabs
+    )
+    for button_id, panel_id in tabs:
+        assert parser.attributes_by_id[button_id]["role"] == "tab"
+        assert parser.attributes_by_id[button_id]["aria-controls"] == panel_id
+        assert parser.attributes_by_id[panel_id]["role"] == "tabpanel"
+        assert parser.attributes_by_id[panel_id]["aria-labelledby"] == button_id
+    assert parser.parent_by_id["health-comparison"] == "health-panel-comparison"
+    assert parser.attributes_by_id["health-tab-findings"]["aria-selected"] == "true"
+    assert parser.attributes_by_id["health-tab-findings"]["tabindex"] == "0"
+    assert parser.attributes_by_id["health-tab-comparison"]["aria-selected"] == "false"
+    assert parser.attributes_by_id["health-tab-roster"]["aria-selected"] == "false"
+    assert 'id="health-mode-switch"' not in html
+    assert 'id="health-mode-snapshot"' not in html
+    assert 'id="health-mode-comparison"' not in html
+    assert 'const HEALTH_INSIGHTS_TABS = [' in ui_text
+    assert 'let healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;' in ui_text
+    assert 'healthInsightsTab === "comparison" && currentView === "insights"' in ui_text
+    assert "ensureHealthComparisonLoaded();" in ui_text
+
+
 def test_topology_controls_use_container_layout_and_native_legend_disclosure() -> None:
     parser = _IdParentParser()
     html = _read_text(HTML)

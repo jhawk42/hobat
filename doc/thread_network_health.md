@@ -457,16 +457,23 @@ GET routes are read-only and no-store. Stored responses distinguish persisted
 comparability from a read-time `baseline-pruned` override; no GET creates or
 repairs a comparison.
 
-For health-eligible datasets with comparison endpoint-selection capability,
-Insights offers Snapshot and Comparison modes. Comparison opens with the 1D
-preset selected and Custom collapsed. The 1D, 3D, and 1W presets resolve
-against the latest retained After assessment, at or before exactly 1, 3, or 7
-elapsed days before its observation time. They do not fall back to a later or
-nearest assessment. Custom reveals independent Before and After selectors for
-any retained pair, including partial assessments; editing an endpoint loads
-that pair automatically. Opening or closing Custom does not change the
-selection. Missing preset candidates are disabled with an accessible
-explanation.
+Network Insights offers **Findings**, **Comparison**, and **Device Roster** as
+peer tabs, with Findings selected initially. Each tab retains its own
+navigation, filters, selection, disclosures, and table position while moving
+between tabs or using Show in table/Return. The **Selected assessment** summary
+describes the assessment pinned to Findings and Device Roster. It must not be
+read as the health of an arbitrary comparison pair or necessarily its After
+endpoint.
+
+For health-eligible datasets with comparison-read capability, the Comparison
+tab opens with the 1D preset selected and Custom collapsed. The 1D, 3D, and 1W
+presets resolve against the latest retained After assessment, at or before
+exactly 1, 3, or 7 elapsed days before its observation time. They do not fall
+back to a later or nearest assessment. Custom reveals independent Before and
+After selectors for any retained pair, including partial assessments; editing
+an endpoint loads that pair automatically. Opening or closing Custom does not
+change the selection. Missing preset candidates are disabled with an
+accessible explanation.
 
 Selector and summary timestamps are displayed in UTC to whole seconds while
 retaining full source timestamps in option and heading metadata. The 1M control
@@ -474,6 +481,21 @@ alone is removed from the UI; its server-side 30-day candidate resolution and
 automatic persistence remain unchanged. Partial or over-seven-day pairs retain
 truthful Unknown behavior. The compact summary shows the selected endpoints
 and actual elapsed time; expandable Details exposes comparison metadata.
+
+**Reset comparison** resets only Comparison: it restores 1D/latest-After
+intent, Changed results, All scopes, first history/result pages, collapsed
+Custom and Details, and zero table scroll. It stays on Comparison and preserves
+Findings and Device Roster state. Findings Reset retains its existing
+whole-workflow behavior and selects Findings.
+
+Comparison remains discoverable while its capability and history are loading
+or unavailable. Unsupported comparison reads, insufficient retained history,
+no rows matching the current filters, non-comparable pairs, and request errors
+are distinct states. Empty matches retain the selected pair and filters;
+unavailable history is not presented as a successful empty comparison. Legacy
+stored-pair reads remain supported when endpoint selection is not available.
+Comparison reads and retries are query-only; they do not collect data, process
+health, run diagnostics, or write the database.
 
 Result defaults to Changed and offers Changed, Unchanged, Unknown, and All
 results. Changed includes both improved and worsened rows; Unknown includes
@@ -485,9 +507,9 @@ count separately; for example, `1–25 of 482 matching rows` and `1,626 total
 rows`. First/Previous/direct page selection/Next/Last navigate the matching
 rows in 25-row pages; the footer remains outside the internally scrolling
 table. Filters and valid endpoints remain selected when changing pairs, pages,
-modes, or drilling down and returning; dataset changes, Reset, and reload
-restore Changed and All scopes. Changing a filter restarts item paging at the
-first matching row. This view does not create pairs or infer deltas from roster
+or drilling down and returning; dataset/network identity changes, Reset
+comparison, and reload restore Changed and All scopes. Changing a filter
+restarts item paging at the first matching row. This view does not create pairs or infer deltas from roster
 values. Old stored-pair APIs remain supported for clients that need to inspect
 a pruned pair by its ID.
 

@@ -311,62 +311,63 @@
             <div id="health-insights-summary"></div>
             <div id="health-insights-tabs" role="tablist" aria-label="Health insights">
               <button id="health-tab-findings" type="button" role="tab" aria-controls="health-panel-findings" aria-selected="true" tabindex="0">Findings <span id="health-findings-count"></span></button>
+              <button id="health-tab-comparison" type="button" role="tab" aria-controls="health-panel-comparison" aria-selected="false" tabindex="-1">Comparison</button>
               <button id="health-tab-roster" type="button" role="tab" aria-controls="health-panel-roster" aria-selected="false" tabindex="-1">Device Roster <span id="health-roster-count"></span></button>
             </div>
             </div>
             <section id="health-panel-findings" role="tabpanel" aria-labelledby="health-tab-findings">
-          <div id="health-insights-filters" class="health-insights-filters" hidden>
-            <label title="Choose actionable, healthy, or all finding groups.">View
-              <select id="health-view-filter" title="Choose which finding groups to show.">
-                <option value="all" selected>All</option>
-                <option value="actionable">Actionable</option>
-                <option value="going-well">Going Well</option>
-              </select>
-            </label>
-            <label title="Filter findings by their assessed health status.">Status
-              <select id="health-status-filter" title="Show only findings with the selected health status.">
-                <option value="all">All</option>
-                <option value="poor">Poor</option>
-                <option value="moderate">Moderate</option>
-                <option value="strong">Strong</option>
-                <option value="unknown">Unknown</option>
-              </select>
-            </label>
-            <label title="Filter findings by the network object they describe.">Scope
-              <select id="health-scope-filter" title="Show network-wide, device-specific, or relationship-specific findings.">
-                <option value="all">All</option>
-                <option value="network">Network</option>
-                <option value="device">Device</option>
-                <option value="relationship">Relationship</option>
-              </select>
-            </label>
-            <label title="Filter findings by the kind of evidence used.">Evidence
-              <select id="health-evidence-filter" title="Show findings backed by the selected evidence kind.">
-                <option value="all">All</option>
-                <option value="snapshot">Snapshot</option>
-                <option value="since-reset">Since reset</option>
-                <option value="historical">Historical</option>
-                <option value="expected-state">Expected state</option>
-                <option value="active-probe">Active probe</option>
-              </select>
-            </label>
-            <button id="btn-health-reset" type="button" title="Clear health filters and navigation state">Reset</button>
-            <button id="btn-health-export" type="button" title="Download the pinned health assessment">Export JSON</button>
-          </div>
-            <div id="health-mode-switch" role="group" aria-label="Health view mode" hidden>
-              <button id="health-mode-snapshot" type="button" aria-pressed="true">Snapshot</button>
-              <button id="health-mode-comparison" type="button" aria-pressed="false">Comparison</button>
-              <button id="btn-health-comparison-reset" type="button" hidden>Reset</button>
-            </div>
-            <section id="health-comparison" aria-label="Stored comparison" hidden></section>
-            <div id="health-insights-evidence"></div>
-            <div id="health-finding-table-wrap" class="health-finding-table-wrap">
-              <table id="health-finding-table">
-                <thead></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <div id="health-insights-empty"></div>
+              <div id="health-insights-filters" class="health-insights-filters" hidden>
+                <label title="Choose actionable, healthy, or all finding groups.">View
+                  <select id="health-view-filter" title="Choose which finding groups to show.">
+                    <option value="all" selected>All</option>
+                    <option value="actionable">Actionable</option>
+                    <option value="going-well">Going Well</option>
+                  </select>
+                </label>
+                <label title="Filter findings by their assessed health status.">Status
+                  <select id="health-status-filter" title="Show only findings with the selected health status.">
+                    <option value="all">All</option>
+                    <option value="poor">Poor</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="strong">Strong</option>
+                    <option value="unknown">Unknown</option>
+                  </select>
+                </label>
+                <label title="Filter findings by the network object they describe.">Scope
+                  <select id="health-scope-filter" title="Show network-wide, device-specific, or relationship-specific findings.">
+                    <option value="all">All</option>
+                    <option value="network">Network</option>
+                    <option value="device">Device</option>
+                    <option value="relationship">Relationship</option>
+                  </select>
+                </label>
+                <label title="Filter findings by the kind of evidence used.">Evidence
+                  <select id="health-evidence-filter" title="Show findings backed by the selected evidence kind.">
+                    <option value="all">All</option>
+                    <option value="snapshot">Snapshot</option>
+                    <option value="since-reset">Since reset</option>
+                    <option value="historical">Historical</option>
+                    <option value="expected-state">Expected state</option>
+                    <option value="active-probe">Active probe</option>
+                  </select>
+                </label>
+                <button id="btn-health-reset" type="button" title="Clear health filters and navigation state">Reset</button>
+                <button id="btn-health-export" type="button" title="Download the pinned health assessment">Export JSON</button>
+              </div>
+              <div id="health-insights-evidence"></div>
+              <div id="health-finding-table-wrap" class="health-finding-table-wrap">
+                <table id="health-finding-table">
+                  <thead></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div id="health-insights-empty"></div>
+            </section>
+            <section id="health-panel-comparison" role="tabpanel" aria-labelledby="health-tab-comparison" hidden>
+              <div class="health-comparison-panel-actions">
+                <button id="btn-health-comparison-reset" type="button">Reset comparison</button>
+              </div>
+              <section id="health-comparison" aria-label="Stored comparison"></section>
             </section>
             <section id="health-panel-roster" role="tabpanel" aria-labelledby="health-tab-roster" hidden>
               <div class="health-roster-controls">

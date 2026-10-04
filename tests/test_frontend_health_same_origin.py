@@ -108,6 +108,174 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
     }
 
 
+def test_health_comparison_availability_and_empty_history_states_are_distinct() -> None:
+    script = r"""
+      import {renderHealthComparison} from "./src/js/tdash-health.js";
+
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.listeners = {};
+        }
+        appendChild(child) { this.children.push(child); return child; }
+        replaceChildren() { this.children = []; }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+      }
+      globalThis.document = {
+        activeElement: null,
+        createElement: (tagName) => new Element(tagName),
+      };
+      const render = (state, actions = {}, page = null, comparison = null) => {
+        const container = new Element("section");
+        renderHealthComparison(container, page, comparison, state, actions);
+        return container;
+      };
+      const textContent = (element) => [
+        element.textContent || "",
+        ...element.children.map(textContent),
+      ].join(" ");
+      const loading = render({supportLoading: true});
+      const unsupported = render({capabilityKnown: true, comparisonReadModel: false});
+      let retried = 0;
+      const failed = render({capabilityKnown: false, supportError: "offline"}, {
+        retry: () => { retried += 1; },
+      });
+      failed.children.find((child) => child.tagName === "button").listeners.click();
+      let detailRetried = 0;
+      const legacyDetailFailure = render({
+        capabilityKnown: true,
+        comparisonReadModel: true,
+        endpointSelection: false,
+        comparisonId: "pair",
+        detailError: "offline",
+      }, {
+        retry: () => { retried += 1; },
+        retryDetail: () => { detailRetried += 1; },
+      }, {total: 1, offset: 0, limit: 25, items: [
+        {comparisonId: "pair", beforeObservedAt: null, afterObservedAt: null},
+      ]});
+      legacyDetailFailure.children.find(
+        (child) => child.tagName === "button" && child.textContent === "Retry comparison read",
+      ).listeners.click();
+      const higherPriorityFailure = render({
+        capabilityKnown: true,
+        comparisonReadModel: true,
+        supportError: "offline",
+        comparisonId: "pair",
+        detailError: "stale detail error",
+      }, {
+        retry: () => { retried += 1; },
+        retryDetail: () => { detailRetried += 1; },
+      });
+      higherPriorityFailure.children.find(
+        (child) => child.tagName === "button" && child.textContent === "Retry comparison read",
+      ).listeners.click();
+      const insufficient = render({
+        capabilityKnown: true,
+        comparisonReadModel: true,
+        endpointSelection: true,
+        endpointPages: {
+          before: null,
+          after: {total: 0, offset: 0, limit: 25, items: [], shortcuts: []},
+        },
+        endpointLoading: {before: false, after: false},
+        endpointErrors: {before: "", after: ""},
+      });
+      const emptyLegacy = new Element("section");
+      renderHealthComparison(emptyLegacy, {total: 0, offset: 0, limit: 25, items: []}, null, {
+        capabilityKnown: true,
+        comparisonReadModel: true,
+        endpointSelection: false,
+      });
+      console.log(JSON.stringify({
+        loading: textContent(loading),
+        unsupported: textContent(unsupported),
+        failed: textContent(failed),
+        failedRole: failed.children[0].role,
+        retryLabel: failed.children[1].textContent,
+        retried, detailRetried,
+        unavailableHistory: textContent(insufficient),
+        emptyLegacy: textContent(emptyLegacy),
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert "Loading comparison availability" in result["loading"]
+    assert "does not support comparison reads" in result["unsupported"]
+    assert "availability could not be loaded: offline" in result["failed"]
+    assert result["failedRole"] == "alert"
+    assert result["retryLabel"] == "Retry comparison read"
+    assert result["retried"] == 2
+    assert result["detailRetried"] == 1
+    assert "Not enough history" in result["unavailableHistory"]
+    assert "Not enough retained history" in result["emptyLegacy"]
+
+
+def test_legacy_comparison_detail_retry_reloads_selected_pair() -> None:
+    script = r"""
+      import {createHealthComparisonDetailController} from "./src/js/tdash-health.js";
+
+      const state = {
+        comparisonDetailRequestVersion: 0,
+        comparisonDetailError: "",
+        comparisonDetailLoading: false,
+        comparisonDetailRequestIdentity: null,
+        comparisonDetailRequestHeader: null,
+        comparison: null,
+        comparisonQueryIdentity: null,
+      };
+      const assessment = {networkId: "network", datasetId: "dataset"};
+      const selection = {comparisonId: "pair", scope: "all", result: "changed"};
+      let offset = 0;
+      let attempts = 0;
+      const controller = createHealthComparisonDetailController({
+        state,
+        getAssessment: () => assessment,
+        getSelection: () => selection,
+        getSummary: () => null,
+        getOffset: () => offset,
+        setOffset: (value) => { offset = value; },
+        updateSelection: () => {},
+        fetchDetail: async (comparisonId, requestedOffset) => {
+          attempts += 1;
+          if (attempts === 1) throw new Error("offline");
+          return {
+            schemaVersion: 1, comparisonId, networkId: "network", datasetId: "dataset",
+            itemCount: 1, filteredItemCount: 1, limit: 25, offset: requestedOffset,
+            items: [{itemId: "item", scope: "device", subjectId: "device"}],
+          };
+        },
+      });
+      await controller.select("pair", offset);
+      const firstError = state.comparisonDetailError;
+      await controller.retrySelected();
+      console.log(JSON.stringify({
+        firstError, attempts, finalError: state.comparisonDetailError,
+        comparisonId: state.comparison?.comparisonId ?? null,
+        offset,
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result == {
+        "firstError": "offline",
+        "attempts": 2,
+        "finalError": "",
+        "comparisonId": "pair",
+        "offset": 0,
+    }
+
+
 def test_comparison_detail_query_and_page_validation() -> None:
     script = r"""
       import {
@@ -1027,6 +1195,8 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
       assert action in health_js
       assert action in ui_js
     assert "restoreHealthNavigationContext" in ui_js
+    assert "healthComparisonDetailController.retrySelected()" in ui_js
+    assert "retryDetail: () => { void healthComparisonDetailController.retrySelected(); }" in ui_js
     assert "comparisonTableScrollTop: healthInsightsViewState.comparisonTableScrollTop" in ui_js
     assert 'event.target?.matches?.(".health-comparison-table-wrap")' in ui_js
     assert "healthInsightsViewState.comparisonTableScrollTop = event.target.scrollTop;" in ui_js
@@ -1076,7 +1246,7 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert '<option value="all" selected>All</option>' in html
     assert 'view: "all"' in ui_js
     assert 'healthInsightsViewState.view = "all";' in ui_js
-    assert 'document.getElementById("health-view-filter").value = "all";' in ui_js
+    assert 'if (viewFilter) viewFilter.value = "all";' in ui_js
     assert "Health processed:" in health_js
     assert "refreshedAt" in ui_js
     assert html.index('id="btn-health-refresh"') < html.index('id="btn-details-panel-toggle"')
@@ -1109,3 +1279,29 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert 'aria-pressed="false"' in html
     assert "overflow-wrap: anywhere" in css
     assert "@media (max-width: 760px)" in css
+
+
+def test_comparison_reset_and_return_preserve_health_tab_context() -> None:
+    ui_js = (ROOT / "src/js/tdash-ui.js").read_text(encoding="utf-8")
+    comparison_reset = ui_js.split("function resetHealthComparison() {", 1)[1].split(
+        "\nfunction resetHealthWorkflow()", 1,
+    )[0]
+    state_reset = ui_js.split("function resetHealthComparisonState() {", 1)[1].split(
+        "\nfunction resetHealthComparison()", 1,
+    )[0]
+
+    assert 'healthInsightsTab === "comparison" && currentView === "insights"' in comparison_reset
+    assert "resetHealthComparisonState();" in comparison_reset
+    assert "ensureHealthComparisonLoaded();" in comparison_reset
+    assert "switchView(" not in comparison_reset
+    assert "healthInsightsState.comparisonListRequestVersion += 1;" in state_reset
+    assert "healthComparisonDetailController.invalidate();" in state_reset
+    assert "resetComparisonEndpointState();" in state_reset
+    assert "healthInsightsTab !== \"findings\"" in ui_js
+    assert 'addEventListener("click", resetHealthComparison)' in ui_js
+    assert "healthTab: healthInsightsTab" in ui_js
+    assert "healthInsightsTab = context.healthTab ?? HEALTH_INSIGHTS_TABS[0].id;" in ui_js
+    assert "healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;" in ui_js
+    assert "savedInsights[key] = healthInsightsViewState[key];" in ui_js
+    assert "comparisonResetPendingRefresh = healthInsightsState.loading;" in ui_js
+    assert "if (resetComparisonDuringRefresh && healthInsightsTab === \"comparison\")" in ui_js

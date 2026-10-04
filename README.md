@@ -108,15 +108,22 @@ health status control optionally colors topology node borders from the current
 assessment; coloring is off by default, is not persisted, and resets when the
 active dataset changes.
 
-Network Insights opens on **Findings**. **Device Roster** shows a searchable,
-sortable, paginated inventory for the selected stored assessment. Presence
-defaults to **Observed** and describes that assessment, not network health;
-the separate roster designation reflects the current operator-managed state.
-Missing and Offline come from stored assessment findings, not device age.
-Selecting a device opens its stored facts in the details panel. Roster reads
-do not collect data or modify enrollment; roster administration remains CLI-only.
+Network Insights opens on **Findings** and offers three peer tabs:
+**Findings**, **Comparison**, and **Device Roster**. Each tab keeps its filters,
+selection, disclosures, pagination, and table position while switching tabs or
+using **Show in table** and **Return**. The assessment summary is labeled
+**Selected assessment**; it describes the pinned Findings/Roster assessment,
+not an arbitrary comparison pair or necessarily its After endpoint.
 
-In **Comparison** mode, **1D**, **3D**, and **1W** are the primary choices;
+**Device Roster** shows a searchable, sortable, paginated inventory for the
+selected stored assessment. Presence defaults to **Observed** and describes
+that assessment, not network health; the separate roster designation reflects
+the current operator-managed state. Missing and Offline come from stored
+assessment findings, not device age. Selecting a device opens its stored facts
+in the details panel. Roster reads do not collect data or modify enrollment;
+roster administration remains CLI-only.
+
+The **Comparison** tab offers **1D**, **3D**, and **1W** as the primary choices;
 each resolves its baseline against the latest retained **After** assessment.
 The default is 1D. **Custom** reveals independent Before/After selectors for
 any retained assessment pair and is collapsed until opened. Selecting a preset
@@ -126,16 +133,20 @@ remain unchanged. Partial assessments remain manually selectable; partial
 assessments or gaps longer than seven days may result in Unknown.
 
 The comparison summary shows the selected UTC endpoints and actual elapsed
-time; **Details** expands comparison metadata. **All scopes** and **Result**
+time; **Details** expands comparison metadata. **Reset comparison** restores
+the default 1D/latest-After intent, **Changed** result, **All scopes**, first
+pages, and collapsed Custom/Details without changing Findings or Device Roster.
+**All scopes** and **Result**
 (default **Changed**) filter the entire comparison before paging. The table
 reports the visible row range and matching-row count separately from the
 unfiltered total, with First, Previous, direct page selection, Next, and Last
-controls. Pages contain 25 rows; the table scrolls independently. Pair,
-filter, page, and disclosure state are retained across supported Snapshot/
-Comparison and Show in table/Return navigation. Processing stores adjacent
-and complete-only interval pairs in `hobat_v1.db`; reads can also derive an
-unstored pair without writing. See [Thread Network Health](doc/thread_network_health.md)
-for API, retention, and comparison details.
+controls. Pages contain 25 rows; the table scrolls independently. Comparison
+is available only when the server exposes comparison reads; unavailable
+history, insufficient retained history, empty filter results, and failed reads
+are reported separately. Processing stores adjacent and complete-only interval
+pairs in `hobat_v1.db`; reads can also derive an unstored pair without writing.
+See [Thread Network Health](doc/thread_network_health.md) for API, retention,
+and comparison details.
 
 The **Logs** workspace contains local **Logs** and **Jobs** tabs. Logs retains
 the newest 200 sanitized browser activity entries in memory only. Jobs lists
