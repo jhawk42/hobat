@@ -95,6 +95,9 @@ def test_catalog_exposes_effective_source_and_denominator_requirements():
     assert mle.source_requirements == frozenset({"mleCounters"})
     assert observed.evidence_kind == "snapshot"
     assert mle.evidence_kind == "since-reset"
+    queue = HEALTH_RULE_CATALOG.rule("relationship.queued-messages")
+    assert queue.materiality == "relationship"
+    assert queue.threshold_keys == frozenset({"thresholds.queuedMessages"})
     assert mac.required_evidence == (
         "metric",
         "value",

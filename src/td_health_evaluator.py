@@ -1,4 +1,4 @@
-"""Pure snapshot-v1 health evaluation."""
+"""Pure snapshot health evaluation."""
 
 from __future__ import annotations
 
@@ -25,7 +25,11 @@ from td_health_graph import GraphEdge, analyze_undirected_graph
 from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
-EVALUATOR_VERSION = "snapshot-v10"
+EVALUATOR_VERSION = "snapshot-v11"
+
+_DIRECT_THRESHOLD_COUNT_METRICS = frozenset(
+    {"parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"}
+)
 
 EVALUATOR_THRESHOLD_OWNERS = {
     "offlineConsecutiveCompleteObservations": frozenset({"device.offline", "device.missing"}),
@@ -48,6 +52,7 @@ EVALUATOR_THRESHOLD_OWNERS = {
     "thresholds.parentChanges": frozenset({"device.parentChanges"}),
     "thresholds.partitionIdChanges": frozenset({"device.partitionIdChanges"}),
     "thresholds.betterPartitionAttachAttempts": frozenset({"device.betterPartitionAttachAttempts"}),
+    "thresholds.queuedMessages": frozenset({"relationship.queued-messages"}),
     "thresholds.totalParentPartitionChanges": frozenset({"device.totalParentPartitionChanges"}),
     "thresholds.routerRolePercent": frozenset({"device.routerRolePercent"}),
     "thresholds.detachedDisabledPercent": frozenset({"device.detachedDisabledPercent"}),
@@ -625,10 +630,23 @@ def evaluate_observation(
                 _finding(
                     observation,
                     rule_id=f"device.{metric.metric}",
-                    status=HealthStatus.UNKNOWN,
+                    status=(
+                        HealthStatus.MODERATE
+                        if metric.metric in _DIRECT_THRESHOLD_COUNT_METRICS
+                        else HealthStatus.UNKNOWN
+                    ),
                     scope=FindingScope.DEVICE,
-                    rank=FindingRank.INFO,
-                    summary=f"{metric.metric} is {metric.value:g} ({band} band); lifetime/since-reset evidence only.",
+                    rank=(
+                        FindingRank.MODERATE
+                        if metric.metric in _DIRECT_THRESHOLD_COUNT_METRICS
+                        else FindingRank.INFO
+                    ),
+                    summary=(
+                        f"{metric.metric} is {metric.value:g} ({band} evidence band); "
+                        "this accumulated count alone does not establish current churn."
+                        if metric.metric in _DIRECT_THRESHOLD_COUNT_METRICS
+                        else f"{metric.metric} is {metric.value:g} ({band} band); lifetime/since-reset evidence only."
+                    ),
                     evidence={
                         "metric": metric.metric,
                         "value": metric.value,
@@ -854,24 +872,41 @@ def evaluate_observation(
         if (
             child_relationship
             and relationship.queued_message_count is not None
-            and relationship.queued_message_count > 0
             and _profile_supports_rule(profile, "relationship.queued-messages")
         ):
-            findings.append(
-                _finding(
-                    observation,
-                    rule_id="relationship.queued-messages",
-                    status=HealthStatus.UNKNOWN,
-                    scope=FindingScope.RELATIONSHIP,
-                    rank=FindingRank.INFO,
-                    summary=f"{relationship.queued_message_count:g} indirect message(s) queued for delivery.",
-                    evidence={"queuedMessageCount": relationship.queued_message_count},
-                    device_ids=(relationship.from_device_id, relationship.to_device_id),
-                    relationship_ids=(relationship.relationship_id,),
-                    source_files=relationship.source_files,
-                    confidence=Confidence.LOW,
-                )
+            queue_threshold = _policy_value(
+                policy,
+                "relationship.queued-messages",
+                "thresholds.queuedMessages",
             )
+            if relationship.queued_message_count >= queue_threshold["unstable"]:
+                band = (
+                    "high"
+                    if relationship.queued_message_count >= queue_threshold["high"]
+                    else "moderate"
+                )
+                findings.append(
+                    _finding(
+                        observation,
+                        rule_id="relationship.queued-messages",
+                        status=HealthStatus.MODERATE,
+                        scope=FindingScope.RELATIONSHIP,
+                        rank=FindingRank.MODERATE,
+                        summary=(
+                            f"{relationship.queued_message_count:g} indirect message(s) are queued "
+                            f"for delivery ({band} evidence band)."
+                        ),
+                        evidence={
+                            "queuedMessageCount": relationship.queued_message_count,
+                            "band": band,
+                            "thresholds": dict(queue_threshold),
+                        },
+                        device_ids=(relationship.from_device_id, relationship.to_device_id),
+                        relationship_ids=(relationship.relationship_id,),
+                        source_files=relationship.source_files,
+                        confidence=Confidence.LOW,
+                    )
+                )
         if frame_bad or message_bad:
             neighbor_high_error_relationships.setdefault(relationship.to_device_id, set()).add(
                 relationship.relationship_id

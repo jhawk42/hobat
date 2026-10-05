@@ -61,6 +61,15 @@ def _uses_catalog_contract(evaluator_version: object) -> bool:
         return False
 
 
+def _uses_snapshot_count_contract(evaluator_version: object) -> bool:
+    if not isinstance(evaluator_version, str) or not evaluator_version.startswith("snapshot-v"):
+        return False
+    try:
+        return int(evaluator_version.removeprefix("snapshot-v")) >= 11
+    except ValueError:
+        return False
+
+
 def _finding_group_presentation(
     rule_id: str, title: str, variant: str | None = None
 ) -> tuple[int, str]:
@@ -410,7 +419,15 @@ class TDHealthReadService:
             action = rule.action
             verify = rule.verify
             evidence_kind = rule.evidence_kind
-            materiality = rule.materiality
+            stored_materiality = evidence.get("materiality")
+            materiality = (
+                rule.materiality
+                if _uses_snapshot_count_contract(evaluator_version)
+                or stored_materiality not in {
+                    "informational", "device", "relationship", "network"
+                }
+                else stored_materiality
+            )
             action_key = rule.action_key
             verification_key = rule.verification_key
         else:

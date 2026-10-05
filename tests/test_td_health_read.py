@@ -9,8 +9,19 @@ from dataclasses import replace
 
 import pytest
 
-from td_health_observation_model import Completeness, MetricSample, SourceEvidence
+from td_health_evaluator import evaluate_observation
+from td_health_manifest import load_health_manifest
+from td_health_observation_model import (
+    Completeness,
+    DeviceSample,
+    FindingRank,
+    HealthStatus,
+    MetricSample,
+    RelationshipSample,
+    SourceEvidence,
+)
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
+from td_health_policy import load_health_policy
 from td_health_read import TDHealthReadService
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
@@ -51,6 +62,159 @@ def test_assessment_projection_groups_losslessly_and_resolves_labels(tmp_path) -
     assert device["displayName"] == "Office Router"
     assert device["deviceId"] == "extaddr:8672766ae0578187"
     assert "device_id" not in device
+
+
+def test_reprocessing_snapshot_counts_preserves_prior_assessment_and_projection(
+    tmp_path,
+) -> None:
+    observation, _ = _result()
+    metric = MetricSample(
+        observation.devices[0].device_id,
+        "parentChanges",
+        6,
+        "count",
+        None,
+        "snapshot.json",
+    )
+    second_device_id = "extaddr:1122334455667788"
+    observation = replace(
+        observation,
+        devices=observation.devices + (
+            DeviceSample(
+                second_device_id,
+                "1122334455667788",
+                "router",
+                None,
+                False,
+                ("snapshot.json",),
+            ),
+        ),
+        relationships=(
+            RelationshipSample(
+                "link:child",
+                "parent-child",
+                observation.devices[0].device_id,
+                second_device_id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                observation.devices[0].device_id,
+                ("snapshot.json",),
+                5,
+            ),
+        ),
+        metrics=(metric,),
+    )
+    profile = load_health_manifest().dataset(
+        "otbr_cli_topology_mdns_health"
+    ).health_profile
+    current = evaluate_observation(
+        observation, load_health_policy(), profile=profile
+    )
+    current_finding = next(
+        finding
+        for finding in current.findings
+        if finding.rule_id == "device.parentChanges"
+    )
+    legacy_finding = replace(
+        current_finding,
+        status=HealthStatus.UNKNOWN,
+        rank=FindingRank.INFO,
+        summary="Legacy evidence-only counter finding.",
+    )
+    current_queue_finding = next(
+        finding
+        for finding in current.findings
+        if finding.rule_id == "relationship.queued-messages"
+    )
+    legacy_queue_evidence = {
+        key: value
+        for key, value in current_queue_finding.evidence.items()
+        if key not in {"band", "thresholds"}
+    }
+    legacy_queue_evidence["materiality"] = "informational"
+    legacy_queue_finding = replace(
+        current_queue_finding,
+        status=HealthStatus.UNKNOWN,
+        rank=FindingRank.INFO,
+        summary="Legacy informational queue evidence.",
+        evidence=legacy_queue_evidence,
+    )
+    legacy = replace(
+        current,
+        assessment_id="assessment:legacy-snapshot-v10",
+        policy_digest="legacy-policy-digest",
+        evaluator_version="snapshot-v10",
+        status=HealthStatus.UNKNOWN,
+        findings=tuple(
+            legacy_finding if finding is current_finding
+            else legacy_queue_finding if finding is current_queue_finding
+            else finding
+            for finding in current.findings
+        ),
+    )
+
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    store.save_processing_result(observation, legacy)
+    store.save_processing_result(observation, current)
+    service = TDHealthReadService(tmp_path)
+    old_projection = service.assessment(
+        assessment_id=legacy.assessment_id, grouped=False
+    )
+    current_projection = service.assessment(
+        assessment_id=current.assessment_id, grouped=False
+    )
+    current_groups = service.assessment(
+        assessment_id=current.assessment_id, grouped=True
+    )
+
+    assert legacy.assessment_id != current.assessment_id
+    assert old_projection is not None
+    assert current_projection is not None
+    assert old_projection["evaluatorVersion"] == "snapshot-v10"
+    assert current_projection["evaluatorVersion"] == "snapshot-v11"
+    assert next(
+        finding for finding in old_projection["findings"]
+        if finding["ruleId"] == "device.parentChanges"
+    )["status"] == "unknown"
+    old_queue_projection = next(
+        finding for finding in old_projection["findings"]
+        if finding["ruleId"] == "relationship.queued-messages"
+    )
+    assert old_queue_projection["status"] == "unknown"
+    assert old_queue_projection["materiality"] == "informational"
+    old_groups = service.assessment(
+        assessment_id=legacy.assessment_id, grouped=True
+    )
+    old_queue_group = next(
+        item for item in old_groups["findingGroups"]
+        if item["ruleId"] == "relationship.queued-messages"
+    )
+    assert old_queue_group["status"] == "unknown"
+    assert old_queue_group["findings"][0]["materiality"] == "informational"
+    current_finding_projection = next(
+        finding for finding in current_projection["findings"]
+        if finding["ruleId"] == "device.parentChanges"
+    )
+    assert current_finding_projection["status"] == "moderate"
+    assert current_finding_projection["evidence"]["band"] == "high"
+    group = next(
+        item for item in current_groups["findingGroups"]
+        if item["ruleId"] == "device.parentChanges"
+    )
+    assert group["status"] == "moderate"
+    assert group["findings"][0]["evidence"]["band"] == "high"
+    current_queue_projection = next(
+        finding for finding in current_projection["findings"]
+        if finding["ruleId"] == "relationship.queued-messages"
+    )
+    assert current_queue_projection["status"] == "moderate"
+    assert current_queue_projection["materiality"] == "relationship"
+    assert current_queue_projection["evidence"]["band"] == "high"
 
 
 def test_comparison_endpoint_pages_and_query_only_pair_projection(tmp_path) -> None:

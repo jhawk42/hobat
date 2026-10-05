@@ -176,10 +176,17 @@ Offline. Stage 1 reports observation counts rather than wall-clock duration.
 
 ## Policy and Findings
 
-Python owns all verdicts. Built-in `snapshot-v1` thresholds cover current MAC
+Python owns all verdicts. Built-in `snapshot-v2` thresholds cover current MAC
 delivery ratios, router-neighbor and child error rates, directional link quality,
 RSS, link margin, multiple-reporter correlation, attachment, and Router/Border
-Router resilience. Child and router-neighbor delivery policies have explicit
+Router resilience, plus direct snapshot-count findings for selected MLE counters
+and per-relationship child queue depth. Parent changes, partition ID changes,
+better-partition attach attempts, and queue depths below 2 produce no threshold
+finding; counts from 2 through 4 produce Moderate, and counts of 5 or more carry
+a High evidence band while remaining Moderate. MLE findings are device-scoped
+and do not change aggregate network status; threshold-crossing child queues are
+relationship-material and can make the aggregate at most Moderate. A single
+queue count does not establish persistence or message age. Child and router-neighbor delivery policies have explicit
 critical bands. Border Router redundancy is emitted only for profiles whose
 evidence can identify Border Routers; incomplete observations keep that finding
 provisional. RSS alone is supporting evidence and cannot produce Poor. Critical
@@ -187,12 +194,15 @@ delivery evidence escalates only when direct current evidence also identifies
 an observed sole path.
 
 An optional `config/td-health-policy.json` replaces the defaults after strict
-validation. It must include the complete `snapshot-v1` threshold contract and
+validation. It must include the complete `snapshot-v2` threshold contract and
 an Offline requirement of at least two complete observations. The applied
 policy version and digest, evaluator version, and health profile ID are stored
 with every assessment. Policy, evaluator, and profile capability digests
 participate in assessment identity, so any semantic change creates a new
-assessment over the same observation.
+assessment over the same observation. Policies written before the queue-depth
+threshold was added may omit `thresholds.queuedMessages`; those policies inherit
+the independent defaults of 2 and 5 and are digested with the normalized
+threshold entry.
 
 Every finding has a stable ID, scope, status, confidence, affected device or
 relationship IDs, structured evidence, source files, action, and verification
@@ -259,9 +269,9 @@ also project catalog-owned `evidenceKind`, `materiality`, `actionKey`, and
 | `device.offline` | Offline Devices | Reports an expected device absent for the configured consecutive complete observations. |
 | `device.diagnostic-timeout` | Mesh Diagnostic Query Timed Out | Reports attributed missing diagnostic evidence for a device. |
 | `device.multiple-reporters-high-error` | High Link Errors Reported by Multiple Neighbors | Correlates elevated delivery errors reported by multiple observed relationships. |
-| `device.parentChanges` | Parent Changes Since Counter Reset | Reports a cumulative parent-change counter that requires a later delta to establish current churn. |
-| `device.partitionIdChanges` | Partition ID Changes Since Counter Reset | Reports a cumulative partition-change counter that requires a later delta to establish current instability. |
-| `device.betterPartitionAttachAttempts` | Better-Partition Attach Attempts Since Counter Reset | Reports cumulative attempts to attach to a better partition. |
+| `device.parentChanges` | Parent Changes Since Counter Reset | Classifies the observed since-reset parent-change count directly; the count alone does not establish current churn. |
+| `device.partitionIdChanges` | Partition ID Changes Since Counter Reset | Classifies the observed since-reset partition ID change count directly; the count alone does not establish current instability. |
+| `device.betterPartitionAttachAttempts` | Better-Partition Attach Attempts Since Counter Reset | Classifies the observed since-reset better-partition attach attempt count directly; the count alone does not establish current instability. |
 | `device.totalParentPartitionChanges` | Parent and Partition Changes Since Counter Reset | Reports a cumulative combined parent and partition change counter. |
 | `device.routerRolePercent` | Low Router-Role Time Since Reset | Reports low cumulative Router-role time for an observed Router or Leader. |
 | `device.detachedDisabledPercent` | Detached or Disabled Time Since Reset | Reports cumulative detached or disabled uptime without claiming current detachment. |
@@ -270,7 +280,7 @@ also project catalog-owned `evidenceKind`, `materiality`, `actionKey`, and
 | `device.attachment-failure` | Device Not Attached to Mesh | Reports a current detached, disabled, or orphaned attachment state. |
 | `relationship.bidirectional-lq3` | Strong Bidirectional Link (LQ3) | Reports a relationship where both observed directions have LQ3. |
 | `relationship.directional-quality` | Link Quality or Delivery Degradation | Reports current directional LQ, delivery, RSS, or margin degradation using relationship-specific policy and path evidence. |
-| `relationship.queued-messages` | Indirect Messages Queued for Child | Reports current indirect messages queued on a parent-child relationship as trend evidence. |
+| `relationship.queued-messages` | Indirect Messages Queued for Child | Classifies the current queued-message count on one parent-child relationship; one snapshot does not establish persistence or message age. |
 
 ## Storage Safety
 
@@ -314,11 +324,13 @@ the schema but does not fabricate a last-known roster: new, complete observation
 with valid source timestamps populate the projection. Unattributed migrated
 facts retain unknown confidence and cannot replace sourced facts.
 
-The `snapshot-v10` read projection resolves known-rule titles, descriptions,
+The `snapshot-v11` read projection resolves known-rule titles, descriptions,
 actions, verification text, evidence kinds, materiality, and template keys from
-the catalog. Legacy findings receive version-aware metadata defaults at read
-time; unknown legacy rules retain their stored operator copy and deterministic
-fallback keys without rewriting history.
+the catalog. For pre-v11 assessments, valid stored materiality remains
+authoritative so the queue rule's new relationship materiality does not rewrite
+historical findings. Legacy findings receive version-aware metadata defaults
+at read time; unknown legacy rules retain their stored operator copy and
+deterministic fallback keys without rewriting history.
 
 The filename promotes SQLite to a shared Hobat persistence boundary. The
 existing health tables and their contents are retained unchanged.

@@ -19,47 +19,49 @@ def _freeze(value: Any) -> Any:
     return value
 
 
-_SNAPSHOT_V1_RAW: dict[str, Any] = {
-        "version": "snapshot-v1",
-        "offlineConsecutiveCompleteObservations": 2,
+_SNAPSHOT_V2_RAW: dict[str, Any] = {
+    "version": "snapshot-v2",
+    "offlineConsecutiveCompleteObservations": 2,
     "offlinePoorDeviceRatioThreshold": 0.15,
-        "thresholds": {
-            "totalMacErrorRatio": {"unstable": 0.01, "high": 0.05, "critical": 1.0},
-            "totalMacDiscardRatio": {"unstable": 0.02, "high": 0.08, "critical": 1.0},
-            "routerNeighborFrameErrorRate": {
-                "unstable": 0.05,
-                "high": 0.10,
-                "critical": 0.30,
-            },
-            "routerNeighborMessageErrorRate": {
-                "unstable": 0.05,
-                "high": 0.10,
-                "critical": 0.30,
-            },
-            "childFrameErrorRate": {"unstable": 0.10, "high": 0.25, "critical": 0.30},
-            "childMessageErrorRate": {"unstable": 0.01, "high": 0.05, "critical": 0.30},
-            "observedLq3Ratio": {"unstableBelow": 0.60, "highBelow": 0.35},
-            "observedLq1Ratio": {"unstable": 0.20, "high": 0.35},
-            "childLinkQuality": {"unstableAtOrBelow": 2, "highAtOrBelow": 1},
-            "routerLinkQuality": {"unstableAtOrBelow": 2, "highAtOrBelow": 1},
-            "rssi": {"unstableBelow": -70.0, "highBelow": -80.0},
-            "childLinkMargin": {"unstableBelow": 20.0},
-            "multipleReporterCount": {"unstableAtOrAbove": 2},
-            "borderRouterCount": {"unstableAtOrBelow": 1},
-            "routerCount": {"unstableAtOrBelow": 1},
-            "parentChanges": {"unstable": 2, "high": 5},
-            "partitionIdChanges": {"unstable": 2, "high": 5},
-            "betterPartitionAttachAttempts": {"unstable": 2, "high": 5},
-            "totalParentPartitionChanges": {"unstable": 3, "high": 8},
-            "routerRolePercent": {"unstableBelow": 80.0, "highBelow": 50.0},
-            "detachedDisabledPercent": {"unstable": 1.0, "high": 5.0},
+    "thresholds": {
+        "totalMacErrorRatio": {"unstable": 0.01, "high": 0.05, "critical": 1.0},
+        "totalMacDiscardRatio": {"unstable": 0.02, "high": 0.08, "critical": 1.0},
+        "routerNeighborFrameErrorRate": {
+            "unstable": 0.05,
+            "high": 0.10,
+            "critical": 0.30,
         },
-    }
-SNAPSHOT_V1: Mapping[str, Any] = _freeze(_SNAPSHOT_V1_RAW)
+        "routerNeighborMessageErrorRate": {
+            "unstable": 0.05,
+            "high": 0.10,
+            "critical": 0.30,
+        },
+        "childFrameErrorRate": {"unstable": 0.10, "high": 0.25, "critical": 0.30},
+        "childMessageErrorRate": {"unstable": 0.01, "high": 0.05, "critical": 0.30},
+        "observedLq3Ratio": {"unstableBelow": 0.60, "highBelow": 0.35},
+        "observedLq1Ratio": {"unstable": 0.20, "high": 0.35},
+        "childLinkQuality": {"unstableAtOrBelow": 2, "highAtOrBelow": 1},
+        "routerLinkQuality": {"unstableAtOrBelow": 2, "highAtOrBelow": 1},
+        "rssi": {"unstableBelow": -70.0, "highBelow": -80.0},
+        "childLinkMargin": {"unstableBelow": 20.0},
+        "multipleReporterCount": {"unstableAtOrAbove": 2},
+        "borderRouterCount": {"unstableAtOrBelow": 1},
+        "routerCount": {"unstableAtOrBelow": 1},
+        "parentChanges": {"unstable": 2, "high": 5},
+        "partitionIdChanges": {"unstable": 2, "high": 5},
+        "betterPartitionAttachAttempts": {"unstable": 2, "high": 5},
+        "queuedMessages": {"unstable": 2, "high": 5},
+        "totalParentPartitionChanges": {"unstable": 3, "high": 8},
+        "routerRolePercent": {"unstableBelow": 80.0, "highBelow": 50.0},
+        "detachedDisabledPercent": {"unstable": 1.0, "high": 5.0},
+    },
+}
+SNAPSHOT_V2: Mapping[str, Any] = _freeze(_SNAPSHOT_V2_RAW)
 _REQUIRED_THRESHOLD_BANDS = {
     metric: frozenset(bands)
-    for metric, bands in _SNAPSHOT_V1_RAW["thresholds"].items()
+    for metric, bands in _SNAPSHOT_V2_RAW["thresholds"].items()
 }
+_DEFAULTED_LEGACY_THRESHOLDS = frozenset({"queuedMessages"})
 POLICY_THRESHOLD_KEYS = frozenset(
     {
         "offlineConsecutiveCompleteObservations",
@@ -94,7 +96,7 @@ def _validate_policy(raw: object) -> HealthPolicy:
     consecutive = raw.get("offlineConsecutiveCompleteObservations")
     offline_ratio = raw.get(
         "offlinePoorDeviceRatioThreshold",
-        _SNAPSHOT_V1_RAW["offlinePoorDeviceRatioThreshold"],
+        _SNAPSHOT_V2_RAW["offlinePoorDeviceRatioThreshold"],
     )
     thresholds = raw.get("thresholds")
     if not isinstance(version, str) or not version:
@@ -109,10 +111,23 @@ def _validate_policy(raw: object) -> HealthPolicy:
         )
     if not isinstance(thresholds, dict) or not thresholds:
         raise HealthPolicyError("Health policy requires thresholds")
-    if set(thresholds) != set(_REQUIRED_THRESHOLD_BANDS):
-        raise HealthPolicyError("Health policy must define every snapshot-v1 threshold")
+    missing_thresholds = set(_REQUIRED_THRESHOLD_BANDS) - set(thresholds)
+    if (
+        set(thresholds) - set(_REQUIRED_THRESHOLD_BANDS)
+        or missing_thresholds - _DEFAULTED_LEGACY_THRESHOLDS
+    ):
+        raise HealthPolicyError(
+            "Health policy must define every required snapshot threshold"
+        )
+    effective_thresholds = {
+        **thresholds,
+        **{
+            metric: dict(_SNAPSHOT_V2_RAW["thresholds"][metric])
+            for metric in missing_thresholds
+        },
+    }
     normalized: dict[str, Mapping[str, float | int]] = {}
-    for metric, bands in thresholds.items():
+    for metric, bands in effective_thresholds.items():
         if not isinstance(metric, str) or not isinstance(bands, dict) or not bands:
             raise HealthPolicyError("Each threshold requires named numeric bands")
         if not all(
@@ -126,6 +141,9 @@ def _validate_policy(raw: object) -> HealthPolicy:
     normalized_raw = {
         **raw,
         "offlinePoorDeviceRatioThreshold": float(offline_ratio),
+        "thresholds": {
+            metric: dict(bands) for metric, bands in effective_thresholds.items()
+        },
     }
     return HealthPolicy(
         version=version,
@@ -138,7 +156,7 @@ def _validate_policy(raw: object) -> HealthPolicy:
 
 def load_health_policy(config_dir: Path | None = None) -> HealthPolicy:
     if config_dir is None or not (config_dir / POLICY_FILENAME).exists():
-        return _validate_policy(json.loads(json.dumps(_SNAPSHOT_V1_RAW)))
+        return _validate_policy(json.loads(json.dumps(_SNAPSHOT_V2_RAW)))
     path = config_dir / POLICY_FILENAME
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))

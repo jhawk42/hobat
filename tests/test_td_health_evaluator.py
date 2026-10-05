@@ -160,7 +160,7 @@ def test_complete_topology_profile_reports_border_router_redundancy() -> None:
     )
 
     assert PROFILE.border_router_authority is True
-    assert EVALUATOR_VERSION == "snapshot-v10"
+    assert EVALUATOR_VERSION == "snapshot-v11"
     assert border_router_finding.status is HealthStatus.STRONG
     assert border_router_finding.evidence["observedBorderRouterCount"] == 2
     assert border_router_finding.evidence["moreThanOne"] is True
@@ -463,7 +463,7 @@ def test_child_relationship_does_not_count_as_alternate_router_path() -> None:
     assert "link:child" not in finding.evidence["bridgeRelationshipIds"]
 
 
-def test_lifetime_counter_metrics_are_evidence_only_and_do_not_change_status() -> None:
+def test_snapshot_count_metrics_are_moderate_but_not_network_material() -> None:
     observation = _observation(_relationship())
     observation = Observation(
         **{
@@ -479,28 +479,33 @@ def test_lifetime_counter_metrics_are_evidence_only_and_do_not_change_status() -
         }
     )
     assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    baseline = evaluate_observation(
+        replace(observation, metrics=()), load_health_policy(), profile=PROFILE
+    )
     parent_changes = next(f for f in assessment.findings if f.rule_id == "device.parentChanges")
     router_pct = next(f for f in assessment.findings if f.rule_id == "device.routerRolePercent")
 
-    assert parent_changes.status is HealthStatus.UNKNOWN
+    assert parent_changes.status is HealthStatus.MODERATE
     assert parent_changes.evidence["band"] == "high"
     assert router_pct.status is HealthStatus.UNKNOWN
     assert router_pct.evidence["band"] == "high"
-    assert not any(
-        finding.rule_id in {"device.parentChanges", "device.routerRolePercent"}
-        and finding.status in {HealthStatus.MODERATE, HealthStatus.POOR}
-        for finding in assessment.findings
-    )
+    assert parent_changes.scope.value == "device"
+    assert parent_changes.evidence["materiality"] == "informational"
+    assert assessment.status is baseline.status
 
 
-def test_role_specific_metric_is_omitted_for_unknown_role() -> None:
+@pytest.mark.parametrize(
+    "metric_name",
+    ["parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"],
+)
+def test_role_specific_metric_is_omitted_for_unknown_role(metric_name) -> None:
     observation = replace(
         _observation(_relationship()),
         devices=tuple(replace(device, role=None) for device in _observation(_relationship()).devices),
         metrics=(
             MetricSample(
                 "extaddr:1111111111111111",
-                "parentChanges",
+                metric_name,
                 9,
                 "count",
                 None,
@@ -512,7 +517,7 @@ def test_role_specific_metric_is_omitted_for_unknown_role() -> None:
     assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
 
     assert not any(
-        finding.rule_id == "device.parentChanges" for finding in assessment.findings
+        finding.rule_id == f"device.{metric_name}" for finding in assessment.findings
     )
 
 
@@ -634,17 +639,152 @@ def test_multiple_reporters_high_error_aggregates_across_relationships() -> None
     assert finding.confidence.value == "high"
 
 
-def test_queued_messages_are_evidence_only() -> None:
+@pytest.mark.parametrize(
+    ("value", "expected_status", "expected_band"),
+    [
+        (0, None, None),
+        (1, None, None),
+        (2, HealthStatus.MODERATE, "moderate"),
+        (4, HealthStatus.MODERATE, "moderate"),
+        (5, HealthStatus.MODERATE, "high"),
+        (6, HealthStatus.MODERATE, "high"),
+    ],
+)
+@pytest.mark.parametrize(
+    "metric_name",
+    ["parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"],
+)
+def test_mle_snapshot_count_threshold_boundaries(
+    metric_name, value, expected_status, expected_band
+) -> None:
+    observation = replace(
+        _observation(_relationship()),
+        metrics=(
+            MetricSample(
+                "extaddr:1111111111111111",
+                metric_name,
+                value,
+                "count",
+                None,
+                "source.json",
+            ),
+        ),
+    )
+
+    assessment = evaluate_observation(observation, load_health_policy(), profile=PROFILE)
+    baseline = evaluate_observation(
+        replace(observation, metrics=()), load_health_policy(), profile=PROFILE
+    )
+    findings = [
+        finding for finding in assessment.findings
+        if finding.rule_id == f"device.{metric_name}"
+    ]
+
+    if expected_status is None:
+        assert findings == []
+        return
+    finding = findings[0]
+    assert finding.status is expected_status
+    assert finding.scope.value == "device"
+    assert finding.evidence["band"] == expected_band
+    assert finding.evidence["materiality"] == "informational"
+    assert assessment.status is baseline.status
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_status", "expected_band"),
+    [
+        (None, None, None),
+        (0, None, None),
+        (1, None, None),
+        (2, HealthStatus.MODERATE, "moderate"),
+        (4, HealthStatus.MODERATE, "moderate"),
+        (5, HealthStatus.MODERATE, "high"),
+        (6, HealthStatus.MODERATE, "high"),
+    ],
+)
+def test_child_queue_depth_threshold_boundaries(value, expected_status, expected_band) -> None:
     relationship = _relationship(
-        relationship_type="parent-child", queued_message_count=3
+        relationship_type="parent-child", queued_message_count=value
     )
     assessment = evaluate_observation(
         _observation(relationship), load_health_policy(), profile=PROFILE
     )
-    finding = next(f for f in assessment.findings if f.rule_id == "relationship.queued-messages")
+    baseline = evaluate_observation(
+        _observation(
+            _relationship(
+                relationship_type="parent-child",
+                queued_message_count=None,
+            )
+        ),
+        load_health_policy(),
+        profile=PROFILE,
+    )
+    findings = [
+        finding for finding in assessment.findings
+        if finding.rule_id == "relationship.queued-messages"
+    ]
 
-    assert finding.status is HealthStatus.UNKNOWN
-    assert finding.evidence["queuedMessageCount"] == 3
+    if expected_status is None:
+        assert findings == []
+        assert assessment.status is baseline.status
+        return
+    finding = findings[0]
+    assert finding.status is expected_status
+    assert finding.scope.value == "relationship"
+    assert finding.relationship_ids == ("link:test",)
+    assert finding.evidence["band"] == expected_band
+    assert finding.evidence["materiality"] == "relationship"
+    assert assessment.status is HealthStatus.MODERATE
+
+
+def test_child_queue_counts_are_not_summed_across_relationships() -> None:
+    first = _relationship(
+        relationship_type="parent-child", queued_message_count=1
+    )
+    second = _relationship(
+        relationship_id="link:test-2",
+        relationship_type="parent-child",
+        queued_message_count=1,
+    )
+    observation = replace(_observation(first), relationships=(first, second))
+
+    assessment = evaluate_observation(
+        observation, load_health_policy(), profile=PROFILE
+    )
+
+    assert not any(
+        finding.rule_id == "relationship.queued-messages"
+        for finding in assessment.findings
+    )
+
+
+def test_child_queue_depth_uses_independent_policy_override() -> None:
+    policy = load_health_policy()
+    thresholds = {
+        **policy.thresholds,
+        "queuedMessages": {"unstable": 3, "high": 7},
+        "parentChanges": {"unstable": 10, "high": 20},
+    }
+    policy = replace(policy, thresholds=MappingProxyType({
+        metric: MappingProxyType(bands) for metric, bands in thresholds.items()
+    }))
+    observation = replace(
+        _observation(_relationship(relationship_type="parent-child", queued_message_count=3)),
+        metrics=(
+            MetricSample(
+                "extaddr:1111111111111111", "parentChanges", 3, "count", None, "source.json"
+            ),
+        ),
+    )
+
+    assessment = evaluate_observation(observation, policy, profile=PROFILE)
+
+    queue = next(f for f in assessment.findings if f.rule_id == "relationship.queued-messages")
+    assert queue.status is HealthStatus.MODERATE
+    assert queue.evidence["thresholds"] == {"unstable": 3, "high": 7}
+    assert queue.evidence["band"] == "moderate"
+    assert not any(f.rule_id == "device.parentChanges" for f in assessment.findings)
 
 
 def test_router_neighbor_queue_depth_is_not_applicable() -> None:

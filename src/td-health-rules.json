@@ -217,7 +217,7 @@
       "ruleId": "device.parentChanges",
       "order": 2060,
       "title": "Parent Changes Since Counter Reset",
-      "description": "Reports a cumulative parent-change counter that requires a later delta to establish current churn.",
+      "description": "Classifies the observed since-reset parent-change count directly; the count alone does not establish current churn.",
       "evidenceKind": "since-reset",
       "sourceRequirements": ["mleCounters"],
       "scopes": ["device"],
@@ -226,14 +226,14 @@
       "requiredCapability": "resilience",
       "materiality": "informational",
       "thresholdKeys": ["thresholds.parentChanges"],
-      "action": "Compare against a future observation before treating this as a current failure.",
-      "verify": "Process another complete observation and compare the delta or trend."
+      "action": "Investigate the device and its environment when the observed count crosses a threshold.",
+      "verify": "Use newer source evidence to determine whether parent changes are continuing; processing the same cached snapshot is not a new sample."
     },
     {
       "ruleId": "device.partitionIdChanges",
       "order": 2070,
       "title": "Partition ID Changes Since Counter Reset",
-      "description": "Reports a cumulative partition-change counter that requires a later delta to establish current instability.",
+      "description": "Classifies the observed since-reset partition ID change count directly; the count alone does not establish current instability.",
       "evidenceKind": "since-reset",
       "sourceRequirements": ["mleCounters"],
       "scopes": ["device"],
@@ -242,14 +242,14 @@
       "requiredCapability": "resilience",
       "materiality": "informational",
       "thresholdKeys": ["thresholds.partitionIdChanges"],
-      "action": "Compare against a future observation before treating this as a current failure.",
-      "verify": "Process another complete observation and compare the delta or trend."
+      "action": "Investigate the device and its environment when the observed count crosses a threshold.",
+      "verify": "Use newer source evidence to determine whether partition changes are continuing; processing the same cached snapshot is not a new sample."
     },
     {
       "ruleId": "device.betterPartitionAttachAttempts",
       "order": 2080,
       "title": "Better-Partition Attach Attempts Since Counter Reset",
-      "description": "Reports cumulative attempts to attach to a better partition.",
+      "description": "Classifies the observed since-reset better-partition attach attempt count directly; the count alone does not establish current instability.",
       "evidenceKind": "since-reset",
       "sourceRequirements": ["mleCounters"],
       "scopes": ["device"],
@@ -258,8 +258,8 @@
       "requiredCapability": "resilience",
       "materiality": "informational",
       "thresholdKeys": ["thresholds.betterPartitionAttachAttempts"],
-      "action": "Compare against a future observation before treating this as a current failure.",
-      "verify": "Process another complete observation and compare the delta or trend."
+      "action": "Investigate the device and its environment when the observed count crosses a threshold.",
+      "verify": "Use newer source evidence to determine whether better-partition attach attempts are continuing; processing the same cached snapshot is not a new sample."
     },
     {
       "ruleId": "device.totalParentPartitionChanges",
@@ -395,16 +395,16 @@
       "ruleId": "relationship.queued-messages",
       "order": 3030,
       "title": "Indirect Messages Queued for Child",
-      "description": "Reports current indirect messages queued on a parent-child relationship as trend evidence.",
+      "description": "Classifies the current queued-message count on one parent-child relationship; one snapshot does not establish persistence or message age.",
       "evidenceKind": "snapshot",
       "scopes": ["relationship"],
       "roles": [],
       "relationshipTypes": ["parent-child"],
       "requiredCapability": "delivery",
-      "materiality": "informational",
-      "thresholdKeys": [],
-      "action": "Compare against a future observation before treating this as a current failure.",
-      "verify": "Process another complete observation and confirm the queue clears."
+      "materiality": "relationship",
+      "thresholdKeys": ["thresholds.queuedMessages"],
+      "action": "Check whether the current queue depth is affecting child delivery.",
+      "verify": "Obtain a newer diagnostic snapshot to assess whether the queue persists; one count does not establish message age."
     }
   ]
 }
