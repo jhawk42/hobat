@@ -112,6 +112,36 @@ def test_schema_13_fixture_preserves_native_topology_and_optional_fields() -> No
     assert_snapshot_safe(topology)
 
 
+@pytest.mark.parametrize(
+    "node",
+    [
+        {"isReed": "true"},
+        {"is_border_router": 1},
+    ],
+)
+def test_native_topology_rejects_non_boolean_role_inputs(node) -> None:
+    topology = _minimal_topology()
+    topology["nodes"][0].update(node)
+
+    with pytest.raises(MatterWsContractError, match="must be boolean"):
+        validate_native_topology(topology)
+
+
+def test_border_router_validator_accepts_boolean_role_aliases_only() -> None:
+    router = {
+        "extAddressHex": "AABBCCDDEEFF0011",
+        "addresses": [],
+        "sources": ["meshcop"],
+        "is_border_router": False,
+        "br": True,
+    }
+
+    assert validate_border_router_entries([router])[0]["br"] is True
+    router["isReed"] = None
+    with pytest.raises(MatterWsContractError, match="must be boolean"):
+        validate_border_router_entries([router])
+
+
 def test_optional_post_schema_13_topology_fields_may_be_absent() -> None:
     topology = validate_native_topology(_minimal_topology())
 

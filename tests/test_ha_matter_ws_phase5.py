@@ -216,11 +216,18 @@ def _native_topology():
     return {
         "collected_at": 42,
         "nodes": [
-            {"id": "matter:1", "kind": "matter", "network_type": "thread"},
+            {
+                "id": "matter:1",
+                "kind": "matter",
+                "network_type": "thread",
+                "role": "reed",
+                "is_router": True,
+            },
             {
                 "id": "thread:aabb",
-                "kind": "thread_unknown",
+                "kind": "border_router",
                 "network_type": "thread",
+                "role": "reed",
             },
         ],
         "connections": [
@@ -261,6 +268,10 @@ def test_border_router_command_saves_native_wrapper_and_outcome(
     assert final["source"] == "ha-matter-ws-thread-border-routers"
     assert final["request"] == {"mode": "passive-discovery"}
     assert len(final["borderRouters"]) == 1
+    assert final["borderRouters"][0]["isBorderRouter"] is True
+    assert final["borderRouters"][0]["isRouter"] is True
+    assert "isLeader" not in final["borderRouters"][0]
+    assert "isReed" not in final["borderRouters"][0]
     assert outcome["status"] == "complete"
     assert outcome["itemCount"] == 1
     assert FakeNativeClient.requests == [
@@ -484,7 +495,27 @@ def test_network_topology_defaults_to_cached_graph_and_saves_native_wrapper(
     )
     assert final["source"] == "ha-matter-ws-network-topology"
     assert final["request"] == {"refresh": False}
-    assert final["topology"] == topology
+    assert final["topology"]["nodes"] == [
+        {
+            **topology["nodes"][0],
+            "isRouter": True,
+            "isLeader": False,
+            "isReed": True,
+            "_merge_conflicts": [
+                {"path": "isRouter", "current": True, "incoming": False}
+            ],
+        },
+        {
+            **topology["nodes"][1],
+            "isBorderRouter": True,
+            "isRouter": True,
+            "isLeader": False,
+            "isReed": True,
+            "_merge_conflicts": [
+                {"path": "isRouter", "current": True, "incoming": False}
+            ],
+        },
+    ]
     assert outcome["status"] == "complete"
     assert outcome["refresh"] is False
     assert outcome["nodeCount"] == 2

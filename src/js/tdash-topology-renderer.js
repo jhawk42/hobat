@@ -470,11 +470,17 @@ export function renderTopologyForDataset(
     });
   }
 
-  const capabilities = computeTopologyCapabilities(nodeData, edgeData);
+  const capabilities = computeTopologyCapabilities(nodeData, edgeData, {
+    rolePolicy: dataset.rolePolicy,
+  });
   dataset.capabilities = capabilities;
   updateFilterOptionVisibility(capabilities, "topology");
 
-  const viewModel = createTopologyViewModel(adaptorResult, dataset.deviceProjections);
+  const viewModel = createTopologyViewModel(
+    adaptorResult,
+    dataset.deviceProjections,
+    { rolePolicy: dataset.rolePolicy },
+  );
   const nodesDataset = new vis.DataSet(viewModel.nodes);
   const edgesDataset = new vis.DataSet(viewModel.edges);
   const optionsWithProfile = Object.assign({}, VIS_OPTIONS, {

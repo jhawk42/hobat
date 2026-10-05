@@ -17,6 +17,13 @@ import {
 } from "./tdash-merge.js";
 import { isPlaceholderOmrAddress } from "./tdash-device-fields.js";
 import { buildDeviceProjections } from "./tdash-device-projection.js";
+import {
+  HA_MATTER_ROLE_POLICY,
+  getHaMatterRoleContext,
+  isHaMatterRolePolicyEligible,
+  normalizeHaMatterRolePayload,
+  normalizeHaMatterRoleRecord,
+} from "./tdash-ha-matter-ws-roles.js";
 import { trackedFetch } from "./tdash-activity.js";
 
 // ── Module-level state ────────────────────────────────────────────────────────
@@ -153,6 +160,16 @@ function extractProcessedEveRows(payload) {
   });
 }
 
+export function normalizeDatasetFilePayload(entry, fileIndex, payload, options = {}) {
+  if (!isHaMatterRolePolicyEligible(entry)) {
+    return normalizeDatasetPayload(payload, options);
+  }
+  const filename = entry.files[fileIndex];
+  const roleNormalized = normalizeHaMatterRolePayload(payload, filename);
+  const genericNormalized = normalizeDatasetPayload(roleNormalized, options);
+  return normalizeHaMatterRolePayload(genericNormalized, filename);
+}
+
 export const ROW_EXTRACTORS = Object.freeze({
   "raw-array": extractRawRows,
   "eve-native": (payload) => extractEnvelopeRows(payload, "nodes"),
@@ -185,13 +202,22 @@ export function getDatasetAuxiliaryFiles(entry) {
 }
 
 export function buildDatasetRows(entry, rawFiles, options = {}) {
+  const rolePolicy = isHaMatterRolePolicyEligible(entry)
+    ? HA_MATTER_ROLE_POLICY
+    : undefined;
   const loadedFileIndexes = [];
   rawFiles.forEach((file, index) => {
     if (file !== null && file !== undefined) loadedFileIndexes.push(index);
   });
   const loadedFiles = loadedFileIndexes.map((index) => entry.files[index]);
   if (loadedFileIndexes.length === 0) {
-    return { rows: [], loadedFiles, loadedFileIndexes };
+    return {
+      rows: [],
+      adaptorRows: [],
+      loadedFiles,
+      loadedFileIndexes,
+      rolePolicy,
+    };
   }
 
   const strategyHandler = MERGE_STRATEGY_HANDLERS[entry.mergeStrategy];
@@ -200,11 +226,40 @@ export function buildDatasetRows(entry, rawFiles, options = {}) {
   }
 
   let groups;
+  let extraAdaptorRows = [];
   if (entry.mergeStrategy === MERGE_STRATEGIES.none) {
     const firstIndex = loadedFileIndexes[0];
     const extractor = ROW_EXTRACTORS[entry.rowExtractor];
     if (!extractor) throw new Error(`Unknown row extractor: ${entry.rowExtractor}`);
-    groups = [normalizeRows(extractor(rawFiles[firstIndex]), entry.files[firstIndex])];
+    groups = [normalizeRows(
+      extractor(rawFiles[firstIndex]),
+      entry.files[firstIndex],
+      {
+        rolePolicy,
+        roleContext: rolePolicy
+          ? getHaMatterRoleContext(entry, firstIndex)
+          : undefined,
+      },
+    )];
+    if (
+      rolePolicy === HA_MATTER_ROLE_POLICY
+      && entry.adaptor === "ha-matter-ws"
+      && entry.rowExtractor === "ha-matter-ws-mesh-diagnostics"
+    ) {
+      const relationshipOnlyRows = ROW_EXTRACTORS["ha-matter-ws-topology"](
+        rawFiles[firstIndex],
+      ).filter((row) => row?.relationshipOnly === true);
+      if (relationshipOnlyRows.length > 0) {
+        extraAdaptorRows = normalizeRows(
+          relationshipOnlyRows,
+          entry.files[firstIndex],
+          {
+            rolePolicy,
+            roleContext: "commissioned-topology",
+          },
+        );
+      }
+    }
   } else {
     groups = loadedFileIndexes.map((index) => {
       const extractorId = entry.mergeRowExtractors?.[index];
@@ -213,14 +268,32 @@ export function buildDatasetRows(entry, rawFiles, options = {}) {
       return normalizeRows(
         extractor ? extractor(rawFiles[index]) : rawFiles[index],
         entry.files[index],
+        {
+          rolePolicy,
+          roleContext: rolePolicy ? getHaMatterRoleContext(entry, index) : undefined,
+        },
       );
     });
   }
 
   const rows = strategyHandler(groups, options)
     .map((row) => normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT))
+    .map((row) => rolePolicy === HA_MATTER_ROLE_POLICY
+      ? normalizeHaMatterRoleRecord(row, "canonical-only")
+      : row)
     .map((row) => entry.adaptor === "ha-matter-ws" ? addMatterProjection(row) : row);
-  return { rows, loadedFiles, loadedFileIndexes };
+  const adaptorRows = [...rows, ...extraAdaptorRows.map(
+    (row) => normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
+  )].map((row) => rolePolicy === HA_MATTER_ROLE_POLICY
+    ? normalizeHaMatterRoleRecord(row, "canonical-only")
+    : row);
+  return {
+    rows,
+    adaptorRows,
+    loadedFiles,
+    loadedFileIndexes,
+    rolePolicy,
+  };
 }
 
 function _isProgressiveFeatureEnabled() {
@@ -686,7 +759,8 @@ export function setStaticDeviceLabel(extaddr, deviceLabel) {
 // Builds a partial dataset from whichever entries in rawFiles are non-null.
 // Returns null when no file has arrived yet. Used for incremental rendering.
 function _buildPartialDataset(entry, rawFiles, loadStartTime) {
-  const { rows, loadedFiles } = buildDatasetRows(entry, rawFiles);
+  const assembled = buildDatasetRows(entry, rawFiles);
+  const { rows, loadedFiles } = assembled;
   if (loadedFiles.length === 0) return null;
   const canonicalRawFiles = rawFiles.map((file) =>
     file === null || file === undefined
@@ -709,7 +783,12 @@ function _buildPartialDataset(entry, rawFiles, loadStartTime) {
     rawFiles: canonicalRawFiles,
     auxiliaryFiles: {},
     rows,
-    deviceProjections: buildDeviceProjections(rows),
+    adaptorRows: assembled.adaptorRows,
+    rolePolicy: assembled.rolePolicy,
+    deviceProjections: buildDeviceProjections(
+      rows,
+      { rolePolicy: assembled.rolePolicy },
+    ),
     loadedFiles,
     fetchDurationMs: Date.now() - loadStartTime,
     fileLastModifiedAt: oldestLastModifiedAt,
@@ -796,7 +875,9 @@ export async function loadDataset(entryValue, options = {}) {
         const onCheckpointData = onFileReady !== null && progressiveEnabled
           ? (checkpointData) => {
               if (!_isFetchSessionActive(sessionId)) return;
-              rawFilesInProgress[fileIdx] = normalizeDatasetPayload(
+              rawFilesInProgress[fileIdx] = normalizeDatasetFilePayload(
+                entry,
+                fileIdx,
                 checkpointData,
                 NORMALIZE_OPTIONS_MERGE_INTERNAL,
               );
@@ -819,7 +900,9 @@ export async function loadDataset(entryValue, options = {}) {
               });
             }
             if (onFileReady !== null && progressiveEnabled && _isFetchSessionActive(sessionId)) {
-              rawFilesInProgress[fileIdx] = normalizeDatasetPayload(
+              rawFilesInProgress[fileIdx] = normalizeDatasetFilePayload(
+                entry,
+                fileIdx,
                 data,
                 NORMALIZE_OPTIONS_MERGE_INTERNAL,
               );
@@ -889,9 +972,12 @@ export async function loadDataset(entryValue, options = {}) {
 
   settled.forEach((result, i) => {
     if (result.status === "fulfilled" && result.value != null) {
-      rawFiles.push(
-        normalizeDatasetPayload(result.value, NORMALIZE_OPTIONS_MERGE_INTERNAL),
-      );
+      rawFiles.push(normalizeDatasetFilePayload(
+        entry,
+        i,
+        result.value,
+        NORMALIZE_OPTIONS_MERGE_INTERNAL,
+      ));
       loadedFiles.push(entry.files[i]);
     } else {
       rawFiles.push(null);
@@ -950,7 +1036,12 @@ export async function loadDataset(entryValue, options = {}) {
     rawFiles: canonicalRawFiles,
     auxiliaryFiles,
     rows: assembled.rows,
-    deviceProjections: buildDeviceProjections(assembled.rows),
+    adaptorRows: assembled.adaptorRows,
+    rolePolicy: assembled.rolePolicy,
+    deviceProjections: buildDeviceProjections(
+      assembled.rows,
+      { rolePolicy: assembled.rolePolicy },
+    ),
     loadedFiles: assembled.loadedFiles,
     fetchDurationMs,
     fileLastModifiedAt: oldestLastModifiedAt,

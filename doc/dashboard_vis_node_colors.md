@@ -14,9 +14,12 @@ the final vis-network presentation.
 | Eve fallback | `#e8f5e9` | `#2e7d32` | adaptor-selected |
 | Unknown | `#f2f2f2` | `#808080` | dot |
 
-Border routers and routers receive stronger size/border emphasis than child or
-unknown nodes. Exact dimensions can vary by the final node builder and active
-dataset; the palette and role-shape mapping above are the stable contract.
+All topology adaptors share the same role emphasis: border routers use
+`borderWidth: 5` and `size: 45`, routers use `borderWidth: 3` and `size: 45`,
+and child or unknown nodes use `borderWidth: 1` and `size: 27`. This includes
+ha-matter-ws commissioned, native, and merged topology nodes. Adaptors may
+still select different labels, fonts, and role classifications based on their
+source data.
 
 ## Edge Styles
 

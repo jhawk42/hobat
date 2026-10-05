@@ -33,6 +33,7 @@ from ha_matter_ws_contract import (
 from ha_matter_ws_extractor import MatterExtractionError
 from ha_matter_ws_fetch_all import MatterCollection, collect_devices
 from ha_matter_ws_native_topology import validate_native_topology
+from ha_matter_ws_roles import normalize_ha_matter_roles
 from ha_matter_ws_snapshots import MatterSnapshotSecurityError
 from ha_matter_ws_snapshots import assert_snapshot_safe
 from ha_matter_ws_thread import (
@@ -518,7 +519,10 @@ async def _fetch_native_thread_product(
             result = await client.request(
                 "get_thread_border_routers", require_schema=12
             )
-            payload = validate_border_router_entries(result)
+            payload = [
+                normalize_ha_matter_roles(entry, inventory_router=True)
+                for entry in validate_border_router_entries(result)
+            ]
             metadata: dict[str, Any] = {}
         elif path == ("thread", "diagnostics", "list"):
             result = await client.request("get_thread_diagnostics", require_schema=12)
@@ -710,6 +714,15 @@ async def _fetch_native_topology(
             request_kwargs["timeout"] = args.refresh_timeout
         result = await client.request("get_network_topology", **request_kwargs)
         topology = validate_native_topology(result)
+        topology["nodes"] = [
+            normalize_ha_matter_roles(
+                node,
+                thread_role=node.get("role"),
+                is_thread=node.get("network_type") == "thread",
+                border_router=node.get("kind") == "border_router",
+            )
+            for node in topology["nodes"]
+        ]
         client.raise_if_reader_failed()
         return client.uri, client.server_info, topology
 

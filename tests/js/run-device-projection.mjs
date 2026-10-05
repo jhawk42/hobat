@@ -5,7 +5,13 @@ import path from "node:path";
 import { DATASET_REGISTRY } from "../../src/js/tdash-dataset-registry.js";
 import { buildDatasetRows } from "../../src/js/tdash-dataset.js";
 import { buildDeviceProjection, buildDeviceProjections } from "../../src/js/tdash-device-projection.js";
-import { scanTableCapabilities } from "../../src/js/tdash-filters.js";
+import {
+  computeTopologyCapabilities,
+  isNodeVisibleByFilter,
+  isRowVisibleByNodeFilter,
+  scanTableCapabilities,
+} from "../../src/js/tdash-filters.js";
+import { HA_MATTER_ROLE_POLICY } from "../../src/js/tdash-ha-matter-ws-roles.js";
 
 let checked = 0;
 for (const entry of DATASET_REGISTRY) {
@@ -62,4 +68,72 @@ assert.equal(routerFtd.isReed, false);
 assert.equal(routerFtd.isRouter, true);
 assert.equal(unknownChild.isReed, false);
 assert.equal(unknownChild.isRouter, false);
+const haMatterReed = buildDeviceProjection({
+  role: "Router",
+  isRouter: false,
+  isLeader: false,
+  isReed: true,
+  rloc16: "0x1000",
+}, 0, { rolePolicy: HA_MATTER_ROLE_POLICY });
+assert.equal(haMatterReed.isRouter, false);
+assert.equal(haMatterReed.isLeader, false);
+assert.equal(haMatterReed.isReed, true);
+assert.equal(haMatterReed.deviceType, "unknown");
+assert.equal(
+  isRowVisibleByNodeFilter(
+    { role: "Router", isRouter: false, isReed: true, rloc16: "0x1000" },
+    "reed-devices",
+    HA_MATTER_ROLE_POLICY,
+  ),
+  true,
+);
+assert.equal(
+  isRowVisibleByNodeFilter(
+    { role: "Router", isRouter: false, isReed: true, rloc16: "0x1000" },
+    "main-routers",
+    HA_MATTER_ROLE_POLICY,
+  ),
+  false,
+);
+const haMatterUnknown = buildDeviceProjection({
+  role: "Router",
+  rloc16: "0x1000",
+  mode: { device: "FTD", fullThreadDevice: true },
+}, 0, { rolePolicy: HA_MATTER_ROLE_POLICY });
+assert.equal(haMatterUnknown.isRouter, false);
+assert.equal(haMatterUnknown.isReed, false);
+assert.equal(haMatterUnknown.roleEvidence, "none");
+assert.equal(
+  isNodeVisibleByFilter(
+    { mode_device: "FTD", role: "child", isRouter: false },
+    "reed-devices",
+    undefined,
+    HA_MATTER_ROLE_POLICY,
+  ),
+  false,
+);
+assert.equal(
+  isNodeVisibleByFilter(
+    { mode_device: "FTD", role: "Router", isReed: true },
+    "reed-devices",
+    undefined,
+    HA_MATTER_ROLE_POLICY,
+  ),
+  true,
+);
+assert.equal(
+  computeTopologyCapabilities(
+    [{ mode_device: "FTD", role: "child", isRouter: false, isBorderRouter: false }],
+    [],
+    { rolePolicy: HA_MATTER_ROLE_POLICY },
+  ).hasReedNodes,
+  false,
+);
+assert.equal(
+  computeTopologyCapabilities(
+    [{ mode_device: "FTD", role: "child", isRouter: false, isBorderRouter: false }],
+    [],
+  ).hasReedNodes,
+  true,
+);
 console.log(JSON.stringify({ checked }));

@@ -178,6 +178,27 @@ Per-reporter link, child, route, and link-quality totals are computed after all
 relationships resolve, and final validation rejects duplicate node IDs or any
 unresolved relationship endpoint. Reciprocal links are never synthesized.
 
+## Optional Thread Role Facts
+
+Commissioned device, diagnostics, topology, native-network-topology, and
+Border Router inventory snapshots may carry the optional canonical booleans
+`isBorderRouter`, `isRouter`, `isLeader`, and `isReed`. These are additive
+snapshot facts; they do not change the Matter or WebSocket protocol contract.
+Recognized Thread `routingRole` values map to Router, Leader, and REED facts.
+Unknown or unassigned roles leave unsupported facts absent. A Router role alone
+does not establish Border Router status; native `kind=border_router` and the
+dedicated Border Router inventory establish positive Border Router and Router
+evidence, but not Leader or REED.
+
+Native role mapping requires `network_type=thread`. Explicit boolean values,
+including `false`, take precedence over derived evidence; contradictory
+recognized evidence is retained in `_merge_conflicts`. Non-boolean role inputs
+are discarded rather than coerced. RLOC16, FTD mode, labels, and relationship
+placeholders are not role evidence for commissioned records. REED is represented
+as `isRouter=false`, `isLeader=false`, `isReed=true`; sleepy end devices are not
+REED. Older cached snapshots are normalized for dashboard use without rewriting
+their files.
+
 ## Evidence and Limits
 
 Sanitized protocol fixtures cover the initial server-info frame, interleaved node

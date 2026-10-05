@@ -24,6 +24,7 @@ import {
   expandVisibleRelationship,
 } from "./tdash-topology-utils.js";
 import { getColumnValue, mergeForDisplay, toText } from "./tdash-utils.js";
+import { HA_MATTER_ROLE_POLICY } from "./tdash-ha-matter-ws-roles.js";
 
 const TOPOLOGY_DIAGNOSTIC_FIELDS = Object.freeze([
   ...new Set([
@@ -86,7 +87,14 @@ function getRouterChildRows(viewModel, parentNodeId) {
   return mergedRows;
 }
 
-export function createTopologyViewModel(adaptorResult, projections = new Map()) {
+export function createTopologyViewModel(
+  adaptorResult,
+  projections = new Map(),
+  options = {},
+) {
+  const rolePolicy = options.rolePolicy === HA_MATTER_ROLE_POLICY
+    ? HA_MATTER_ROLE_POLICY
+    : undefined;
   const nodes = (adaptorResult.nodeData || []).map(cloneValue);
   const edges = (adaptorResult.edgeData || []).map(cloneValue);
   const nodeMap = new Map(
@@ -112,7 +120,14 @@ export function createTopologyViewModel(adaptorResult, projections = new Map()) 
     for (const record of [rawByIdForDetails.get(nodeId), node]) {
       const projection = identityKeysForRecord(record).map((key) => projectionByIdentity.get(key)).find(Boolean);
       if (projection) {
-        projectionByNodeId.set(nodeId, projectAdaptorNode(projection, displayById.get(nodeId) ?? node));
+        projectionByNodeId.set(
+          nodeId,
+          projectAdaptorNode(
+            projection,
+            displayById.get(nodeId) ?? node,
+            rolePolicy,
+          ),
+        );
         break;
       }
     }
@@ -132,6 +147,7 @@ export function createTopologyViewModel(adaptorResult, projections = new Map()) 
         .map(([rloc16, record]) => [rloc16, cloneValue(record)]),
     ),
     sourceNames: [...(adaptorResult.sourceNames || [])],
+    rolePolicy,
     identityToNodeId,
     projectionByNodeId,
     originalNodeStyling: new Map(nodes.map((node) => [node.id, cloneNodeStyle(node)])),
@@ -172,7 +188,12 @@ export function computeTopologyVisibility(viewModel, filterState) {
 
   viewModel.nodes.forEach((node) => {
     if (
-      isNodeVisibleByFilter(node, filterState.nodeMode, viewModel.projectionByNodeId.get(node.id))
+      isNodeVisibleByFilter(
+        node,
+        filterState.nodeMode,
+        viewModel.projectionByNodeId.get(node.id),
+        viewModel.rolePolicy,
+      )
       && isNodeVisibleByDiagnosticFilter(node, filterState.diagnosticMode, viewModel.projectionByNodeId.get(node.id))
     ) visibleNodeIds.add(node.id);
   });
@@ -307,12 +328,14 @@ export function buildTopologyDetails(viewModel, selectedId) {
     graph: {
       unifiedId: selectedId,
       graphLinkCount,
-      isRouter: node.isRouter || node.is_router || (
-        typeof node.rloc16 === "string"
-        && node.rloc16.toLowerCase().startsWith("0x")
-        && node.rloc16.toLowerCase().endsWith("00")
-        && node.rloc16.length === 6
-      ) || toText(node.role).toLowerCase() === "router",
+      isRouter: viewModel.rolePolicy === HA_MATTER_ROLE_POLICY
+        ? node.isRouter === true
+        : node.isRouter || node.is_router || (
+          typeof node.rloc16 === "string"
+          && node.rloc16.toLowerCase().startsWith("0x")
+          && node.rloc16.toLowerCase().endsWith("00")
+          && node.rloc16.length === 6
+        ) || toText(node.role).toLowerCase() === "router",
       hasChildren: viewModel.nodes.some((candidate) => candidate.id === selectedId && candidate.hasChildren),
     },
   };

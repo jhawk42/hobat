@@ -112,7 +112,7 @@ def test_reporter_rloc16_is_derived_from_thread_rloc_address() -> None:
     assert reporter["matterId"] == "FABRIC-9"
 
 
-def test_topology_infers_router_and_child_relationships_from_rloc16() -> None:
+def test_commissioned_roles_do_not_infer_router_from_rloc16() -> None:
     diagnostics = [
         {
             "nodeId": 20,
@@ -144,11 +144,31 @@ def test_topology_infers_router_and_child_relationships_from_rloc16() -> None:
     parent = _by_node_id(topology, 20)
     child = _by_node_id(topology, 21)
 
-    assert parent["isRouter"] is True
-    assert child["isRouter"] is False
+    assert "isRouter" not in parent
+    assert "isRouter" not in child
     assert parent["totalChildren"] == 1
     assert parent["children"][0]["targetId"] == child["topologyId"]
     assert parent["children"][0]["observations"][0]["source"] == "Rloc16Hierarchy"
+
+
+def test_relationship_only_placeholder_keeps_rloc_router_classification() -> None:
+    diagnostics = [
+        {
+            "nodeId": 30,
+            "matterId": "FABRIC-30",
+            "extPanId": "0x1111222233334444",
+            "rloc16": "0x4c00",
+            "neighborTable": [
+                {"rloc16": "0x5000", "extAddress": "cc00000000000003"}
+            ],
+            "routeTable": [],
+        }
+    ]
+
+    topology = build_topology_snapshot(diagnostics)
+    placeholder = next(node for node in topology if node.get("relationshipOnly"))
+
+    assert placeholder["isRouter"] is True
 
 
 def test_mesh_snapshot_excludes_relationship_only_nodes_but_topology_keeps_them() -> None:

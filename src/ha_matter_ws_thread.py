@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol
 
 from ha_matter_ws_contract import MatterWsContractError
+from ha_matter_ws_roles import ROLE_FIELDS
 from ha_matter_ws_snapshots import assert_snapshot_safe
+from td_device_fields import FIELD_DEFINITIONS
 
 
 MAX_SAFE_JSON_INTEGER = (1 << 53) - 1
@@ -54,6 +56,11 @@ THREAD_DIAGNOSTIC_TERMINAL_REASONS = (
 
 _HEX_RE = re.compile(r"^[0-9A-Fa-f]+$")
 _DECIMAL_RE = re.compile(r"^(0|[1-9][0-9]*)$")
+_ROLE_ALIASES = {
+    definition["path"]: definition["aliases"]
+    for definition in FIELD_DEFINITIONS
+    if definition["path"] in ROLE_FIELDS
+}
 Validator = Callable[[Any, str], Any]
 
 
@@ -335,6 +342,10 @@ def _validate_border_router(
         "sources": sources,
         "lastSeen": _safe_uint,
     }
+    for field in ROLE_FIELDS:
+        validators[field] = _boolean
+        for alias in _ROLE_ALIASES.get(field, ()):
+            validators[alias] = _boolean
     return _project_object(
         value,
         path,

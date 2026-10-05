@@ -11,6 +11,7 @@ import {
   createTopologyViewModel,
   resolveTopologyNodeId,
 } from "../../src/js/tdash-topology-view-model.js";
+import { HA_MATTER_ROLE_POLICY } from "../../src/js/tdash-ha-matter-ws-roles.js";
 
 const router = {
   id: "router-a",
@@ -93,6 +94,46 @@ const status = buildTopologyStatus(viewModel, visibility, searchState, 1.234, {
 assert.equal(status.scale, "1.23x");
 assert.match(status.text, /Showing: 2 nodes, 1 links/);
 assert.match(status.text, /Search: "desk" — 1 of 2 rows match/);
+
+const haNode = {
+  id: "ha-reed",
+  role: "Router",
+  rloc16: "0x1000",
+  isRouter: false,
+  isLeader: false,
+  isReed: true,
+};
+const haViewModel = createTopologyViewModel({
+  nodeData: [haNode],
+  edgeData: [],
+  nodeMap: new Map([[haNode.id, haNode]]),
+  rawByIdForDetails: new Map([[haNode.id, haNode]]),
+  routerNeighborByRloc16: new Map(),
+  routerChildByRloc16: new Map(),
+  sourceNames: ["ha-matter-ws"],
+}, new Map(), { rolePolicy: HA_MATTER_ROLE_POLICY });
+const haRouterVisibility = computeTopologyVisibility(
+  haViewModel,
+  createTopologyFilterState("main-routers", "all", "all"),
+);
+const haReedVisibility = computeTopologyVisibility(
+  haViewModel,
+  createTopologyFilterState("reed-devices", "all", "all"),
+);
+assert.equal(haRouterVisibility.visibleNodeCount, 0);
+assert.equal(haReedVisibility.visibleNodeCount, 1);
+assert.equal(buildTopologyDetails(haViewModel, haNode.id).graph.isRouter, false);
+
+const legacyHaLookalike = createTopologyViewModel({
+  nodeData: [haNode],
+  edgeData: [],
+  nodeMap: new Map([[haNode.id, haNode]]),
+  rawByIdForDetails: new Map([[haNode.id, haNode]]),
+  routerNeighborByRloc16: new Map(),
+  routerChildByRloc16: new Map(),
+  sourceNames: ["fixture.json"],
+});
+assert.equal(buildTopologyDetails(legacyHaLookalike, haNode.id).graph.isRouter, true);
 
 class FakeTarget {
   constructor() {

@@ -9,6 +9,10 @@ export { adaptMergedDetailed, adaptRawArray };
 import { adaptEve, adaptEveNative } from './tdash-adaptor-eve.js';
 export { adaptEve, adaptEveNative };
 import { adaptThreadToolsNative } from './tdash-adaptor-thread-tools.js';
+import {
+  HA_MATTER_ROLE_POLICY,
+  isHaMatterRolePolicyEligible,
+} from './tdash-ha-matter-ws-roles.js';
 export { adaptThreadToolsNative };
 function buildFileMap(fileNames, rawFiles) {
   const map = new Map();
@@ -30,10 +34,11 @@ export const ADAPTOR_HANDLERS = Object.freeze({
     fileMap,
     rows,
     entry?.rowExtractor,
+    entry?.rolePolicy,
   ),
-  'ha-matter-ws-native-thread': (fileMap, rows, entry) => adaptHaMatterWsNativeThread(fileMap, rows, entry),
-  'ha-matter-ws-network-topology': (fileMap) => adaptHaMatterWsNetworkTopology(fileMap),
-  'ha-matter-ws-merge-topology': (fileMap, rows) => adaptHaMatterWsMergeTopology(fileMap, rows),
+  'ha-matter-ws-native-thread': (fileMap, rows, entry) => adaptHaMatterWsNativeThread(fileMap, rows, entry?.rolePolicy),
+  'ha-matter-ws-network-topology': (fileMap, rows, entry) => adaptHaMatterWsNetworkTopology(fileMap, rows, entry?.rolePolicy),
+  'ha-matter-ws-merge-topology': (fileMap, rows, entry) => adaptHaMatterWsMergeTopology(fileMap, rows, entry?.rolePolicy),
   'raw-array': (fileMap) => adaptRawArray(fileMap),
 });
 
@@ -42,5 +47,17 @@ export function runAdaptor(dataset) {
   const fileMap = buildFileMap(entry.files || [], rawFiles);
   const handler = ADAPTOR_HANDLERS[entry.adaptor];
   if (!handler) throw new Error(`Unknown adaptor: ${entry.adaptor}`);
+  const rolePolicy = dataset.rolePolicy === HA_MATTER_ROLE_POLICY
+    && isHaMatterRolePolicyEligible(entry)
+    ? HA_MATTER_ROLE_POLICY
+    : undefined;
+  if (rolePolicy) {
+    const roleEntry = { ...entry, rolePolicy };
+    return handler(
+      fileMap,
+      dataset.adaptorRows ?? rows,
+      roleEntry,
+    );
+  }
   return handler(fileMap, rows, entry);
 }

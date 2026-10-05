@@ -473,6 +473,12 @@ export function groupIsolatedUnknownNodes(nodeData, edgeData, edgeMap, presetNam
 
 // ── Vis-node data builder ─────────────────────────────────────────────────────
 
+export function buildRoleNodeEmphasis({ isBorderRouter, isRouter }) {
+  if (isBorderRouter) return { borderWidth: 5, size: 45 };
+  if (isRouter) return { borderWidth: 3, size: 45 };
+  return { borderWidth: 1, size: 27 };
+}
+
 export function buildVisNodeData(
   nodeMap,
   routerIdsWithChildren,
@@ -514,19 +520,14 @@ export function buildVisNodeData(
             ? NODE_SHAPES.childFtd
             : (isChildMtd ? NODE_SHAPES.childMtd : NODE_SHAPES.child))));
     
-    let borderWidth = 1;
     let fontSize = 13;
-    let size = 27;
+    const { borderWidth, size } = buildRoleNodeEmphasis({ isBorderRouter, isRouter });
     let widthConstraint = { minimum: 70, maximum: 200 };
     let heightConstraint = { minimum: 26, maximum: 26 };
     if (isBorderRouter) {
-      borderWidth = 5;
       fontSize = 19.5;
-      size = 45;
     } else if (isRouter) {
-      borderWidth = 3;
       fontSize = 19.5;
-      size = 45;
     }
     const font = buildNodeLabelFont({ fontSize, isRouter });
     // Enforce role-based color independently from shape strings.

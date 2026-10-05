@@ -100,7 +100,6 @@ def _initialize_node(record: Mapping[str, Any]) -> dict[str, Any]:
         node.pop("extAddress", None)
     if rloc16 is not None:
         node["rloc16"] = rloc16
-        node["isRouter"] = is_router(rloc16)
     else:
         node.pop("rloc16", None)
     node["topologyId"] = _topology_id(node)

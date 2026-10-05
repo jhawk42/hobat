@@ -117,3 +117,36 @@ def test_diagnostic_snapshot_uses_canonical_fields_and_excludes_wifi_nodes() -> 
     assert golden["macCounters"]["txTotalCount"] == 22
     assert "children" not in golden
     assert "routerNeighbors" not in golden
+
+
+def test_diagnostic_snapshot_role_facts_match_device_product_and_omit_unknowns() -> None:
+    records = [
+        {
+            "matter": {"nodeId": 1, "matterId": "FABRIC-1"},
+            "thread": {"routingRole": "Router"},
+        },
+        {
+            "matter": {"nodeId": 2, "matterId": "FABRIC-2"},
+            "thread": {"routingRole": "Reed"},
+            "isReed": False,
+        },
+        {
+            "matter": {"nodeId": 3, "matterId": "FABRIC-3"},
+            "thread": {"routingRole": "Unknown (99)"},
+        },
+    ]
+
+    diagnostics = build_diagnostic_snapshot(records)
+
+    assert {
+        key: diagnostics[0][key] for key in ("isRouter", "isLeader", "isReed")
+    } == {"isRouter": True, "isLeader": False, "isReed": False}
+    assert {
+        key: diagnostics[1][key] for key in ("isRouter", "isLeader", "isReed")
+    } == {"isRouter": False, "isLeader": False, "isReed": False}
+    assert "isRouter" not in diagnostics[2]
+    assert "isLeader" not in diagnostics[2]
+    assert "isReed" not in diagnostics[2]
+    assert diagnostics[1]["_merge_conflicts"] == [
+        {"path": "isReed", "current": False, "incoming": True}
+    ]

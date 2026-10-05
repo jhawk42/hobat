@@ -26,6 +26,7 @@ import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
 
 let _tableRows = [];
 let _tableProjectionByRow = new WeakMap();
+let _tableRolePolicy;
 let _tableColumns = [];
 let _tableDatasetLabel = "";
 let _tableDatasetToken = null;
@@ -502,7 +503,7 @@ export function applyTableFilters({ preserveSelection = false } = {}) {
   );
   const filtered = _tableRows.filter(
     (row) =>
-      isRowVisibleByNodeFilter(row, nodeMode) &&
+      isRowVisibleByNodeFilter(row, nodeMode, _tableRolePolicy) &&
       isRowVisibleByDiagnosticFilter(row, diagMode, _tableProjectionByRow.get(row)),
   );
   const { matchingRows } = filterRowsBySearch(filtered, searchQuery, _moreInfoEnabled);
@@ -582,6 +583,7 @@ export function renderTableForDataset(dataset, statusDatasetToken = dataset) {
   const columns = collectColumns(rows);
 
   _tableRows = rows;
+  _tableRolePolicy = dataset.rolePolicy;
   _tableColumns = columns;
   _selectedTableRow = null;
   _tableSort = null;
@@ -590,7 +592,10 @@ export function renderTableForDataset(dataset, statusDatasetToken = dataset) {
 
   // ── compute and apply dynamic filter option visibility ────────
   _tableProjectionByRow = new WeakMap();
-  const projections = [...(dataset.deviceProjections ?? buildDeviceProjections(rows)).values()];
+  const projections = [...(
+    dataset.deviceProjections
+      ?? buildDeviceProjections(rows, { rolePolicy: dataset.rolePolicy })
+  ).values()];
   rows.forEach((row, index) => {
     const projection = projections[index];
     _tableProjectionByRow.set(row, projection);

@@ -39,7 +39,7 @@ The maintained model covers these groups:
 - Identity: `rloc16`, `extAddress`, `omrIpv6Address`, `eui`, `id`, `routerId`,
   `mlEidIid`, `deviceLabel`, and network identity fields.
 - Role and mode: `role`, `type`, `mode.*`, `isLeader`, `isBorderRouter`,
-  `isRouter`, and `isPrimaryBBR`.
+  `isRouter`, `isReed`, and `isPrimaryBBR`.
 - Network state: IPv6 addresses, `leaderData`, `connectivity`, routes, children,
   child tables, child IPv6 addresses, and router neighbors.
 - Diagnostics: `macCounters`, `mleCounters`, `timeStatistics`, and derived
@@ -141,5 +141,19 @@ fields or relationship categories. Link filters are topology-only.
 Diagnostic insights evaluate the selected normalized record. They are
 informational and use the same diagnostic predicates as filtering where the
 field shapes overlap.
+
+### HA Matter Thread Roles
+
+HA Matter records use the optional canonical `isBorderRouter`, `isRouter`,
+`isLeader`, and `isReed` facts. Recognized Thread roles classify Router, Leader,
+and REED devices; REED devices appear in the existing REED filter and are not
+active Routers. Border Router classification requires Border Router evidence,
+not merely a Router role or label. Explicit boolean values, including `false`,
+are preserved in rows, topology, and details; unsupported or unknown role facts
+remain absent rather than being inferred from RLOC16 or device mode. Older
+caches receive this source-scoped normalization in memory only.
+
+Other sources retain their existing Router RLOC16, REED mode/child, and details
+precedence behavior.
 
 See [Webpage, Web Server, and Data Flow](codebase_webpage_web_server_data_flow.md) and [Merge Thread Device Information](merge_thread_device_info.md).

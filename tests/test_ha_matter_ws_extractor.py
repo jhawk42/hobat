@@ -126,3 +126,65 @@ def test_snapshot_builder_rejects_credential_shaped_final_fields() -> None:
         build_device_snapshot(
             [{"matter": {"nodeId": 1}, "trustedRootCertificates": ["secret"]}]
         )
+
+
+def test_device_snapshot_maps_commissioned_thread_roles_and_explicit_false() -> None:
+    records = [
+        {
+            "matter": {"nodeId": 1, "matterId": "FABRIC-1"},
+            "thread": {"routingRole": "Reed", "isRouter": True},
+        },
+        {
+            "matter": {"nodeId": 2, "matterId": "FABRIC-2"},
+            "thread": {"routingRole": "Leader"},
+            "isLeader": False,
+        },
+        {"matter": {"nodeId": 3, "matterId": "FABRIC-3"}},
+    ]
+
+    devices = build_device_snapshot(records)
+
+    assert {
+        key: devices[0][key]
+        for key in ("isRouter", "isLeader", "isReed")
+    } == {"isRouter": True, "isLeader": False, "isReed": True}
+    assert devices[0]["_merge_conflicts"] == [
+        {"path": "isRouter", "current": True, "incoming": False}
+    ]
+    assert devices[1]["isLeader"] is False
+    assert devices[1]["_merge_conflicts"] == [
+        {"path": "isLeader", "current": False, "incoming": True}
+    ]
+    assert not any(
+        key in devices[2] for key in ("isBorderRouter", "isRouter", "isLeader", "isReed")
+    )
+
+
+def test_device_snapshot_resolves_strict_role_aliases_before_generic_normalization() -> None:
+    records = [
+        {
+            "matter": {"nodeId": 1, "matterId": "FABRIC-1"},
+            "thread": {"routingRole": "Reed"},
+            "isRouter": "true",
+            "is_router": True,
+        },
+        {
+            "matter": {"nodeId": 2, "matterId": "FABRIC-2"},
+            "thread": {"routingRole": "Leader"},
+            "isBorderRouter": "true",
+        },
+        {
+            "matter": {"nodeId": 3, "matterId": "FABRIC-3"},
+            "thread": {"routingRole": "Reed"},
+            "isRouter": "true",
+        },
+    ]
+
+    devices = build_device_snapshot(records)
+
+    assert devices[0]["isRouter"] is True
+    assert devices[0]["_merge_conflicts"] == [
+        {"path": "isRouter", "current": True, "incoming": False}
+    ]
+    assert "isBorderRouter" not in devices[1]
+    assert devices[2]["isRouter"] is False

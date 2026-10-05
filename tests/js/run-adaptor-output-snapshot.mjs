@@ -18,6 +18,11 @@ export function createCachedAdaptorSnapshot() {
     const keys = (index) => [...index.keys()].map(String).sort();
     snapshot[entry.value] = {
       nodeIds: result.nodeData.map((node) => node.id),
+      nodeEmphasis: result.nodeData.map((node) => [
+        node.id,
+        node.borderWidth ?? null,
+        node.size ?? null,
+      ]),
       edges: result.edgeData.map((edge) => [edge.id ?? null, edge.from, edge.to, edge.linkCategories ?? null]),
       details: [...result.rawByIdForDetails].map(([id, record]) => [String(id), Object.keys(record).sort()]),
       nodeMapKeys: keys(result.nodeMap),

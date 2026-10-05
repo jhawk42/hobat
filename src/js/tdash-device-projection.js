@@ -1,6 +1,7 @@
 import { getDeviceIdentityKeys, normalizeInputRecord } from "./tdash-device-fields.js";
 import { computeTopologyCapabilities } from "./tdash-filters.js";
 import { getColumnValue, toFiniteNumber, toText } from "./tdash-utils.js";
+import { HA_MATTER_ROLE_POLICY } from "./tdash-ha-matter-ws-roles.js";
 
 const relationshipPaths = ["children", "childTable", "routerNeighbors"];
 const metricPaths = [
@@ -57,7 +58,8 @@ function deriveDiagnostics(row, metrics, deviceType, isRouter, isBorderRouter, i
   };
 }
 
-export function buildDeviceProjection(row, index = 0) {
+export function buildDeviceProjection(row, index = 0, options = {}) {
+  const useHaMatterRoles = options.rolePolicy === HA_MATTER_ROLE_POLICY;
   const deviceId = getDeviceIdentityKeys(row)[0] ?? `row:${index}`;
   const rloc16 = toText(getColumnValue(row, "rloc16")).toLowerCase();
   const role = toText(getColumnValue(row, "role")).toLowerCase();
@@ -65,8 +67,12 @@ export function buildDeviceProjection(row, index = 0) {
   const roleRouter = ["router", "leader", "border router"].includes(role);
   const hasRole = typeof explicitRouter === "boolean" || role.length > 0;
   const derivedRouter = rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6;
-  const isRouter = typeof explicitRouter === "boolean" ? explicitRouter : hasRole ? roleRouter : derivedRouter;
-  const roleEvidence = typeof explicitRouter === "boolean" || role.length > 0
+  const isRouter = useHaMatterRoles
+    ? explicitRouter === true
+    : typeof explicitRouter === "boolean" ? explicitRouter : hasRole ? roleRouter : derivedRouter;
+  const roleEvidence = useHaMatterRoles
+    ? typeof explicitRouter === "boolean" ? "explicit" : "none"
+    : typeof explicitRouter === "boolean" || role.length > 0
     ? "explicit" : derivedRouter ? "rloc16-derived" : "none";
   const deviceType = toText(getColumnValue(row, "mode.device")).toUpperCase();
   const relationships = Object.fromEntries(relationshipPaths.map((path) => {
@@ -84,9 +90,20 @@ export function buildDeviceProjection(row, index = 0) {
   }));
   const normalizedType = ["FTD", "MTD", "REED"].includes(deviceType) ? deviceType : "unknown";
   const isBorderRouter = getColumnValue(row, "isBorderRouter") === true;
-  const isReed = deviceType === "FTD" && (role ? role === "child" : !isRouter && !isBorderRouter);
-  const diagnostics = deriveDiagnostics(row, metrics, normalizedType, derivedRouter,
-    isBorderRouter, deviceType === "FTD" && (role ? role === "child" : !derivedRouter && !isBorderRouter), relationships);
+  const isReed = useHaMatterRoles
+    ? getColumnValue(row, "isReed") === true
+    : deviceType === "FTD" && (role ? role === "child" : !isRouter && !isBorderRouter);
+  const diagnostics = deriveDiagnostics(
+    row,
+    metrics,
+    normalizedType,
+    useHaMatterRoles ? isRouter : derivedRouter,
+    isBorderRouter,
+    useHaMatterRoles
+      ? isReed
+      : deviceType === "FTD" && (role ? role === "child" : !derivedRouter && !isBorderRouter),
+    relationships,
+  );
   return {
     deviceId,
     extAddress: toText(getColumnValue(row, "extAddress")),
@@ -94,7 +111,9 @@ export function buildDeviceProjection(row, index = 0) {
     omrIpv6Address: toText(getColumnValue(row, "omrIpv6Address")),
     deviceType: normalizedType,
     isRouter,
-    isLeader: getColumnValue(row, "isLeader") === true || role === "leader",
+    isLeader: useHaMatterRoles
+      ? getColumnValue(row, "isLeader") === true
+      : getColumnValue(row, "isLeader") === true || role === "leader",
     isBorderRouter,
     isReed,
     roleEvidence,
@@ -104,16 +123,42 @@ export function buildDeviceProjection(row, index = 0) {
   };
 }
 
-export function buildDeviceProjections(rows) {
+export function buildDeviceProjections(rows, options = {}) {
   const projections = new Map();
   rows.forEach((row, index) => {
-    const projection = buildDeviceProjection(row, index);
+    const projection = buildDeviceProjection(row, index, options);
     projections.set(projections.has(projection.deviceId) ? `${projection.deviceId}#${index}` : projection.deviceId, projection);
   });
   return projections;
 }
 
-export function projectAdaptorNode(projection, node) {
+export function projectAdaptorNode(projection, node, rolePolicy = undefined) {
+  const useHaMatterRoles = rolePolicy === HA_MATTER_ROLE_POLICY;
+  if (useHaMatterRoles) {
+    const isRouter = node.isRouter === true;
+    const isBorderRouter = node.isBorderRouter === true;
+    const isLeader = node.isLeader === true;
+    const isReed = node.isReed === true;
+    const { edgeCategories, ...diagnostics } = computeTopologyCapabilities(
+      [node],
+      [],
+      { rolePolicy },
+    );
+    return {
+      ...projection,
+      isRouter,
+      isBorderRouter,
+      isLeader,
+      isReed,
+      relationships: {
+        ...projection.relationships,
+        children: node.hasChildren === true ? 1 : 0,
+        totalChildren: 0,
+      },
+      roleEvidence: typeof node.isRouter === "boolean" ? "explicit" : "none",
+      diagnostics,
+    };
+  }
   const deviceType = toText(node.mode_device).toUpperCase();
   const isRouter = node.isRouter === true;
   const isBorderRouter = node.isBorderRouter === true;

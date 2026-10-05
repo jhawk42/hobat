@@ -48,9 +48,9 @@ def test_dataset_uses_internal_vs_canonical_route_normalization_modes() -> None:
     assert "dropLegacyRouteData: true" in text
 
     # Progressive and final merge staging should preserve legacy merge behavior.
-    assert "normalizeDatasetPayload(\n                checkpointData,\n                NORMALIZE_OPTIONS_MERGE_INTERNAL," in text
-    assert "normalizeDatasetPayload(\n                data,\n                NORMALIZE_OPTIONS_MERGE_INTERNAL," in text
-    assert "normalizeDatasetPayload(result.value, NORMALIZE_OPTIONS_MERGE_INTERNAL)" in text
+    assert "normalizeDatasetFilePayload(\n                entry,\n                fileIdx,\n                checkpointData,\n                NORMALIZE_OPTIONS_MERGE_INTERNAL," in text
+    assert "normalizeDatasetFilePayload(\n                entry,\n                fileIdx,\n                data,\n                NORMALIZE_OPTIONS_MERGE_INTERNAL," in text
+    assert "normalizeDatasetFilePayload(\n        entry,\n        i,\n        result.value,\n        NORMALIZE_OPTIONS_MERGE_INTERNAL," in text
 
     # Public dataset output should expose canonical route.routeData shape.
     assert "normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT)" in text
@@ -63,6 +63,6 @@ def test_dataset_partial_and_final_outputs_use_canonicalized_buffers() -> None:
     assert "export function buildDatasetRows(entry, rawFiles, options = {})" in text
     assert "normalizeRowMergeAliases(row, NORMALIZE_OPTIONS_CANONICAL_OUTPUT)" in text
     assert "const canonicalRawFiles = rawFiles.map((file) =>" in text
-    assert "const { rows, loadedFiles } = buildDatasetRows(entry, rawFiles);" in text
     assert "const assembled = buildDatasetRows(entry, rawFiles);" in text
+    assert "const { rows, loadedFiles } = assembled;" in text
     assert "rows: assembled.rows" in text

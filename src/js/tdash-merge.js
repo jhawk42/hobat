@@ -1,4 +1,9 @@
 import { MERGE_STRATEGIES } from "./tdash-constants.js";
+import {
+  HA_MATTER_ROLE_POLICY,
+  isHaMatterRoleContextAllowed,
+  normalizeHaMatterRoleRecord,
+} from "./tdash-ha-matter-ws-roles.js";
 import { sourceDefaults } from "./tdash-source-authority.js";
 import { getDeviceIdentityKeys, isPlaceholderExtAddress, isPlaceholderDeviceLabel } from "./tdash-device-fields.js";
 import {
@@ -15,23 +20,46 @@ import {
 
 // ── Row normalisation (used by table renderer + merge strategies) ────────────
 
-export function normalizeRows(rawData, sourceName = "") {
+export function normalizeRows(rawData, sourceName = "", options = {}) {
   const fieldSource = fieldSourceForFile(sourceName);
+  const normalizeRow = (row) => {
+    if (
+      options.rolePolicy === HA_MATTER_ROLE_POLICY
+      && isHaMatterRoleContextAllowed(sourceName, options.roleContext)
+    ) return normalizeHaMatterRoleRecord(row, options.roleContext);
+    return row;
+  };
+  const normalizeRelationshipsAndRoles = (row) => {
+    const normalized = normalizeSourceRelationships(
+      normalizeRow(row),
+      sourceName,
+      fieldSource,
+    );
+    return normalizeRow(normalized);
+  };
   if (Array.isArray(rawData)) {
     return rawData.map((row, index) => {
       if (isPlainObject(row))
-        return withRowProvenance(normalizeSourceRelationships(row, sourceName, fieldSource), sourceName);
+        return withRowProvenance(
+          normalizeRelationshipsAndRoles(row),
+          sourceName,
+        );
       return withRowProvenance({ row_index: index, value: row }, sourceName);
     });
   }
   if (isPlainObject(rawData)) {
     return Object.keys(rawData).map((key) => {
       const row = rawData[key];
-      if (isPlainObject(row))
+      if (isPlainObject(row)) {
+        const normalized = normalizeRowMergeAliases(
+          normalizeRow({ _row_key: key, ...row }),
+          { source: fieldSource },
+        );
         return withRowProvenance(
-          normalizeRowMergeAliases({ _row_key: key, ...row }, { source: fieldSource }),
+          normalizeRow(normalized),
           sourceName,
         );
+      }
       return withRowProvenance({ _row_key: key, value: row }, sourceName);
     });
   }
