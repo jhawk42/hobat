@@ -16,6 +16,7 @@ from td_health_observation_model import device_id_from_ext_address
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_policy import load_health_policy
 from td_health_processor import ProcessingResult, build_processing_result, process_health
+from td_health_roster_mutation import set_cli_roster_device
 from td_health_sqlite import SQLiteHealthStore
 from util_data import resolve_data_dir, save_json_atomic
 
@@ -63,13 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicitly import expected extAddress entries from the static label map.",
     )
     process_dataset.add_argument("--roster-list", action="store_true", help="List roster records for this network.")
-    process_dataset.add_argument("--roster-device", metavar="EXTADDR", help="Upsert this roster device identity.")
+    process_dataset.add_argument("--roster-device", metavar="EXTADDR", help="Add or update this roster device identity.")
     process_dataset.add_argument("--roster-label", help="Label to store with --roster-device.")
     process_dataset.add_argument(
         "--roster-state",
         choices=("expected", "retired", "intentionally-offline", "intermittent"),
-        default="expected",
-        help="State to store with --roster-device.",
+        default=None,
+        help="State to set with --roster-device; omitted preserves an existing state.",
     )
     compare = commands.add_parser("compare", description="Compare two stored health assessments.")
     compare.add_argument("--before-assessment", required=True)
@@ -226,7 +227,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if roster_actions > 1:
         parser.error("roster operations are mutually exclusive")
-    if (args.roster_label or args.roster_state != "expected") and not args.roster_device:
+    if (args.roster_label is not None or args.roster_state is not None) and not args.roster_device:
         parser.error("--roster-label and --roster-state require --roster-device")
     if args.dataset == "all" and (roster_actions or args.export_latest):
         parser.error("--dataset all cannot be combined with roster operations or --export-latest")
@@ -239,30 +240,39 @@ def main(argv: Sequence[str] | None = None) -> int:
         document = {
             "networkId": imported.network_id,
             "imported": imported.imported,
+            "alreadyPresent": imported.already_present,
             "skipped": imported.skipped,
         }
         print(json.dumps(document, sort_keys=True) if args.json_output else (
             f"Imported {imported.imported} expected devices for {imported.network_id}; "
-            f"skipped {imported.skipped}."
+            f"already present {imported.already_present}; skipped {imported.skipped}."
         ))
         return 0
 
     if args.roster_list or args.roster_device:
         store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
         network_id = network_id_for_dataset(data_dir=data_dir, dataset_id=args.dataset)
+        mutation = None
         if args.roster_device:
             try:
                 device_id = device_id_from_ext_address(args.roster_device)
             except ValueError as exc:
                 parser.error(str(exc))
-            store.upsert_expected_device(
-                network_id,
-                device_id,
-                args.roster_label,
-                args.roster_state,
-            )
+            try:
+                mutation = set_cli_roster_device(
+                    store,
+                    network_id=network_id,
+                    device_id=device_id,
+                    label=args.roster_label,
+                    state=args.roster_state,
+                    label_supplied=args.roster_label is not None,
+                )
+            except ValueError as exc:
+                parser.error(str(exc))
         records = store.expected_device_records(network_id)
         document = {"networkId": network_id, "devices": records}
+        if mutation is not None:
+            document["mutation"] = asdict(mutation)
         if args.json_output:
             print(json.dumps(document, sort_keys=True))
         else:

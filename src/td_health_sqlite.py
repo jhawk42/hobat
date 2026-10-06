@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MappingProxyType
 from typing import Iterator
 
 from td_health_comparison import (
@@ -17,7 +19,7 @@ from td_health_comparison import (
 from td_health_manifest import load_health_manifest
 from td_health_observation_model import (
     Assessment, Completeness, Confidence, DeviceSample, HealthStatus, MetricSample,
-    Observation, RelationshipSample, SourceEvidence,
+    Finding, FindingRank, FindingScope, Observation, RelationshipSample, SourceEvidence,
 )
 from td_health_observation_store import (
     MAX_OBSERVATIONS,
@@ -28,7 +30,7 @@ from td_health_observation_store import (
 from td_health_roster import RosterFact
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 7
 _PURGE_TABLES = (
     "observations",
     "observation_sources",
@@ -41,6 +43,9 @@ _PURGE_TABLES = (
     "devices",
     "relationships",
     "expected_devices",
+    "network_roster_revisions",
+    "roster_lifecycle_events",
+    "roster_mutation_receipts",
     "comparisons",
     "comparison_items",
     "device_fact_samples",
@@ -129,7 +134,11 @@ CREATE TABLE IF NOT EXISTS assessments (
     confidence TEXT NOT NULL,
     coverage_json TEXT NOT NULL,
     assessed_at TEXT NOT NULL,
-    UNIQUE (observation_id, policy_digest)
+    roster_context_digest TEXT NOT NULL DEFAULT 'legacy-unknown',
+    network_roster_revision INTEGER NOT NULL DEFAULT 0,
+    presence_input_digest TEXT NOT NULL DEFAULT 'legacy-unknown',
+    reproduction_context_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE (observation_id, policy_digest, roster_context_digest)
 );
 CREATE TABLE IF NOT EXISTS findings (
     assessment_id TEXT NOT NULL REFERENCES assessments(assessment_id) ON DELETE CASCADE,
@@ -162,7 +171,51 @@ CREATE TABLE IF NOT EXISTS expected_devices (
     label TEXT,
     roster_state TEXT NOT NULL DEFAULT 'expected',
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revision INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    expected_since TEXT,
+    change_source TEXT NOT NULL DEFAULT 'legacy',
     PRIMARY KEY (network_id, device_id)
+);
+CREATE TABLE IF NOT EXISTS network_roster_revisions (
+    network_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS roster_lifecycle_events (
+    event_id TEXT PRIMARY KEY,
+    request_id TEXT,
+    network_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    from_state TEXT,
+    to_state TEXT NOT NULL,
+    previous_label TEXT,
+    new_label TEXT,
+    previous_expected_since TEXT,
+    new_expected_since TEXT,
+    reason TEXT,
+    occurred_at TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    context_assessment_id TEXT,
+    context_observation_id TEXT,
+    evidence_basis TEXT,
+    device_revision INTEGER NOT NULL,
+    network_revision INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_roster_lifecycle_network_device
+    ON roster_lifecycle_events(network_id, device_id, occurred_at);
+CREATE TABLE IF NOT EXISTS roster_mutation_receipts (
+    network_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    device_id TEXT,
+    request_digest TEXT NOT NULL,
+    event_id TEXT,
+    result_revision INTEGER NOT NULL,
+    response_json TEXT NOT NULL,
+    committed_at TEXT NOT NULL,
+    PRIMARY KEY (network_id, request_id)
 );
 """
 
@@ -219,6 +272,14 @@ _V4_TABLES = (
 )
 
 
+class StaleRosterContextError(RuntimeError):
+    """Raised when an assessment was evaluated against an obsolete roster revision."""
+
+
+class ReassessmentBaselineUnavailable(ValueError):
+    """Raised when retained evidence cannot reproduce a stored assessment."""
+
+
 class SQLiteHealthStore:
     def __init__(
         self,
@@ -264,6 +325,8 @@ class SQLiteHealthStore:
                     raise HealthStoreFutureSchemaError(
                         f"Database schema {version} is newer than supported {SCHEMA_VERSION}"
                     )
+                if version is not None and version < 6:
+                    connection.execute("PRAGMA foreign_keys=OFF")
             connection.executescript(_SCHEMA)
             applied_versions = {
                 row["version"]
@@ -338,6 +401,124 @@ class SQLiteHealthStore:
                     "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
                     (4,),
                 )
+            if 5 not in applied_versions:
+                expected_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(expected_devices)")
+                }
+                for column, definition in (
+                    ("revision", "INTEGER NOT NULL DEFAULT 0"),
+                    ("reason", "TEXT"),
+                    ("expected_since", "TEXT"),
+                    ("change_source", "TEXT NOT NULL DEFAULT 'legacy'"),
+                ):
+                    if column not in expected_columns:
+                        connection.execute(
+                            f"ALTER TABLE expected_devices ADD COLUMN {column} {definition}"
+                        )
+                connection.execute(
+                    """INSERT OR IGNORE INTO network_roster_revisions
+                       (network_id, revision, updated_at)
+                       SELECT DISTINCT network_id, 0, CURRENT_TIMESTAMP
+                       FROM expected_devices"""
+                )
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
+                    (5,),
+                )
+            if 6 not in applied_versions:
+                indexes = connection.execute("PRAGMA index_list(assessments)").fetchall()
+                legacy_unique = False
+                for index in indexes:
+                    if not index["unique"]:
+                        continue
+                    columns = [
+                        row["name"] for row in connection.execute(
+                            f"PRAGMA index_info('{index['name']}')"
+                        )
+                    ]
+                    if columns == ["observation_id", "policy_digest"]:
+                        legacy_unique = True
+                        break
+                if legacy_unique:
+                    connection.execute(
+                        """CREATE TABLE assessments_v6 (
+                            assessment_id TEXT PRIMARY KEY,
+                            observation_id TEXT NOT NULL REFERENCES observations(observation_id) ON DELETE CASCADE,
+                            policy_version TEXT NOT NULL,
+                            policy_digest TEXT NOT NULL,
+                            evaluator_version TEXT NOT NULL,
+                            profile_id TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            confidence TEXT NOT NULL,
+                            coverage_json TEXT NOT NULL,
+                            assessed_at TEXT NOT NULL,
+                            sample_contract_version TEXT NOT NULL DEFAULT 'legacy-unknown',
+                            health_policy_digest TEXT,
+                            roster_context_digest TEXT NOT NULL DEFAULT 'legacy-unknown',
+                            network_roster_revision INTEGER NOT NULL DEFAULT 0,
+                            presence_input_digest TEXT NOT NULL DEFAULT 'legacy-unknown',
+                            reproduction_context_json TEXT NOT NULL DEFAULT '{}',
+                            UNIQUE(observation_id, policy_digest, roster_context_digest)
+                        )"""
+                    )
+                    connection.execute(
+                        """INSERT INTO assessments_v6
+                           (assessment_id, observation_id, policy_version, policy_digest,
+                            evaluator_version, profile_id, status, confidence, coverage_json,
+                            assessed_at, sample_contract_version, health_policy_digest,
+                            roster_context_digest, network_roster_revision,
+                            presence_input_digest, reproduction_context_json)
+                           SELECT assessment_id, observation_id, policy_version, policy_digest,
+                                  evaluator_version, profile_id, status, confidence, coverage_json,
+                                  assessed_at, sample_contract_version, health_policy_digest,
+                                  'legacy-unknown', 0, 'legacy-unknown', '{}'
+                           FROM assessments"""
+                    )
+                    connection.execute("DROP TABLE assessments")
+                    connection.execute("ALTER TABLE assessments_v6 RENAME TO assessments")
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
+                    (6,),
+                )
+            if 7 not in applied_versions:
+                receipt_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(roster_mutation_receipts)")
+                }
+                if "device_id" not in receipt_columns:
+                    connection.execute(
+                        "ALTER TABLE roster_mutation_receipts ADD COLUMN device_id TEXT"
+                    )
+                for receipt in connection.execute(
+                    """SELECT network_id, request_id, response_json
+                       FROM roster_mutation_receipts WHERE device_id IS NULL"""
+                ).fetchall():
+                    try:
+                        response = json.loads(receipt["response_json"])
+                    except (TypeError, json.JSONDecodeError):
+                        continue
+                    device_id = response.get("deviceId") if isinstance(response, dict) else None
+                    if isinstance(device_id, str):
+                        connection.execute(
+                            """UPDATE roster_mutation_receipts SET device_id=?
+                               WHERE network_id=? AND request_id=?""",
+                            (device_id, receipt["network_id"], receipt["request_id"]),
+                        )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_roster_receipts_network_device "
+                    "ON roster_mutation_receipts(network_id, device_id)"
+                )
+                connection.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
+                    (7,),
+                )
+                connection.commit()
+                foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+                if foreign_key_errors:
+                    raise sqlite3.DatabaseError("Health schema migration left invalid foreign keys")
+                connection.execute("PRAGMA foreign_keys=ON")
+            self._repair_current_assessments(connection)
 
     def save_processing_result(
         self, observation: Observation, assessment: Assessment,
@@ -348,6 +529,16 @@ class SQLiteHealthStore:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            if assessment.roster_context_digest != "legacy-unknown":
+                current_revision = connection.execute(
+                    "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+                    (observation.network_id,),
+                ).fetchone()
+                current_revision_value = int(current_revision["revision"]) if current_revision else 0
+                if current_revision_value != assessment.network_roster_revision:
+                    raise StaleRosterContextError(
+                        "Roster changed during health processing; retry with the current roster."
+                    )
             observation_created = self._insert_observation(connection, observation)
             if not observation_created and assessment.sample_contract_version == ROUTE64_SAMPLE_CONTRACT_VERSION:
                 versions = {row[0] for row in connection.execute(
@@ -360,15 +551,8 @@ class SQLiteHealthStore:
                 self._insert_roster_facts(connection, observation, roster_facts)
             assessment_created = self._insert_assessment(connection, assessment)
             self._auto_compare(connection, observation, assessment)
-            connection.execute(
-                """INSERT INTO current_assessments(network_id, dataset_id, assessment_id)
-                   SELECT ?, ?, a.assessment_id FROM assessments a
-                   JOIN observations o USING (observation_id)
-                   WHERE o.network_id=? AND o.dataset_id=?
-                   ORDER BY o.observed_at DESC, a.assessed_at DESC, a.assessment_id DESC LIMIT 1
-                   ON CONFLICT(network_id, dataset_id) DO UPDATE SET assessment_id=excluded.assessment_id""",
-                (observation.network_id, observation.dataset_id,
-                 observation.network_id, observation.dataset_id),
+            self._set_current_assessment(
+                connection, observation.network_id, observation.dataset_id
             )
             self._prune_observations(connection)
             connection.commit()
@@ -692,9 +876,17 @@ class SQLiteHealthStore:
     ) -> dict:
         with closing(self._connect()) as connection:
             connection.execute("BEGIN")
+            assessment_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(assessments)")
+            }
+            roster_revision = (
+                "a.network_roster_revision" if "network_roster_revision" in assessment_columns
+                else "0 AS network_roster_revision"
+            )
             records = [
                 dict(row) for row in connection.execute(
-                    """SELECT a.assessment_id, a.assessed_at, o.observation_id,
+                    f"""SELECT a.assessment_id, a.assessed_at,
+                              {roster_revision}, o.observation_id,
                               o.network_id, o.network_name, o.datasource_id, o.dataset_id,
                               o.observed_at, o.completeness
                        FROM assessments a JOIN observations o USING (observation_id)
@@ -711,12 +903,20 @@ class SQLiteHealthStore:
             }
             records.sort(
                 key=lambda row: (
-                    *instants[row["assessment_id"]],
+                    instants[row["assessment_id"]][0],
+                    row["network_roster_revision"],
+                    instants[row["assessment_id"]][1],
                     row["assessment_id"],
                 ),
                 reverse=True,
             )
             by_id = {row["assessment_id"]: row for row in records}
+            candidate_records: list[dict] = []
+            seen_observations: set[str] = set()
+            for row in records:
+                if row["observation_id"] not in seen_observations:
+                    candidate_records.append(row)
+                    seen_observations.add(row["observation_id"])
             if selected_assessment_id and selected_assessment_id not in by_id:
                 raise KeyError("Selected assessment endpoint not found")
             if side == "before":
@@ -724,23 +924,43 @@ class SQLiteHealthStore:
                     raise KeyError("After assessment endpoint not found")
                 after_instant = instants[after_assessment_id][0]
                 candidates = [
-                    row for row in records
+                    row for row in candidate_records
                     if instants[row["assessment_id"]][0] < after_instant
                 ]
                 if selected_assessment_id and selected_assessment_id not in {
                     row["assessment_id"] for row in candidates
                 }:
-                    raise ValueError("Selected Before assessment must precede After")
+                    selected = by_id[selected_assessment_id]
+                    if (
+                        instants[selected_assessment_id][0] < after_instant
+                        or selected["observation_id"] == by_id[after_assessment_id]["observation_id"]
+                    ):
+                        candidates.append(selected)
+                    else:
+                        raise ValueError("Selected Before assessment must precede After")
             else:
                 if after_assessment_id is not None:
                     raise ValueError("after assessment is only valid for the before side")
-                candidates = records
-            latest_after = records[0] if records else None
+                candidates = list(candidate_records)
+                if selected_assessment_id and selected_assessment_id not in {
+                    row["assessment_id"] for row in candidates
+                }:
+                    candidates.append(by_id[selected_assessment_id])
+            candidates.sort(
+                key=lambda row: (
+                    instants[row["assessment_id"]][0],
+                    row["network_roster_revision"],
+                    instants[row["assessment_id"]][1],
+                    row["assessment_id"],
+                ),
+                reverse=True,
+            )
+            latest_after = candidate_records[0] if candidate_records else None
             default_before = None
             if latest_after:
                 after_instant = instants[latest_after["assessment_id"]][0]
                 default_before = next(
-                    (row for row in records
+                    (row for row in candidate_records
                      if instants[row["assessment_id"]][0] < after_instant),
                     None,
                 )
@@ -748,7 +968,7 @@ class SQLiteHealthStore:
             if side == "before" and after_assessment_id:
                 after_instant = instants[after_assessment_id][0]
                 predecessor = next(
-                    (row for row in records
+                    (row for row in candidate_records
                      if instants[row["assessment_id"]][0] < after_instant),
                     None,
                 )
@@ -758,6 +978,7 @@ class SQLiteHealthStore:
                     return None
                 return {
                     "assessmentId": row["assessment_id"],
+                    "networkRosterRevision": row["network_roster_revision"],
                     "observationId": row["observation_id"],
                     "networkId": row["network_id"],
                     "networkName": row["network_name"],
@@ -777,7 +998,7 @@ class SQLiteHealthStore:
                 for interval, duration_seconds in COMPARISON_INTERVALS.items():
                     try:
                         candidate = resolve_interval_candidate(
-                            records, after_observed_at=selected_after["observed_at"],
+                            candidate_records, after_observed_at=selected_after["observed_at"],
                             interval=interval,
                         )
                     except ValueError as exc:
@@ -869,9 +1090,8 @@ class SQLiteHealthStore:
                 raise ValueError("Assessment endpoints must belong to the requested network and dataset")
             before_time = self._utc_instant(before_row["observed_at"])
             after_time = self._utc_instant(after_row["observed_at"])
-            if (before_assessment_id == after_assessment_id
-                    or before_row["observation_id"] == after_row["observation_id"]
-                    or before_time >= after_time):
+            same_observation = before_row["observation_id"] == after_row["observation_id"]
+            if not same_observation and before_time >= after_time:
                 raise ValueError("Before assessment must precede After assessment")
             for source in connection.execute(
                 """SELECT source_observed_at FROM observation_sources
@@ -1039,10 +1259,48 @@ class SQLiteHealthStore:
             """SELECT * FROM device_last_known WHERE network_id=? AND device_id=? ORDER BY field_key""",
             (network_id, device_id),
         ).fetchall()
-        expected = connection.execute(
-            "SELECT label, roster_state FROM expected_devices WHERE network_id=? AND device_id=?",
-            (network_id, device_id),
-        ).fetchone()
+        expected_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(expected_devices)")
+        }
+        if {"updated_at", "revision", "reason", "expected_since", "change_source"} <= expected_columns:
+            expected = connection.execute(
+                """SELECT label, roster_state, updated_at, revision, reason, expected_since,
+                          change_source FROM expected_devices
+                   WHERE network_id=? AND device_id=?""",
+                (network_id, device_id),
+            ).fetchone()
+        else:
+            legacy = connection.execute(
+                """SELECT label, roster_state FROM expected_devices
+                   WHERE network_id=? AND device_id=?""",
+                (network_id, device_id),
+            ).fetchone()
+            expected = ({
+                "label": legacy["label"], "roster_state": legacy["roster_state"],
+                "updated_at": None, "revision": 0, "reason": None,
+                "expected_since": None, "change_source": "legacy",
+            } if legacy else None)
+        tables = {
+            row["name"] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        network_revision_row = (
+            connection.execute(
+                "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+                (network_id,),
+            ).fetchone()
+            if "network_roster_revisions" in tables else None
+        )
+        last_event = (
+            connection.execute(
+                """SELECT event_id, action, reason, occurred_at, origin, actor
+                   FROM roster_lifecycle_events WHERE network_id=? AND device_id=?
+                   ORDER BY occurred_at DESC, event_id DESC LIMIT 1""",
+                (network_id, device_id),
+            ).fetchone()
+            if "roster_lifecycle_events" in tables else None
+        )
         conflicts = connection.execute(
                 """SELECT c.field_key, c.value_json, c.other_device_id, c.source_observed_at,
                     other.source_observed_at AS other_source_observed_at
@@ -1061,12 +1319,56 @@ class SQLiteHealthStore:
                 "expectedLabel": expected["label"] if expected else None,
             "rosterState": expected["roster_state"] if expected else "untracked",
             "designated": expected is not None,
+                "revision": int(expected["revision"]) if expected else 0,
+                "networkRosterRevision": (
+                    int(network_revision_row["revision"]) if network_revision_row else 0
+                ),
+                "updatedAt": expected["updated_at"] if expected else None,
+                "reason": expected["reason"] if expected else None,
+                "expectedSince": expected["expected_since"] if expected else None,
+                "changeSource": expected["change_source"] if expected else None,
+                "lastLifecycleEvent": dict(last_event) if last_event else None,
                 "conflicts": [dict(row) for row in conflicts], "lastEndpointPresenceAt": presence}
 
-    def roster_device_row(self, *, network_id: str, device_id: str) -> dict | None:
+    def roster_device_row(
+        self, *, network_id: str, device_id: str, assessment_id: str | None = None
+    ) -> dict | None:
         with closing(self._connect()) as connection:
             connection.execute("BEGIN")
             data = self._roster_device_rows(connection, network_id, device_id)
+            if assessment_id is not None:
+                assessment = connection.execute(
+                    """SELECT a.assessment_id, o.observation_id, o.network_id
+                       FROM assessments a JOIN observations o USING (observation_id)
+                       WHERE a.assessment_id=?""",
+                    (assessment_id,),
+                ).fetchone()
+                if assessment is None:
+                    raise ValueError("Assessment not found")
+                if assessment["network_id"] != network_id:
+                    raise ValueError("Assessment does not belong to network")
+                present = connection.execute(
+                    """SELECT 1 FROM device_samples
+                       WHERE observation_id=? AND device_id=?""",
+                    (assessment["observation_id"], device_id),
+                ).fetchone() is not None
+                finding = connection.execute(
+                    """SELECT rule_id FROM findings
+                       WHERE assessment_id=? AND scope='device'
+                         AND rule_id IN ('device.missing', 'device.offline')
+                         AND EXISTS (SELECT 1 FROM json_each(findings.device_ids_json)
+                                     WHERE json_each.value=?) LIMIT 1""",
+                    (assessment_id, device_id),
+                ).fetchone()
+                data["contextAssessmentId"] = assessment_id
+                data["contextObservationId"] = assessment["observation_id"]
+                data["presenceState"] = (
+                    "observed" if present else
+                    finding["rule_id"].removeprefix("device.") if finding else "not-assessed"
+                )
+                return data if (
+                    data["fields"] or data["designated"] or data["lastEndpointPresenceAt"] or present
+                ) else None
             return data if data["fields"] or data["designated"] or data["lastEndpointPresenceAt"] else None
 
     def roster_label_candidates(self, *, network_id: str, label: str,
@@ -1133,8 +1435,8 @@ class SQLiteHealthStore:
             raise
         candidates = [
             dict(row) for row in connection.execute(
-                """SELECT a.assessment_id, a.assessed_at, o.observation_id,
-                          o.observed_at, o.completeness
+                """SELECT a.assessment_id, a.assessed_at, a.network_roster_revision,
+                          o.observation_id, o.observed_at, o.completeness
                    FROM assessments a JOIN observations o USING (observation_id)
                    WHERE o.network_id=? AND o.dataset_id=?""",
                 (observation.network_id, observation.dataset_id),
@@ -1159,11 +1461,17 @@ class SQLiteHealthStore:
 
         candidates.sort(
             key=lambda row: (
-                *candidate_times[row["assessment_id"]],
+                candidate_times[row["assessment_id"]][0],
+                row["network_roster_revision"],
+                candidate_times[row["assessment_id"]][1],
                 row["assessment_id"],
             ),
             reverse=True,
         )
+        latest_by_observation: dict[str, dict] = {}
+        for row in candidates:
+            latest_by_observation.setdefault(row["observation_id"], row)
+        candidates = list(latest_by_observation.values())
         adjacent = next(
             (row for row in candidates
              if row["completeness"] == "complete"
@@ -1349,8 +1657,10 @@ class SQLiteHealthStore:
             """INSERT OR IGNORE INTO assessments
                (assessment_id, observation_id, policy_version, policy_digest,
                 evaluator_version, profile_id, status, confidence, coverage_json,
-                assessed_at, sample_contract_version, health_policy_digest)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                assessed_at, sample_contract_version, health_policy_digest,
+                roster_context_digest, network_roster_revision,
+                presence_input_digest, reproduction_context_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 assessment.assessment_id,
                 assessment.observation_id,
@@ -1364,6 +1674,10 @@ class SQLiteHealthStore:
                 assessment.assessed_at,
                 assessment.sample_contract_version,
                 assessment.health_policy_digest,
+                assessment.roster_context_digest,
+                assessment.network_roster_revision,
+                assessment.presence_input_digest,
+                json.dumps(assessment.reproduction_context, sort_keys=True),
             ),
         )
         if cursor.rowcount == 0:
@@ -1394,6 +1708,368 @@ class SQLiteHealthStore:
         )
         return True
 
+    @staticmethod
+    def _prior_complete_absences(
+        connection: sqlite3.Connection,
+        *,
+        network_id: str,
+        device_id: str,
+        endpoint: tuple[datetime, str],
+        expected_since: str | None,
+    ) -> int:
+        rows = connection.execute(
+            """SELECT o.observation_id, o.observed_at,
+                      EXISTS(SELECT 1 FROM device_samples ds
+                             WHERE ds.observation_id=o.observation_id
+                               AND ds.device_id=?) AS present
+               FROM observations o
+               WHERE o.network_id=? AND o.completeness='complete'""",
+            (device_id, network_id),
+        ).fetchall()
+        epoch = SQLiteHealthStore._utc_instant(expected_since) if expected_since else None
+        preceding = sorted(
+            (
+                (SQLiteHealthStore._utc_instant(row["observed_at"]), row["observation_id"], bool(row["present"]))
+                for row in rows
+                if (
+                    SQLiteHealthStore._utc_instant(row["observed_at"]),
+                    row["observation_id"],
+                ) < endpoint
+                and (epoch is None or SQLiteHealthStore._utc_instant(row["observed_at"]) >= epoch)
+            ),
+            reverse=True,
+        )
+        count = 0
+        for _, _, present in preceding:
+            if present:
+                break
+            count += 1
+        return count
+
+    @staticmethod
+    def _reassessment_inputs(
+        connection: sqlite3.Connection, assessment_id: str
+    ) -> tuple[Observation, Assessment, object, object, dict]:
+        from td_health_evaluator import EVALUATOR_VERSION
+        from td_health_manifest import HealthProfile
+        from td_health_policy import HealthPolicy
+
+        row = connection.execute(
+            """SELECT a.*, o.datasource_id, o.dataset_id, o.network_id,
+                      o.network_name, o.observed_at, o.ingested_at, o.completeness,
+                      o.source_set_digest
+               FROM assessments a JOIN observations o USING (observation_id)
+               WHERE a.assessment_id=?""",
+            (assessment_id,),
+        ).fetchone()
+        if row is None:
+            raise ReassessmentBaselineUnavailable(
+                "reassessment-baseline-unavailable: current assessment is not retained"
+            )
+        try:
+            context = json.loads(row["reproduction_context_json"])
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ReassessmentBaselineUnavailable(
+                "reassessment-baseline-unavailable: saved evaluation context is invalid"
+            ) from exc
+        if (
+            not isinstance(context, dict)
+            or context.get("schemaVersion") != 1
+            or context.get("evaluatorVersion") != EVALUATOR_VERSION
+            or row["evaluator_version"] != EVALUATOR_VERSION
+        ):
+            raise ReassessmentBaselineUnavailable(
+                "reassessment-baseline-unavailable: refresh health from retained snapshots before changing the roster"
+            )
+        policy_data = context.get("healthPolicy")
+        profile_data = context.get("healthProfile")
+        if not isinstance(policy_data, dict) or not isinstance(profile_data, dict):
+            raise ReassessmentBaselineUnavailable(
+                "reassessment-baseline-unavailable: saved policy or profile is missing"
+            )
+        try:
+            policy = HealthPolicy(
+                version=policy_data["version"],
+                digest=policy_data["digest"],
+                offline_consecutive_complete_observations=policy_data[
+                    "offlineConsecutiveCompleteObservations"
+                ],
+                offline_poor_device_ratio_threshold=policy_data[
+                    "offlinePoorDeviceRatioThreshold"
+                ],
+                thresholds=MappingProxyType({
+                    metric: MappingProxyType(dict(bands))
+                    for metric, bands in policy_data["thresholds"].items()
+                }),
+            )
+            profile = HealthProfile(
+                profile_id=profile_data["profileId"],
+                identity_file=profile_data["identityFile"],
+                required_outcomes=tuple(profile_data["requiredOutcomes"]),
+                coverage=MappingProxyType(dict(profile_data["coverage"])),
+                topology_authority=profile_data["topologyAuthority"],
+                border_router_authority=profile_data["borderRouterAuthority"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ReassessmentBaselineUnavailable(
+                "reassessment-baseline-unavailable: saved policy or profile is invalid"
+            ) from exc
+        if (
+            profile.profile_id != row["profile_id"]
+            or policy.digest != row["health_policy_digest"]
+        ):
+            raise ReassessmentBaselineUnavailable(
+                "reassessment-baseline-unavailable: stored policy identity does not match its saved context"
+            )
+
+        sources = tuple(
+            SourceEvidence(
+                item["filename"], item["digest"], item["kind"], item["state"],
+                item["source_observed_at"],
+            )
+            for item in connection.execute(
+                """SELECT filename, digest, kind, state, source_observed_at
+                   FROM observation_sources WHERE observation_id=? ORDER BY filename""",
+                (row["observation_id"],),
+            )
+        )
+        devices = tuple(
+            DeviceSample(
+                item["device_id"],
+                item["device_id"].removeprefix("extaddr:"),
+                item["role"],
+                item["state"],
+                bool(item["is_border_router"]),
+                tuple(json.loads(item["source_files_json"])),
+            )
+            for item in connection.execute(
+                """SELECT device_id, role, state, is_border_router, source_files_json
+                   FROM device_samples WHERE observation_id=? ORDER BY device_id""",
+                (row["observation_id"],),
+            )
+        )
+        relationships = tuple(
+            RelationshipSample(
+                item["relationship_id"], item["relationship_type"],
+                item["from_device_id"], item["to_device_id"],
+                item["link_quality_in"], item["link_quality_out"],
+                item["average_rssi"], item["last_rssi"], item["link_margin"],
+                item["frame_error_rate"], item["message_error_rate"],
+                item["reporter_device_id"], tuple(json.loads(item["source_files_json"])),
+                item["queued_message_count"],
+            )
+            for item in connection.execute(
+                """SELECT rs.*, r.from_device_id, r.to_device_id
+                   FROM relationship_samples rs JOIN relationships r USING (relationship_id)
+                   WHERE rs.observation_id=? ORDER BY rs.relationship_id""",
+                (row["observation_id"],),
+            )
+        )
+        metrics = tuple(
+            MetricSample(
+                item["device_id"], item["metric"], item["value"], item["unit"],
+                item["denominator"], item["source_file"],
+            )
+            for item in connection.execute(
+                """SELECT device_id, metric, value, unit, denominator, source_file
+                   FROM metric_samples WHERE observation_id=?
+                   ORDER BY device_id, metric, source_file""",
+                (row["observation_id"],),
+            )
+        )
+        observation = Observation(
+            row["observation_id"], row["datasource_id"], row["dataset_id"],
+            row["network_id"], row["network_name"], row["observed_at"],
+            row["ingested_at"], Completeness(row["completeness"]),
+            row["source_set_digest"], sources, devices, relationships, metrics,
+        )
+        original = Assessment(
+            row["assessment_id"], row["observation_id"], row["policy_version"],
+            row["policy_digest"], row["evaluator_version"], row["profile_id"],
+            HealthStatus(row["status"]), Confidence(row["confidence"]),
+            json.loads(row["coverage_json"]), row["assessed_at"],
+            row["sample_contract_version"], row["health_policy_digest"],
+            row["roster_context_digest"], row["presence_input_digest"],
+            row["network_roster_revision"], context,
+        )
+        return observation, original, policy, profile, context
+
+    def _reassess_network(
+        self, connection: sqlite3.Connection, network_id: str
+    ) -> list[dict]:
+        from td_health_evaluator import (
+            EVALUATOR_VERSION,
+            aggregate_assessment_state,
+            evaluate_observation,
+        )
+
+        pointers = [
+            dict(row) for row in connection.execute(
+                """SELECT c.dataset_id, c.assessment_id
+                   FROM current_assessments c
+                   WHERE c.network_id=? ORDER BY c.dataset_id""",
+                (network_id,),
+            )
+        ]
+        current_revision_row = connection.execute(
+            "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+            (network_id,),
+        ).fetchone()
+        network_revision = int(current_revision_row["revision"]) if current_revision_row else 0
+        roster_records = [
+            {
+                "deviceId": row["device_id"],
+                "rosterState": row["roster_state"],
+                "revision": row["revision"],
+                "expectedSince": row["expected_since"],
+            }
+            for row in connection.execute(
+                """SELECT device_id, roster_state, revision, expected_since
+                   FROM expected_devices WHERE network_id=? ORDER BY device_id""",
+                (network_id,),
+            )
+        ]
+        revisions: list[dict] = []
+        for pointer in pointers:
+            observation, previous, policy, profile, old_context = self._reassessment_inputs(
+                connection, pointer["assessment_id"]
+            )
+            endpoint = (self._utc_instant(observation.observed_at), observation.observation_id)
+            old_roster = old_context.get("rosterContext", {}).get("records", [])
+            old_records = {
+                record.get("deviceId"): record
+                for record in old_roster if isinstance(record, dict)
+            }
+            old_absences = old_context.get("priorCompleteAbsences", {})
+            observed_ids = frozenset(device.device_id for device in observation.devices)
+            expected_ids: set[str] = set()
+            prior_absences: dict[str, int] = {}
+            for record in roster_records:
+                if record["rosterState"] != "expected":
+                    continue
+                epoch = (
+                    self._utc_instant(record["expectedSince"])
+                    if record["expectedSince"] is not None
+                    else None
+                )
+                if epoch is not None and epoch > endpoint[0]:
+                    continue
+                device_id = record["deviceId"]
+                expected_ids.add(device_id)
+                if device_id in observed_ids or observation.completeness is not Completeness.COMPLETE:
+                    continue
+                old_record = old_records.get(device_id)
+                unchanged = (
+                    old_record is not None
+                    and old_record.get("rosterState") == "expected"
+                    and old_record.get("expectedSince") == record["expectedSince"]
+                )
+                if unchanged and isinstance(old_absences, dict):
+                    count = old_absences.get(device_id, 0)
+                    if type(count) is not int or count < 0:
+                        raise ReassessmentBaselineUnavailable(
+                            "reassessment-baseline-unavailable: saved absence history is invalid"
+                        )
+                    prior_absences[device_id] = count
+                else:
+                    prior_absences[device_id] = self._prior_complete_absences(
+                        connection,
+                        network_id=network_id,
+                        device_id=device_id,
+                        endpoint=endpoint,
+                        expected_since=record["expectedSince"],
+                    )
+            roster_context = {
+                "schemaVersion": 1,
+                "networkId": network_id,
+                "networkRosterRevision": network_revision,
+                "records": roster_records,
+            }
+            revised = evaluate_observation(
+                observation,
+                policy,
+                profile=profile,
+                expected_device_ids=frozenset(expected_ids),
+                prior_complete_absences=prior_absences,
+                assessed_at=datetime.now(timezone.utc).isoformat(),
+                roster_context=roster_context,
+                network_roster_revision=network_revision,
+                history_boundary=old_context.get("historyBoundary"),
+            )
+            roster_rules = {
+                "device.missing", "device.offline", "network.offline-impact",
+            }
+            previous_findings = [
+                Finding(
+                    item["finding_id"], item["rule_id"], HealthStatus(item["status"]),
+                    FindingScope(item["scope"]), FindingRank(item["rank"]),
+                    item["title"], item["summary"], item["why_it_matters"],
+                    tuple(json.loads(item["device_ids_json"])),
+                    tuple(json.loads(item["relationship_ids_json"])),
+                    json.loads(item["evidence_json"]), Confidence(item["confidence"]),
+                    item["action"], item["verify"], "", "",
+                    tuple(json.loads(item["source_files_json"])),
+                )
+                for item in connection.execute(
+                    "SELECT * FROM findings WHERE assessment_id=?",
+                    (previous.assessment_id,),
+                )
+                if item["rule_id"] not in roster_rules
+            ]
+            revised_findings = tuple(sorted(
+                previous_findings + [
+                    finding for finding in revised.findings
+                    if finding.rule_id in roster_rules
+                ],
+                key=lambda item: (-int(item.rank), item.finding_id),
+            ))
+            old_coverage = json.loads(
+                connection.execute(
+                    "SELECT coverage_json FROM assessments WHERE assessment_id=?",
+                    (previous.assessment_id,),
+                ).fetchone()["coverage_json"]
+            )
+            new_coverage = revised.coverage
+            coverage = dict(old_coverage)
+            coverage["expectedRosterCount"] = new_coverage["expectedRosterCount"]
+            coverage["offlineEligible"] = new_coverage["offlineEligible"]
+            observed_pillars = dict(coverage.get("observedPillars", {}))
+            observed_pillars["availability"] = new_coverage["observedPillars"]["availability"]
+            coverage["observedPillars"] = observed_pillars
+            sufficient = sum(
+                pillar.get("state") == "sufficient"
+                for pillar in observed_pillars.values()
+            )
+            reasons = list(coverage.get("confidenceReasons", []))
+            if reasons:
+                reasons[0] = f"{sufficient} of {len(observed_pillars)} pillars sufficient"
+            coverage["confidenceReasons"] = reasons
+            status, confidence = aggregate_assessment_state(
+                revised_findings,
+                completeness=observation.completeness,
+                device_count=len(observation.devices),
+                observed_pillars=observed_pillars,
+            )
+            assessment = replace(
+                revised,
+                findings=revised_findings,
+                coverage=coverage,
+                status=status,
+                confidence=confidence,
+            )
+            if self._insert_assessment(connection, assessment):
+                self._auto_compare(connection, observation, assessment)
+            self._set_current_assessment(
+                connection, network_id, pointer["dataset_id"]
+            )
+            revisions.append({
+                "datasetId": pointer["dataset_id"],
+                "previousAssessmentId": previous.assessment_id,
+                "assessmentId": assessment.assessment_id,
+                "observationId": observation.observation_id,
+            })
+        return revisions
+
     def _prune_observations(self, connection: sqlite3.Connection) -> None:
         connection.execute(
             """DELETE FROM observations WHERE observation_id IN (
@@ -1412,22 +2088,60 @@ class SQLiteHealthStore:
         }
 
     @staticmethod
-    def _repair_current_assessments(connection: sqlite3.Connection) -> None:
+    def _latest_assessment_id(
+        connection: sqlite3.Connection, network_id: str, dataset_id: str
+    ) -> str | None:
+        rows = connection.execute(
+            """SELECT a.assessment_id, a.assessed_at, a.network_roster_revision,
+                      o.observation_id, o.observed_at
+               FROM assessments a JOIN observations o USING (observation_id)
+               WHERE o.network_id=? AND o.dataset_id=?""",
+            (network_id, dataset_id),
+        ).fetchall()
+        if not rows:
+            return None
+        latest = max(
+            rows,
+            key=lambda row: (
+                SQLiteHealthStore._utc_instant(row["observed_at"]),
+                row["observation_id"],
+                row["network_roster_revision"],
+                SQLiteHealthStore._utc_instant(row["assessed_at"]),
+                row["assessment_id"],
+            ),
+        )
+        return latest["assessment_id"]
+
+    @staticmethod
+    def _set_current_assessment(
+        connection: sqlite3.Connection, network_id: str, dataset_id: str
+    ) -> None:
+        assessment_id = SQLiteHealthStore._latest_assessment_id(
+            connection, network_id, dataset_id
+        )
+        if assessment_id is None:
+            connection.execute(
+                "DELETE FROM current_assessments WHERE network_id=? AND dataset_id=?",
+                (network_id, dataset_id),
+            )
+            return
         connection.execute(
             """INSERT INTO current_assessments(network_id, dataset_id, assessment_id)
-               SELECT o.network_id, o.dataset_id, a.assessment_id
-               FROM assessments a
-               JOIN observations o ON o.observation_id=a.observation_id
-               WHERE a.assessment_id=(
-                   SELECT a2.assessment_id
-                   FROM assessments a2
-                   JOIN observations o2 ON o2.observation_id=a2.observation_id
-                   WHERE o2.network_id=o.network_id AND o2.dataset_id=o.dataset_id
-                   ORDER BY o2.observed_at DESC, a2.assessed_at DESC,
-                            a2.assessment_id DESC LIMIT 1
-               )
-               ON CONFLICT(network_id, dataset_id) DO NOTHING"""
+               VALUES (?, ?, ?)
+               ON CONFLICT(network_id, dataset_id) DO UPDATE SET
+                   assessment_id=excluded.assessment_id""",
+            (network_id, dataset_id, assessment_id),
         )
+
+    @staticmethod
+    def _repair_current_assessments(connection: sqlite3.Connection) -> None:
+        datasets = connection.execute(
+            "SELECT DISTINCT network_id, dataset_id FROM observations"
+        ).fetchall()
+        for row in datasets:
+            SQLiteHealthStore._set_current_assessment(
+                connection, row["network_id"], row["dataset_id"]
+            )
 
     @staticmethod
     def _delete_orphans(connection: sqlite3.Connection) -> None:
@@ -1504,6 +2218,9 @@ class SQLiteHealthStore:
             connection.execute("DELETE FROM comparisons")
             connection.execute("DELETE FROM observations")
             connection.execute("DELETE FROM expected_devices")
+            connection.execute("DELETE FROM roster_mutation_receipts")
+            connection.execute("DELETE FROM roster_lifecycle_events")
+            connection.execute("DELETE FROM network_roster_revisions")
             self._delete_orphans(connection)
             after = self._table_counts(connection)
             deleted = {table: before[table] - after[table] for table in _PURGE_TABLES}
@@ -1536,8 +2253,10 @@ class SQLiteHealthStore:
                        JOIN device_samples ds ON ds.observation_id=o.observation_id
                        WHERE ds.device_id=?
                        UNION
-                       SELECT network_id FROM expected_devices WHERE device_id=?""",
-                    (device_id, device_id),
+                       SELECT network_id FROM expected_devices WHERE device_id=?
+                       UNION
+                       SELECT network_id FROM roster_lifecycle_events WHERE device_id=?""",
+                    (device_id, device_id, device_id),
                 )
             }
             if network_id is None and len(networks) > 1:
@@ -1614,18 +2333,51 @@ class SQLiteHealthStore:
                 connection.execute(
                     "DELETE FROM expected_devices WHERE device_id=?", (device_id,)
                 )
+                connection.execute(
+                    """DELETE FROM roster_mutation_receipts
+                       WHERE device_id=?""",
+                    (device_id,),
+                )
+                connection.execute(
+                    "DELETE FROM roster_lifecycle_events WHERE device_id=?", (device_id,)
+                )
                 connection.execute("DELETE FROM device_last_known WHERE device_id=?", (device_id,))
                 connection.execute("DELETE FROM device_identity_conflicts WHERE device_id=? OR other_device_id=?",
                                    (device_id, device_id))
             else:
+                removed_expectation = connection.execute(
+                    "SELECT 1 FROM expected_devices WHERE device_id=? AND network_id=?",
+                    (device_id, selected_network),
+                ).fetchone()
                 connection.execute(
                     "DELETE FROM expected_devices WHERE device_id=? AND network_id=?",
                     (device_id, selected_network),
+                )
+                connection.execute(
+                    """DELETE FROM roster_mutation_receipts
+                       WHERE network_id=? AND device_id=?""",
+                    (selected_network, device_id),
+                )
+                connection.execute(
+                    "DELETE FROM roster_lifecycle_events WHERE network_id=? AND device_id=?",
+                    (selected_network, device_id),
                 )
                 connection.execute("DELETE FROM device_last_known WHERE device_id=? AND network_id=?",
                                    (device_id, selected_network))
                 connection.execute("DELETE FROM device_identity_conflicts WHERE network_id=? AND (device_id=? OR other_device_id=?)",
                                    (selected_network, device_id, device_id))
+                if removed_expectation:
+                    current = connection.execute(
+                        "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+                        (selected_network,),
+                    ).fetchone()
+                    revision = int(current["revision"]) if current else 0
+                    connection.execute(
+                        """INSERT INTO network_roster_revisions(network_id, revision, updated_at)
+                           VALUES (?, ?, ?) ON CONFLICT(network_id) DO UPDATE SET
+                           revision=excluded.revision, updated_at=excluded.updated_at""",
+                        (selected_network, revision + 1, datetime.now(timezone.utc).isoformat()),
+                    )
             if selected_network is None:
                 connection.execute("DELETE FROM device_fact_samples WHERE device_id=?", (device_id,))
             else:
@@ -1658,30 +2410,144 @@ class SQLiteHealthStore:
             )
             return frozenset(row["device_id"] for row in rows)
 
+    def roster_evaluation_inputs(
+        self,
+        *,
+        network_id: str,
+        observation_id: str,
+        observed_at: str,
+        completeness: Completeness,
+        observed_device_ids: frozenset[str],
+    ) -> dict:
+        endpoint = self._utc_instant(observed_at)
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN")
+            revision_row = connection.execute(
+                "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+                (network_id,),
+            ).fetchone()
+            network_revision = int(revision_row["revision"]) if revision_row else 0
+            boundary_rows = connection.execute(
+                """SELECT observation_id, observed_at FROM observations
+                   WHERE network_id=? AND completeness='complete'""",
+                (network_id,),
+            ).fetchall()
+            history_boundary = min(
+                (
+                    (self._utc_instant(row["observed_at"]), row["observation_id"])
+                    for row in boundary_rows
+                ),
+                default=None,
+            )
+            roster_rows = [
+                dict(row) for row in connection.execute(
+                    """SELECT device_id, roster_state, revision, expected_since
+                       FROM expected_devices WHERE network_id=? ORDER BY device_id""",
+                    (network_id,),
+                )
+            ]
+            context_records = [
+                {
+                    "deviceId": row["device_id"],
+                    "rosterState": row["roster_state"],
+                    "revision": row["revision"],
+                    "expectedSince": row["expected_since"],
+                }
+                for row in roster_rows
+            ]
+            eligible_rows = []
+            for row in roster_rows:
+                if row["roster_state"] != "expected":
+                    continue
+                epoch = (
+                    self._utc_instant(row["expected_since"])
+                    if row["expected_since"] is not None
+                    else None
+                )
+                if epoch is None or epoch <= endpoint:
+                    eligible_rows.append((row["device_id"], epoch))
+            expected_ids = frozenset(device_id for device_id, _ in eligible_rows)
+            prior_absences: dict[str, int] = {}
+            if completeness is Completeness.COMPLETE:
+                absent_ids = expected_ids - observed_device_ids
+                for device_id in absent_ids:
+                    epoch = next(
+                        eligible_epoch for eligible_id, eligible_epoch in eligible_rows
+                        if eligible_id == device_id
+                    )
+                    rows = [
+                        dict(row) for row in connection.execute(
+                            """SELECT o.observation_id, o.observed_at,
+                                      EXISTS(SELECT 1 FROM device_samples ds
+                                             WHERE ds.observation_id=o.observation_id
+                                               AND ds.device_id=?) AS present
+                               FROM observations o
+                               WHERE o.network_id=? AND o.completeness='complete'""",
+                            (device_id, network_id),
+                        )
+                    ]
+                    earlier = sorted(
+                        (
+                            (self._utc_instant(row["observed_at"]), row["observation_id"], bool(row["present"]))
+                            for row in rows
+                            if (
+                                self._utc_instant(row["observed_at"]),
+                                row["observation_id"],
+                            ) < (endpoint, observation_id)
+                            and (epoch is None or self._utc_instant(row["observed_at"]) >= epoch)
+                        ),
+                        reverse=True,
+                    )
+                    count = 0
+                    for _, _, present in earlier:
+                        if present:
+                            break
+                        count += 1
+                    prior_absences[device_id] = count
+            return {
+                "expectedDeviceIds": expected_ids,
+                "priorCompleteAbsences": prior_absences,
+                "networkRosterRevision": network_revision,
+                "rosterContext": {
+                    "schemaVersion": 1,
+                    "networkId": network_id,
+                    "networkRosterRevision": network_revision,
+                    "records": context_records,
+                },
+                "historyBoundary": (
+                    {
+                        "observedAt": history_boundary[0].isoformat(),
+                        "observationId": history_boundary[1],
+                    }
+                    if history_boundary else None
+                ),
+            }
+
     def upsert_expected_device(
         self,
         network_id: str,
         device_id: str,
         label: str | None,
-        roster_state: str = "expected",
+        roster_state: str | None = None,
     ) -> None:
-        with closing(self._connect()) as connection, connection:
-            connection.execute(
-                """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
-                   VALUES (?, ?, ?, ?)
-                   ON CONFLICT(network_id, device_id) DO UPDATE SET
-                       label=COALESCE(excluded.label, expected_devices.label),
-                       roster_state=excluded.roster_state,
-                       updated_at=CURRENT_TIMESTAMP""",
-                (network_id, device_id, label, roster_state),
-            )
+        from td_health_roster_mutation import set_cli_roster_device
+
+        set_cli_roster_device(
+            self,
+            network_id=network_id,
+            device_id=device_id,
+            label=label,
+            state=roster_state,
+            label_supplied=label is not None,
+        )
 
     def expected_device_records(self, network_id: str) -> list[dict]:
         with closing(self._connect()) as connection, connection:
             return [
                 dict(row)
                 for row in connection.execute(
-                    """SELECT network_id, device_id, label, roster_state, updated_at
+                    """SELECT network_id, device_id, label, roster_state, updated_at,
+                              revision, reason, expected_since, change_source
                        FROM expected_devices WHERE network_id=?
                        ORDER BY device_id""",
                     (network_id,),

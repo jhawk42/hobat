@@ -26,7 +26,8 @@ from td_health_processor import (
 )
 from td_health_manifest import load_health_manifest
 from td_health_roster import extract_roster_facts
-from td_health_sqlite import SQLiteHealthStore
+from td_health_roster_mutation import set_cli_roster_device
+from td_health_sqlite import SQLiteHealthStore, StaleRosterContextError
 
 
 def _write_seed(data_dir, devices, *, extpan="78b9775b001c1cbe"):
@@ -472,6 +473,12 @@ def test_second_complete_absence_establishes_offline(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     device_id = "extaddr:8672766ae0578187"
     store.upsert_expected_device("extpan:78b9775b001c1cbe", device_id, "expected")
+    with closing(store._connect()) as connection:
+        connection.execute(
+            "UPDATE expected_devices SET expected_since=? WHERE device_id=?",
+            ("2026-08-01T00:00:00+00:00", device_id),
+        )
+        connection.commit()
     first = process_health(
         data_dir=tmp_path,
         dataset_id="otbr_cli_networkdiag_fetch_all",
@@ -499,6 +506,12 @@ def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tm
     network_id = "extpan:78b9775b001c1cbe"
     device_id = "extaddr:8672766ae0578187"
     store.upsert_expected_device(network_id, device_id, "expected")
+    with closing(store._connect()) as connection:
+        connection.execute(
+            "UPDATE expected_devices SET expected_since=? WHERE network_id=? AND device_id=?",
+            ("2026-08-01T00:00:00+00:00", network_id, device_id),
+        )
+        connection.commit()
     process_health(
         data_dir=tmp_path,
         dataset_id="otbr_cli_networkdiag_fetch_all",
@@ -536,7 +549,7 @@ def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tm
     )
 
     assert not updated.observation_created
-    assert updated.assessment_created
+    assert not updated.assessment_created
     assert updated.assessment.assessment_id != offline.assessment.assessment_id
     assert not any(
         finding.rule_id == "device.offline" for finding in updated.assessment.findings
@@ -547,10 +560,132 @@ def test_intentionally_offline_roster_state_replaces_stale_offline_assessment(tm
     )
     assert historical["filteredTotal"] == 1
     assert historical["devices"][0]["rosterState"] == "intentionally-offline"
+    assert store.latest_assessment(network_id, "otbr_cli_networkdiag_fetch_all")[
+        "assessment_id"
+    ] == updated.assessment.assessment_id
+
+
+def test_roster_change_creates_immutable_revision_and_same_observation_is_not_comparable(tmp_path) -> None:
+    device = {"extaddr": "8672766ae0578187", "state": "detached"}
+    _write_seed(tmp_path, [device])
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    before = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+    )
+
+    mutation = set_cli_roster_device(
+        store,
+        network_id=before.observation.network_id,
+        device_id="extaddr:1111111111111111",
+        label="Newly tracked",
+        state=None,
+        label_supplied=True,
+    )
+    assert mutation.changed and len(mutation.reassessment) == 1
+    after_id = mutation.reassessment[0]["assessmentId"]
+    assert after_id != before.assessment.assessment_id
+    after = store.latest_assessment(
+        before.observation.network_id, before.observation.dataset_id
+    )
+    assert after["assessment_id"] == after_id
+
+    with closing(store._connect()) as connection:
+        before_non_roster = connection.execute(
+            """SELECT rule_id, finding_id, evidence_json FROM findings
+               WHERE assessment_id=? AND rule_id NOT IN
+               ('device.missing', 'device.offline', 'network.offline-impact')
+               ORDER BY finding_id""",
+            (before.assessment.assessment_id,),
+        ).fetchall()
+        after_non_roster = connection.execute(
+            """SELECT rule_id, finding_id, evidence_json FROM findings
+               WHERE assessment_id=? AND rule_id NOT IN
+               ('device.missing', 'device.offline', 'network.offline-impact')
+               ORDER BY finding_id""",
+            (after_id,),
+        ).fetchall()
+        assert before_non_roster == after_non_roster
+
+    same_observation, _, _ = store.compare_assessments(
+        before.assessment.assessment_id, after_id, dry_run=True
+    )
+    assert "same-observation" in same_observation.compatibility.reasons
+    pair = store.compare_endpoint_pair(
+        network_id=before.observation.network_id,
+        dataset_id=before.observation.dataset_id,
+        before_assessment_id=before.assessment.assessment_id,
+        after_assessment_id=after_id,
+        limit=25,
+        offset=0,
+        scope="all",
+        result="all",
+    )
+    assert pair is not None
+    assert "same-observation" in json.loads(pair[1]["reasons_json"])
+    endpoint_page = store.assessment_endpoint_page(
+        network_id=before.observation.network_id,
+        dataset_id=before.observation.dataset_id,
+        side="after",
+        limit=10,
+        offset=0,
+        selected_assessment_id=before.assessment.assessment_id,
+    )
+    assert endpoint_page["total"] == 2
+    assert {item["assessmentId"] for item in endpoint_page["items"]} == {
+        before.assessment.assessment_id, after_id,
+    }
+
+
+def test_expected_epoch_excludes_pre_enrollment_endpoint_and_stale_save_retries(tmp_path) -> None:
+    _write_seed(tmp_path, [])
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    network_id = "extpan:78b9775b001c1cbe"
+    first = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+    )
+    mutation = set_cli_roster_device(
+        store,
+        network_id=network_id,
+        device_id="extaddr:1111111111111111",
+        label=None,
+        state=None,
+        label_supplied=False,
+    )
+    assert mutation.changed
+    revised = store.latest_assessment(network_id, first.observation.dataset_id)
+    assert revised["assessment_id"] != first.assessment.assessment_id
+    with closing(store._connect()) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM findings WHERE assessment_id=? AND rule_id IN ('device.missing','device.offline')",
+            (revised["assessment_id"],),
+        ).fetchone()[0] == 0
+
+    pending = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+    )
+    set_cli_roster_device(
+        store,
+        network_id=network_id,
+        device_id="extaddr:2222222222222222",
+        label=None,
+        state=None,
+        label_supplied=False,
+    )
+    with pytest.raises(StaleRosterContextError, match="Roster changed"):
+        store.save_processing_result(pending.observation, pending.assessment)
 
 
 def test_complete_absences_below_roster_ratio_are_offline_without_network_impact(tmp_path) -> None:
-    device_ids = [f"extaddr:{index:016x}" for index in range(10)]
+    device_ids = [f"extaddr:{index:016x}" for index in range(1, 11)]
     missing_device_id = device_ids[0]
     observed_devices = [
         {"extaddr": device_id.removeprefix("extaddr:"), "role": "child"}
@@ -561,6 +696,12 @@ def test_complete_absences_below_roster_ratio_are_offline_without_network_impact
     network_id = "extpan:78b9775b001c1cbe"
     for device_id in device_ids:
         store.upsert_expected_device(network_id, device_id, "expected")
+    with closing(store._connect()) as connection:
+        connection.execute(
+            "UPDATE expected_devices SET expected_since=? WHERE network_id=?",
+            ("2026-08-01T00:00:00+00:00", network_id),
+        )
+        connection.commit()
 
     first = process_health(
         data_dir=tmp_path,

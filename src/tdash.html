@@ -309,6 +309,8 @@
           <div id="health-insights-workspace" hidden>
             <div class="health-insights-sticky">
             <div id="health-insights-summary"></div>
+            <div id="health-roster-mutation-status" class="health-roster-mutation-status" hidden
+              role="status" aria-live="polite"></div>
             <div id="health-insights-tabs" role="tablist" aria-label="Health insights">
               <button id="health-tab-findings" type="button" role="tab" aria-controls="health-panel-findings" aria-selected="true" tabindex="0">Findings <span id="health-findings-count"></span></button>
               <button id="health-tab-comparison" type="button" role="tab" aria-controls="health-panel-comparison" aria-selected="false" tabindex="-1">Comparison</button>
@@ -568,6 +570,28 @@
         </div>
         <div id="health-finding-details-content"></div>
       </section>
+      <dialog id="health-roster-action-dialog" aria-labelledby="health-roster-action-heading">
+        <form id="health-roster-action-form">
+          <h2 id="health-roster-action-heading">Confirm roster action</h2>
+          <div id="health-roster-action-context" class="health-roster-action-summary"></div>
+          <p id="health-roster-action-description"></p>
+          <label id="health-roster-action-label-row" hidden>
+            Enrollment label
+            <input id="health-roster-action-label" type="text" maxlength="128" autocomplete="off">
+            <span id="health-roster-action-label-hint" class="health-roster-dialog-hint"></span>
+          </label>
+          <label>
+            Reason (optional)
+            <input id="health-roster-action-reason" type="text" maxlength="500" autocomplete="off">
+            <span class="health-roster-dialog-hint">Saved in the roster lifecycle history.</span>
+          </label>
+          <p id="health-roster-action-status" role="status" aria-live="polite"></p>
+          <div class="health-roster-dialog-actions">
+            <button id="health-roster-action-cancel" type="button">Cancel</button>
+            <button id="health-roster-action-confirm" type="submit">Confirm</button>
+          </div>
+        </form>
+      </dialog>
     </aside>
 
     <nav id="panel-navigation" class="layout-panel layout-panel-navigation" aria-label="Workspace views">

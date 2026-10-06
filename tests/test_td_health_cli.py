@@ -6,7 +6,7 @@ import io
 import json
 import hashlib
 import os
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -16,6 +16,7 @@ from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_read import TDHealthReadService
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
+from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
 
 def _seed(data_dir) -> None:
@@ -130,6 +131,12 @@ def test_dry_run_uses_existing_roster_history_without_mutating_store(tmp_path) -
     store.upsert_expected_device(
         "extpan:78b9775b001c1cbe", "extaddr:1111111111111111", "Missing"
     )
+    with closing(store._connect()) as connection:
+        connection.execute(
+            "UPDATE expected_devices SET expected_since=? WHERE device_id=?",
+            ("2020-01-01T00:00:00+00:00", "extaddr:1111111111111111"),
+        )
+        connection.commit()
     assert td_health_cli.main([
         "--datadir", str(tmp_path), "process-dataset",
         "--dataset", "otbr_cli_networkdiag_fetch_all",
@@ -225,6 +232,42 @@ def test_roster_upsert_state_change_and_list_are_cli_only(tmp_path) -> None:
             "--json",
         ]) == 0
     assert json.loads(output.getvalue())["devices"][0]["label"] == "Office Router"
+
+
+def test_label_map_import_is_additive_and_reports_existing_entries(tmp_path) -> None:
+    _seed(tmp_path)
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    network_id = "extpan:78b9775b001c1cbe"
+    store.upsert_expected_device(
+        network_id, "extaddr:8672766ae0578187", "Operator label", "retired"
+    )
+    (tmp_path / EXTADDR_DEVICE_LABEL_MAP_FILENAME).write_text(
+        json.dumps([
+            {"extAddress": "8672766ae0578187", "deviceLabel": "Static overwrite"},
+            {"extAddress": "1111111111111111", "deviceLabel": "New device"},
+            {"extAddress": "invalid"},
+        ]),
+        encoding="utf-8",
+    )
+
+    def import_map():
+        output = io.StringIO()
+        with redirect_stdout(output):
+            assert td_health_cli.main([
+                "--datadir", str(tmp_path), "process-dataset",
+                "--dataset", "otbr_cli_networkdiag_fetch_all",
+                "--init-roster-from-label-map", "--json",
+            ]) == 0
+        return json.loads(output.getvalue())
+
+    first = import_map()
+    assert (first["imported"], first["alreadyPresent"], first["skipped"]) == (1, 1, 1)
+    second = import_map()
+    assert (second["imported"], second["alreadyPresent"], second["skipped"]) == (0, 2, 1)
+    records = {row["device_id"]: row for row in store.expected_device_records(network_id)}
+    assert records["extaddr:8672766ae0578187"]["label"] == "Operator label"
+    assert records["extaddr:8672766ae0578187"]["roster_state"] == "retired"
+    assert records["extaddr:1111111111111111"]["label"] == "New device"
 
 
 def test_all_processes_every_eligible_dataset_in_sorted_order(tmp_path) -> None:

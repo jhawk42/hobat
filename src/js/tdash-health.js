@@ -108,9 +108,59 @@ export function fetchHealthRoster(networkId, assessmentId, view, signal) {
   return healthRequest(`api/health/roster?${query}`, signal);
 }
 
-export function fetchHealthRosterDevice(networkId, deviceId, signal) {
+export function fetchHealthRosterDevice(networkId, deviceId, signal, assessmentId = null) {
   const query = new URLSearchParams({ network: networkId });
+  if (assessmentId) query.set("assessment", assessmentId);
   return healthRequest(`api/health/roster/${encodeURIComponent(deviceId)}?${query}`, signal);
+}
+
+export function patchHealthRosterDevice(networkId, deviceId, payload, signal) {
+  const query = new URLSearchParams({ network: networkId });
+  return trackedFetch(
+    `api/health/roster/${encodeURIComponent(deviceId)}?${query}`,
+    {
+      method: "PATCH",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal,
+    },
+  ).then(async (response) => {
+    if (!response.ok) {
+      const responseText = await response.text();
+      let details = responseText.trim();
+      try {
+        const body = JSON.parse(responseText);
+        details = typeof body?.reason === "string" ? body.reason
+          : typeof body?.error === "string" ? body.error : details;
+      } catch {
+        details = details.split(/\r?\n\r?\n/).at(-1)?.trim() || details;
+      }
+      details = details.replace(/^\d{3}:\s*/, "");
+      if (details.startsWith("Conflict\n\n")) details = details.slice("Conflict\n\n".length);
+      const code = details.match(/^(stale-revision|reassessment-baseline-unavailable):/)?.[1];
+      const error = new Error(details || `Roster action rejected (${response.status}).`);
+      error.status = response.status;
+      error.code = code;
+      throw error;
+    }
+    return response.json();
+  });
+}
+
+export function createHealthMutationRequestId(cryptoApi = globalThis.crypto) {
+  if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    cryptoApi.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export function fetchHealthComparisons(networkId, datasetId, offset = 0, signal) {
@@ -1058,7 +1108,15 @@ export function renderHealthRoster(container, page, view, actions = {}) {
   next.addEventListener("click", () => actions.page?.(page.offset + page.limit));
 }
 
-export function renderHealthRosterDetail(container, detail, presenceState) {
+const ROSTER_ACTION_LABELS = Object.freeze({
+  enroll: "Add to Roster",
+  "mark-offline": "Mark Offline",
+  "clear-offline": "Clear Offline",
+  retire: "Retire Device",
+  unretire: "Unretire Device",
+});
+
+export function renderHealthRosterDetail(container, detail, presenceState, actions = {}) {
   if (!container) return;
   container.replaceChildren();
   if (!detail) return;
@@ -1067,8 +1125,38 @@ export function renderHealthRosterDetail(container, detail, presenceState) {
   const copy = appendText(container, "button", "Copy ID");
   copy.type = "button";
   copy.addEventListener("click", () => navigator.clipboard.writeText(detail.deviceId));
-  appendText(container, "p", `Presence: ${rosterLabel(presenceState)} · Roster designation: ${rosterLabel(detail.rosterState)}`);
+  appendText(container, "p", `Presence in selected assessment: ${
+    rosterLabel(detail.presenceState || presenceState)
+  }`);
+  appendText(container, "p", `Current roster designation: ${rosterLabel(detail.rosterState)}`);
   appendText(container, "p", `Last endpoint presence: ${detail.lastEndpointPresenceAt || "Unknown"}`);
+  if (detail.reason) appendText(container, "p", `Reason: ${detail.reason}`);
+  if (detail.updatedAt) appendText(container, "p", `Updated: ${detail.updatedAt}`);
+  if (detail.expectedSince) appendText(container, "p", `Expected since: ${detail.expectedSince}`);
+  if (detail.changeSource) appendText(container, "p", `Change origin: ${detail.changeSource}`);
+  if (detail.lastLifecycleEvent) {
+    appendText(container, "p", `Last action: ${rosterLabel(detail.lastLifecycleEvent.action)} · ${
+      detail.lastLifecycleEvent.actor || detail.lastLifecycleEvent.origin
+    } · ${detail.lastLifecycleEvent.occurred_at}`);
+  }
+  const actionBar = appendText(container, "div", "", "health-roster-action-bar");
+  if (actions.mutationAvailable) {
+    for (const action of detail.allowedActions || []) {
+      const button = appendText(actionBar, "button", ROSTER_ACTION_LABELS[action] || action);
+      button.type = "button";
+      button.disabled = actions.pending === true;
+      button.addEventListener("click", () => actions.action?.(action, detail));
+    }
+  }
+  const unavailableReason = detail.disabledActionReasons?.enroll;
+  if (unavailableReason) {
+    appendText(container, "p", unavailableReason === "observation-context-required"
+      ? "Add to Roster requires a retained assessment context."
+      : unavailableReason === "device-not-present-in-context"
+        ? "Add to Roster is available only for a device observed in this assessment."
+        : "Add to Roster is unavailable in the current context.",
+    "health-roster-action-note");
+  }
   const table = document.createElement("table");
   const body = table.createTBody();
   Object.entries(detail.fields).forEach(([field, fact]) => {
@@ -1792,6 +1880,26 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
           item.endpointIds[0], item.findingId,
         ));
       }
+      if (actions.mutationAvailable && item.endpointIds.length === 1
+          && item.finding.scope === "device") {
+        const deviceId = item.endpointIds[0];
+        const allowedActions = actions.rosterActionsByDevice?.get(deviceId) || [];
+        if (allowedActions.includes("enroll")) {
+          appendDetailAction(details, "Add to Roster", () => actions.rosterAction?.(
+            "enroll", deviceId, item.findingId,
+          ));
+        }
+        if (item.finding.ruleId === "device.offline"
+            && allowedActions.includes("mark-offline")) {
+          appendDetailAction(details, "Mark Offline", () => actions.rosterAction?.(
+            "mark-offline", deviceId, item.findingId,
+          ));
+        }
+        const actionError = actions.rosterActionErrors?.get(deviceId);
+        if (actionError) {
+          appendText(details, "p", `Stored device actions unavailable: ${actionError}`, "error");
+        }
+      }
     }
     listItem.appendChild(details);
     list.appendChild(listItem);
@@ -1802,6 +1910,13 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
   if (model.shared.sourceFiles.length > 0) {
     appendSharedDetailSection(container, "Sources", model.shared.sourceFiles.join(", "));
   }
+}
+
+export function projectFindingDeviceAvailability(currentDeviceIds, storedDeviceIds) {
+  return {
+    availableTargets: currentDeviceIds.size,
+    inspectableDeviceIds: new Set([...currentDeviceIds, ...storedDeviceIds]),
+  };
 }
 
 export function exportHealthAssessment(assessment) {

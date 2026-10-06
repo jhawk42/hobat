@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import time
 import uuid
+import unicodedata
 from pathlib import Path
 from typing import Sequence
 from collections.abc import Callable
@@ -28,6 +29,7 @@ from td_health_read import (
     HealthUnavailableError,
     TDHealthReadService,
 )
+from td_health_observation_store import HOBAT_DATABASE_FILENAME, HealthStoreFutureSchemaError
 from td_device_actions import (
     ACTION_OTBR_RESET,
     DeviceActionError,
@@ -1315,8 +1317,10 @@ async def handle_device_patch_api(request: aiohttp.web.Request) -> aiohttp.web.R
     return _device_json_response(result, status=201 if inserted else 200)
 
 
-def _health_json_response(payload: object) -> aiohttp.web.Response:
-    return aiohttp.web.json_response(payload, headers={"Cache-Control": "no-store"})
+def _health_json_response(payload: object, *, status: int = 200) -> aiohttp.web.Response:
+    return aiohttp.web.json_response(
+        payload, status=status, headers={"Cache-Control": "no-store"},
+    )
 
 
 def _health_page_value(raw: str | None, *, name: str, default: int) -> int:
@@ -1463,11 +1467,138 @@ async def handle_health_roster_device_api(request: aiohttp.web.Request) -> aioht
     device_id = request.match_info.get("device_id", "")
     if not network_id or not device_id.startswith("extaddr:"):
         raise aiohttp.web.HTTPBadRequest(reason="network and canonical device ID are required")
-    result = await _health_service_call(request, "roster_device", network_id=network_id,
-                                        device_id=device_id)
+    result = await _health_service_call(
+        request, "roster_device", network_id=network_id, device_id=device_id,
+        assessment_id=request.query.get("assessment"),
+    )
     if result is None:
         raise aiohttp.web.HTTPNotFound(reason="Roster device not found")
     return _health_json_response(result)
+
+
+async def handle_health_roster_device_patch_api(
+    request: aiohttp.web.Request,
+) -> aiohttp.web.Response:
+    network_id = request.query.get("network")
+    device_id = request.match_info.get("device_id", "")
+    if not network_id or not device_id:
+        raise aiohttp.web.HTTPBadRequest(reason="network and canonical device ID are required")
+    if request.content_type != "application/json":
+        raise aiohttp.web.HTTPUnsupportedMediaType(reason="Content-Type must be application/json")
+    if request.content_length is not None and request.content_length > 16_384:
+        raise aiohttp.web.HTTPRequestEntityTooLarge(
+            max_size=16_384, actual_size=request.content_length,
+        )
+    body_parts = []
+    body_size = 0
+    async for chunk in request.content.iter_chunked(8192):
+        body_size += len(chunk)
+        if body_size > 16_384:
+            raise aiohttp.web.HTTPRequestEntityTooLarge(
+                max_size=16_384, actual_size=body_size,
+            )
+        body_parts.append(chunk)
+    body = b"".join(body_parts)
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise aiohttp.web.HTTPBadRequest(reason="malformed JSON body") from exc
+    if not isinstance(payload, dict):
+        raise aiohttp.web.HTTPBadRequest(reason="JSON body must be an object")
+    action = payload.get("action")
+    if not isinstance(action, str) or action not in {
+        "enroll", "mark-offline", "clear-offline", "retire", "unretire",
+    }:
+        raise aiohttp.web.HTTPBadRequest(reason="unsupported roster action")
+    allowed = {"action", "requestId", "expectedRevision", "contextAssessmentId", "reason"}
+    if action == "enroll":
+        allowed.add("deviceLabel")
+    if set(payload) - allowed or not {"action", "requestId", "expectedRevision"} <= set(payload):
+        raise aiohttp.web.HTTPBadRequest(reason="JSON body has missing or unknown fields")
+    request_id = payload["requestId"]
+    try:
+        if not isinstance(request_id, str) or str(uuid.UUID(request_id)) != request_id:
+            raise ValueError
+    except (ValueError, AttributeError) as exc:
+        raise aiohttp.web.HTTPBadRequest(reason="requestId must be a UUID") from exc
+    expected_revision = payload["expectedRevision"]
+    if type(expected_revision) is not int or expected_revision < 0:
+        raise aiohttp.web.HTTPBadRequest(reason="expectedRevision must be a non-negative integer")
+    context_assessment_id = payload.get("contextAssessmentId")
+    if context_assessment_id is not None and (
+        not isinstance(context_assessment_id, str)
+        or not context_assessment_id.startswith("assessment:")
+        or len(context_assessment_id) > 200
+    ):
+        raise aiohttp.web.HTTPBadRequest(reason="contextAssessmentId is invalid")
+    device_label = None
+    if "deviceLabel" in payload:
+        try:
+            device_label = normalize_valid_device_label(payload["deviceLabel"])
+        except (ValueError, TypeError) as exc:
+            raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
+    reason = payload.get("reason")
+    if reason is not None:
+        if not isinstance(reason, str):
+            raise aiohttp.web.HTTPBadRequest(reason="reason must be a string")
+        reason = reason.strip()
+        if len(reason) > 500 or any(
+            unicodedata.category(char) == "Cc" for char in reason
+        ):
+            raise aiohttp.web.HTTPBadRequest(reason="reason is invalid or too long")
+        reason = reason or None
+    data_dir = request.app[TD_DATA_DIR_APP_KEY]
+    database_path = data_dir / HOBAT_DATABASE_FILENAME
+    if not database_path.is_file():
+        raise aiohttp.web.HTTPServiceUnavailable(reason="Health store is not available")
+    try:
+        from td_health_roster_mutation import (
+            RosterMutationConflictError,
+            RosterMutationNotFoundError,
+            apply_browser_roster_action,
+        )
+        from td_health_sqlite import (
+            ReassessmentBaselineUnavailable, SCHEMA_VERSION, SQLiteHealthStore,
+        )
+
+        def mutate():
+            store = SQLiteHealthStore(database_path)
+            if store.store_capabilities()["schemaVersion"] < SCHEMA_VERSION:
+                raise sqlite3.DatabaseError("Health store schema migration is incomplete")
+            if store.store_capabilities()["schemaVersion"] < 6:
+                raise sqlite3.DatabaseError("Health store lacks roster mutation support")
+            return apply_browser_roster_action(
+                store, network_id=network_id, device_id=device_id, action=action,
+                request_id=request_id, expected_revision=expected_revision,
+                context_assessment_id=context_assessment_id,
+                device_label=device_label, reason=reason,
+            )
+
+        result, _ = await asyncio.to_thread(mutate)
+    except RosterMutationConflictError as exc:
+        reason = str(exc)
+        if reason == "stale-revision":
+            reason = "stale-revision: refetch roster detail and reconfirm the action"
+        raise aiohttp.web.HTTPConflict(reason=reason) from exc
+    except RosterMutationNotFoundError as exc:
+        raise aiohttp.web.HTTPNotFound(reason=str(exc)) from exc
+    except HealthStoreFutureSchemaError as exc:
+        raise aiohttp.web.HTTPServiceUnavailable(reason=str(exc)) from exc
+    except ReassessmentBaselineUnavailable as exc:
+        raise aiohttp.web.HTTPConflict(reason=str(exc)) from exc
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            raise aiohttp.web.HTTPServiceUnavailable(
+                reason="Health store is busy", headers={"Retry-After": "5"},
+            ) from exc
+        raise aiohttp.web.HTTPInternalServerError(reason="Health store mutation failed") from exc
+    except sqlite3.DatabaseError as exc:
+        raise aiohttp.web.HTTPInternalServerError(reason="Health store mutation failed") from exc
+    except ValueError as exc:
+        raise aiohttp.web.HTTPBadRequest(reason=str(exc)) from exc
+    return _health_json_response(
+        result, status=201 if action == "enroll" and result["changed"] else 200,
+    )
 
 
 async def handle_health_comparison_api(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -2597,6 +2728,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.router.add_get("/api/health/comparisons/{comparison_id}", handle_health_comparison_api)
     app.router.add_get("/api/health/roster", handle_health_roster_api)
     app.router.add_get("/api/health/roster/{device_id}", handle_health_roster_device_api)
+    app.router.add_patch(
+        "/api/health/roster/{device_id}", handle_health_roster_device_patch_api
+    )
     app.router.add_get("/api/health/latest", handle_health_latest_api)
     app.router.add_get("/api/health/capabilities", handle_health_capabilities_api)
     app.router.add_post("/api/health/process-dataset", handle_health_process_dataset_api)

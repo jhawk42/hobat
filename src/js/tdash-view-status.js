@@ -36,6 +36,14 @@ export function networkInstanceStatus(filenames, capabilities) {
   return `Network instance: ${scope.extPanId} (${scope.provenance})`;
 }
 
+export function networkInstanceMatchesId(filenames, capabilities, networkId) {
+  const expectedExtPanId = networkId?.match(/^extpan:([0-9a-f]{16})$/i)?.[1];
+  if (!expectedExtPanId) return false;
+  const scope = resolveNetworkInstance(filenames, capabilities);
+  return scope.status === "known"
+    && scope.extPanId?.toLowerCase() === expectedExtPanId.toLowerCase();
+}
+
 export function createViewStatusOwner(presentStatus = () => {}) {
   let activeView = null;
   let datasetToken = null;

@@ -236,6 +236,50 @@ def _finding(
     )
 
 
+def aggregate_assessment_state(
+    findings: tuple[Finding, ...] | list[Finding],
+    *,
+    completeness: Completeness,
+    device_count: int,
+    observed_pillars: Mapping[str, Mapping[str, Any]],
+) -> tuple[HealthStatus, Confidence]:
+    material = [
+        finding
+        for finding in findings
+        if finding.status in {HealthStatus.MODERATE, HealthStatus.POOR}
+        and HEALTH_RULE_CATALOG.rule(finding.rule_id).materiality
+        in {"network", "relationship"}
+    ]
+    if any(finding.status is HealthStatus.POOR for finding in material):
+        status = HealthStatus.POOR
+    elif any(finding.status is HealthStatus.MODERATE for finding in material):
+        status = HealthStatus.MODERATE
+    elif (
+        completeness is Completeness.COMPLETE
+        and device_count
+        and all(pillar["state"] == "sufficient" for pillar in observed_pillars.values())
+    ):
+        status = HealthStatus.STRONG
+    else:
+        status = HealthStatus.UNKNOWN
+    sufficient_pillars = sum(
+        pillar["state"] == "sufficient" for pillar in observed_pillars.values()
+    )
+    if completeness is not Completeness.COMPLETE:
+        confidence = (
+    Confidence.MEDIUM
+    if completeness is Completeness.DEGRADED
+    else Confidence.LOW
+        )
+    elif sufficient_pillars >= 4:
+        confidence = Confidence.HIGH
+    elif sufficient_pillars >= 2:
+        confidence = Confidence.MEDIUM
+    else:
+        confidence = Confidence.LOW
+    return status, confidence
+
+
 def evaluate_observation(
     observation: Observation,
     policy: HealthPolicy,
@@ -246,6 +290,9 @@ def evaluate_observation(
     assessed_at: str | None = None,
     omr_prefix: str | None = None,
     device_ipv6_addresses: Mapping[str, tuple[str, ...]] | None = None,
+    roster_context: Mapping[str, Any] | None = None,
+    network_roster_revision: int = 0,
+    history_boundary: Mapping[str, Any] | None = None,
 ) -> Assessment:
     absences = prior_complete_absences or {}
     findings: list[Finding] = []
@@ -1030,17 +1077,6 @@ def evaluate_observation(
     for finding in findings:
         _validate_finding_applicability(finding, observation, profile)
 
-    material = [
-        finding
-        for finding in findings
-        if finding.status in {HealthStatus.MODERATE, HealthStatus.POOR}
-        and HEALTH_RULE_CATALOG.rule(finding.rule_id).materiality
-        in {"network", "relationship"}
-    ]
-    if any(finding.status is HealthStatus.POOR for finding in material):
-        status = HealthStatus.POOR
-    elif any(finding.status is HealthStatus.MODERATE for finding in material):
-        status = HealthStatus.MODERATE
     valid_mac_metrics = sum(
         metric.metric in {"totalMacErrorRatio", "totalMacDiscardRatio"}
         and metric.denominator is not None
@@ -1122,27 +1158,15 @@ def evaluate_observation(
             "evidenceCounts": counts,
             "reasons": reasons,
         }
-    if not material and complete and observation.devices and all(
-        pillar["state"] == "sufficient" for pillar in observed_pillars.values()
-    ):
-        status = HealthStatus.STRONG
-    elif not material:
-        status = HealthStatus.UNKNOWN
+    status, confidence = aggregate_assessment_state(
+        findings,
+        completeness=observation.completeness,
+        device_count=len(observation.devices),
+        observed_pillars=observed_pillars,
+    )
     sufficient_pillars = sum(
         pillar["state"] == "sufficient" for pillar in observed_pillars.values()
     )
-    if not complete:
-        confidence = (
-            Confidence.MEDIUM
-            if observation.completeness is Completeness.DEGRADED
-            else Confidence.LOW
-        )
-    elif sufficient_pillars >= 4:
-        confidence = Confidence.HIGH
-    elif sufficient_pillars >= 2:
-        confidence = Confidence.MEDIUM
-    else:
-        confidence = Confidence.LOW
     coverage = {
         "completeness": observation.completeness.value,
         "pillars": dict(profile.coverage),
@@ -1172,10 +1196,61 @@ def evaluate_observation(
         ROUTE64_SAMPLE_CONTRACT_VERSION if observation.dataset_id == "otbr_cli_networkdiag_fetch_all"
         else "comparison-v1"
     )
+    normalized_roster_context = dict(roster_context or {
+        "networkRosterRevision": network_roster_revision,
+        "expectedDeviceIds": sorted(expected_device_ids),
+    })
+    presence_inputs = {
+        "complete": complete,
+        "expectedDeviceIds": sorted(expected_device_ids),
+        "observedDeviceIds": sorted(observed_ids),
+        "priorCompleteAbsences": sorted(absences.items()),
+        "sampleContractVersion": sample_contract_version,
+    }
+    roster_context_digest = hashlib.sha256(
+        json.dumps(normalized_roster_context, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    presence_input_digest = hashlib.sha256(
+        json.dumps(presence_inputs, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     assessment_id = _stable_id(
-        "assessment", observation.observation_id, assessment_input_digest,
-        *([sample_contract_version] if sample_contract_version != "comparison-v1" else []),
+        "assessment", "v2", observation.observation_id, assessment_input_digest,
+        roster_context_digest, presence_input_digest,
     )
+    reproduction_context = {
+        "schemaVersion": 1,
+        "evaluatorVersion": EVALUATOR_VERSION,
+        "healthPolicy": {
+            "version": policy.version,
+            "digest": policy.digest,
+            "offlineConsecutiveCompleteObservations": (
+                policy.offline_consecutive_complete_observations
+            ),
+            "offlinePoorDeviceRatioThreshold": policy.offline_poor_device_ratio_threshold,
+            "thresholds": {
+                metric: dict(bands) for metric, bands in policy.thresholds.items()
+            },
+        },
+        "healthProfile": {
+            "profileId": profile.profile_id,
+            "identityFile": profile.identity_file,
+            "requiredOutcomes": list(profile.required_outcomes),
+            "coverage": dict(profile.coverage),
+            "topologyAuthority": profile.topology_authority,
+            "borderRouterAuthority": profile.border_router_authority,
+        },
+        "networkRosterRevision": network_roster_revision,
+        "rosterContext": normalized_roster_context,
+        "historyProvenance": "retained-complete-observations",
+        "historyBoundary": dict(history_boundary) if history_boundary else None,
+        "presenceInputs": presence_inputs,
+        "expectedDeviceIds": sorted(expected_device_ids),
+        "priorCompleteAbsences": dict(sorted(absences.items())),
+        "endpointEligibility": {
+            "complete": complete,
+            "observedAt": observation.observed_at,
+        },
+    }
     return Assessment(
         assessment_id=assessment_id,
         observation_id=observation.observation_id,
@@ -1190,4 +1265,8 @@ def evaluate_observation(
         assessed_at=assessment_time,
         sample_contract_version=sample_contract_version,
         health_policy_digest=policy.digest,
+        roster_context_digest=roster_context_digest,
+        presence_input_digest=presence_input_digest,
+        network_roster_revision=network_roster_revision,
+        reproduction_context=reproduction_context,
     )

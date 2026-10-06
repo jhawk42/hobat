@@ -63,6 +63,7 @@ labels use their own static-map API.
 | `GET /api/health/comparisons/{comparison_id}` | `handle_health_comparison_api` | Read a pinned comparison; apply effective Result/scope filters and counts before paging |
 | `GET /api/health/roster` | `handle_health_roster_api` | Read a paginated network device roster projection |
 | `GET /api/health/roster/{device_id}` | `handle_health_roster_device_api` | Read one device's approved roster fields |
+| `PATCH /api/health/roster/{device_id}` | `handle_health_roster_device_patch_api` | Apply one revision-guarded, idempotent network-scoped lifecycle action and reassess retained evidence |
 | `GET /api/health/latest` | `handle_health_latest_api` | Read the latest eligible assessment |
 | `GET /api/health/capabilities` | `handle_health_capabilities_api` | Report health-store read capabilities |
 | `POST /api/health/process-dataset` | `handle_health_process_dataset_api` | Process one approved cached dataset into a health assessment |
@@ -98,6 +99,8 @@ policy for active Ping and Reset Counters operations.
 Dashboard -> POST /api/health/process-dataset -> web server
                  -> td_cli health process-dataset -> hobat_v1.db
 Dashboard -> GET /api/health/* -> web server -> query-only hobat_v1.db read
+Dashboard -> PATCH /api/health/roster/{device_id} -> validate revision/receipt
+                 -> atomic roster + lifecycle audit + receipt + reassessment transaction
 Dashboard -> POST /api/device-actions -> validate -> source action
                                                            -> transient job/result (memory)
 ```
@@ -107,9 +110,19 @@ with `--allow-partial`, which writes health history to `hobat_v1.db` without
 starting a collector, changing a snapshot, or probing a device. Health GET
 routes are query-only and return no-store responses. Device-action results and
 jobs are transient; they are not persisted in snapshots, checkpoints, labels,
-or health data. On eligible complete observations, the shared processing path
-stores the adjacent comparison and unique complete-only 1/3/7/30-day interval
-pairs in the same SQLite transaction, subject to the existing 2,000-pair cap.
+or health data. Roster PATCH is the exception to query-only health reads: it
+requires a preexisting supported health schema, checks network/device identity,
+the request receipt and expected device revision in one write transaction,
+applies only an allowed transition, stores the lifecycle event and replay
+receipt, and reassesses from retained evidence before committing. It never
+starts a collector or changes source snapshots, static labels, or observed
+facts. Same-request retries replay the committed response; stale revisions
+require a fresh detail read and confirmation. Historical assessments and
+comparisons remain immutable, while the selected current assessment may gain a
+new roster-aware revision. On eligible complete observations, the shared
+processing path stores the adjacent comparison and unique complete-only
+1/3/7/30-day interval pairs in the same SQLite transaction, subject to the
+existing 2,000-pair cap.
 
 The endpoint inventory GET pages retained assessment metadata and resolves
 defaults and interval candidates over the full history. The arbitrary pair GET

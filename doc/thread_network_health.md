@@ -147,7 +147,7 @@ of the expected roster is Offline. Partial and degraded observations do not
 increment absence history. Stage 1 reports observation counts, not wall-clock
 offline duration.
 
-List or update one network's roster through the CLI-only administration boundary:
+List or update one network's roster from the CLI:
 
 ```bash
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
@@ -168,11 +168,57 @@ Supported roster states are:
   and Offline evaluation; the state does not change observation completeness or
   suppress current findings when the device is observed.
 
-There are no roster mutation HTTP routes. Partial or degraded observations do
-not increment absence history, and an Offline device contributes to the
-separate `network.offline-impact` finding only when the Offline ratio is above
-the configured threshold (15% by default), not merely because one device is
-Offline. Stage 1 reports observation counts rather than wall-clock duration.
+The dashboard also offers confirmed, single-device lifecycle actions from
+Findings and Device Roster. The action-context
+`GET /api/health/roster/{device_id}?network=extpan:...&assessment=assessment:...`
+returns the network-scoped device detail, per-device and network roster
+revisions, selected-assessment presence when requested, and server-computed
+`allowedActions`/`disabledActionReasons`. The assessment parameter pins the
+presence context; it does not change current roster designation. For an absent
+device, Inspect opens its stored scoped facts rather than selecting a possibly
+different current-network record.
+
+`PATCH /api/health/roster/{device_id}?network=extpan:...` accepts one
+confirmed action. The JSON object requires `action`, UUID `requestId`, and
+non-negative `expectedRevision`. Actions are `enroll`, `mark-offline`,
+`clear-offline`, `retire`, and `unretire`; optional `reason` is at most 500
+characters. Enrollment additionally requires `contextAssessmentId` for a
+retained assessment in that network and may include `deviceLabel`. Only a
+device sampled in that assessment can be enrolled. An omitted label uses
+`found-<16-hex canonical extAddress>` in the expected roster; neither path
+updates the static label map or fabricates observed facts.
+
+Transitions are state-gated by the server: Mark Offline is offered only from
+Expected; Clear Offline changes Intentionally Offline to Expected; Retire
+changes Expected, Intentionally Offline, or Intermittent to Retired; and
+Unretire changes Retired to Expected. Retired and intentionally-offline
+designations do not expire and later observations do not clear them. Returning
+to Expected through Clear Offline, Unretire, or an explicit CLI expected-state
+change starts a fresh absence-monitoring epoch. Partial or degraded
+observations do not increment absence history, and an Offline device
+contributes to the separate `network.offline-impact` finding only when the
+Offline ratio is above the configured threshold (15% by default), not merely
+because one device is Offline. Stage 1 reports observation counts rather than
+wall-clock duration.
+
+PATCH is revision-guarded and request-ID idempotent. A retry with the same
+request ID and exact request body replays the stored response; reusing an ID
+with a different body or acting on a stale revision returns a conflict and
+requires fresh detail and confirmation. A committed lifecycle change records
+its server timestamp, actor/source, reason, prior/next designation, context,
+and revisions. The roster update, durable lifecycle event, retry receipt, and
+retained-evidence reassessment commit atomically. Reassessment can create a
+new current assessment revision without collecting data; previous assessments
+and comparisons stay immutable. A no-op records a replayable receipt without
+creating a lifecycle event or reassessment.
+
+Health GET routes, including roster context, remain query-only and no-store;
+PATCH alone writes. The write path requires the current roster schema and an
+available health store. Expectation/lifecycle data is separate from observed
+device facts and the static label map. Age-based health purge preserves roster
+lifecycle history; explicit `purge-all` removes health-domain and roster
+records. The API is same-origin, not authenticated: restrict the dashboard and
+mutation route to a trusted network or authenticated reverse proxy/firewall.
 
 ## Policy and Findings
 

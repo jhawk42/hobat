@@ -228,6 +228,17 @@ also supports roster administration and policy options; see
 [Thread Network Health](thread_network_health.md) for its full contract and
 examples.
 
+Roster writes are network-scoped. `--roster-label` without `--roster-state`
+preserves the existing designation and monitoring epoch. Setting
+`--roster-state expected` explicitly reactivates a non-Expected device and
+starts a fresh absence-monitoring epoch; equal label/state updates are no-ops.
+Importing the static label map is additive: it does not clear
+Intentionally Offline or Retired designations. Retired remains retained until
+explicitly returned to Expected. The dashboard exposes the same confirmed
+per-device lifecycle transitions through `PATCH /api/health/roster/{device_id}`;
+that mutation route is not authenticated, so protect it with the same trusted
+network or authenticated reverse-proxy boundary as other API mutations.
+
 Age purge defaults to 30 retained days and uses an exclusive UTC cutoff.
 `purge-all` removes health-domain records and roster entries but preserves the
 shared database, migrations, and non-health tables. Per-device purge preserves

@@ -351,6 +351,7 @@ class TDHealthReadService:
             "devices": devices}
 
     def roster_device(self, *, network_id: str, device_id: str,
+                      assessment_id: str | None = None,
                       read_time: datetime | None = None) -> dict[str, Any] | None:
         if (not network_id.startswith("extpan:") or
             network_id_from_ext_pan_id(network_id.removeprefix("extpan:")) != network_id or
@@ -358,12 +359,66 @@ class TDHealthReadService:
             device_id_from_ext_address(device_id.removeprefix("extaddr:")) != device_id):
             raise ValueError("Invalid roster network or device identity")
         self._require_roster_schema()
-        row = self.store.roster_device_row(network_id=network_id, device_id=device_id)
+        row = self.store.roster_device_row(
+            network_id=network_id, device_id=device_id, assessment_id=assessment_id,
+        )
         if not row:
             return None
         now = read_time or datetime.now(timezone.utc)
         labels = self._labels()
         device = self._roster_projection(row, now=now, labels=labels, detailed=True)
+        proposed_label = (
+            device["displayLabel"]
+            if device["labelOrigin"] in ("expected", "observed", "static")
+            else f"found-{device_id.removeprefix('extaddr:')}"
+        )
+        device.update({
+            "currentDesignation": row["designated"],
+            "revision": row["revision"],
+            "networkRosterRevision": row["networkRosterRevision"],
+            "updatedAt": row["updatedAt"],
+            "reason": row["reason"],
+            "expectedSince": row["expectedSince"],
+            "changeSource": row["changeSource"],
+            "proposedEnrollmentLabel": proposed_label,
+            "proposedEnrollmentLabelOrigin": device["labelOrigin"],
+        })
+        if assessment_id is not None:
+            device.update({
+                "contextAssessmentId": row["contextAssessmentId"],
+                "contextObservationId": row["contextObservationId"],
+                "presenceState": row["presenceState"],
+            })
+        actions = ("enroll", "mark-offline", "clear-offline", "retire", "unretire")
+        state = row["rosterState"]
+        allowed = {
+            "untracked": ("enroll",),
+            "expected": ("mark-offline", "retire"),
+            "intentionally-offline": ("clear-offline", "retire"),
+            "intermittent": ("retire",),
+            "retired": ("unretire",),
+        }.get(state, ())
+        disabled = {
+            action: (
+                "observation-context-required"
+                if action == "enroll" and state == "untracked" and assessment_id is None
+                else "device-not-present-in-context"
+                if action == "enroll" and state == "untracked"
+                and row.get("presenceState") != "observed"
+                else "invalid-transition" if action not in allowed
+                else None
+            )
+            for action in actions
+        }
+        device["allowedActions"] = [
+            action for action in allowed
+            if action != "enroll" or (
+                assessment_id is not None and row.get("presenceState") == "observed"
+            )
+        ]
+        device["disabledActionReasons"] = {
+            action: code for action, code in disabled.items() if code is not None
+        }
         self._disambiguate_roster_labels([device], network_id=network_id, now=now, labels=labels)
         return device
 
@@ -968,7 +1023,7 @@ class TDHealthReadService:
                 "comparisonVersion": COMPARISON_VERSION,
                 "comparisonPolicyDigest": policy.digest,
             } if capabilities["schemaVersion"] >= 4 else {}),
-            "rosterMutation": "cli-only",
+            **({"rosterMutation": 1} if capabilities["schemaVersion"] >= 6 else {}),
             "datasets": sorted(load_health_manifest().datasets),
             **capabilities,
         }

@@ -120,8 +120,15 @@ selected stored assessment. Presence defaults to **Observed** and describes
 that assessment, not network health; the separate roster designation reflects
 the current operator-managed state. Missing and Offline come from stored
 assessment findings, not device age. Selecting a device opens its stored facts
-in the details panel. Roster reads do not collect data or modify enrollment;
-roster administration remains CLI-only.
+in the details panel. From Findings or Device Roster, confirmed per-device
+actions can enroll an observed untracked device, mark an expected device
+intentionally offline, clear that designation, retire a tracked device, or
+unretire a retired device. These actions update the expected roster and
+reassess retained evidence; they do not collect data, change snapshots, or
+rewrite historical assessments. Enrollment does not update the static label
+map. The same lifecycle changes are available through the health CLI; see
+[Thread Network Health](doc/thread_network_health.md) for transitions,
+idempotence, audit, retention, and API details.
 
 The **Comparison** tab offers **1D**, **3D**, and **1W** as the primary choices;
 each resolves its baseline against the latest retained **After** assessment.
@@ -160,7 +167,8 @@ the same browser origin (and the same path prefix when one is used). Changing
 the bind host does not create an origin allowlist. This browser restriction is
 not authentication: direct clients such as `curl` or `wget` can call any API
 route they can reach, so use firewall or authenticated proxy controls when the
-API must be restricted.
+API must be restricted. This is especially important for roster lifecycle and
+device diagnostic mutations.
 
 The unified pending-job listing and bulk cancellation API are server-wide
 administrative operations. Browser confirmation prevents accidental bulk

@@ -26,6 +26,7 @@ from td_health_read import TDHealthReadService
 from td_health_roster import RosterFact
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_sqlite import SCHEMA_VERSION, SQLiteHealthStore, _SCHEMA
+from td_health_sqlite import StaleRosterContextError
 
 
 def _result(suffix: str = "1") -> tuple[Observation, Assessment]:
@@ -232,6 +233,20 @@ def test_schema_two_assessments_migrate_with_unknown_legacy_provenance(tmp_path)
             "INSERT INTO schema_migrations VALUES (2, CURRENT_TIMESTAMP)"
         )
         connection.execute(
+            """CREATE TABLE observations(
+                observation_id TEXT PRIMARY KEY, datasource_id TEXT NOT NULL,
+                dataset_id TEXT NOT NULL, network_id TEXT NOT NULL, network_name TEXT,
+                observed_at TEXT NOT NULL, ingested_at TEXT NOT NULL,
+                completeness TEXT NOT NULL, source_set_digest TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            """INSERT INTO observations VALUES
+               ('o', 'source', 'dataset', 'extpan:78b9775b001c1cbe', NULL,
+                '2026-09-01T00:00:00+00:00', '2026-09-01T00:00:00+00:00',
+                'complete', 'digest')"""
+        )
+        connection.execute(
             """CREATE TABLE assessments (
                 assessment_id TEXT PRIMARY KEY,
                 observation_id TEXT NOT NULL,
@@ -246,7 +261,7 @@ def test_schema_two_assessments_migrate_with_unknown_legacy_provenance(tmp_path)
         )
         connection.execute(
             "INSERT INTO assessments VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("a", "o", "p", "d", "strong", "high", "{}", "now"),
+            ("a", "o", "p", "d", "strong", "high", "{}", "2026-09-01T00:00:00+00:00"),
         )
 
     SQLiteHealthStore(path)
@@ -255,6 +270,26 @@ def test_schema_two_assessments_migrate_with_unknown_legacy_provenance(tmp_path)
         assert connection.execute(
             "SELECT evaluator_version, profile_id FROM assessments"
         ).fetchone() == ("legacy-unknown", "legacy-unknown")
+        assert connection.execute("SELECT assessment_id FROM assessments").fetchone() == ("a",)
+        assert connection.execute(
+            "SELECT roster_context_digest, presence_input_digest FROM assessments"
+        ).fetchone() == ("legacy-unknown", "legacy-unknown")
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_current_assessment_orders_offset_timestamps_by_utc_instant(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    first, first_assessment = _result("1")
+    second, second_assessment = _result("2")
+    first = replace(first, observed_at="2026-09-01T00:00:00+00:00")
+    first_assessment = replace(first_assessment, assessed_at="2026-09-01T00:00:00+00:00")
+    second = replace(second, observed_at="2026-09-01T01:00:00+02:00")
+    second_assessment = replace(second_assessment, assessed_at="2026-09-01T01:00:00+02:00")
+    store.save_processing_result(first, first_assessment)
+    store.save_processing_result(second, second_assessment)
+
+    current = store.latest_assessment(first.network_id, first.dataset_id)
+    assert current["assessment_id"] == first_assessment.assessment_id
 
 
 def test_observation_retention_is_bounded(tmp_path) -> None:
@@ -316,10 +351,10 @@ def test_observation_retention_prunes_orphaned_identities(tmp_path) -> None:
         ),
     )
 
-    store.save_processing_result(expired_observation, expired_assessment)
     store.upsert_expected_device(
         expired_observation.network_id, expired_device.device_id, "Retained roster"
     )
+    store.save_processing_result(expired_observation, expired_assessment)
     store.save_processing_result(retained_observation, retained_assessment)
 
     with sqlite3.connect(store.path) as connection:
@@ -335,11 +370,11 @@ def test_observation_retention_prunes_orphaned_identities(tmp_path) -> None:
 
 def test_age_purge_is_exclusive_preserves_roster_and_supports_dry_run(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
-    for suffix in ("1", "2", "3"):
-        store.save_processing_result(*_result(suffix))
     store.upsert_expected_device(
         "extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187", "Router"
     )
+    for suffix in ("1", "2", "3"):
+        store.save_processing_result(*_result(suffix))
     cutoff = datetime(2026, 9, 1, 0, 0, 3, tzinfo=timezone.utc)
 
     preview = store.purge_before(cutoff, dry_run=True)
@@ -358,10 +393,10 @@ def test_age_purge_is_exclusive_preserves_roster_and_supports_dry_run(tmp_path) 
 
 def test_purge_all_removes_health_records_but_preserves_other_tables(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
-    store.save_processing_result(*_result())
     store.upsert_expected_device(
         "extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187", "Router"
     )
+    store.save_processing_result(*_result())
     with sqlite3.connect(store.path) as connection:
         connection.execute("CREATE TABLE other_hobat_data(value TEXT)")
         connection.execute("INSERT INTO other_hobat_data VALUES ('keep')")
@@ -373,6 +408,8 @@ def test_purge_all_removes_health_records_but_preserves_other_tables(tmp_path) -
     result = store.purge_all()
     assert result.deleted["observations"] == 1
     assert result.deleted["expected_devices"] == 1
+    assert result.deleted["roster_lifecycle_events"] == 1
+    assert result.deleted["network_roster_revisions"] == 1
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("SELECT value FROM other_hobat_data").fetchone() == ("keep",)
         assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] > 0
@@ -382,10 +419,10 @@ def test_purge_all_removes_health_records_but_preserves_other_tables(tmp_path) -
 
 def test_purge_device_removes_identity_and_invalidates_affected_assessment(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
-    store.save_processing_result(*_result())
     store.upsert_expected_device(
         "extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187", "Router"
     )
+    store.save_processing_result(*_result())
 
     preview = store.purge_device("extaddr:8672766ae0578187", dry_run=True)
     assert preview.deleted["assessments"] == 1
@@ -400,6 +437,117 @@ def test_purge_device_removes_identity_and_invalidates_affected_assessment(tmp_p
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM current_assessments").fetchone()[0] == 0
+
+
+def test_purging_expected_device_invalidates_pending_processing_context(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    network_id = "extpan:78b9775b001c1cbe"
+    device_id = "extaddr:8672766ae0578187"
+    store.upsert_expected_device(network_id, device_id, "Router")
+    observation, assessment = _result()
+    assessment = replace(
+        assessment, roster_context_digest="roster-context",
+        network_roster_revision=1,
+    )
+
+    store.purge_device(device_id, network_id=network_id)
+
+    with pytest.raises(StaleRosterContextError, match="Roster changed"):
+        store.save_processing_result(observation, assessment)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+            (network_id,),
+        ).fetchone() == (2,)
+        assert connection.execute("SELECT COUNT(*) FROM assessments").fetchone() == (0,)
+
+
+def test_device_purge_removes_noop_receipts_for_the_scoped_device(tmp_path) -> None:
+    from td_health_roster_mutation import apply_browser_roster_action
+
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    network_id = "extpan:78b9775b001c1cbe"
+    device_id = "extaddr:8672766ae0578187"
+    store.upsert_expected_device(network_id, device_id, "Router")
+    action = {
+        "network_id": network_id, "device_id": device_id,
+        "action": "mark-offline", "expected_revision": 1,
+        "context_assessment_id": None, "device_label": None, "reason": None,
+    }
+    apply_browser_roster_action(
+        store, **action, request_id="63b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
+    )
+    action["expected_revision"] = 2
+    result, changed = apply_browser_roster_action(
+        store, **action, request_id="73b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
+    )
+    assert not changed
+    assert result["eventId"] is None
+
+    store.purge_device(device_id, network_id=network_id)
+
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM roster_mutation_receipts WHERE device_id=?",
+            (device_id,),
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+            (network_id,),
+        ).fetchone() == (3,)
+
+
+def test_schema_seven_adds_and_backfills_receipt_device_scope(tmp_path) -> None:
+    from td_health_roster_mutation import apply_browser_roster_action
+
+    path = tmp_path / "health.db"
+    store = SQLiteHealthStore(path)
+    network_id = "extpan:78b9775b001c1cbe"
+    device_id = "extaddr:8672766ae0578187"
+    store.upsert_expected_device(network_id, device_id, "Router")
+    apply_browser_roster_action(
+        store, network_id=network_id, device_id=device_id, action="mark-offline",
+        request_id="63b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
+        expected_revision=1, context_assessment_id=None, device_label=None, reason=None,
+    )
+    apply_browser_roster_action(
+        store, network_id=network_id, device_id=device_id, action="mark-offline",
+        request_id="73b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
+        expected_revision=2, context_assessment_id=None, device_label=None, reason=None,
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP INDEX idx_roster_receipts_network_device")
+        connection.execute("ALTER TABLE roster_mutation_receipts DROP COLUMN device_id")
+        connection.execute("DELETE FROM schema_migrations WHERE version=7")
+
+    migrated = SQLiteHealthStore(path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT DISTINCT device_id FROM roster_mutation_receipts"
+        ).fetchall() == [(device_id,)]
+        assert connection.execute(
+            "SELECT version FROM schema_migrations WHERE version=7"
+        ).fetchone() == (7,)
+    result = migrated.purge_device(device_id, network_id=network_id)
+    assert result.deleted["roster_mutation_receipts"] == 2
+
+
+def test_legacy_assessment_endpoint_uses_zero_roster_revision(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    observation, assessment = _result()
+    store.save_processing_result(observation, assessment)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("ALTER TABLE assessments DROP COLUMN network_roster_revision")
+
+    page = store.assessment_endpoint_page(
+        network_id=observation.network_id,
+        dataset_id=observation.dataset_id,
+        side="after", limit=10, offset=0,
+    )
+
+    assert page["items"][0]["assessmentId"] == assessment.assessment_id
+    assert page["items"][0]["networkRosterRevision"] == 0
 
 
 def test_purge_device_preserves_other_network_fact_samples(tmp_path) -> None:
@@ -689,7 +837,9 @@ def test_real_v3_migration_backfills_only_lossless_device_facts(tmp_path) -> Non
             ("state", '"attached"', "legacy-unknown", None, None),
         ]
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
-        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone() == (4,)
+        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone() == (
+            SCHEMA_VERSION,
+        )
 
 
 def test_v3_upgrade_reopen_keeps_comparison_and_roster_provenance(tmp_path) -> None:
@@ -710,7 +860,9 @@ def test_v3_upgrade_reopen_keeps_comparison_and_roster_provenance(tmp_path) -> N
 
     SQLiteHealthStore(path)
     with sqlite3.connect(path) as connection:
-        assert connection.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall() == [(2,), (3,), (4,)]
+        assert connection.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall() == [
+            (version,) for version in range(2, SCHEMA_VERSION + 1)
+        ]
         assert connection.execute("SELECT before_assessment_id, after_assessment_id FROM comparisons").fetchall() == [
             ("assessment-1", "assessment-2")]
         assert connection.execute(
@@ -738,6 +890,113 @@ def test_comparison_failure_rolls_back_observation_and_current_pointer(tmp_path,
         assert connection.execute("SELECT COUNT(*) FROM observations").fetchone() == (1,)
         assert connection.execute("SELECT assessment_id FROM current_assessments").fetchone() == ("assessment-1",)
         assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone() == (0,)
+
+
+def test_schema_five_migration_adds_roster_lifecycle_columns_to_v4_rows(tmp_path) -> None:
+    path = tmp_path / "health.db"
+    network_id = "extpan:78b9775b001c1cbe"
+    device_id = "extaddr:8672766ae0578187"
+    with sqlite3.connect(path) as connection:
+        connection.executescript("""
+            CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+            INSERT INTO schema_migrations VALUES (4, CURRENT_TIMESTAMP);
+            CREATE TABLE expected_devices(
+                network_id TEXT NOT NULL, device_id TEXT NOT NULL, label TEXT,
+                roster_state TEXT NOT NULL DEFAULT 'expected',
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(network_id, device_id)
+            );
+            INSERT INTO expected_devices(network_id, device_id, label, roster_state)
+            VALUES ('extpan:78b9775b001c1cbe', 'extaddr:8672766ae0578187', 'Router', 'expected');
+        """)
+
+    SQLiteHealthStore(path)
+    with sqlite3.connect(path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(expected_devices)")}
+        assert {"revision", "reason", "expected_since", "change_source"} <= columns
+        assert connection.execute(
+            "SELECT label, roster_state, revision, expected_since, change_source "
+            "FROM expected_devices WHERE network_id=? AND device_id=?",
+            (network_id, device_id),
+        ).fetchone() == ("Router", "expected", 0, None, "legacy")
+        assert connection.execute(
+            "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+            (network_id,),
+        ).fetchone() == (0,)
+
+
+def test_roster_cli_writes_are_audited_revisioned_and_label_only_is_nonreactivating(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    network_id = "extpan:78b9775b001c1cbe"
+    device_id = "extaddr:8672766ae0578187"
+
+    store.upsert_expected_device(network_id, device_id, "Desk", "intentionally-offline")
+    store.upsert_expected_device(network_id, device_id, "Office")
+    row = store.expected_device_records(network_id)[0]
+    assert row["roster_state"] == "intentionally-offline"
+    assert row["label"] == "Office"
+    assert row["expected_since"] is None
+    assert row["revision"] == 2
+
+    store.upsert_expected_device(network_id, device_id, None)
+    assert store.expected_device_records(network_id)[0]["revision"] == 2
+    store.upsert_expected_device(network_id, device_id, None, "expected")
+    reactivated = store.expected_device_records(network_id)[0]
+    assert reactivated["roster_state"] == "expected"
+    assert reactivated["expected_since"] is not None
+    assert reactivated["revision"] == 3
+
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+            (network_id,),
+        ).fetchone() == (3,)
+        events = connection.execute(
+            """SELECT action, from_state, to_state, previous_label, new_label,
+                      device_revision, network_revision
+               FROM roster_lifecycle_events ORDER BY network_revision"""
+        ).fetchall()
+        assert events == [
+            ("enroll", None, "intentionally-offline", None, "Desk", 1, 1),
+            ("set-label", "intentionally-offline", "intentionally-offline", "Desk", "Office", 2, 2),
+            ("set-state", "intentionally-offline", "expected", "Office", "Office", 3, 3),
+        ]
+
+
+def test_roster_import_is_additive_idempotent_and_purge_removes_its_audit(tmp_path) -> None:
+    from td_health_roster_mutation import add_expected_devices_from_label_map
+
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    network_id = "extpan:78b9775b001c1cbe"
+    existing_id = "extaddr:8672766ae0578187"
+    imported_id = "extaddr:1111111111111111"
+    store.upsert_expected_device(network_id, existing_id, "Operator label", "retired")
+
+    first = add_expected_devices_from_label_map(
+        store,
+        network_id=network_id,
+        devices=((existing_id, "Static label"), (imported_id, "New device")),
+    )
+    assert (first.imported, first.already_present, first.skipped) == (1, 1, 0)
+    rows = {row["device_id"]: row for row in store.expected_device_records(network_id)}
+    assert rows[existing_id]["label"] == "Operator label"
+    assert rows[existing_id]["roster_state"] == "retired"
+    assert rows[imported_id]["roster_state"] == "expected"
+
+    repeated = add_expected_devices_from_label_map(
+        store,
+        network_id=network_id,
+        devices=((existing_id, "Changed label"), (imported_id, "Changed label")),
+    )
+    assert (repeated.imported, repeated.already_present) == (0, 2)
+    assert rows[existing_id]["revision"] == 1
+    assert rows[imported_id]["revision"] == 1
+
+    result = store.purge_device(existing_id, network_id=network_id)
+    assert result.deleted["expected_devices"] == 1
+    assert result.deleted["roster_lifecycle_events"] == 1
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM roster_lifecycle_events").fetchone()[0] == 1
 
 
 def test_idempotent_retry_recreates_missing_comparison(tmp_path) -> None:

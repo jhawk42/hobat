@@ -433,9 +433,9 @@ def test_derived_comparison_rejects_corrupt_source_timestamps(tmp_path) -> None:
 def test_pinned_roster_includes_observed_without_facts_and_designation_only(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     observation, assessment = _result()
-    store.save_processing_result(observation, assessment)
     expected_id = "extaddr:0000000000000001"
     store.upsert_expected_device(observation.network_id, expected_id, "Alpha")
+    store.save_processing_result(observation, assessment)
     service = TDHealthReadService(tmp_path)
 
     observed = service.roster(network_id=observation.network_id,
@@ -473,10 +473,10 @@ def test_pinned_roster_includes_observed_without_facts_and_designation_only(tmp_
 def test_pinned_roster_sorts_and_filters_complete_population_before_paging(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     observation, assessment = _result()
-    store.save_processing_result(observation, assessment)
     for index in range(30):
-        store.upsert_expected_device(observation.network_id, f"extaddr:{index:016x}",
+        store.upsert_expected_device(observation.network_id, f"extaddr:{0x1000000000000000 + index:016x}",
                                      "Same" if index in (0, 29) else f"Room {index:02d}")
+    store.save_processing_result(observation, assessment)
     service = TDHealthReadService(tmp_path)
     page = service.roster(network_id=observation.network_id,
                           assessment_id=assessment.assessment_id, presence="all", limit=25)
@@ -500,7 +500,26 @@ def test_pinned_roster_sorts_and_filters_complete_population_before_paging(tmp_p
             if sort == "lastObserved":
                 assert ordered["devices"][0]["deviceId"] == observation.devices[0].device_id
             if sort == "quality":
-                assert ordered["devices"][0]["deviceId"] == "extaddr:0000000000000000"
+                assert ordered["devices"][0]["deviceId"] == "extaddr:1000000000000000"
+
+
+def test_intermittent_roster_actions_do_not_offer_mark_offline(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result()
+    device_id = observation.devices[0].device_id
+    store.upsert_expected_device(
+        observation.network_id, device_id, "Occasional", "intermittent",
+    )
+    store.save_processing_result(observation, assessment)
+
+    detail = TDHealthReadService(tmp_path).roster_device(
+        network_id=observation.network_id, device_id=device_id,
+        assessment_id=assessment.assessment_id,
+    )
+
+    assert detail["rosterState"] == "intermittent"
+    assert detail["allowedActions"] == ["retire"]
+    assert detail["disabledActionReasons"]["mark-offline"] == "invalid-transition"
 
 
 def test_finding_groups_follow_operator_presentation_order() -> None:

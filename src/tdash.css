@@ -1460,6 +1460,51 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   padding: 4px 8px;
 }
 
+.health-roster-action-bar,
+.health-roster-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+#health-roster-action-dialog {
+  width: min(520px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+#health-roster-action-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+#health-roster-action-dialog form { display: grid; gap: 10px; }
+#health-roster-action-dialog h2 { margin: 0; font-size: 18px; }
+#health-roster-action-dialog label { display: grid; gap: 4px; }
+#health-roster-action-dialog label[hidden] { display: none; }
+#health-roster-action-dialog input { width: 100%; }
+#health-roster-action-context { margin: 0; }
+.health-roster-action-summary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 0;
+}
+.health-roster-action-summary dt { color: var(--muted); }
+.health-roster-action-summary dd { margin: 0; overflow-wrap: anywhere; }
+.health-roster-dialog-hint { color: var(--muted); font-size: 12px; font-weight: 400; }
+#health-roster-action-status:empty { display: none; }
+.health-roster-action-note { color: var(--muted); }
+.health-roster-mutation-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  color: var(--danger, #b42318);
+  background: var(--surface-raised);
+}
+.health-roster-mutation-status[hidden] { display: none; }
+
 .health-finding-impact,
 .health-finding-action-copy,
 .health-finding-verify-copy,

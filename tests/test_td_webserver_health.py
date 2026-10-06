@@ -17,6 +17,8 @@ from aiohttp.test_utils import TestClient, TestServer
 import td_webserver
 from td_health_observation_model import SourceEvidence
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
+from td_health_policy import load_health_policy
+from td_health_processor import process_health
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
 
@@ -27,6 +29,26 @@ def _request(data_dir, *, query=None, match_info=None):
     request.query = query or {}
     request.match_info = match_info or {}
     return request
+
+
+def _patch_request(data_dir, *, network, device_id, payload):
+    request = _request(
+        data_dir, query={"network": network},
+        match_info={"device_id": device_id},
+    )
+    request.content_type = "application/json"
+    request.content_length = None
+    request.content = MagicMock()
+    request.content.iter_chunked = _chunked_content(json.dumps(payload).encode("utf-8"))
+    return request
+
+
+def _chunked_content(*chunks):
+    async def iterate_chunks(_size):
+        for chunk in chunks:
+            yield chunk
+
+    return iterate_chunks
 
 
 class HealthApiTests(unittest.IsolatedAsyncioTestCase):
@@ -81,6 +103,15 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                              match_info={"device_id": "extaddr:8672766ae0578187"})
                 )
 
+    async def test_roster_get_never_initializes_a_missing_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            with self.assertRaises(aiohttp.web.HTTPServiceUnavailable):
+                await td_webserver.handle_health_roster_api(_request(
+                    data_dir, query={"network": "extpan:78b9775b001c1cbe"},
+                ))
+            self.assertFalse((data_dir / HOBAT_DATABASE_FILENAME).exists())
+
     async def test_pinned_roster_route_validates_filters_and_preserves_v1(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)
@@ -108,6 +139,174 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                 await td_webserver.handle_health_roster_api(_request(
                     data_dir, query={**base, "network": "extpan:0000000000000000"},
                 ))
+
+    async def test_roster_patch_enrollment_is_idempotent_and_network_scoped(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+            (data_dir / "td-otbr-cli-thread-network-info.json").write_text(
+                json.dumps({"extPanId": "78b9775b001c1cbe", "networkName": "island"}),
+                encoding="utf-8",
+            )
+            (data_dir / "td-otbr-cli-networkdiag-fetch-all.json").write_text(
+                json.dumps([{"extaddr": "8672766ae0578187", "state": "detached"}]),
+                encoding="utf-8",
+            )
+            processed = process_health(
+                data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+                policy=load_health_policy(), store=store,
+            )
+            observation, assessment = processed.observation, processed.assessment
+            device_id = observation.devices[0].device_id
+            initial_detail = await td_webserver.handle_health_roster_device_api(_request(
+                data_dir,
+                query={"network": observation.network_id, "assessment": assessment.assessment_id},
+                match_info={"device_id": device_id},
+            ))
+            proposed_label = json.loads(initial_detail.text)["proposedEnrollmentLabel"]
+            self.assertEqual(proposed_label, "found-8672766ae0578187")
+            with self.assertRaises(aiohttp.web.HTTPNotFound):
+                await td_webserver.handle_health_roster_device_patch_api(_patch_request(
+                    data_dir, network=observation.network_id,
+                    device_id="extaddr:1111111111111111",
+                    payload={
+                        "action": "enroll",
+                        "requestId": "13b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
+                        "expectedRevision": 0,
+                        "contextAssessmentId": assessment.assessment_id,
+                    },
+                ))
+            payload = {
+                "action": "enroll",
+                "requestId": "63b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
+                "expectedRevision": 0,
+                "contextAssessmentId": assessment.assessment_id,
+                "reason": "Managed device",
+            }
+            request = _patch_request(
+                data_dir, network=observation.network_id,
+                device_id=device_id, payload=payload,
+            )
+            response = await td_webserver.handle_health_roster_device_patch_api(request)
+            result = json.loads(response.text)
+            self.assertEqual(response.status, 201)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+            self.assertTrue(result["changed"])
+            self.assertEqual(result["rosterState"], "expected")
+            self.assertEqual(result["revision"], 1)
+            replay = await td_webserver.handle_health_roster_device_patch_api(request)
+            self.assertEqual(json.loads(replay.text), result)
+            self.assertEqual(replay.status, 201)
+
+            no_op_payload = dict(
+                payload,
+                requestId="2c730136-0b64-4bea-9af4-0022c9d2fa27",
+                expectedRevision=1,
+            )
+            no_op = await td_webserver.handle_health_roster_device_patch_api(_patch_request(
+                data_dir, network=observation.network_id,
+                device_id=device_id, payload=no_op_payload,
+            ))
+            no_op_result = json.loads(no_op.text)
+            self.assertEqual(no_op.status, 200)
+            self.assertFalse(no_op_result["changed"])
+            self.assertIsNone(no_op_result["eventId"])
+            self.assertEqual(no_op_result["networkRosterRevision"], 1)
+            with self.assertRaises(aiohttp.web.HTTPConflict):
+                await td_webserver.handle_health_roster_device_patch_api(_patch_request(
+                    data_dir, network=observation.network_id,
+                    device_id="extaddr:1111111111111111", payload=payload,
+                ))
+
+            offline = await td_webserver.handle_health_roster_device_patch_api(_patch_request(
+                data_dir, network=observation.network_id, device_id=device_id,
+                payload={
+                    "action": "mark-offline",
+                    "requestId": "3c730136-0b64-4bea-9af4-0022c9d2fa27",
+                    "expectedRevision": 1,
+                },
+            ))
+            self.assertEqual(offline.status, 200)
+            self.assertEqual(json.loads(offline.text)["rosterState"], "intentionally-offline")
+            with self.assertRaises(aiohttp.web.HTTPConflict) as stale:
+                await td_webserver.handle_health_roster_device_patch_api(_patch_request(
+                    data_dir, network=observation.network_id, device_id=device_id,
+                    payload={
+                        "action": "retire",
+                        "requestId": "4c730136-0b64-4bea-9af4-0022c9d2fa27",
+                        "expectedRevision": 1,
+                    },
+                ))
+            self.assertIn("refetch roster detail", stale.exception.reason)
+
+            mismatch = dict(payload, deviceLabel="Node B")
+            with self.assertRaises(aiohttp.web.HTTPConflict):
+                await td_webserver.handle_health_roster_device_patch_api(_patch_request(
+                    data_dir, network=observation.network_id, device_id=device_id,
+                    payload=mismatch,
+                ))
+            detail = await td_webserver.handle_health_roster_device_api(_request(
+                data_dir,
+                query={"network": observation.network_id, "assessment": assessment.assessment_id},
+                match_info={"device_id": device_id},
+            ))
+            projection = json.loads(detail.text)
+            self.assertEqual(projection["presenceState"], "observed")
+            self.assertEqual(projection["revision"], 2)
+            self.assertIn("clear-offline", projection["allowedActions"])
+            self.assertEqual(projection["contextAssessmentId"], assessment.assessment_id)
+            self.assertEqual(projection["displayLabel"], proposed_label)
+            capabilities = await td_webserver.handle_health_capabilities_api(
+                _request(data_dir)
+            )
+            self.assertEqual(json.loads(capabilities.text)["rosterMutation"], 1)
+
+    async def test_roster_patch_rejects_invalid_content_and_boolean_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+            network = "extpan:78b9775b001c1cbe"
+            device_id = "extaddr:8672766ae0578187"
+            payload = {
+                "action": "retire",
+                "requestId": "63b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
+                "expectedRevision": True,
+            }
+            request = _patch_request(
+                data_dir, network=network, device_id=device_id, payload=payload,
+            )
+            with self.assertRaises(aiohttp.web.HTTPBadRequest):
+                await td_webserver.handle_health_roster_device_patch_api(request)
+            request.content_type = "text/plain"
+            with self.assertRaises(aiohttp.web.HTTPUnsupportedMediaType):
+                await td_webserver.handle_health_roster_device_patch_api(request)
+            request.content_type = "application/json"
+            request.content.iter_chunked = _chunked_content(b"x" * 8_192, b"x" * 8_193)
+            with self.assertRaises(aiohttp.web.HTTPRequestEntityTooLarge):
+                await td_webserver.handle_health_roster_device_patch_api(request)
+
+    async def test_roster_patch_reads_valid_json_split_across_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            network = "extpan:78b9775b001c1cbe"
+            device_id = "extaddr:8672766ae0578187"
+            store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+            store.upsert_expected_device(network, device_id, "Router")
+            payload = json.dumps({
+                "action": "mark-offline",
+                "requestId": "63b4c344-c7f9-41ce-9f3e-a62d4eb7b116",
+                "expectedRevision": 1,
+            }).encode("utf-8")
+            request = _patch_request(
+                data_dir, network=network, device_id=device_id, payload={},
+            )
+            split = len(payload) // 2
+            request.content.iter_chunked = _chunked_content(payload[:split], payload[split:])
+
+            response = await td_webserver.handle_health_roster_device_patch_api(request)
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.text)["rosterState"], "intentionally-offline")
 
     async def test_process_dataset_starts_deduplicated_health_task(self) -> None:
         data_dir = Path(tempfile.mkdtemp())
@@ -342,13 +541,14 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
                 (await self.client.get(f"/api/health/comparison-endpoints?{query}")).status,
                 400,
             )
-        self.assertEqual(
-            (await self.client.get(
-                "/api/health/comparison?network=extpan:78b9775b001c1cbe"
-                "&dataset=otbr_cli_networkdiag_fetch_all&before=assessment-1&after=assessment-1"
-            )).status,
-            400,
+        same_observation = await self.client.get(
+            "/api/health/comparison?network=extpan:78b9775b001c1cbe"
+            "&dataset=otbr_cli_networkdiag_fetch_all&before=assessment-1&after=assessment-1"
         )
+        self.assertEqual(same_observation.status, 200)
+        same_observation_payload = await same_observation.json()
+        self.assertFalse(same_observation_payload["comparable"])
+        self.assertEqual(same_observation_payload["primaryReason"], "same-observation")
         self.assertEqual((await self.client.get("/api/health/comparisons?dataset=otbr_cli_networkdiag_fetch_all")).status, 400)
         self.assertEqual((await self.client.get("/api/health/comparisons?network=extpan:78b9775b001c1cbe&dataset=otbr_cli_networkdiag_fetch_all&limit=101")).status, 400)
         self.assertEqual(store.comparison_rows(network_id="extpan:78b9775b001c1cbe",

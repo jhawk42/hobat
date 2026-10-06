@@ -4,6 +4,7 @@ import {
   activateViewStatus,
   configureViewStatusPresenter,
   createViewStatusOwner,
+  networkInstanceMatchesId,
   networkInstanceStatus,
   publishViewStatus,
   supersedeViewStatus,
@@ -21,6 +22,11 @@ assert.equal(networkInstanceStatus(["first"], capabilities), "Network instance: 
 assert.equal(networkInstanceStatus(["second"], capabilities), "Network instance: 1111111111111111 (operator)");
 assert.equal(networkInstanceStatus(["first", "second"], capabilities), "Network instance: mixed");
 assert.equal(networkInstanceStatus(["missing"], capabilities), "Network instance: unknown");
+assert.equal(networkInstanceMatchesId(["first"], capabilities, "extpan:78b9775b001c1cbe"), true);
+assert.equal(networkInstanceMatchesId(["first"], capabilities, "extpan:1111111111111111"), false);
+assert.equal(networkInstanceMatchesId(["first", "second"], capabilities, "extpan:78b9775b001c1cbe"), false);
+assert.equal(networkInstanceMatchesId(["missing"], capabilities, "extpan:78b9775b001c1cbe"), false);
+assert.equal(networkInstanceMatchesId(["first"], capabilities, "unknown"), false);
 
 assert.equal(owner.activate("topology", firstDataset), undefined);
 assert.equal(owner.publish("topology", "Showing: 93 nodes, 0 links", firstDataset), true);

@@ -94,6 +94,7 @@ import {
   configureViewStatusPresenter,
   invalidateViewStatuses,
   networkInstanceStatus,
+  networkInstanceMatchesId,
   supersedeViewStatus,
 } from "./tdash-view-status.js";
 import {
@@ -111,6 +112,9 @@ import {
   fetchHealthDevice,
   fetchHealthRoster,
   fetchHealthRosterDevice,
+  patchHealthRosterDevice,
+  projectFindingDeviceAvailability,
+  createHealthMutationRequestId,
   fetchHealthComparisons,
   fetchHealthComparisonEndpoints,
   fetchHealthComparisonPair,
@@ -413,6 +417,12 @@ const healthRosterViewState = {
   requestVersion: 0,
   detailVersion: 0,
 };
+let rosterMutationPendingDeviceId = null;
+let activeRosterAction = null;
+let activeRosterRequest = null;
+const findingRosterActionEligibility = new Map();
+const findingRosterActionPending = new Set();
+let rosterNavigationGeneration = 0;
 const contextDetailsState = {
   mode: "device",
   device: { record: null, activePanelId: "device-properties-panel" },
@@ -2266,7 +2276,12 @@ function renderNetworkInsights() {
     renderHealthRoster(document.getElementById("health-roster"), healthInsightsState.roster,
       { ...healthRosterViewState, loading: healthInsightsState.rosterLoading,
         error: healthInsightsState.rosterError }, {
-        select: selectRosterDevice, page: loadRosterPage, sort: changeRosterSort,
+        select: selectRosterDevice,
+        page: (offset) => {
+          rosterNavigationGeneration += 1;
+          void loadRosterPage(offset);
+        },
+        sort: changeRosterSort,
       });
     const newRosterWrap = document.querySelector(".health-roster-table-wrap");
     if (newRosterWrap) newRosterWrap.scrollTop = healthRosterViewState.tableScrollTop;
@@ -2577,6 +2592,32 @@ function closeHealthFindingDetails({ restoreFocus = true } = {}) {
   }
 }
 
+function ensureFindingRosterActionEligibility(model, assessment) {
+  if (healthInsightsState.capabilities?.rosterMutation !== 1 || !assessment) return;
+  for (const item of model.items) {
+    if (!item.isExpanded || item.endpointIds.length !== 1
+        || item.finding.scope !== "device") continue;
+    const deviceId = item.endpointIds[0];
+    const key = `${assessment.assessmentId}\n${deviceId}`;
+    if (findingRosterActionEligibility.has(key) || findingRosterActionPending.has(key)) continue;
+    findingRosterActionPending.add(key);
+    void fetchHealthRosterDevice(
+      assessment.networkId, deviceId, undefined, assessment.assessmentId,
+    ).then((detail) => {
+      findingRosterActionEligibility.set(key, { detail, error: null });
+    }).catch((error) => {
+      findingRosterActionEligibility.set(key, { detail: null, error });
+    }).finally(() => {
+      findingRosterActionPending.delete(key);
+      if (healthInsightsState.assessment?.assessmentId === assessment.assessmentId
+          && healthInsightsViewState.detailsOpen
+          && healthInsightsViewState.selectedGroupId === model.groupId) {
+        renderSelectedHealthFinding();
+      }
+    });
+  }
+}
+
 function renderSelectedHealthFinding() {
   if (healthInsightsTab !== "findings" || !healthInsightsViewState.detailsOpen
       || !healthInsightsViewState.selectedGroupId) return;
@@ -2586,15 +2627,39 @@ function renderSelectedHealthFinding() {
     return;
   }
   const model = projectHealthFindingDetail(group, healthInsightsViewState.selectedFindingId);
+  const assessment = healthInsightsState.assessment;
+  ensureFindingRosterActionEligibility(model, assessment);
   const heading = document.getElementById("health-finding-details-heading");
   if (heading) heading.textContent = model.heading;
   const availableDeviceIds = new Set(
     (group.deviceIds || []).filter((deviceId) => findCurrentDeviceRecord(deviceId)),
   );
+  const storedInspectableDeviceIds = new Set();
+  const rosterActionsByDevice = new Map();
+  const rosterActionErrors = new Map();
+  for (const item of model.items) {
+    if (!item.isExpanded || item.endpointIds.length !== 1) continue;
+    const deviceId = item.endpointIds[0];
+    const eligibility = findingRosterActionEligibility.get(
+      `${assessment?.assessmentId}\n${deviceId}`,
+    );
+    if (eligibility?.detail) {
+      storedInspectableDeviceIds.add(deviceId);
+      rosterActionsByDevice.set(deviceId, eligibility.detail.allowedActions || []);
+    } else if (eligibility?.error) {
+      rosterActionErrors.set(deviceId, eligibility.error.message);
+    }
+  }
+  const deviceAvailability = projectFindingDeviceAvailability(
+    availableDeviceIds, storedInspectableDeviceIds,
+  );
   renderHealthFindingDetails(document.getElementById("health-finding-details-content"), model, {
-    availableTargets: availableDeviceIds.size,
+    mutationAvailable: healthInsightsState.capabilities?.rosterMutation === 1,
+    rosterActionsByDevice,
+    rosterActionErrors,
+    availableTargets: deviceAvailability.availableTargets,
     groupDeviceCount: group.deviceIds?.length ?? 0,
-    inspectableDeviceIds: availableDeviceIds,
+    inspectableDeviceIds: deviceAvailability.inspectableDeviceIds,
     selectFinding: (findingId) => {
       const selectedFindingId = toggleHealthFindingSelection(
         healthInsightsViewState.selectedFindingId,
@@ -2618,6 +2683,12 @@ function renderSelectedHealthFinding() {
       "table", resolveHealthFindingGroup(selectedGroupId),
     ),
     inspectDevice: (deviceId, findingId) => inspectHealthDevice(deviceId, findingId),
+    rosterAction: (action, deviceId) => {
+      const detail = findingRosterActionEligibility.get(
+        `${assessment?.assessmentId}\n${deviceId}`,
+      )?.detail;
+      void beginRosterAction(action, deviceId, detail);
+    },
     compareEndpoints: (selectedGroupId) => compareHealthEndpoints(
       resolveHealthFindingGroup(selectedGroupId),
     ),
@@ -2632,6 +2703,19 @@ function renderSelectedHealthFinding() {
 
 function findCurrentDeviceRecord(deviceId) {
   const extAddress = deviceId?.replace(/^extaddr:/, "").toLowerCase();
+  const assessment = healthInsightsState.assessment;
+  if (assessment) {
+    const statusFiles = currentDataset
+      ? [...new Set([
+        ...(currentDataset.loadedFiles ?? currentDataset.entry.files ?? []),
+        ...Object.keys(currentDataset.auxiliaryFiles ?? {}),
+      ])]
+      : [];
+    if (!networkInstanceMatchesId(statusFiles, sourceCapabilities, assessment.networkId)
+        || currentDataset?.entry?.value !== assessment.datasetId) {
+      return null;
+    }
+  }
   return currentDataset?.rows?.find(
     (record) => projectSelectedDevice(record)?.extAddress === extAddress,
   ) ?? null;
@@ -2720,8 +2804,6 @@ function navigateToHealthTargets(view, group, { compare = false } = {}) {
 
 function inspectHealthDevice(deviceId, findingId = null) {
   const record = findCurrentDeviceRecord(deviceId);
-  if (!record) return;
-  document.getElementById("device-details")?.classList.remove("roster-selected");
   if (healthInsightsViewState.selectedGroupId) {
     findingDeviceReturnContext = {
       assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
@@ -2731,6 +2813,17 @@ function inspectHealthDevice(deviceId, findingId = null) {
   } else {
     rememberHealthNavigationContext();
   }
+  if (!record) {
+    const assessment = healthInsightsState.assessment;
+    if (!assessment) return;
+    healthRosterViewState.selectedDeviceId = null;
+    healthInsightsState.rosterDetail = null;
+    document.getElementById("btn-back-to-health-finding")?.removeAttribute("hidden");
+    activateHealthTab("roster");
+    void selectRosterDevice(deviceId);
+    return;
+  }
+  document.getElementById("device-details")?.classList.remove("roster-selected");
   setContextDetailsMode("device");
   contextDetailsController.setCollapsed(false);
   publishDeviceSelection(record);
@@ -2776,7 +2869,11 @@ function returnToHealthFinding() {
   healthInsightsViewState.selectedFindingId = findingId;
   healthInsightsViewState.detailsOpen = true;
   contextDetailsState.finding = { ...context, findingId };
-  renderSelectedHealthFinding();
+  if (healthInsightsTab === "findings") {
+    renderSelectedHealthFinding();
+  } else {
+    activateHealthTab("findings");
+  }
   const focusSelector = findingId
     ? `.health-affected-select[data-finding-id="${CSS.escape(findingId)}"]`
     : `.health-finding-select[data-group-id="${CSS.escape(context.groupId)}"]`;
@@ -3120,6 +3217,7 @@ async function loadRosterPage(offset) {
 }
 
 async function selectRosterDevice(deviceId) {
+  rosterNavigationGeneration += 1;
   const networkId = healthInsightsState.assessment?.networkId;
   const assessmentId = healthInsightsState.assessment?.assessmentId;
   const version = ++healthRosterViewState.detailVersion;
@@ -3138,12 +3236,11 @@ async function selectRosterDevice(deviceId) {
   )?.presenceState;
   renderNetworkInsights();
   try {
-    const detail = await fetchHealthRosterDevice(networkId, deviceId);
+    const detail = await fetchHealthRosterDevice(networkId, deviceId, undefined, assessmentId);
     if (version !== healthRosterViewState.detailVersion ||
         assessmentId !== healthInsightsState.assessment?.assessmentId) return;
     healthInsightsState.rosterDetail = detail;
-    renderHealthRosterDetail(document.getElementById("health-roster-details-content"), detail,
-      healthInsightsState.rosterDetailPresence);
+    renderRosterDetailPanel(detail, healthInsightsState.rosterDetailPresence);
     document.getElementById("device-details").classList.add("roster-selected");
     setContextDetailsMode("device");
     contextDetailsController.setCollapsed(false);
@@ -3152,12 +3249,350 @@ async function selectRosterDevice(deviceId) {
     if (version === healthRosterViewState.detailVersion) {
       healthRosterViewState.selectedDeviceId = null;
       announceHealthInsight(`Device details unavailable: ${error.message}`);
+      if (findingDeviceReturnContext?.assessmentId === assessmentId) {
+        findingDeviceReturnContext = null;
+        document.getElementById("btn-back-to-health-finding")?.setAttribute("hidden", "");
+      }
       renderNetworkInsights();
     }
   }
 }
 
+function renderRosterDetailPanel(detail, presenceState) {
+  renderHealthRosterDetail(
+    document.getElementById("health-roster-details-content"),
+    detail,
+    presenceState,
+    {
+      mutationAvailable: healthInsightsState.capabilities?.rosterMutation === 1,
+      pending: rosterMutationPendingDeviceId === detail?.deviceId,
+      action: (action, selectedDetail) => {
+        void beginRosterAction(action, selectedDetail.deviceId, selectedDetail);
+      },
+    },
+  );
+}
+
+function clearRosterMutationRefreshStatus() {
+  const status = document.getElementById("health-roster-mutation-status");
+  if (!status) return;
+  status.replaceChildren();
+  status.hidden = true;
+}
+
+function showRosterMutationRefreshFailure(capture, error) {
+  const status = document.getElementById("health-roster-mutation-status");
+  if (!status) return;
+  status.replaceChildren();
+  status.hidden = false;
+  const message = document.createElement("span");
+  message.textContent = `Change saved; view refresh failed: ${error.message}`;
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "Retry refresh";
+  retry.addEventListener("click", () => {
+    retry.disabled = true;
+    void reconcileCommittedRosterAction(capture).then(
+      clearRosterMutationRefreshStatus,
+      (retryError) => {
+        retry.disabled = false;
+        message.textContent = `Change saved; view refresh failed: ${retryError.message}`;
+      },
+    );
+  });
+  status.append(message, retry);
+  announceHealthInsight(`Change saved; view refresh failed: ${error.message}`);
+}
+
+const ROSTER_ACTION_TITLES = Object.freeze({
+  enroll: "Add to roster",
+  "mark-offline": "Designate as intentionally offline",
+  "clear-offline": "Clear offline designation",
+  retire: "Retire device",
+  unretire: "Return to Expected",
+});
+
+const ROSTER_ACTION_DESCRIPTIONS = Object.freeze({
+  enroll: "Adds this observed device to the Expected roster for future absence monitoring.",
+  "mark-offline": "Records operator intent only; it does not send a command to disconnect or power off the device. It will no longer be counted as Missing or Offline.",
+  "clear-offline": "Returns this device to Expected and starts a fresh absence-monitoring epoch.",
+  retire: "Removes this device from Expected roster monitoring. Observed facts and history are preserved; unretire it to resume monitoring.",
+  unretire: "Returns this device to Expected and starts a fresh absence-monitoring epoch.",
+});
+
+const ROSTER_ACTION_BUTTON_LABELS = Object.freeze({
+  enroll: "Add to roster",
+  "mark-offline": "Designate offline",
+  "clear-offline": "Clear designation",
+  retire: "Retire device",
+  unretire: "Return to Expected",
+});
+
+const ROSTER_STATE_LABELS = Object.freeze({
+  expected: "Expected",
+  "intentionally-offline": "Intentionally offline",
+  intermittent: "Intermittent",
+  retired: "Retired",
+  untracked: "Untracked",
+});
+
+function beginRosterAction(action, deviceId, knownDetail = null) {
+  if (rosterMutationPendingDeviceId) {
+    announceHealthInsight("Wait for the pending roster action to finish before starting another.");
+    return;
+  }
+  const assessment = healthInsightsState.assessment;
+  if (!assessment || healthInsightsState.capabilities?.rosterMutation !== 1) {
+    announceHealthInsight("Roster actions are unavailable on this server.");
+    return;
+  }
+  const capture = {
+    action,
+    deviceId,
+    networkId: assessment.networkId,
+    datasetId: assessment.datasetId,
+    assessmentId: assessment.assessmentId,
+    generation: healthInsightsState.assessmentRequestVersion,
+    navigation: {
+      generation: rosterNavigationGeneration,
+      tab: healthInsightsTab,
+      view: currentView,
+      deviceId: healthRosterViewState.selectedDeviceId,
+      groupId: healthInsightsViewState.selectedGroupId,
+      findingId: healthInsightsViewState.selectedFindingId,
+    },
+  };
+  const showConfirmation = (detail) => {
+    if (healthInsightsState.assessment?.networkId !== capture.networkId
+        || healthInsightsState.assessment?.assessmentId !== capture.assessmentId
+        || healthInsightsState.assessmentRequestVersion !== capture.generation) {
+      announceHealthInsight("The assessment changed; reopen roster details before acting.");
+      return;
+    }
+    if (!detail.allowedActions?.includes(action)) {
+      announceHealthInsight(
+        `Action unavailable: ${detail.disabledActionReasons?.[action] || "invalid-transition"}.`,
+      );
+      return;
+    }
+    activeRosterAction = {
+      ...capture,
+      revision: detail.revision,
+      detail,
+    };
+    activeRosterRequest = null;
+    const dialog = document.getElementById("health-roster-action-dialog");
+    const labelRow = document.getElementById("health-roster-action-label-row");
+    const label = document.getElementById("health-roster-action-label");
+    const labelHint = document.getElementById("health-roster-action-label-hint");
+    const reason = document.getElementById("health-roster-action-reason");
+    document.getElementById("health-roster-action-heading").textContent =
+      ROSTER_ACTION_TITLES[action] || "Confirm roster action";
+    const context = document.getElementById("health-roster-action-context");
+    context.replaceChildren();
+    const identityRows = [
+      ["Device", detail.displayLabel],
+      ["Network", capture.networkId],
+      ["Extended address", capture.deviceId.replace(/^extaddr:/, "")],
+      ["Current designation", ROSTER_STATE_LABELS[detail.rosterState] || detail.rosterState],
+      ["Change", ROSTER_ACTION_TITLES[action] || action],
+    ];
+    for (const [labelText, value] of identityRows) {
+      const term = document.createElement("dt");
+      term.textContent = labelText;
+      const description = document.createElement("dd");
+      description.textContent = value;
+      context.append(term, description);
+    }
+    document.getElementById("health-roster-action-description").textContent =
+      ROSTER_ACTION_DESCRIPTIONS[action] || "";
+    labelRow.hidden = action !== "enroll";
+    label.disabled = action !== "enroll";
+    label.required = false;
+    label.value = action === "enroll" ? detail.proposedEnrollmentLabel || "" : "";
+    labelHint.textContent =
+      `Optional. Clear to use found-${capture.deviceId.replace(/^extaddr:/, "")}.`;
+    reason.value = "";
+    document.getElementById("health-roster-action-status").textContent = "";
+    document.getElementById("health-roster-action-confirm").textContent =
+      ROSTER_ACTION_BUTTON_LABELS[action] || "Confirm";
+    document.getElementById("health-roster-action-confirm").disabled = false;
+    dialog.showModal();
+    if (action === "enroll") label.focus();
+  };
+  if (knownDetail) {
+    showConfirmation(knownDetail);
+    return;
+  }
+  void fetchHealthRosterDevice(
+    capture.networkId, deviceId, undefined, capture.assessmentId,
+  ).then(showConfirmation).catch((error) => {
+    announceHealthInsight(`Roster action context unavailable: ${error.message}`);
+  });
+}
+
+async function reconcileCommittedRosterAction(capture) {
+  if (healthInsightsState.datasetId !== capture.datasetId
+      || healthInsightsState.assessment?.networkId !== capture.networkId) return;
+  await refreshHealthAssessment();
+  if (healthInsightsState.error || !healthInsightsState.assessment) {
+    throw new Error(healthInsightsState.error || "Current assessment could not be refreshed.");
+  }
+  clearRosterMutationRefreshStatus();
+  const currentAssessment = healthInsightsState.assessment;
+  await loadRosterPage(healthRosterViewState.offset);
+  if (healthInsightsState.rosterError) {
+    throw new Error(healthInsightsState.rosterError);
+  }
+  const detail = await fetchHealthRosterDevice(
+    currentAssessment.networkId, capture.deviceId, undefined, currentAssessment.assessmentId,
+  );
+  if (healthInsightsState.assessment?.assessmentId !== currentAssessment.assessmentId) return;
+  const navigationIsUnchanged = () => healthInsightsTab === capture.navigation.tab
+    && rosterNavigationGeneration === capture.navigation.generation
+    && currentView === capture.navigation.view
+    && (capture.navigation.tab !== "roster"
+      || healthRosterViewState.selectedDeviceId === null
+      || healthRosterViewState.selectedDeviceId === capture.deviceId)
+    && healthInsightsViewState.selectedGroupId === capture.navigation.groupId
+    && healthInsightsViewState.selectedFindingId === capture.navigation.findingId;
+  if (!navigationIsUnchanged()) return;
+  if (healthInsightsTab !== "roster") return;
+  healthRosterViewState.selectedDeviceId = capture.deviceId;
+  healthRosterViewState.detailVersion += 1;
+  healthInsightsState.rosterDetail = detail;
+  healthInsightsState.rosterDetailPresence = detail.presenceState;
+  const changedFilters = [];
+  if (healthRosterViewState.rosterState !== "all"
+      && healthRosterViewState.rosterState !== detail.rosterState) {
+    healthRosterViewState.rosterState = "all";
+    document.getElementById("health-roster-designation").value = "all";
+    changedFilters.push("designation");
+  }
+  if (healthRosterViewState.presence !== "all"
+      && healthRosterViewState.presence !== detail.presenceState) {
+    healthRosterViewState.presence = "all";
+    document.getElementById("health-roster-presence").value = "all";
+    changedFilters.push("presence");
+  }
+  if (changedFilters.length) {
+    announceHealthInsight(`Roster action saved; ${changedFilters.join(" and ")} filter changed to All to keep the device visible.`);
+    healthRosterViewState.offset = 0;
+    await loadRosterPage(0);
+    if (healthInsightsState.assessment?.assessmentId !== currentAssessment.assessmentId
+        || !navigationIsUnchanged()) return;
+    if (healthInsightsState.rosterError) {
+      throw new Error(healthInsightsState.rosterError);
+    }
+  }
+  renderRosterDetailPanel(detail, detail.presenceState);
+  document.getElementById("device-details").classList.add("roster-selected");
+  contextDetailsController.setCollapsed(false);
+  renderNetworkInsights();
+}
+
+async function submitRosterAction(event) {
+  event.preventDefault();
+  const capture = activeRosterAction;
+  if (!capture) return;
+  if (rosterMutationPendingDeviceId === capture.deviceId) return;
+  if (healthInsightsState.assessment?.networkId !== capture.networkId
+      || healthInsightsState.assessment?.assessmentId !== capture.assessmentId
+      || healthInsightsState.datasetId !== capture.datasetId
+      || healthInsightsState.assessmentRequestVersion !== capture.generation) {
+    document.getElementById("health-roster-action-dialog")?.close();
+    activeRosterAction = null;
+    activeRosterRequest = null;
+    announceHealthInsight("The selected assessment changed. Reopen details before acting.");
+    return;
+  }
+  if (!activeRosterRequest) {
+    const payload = {
+      action: capture.action,
+      requestId: createHealthMutationRequestId(),
+      expectedRevision: capture.revision,
+    };
+    if (capture.action === "enroll") {
+      payload.contextAssessmentId = capture.assessmentId;
+      const deviceLabel = document.getElementById("health-roster-action-label").value.trim();
+      if (deviceLabel) payload.deviceLabel = deviceLabel;
+    }
+    const reason = document.getElementById("health-roster-action-reason").value.trim();
+    if (reason) payload.reason = reason;
+    activeRosterRequest = payload;
+  }
+  const requestPayload = activeRosterRequest;
+  const confirm = document.getElementById("health-roster-action-confirm");
+  const cancel = document.getElementById("health-roster-action-cancel");
+  const status = document.getElementById("health-roster-action-status");
+  confirm.disabled = true;
+  cancel.disabled = true;
+  rosterMutationPendingDeviceId = capture.deviceId;
+  let reconfirmAfterConflict = false;
+  if (healthInsightsState.rosterDetail?.deviceId === capture.deviceId) {
+    renderRosterDetailPanel(
+      healthInsightsState.rosterDetail, healthInsightsState.rosterDetailPresence,
+    );
+  }
+  try {
+    const response = await patchHealthRosterDevice(
+      capture.networkId, capture.deviceId, requestPayload,
+    );
+    document.getElementById("health-roster-action-dialog").close();
+    if (activeRosterAction === capture) {
+      activeRosterAction = null;
+      activeRosterRequest = null;
+    }
+    announceHealthInsight(response.changed ? "Roster change saved." : "Roster is already in the requested state.");
+    try {
+      await reconcileCommittedRosterAction(capture);
+    } catch (error) {
+      status.textContent = "";
+      showRosterMutationRefreshFailure(capture, error);
+    }
+  } catch (error) {
+    confirm.disabled = false;
+    cancel.disabled = false;
+    if (error.status == null) {
+      status.textContent = "Outcome unclear. Retry safely with the same request, or close this dialog.";
+      confirm.textContent = "Retry same request";
+    } else {
+      activeRosterRequest = null;
+      if (error.status === 409 && error.code === "stale-revision") {
+        reconfirmAfterConflict = true;
+        document.getElementById("health-roster-action-dialog").close();
+        activeRosterAction = null;
+        status.textContent = "";
+      } else if (error.status === 409
+          && error.code === "reassessment-baseline-unavailable") {
+        status.textContent = `Refresh Health before changing the roster. ${error.message}`;
+      } else {
+        status.textContent = `Roster action failed (${error.status}): ${error.message}`;
+      }
+    }
+  } finally {
+    if (rosterMutationPendingDeviceId === capture.deviceId) {
+      rosterMutationPendingDeviceId = null;
+    }
+    cancel.disabled = false;
+    if (healthInsightsState.rosterDetail?.deviceId === capture.deviceId) {
+      renderRosterDetailPanel(
+        healthInsightsState.rosterDetail, healthInsightsState.rosterDetailPresence,
+      );
+    }
+    if (reconfirmAfterConflict
+        && healthInsightsState.assessment?.networkId === capture.networkId
+        && healthInsightsState.assessment?.assessmentId === capture.assessmentId) {
+      announceHealthInsight(
+        "No change was made. The roster changed since confirmation; review the refreshed state and confirm again.",
+      );
+      void beginRosterAction(capture.action, capture.deviceId);
+    }
+  }
+}
+
 function changeRosterSort(column) {
+  rosterNavigationGeneration += 1;
   healthRosterViewState.sort = { column, direction: healthRosterViewState.sort.column === column &&
     healthRosterViewState.sort.direction === "ascending" ? "descending" : "ascending" };
   resetRosterScroll();
@@ -3171,6 +3606,7 @@ function resetRosterScroll() {
 }
 
 function applyRosterFilter() {
+  rosterNavigationGeneration += 1;
   const detail = healthInsightsState.rosterDetail;
   if (healthRosterViewState.selectedDeviceId && detail && (
     (healthRosterViewState.presence !== "all" &&
@@ -3651,6 +4087,9 @@ async function refreshHealthAssessment() {
   const previousNetworkId = healthInsightsState.assessment?.networkId;
   const datasetChanged = healthInsightsState.datasetId !== entry?.value;
   if (datasetChanged) {
+    findingRosterActionEligibility.clear();
+    findingRosterActionPending.clear();
+    clearRosterMutationRefreshStatus();
     healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;
     healthInsightsState.assessment = null;
     healthInsightsViewState.assessmentId = null;
@@ -3694,6 +4133,7 @@ async function refreshHealthAssessment() {
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
     const networkChanged = Boolean(previousNetworkId && previousNetworkId !== assessment.networkId);
     if (networkChanged) {
+      clearRosterMutationRefreshStatus();
       healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;
       resetHealthFindingState();
       resetHealthComparisonState();
@@ -3709,6 +4149,8 @@ async function refreshHealthAssessment() {
     }
     healthInsightsState.assessment = assessment;
     if (previousAssessmentId !== assessment.assessmentId) {
+      findingRosterActionEligibility.clear();
+      findingRosterActionPending.clear();
       healthInsightsState.rosterDetail = null;
       healthRosterViewState.assessmentId = assessment.assessmentId;
       healthRosterViewState.selectedDeviceId = null;
@@ -3736,6 +4178,11 @@ async function refreshHealthAssessment() {
       healthInsightsState.capabilities = support.capabilities;
       healthInsightsState.supportError = "";
       healthInsightsState.observations = support.observations;
+      if (healthInsightsState.rosterDetail) {
+        renderRosterDetailPanel(
+          healthInsightsState.rosterDetail, healthInsightsState.rosterDetailPresence,
+        );
+      }
       if (support.capabilities?.comparisonReadModel === 1 && healthInsightsTab === "comparison") {
         if (support.capabilities.comparisonEndpointSelection === 1) {
           if (healthInsightsViewState.comparisonIntent !== "custom") {
@@ -3921,6 +4368,7 @@ function ensureHealthComparisonLoaded() {
 
 function activateHealthTab(tab) {
   if (!HEALTH_INSIGHTS_TABS.some(({ id }) => id === tab)) return;
+  if (healthInsightsTab !== tab) rosterNavigationGeneration += 1;
   if (healthInsightsTab === "findings") {
     healthInsightsViewState.tableScrollTop =
       document.getElementById("health-finding-table-wrap")?.scrollTop ?? 0;
@@ -4008,6 +4456,20 @@ document.getElementById("btn-health-refresh")?.addEventListener("click", () => {
 });
 document.getElementById("btn-health-refresh-cancel")?.addEventListener("click", () => {
   void cancelHealthRefresh();
+});
+document.getElementById("health-roster-action-form")?.addEventListener("submit", (event) => {
+  void submitRosterAction(event);
+});
+document.getElementById("health-roster-action-cancel")?.addEventListener("click", () => {
+  if (!rosterMutationPendingDeviceId) {
+    document.getElementById("health-roster-action-dialog")?.close();
+  }
+});
+document.getElementById("health-roster-action-dialog")?.addEventListener("cancel", () => {
+  if (!rosterMutationPendingDeviceId) {
+    activeRosterAction = null;
+    activeRosterRequest = null;
+  }
 });
 
 const DEVICE_DETAILS_PANEL_TABS = [
@@ -4291,6 +4753,12 @@ contextDetailsController = initContextDetailsPanel({
   onVisibilityChanged: handleDetailsPanelVisibilityChanged,
 });
 document.getElementById("btn-device-details-close")?.addEventListener("click", () => {
+  if (healthInsightsTab === "roster" && healthRosterViewState.selectedDeviceId) {
+    rosterNavigationGeneration += 1;
+    healthRosterViewState.selectedDeviceId = null;
+    healthInsightsState.rosterDetail = null;
+    document.getElementById("device-details")?.classList.remove("roster-selected");
+  }
   contextDetailsController.setCollapsed(true);
 });
 

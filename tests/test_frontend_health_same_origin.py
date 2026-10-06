@@ -882,6 +882,210 @@ def test_roster_request_pins_assessment_and_bounded_query() -> None:
     }
 
 
+def test_roster_detail_context_and_patch_use_same_origin_json_api() -> None:
+    script = r"""
+      import {
+        fetchHealthRosterDevice,
+        patchHealthRosterDevice,
+      } from "./src/js/tdash-health.js";
+      const requests = [];
+      globalThis.fetch = async (path, options = {}) => {
+        requests.push({path, options});
+        return {ok: true, status: 200, json: async () => ({ok: true})};
+      };
+      await fetchHealthRosterDevice(
+        "extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187",
+        undefined, "assessment:one",
+      );
+      const payload = {
+        action: "retire", requestId: "stable-request-id", expectedRevision: 3,
+        contextAssessmentId: "assessment:one", reason: "Removed",
+      };
+      await patchHealthRosterDevice(
+        "extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187", payload,
+      );
+      console.log(JSON.stringify(requests.map(({path, options}) => ({
+        path, method: options.method || "GET",
+        contentType: options.headers?.["Content-Type"] || null,
+        body: options.body ? JSON.parse(options.body) : null,
+      }))));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result == [
+        {
+            "path": "api/health/roster/extaddr%3A8672766ae0578187"
+            "?network=extpan%3A78b9775b001c1cbe&assessment=assessment%3Aone",
+            "method": "GET",
+            "contentType": None,
+            "body": None,
+        },
+        {
+            "path": "api/health/roster/extaddr%3A8672766ae0578187"
+            "?network=extpan%3A78b9775b001c1cbe",
+            "method": "PATCH",
+            "contentType": "application/json",
+            "body": {
+                "action": "retire", "requestId": "stable-request-id",
+                "expectedRevision": 3, "contextAssessmentId": "assessment:one",
+                "reason": "Removed",
+            },
+        },
+    ]
+
+
+def test_roster_patch_preserves_conflict_code_and_server_message() -> None:
+    script = r"""
+      import {patchHealthRosterDevice} from "./src/js/tdash-health.js";
+      const errors = [];
+      globalThis.fetch = async () => ({
+        ok: false,
+        status: 409,
+        text: async () => "409: reassessment-baseline-unavailable: refresh health from retained snapshots",
+      });
+      try {
+        await patchHealthRosterDevice(
+          "extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187",
+          {action: "retire", requestId: "stable", expectedRevision: 2},
+        );
+      } catch (error) {
+        errors.push({status: error.status, code: error.code, message: error.message});
+      }
+      console.log(JSON.stringify(errors));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    assert json.loads(completed.stdout) == [{
+        "status": 409,
+        "code": "reassessment-baseline-unavailable",
+        "message": "reassessment-baseline-unavailable: refresh health from retained snapshots",
+    }]
+
+
+def test_stale_roster_conflict_code_survives_aiohttp_status_prefix() -> None:
+    script = r"""
+      import {patchHealthRosterDevice} from "./src/js/tdash-health.js";
+      globalThis.fetch = async () => ({
+        ok: false,
+        status: 409,
+        text: async () => "409: stale-revision: refetch roster detail and reconfirm the action",
+      });
+      try {
+        await patchHealthRosterDevice("extpan:78b9775b001c1cbe", "extaddr:8672766ae0578187", {});
+      } catch (error) {
+        console.log(JSON.stringify({code: error.code, message: error.message}));
+      }
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    assert json.loads(completed.stdout) == {
+        "code": "stale-revision",
+        "message": "stale-revision: refetch roster detail and reconfirm the action",
+    }
+
+
+def test_stored_finding_inspection_does_not_enable_current_network_navigation() -> None:
+    script = r"""
+      import {projectFindingDeviceAvailability} from "./src/js/tdash-health.js";
+      const deviceId = "extaddr:8672766ae0578187";
+      const available = projectFindingDeviceAvailability(new Set(), new Set([deviceId]));
+      console.log(JSON.stringify({
+        availableTargets: available.availableTargets,
+        inspectableDeviceIds: [...available.inspectableDeviceIds],
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    assert json.loads(completed.stdout) == {
+        "availableTargets": 0,
+        "inspectableDeviceIds": ["extaddr:8672766ae0578187"],
+    }
+
+
+def test_finding_roster_actions_follow_server_eligibility() -> None:
+    script = r"""
+      import {renderHealthFindingDetails} from "./src/js/tdash-health.js";
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.childNodes = this.children;
+          this.dataset = {};
+          this.listeners = {};
+          this.attributes = {};
+          this.parentNode = null;
+        }
+        appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+        replaceChildren() { this.children = []; this.childNodes = this.children; }
+        setAttribute(name, value) { this.attributes[name] = value; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+      }
+      globalThis.document = {createElement: (tagName) => new Element(tagName)};
+      const makeModel = (ruleId) => ({
+        groupId: "group", heading: "Finding", status: "poor", summary: "summary",
+        affected: {label: "one device"}, scope: "device", confidence: "high",
+        evidenceLabel: "Snapshot", materialityLabel: "Device",
+        shared: {whyItMatters: "why", action: "act", verify: "verify", sourceFiles: []},
+        items: [{
+          findingId: "finding", label: "Node", highlightSummary: null,
+          endpointIds: ["extaddr:8672766ae0578187"], relationshipIds: [],
+          evidenceRows: [], isExpanded: true, finding: {scope: "device", ruleId},
+        }],
+      });
+      const text = (node) => [node.textContent || "", ...(node.children || []).map(text)].join(" ");
+      const render = (ruleId, allowed) => {
+        const container = new Element("section");
+        renderHealthFindingDetails(container, makeModel(ruleId), {
+          mutationAvailable: true,
+          inspectableDeviceIds: new Set(["extaddr:8672766ae0578187"]),
+          rosterActionsByDevice: new Map([["extaddr:8672766ae0578187", allowed]]),
+        });
+        return text(container);
+      };
+      console.log(JSON.stringify({
+        unavailable: render("device.offline", []),
+        enrollment: render("device.attachment-failure", ["enroll"]),
+        offline: render("device.offline", ["mark-offline"]),
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=False, capture_output=True, text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert "Add to Roster" not in result["unavailable"]
+    assert "Mark Offline" not in result["unavailable"]
+    assert "Add to Roster" in result["enrollment"]
+    assert "Mark Offline" not in result["enrollment"]
+    assert "Mark Offline" in result["offline"]
+    assert "Add to Roster" not in result["offline"]
+
+
+def test_health_mutation_request_id_works_without_secure_context_crypto() -> None:
+    script = r"""
+      import {createHealthMutationRequestId} from "./src/js/tdash-health.js";
+      console.log(createHealthMutationRequestId(null));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    request_id = completed.stdout.strip()
+    assert len(request_id) == 36
+    assert request_id[14] == "4"
+    assert request_id[19] in "89ab"
+
+
 def test_health_sections_use_stored_status_and_evidence_kind_without_reclassification() -> None:
     script = r"""
       import {projectHealthFindingSections} from "./src/js/tdash-health.js";

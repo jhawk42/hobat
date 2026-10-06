@@ -22,7 +22,7 @@ COMPARISON_INTERVALS = {
     "1m": 30 * 24 * 60 * 60,
 }
 REASON_ORDER = (
-    "endpoint-missing", "endpoint-order-invalid", "network-mismatch",
+    "endpoint-missing", "endpoint-order-invalid", "same-observation", "network-mismatch",
     "dataset-mismatch", "profile-mismatch", "source-signature-mismatch",
     "sample-contract-mismatch", "evaluator-mismatch", "policy-mismatch",
     "endpoint-incomplete", "gap-exceeded", "subject-mismatch", "role-mismatch",
@@ -640,8 +640,9 @@ def compare_interval(
             raise ValueError("Assessment and observation IDs must match the requested endpoints")
         start = _utc_timestamp(before_obs.observed_at)
         end = _utc_timestamp(after_obs.observed_at)
-        if (before_assessment_id == after_assessment_id or
-            before_obs.observation_id == after_obs.observation_id or start >= end):
+        if before_obs.observation_id == after_obs.observation_id:
+            reasons.add("same-observation")
+        elif before_assessment_id == after_assessment_id or start >= end:
             reasons.add("endpoint-order-invalid")
         else:
             elapsed = math.floor((end - start).total_seconds())

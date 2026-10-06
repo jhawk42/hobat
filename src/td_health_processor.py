@@ -30,7 +30,7 @@ from td_health_observation_model import (
 )
 from td_health_policy import HealthPolicy
 from td_health_roster import RosterFact, extract_roster_facts
-from td_health_sqlite import SQLiteHealthStore
+from td_health_sqlite import SQLiteHealthStore, StaleRosterContextError
 
 
 class HealthProcessingError(RuntimeError):
@@ -495,33 +495,59 @@ def build_processing_result(
         metrics=metrics,
         duplicate_relationship_ids=duplicate_relationship_ids,
     )
-    expected_ids = store.expected_device_ids(network_id) if store else frozenset()
-    prior_absences = (
-        {
-            device_id: store.consecutive_complete_absences(network_id, device_id, observation_id)
-            for device_id in expected_ids - {device.device_id for device in devices}
+    roster_inputs = (
+        store.roster_evaluation_inputs(
+            network_id=network_id,
+            observation_id=observation_id,
+            observed_at=observed_at,
+            completeness=completeness,
+            observed_device_ids=frozenset(device.device_id for device in devices),
+        )
+        if store
+        else {
+            "expectedDeviceIds": frozenset(),
+            "priorCompleteAbsences": {},
+            "networkRosterRevision": 0,
+            "rosterContext": {
+                "schemaVersion": 1,
+                "networkId": network_id,
+                "networkRosterRevision": 0,
+                "records": [],
+            },
+            "historyBoundary": None,
         }
-        if store and completeness is Completeness.COMPLETE
-        else {}
     )
     assessment = evaluate_observation(
         observation,
         policy,
         profile=dataset.health_profile,
-        expected_device_ids=expected_ids,
-        prior_complete_absences=prior_absences,
+        expected_device_ids=roster_inputs["expectedDeviceIds"],
+        prior_complete_absences=roster_inputs["priorCompleteAbsences"],
         assessed_at=now.isoformat(),
         omr_prefix=omr_prefix,
         device_ipv6_addresses=device_ipv6_addresses,
+        roster_context=roster_inputs["rosterContext"],
+        network_roster_revision=roster_inputs["networkRosterRevision"],
+        history_boundary=roster_inputs["historyBoundary"],
     )
     return ProcessingResult(observation, assessment, None, None, roster_facts)
 
 
 def process_health(**kwargs: Any) -> ProcessingResult:
     store: SQLiteHealthStore = kwargs["store"]
-    result = build_processing_result(**kwargs)
-    saved = store.save_processing_result(result.observation, result.assessment,
-                                         roster_facts=result.roster_facts)
+    for attempt in range(3):
+        result = build_processing_result(**kwargs)
+        try:
+            saved = store.save_processing_result(
+                result.observation, result.assessment,
+                roster_facts=result.roster_facts,
+            )
+            break
+        except StaleRosterContextError:
+            if attempt == 2:
+                raise HealthProcessingError(
+                    "Roster changed repeatedly during health processing; retry the assessment."
+                )
     return ProcessingResult(
         result.observation,
         result.assessment,

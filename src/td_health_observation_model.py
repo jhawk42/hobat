@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from typing import Any, Mapping
 
@@ -146,6 +146,10 @@ class Assessment:
     assessed_at: str
     sample_contract_version: str = "legacy-unknown"
     health_policy_digest: str | None = None
+    roster_context_digest: str = "legacy-unknown"
+    presence_input_digest: str = "legacy-unknown"
+    network_roster_revision: int = 0
+    reproduction_context: Mapping[str, Any] = field(default_factory=dict)
 
 
 def device_id_from_ext_address(value: object) -> str:
