@@ -568,6 +568,51 @@ export function applyTableFilters({ preserveSelection = false } = {}) {
   }
 }
 
+export function findTableRowByDeviceId(rows, deviceId) {
+  const targetAddress = deviceId?.replace(/^extaddr:/i, "").toLowerCase();
+  if (!targetAddress) return null;
+  let matchingRow = null;
+  for (const row of rows) {
+    const identity = getDeviceIdentityKeys(row).find((key) => key.startsWith("extAddress:"));
+    if (identity?.slice("extAddress:".length) !== targetAddress) continue;
+    if (matchingRow) return null;
+    matchingRow = row;
+  }
+  return matchingRow;
+}
+
+export function selectTableDeviceById(deviceId) {
+  const row = findTableRowByDeviceId(_lastFilteredRows, deviceId);
+  if (!row) return false;
+  const rowIndex = _lastFilteredRows.indexOf(row);
+  const tbodyEl = document.querySelector("#data-table tbody");
+  const renderedRow = Array.from(tbodyEl?.querySelectorAll("tr") || []).find(
+    (candidate) => Number(candidate.dataset.rowIndex) === rowIndex,
+  );
+  if (!renderedRow) return false;
+  const previous = tbodyEl.querySelector("tr.selected-row");
+  if (previous) previous.classList.remove("selected-row");
+  renderedRow.classList.add("selected-row");
+  renderedRow.tabIndex = -1;
+  renderedRow.focus({ preventScroll: true });
+  _selectedTableRow = row;
+  const details = sortDetailsWithPriority(
+    flattenObjectEntries(row).filter(([key]) => !shouldExcludeDetailPath(key, "table")),
+  );
+  if (details.length === 0) {
+    _selectedTableRow = null;
+    publishDeviceSelection(null, { direct: true });
+    const summaryListEl = document.getElementById("summary-list");
+    if (summaryListEl) summaryListEl.innerHTML = "<li>No details available for selected row.</li>";
+    return false;
+  }
+  const summaryListEl = document.getElementById("summary-list");
+  if (summaryListEl) summaryListEl.innerHTML = "";
+  publishDeviceSelection(row, { direct: true });
+  populateNodeDetailsLists(details);
+  return true;
+}
+
 export function renderTableForDataset(dataset, statusDatasetToken = dataset) {
   const healthAssessment = dataset.healthAssessment;
   const hasMatchingHealthAssessment = dataset.entry?.healthEligible === true &&

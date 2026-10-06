@@ -21,6 +21,7 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
           this.tagName = tagName;
           this.children = [];
           this.listeners = {};
+          this.dataset = {};
           this.parentNode = null;
         }
         appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
@@ -105,6 +106,121 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
         "headingTitle": "Before 2026-09-24T11:00:00Z · After 2026-09-24T11:59:00Z",
         "count": "0 matching rows",
         "total": "0 total rows",
+    }
+
+
+def test_comparison_show_in_table_targets_only_the_current_row_device() -> None:
+    script = r"""
+      import {renderHealthComparison} from "./src/js/tdash-health.js";
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.listeners = {};
+          this.dataset = {};
+          this.parentNode = null;
+        }
+        appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+        replaceChildren() {
+          this.children.forEach((child) => { child.parentNode = null; });
+          this.children = [];
+        }
+        remove() {
+          if (!this.parentNode) return;
+          this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+          this.parentNode = null;
+        }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+      }
+      globalThis.document = {createElement: (tagName) => new Element(tagName)};
+      const deviceId = "extaddr:device-a";
+      const comparison = {
+        comparisonId: "pair", beforeObservedAt: "2026-09-23T12:00:00Z",
+        afterObservedAt: "2026-09-24T12:00:00Z", elapsedSeconds: 86400,
+        comparable: true, resetState: "unchanged", reasons: [], baselineState: "complete",
+        gapState: "within-policy", origin: "stored", itemCount: 2, filteredItemCount: 2,
+        offset: 0, limit: 25, items: [
+          {subjectId: deviceId, scope: "device", metric: "rssi", sampleCount: 1,
+            beforeValue: -60, afterValue: -55, delta: 5, unit: "dBm",
+            comparable: true, change: "changed", sourceFiles: ["devices.json"], resetState: "unchanged"},
+          {subjectId: "network:network-a", scope: "network", metric: "availability",
+            sampleCount: 1, beforeValue: 1, afterValue: 1, delta: 0,
+            comparable: true, change: "unchanged", sourceFiles: [], resetState: "unchanged"},
+        ],
+      };
+      const page = {total: 1, offset: 0, limit: 25, items: [{
+        comparisonId: "pair", beforeObservedAt: comparison.beforeObservedAt,
+        afterObservedAt: comparison.afterObservedAt,
+      }]};
+      const render = (canInspect) => {
+        const container = new Element("section");
+        const inspected = [];
+        renderHealthComparison(container, page, comparison, {
+          capabilityKnown: true, comparisonReadModel: true, assessmentAvailable: true,
+          endpointSelection: false, comparisonId: "pair", scope: "all", result: "changed",
+        }, {
+          canInspect: (subjectId) => canInspect && subjectId === deviceId,
+          inspect: (subjectId) => inspected.push(subjectId),
+        });
+        const wrap = container.children.find((child) => child.className === "health-comparison-table-wrap");
+        const rows = wrap.children[0].children[1].children;
+        const deviceAction = rows[0].children[0].children.find(
+          (child) => child.textContent === "Show in table",
+        );
+        const networkAction = rows[1].children[0].children.find(
+          (child) => child.textContent === "Show in table",
+        );
+        deviceAction?.listeners.click();
+        return {deviceAction: Boolean(deviceAction), networkAction: Boolean(networkAction), inspected};
+      };
+      console.log(JSON.stringify({eligible: render(true), unavailable: render(false)}));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    assert json.loads(completed.stdout) == {
+        "eligible": {
+            "deviceAction": True,
+            "networkAction": False,
+            "inspected": ["extaddr:device-a"],
+        },
+        "unavailable": {"deviceAction": False, "networkAction": False, "inspected": []},
+    }
+
+
+def test_table_device_selection_uses_direct_identity_not_nested_references() -> None:
+    script = r"""
+      import {findTableRowByDeviceId} from "./src/js/tdash-table-renderer.js";
+      const target = {extAddress: "device-a", name: "Target"};
+      const referencing = {
+        extAddress: "device-b", name: "Referencing device",
+        routerNeighbors: [{extAddress: "device-a"}],
+      };
+      console.log(JSON.stringify({
+        target: findTableRowByDeviceId([referencing, target], "extaddr:device-a")?.name,
+        duplicate: findTableRowByDeviceId([target, {...target}], "extaddr:device-a"),
+        absent: findTableRowByDeviceId([referencing], "extaddr:device-a"),
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(completed.stdout) == {
+        "target": "Target",
+        "duplicate": None,
+        "absent": None,
     }
 
 
@@ -1011,6 +1127,144 @@ def test_stored_finding_inspection_does_not_enable_current_network_navigation() 
     }
 
 
+def test_multi_endpoint_finding_projects_and_inspects_each_canonical_device() -> None:
+    script = r"""
+      import {
+        projectHealthFindingDetail,
+        renderHealthFindingDetails,
+        toggleHealthFindingEndpointSelection,
+      } from "./src/js/tdash-health.js";
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.childNodes = this.children;
+          this.dataset = {};
+          this.listeners = {};
+          this.attributes = {};
+          this.parentNode = null;
+          this.textContent = "";
+        }
+        appendChild(child) {
+          this.children.push(child);
+          child.parentNode = this;
+          return child;
+        }
+        replaceChildren() {
+          this.children = [];
+          this.childNodes = this.children;
+        }
+        setAttribute(name, value) { this.attributes[name] = value; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+      }
+      globalThis.document = {createElement: (tagName) => new Element(tagName)};
+      const finding = {
+        findingId: "finding-1", summary: "Two devices share one finding",
+        deviceIds: ["extaddr:2", "extaddr:1"], relationshipIds: ["link:1"],
+        endpoints: [
+          {deviceId: "extaddr:2", displayName: "Shared label"},
+          {deviceId: "extaddr:1", displayName: "Shared label"},
+        ],
+        routerEndpoints: [{deviceId: "extaddr:3", displayName: "Shared label"}],
+        evidence: {sampleCount: 3}, whyItMatters: "Impact", action: "Act", verify: "Check",
+      };
+      const group = {
+        groupId: "group-1", ruleId: "device.rule", status: "poor", scope: "device",
+        title: "Finding group", summary: "Group summary", confidence: "high",
+        count: 1, deviceIds: ["extaddr:2", "extaddr:1"], relationshipIds: [],
+        endpoints: [
+          {deviceId: "extaddr:2", displayName: "Shared label"},
+          {deviceId: "extaddr:1", displayName: "Shared label"},
+          {deviceId: "extaddr:3", displayName: "Shared label"},
+        ],
+        findings: [finding],
+      };
+      const model = projectHealthFindingDetail(group, "finding-1", "extaddr:1");
+      const inspected = [];
+      const selected = [];
+      const container = new Element("section");
+      const relatedInspected = [];
+      renderHealthFindingDetails(container, model, {
+        inspectableDeviceIds: new Set(["extaddr:1", "extaddr:2", "extaddr:3"]),
+        selectFinding: (...args) => selected.push(args),
+        inspectDevice: (...args) => inspected.push(args),
+        inspectRelatedDevice: (...args) => relatedInspected.push(args),
+      });
+      const affected = container.children.find((child) => child.children.some(
+        (nested) => nested.textContent === "Affected items",
+      ));
+      const entries = affected.children.find((child) => child.tagName === "ol").children;
+      const inspectButton = entries[1].children[1].children.find(
+        (child) => child.textContent === "Inspect device",
+      );
+      entries[1].children[0].listeners.click();
+      inspectButton.listeners.click();
+      const related = container.children.find((child) => child.className === "health-finding-detail-section"
+        && child.children[0]?.textContent === "Related devices");
+      const relatedButton = related.children[1].children[0].children.find(
+        (child) => child.textContent === "Inspect device",
+      );
+      relatedButton.listeners.click();
+      const comparisonEnabled = [1, 2].map((availableTopologyTargets) => {
+        const comparisonContainer = new Element("section");
+        renderHealthFindingDetails(comparisonContainer, model, {
+          groupDeviceCount: 2,
+          availableTargets: 2,
+          availableTopologyTargets,
+        });
+        const investigation = comparisonContainer.children.find(
+          (child) => child.className?.includes("health-finding-investigation"),
+        );
+        const actionBar = investigation?.children.find(
+          (child) => child.className === "health-finding-actions",
+        );
+        return Boolean(actionBar?.children.find(
+          (child) => child.textContent === "Compare endpoints",
+        ));
+      });
+      const switched = toggleHealthFindingEndpointSelection(
+        "finding-1", "extaddr:1", "finding-1", "extaddr:2",
+      );
+      const collapsed = toggleHealthFindingEndpointSelection(
+        switched.findingId, switched.endpointId, "finding-1", "extaddr:2",
+      );
+      console.log(JSON.stringify({
+        entries: model.items.map(({label, endpointId, isExpanded}) => [label, endpointId, isExpanded]),
+        joinedLabels: model.items.some(({label}) => label.includes(",")),
+        identities: model.items.map(({identityLabel}) => identityLabel),
+        relatedDevices: model.relatedDevices.map(({deviceId, association}) => [deviceId, association]),
+        relatedInspected, inspectName: inspectButton.attributes["aria-label"],
+        inspected, selected, comparisonEnabled, switched, collapsed,
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(completed.stdout) == {
+        "entries": [
+            ["Shared label", "extaddr:2", False],
+            ["Shared label", "extaddr:1", True],
+        ],
+        "joinedLabels": False,
+        "identities": ["2", "1"],
+        "relatedDevices": [["extaddr:3", "Router path evidence"]],
+        "relatedInspected": [["group-1", "finding-1", "extaddr:3",
+          "related-inspect:group-1:finding-1:extaddr:3"]],
+        "comparisonEnabled": [False, True],
+        "inspectName": "Inspect Shared label (1)",
+        "inspected": [["extaddr:1", "finding-1", "extaddr:1",
+          "finding-inspect:finding-1:extaddr:1"]],
+        "selected": [["finding-1", "extaddr:1"]],
+      "switched": {"findingId": "finding-1", "endpointId": "extaddr:2"},
+      "collapsed": {"findingId": None, "endpointId": None},
+    }
+
+
 def test_finding_roster_actions_follow_server_eligibility() -> None:
     script = r"""
       import {renderHealthFindingDetails} from "./src/js/tdash-health.js";
@@ -1406,7 +1660,21 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert "healthInsightsViewState.comparisonTableScrollTop = event.target.scrollTop;" in ui_js
     assert "updatedComparisonWrap.scrollTop = healthInsightsViewState.comparisonTableScrollTop;" in ui_js
     assert "renderHealthFindingDetails" in ui_js
-    assert "toggleHealthFindingSelection" in ui_js
+    assert "toggleHealthFindingEndpointSelection" in ui_js
+    assert "selectedEndpointId: healthInsightsViewState.selectedEndpointId" in ui_js
+    assert "healthInsightsViewState.selectedEndpointId = endpointId;" in ui_js
+    assert "selectTableDeviceById" in ui_js
+    assert "selectTableDeviceById(eligibleDeviceIds[0]);" in ui_js
+    assert "function topologyNodeIdForHealthDevice(deviceId)" in ui_js
+    assert "runAdaptor(currentDataset)" in ui_js
+    assert "createTopologyViewModel(" in ui_js
+    assert "resolveTopologyNodeId(viewModel, record)" in ui_js
+    assert "healthTopologyViewModelCache?.dataset !== currentDataset" in ui_js
+    assert "topologyNodeIdForHealthDevice(deviceId)" in ui_js
+    assert "returnFindingId = healthInsightsViewState.selectedFindingId" in ui_js
+    assert "returnEndpointId = healthInsightsViewState.selectedEndpointId" in ui_js
+    assert "inspectHealthDevice(deviceId, returnFindingId, returnEndpointId, focusKey, deviceId)" in ui_js
+    assert "findTableRowByDeviceId(_lastFilteredRows, deviceId)" in table_js
     assert "initContextDetailsPanel" in ui_js
     assert 'tableRow.addEventListener("click", () => actions.selectGroup?.(row.groupId));' in health_js
     assert 'aria-current", "true"' in health_js

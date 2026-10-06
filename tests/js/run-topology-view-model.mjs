@@ -68,6 +68,19 @@ assert.equal(viewModel.originalNodeStyling.get(router.id).color.background, "#11
 assert.equal(viewModel.rawByIdForDetails.get(router.id).childTable[0].frameErrorRate, 30);
 assert.equal(resolveTopologyNodeId(viewModel, { extaddr: child.extAddress.toUpperCase() }), child.id);
 
+const restDeviceId = "0011223344556677";
+const restNode = { id: restDeviceId, extAddress: restDeviceId, rloc16: "0x1002" };
+const restViewModel = createTopologyViewModel({
+  nodeData: [restNode],
+  edgeData: [],
+  nodeMap: new Map([[restNode.id, restNode]]),
+  rawByIdForDetails: new Map([[restNode.id, restNode]]),
+});
+assert.equal(
+  resolveTopologyNodeId(restViewModel, { extAddress: restDeviceId, rloc16: "0x1002" }),
+  restDeviceId,
+);
+
 const visibility = computeTopologyVisibility(
   viewModel,
   createTopologyFilterState("all", "all", "router-child-err-rate-frame-high"),

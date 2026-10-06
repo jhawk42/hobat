@@ -1195,6 +1195,15 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .health-finding-detail-section h3 { margin: 0 0 6px; font-size: 14px; }
 .health-affected-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .health-affected-item { padding-top: 6px; border-top: 1px solid var(--line); }
+.health-finding-endpoints {
+  display: grid;
+  gap: 5px;
+  margin: 6px 0;
+  padding-left: 22px;
+}
+.health-finding-endpoints li { overflow-wrap: anywhere; }
+.health-finding-endpoints button { margin-left: 8px; }
+.health-finding-endpoints-omitted { color: var(--muted); font-size: 12px; }
 .health-affected-select {
   display: flex;
   width: 100%;
@@ -1209,6 +1218,24 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .health-affected-summary { overflow-wrap: anywhere; }
 .health-affected-label { font-weight: 600; }
 .health-affected-summary { color: var(--muted); font-size: 12px; }
+.health-affected-identity,
+.health-related-device-association { color: var(--muted); font-size: 11px; }
+.health-finding-navigation-note { color: var(--muted); font-size: 12px; }
+.health-related-devices {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 22px;
+}
+.health-related-devices li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  overflow-wrap: anywhere;
+}
+.health-related-devices li > div { display: grid; min-width: 0; gap: 2px; }
+.health-related-device-inspect { margin-left: auto; }
 .health-affected-chevron {
   width: 0;
   height: 0;
@@ -1222,6 +1249,21 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .health-affected-details { padding: 0 8px; }
 .health-affected-details[hidden] { display: none; }
 .health-affected-evidence { margin-top: 8px; }
+
+#data-table tbody tr[tabindex="-1"]:focus-visible {
+  outline: 2px solid var(--accent, #1769aa);
+  outline-offset: -2px;
+}
+
+@media (max-width: 760px) {
+  .health-related-devices li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+  }
+  .health-related-device-inspect { margin-left: 0; }
+  .health-finding-navigation-note { overflow-wrap: anywhere; }
+}
 
 .workspace-navigation-tabs {
   display: flex;

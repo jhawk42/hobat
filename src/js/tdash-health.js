@@ -1011,6 +1011,8 @@ export function renderHealthComparison(container, page, comparison, viewState = 
         if (item.scope === "device" && actions.canInspect?.(item.subjectId)) {
           const inspect = appendText(subject, "button", "Show in table");
           inspect.type = "button";
+          inspect.setAttribute("aria-label", `Show ${item.subjectId} in table`);
+          inspect.dataset.healthFocusKey = `comparison-device:${item.subjectId}`;
           inspect.addEventListener("click", () => actions.inspect?.(item.subjectId));
         }
         appendText(row, "td", `${item.metric || item.itemKind} · ${item.sampleCount} ${item.sampleCount === 1 ? "sample" : "samples"}`);
@@ -1120,7 +1122,9 @@ export function renderHealthRosterDetail(container, detail, presenceState, actio
   if (!container) return;
   container.replaceChildren();
   if (!detail) return;
-  appendText(container, "h3", detail.displayLabel);
+  const heading = appendText(container, "h3", detail.displayLabel);
+  heading.id = "health-roster-device-heading";
+  heading.tabIndex = -1;
   appendText(container, "p", detail.deviceId, "health-roster-identity");
   const copy = appendText(container, "button", "Copy ID");
   copy.type = "button";
@@ -1370,7 +1374,7 @@ function sharedFindingValue(findings, key) {
   return values.length === 1 ? values[0] : null;
 }
 
-export function projectHealthFindingDetail(group, selectedFindingId = null) {
+export function projectHealthFindingDetail(group, selectedFindingId = null, selectedEndpointId = null) {
   if (!projectVisibleHealthFindingGroups([group]).length) return null;
   const findings = group.findings || [];
   const row = projectHealthSummaryRows([group], { view: "all" })[0];
@@ -1380,6 +1384,43 @@ export function projectHealthFindingDetail(group, selectedFindingId = null) {
     const findingSummaryText = typeof finding.summary === "string" ? finding.summary.trim() : "";
     if (findingSummaryText) {
       findingSummaryCounts.set(findingSummaryText, (findingSummaryCounts.get(findingSummaryText) || 0) + 1);
+    }
+  });
+  const deviceFindingCounts = new Map();
+  findings.forEach((finding) => {
+    uniqueValues([
+      ...(finding.deviceIds || []),
+      ...(finding.endpoints || []).map(({ deviceId }) => deviceId),
+    ]).forEach((deviceId) => {
+      deviceFindingCounts.set(deviceId, (deviceFindingCounts.get(deviceId) || 0) + 1);
+    });
+  });
+  const affectedDeviceIds = new Set(findings.flatMap((finding) => [
+    ...(finding.deviceIds || []),
+    ...(finding.endpoints || []).map(({ deviceId }) => deviceId),
+  ]));
+  const relatedDevices = new Map();
+  const relatedDeviceIds = new Set();
+  findings.forEach((finding) => {
+    (finding.routerEndpoints || []).forEach((endpoint) => {
+      relatedDevices.set(`${finding.findingId}\n${endpoint.deviceId}`, {
+        ...endpoint,
+        findingId: finding.findingId,
+        association: "Router path evidence",
+        summary: finding.summary,
+      });
+      relatedDeviceIds.add(endpoint.deviceId);
+    });
+  });
+  (group.endpoints || []).forEach((endpoint) => {
+    if (!affectedDeviceIds.has(endpoint.deviceId) && !relatedDeviceIds.has(endpoint.deviceId)) {
+      relatedDevices.set(`\n${endpoint.deviceId}`, {
+        ...endpoint,
+        findingId: null,
+        association: "Group endpoint",
+        summary: group.summary,
+      });
+      relatedDeviceIds.add(endpoint.deviceId);
     }
   });
   return {
@@ -1398,25 +1439,54 @@ export function projectHealthFindingDetail(group, selectedFindingId = null) {
       verify: sharedFindingValue(findings, "verify"),
       sourceFiles: uniqueValues(findings.flatMap((finding) => finding.sourceFiles || [])).sort(),
     },
-    items: findings.map((finding) => {
+    relatedDevices: [...relatedDevices.values()],
+    items: findings.flatMap((finding) => {
       const findingSummaryText = typeof finding.summary === "string" ? finding.summary.trim() : "";
-      return {
+      const endpointsById = new Map((finding.endpoints || []).map((endpoint) => [
+        endpoint.deviceId, endpoint,
+      ]));
+      const endpointIds = uniqueValues([
+        ...(finding.deviceIds || []),
+        ...(finding.endpoints || []).map(({ deviceId }) => deviceId),
+      ].filter((deviceId) => typeof deviceId === "string" && deviceId));
+      const endpointEntries = endpointIds.map((deviceId) => {
+        const endpoint = endpointsById.get(deviceId);
+        return {
+          findingId: finding.findingId,
+          endpointId: deviceId,
+          label: endpoint?.displayName || deviceId.replace(/^extaddr:/, ""),
+          identityLabel: deviceId.replace(/^extaddr:/, ""),
+          findingContext: endpointIds.length > 1 || (deviceFindingCounts.get(deviceId) || 0) > 1
+            ? findingSummaryText
+            : null,
+          highlightSummary: findingSummaryText
+            && findingSummaryText !== summary
+            && findingSummaryCounts.get(findingSummaryText) === 1
+            ? findingSummaryText
+            : null,
+          endpointIds: [deviceId],
+          relationshipIds: [...(finding.relationshipIds || [])],
+          evidenceRows: Object.entries(finding.evidence || {})
+            .filter(([key]) => !["evidenceKind", "materiality", "presentationVariant"].includes(key)),
+          isExpanded: finding.findingId === selectedFindingId
+            && (selectedEndpointId === deviceId || (!selectedEndpointId && endpointIds.length === 1)),
+          finding,
+        };
+      });
+      if (endpointEntries.length > 0) return endpointEntries;
+      return [{
         findingId: finding.findingId,
-        label: finding.endpoints?.map(
-          ({ deviceId, displayName }) => displayName || deviceId.replace(/^extaddr:/, ""),
-        ).join(", ") || findingSummaryText,
-        highlightSummary: findingSummaryText
-          && findingSummaryText !== summary
-          && findingSummaryCounts.get(findingSummaryText) === 1
-          ? findingSummaryText
-          : null,
-        endpointIds: [...(finding.deviceIds || [])],
+        endpointId: null,
+        label: findingSummaryText,
+        identityLabel: "",
+        highlightSummary: null,
+        endpointIds: [],
         relationshipIds: [...(finding.relationshipIds || [])],
         evidenceRows: Object.entries(finding.evidence || {})
           .filter(([key]) => !["evidenceKind", "materiality", "presentationVariant"].includes(key)),
-        isExpanded: finding.findingId === selectedFindingId,
+        isExpanded: finding.findingId === selectedFindingId && !selectedEndpointId,
         finding,
-      };
+      }];
     }),
   };
 }
@@ -1425,18 +1495,41 @@ export function toggleHealthFindingSelection(selectedFindingId, findingId) {
   return selectedFindingId === findingId ? null : findingId;
 }
 
+export function toggleHealthFindingEndpointSelection(
+  selectedFindingId, selectedEndpointId, findingId, endpointId,
+) {
+  if (selectedFindingId === findingId && selectedEndpointId === endpointId) {
+    return { findingId: null, endpointId: null };
+  }
+  return { findingId, endpointId };
+}
+
 export function reconcileHealthInsightsSelection(viewState, assessment) {
   const next = { ...viewState, assessmentId: assessment?.assessmentId ?? null };
   const group = projectVisibleHealthFindingGroups(assessment?.findingGroups).find(
     ({ groupId }) => groupId === viewState.selectedGroupId,
   );
   if (!group) {
-    return { ...next, selectedGroupId: null, selectedFindingId: null, detailsOpen: false };
+    return {
+      ...next, selectedGroupId: null, selectedFindingId: null, selectedEndpointId: null,
+      detailsOpen: false,
+    };
   }
-  const findingExists = (group.findings || []).some(
+  const selectedFinding = (group.findings || []).find(
     ({ findingId }) => findingId === viewState.selectedFindingId,
   );
-  return { ...next, selectedFindingId: findingExists ? viewState.selectedFindingId : null };
+  const selectedEndpointId = selectedFinding
+    && uniqueValues([
+      ...(selectedFinding.deviceIds || []),
+      ...(selectedFinding.endpoints || []).map(({ deviceId }) => deviceId),
+    ]).includes(viewState.selectedEndpointId)
+    ? viewState.selectedEndpointId
+    : null;
+  return {
+    ...next,
+    selectedFindingId: selectedFinding ? viewState.selectedFindingId : null,
+    selectedEndpointId,
+  };
 }
 
 export function projectHealthFindingSections(groups, filters = {}) {
@@ -1468,26 +1561,43 @@ function findingSummary(group) {
 }
 
 function numberedEndpointLabel({ deviceId, displayName }) {
-  return `${deviceId.replace(/^extaddr:/, "")} ${displayName}`;
+  const canonicalAddress = deviceId.replace(/^extaddr:/, "");
+  return displayName ? `${canonicalAddress} ${displayName}` : canonicalAddress;
 }
 
-function appendRouterNames(details, group) {
+function appendEndpointInspection(parent, endpoint, groupId, findingId, actions) {
+  const row = document.createElement("li");
+  appendText(row, "span", numberedEndpointLabel(endpoint));
+  if (actions.canInspectDevice?.(endpoint.deviceId)) {
+    const identity = endpoint.deviceId.replace(/^extaddr:/, "");
+    appendDetailAction(row, "Inspect device", () => actions.inspectEndpoint?.(
+      groupId, findingId, endpoint.deviceId,
+    ), true, `Inspect ${endpoint.displayName || identity} (${identity})`);
+  }
+  parent.appendChild(row);
+}
+
+function appendRouterNames(details, group, actions) {
   const routers = group.findings.flatMap((finding) => finding.routerEndpoints || []);
   const uniqueRouters = [...new Map(routers.map((router) => [router.deviceId, router])).values()];
   appendText(details, "summary", `Show ${uniqueRouters.length} Router name${uniqueRouters.length === 1 ? "" : "s"}`);
   const names = document.createElement("ol");
-  uniqueRouters.forEach((router) => appendText(names, "li", numberedEndpointLabel(router)));
+  uniqueRouters.forEach((router) => appendEndpointInspection(
+    names, router, group.groupId, null, actions,
+  ));
   details.appendChild(names);
 }
 
-function appendRedundancyDevices(details, group, deviceType) {
+function appendRedundancyDevices(details, group, deviceType, actions) {
   appendText(
     details,
     "summary",
     `Show ${group.endpoints.length} ${deviceType}${group.endpoints.length === 1 ? "" : "s"}`,
   );
   const devices = document.createElement("ol");
-  group.endpoints.forEach((endpoint) => appendText(devices, "li", numberedEndpointLabel(endpoint)));
+  group.endpoints.forEach((endpoint) => appendEndpointInspection(
+    devices, endpoint, group.groupId, null, actions,
+  ));
   details.appendChild(devices);
 }
 
@@ -1529,13 +1639,17 @@ function appendFindingEvidence(parent, finding) {
   }
 }
 
-function appendAttributedFindings(details, group) {
+function appendAttributedFindings(details, group, actions) {
   appendText(details, "summary", `Show ${group.count} attributed finding${group.count === 1 ? "" : "s"}`);
   const findings = document.createElement("ol");
   group.findings.forEach((finding) => {
     const child = document.createElement("li");
     if (finding.endpoints.length > 0) {
-      appendText(child, "strong", finding.endpoints.map(numberedEndpointLabel).join(", "));
+      const endpoints = document.createElement("ol");
+      finding.endpoints.forEach((endpoint) => appendEndpointInspection(
+        endpoints, endpoint, group.groupId, finding.findingId, actions,
+      ));
+      child.appendChild(endpoints);
       appendText(child, "span", finding.summary);
     } else {
       appendText(child, "strong", finding.summary);
@@ -1558,10 +1672,12 @@ function appendFindingActions(item, group, actions) {
     button.addEventListener("click", () => actions[action]?.(group));
   };
   const availableTargets = actions.availableTargets?.(group) ?? group.deviceIds.length;
-  addAction("Show in topology", "showTopology", availableTargets > 0);
+  const availableTopologyTargets = actions.availableTopologyTargets?.(group) ?? 0;
+  addAction("Show in topology", "showTopology", availableTopologyTargets > 0);
   addAction("Show in table", "showTable", availableTargets > 0);
   addAction("Inspect device", "inspectDevice", group.deviceIds.length === 1 && availableTargets === 1);
-  addAction("Compare endpoints", "compareEndpoints", group.deviceIds.length === 2 && availableTargets === 2);
+  addAction("Compare endpoints", "compareEndpoints",
+    group.deviceIds.length === 2 && availableTargets === 2 && availableTopologyTargets === 2);
   addAction("Apply related filter", "applyFilter", true);
   if (actionBar.childNodes.length > 0) item.appendChild(actionBar);
 }
@@ -1575,29 +1691,37 @@ function renderFindingGroup(group, actions) {
     `${group.count} finding${group.count === 1 ? "" : "s"} · ${group.scope} · ${group.confidence} confidence`,
     "health-finding-meta");
   if (group.endpoints.length > 0) {
-    appendText(item, "p",
-      group.endpoints.slice(0, 8).map(({ displayName }) => displayName).join(", "),
-      "health-finding-endpoints");
+    const endpoints = document.createElement("ol");
+    endpoints.className = "health-finding-endpoints";
+    const shownEndpoints = group.endpoints.slice(0, 8);
+    shownEndpoints.forEach((endpoint) => appendEndpointInspection(
+      endpoints, endpoint, group.groupId, null, actions,
+    ));
+    if (group.endpoints.length > shownEndpoints.length) {
+      appendText(item, "p", `${group.endpoints.length - shownEndpoints.length} more devices not shown.`,
+        "health-finding-endpoints-omitted");
+    }
+    item.appendChild(endpoints);
   }
   appendFindingActions(item, group, actions);
   const details = document.createElement("details");
   details.className = "health-finding-details";
   if (group.ruleId === "network.current-path-redundancy") {
-    appendRouterNames(details, group);
+    appendRouterNames(details, group, actions);
     item.appendChild(details);
     return item;
   }
   if (group.ruleId === "network.router-redundancy") {
-    appendRedundancyDevices(details, group, "Router");
+    appendRedundancyDevices(details, group, "Router", actions);
     item.appendChild(details);
     return item;
   }
   if (group.ruleId === "network.border-router-redundancy") {
-    appendRedundancyDevices(details, group, "Border Router");
+    appendRedundancyDevices(details, group, "Border Router", actions);
     item.appendChild(details);
     return item;
   }
-  appendAttributedFindings(details, group);
+  appendAttributedFindings(details, group, actions);
   item.appendChild(details);
   return item;
 }
@@ -1758,11 +1882,14 @@ export function renderHealthInsights(container, model, viewState = {}, actions =
   }
 }
 
-function appendDetailAction(parent, label, action, enabled = true) {
+function appendDetailAction(parent, label, action, enabled = true, ariaLabel = null, focusKey = null) {
   if (!enabled) return;
   const button = appendText(parent, "button", label);
   button.type = "button";
+  if (ariaLabel) button.setAttribute("aria-label", ariaLabel);
+  if (focusKey) button.dataset.healthFocusKey = focusKey;
   button.addEventListener("click", action);
+  return button;
 }
 
 function appendSharedDetailSection(parent, heading, value) {
@@ -1811,12 +1938,25 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
   appendText(investigation, "h3", "Investigate");
   const actionBar = document.createElement("div");
   actionBar.className = "health-finding-actions";
+  if (actions.groupDeviceCount > 1) {
+    appendText(investigation, "p",
+      `${actions.availableTargets} of ${actions.groupDeviceCount} affected devices are available in the current dataset/network. `
+      + `${actions.availableTopologyTargets} of ${actions.groupDeviceCount} are represented in topology. `
+      + "Table navigation selects the first available device. "
+      + "Stored-only devices are excluded.",
+      "health-finding-navigation-note");
+  }
   appendDetailAction(actionBar, "Show in topology", () => actions.showTopology?.(model.groupId),
-    actions.availableTargets > 0);
-  appendDetailAction(actionBar, "Show in table", () => actions.showTable?.(model.groupId),
+    actions.availableTopologyTargets > 0);
+  appendDetailAction(
+    actionBar,
+    actions.groupDeviceCount > 1 ? "Show first available in table" : "Show in table",
+    () => actions.showTable?.(model.groupId),
     actions.availableTargets > 0);
   appendDetailAction(actionBar, "Compare endpoints", () => actions.compareEndpoints?.(model.groupId),
-    actions.groupDeviceCount === 2 && actions.availableTargets === 2);
+    actions.groupDeviceCount === 2
+      && actions.availableTargets === 2
+      && actions.availableTopologyTargets === 2);
   appendDetailAction(actionBar, "Apply related filter", () => actions.applyFilter?.(model.groupId));
   if (actionBar.childNodes.length > 0) {
     investigation.appendChild(actionBar);
@@ -1836,18 +1976,32 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
     selectButton.type = "button";
     selectButton.dataset.findingId = item.findingId;
     selectButton.setAttribute("aria-expanded", String(item.isExpanded));
-    const detailId = `health-affected-details-${encodeURIComponent(item.findingId)}`;
+    const endpointId = item.endpointId ?? item.endpointIds[0] ?? null;
+    const identityLabel = item.identityLabel || endpointId?.replace(/^extaddr:/, "") || "";
+    const entryId = `${item.findingId}-${endpointId ?? "finding"}`;
+    const detailId = `health-affected-details-${encodeURIComponent(entryId)}`;
     selectButton.setAttribute("aria-controls", detailId);
-    selectButton.setAttribute("aria-label", item.highlightSummary
-      ? `${item.label}. ${item.highlightSummary}`
-      : item.label);
-    selectButton.addEventListener("click", () => actions.selectFinding?.(item.findingId));
+    const endpointContext = identityLabel ? `Device ID ${identityLabel}.` : "";
+    const findingContext = item.findingContext ? `Finding: ${item.findingContext}.` : "";
+    selectButton.setAttribute("aria-label", [
+      item.label, endpointContext, findingContext, item.highlightSummary,
+    ].filter(Boolean).join(" "));
+    if (endpointId) selectButton.dataset.deviceId = endpointId;
+    selectButton.addEventListener("click", () => actions.selectFinding?.(
+      item.findingId, endpointId,
+    ));
 
     const buttonCopy = document.createElement("span");
     buttonCopy.className = "health-affected-copy";
     appendText(buttonCopy, "span", item.label, "health-affected-label");
+    if (identityLabel) {
+      appendText(buttonCopy, "span", `Device ID ${identityLabel}`, "health-affected-identity");
+    }
     if (item.highlightSummary) {
       appendText(buttonCopy, "span", item.highlightSummary, "health-affected-summary");
+    }
+    if (item.findingContext) {
+      appendText(buttonCopy, "span", `Finding: ${item.findingContext}`, "health-affected-summary");
     }
     selectButton.appendChild(buttonCopy);
     const chevron = appendText(selectButton, "span", "", "health-affected-chevron");
@@ -1875,14 +2029,15 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
       if (!model.shared.verify && item.finding.verify) {
         appendText(details, "p", `Verify: ${item.finding.verify}`);
       }
-      if (item.endpointIds.length === 1 && actions.inspectableDeviceIds?.has(item.endpointIds[0])) {
+      if (endpointId && actions.inspectableDeviceIds?.has(endpointId)) {
+        const focusKey = `finding-inspect:${item.findingId}:${endpointId}`;
         appendDetailAction(details, "Inspect device", () => actions.inspectDevice?.(
-          item.endpointIds[0], item.findingId,
-        ));
+          endpointId, item.findingId, endpointId, focusKey,
+        ), true, `Inspect ${item.label} (${identityLabel})`, focusKey);
       }
-      if (actions.mutationAvailable && item.endpointIds.length === 1
+      if (actions.mutationAvailable && endpointId
           && item.finding.scope === "device") {
-        const deviceId = item.endpointIds[0];
+        const deviceId = endpointId;
         const allowedActions = actions.rosterActionsByDevice?.get(deviceId) || [];
         if (allowedActions.includes("enroll")) {
           appendDetailAction(details, "Add to Roster", () => actions.rosterAction?.(
@@ -1906,6 +2061,47 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
   });
   affectedSection.appendChild(list);
   container.appendChild(affectedSection);
+
+  if ((model.relatedDevices || []).length > 0) {
+    const relatedSection = document.createElement("section");
+    relatedSection.className = "health-finding-detail-section";
+    appendText(relatedSection, "h3", "Related devices");
+    const relatedList = document.createElement("ol");
+    relatedList.className = "health-related-devices";
+    const shownDevices = model.relatedDevices.slice(0, 8);
+    shownDevices.forEach((device) => {
+      const entry = document.createElement("li");
+      const identity = device.deviceId.replace(/^extaddr:/, "");
+      const copy = document.createElement("div");
+      appendText(copy, "strong", device.displayName || identity);
+      appendText(copy, "span", `Device ID ${identity}`, "health-affected-identity");
+      appendText(copy, "span", device.association, "health-related-device-association");
+      if (device.summary) appendText(copy, "span", device.summary, "health-affected-summary");
+      entry.appendChild(copy);
+      if (actions.inspectableDeviceIds?.has(device.deviceId)) {
+        const focusKey = `related-inspect:${model.groupId}:${device.findingId || "group"}:${device.deviceId}`;
+        const inspect = appendDetailAction(
+          entry,
+          "Inspect device",
+          () => actions.inspectRelatedDevice?.(model.groupId, device.findingId, device.deviceId, focusKey),
+          true,
+          `Inspect ${device.displayName || identity} (${identity})`,
+          focusKey,
+        );
+        inspect.className = "health-related-device-inspect";
+        inspect.dataset.deviceId = device.deviceId;
+        if (device.findingId) inspect.dataset.findingId = device.findingId;
+      }
+      relatedList.appendChild(entry);
+    });
+    relatedSection.appendChild(relatedList);
+    if (model.relatedDevices.length > shownDevices.length) {
+      appendText(relatedSection, "p",
+        `${model.relatedDevices.length - shownDevices.length} more related devices not shown.`,
+        "health-finding-endpoints-omitted");
+    }
+    container.appendChild(relatedSection);
+  }
 
   if (model.shared.sourceFiles.length > 0) {
     appendSharedDetailSection(container, "Sources", model.shared.sourceFiles.join(", "));

@@ -444,7 +444,7 @@
 
     <aside id="panel-context-details" class="layout-panel layout-panel-details" aria-label="Context details">
       <div id="device-details" class="node-details-panel">
-        <h2>Device details:</h2>
+        <h2 id="device-details-heading" tabindex="-1">Device details:</h2>
         <ul id="summary-list" class="node-details-list">
           <li>Click a node or row to view its properties.</li>
         </ul>
@@ -457,7 +457,8 @@
             <button id="btn-device-details-settings" title="Show device settings">⛭</button>
           </span>
           <span id="device-details-nav-bar-right">
-           <button id="btn-back-to-health-finding" type="button" title="Back to finding" hidden>↩</button>
+           <button id="btn-back-to-health-finding" type="button" title="Back to finding"
+             aria-label="Back to finding" hidden>↩ Back to finding</button>
            <button id="btn-device-details-close" title="Close details panel">✕</button>
          </span>
         </div>

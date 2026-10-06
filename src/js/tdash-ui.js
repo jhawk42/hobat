@@ -43,6 +43,7 @@ import {
 import {
   renderTableForDataset,
   applyTableFilters,
+  selectTableDeviceById,
   getTableColumnCategories,
   setTableHealthFindings,
   setTableHealthColumnsEnabled,
@@ -104,6 +105,7 @@ import {
   subscribeActivity,
   trackedFetch,
 } from "./tdash-activity.js";
+import { createTopologyViewModel, resolveTopologyNodeId } from "./tdash-topology-view-model.js";
 import {
   exportHealthAssessment,
   cancelHealthJob,
@@ -127,7 +129,7 @@ import {
   projectVisibleHealthFindingGroups,
   projectHealthSummaryRows,
   reconcileHealthInsightsSelection,
-  toggleHealthFindingSelection,
+  toggleHealthFindingEndpointSelection,
   createHealthComparisonDetailController,
   renderDeviceHealth,
   renderHealthFindingDetails,
@@ -363,6 +365,7 @@ const healthInsightsViewState = {
   sort: { column: "priority", direction: "ascending" },
   selectedGroupId: null,
   selectedFindingId: null,
+  selectedEndpointId: null,
   tableScrollTop: 0,
   detailsOpen: false,
   sortWasChanged: false,
@@ -1087,6 +1090,7 @@ function refreshDiagnosticFilterForCurrentSource() {
 }
 
 const lastRenderedDatasetByView = new Map();
+let healthTopologyViewModelCache = null;
 
 function renderCurrentView({ force = false } = {}) {
   if (!currentDataset) return;
@@ -2239,6 +2243,7 @@ function renderNetworkInsights() {
       )) {
         healthInsightsViewState.selectedGroupId = null;
         healthInsightsViewState.selectedFindingId = null;
+        healthInsightsViewState.selectedEndpointId = null;
         healthInsightsViewState.detailsOpen = false;
         setContextDetailsMode("device");
         contextDetailsController.setCollapsed(true);
@@ -2246,6 +2251,16 @@ function renderNetworkInsights() {
     }
     renderHealthInsights(healthWorkspaceEl, healthInsightsState, healthInsightsViewState, {
       selectGroup: selectHealthFindingGroup,
+      availableTargets: countAvailableHealthTargets,
+      availableTopologyTargets: countAvailableTopologyHealthTargets,
+      canInspectDevice: (deviceId) => Boolean(findCurrentDeviceRecord(deviceId)),
+      inspectEndpoint: inspectHealthFindingEndpoint,
+      inspectRelatedDevice: inspectHealthRelatedDevice,
+      inspectDevice: (group) => {
+        const deviceId = group.deviceIds[0];
+        const finding = group.findings.find(({ deviceIds = [] }) => deviceIds.includes(deviceId));
+        inspectHealthFindingEndpoint(group.groupId, finding?.findingId ?? null, deviceId);
+      },
       changeSort: (sort) => {
         healthInsightsViewState.sort = sort;
         healthInsightsViewState.sortWasChanged = true;
@@ -2552,6 +2567,7 @@ function renderHealthRefreshStatus() {
 function selectHealthFindingGroup(groupId) {
   healthInsightsViewState.selectedGroupId = groupId;
   healthInsightsViewState.selectedFindingId = null;
+  healthInsightsViewState.selectedEndpointId = null;
   healthInsightsViewState.detailsOpen = true;
   contextDetailsState.finding = {
     assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
@@ -2626,13 +2642,22 @@ function renderSelectedHealthFinding() {
     closeHealthFindingDetails({ restoreFocus: false });
     return;
   }
-  const model = projectHealthFindingDetail(group, healthInsightsViewState.selectedFindingId);
+  const model = projectHealthFindingDetail(
+    group,
+    healthInsightsViewState.selectedFindingId,
+    healthInsightsViewState.selectedEndpointId,
+  );
   const assessment = healthInsightsState.assessment;
   ensureFindingRosterActionEligibility(model, assessment);
   const heading = document.getElementById("health-finding-details-heading");
   if (heading) heading.textContent = model.heading;
   const availableDeviceIds = new Set(
     (group.deviceIds || []).filter((deviceId) => findCurrentDeviceRecord(deviceId)),
+  );
+  const relatedCurrentDeviceIds = new Set(
+    (model.relatedDevices || [])
+      .map(({ deviceId }) => deviceId)
+      .filter((deviceId) => findCurrentDeviceRecord(deviceId)),
   );
   const storedInspectableDeviceIds = new Set();
   const rosterActionsByDevice = new Map();
@@ -2653,27 +2678,37 @@ function renderSelectedHealthFinding() {
   const deviceAvailability = projectFindingDeviceAvailability(
     availableDeviceIds, storedInspectableDeviceIds,
   );
+  const inspectableDeviceIds = new Set([
+    ...deviceAvailability.inspectableDeviceIds,
+    ...relatedCurrentDeviceIds,
+  ]);
   renderHealthFindingDetails(document.getElementById("health-finding-details-content"), model, {
     mutationAvailable: healthInsightsState.capabilities?.rosterMutation === 1,
     rosterActionsByDevice,
     rosterActionErrors,
     availableTargets: deviceAvailability.availableTargets,
+    availableTopologyTargets: countAvailableTopologyHealthTargets(group),
     groupDeviceCount: group.deviceIds?.length ?? 0,
-    inspectableDeviceIds: deviceAvailability.inspectableDeviceIds,
-    selectFinding: (findingId) => {
-      const selectedFindingId = toggleHealthFindingSelection(
+    inspectableDeviceIds,
+    selectFinding: (findingId, endpointId) => {
+      const selection = toggleHealthFindingEndpointSelection(
         healthInsightsViewState.selectedFindingId,
+        healthInsightsViewState.selectedEndpointId,
         findingId,
+        endpointId,
       );
-      healthInsightsViewState.selectedFindingId = selectedFindingId;
+      healthInsightsViewState.selectedFindingId = selection.findingId;
+      healthInsightsViewState.selectedEndpointId = selection.endpointId;
       contextDetailsState.finding = {
         assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
         groupId: healthInsightsViewState.selectedGroupId,
-        findingId: selectedFindingId,
+        findingId: selection.findingId,
+        endpointId: selection.endpointId,
       };
       renderSelectedHealthFinding();
       requestAnimationFrame(() => document.querySelector(
-        `.health-affected-select[data-finding-id="${CSS.escape(findingId)}"]`,
+        `.health-affected-select[data-finding-id="${CSS.escape(findingId)}"]`
+          + (endpointId ? `[data-device-id="${CSS.escape(endpointId)}"]` : ""),
       )?.focus({ preventScroll: true }));
     },
     showTopology: (selectedGroupId) => navigateToHealthTargets(
@@ -2682,7 +2717,12 @@ function renderSelectedHealthFinding() {
     showTable: (selectedGroupId) => navigateToHealthTargets(
       "table", resolveHealthFindingGroup(selectedGroupId),
     ),
-    inspectDevice: (deviceId, findingId) => inspectHealthDevice(deviceId, findingId),
+    inspectDevice: (deviceId, findingId, endpointId, focusKey) => inspectHealthDevice(
+      deviceId, findingId, endpointId, focusKey,
+    ),
+    inspectRelatedDevice: (groupId, findingId, deviceId, focusKey) => inspectHealthRelatedDevice(
+      groupId, findingId, deviceId, focusKey,
+    ),
     rosterAction: (action, deviceId) => {
       const detail = findingRosterActionEligibility.get(
         `${assessment?.assessmentId}\n${deviceId}`,
@@ -2722,7 +2762,32 @@ function findCurrentDeviceRecord(deviceId) {
 }
 
 function countAvailableHealthTargets(group) {
-  return (group?.deviceIds || []).filter((deviceId) => findCurrentDeviceRecord(deviceId)).length;
+  return currentHealthTargetIds(group).length;
+}
+
+function countAvailableTopologyHealthTargets(group) {
+  return currentTopologyHealthTargetIds(group).length;
+}
+
+function currentHealthTargetIds(group) {
+  return [...new Set(group?.deviceIds || [])].filter((deviceId) => findCurrentDeviceRecord(deviceId));
+}
+
+function currentTopologyHealthTargetIds(group) {
+  const resolvedTargets = currentHealthTargetIds(group)
+    .map((deviceId) => ({ deviceId, nodeId: topologyNodeIdForHealthDevice(deviceId) }))
+    .filter(({ nodeId }) => nodeId !== null);
+  const nodeCounts = new Map();
+  resolvedTargets.forEach(({ nodeId }) => nodeCounts.set(nodeId, (nodeCounts.get(nodeId) ?? 0) + 1));
+  return resolvedTargets
+    .filter(({ nodeId }) => nodeCounts.get(nodeId) === 1)
+    .map(({ deviceId }) => deviceId);
+}
+
+function topologyNodeIdForHealthDevice(deviceId) {
+  const record = findCurrentDeviceRecord(deviceId);
+  const viewModel = record ? getCurrentHealthTopologyViewModel() : null;
+  return viewModel ? resolveTopologyNodeId(viewModel, record) : null;
 }
 
 function rememberHealthNavigationContext() {
@@ -2741,6 +2806,7 @@ function rememberHealthNavigationContext() {
     linkFilter: document.getElementById("link-filter")?.value ?? "default_links",
     diagnosticFilter: document.getElementById("diagnostic-filter")?.value ?? "all",
     selectedRecord: deviceInsightsState.record,
+    focusKey: document.activeElement?.dataset?.healthFocusKey ?? null,
     networkId: healthInsightsState.assessment?.networkId ?? null,
     datasetId: healthInsightsState.assessment?.datasetId ?? null,
     insights: currentView === "insights" ? {
@@ -2751,6 +2817,7 @@ function rememberHealthNavigationContext() {
       sortWasChanged: healthInsightsViewState.sortWasChanged,
       selectedGroupId: healthInsightsViewState.selectedGroupId,
       selectedFindingId: healthInsightsViewState.selectedFindingId,
+      selectedEndpointId: healthInsightsViewState.selectedEndpointId,
       tableScrollTop: healthInsightsViewState.tableScrollTop,
       detailsOpen: healthInsightsViewState.detailsOpen,
       comparisonId: healthInsightsViewState.comparisonId,
@@ -2773,10 +2840,9 @@ function rememberHealthNavigationContext() {
 }
 
 function selectTopologyHealthTargets(deviceIds) {
-  const targetAddresses = new Set(deviceIds.map((deviceId) => deviceId.replace(/^extaddr:/, "")));
-  const nodeIds = (getTopologyNodeData() || [])
-    .filter((node) => targetAddresses.has(projectSelectedDevice(node)?.extAddress))
-    .map((node) => node.id);
+  const nodeIds = deviceIds
+    .map((deviceId) => topologyNodeIdForHealthDevice(deviceId))
+    .filter((nodeId) => nodeId !== null);
   const network = getVisNetwork();
   if (!network || nodeIds.length === 0) return;
   const edges = nodeIds.length === 2
@@ -2788,27 +2854,91 @@ function selectTopologyHealthTargets(deviceIds) {
   network.fit({ nodes: nodeIds, animation: { duration: 300, easingFunction: "easeInOutQuad" } });
 }
 
+function getCurrentHealthTopologyViewModel() {
+  if (!currentDataset) return null;
+  if (healthTopologyViewModelCache?.dataset !== currentDataset) {
+    const adaptorResult = runAdaptor(currentDataset);
+    healthTopologyViewModelCache = {
+      dataset: currentDataset,
+      viewModel: createTopologyViewModel(
+        adaptorResult,
+        currentDataset.deviceProjections,
+        { rolePolicy: currentDataset.rolePolicy },
+      ),
+    };
+  }
+  return healthTopologyViewModelCache.viewModel;
+}
+
 function navigateToHealthTargets(view, group, { compare = false } = {}) {
-  if (!group?.deviceIds?.length) return;
+  const eligibleDeviceIds = view === "topology"
+    ? currentTopologyHealthTargetIds(group)
+    : currentHealthTargetIds(group);
+  if (eligibleDeviceIds.length === 0) return;
   rememberHealthNavigationContext();
   document.getElementById("node-filter").value = "all";
   document.getElementById("diagnostic-filter").value = "all";
   if (view === "topology") document.getElementById("link-filter").value = "all_links";
-  const search = compare ? "" : group.deviceIds[0].replace(/^extaddr:/, "");
+  const search = compare ? "" : eligibleDeviceIds[0].replace(/^extaddr:/, "");
   document.getElementById("search-input").value = search;
   _currentSearchQuery = parseSearchQuery(search);
   switchView(view);
   applySearch();
-  if (view === "topology") selectTopologyHealthTargets(group.deviceIds);
+  if (view === "topology") {
+    selectTopologyHealthTargets(eligibleDeviceIds);
+  } else {
+    selectTableDeviceById(eligibleDeviceIds[0]);
+  }
 }
 
-function inspectHealthDevice(deviceId, findingId = null) {
+function inspectHealthFindingEndpoint(groupId, findingId, deviceId) {
+  const group = resolveHealthFindingGroup(groupId);
+  if (!group || !group.deviceIds?.includes(deviceId)) return;
+  const finding = group.findings.find(({ findingId: candidateId }) => candidateId === findingId);
+  healthInsightsViewState.selectedGroupId = groupId;
+  healthInsightsViewState.selectedFindingId = finding ? findingId : null;
+  healthInsightsViewState.selectedEndpointId = finding ? deviceId : null;
+  healthInsightsViewState.detailsOpen = true;
+  contextDetailsState.finding = {
+    assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
+    groupId,
+    findingId: healthInsightsViewState.selectedFindingId,
+    endpointId: healthInsightsViewState.selectedEndpointId,
+  };
+  inspectHealthDevice(deviceId, healthInsightsViewState.selectedFindingId, deviceId);
+}
+
+function inspectHealthRelatedDevice(groupId, findingId, deviceId, focusKey = null) {
+  const group = resolveHealthFindingGroup(groupId);
+  const relation = projectHealthFindingDetail(group)?.relatedDevices.find(
+    (candidate) => candidate.deviceId === deviceId && candidate.findingId === findingId,
+  );
+  if (!relation) return;
+  const returnFindingId = healthInsightsViewState.selectedFindingId;
+  const returnEndpointId = healthInsightsViewState.selectedEndpointId;
+  healthInsightsViewState.selectedGroupId = groupId;
+  healthInsightsViewState.selectedFindingId = null;
+  healthInsightsViewState.selectedEndpointId = null;
+  healthInsightsViewState.detailsOpen = true;
+  contextDetailsState.finding = {
+    assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
+    groupId,
+    findingId: null,
+    endpointId: null,
+  };
+  inspectHealthDevice(deviceId, returnFindingId, returnEndpointId, focusKey, deviceId);
+}
+
+function inspectHealthDevice(deviceId, findingId = null, endpointId = null, focusKey = null, relatedDeviceId = null) {
   const record = findCurrentDeviceRecord(deviceId);
   if (healthInsightsViewState.selectedGroupId) {
     findingDeviceReturnContext = {
       assessmentId: healthInsightsState.assessment?.assessmentId ?? null,
       groupId: healthInsightsViewState.selectedGroupId,
       findingId: findingId ?? healthInsightsViewState.selectedFindingId,
+      endpointId: endpointId ?? healthInsightsViewState.selectedEndpointId,
+      focusKey,
+      relatedDeviceId,
     };
   } else {
     rememberHealthNavigationContext();
@@ -2829,6 +2959,7 @@ function inspectHealthDevice(deviceId, findingId = null) {
   publishDeviceSelection(record);
   setActiveDeviceDetailsPanel("device-insights-panel");
   document.getElementById("btn-back-to-health-finding")?.removeAttribute("hidden");
+  requestAnimationFrame(() => document.getElementById("device-details-heading")?.focus());
 }
 
 function compareHealthEndpoints(group) {
@@ -2865,19 +2996,37 @@ function returnToHealthFinding() {
   const findingId = group.findings.some(({ findingId: candidateId }) => candidateId === context.findingId)
     ? context.findingId
     : null;
+  const endpointId = findingId && group.findings.some(({ findingId: candidateId, deviceIds = [] }) =>
+    candidateId === findingId && deviceIds.includes(context.endpointId))
+    ? context.endpointId
+    : null;
+  const relatedDevice = context.relatedDeviceId && projectHealthFindingDetail(group).relatedDevices.some(
+    ({ deviceId }) => deviceId === context.relatedDeviceId,
+  ) ? context.relatedDeviceId : null;
   healthInsightsViewState.selectedGroupId = context.groupId;
   healthInsightsViewState.selectedFindingId = findingId;
+  healthInsightsViewState.selectedEndpointId = endpointId;
   healthInsightsViewState.detailsOpen = true;
-  contextDetailsState.finding = { ...context, findingId };
+  contextDetailsState.finding = { ...context, findingId, endpointId };
   if (healthInsightsTab === "findings") {
     renderSelectedHealthFinding();
   } else {
     activateHealthTab("findings");
   }
-  const focusSelector = findingId
-    ? `.health-affected-select[data-finding-id="${CSS.escape(findingId)}"]`
-    : `.health-finding-select[data-group-id="${CSS.escape(context.groupId)}"]`;
-  requestAnimationFrame(() => document.querySelector(focusSelector)?.focus({ preventScroll: true }));
+  requestAnimationFrame(() => {
+    const returnTarget = context.focusKey && [...document.querySelectorAll("[data-health-focus-key]")]
+      .find(({ dataset }) => dataset.healthFocusKey === context.focusKey);
+    const focusSelector = relatedDevice
+      ? `.health-related-device-inspect[data-device-id="${CSS.escape(relatedDevice)}"]`
+        + (context.findingId
+          ? `[data-finding-id="${CSS.escape(context.findingId)}"]`
+          : "")
+      : findingId
+        ? `.health-affected-select[data-finding-id="${CSS.escape(findingId)}"]`
+          + (endpointId ? `[data-device-id="${CSS.escape(endpointId)}"]` : "")
+        : `.health-finding-select[data-group-id="${CSS.escape(context.groupId)}"]`;
+    (returnTarget || document.querySelector(focusSelector))?.focus({ preventScroll: true });
+  });
 }
 
 function resetHealthFindingState() {
@@ -2887,6 +3036,7 @@ function resetHealthFindingState() {
   healthInsightsViewState.sortWasChanged = false;
   healthInsightsViewState.selectedGroupId = null;
   healthInsightsViewState.selectedFindingId = null;
+  healthInsightsViewState.selectedEndpointId = null;
   healthInsightsViewState.tableScrollTop = 0;
   healthInsightsViewState.detailsOpen = false;
   const viewFilter = document.getElementById("health-view-filter");
@@ -2960,6 +3110,12 @@ function restoreHealthNavigationContext() {
   requestAnimationFrame(() => {
     const tableWrap = document.getElementById("health-finding-table-wrap");
     if (tableWrap) tableWrap.scrollTop = healthInsightsViewState.tableScrollTop;
+    const returnTarget = context.focusKey && [...document.querySelectorAll("[data-health-focus-key]")]
+      .find(({ dataset }) => dataset.healthFocusKey === context.focusKey);
+    if (returnTarget) {
+      returnTarget.focus({ preventScroll: true });
+      return;
+    }
     if (contextIdentityMatches && context.view === "insights"
         && context.healthTab === "comparison") {
       document.getElementById("health-tab-comparison")?.focus({ preventScroll: true });
@@ -3245,6 +3401,7 @@ async function selectRosterDevice(deviceId) {
     setContextDetailsMode("device");
     contextDetailsController.setCollapsed(false);
     renderNetworkInsights();
+    requestAnimationFrame(() => document.getElementById("health-roster-device-heading")?.focus());
   } catch (error) {
     if (version === healthRosterViewState.detailVersion) {
       healthRosterViewState.selectedDeviceId = null;
