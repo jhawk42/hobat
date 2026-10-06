@@ -41,6 +41,59 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
 For `--dataset all`, JSON output is an array of result documents. Roster
 operations and `--export-latest` require one concrete dataset ID.
 
+## Migrating Retained Health History
+
+`health migrate-history` replays validated retained observations under the
+current evaluator and policy contract. It is cache-only: it does not read
+today's snapshots, run collectors, probe devices, or rewrite original
+observations and assessments. Schema 8 records immutable upgrade mappings and
+preferred revisions; explicit assessment and comparison IDs continue to refer
+to the original pinned records.
+
+Run this only during a maintenance window after stopping the dashboard's
+write-capable health server, scheduled health processing, roster actions, and
+collectors. Use the same absolute policy directory for migration and subsequent
+native health jobs:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health migrate-history \
+  --dataset all --policy-config-dir /absolute/path/to/server/config \
+  --dry-run --json
+
+PYTHONPATH=src python3 -m td_cli --datadir ./data health migrate-history \
+  --dataset all --policy-config-dir /absolute/path/to/server/config \
+  --backup-output /absolute/path/to/new-backup --yes --json
+```
+
+Use `--network extpan:<16 lowercase hex digits>` to limit the scope. A policy
+digest different from, or not verifiable against, the native history requires
+both an explicit `--policy-config-dir` and `--allow-policy-change`. The
+external backup directory must not exist, must be outside the effective data
+directory, and its parent must already exist. Dry-run requires an existing
+data directory and database but does not initialize or write them.
+
+The JSON report identifies replayable context gaps, unsupported history,
+before/after findings and coverage, backup provenance, and committed cohorts.
+Unsupported or failed history is reported with a nonzero exit status; it is
+never silently treated as migrated. Missing historical roster, absence,
+duplicate, OMR, or address inputs remain unavailable rather than being
+reconstructed from current state. A context gap can lower confidence or leave
+verdicts Unknown; migration does not certify network health.
+
+After migration, refresh a native assessment from cached snapshots before
+normal dashboard use when the report identifies a policy transition or
+context-dependent current coverage:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
+  --dataset all --allow-partial \
+  --policy-config-dir /absolute/path/to/server/config
+```
+
+This follow-up also performs no collection or probing. It cannot repair
+evidence that is genuinely absent. Review the migration report and preserve its
+verified external backup according to the operator's data-retention policy.
+
 ## Eligible Datasets
 
 The shared manifest currently permits these dataset IDs:
@@ -289,6 +342,15 @@ Each pillar is assigned one of three coverage states:
 A `limited` or `missing` observed pillar can still contribute findings, but with
 reduced confidence. Observed coverage cannot exceed static capability, and a
 partial or degraded observation cannot have `sufficient` observed coverage.
+Historical input availability is recorded separately from source completeness.
+An unavailable roster, absence-history, OMR, device-address, or duplicate-
+relationship input remains tagged Unknown rather than being treated as an
+empty value. The network-scoped
+`observation.evaluation-context-unavailable` finding lists the unavailable
+domains and reason codes. Roster gaps suppress Missing/Offline conclusions;
+absence-history gaps can retain Missing but cannot establish Offline. Gaps that
+affect a verdict cap the applicable pillar at Limited and prevent Strong, while
+an informational duplicate-context gap alone does not cap a verdict.
 The dashboard presents each observed state as a labeled status indicator; its
 tooltip includes the static capability and evaluator reasons. Static capability
 is also displayed inline when it differs from the observed state.
@@ -310,6 +372,7 @@ also project catalog-owned `evidenceKind`, `materiality`, `actionKey`, and
 | `network.observed-link-quality-ratios` | Network Link Quality Distribution | Summarizes the distribution of observed non-missing link-quality reports. |
 | `network.offline-impact` | Offline Device Network Impact | Separately assesses whether individually Offline devices are material to network health. |
 | `observation.duplicate-source-entry` | Duplicate Relationships in Source Data | Reports duplicate source relationships as a collection artifact. |
+| `observation.evaluation-context-unavailable` | Historical Evaluation Context Unavailable | Identifies evaluator inputs that were not retained or cannot be verified for this observation. |
 | `device.observed` | Observed Devices | Records device presence in the current cached observation. |
 | `device.missing` | Expected Device Missing | Reports an expected device absent without enough eligible history to establish Offline. |
 | `device.offline` | Offline Devices | Reports an expected device absent for the configured consecutive complete observations. |
@@ -370,7 +433,7 @@ the schema but does not fabricate a last-known roster: new, complete observation
 with valid source timestamps populate the projection. Unattributed migrated
 facts retain unknown confidence and cannot replace sourced facts.
 
-The `snapshot-v11` read projection resolves known-rule titles, descriptions,
+The `snapshot-v12` read projection resolves known-rule titles, descriptions,
 actions, verification text, evidence kinds, materiality, and template keys from
 the catalog. For pre-v11 assessments, valid stored materiality remains
 authoritative so the queue rule's new relationship materiality does not rewrite

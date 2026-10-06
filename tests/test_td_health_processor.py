@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import sqlite3
 from contextlib import closing
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,7 @@ from td_health_processor import (
     process_health,
 )
 from td_health_manifest import load_health_manifest
+from td_health_migration import inventory_health_history
 from td_health_roster import extract_roster_facts
 from td_health_roster_mutation import set_cli_roster_device
 from td_health_sqlite import SQLiteHealthStore, StaleRosterContextError
@@ -424,7 +426,7 @@ def test_processor_uses_extpan_identity_and_normalizes_devices(tmp_path) -> None
     assert result.assessment.confidence.value == "low"
     assert (
         result.assessment.coverage["observedPillars"]["availability"]["state"]
-        == "sufficient"
+        == "limited"
     )
     assert (
         result.assessment.coverage["observedPillars"]["connectivity"]["state"]
@@ -439,6 +441,203 @@ def test_processor_uses_extpan_identity_and_normalizes_devices(tmp_path) -> None
         finding.rule_id == "network.border-router-redundancy"
         for finding in result.assessment.findings
     )
+
+
+def test_readonly_history_inventory_replays_a_current_assessment(tmp_path) -> None:
+    policy = load_health_policy()
+    _write_seed(
+        tmp_path,
+        [
+            {
+                "extaddr": "8672766ae0578187",
+                "role": "router",
+                "ipv6Addresses": [],
+            }
+        ],
+    )
+    path = tmp_path / HOBAT_DATABASE_FILENAME
+    store = SQLiteHealthStore(path)
+    process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=policy,
+        store=store,
+    )
+    readonly_store = SQLiteHealthStore(path, read_only=True)
+
+    inventory = inventory_health_history(
+        readonly_store,
+        target_policy=policy,
+        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+    )
+
+    assert len(inventory.items) == 1
+    assert inventory.items[0].eligibility.value == "already-current", (
+        inventory.items[0].reason_codes
+    )
+    assert inventory.items[0].reason_codes == ()
+
+
+def test_readonly_history_inventory_classifies_context_free_v10_with_gaps(tmp_path) -> None:
+    policy = load_health_policy()
+    _write_seed(
+        tmp_path,
+        [{"extaddr": "8672766ae0578187", "role": "router"}],
+    )
+    path = tmp_path / HOBAT_DATABASE_FILENAME
+    store = SQLiteHealthStore(path)
+    result = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=policy,
+        store=store,
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """UPDATE assessments
+               SET evaluator_version='snapshot-v10', reproduction_context_json='{}'
+               WHERE assessment_id=?""",
+            (result.assessment.assessment_id,),
+        )
+
+    inventory = inventory_health_history(
+        SQLiteHealthStore(path, read_only=True),
+        target_policy=policy,
+        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+    )
+
+    assert inventory.items[0].eligibility.value == "replayable-with-gaps"
+    assert "evaluation-context-unavailable" in inventory.items[0].reason_codes
+
+
+def test_readonly_history_inventory_rejects_contradictory_v2_context(tmp_path) -> None:
+    policy = load_health_policy()
+    _write_seed(tmp_path, [])
+    path = tmp_path / HOBAT_DATABASE_FILENAME
+    store = SQLiteHealthStore(path)
+    device_id = "extaddr:8672766ae0578187"
+    network_id = "extpan:78b9775b001c1cbe"
+    store.upsert_expected_device(network_id, device_id, "expected")
+    result = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=policy,
+        store=store,
+    )
+    with sqlite3.connect(path) as connection:
+        row = connection.execute(
+            "SELECT reproduction_context_json FROM assessments WHERE assessment_id=?",
+            (result.assessment.assessment_id,),
+        ).fetchone()
+        context = json.loads(row[0])
+        context["evaluationInputs"]["absenceHistory"]["priorCompleteAbsences"][
+            device_id
+        ] = 99
+        connection.execute(
+            "UPDATE assessments SET reproduction_context_json=? WHERE assessment_id=?",
+            (json.dumps(context), result.assessment.assessment_id),
+        )
+
+    inventory = inventory_health_history(
+        SQLiteHealthStore(path, read_only=True),
+        target_policy=policy,
+        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+    )
+
+    assert inventory.items[0].eligibility.value == "invalid"
+    assert "evaluation-context-contradiction" in inventory.items[0].reason_codes
+
+
+def test_readonly_history_inventory_rejects_undeclared_legacy_source(tmp_path) -> None:
+    policy = load_health_policy()
+    _write_seed(
+        tmp_path, [{"extaddr": "8672766ae0578187", "role": "router"}]
+    )
+    path = tmp_path / HOBAT_DATABASE_FILENAME
+    store = SQLiteHealthStore(path)
+    result = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=policy,
+        store=store,
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """INSERT INTO observation_sources
+               (observation_id, filename, digest, kind, state)
+               VALUES (?, 'legacy-unknown', ?, 'snapshot', 'complete')""",
+            (result.observation.observation_id, "a" * 64),
+        )
+        source_rows = connection.execute(
+            """SELECT filename, digest FROM observation_sources
+               WHERE observation_id=? ORDER BY filename""",
+            (result.observation.observation_id,),
+        ).fetchall()
+        source_digest = hashlib.sha256(
+            "\0".join(f"{filename}:{digest}" for filename, digest in source_rows).encode()
+        ).hexdigest()
+        connection.execute(
+            "UPDATE observations SET source_set_digest=? WHERE observation_id=?",
+            (source_digest, result.observation.observation_id),
+        )
+
+    inventory = inventory_health_history(
+        SQLiteHealthStore(path, read_only=True),
+        target_policy=policy,
+        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+    )
+
+    assert inventory.items[0].eligibility.value == "invalid"
+    assert "Stored observation references an undeclared source" in (
+        inventory.items[0].reason_codes[0]
+    )
+
+
+def test_readonly_history_inventory_resolves_roster_from_retained_devices(tmp_path) -> None:
+    policy = load_health_policy()
+    path = tmp_path / HOBAT_DATABASE_FILENAME
+    store = SQLiteHealthStore(path)
+    device_id = "extaddr:8672766ae0578187"
+    network_id = "extpan:78b9775b001c1cbe"
+    store.upsert_expected_device(network_id, device_id, "expected")
+    _write_seed(
+        tmp_path, [{"extaddr": "8672766ae0578187", "role": "router"}]
+    )
+    process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=policy,
+        store=store,
+    )
+    _write_seed(tmp_path, [])
+    absent = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=policy,
+        store=store,
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "DELETE FROM expected_devices WHERE network_id=? AND device_id=?",
+            (network_id, device_id),
+        )
+
+    inventory = inventory_health_history(
+        SQLiteHealthStore(path, read_only=True),
+        target_policy=policy,
+        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+    )
+
+    target_item = next(
+        item for item in inventory.items
+        if item.observation_id == absent.observation.observation_id
+    )
+    assert target_item.eligibility.value in {
+        "replayable",
+        "replayable-with-gaps",
+        "already-current",
+    }
+    assert "historical-roster-reference-unverifiable" not in target_item.reason_codes
 
 
 def test_partial_observation_cannot_make_expected_device_offline(tmp_path) -> None:
@@ -929,7 +1128,12 @@ def test_border_router_omr_address_reports_strong_external_routing(tmp_path) -> 
             "role": "router",
             "ipv6Addresses": ["fd6b:32e0:d18:0:1234:5678:9abc:def0"],
         },
-        {"extAddress": "2222222222222222", "isBorderRouter": False, "role": "router"},
+        {
+            "extAddress": "2222222222222222",
+            "isBorderRouter": False,
+            "role": "router",
+            "ipv6Addresses": [],
+        },
     ]
     for filename in (
         "td-otbr-cli-meshdiag-topology.json",
@@ -958,15 +1162,24 @@ def test_border_router_omr_address_reports_strong_external_routing(tmp_path) -> 
     assert not any(item.rule_id == "network.external-routing" for item in future_identity.assessment.findings)
 
 
-@pytest.mark.parametrize("prefixes", [
-    {},
-    {"prefixOmr": "fd6b:32e0:d18::"},
-    {"prefixOmr": "fd6b:32e0:d18::/64"},
-    {"prefixOmr": "fd6b:32e0:d18::/64", "prefixMeshLocal": "not-a-prefix"},
-    {"prefixOmr": "fd6b:32e0:d18::/64", "prefixMeshLocal": "fd6b:32e0:d18::/64"},
+@pytest.mark.parametrize(("prefixes", "expected"), [
+    ({}, (None, None)),
+    ({"prefixOmr": "fd6b:32e0:d18::"}, (None, "identity-invalid")),
+    ({"prefixOmr": "fd6b:32e0:d18::/64"}, (None, "identity-invalid")),
+    (
+        {"prefixOmr": "fd6b:32e0:d18::/64", "prefixMeshLocal": "not-a-prefix"},
+        (None, "identity-invalid"),
+    ),
+    (
+        {
+            "prefixOmr": "fd6b:32e0:d18::/64",
+            "prefixMeshLocal": "fd6b:32e0:d18::/64",
+        },
+        (None, "identity-invalid"),
+    ),
 ])
-def test_unqualified_identity_prefix_is_not_omr_authority(prefixes) -> None:
-    assert _omr_prefix_from_identity(prefixes) is None
+def test_unqualified_identity_prefix_is_not_omr_authority(prefixes, expected) -> None:
+    assert _omr_prefix_from_identity(prefixes) == expected
 
 
 @pytest.mark.parametrize(

@@ -109,6 +109,76 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
     }
 
 
+def test_assessment_summary_explains_context_gaps_and_history_replay() -> None:
+    script = r"""
+      import {renderHealthInsights} from "./src/js/tdash-health.js";
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.className = "";
+          this.hidden = false;
+        }
+        appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+        replaceChildren() { this.children = []; }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener() {}
+      }
+      globalThis.document = {createElement: (tagName) => new Element(tagName)};
+      const summary = new Element("section");
+      const tableHead = new Element("thead");
+      const tableBody = new Element("tbody");
+      const table = new Element("table");
+      table.tHead = tableHead;
+      table.tBodies = [tableBody];
+      const tableWrap = new Element("div");
+      const empty = new Element("div");
+      const selectors = {
+        "#health-insights-evidence": summary,
+        "#health-finding-table": table,
+        "#health-finding-table-wrap": tableWrap,
+        "#health-insights-empty": empty,
+      };
+      const container = {querySelector: (selector) => selectors[selector]};
+      renderHealthInsights(container, {
+        assessment: {
+          status: "unknown",
+          completeness: "complete",
+          confidence: "low",
+          evaluationContextComplete: false,
+          unavailableEvaluationDomains: ["roster", "omrPrefix"],
+          migration: {sourceAssessmentId: "old-assessment"},
+          coverage: {deviceCount: 1, pillars: {}, observedPillars: {}},
+          findingGroups: [],
+        },
+      });
+      console.log(JSON.stringify(summary.children.map((item) => ({
+        className: item.className, text: item.textContent,
+      }))));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert {
+        item["className"]: item["text"]
+        for item in result
+        if item["className"] in {
+            "health-context-gap-summary",
+            "health-migration-summary",
+        }
+    } == {
+        "health-context-gap-summary":
+            "Some evaluation context is unavailable: roster, omrPrefix.",
+        "health-migration-summary":
+            "Replayed from retained history (source old-assessment); migration does not certify network health.",
+    }
+
+
 def test_comparison_show_in_table_targets_only_the_current_row_device() -> None:
     script = r"""
       import {renderHealthComparison} from "./src/js/tdash-health.js";

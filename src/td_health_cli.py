@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import sys
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -18,6 +20,13 @@ from td_health_policy import load_health_policy
 from td_health_processor import ProcessingResult, build_processing_result, process_health
 from td_health_roster_mutation import set_cli_roster_device
 from td_health_sqlite import SQLiteHealthStore
+from td_health_migration import (
+    HealthMigrationError,
+    HealthMigrationInventoryError,
+    history_migration_report,
+    inventory_health_history,
+    migrate_health_history,
+)
 from util_data import resolve_data_dir, save_json_atomic
 
 
@@ -77,6 +86,22 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--after-assessment", required=True)
     compare.add_argument("--dry-run", action="store_true")
     compare.add_argument("--json", action="store_true", dest="json_output")
+    migrate = commands.add_parser(
+        "migrate-history",
+        description="Replay retained health assessments without collecting data.",
+    )
+    migrate.add_argument(
+        "--dataset",
+        required=True,
+        choices=["all", *sorted(load_health_manifest().datasets)],
+    )
+    migrate.add_argument("--network", dest="network_id")
+    migrate.add_argument("--policy-config-dir", type=Path, default=None)
+    migrate.add_argument("--allow-policy-change", action="store_true")
+    migrate.add_argument("--dry-run", action="store_true")
+    migrate.add_argument("--json", action="store_true", dest="json_output")
+    migrate.add_argument("--yes", action="store_true")
+    migrate.add_argument("--backup-output", type=Path, default=None)
     for name, help_text in (
         ("purge", "Delete health records older than a UTC cutoff"),
         ("purge-all", "Delete all health-domain records"),
@@ -187,10 +212,158 @@ def _run_purge(args: argparse.Namespace, data_dir: Path) -> int:
     return 0
 
 
+def _run_history_migration(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    data_dir: Path,
+) -> int:
+    if args.dry_run and args.backup_output is not None:
+        parser.error("--dry-run cannot be combined with --backup-output")
+    if args.backup_output is not None and not args.backup_output.is_absolute():
+        parser.error("--backup-output must be an absolute directory path")
+    if args.allow_policy_change and args.policy_config_dir is None:
+        parser.error("--allow-policy-change requires --policy-config-dir")
+    if args.network_id is not None and not re.fullmatch(
+        r"extpan:[0-9a-f]{16}", args.network_id
+    ):
+        parser.error("--network must be a canonical extpan identifier")
+    database_path = data_dir / HOBAT_DATABASE_FILENAME
+    if not data_dir.is_dir() or not database_path.is_file():
+        print(
+            f"Health store is not available: {database_path}",
+            file=sys.stderr,
+        )
+        return 4
+    dataset_ids = (
+        tuple(sorted(load_health_manifest().datasets))
+        if args.dataset == "all"
+        else (args.dataset,)
+    )
+    config_dir = args.policy_config_dir or Path.cwd() / "config"
+    try:
+        policy = load_health_policy(config_dir)
+        store = SQLiteHealthStore(database_path, read_only=True)
+        inventory = inventory_health_history(
+            store,
+            target_policy=policy,
+            dataset_ids=dataset_ids,
+            network_id=args.network_id,
+        )
+    except (OSError, ValueError, HealthMigrationInventoryError) as exc:
+        print(f"Health history preflight failed: {exc}", file=__import__("sys").stderr)
+        return 2
+
+    native_digests = {item.policy_digest for item in inventory.items}
+    policy_change = any(digest != policy.digest for digest in native_digests)
+    if policy_change and (
+        not args.allow_policy_change or args.policy_config_dir is None
+    ):
+        parser.error(
+            "Target policy differs from or cannot be verified against native history; "
+            "pass --policy-config-dir and --allow-policy-change to acknowledge it"
+        )
+
+    report = history_migration_report(
+        inventory,
+        dry_run=args.dry_run,
+        target_policy=policy,
+    )
+    report["target"]["policyConfigDir"] = str(config_dir.resolve())
+    report["target"]["nativePolicyDigests"] = sorted(
+        digest for digest in native_digests if digest is not None
+    )
+    report["target"]["nativePolicyMatches"] = not policy_change
+    report["target"]["policyChangeAcknowledged"] = args.allow_policy_change
+
+    actionable = (
+        report["totals"]["replayable"]
+        + report["totals"]["replayableWithGaps"]
+        + report["totals"]["preferencesChanged"]
+    )
+    if args.dry_run or actionable == 0:
+        return_code = (
+            1
+            if report["totals"]["unsupported"] or report["totals"]["failed"]
+            else 0
+        )
+    else:
+        if args.backup_output is None:
+            parser.error(
+                "--backup-output is required when migration will create revisions "
+                "or change preferences"
+            )
+        if not args.yes:
+            if not sys.stdin.isatty():
+                parser.error("Noninteractive history migration requires --yes")
+            print(
+                f"Schema {inventory.schema_version}; {len(inventory.items)} observations; "
+                f"{report['totals']['replayableWithGaps']} with context gaps; "
+                f"{report['totals']['unsupported']} unsupported. Backup: "
+                f"{args.backup_output.resolve()}"
+            )
+            if input("Commit health-history migration? [y/N] ").strip().lower() != "y":
+                report["outcome"] = "cancelled"
+                return_code = 0
+                if args.json_output:
+                    print(json.dumps(report, sort_keys=True))
+                else:
+                    print("Health-history migration cancelled.")
+                return return_code
+        writable_store = SQLiteHealthStore(database_path, read_only=True)
+        try:
+            report = migrate_health_history(
+                writable_store,
+                data_dir=data_dir,
+                target_policy=policy,
+                inventory=inventory,
+                backup_output=args.backup_output,
+            )
+        except (OSError, ValueError, HealthMigrationError) as exc:
+            print(f"Health-history migration failed: {exc}", file=sys.stderr)
+            return 1
+        report["target"]["policyConfigDir"] = str(config_dir.resolve())
+        report["target"]["nativePolicyDigests"] = sorted(
+            digest for digest in native_digests if digest is not None
+        )
+        report["target"]["nativePolicyMatches"] = not policy_change
+        report["target"]["policyChangeAcknowledged"] = args.allow_policy_change
+        return_code = (
+            1
+            if report["totals"]["unsupported"] or report["totals"]["failed"]
+            else 0
+        )
+
+    if args.json_output:
+        print(json.dumps(report, sort_keys=True))
+    else:
+        print(
+            f"Health history {report['outcome']}: "
+            f"{report['totals']['observationsScanned']} observations scanned, "
+            f"{report['totals']['alreadyCurrent']} already current, "
+            f"{report['totals']['replayable']} replayable, "
+            f"{report['totals']['replayableWithGaps']} replayable with gaps, "
+            f"{report['totals']['unsupported']} unsupported, "
+            f"{report['totals']['failed']} failed."
+        )
+        for item in report["items"]:
+            if item["reasons"]:
+                print(
+                    f"- {item['networkId']} / {item['datasetId']} / "
+                    f"{item['observationId']}: {item['eligibility']} "
+                    f"({', '.join(item['reasons'])})"
+                )
+    return return_code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    data_dir = resolve_data_dir(args.datadir)
+    data_dir = resolve_data_dir(
+        args.datadir,
+        create_default=args.health_command != "migrate-history",
+    )
+    if args.health_command == "migrate-history":
+        return _run_history_migration(args, parser, data_dir)
     if args.health_command in {"purge", "purge-all", "purge-by-device"}:
         return _run_purge(args, data_dir)
     if args.health_command == "compare":

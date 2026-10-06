@@ -941,6 +941,30 @@ export function renderHealthComparison(container, page, comparison, viewState = 
     appendText(details, "p", `Baseline: ${comparison.baselineState} · Gap: ${comparison.gapState || "unknown"} · Reset: ${comparison.resetState}`);
     appendText(details, "p", `Reasons: ${comparison.reasons?.join(", ") || "none"}`);
     appendText(details, "p", `Before observed ${comparison.beforeObservedAt} · After observed ${comparison.afterObservedAt}`);
+    appendText(
+      details,
+      "p",
+      `Endpoint revisions: Before ${comparison.beforeEndpointRevisionState || "unknown"} · After ${comparison.afterEndpointRevisionState || "unknown"}`,
+    );
+    [
+      ["Before", comparison.beforeEndpointEvaluationContext],
+      ["After", comparison.afterEndpointEvaluationContext],
+    ].forEach(([label, context]) => {
+      if (!context) return;
+      const unavailable = Array.isArray(context.unavailableEvaluationDomains)
+        ? context.unavailableEvaluationDomains.join(", ")
+        : "";
+      const roster = context.historicalRosterRevision === null
+        || context.historicalRosterRevision === undefined
+        ? "roster revision unavailable"
+        : `roster revision ${context.historicalRosterRevision}`;
+      appendText(
+        details,
+        "p",
+        `${label} context: ${unavailable ? `unavailable inputs ${unavailable}; ` : ""}${roster}`,
+        "health-comparison-context",
+      );
+    });
     if (comparison.origin === "derived") {
       appendText(details, "p", "Derived from retained endpoint evidence; not stored.",
         "health-comparison-origin");
@@ -1786,6 +1810,25 @@ function renderHealthAssessmentSummary(container, model) {
     appendText(container, "p",
       `History: ${model.capabilities.observationCount} observations · ${model.capabilities.expectedRosterCount} expected devices`,
       "health-history-summary");
+  }
+  if (assessment.evaluationContextComplete === false) {
+    const unavailable = Array.isArray(assessment.unavailableEvaluationDomains)
+      ? assessment.unavailableEvaluationDomains.join(", ")
+      : "";
+    appendText(
+      container,
+      "p",
+      `Some evaluation context is unavailable${unavailable ? `: ${unavailable}` : ""}.`,
+      "health-context-gap-summary",
+    );
+  }
+  if (assessment.migration) {
+    appendText(
+      container,
+      "p",
+      `Replayed from retained history (source ${assessment.migration.sourceAssessmentId}); migration does not certify network health.`,
+      "health-migration-summary",
+    );
   }
 }
 

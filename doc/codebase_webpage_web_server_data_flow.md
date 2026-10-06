@@ -98,6 +98,7 @@ policy for active Ping and Reset Counters operations.
 ```text
 Dashboard -> POST /api/health/process-dataset -> web server
                  -> td_cli health process-dataset -> hobat_v1.db
+Operator maintenance -> td_cli health migrate-history -> verified backup + schema-8 revisions
 Dashboard -> GET /api/health/* -> web server -> query-only hobat_v1.db read
 Dashboard -> PATCH /api/health/roster/{device_id} -> validate revision/receipt
                  -> atomic roster + lifecycle audit + receipt + reassessment transaction

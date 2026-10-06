@@ -662,6 +662,24 @@ class TDHealthReadService:
             "policyDigest": row["policy_digest"],
             "evaluatorVersion": row["evaluator_version"],
             "profileId": row["profile_id"],
+            "networkRosterRevision": row["network_roster_revision"],
+            "historicalRosterRevision": row["historical_roster_revision"],
+            "evaluationContextComplete": row["evaluation_context_complete"],
+            "verdictContextComplete": row["verdict_context_complete"],
+            "unavailableEvaluationDomains": row[
+                "unavailable_evaluation_domains"
+            ],
+            "migration": (
+                {
+                    "sourceAssessmentId": row[
+                        "migration_source_assessment_id"
+                    ],
+                    "targetEvaluatorVersion": row["evaluator_version"],
+                    "committedAt": row["migration_committed_at"],
+                }
+                if row["migration_source_assessment_id"] is not None
+                else None
+            ),
             "coverage": _decode_json(row["coverage_json"], field="coverage"),
             "findingCount": finding_count,
             "limit": limit,
@@ -706,6 +724,14 @@ class TDHealthReadService:
             "comparisonVersion": row["comparison_version"],
             "beforeAssessmentId": row["before_assessment_id"],
             "afterAssessmentId": row["after_assessment_id"],
+            "beforeEndpointRevisionState": row["before_revision_state"],
+            "afterEndpointRevisionState": row["after_revision_state"],
+            "beforeEndpointEvaluationContext": row[
+                "before_context_metadata"
+            ],
+            "afterEndpointEvaluationContext": row[
+                "after_context_metadata"
+            ],
             "beforeObservationId": row["before_observation_id"],
             "afterObservationId": row["after_observation_id"],
             "baselineAssessmentId": row["before_assessment_id"],

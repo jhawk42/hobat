@@ -138,9 +138,10 @@ explicitly absent. It does not replace OTBR network-wide collection.
 | `td_health_manifest.py`, `td-dataset-manifest.json` | Approved health dataset/profile contracts shared with browser registry metadata |
 | `td_health_rules.py`, `td-health-rules.json` | Health finding catalog validation and stable rule metadata |
 | `td_health_cli.py` | Health processing, comparison, roster, and retention command dispatch |
-| `td_health_processor.py`, `td_health_evaluator.py` | Stable cached-file reads, safe normalization, completeness, and Python-owned verdicts |
-| `td_health_observation_model.py`, `td_health_policy.py` | Frozen domain contracts and validated `snapshot-v2` policy |
+| `td_health_processor.py`, `td_health_evaluator.py` | Stable cached-file reads, safe normalization, completeness, tagged evaluation context, and Python-owned verdicts |
+| `td_health_observation_model.py`, `td_health_policy.py` | Frozen domain contracts and validated health policy |
 | `td_health_observation_store.py`, `td_health_sqlite.py`, `td_health_history.py` | Observation persistence boundary, SQLite transactions, current assessment, and bounded retention |
+| `td_health_migration.py` | Read-only retained-history inventory, replay adapters, backup-first transactional migration, and report generation |
 | `td_health_graph.py`, `td_health_roster.py`, `td_health_comparison.py` | Topology evidence graph, expected/observed roster operations, and stored-assessment comparisons |
 | `td_health_read.py`, `td_webserver.py` health routes | Query-only SQLite projections, assessment pinning, grouped findings, bounded history, and no-store HTTP responses |
 | `td_system_backups.py`, `td_system_cli.py`, `td_system_database.py`, `td_system_ping.py` | Data-directory backup/restore, SQLite database repacking, and bounded host ping |

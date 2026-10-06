@@ -157,6 +157,8 @@ def resolve_data_dir_with_source(
     data_dir: str | os.PathLike[str] | None = None,
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
+    *,
+    create_default: bool = True,
 ) -> TDDataDirResolution:
     """Resolve td_data_dir and include resolution metadata.
 
@@ -190,8 +192,9 @@ def resolve_data_dir_with_source(
         )
 
     local_default = (base_cwd / TD_DATA_DIR_LOCAL_DEFAULT).resolve()
-    created = not local_default.exists()
-    local_default.mkdir(parents=True, exist_ok=True)
+    created = create_default and not local_default.exists()
+    if create_default:
+        local_default.mkdir(parents=True, exist_ok=True)
     return TDDataDirResolution(
         path=local_default,
         source=TDDataDirSource.LOCAL_DEFAULT,
@@ -203,6 +206,8 @@ def resolve_data_dir(
     data_dir: str | os.PathLike[str] | None = None,
     env: Mapping[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
+    *,
+    create_default: bool = True,
 ) -> Path:
     """Resolve the TD data directory using CLI -> ENV -> defaults precedence.
 
@@ -220,6 +225,7 @@ def resolve_data_dir(
         data_dir=data_dir,
         env=env,
         cwd=cwd,
+        create_default=create_default,
     ).path
 
 

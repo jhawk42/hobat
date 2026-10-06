@@ -216,6 +216,9 @@ td_cli process-eve ...
 td_cli health process-dataset --dataset DATASET [--allow-partial] [--dry-run] [--json]
                               [--export-latest [FILE]]
 td_cli health compare --before-assessment ID --after-assessment ID [--dry-run] [--json]
+td_cli health migrate-history --dataset all|DATASET [--network NETWORK_ID]
+                              [--policy-config-dir DIR] [--allow-policy-change]
+                              [--dry-run] [--backup-output DIRECTORY] [--yes] [--json]
 td_cli health purge [--keep-days DAYS] [--dry-run] [--yes] [--json]
 td_cli health purge-all [--dry-run] [--yes] [--json]
 td_cli health purge-by-device --device EXTADDR [--network NETWORK_ID]
@@ -223,8 +226,10 @@ td_cli health purge-by-device --device EXTADDR [--network NETWORK_ID]
 ```
 
 `process-dataset` assesses approved cached snapshots without starting
-collection. `compare` compares two stored assessments. The processing command
-also supports roster administration and policy options; see
+collection. `compare` compares two stored assessments. `migrate-history`
+replays validated retained evidence after an operator-managed backup; run it
+only in a health-writer maintenance window. The processing command also
+supports roster administration and policy options; see
 [Thread Network Health](thread_network_health.md) for its full contract and
 examples.
 

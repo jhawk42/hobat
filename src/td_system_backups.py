@@ -142,7 +142,8 @@ def create_backup(
         raise
 
 
-def _load_and_validate_backup(input_dir: Path) -> dict[str, Any]:
+def validate_backup(input_dir: Path) -> dict[str, Any]:
+    """Validate backup contents, hashes, SQLite integrity, and schema metadata."""
     manifest_path = input_dir / BACKUP_MANIFEST_FILENAME
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -224,7 +225,7 @@ def restore_backup(data_dir: Path, input_dir: Path) -> dict[str, Any]:
         raise BackupError(f"Backup directory does not exist: {input_dir}")
     if _is_within(input_dir, data_dir):
         raise BackupError("Backup input must be outside the data directory")
-    manifest = _load_and_validate_backup(input_dir)
+    manifest = validate_backup(input_dir)
     data_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = data_dir.parent / f".{data_dir.name}.restore-{uuid.uuid4().hex}"
     previous = data_dir.parent / f".{data_dir.name}.previous-{uuid.uuid4().hex}"

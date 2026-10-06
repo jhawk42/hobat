@@ -14,6 +14,7 @@
     "network.observed-link-quality-ratios": ["observedCount", "lq3Ratio", "lq1Ratio"],
     "network.offline-impact": ["offlineDeviceIds", "offlineDeviceRatio", "threshold"],
     "observation.duplicate-source-entry": ["relationshipIds"],
+    "observation.evaluation-context-unavailable": ["unavailableDomains"],
     "device.observed": ["present", "completeness"],
     "device.missing": ["present", "consecutiveCompleteAbsences", "required"],
     "device.offline": ["present", "consecutiveCompleteAbsences", "required"],
@@ -137,6 +138,21 @@
       "thresholdKeys": [],
       "action": "No action required unless duplicates recur across observations.",
       "verify": "Confirm the relationship count is unaffected in the next complete observation."
+    },
+    {
+      "ruleId": "observation.evaluation-context-unavailable",
+      "order": 1080,
+      "title": "Historical Evaluation Context Unavailable",
+      "description": "Identifies evaluator inputs that were not retained or cannot be verified for this observation.",
+      "evidenceKind": "historical",
+      "scopes": ["network"],
+      "roles": [],
+      "relationshipTypes": [],
+      "requiredCapability": null,
+      "materiality": "informational",
+      "thresholdKeys": [],
+      "action": "Treat conclusions that depend on unavailable historical inputs as Unknown.",
+      "verify": "Use a future native assessment with the required inputs retained."
     },
     {
       "ruleId": "device.observed",

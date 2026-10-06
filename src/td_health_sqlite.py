@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import math
 import sqlite3
 from contextlib import closing
 from dataclasses import replace
@@ -13,13 +15,16 @@ from typing import Iterator
 
 from td_health_comparison import (
     COMPARISON_INTERVALS, COMPARISON_VERSION, METRIC_CATALOG, ROUTE64_SAMPLE_CONTRACT_VERSION,
-    ComparisonItem, ComparisonInterval, ComparisonPolicy, comparison_id,
-    derive_comparison, resolve_interval_candidate, source_roles_for_dataset,
+    ComparisonItem, ComparisonInterval, ComparisonPolicy, UnsupportedSourceContractError,
+    comparison_id, derive_comparison, resolve_interval_candidate, source_roles_for_dataset,
+    source_signature,
 )
 from td_health_manifest import load_health_manifest
 from td_health_observation_model import (
     Assessment, Completeness, Confidence, DeviceSample, HealthStatus, MetricSample,
-    Finding, FindingRank, FindingScope, Observation, RelationshipSample, SourceEvidence,
+    EvaluationInputDomain, EvaluationInputState, EvaluationInputs, Finding,
+    FindingRank, FindingScope, Observation, RelationshipSample, SourceEvidence,
+    device_id_from_ext_address,
 )
 from td_health_observation_store import (
     MAX_OBSERVATIONS,
@@ -30,7 +35,7 @@ from td_health_observation_store import (
 from td_health_roster import RosterFact
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 _PURGE_TABLES = (
     "observations",
     "observation_sources",
@@ -48,6 +53,9 @@ _PURGE_TABLES = (
     "roster_mutation_receipts",
     "comparisons",
     "comparison_items",
+    "health_assessment_preferences",
+    "health_assessment_upgrades",
+    "health_history_migrations",
     "device_fact_samples",
     "device_last_known",
     "device_identity_conflicts",
@@ -280,6 +288,168 @@ class ReassessmentBaselineUnavailable(ValueError):
     """Raised when retained evidence cannot reproduce a stored assessment."""
 
 
+def _context_device_references(context_json: str) -> frozenset[str]:
+    try:
+        context = json.loads(context_json)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise sqlite3.DatabaseError(
+            "Stored assessment context is invalid during device purge"
+        ) from exc
+    if not isinstance(context, dict):
+        raise sqlite3.DatabaseError(
+            "Stored assessment context is invalid during device purge"
+        )
+    references: set[str] = set()
+
+    def add_id_list(value: object, description: str) -> None:
+        if not isinstance(value, list) or not all(
+            isinstance(device_id, str) and device_id
+            for device_id in value
+        ):
+            raise sqlite3.DatabaseError(
+                f"Stored {description} is invalid during device purge"
+            )
+        references.update(value)
+
+    def add_absence_map(value: object, description: str) -> None:
+        if not isinstance(value, dict) or not all(
+            isinstance(device_id, str)
+            and device_id
+            and type(count) is int
+            and count >= 0
+            for device_id, count in value.items()
+        ):
+            raise sqlite3.DatabaseError(
+                f"Stored {description} is invalid during device purge"
+            )
+        references.update(value)
+
+    def add_roster_context(value: object, description: str) -> None:
+        if not isinstance(value, dict):
+            raise sqlite3.DatabaseError(
+                f"Stored {description} is invalid during device purge"
+            )
+        records = value.get("records", [])
+        if not isinstance(records, list):
+            raise sqlite3.DatabaseError(
+                f"Stored {description} is invalid during device purge"
+            )
+        for record in records:
+            if not isinstance(record, dict):
+                raise sqlite3.DatabaseError(
+                    f"Stored {description} is invalid during device purge"
+                )
+            device_id = record.get("deviceId")
+            if not isinstance(device_id, str) or not device_id:
+                raise sqlite3.DatabaseError(
+                    f"Stored {description} is invalid during device purge"
+                )
+            references.add(device_id)
+
+    def add_address_map(value: object, description: str) -> None:
+        if not isinstance(value, dict) or not all(
+            isinstance(device_id, str)
+            and device_id
+            and isinstance(addresses, list)
+            and all(isinstance(address, str) for address in addresses)
+            for device_id, addresses in value.items()
+        ):
+            raise sqlite3.DatabaseError(
+                f"Stored {description} is invalid during device purge"
+            )
+        references.update(value)
+
+    for key in ("expectedDeviceIds",):
+        if key in context:
+            add_id_list(context[key], "expected-device context")
+    if "priorCompleteAbsences" in context:
+        add_absence_map(
+            context["priorCompleteAbsences"], "absence-history context"
+        )
+    if "rosterContext" in context:
+        add_roster_context(context["rosterContext"], "roster context")
+    presence = context.get("presenceInputs")
+    if presence is not None:
+        if not isinstance(presence, dict):
+            raise sqlite3.DatabaseError(
+                "Stored presence context is invalid during device purge"
+            )
+        for key in ("observedDeviceIds", "expectedDeviceIds"):
+            if key in presence:
+                add_id_list(presence[key], "presence-device context")
+    evaluation_inputs = context.get("evaluationInputs")
+    if evaluation_inputs is not None:
+        if not isinstance(evaluation_inputs, dict):
+            raise sqlite3.DatabaseError(
+                "Stored evaluation inputs are invalid during device purge"
+            )
+        roster = evaluation_inputs.get("roster")
+        if roster is not None:
+            if not isinstance(roster, dict):
+                raise sqlite3.DatabaseError(
+                    "Stored roster inputs are invalid during device purge"
+                )
+            if "expectedDeviceIds" in roster:
+                add_id_list(
+                    roster["expectedDeviceIds"], "expected-device context"
+                )
+            if "context" in roster:
+                add_roster_context(roster["context"], "roster context")
+        absence = evaluation_inputs.get("absenceHistory")
+        if absence is not None:
+            if not isinstance(absence, dict):
+                raise sqlite3.DatabaseError(
+                    "Stored absence inputs are invalid during device purge"
+                )
+            if "priorCompleteAbsences" in absence:
+                add_absence_map(
+                    absence["priorCompleteAbsences"],
+                    "absence-history context",
+                )
+        addresses = evaluation_inputs.get("deviceIpv6Addresses")
+        if addresses is not None:
+            if not isinstance(addresses, dict):
+                raise sqlite3.DatabaseError(
+                    "Stored address inputs are invalid during device purge"
+                )
+            for key in ("complete", "observed"):
+                if key in addresses:
+                    add_address_map(
+                        addresses[key], "device-address context"
+                    )
+        duplicate_ids = evaluation_inputs.get("duplicateRelationshipIds")
+        if duplicate_ids is not None:
+            add_id_list(duplicate_ids, "duplicate-relationship context")
+            for relationship_id in duplicate_ids:
+                if not relationship_id.startswith("link:"):
+                    raise sqlite3.DatabaseError(
+                        "Stored duplicate-relationship identity is invalid during device purge"
+                    )
+                endpoints = relationship_id.removeprefix("link:").split("->")
+                if len(endpoints) != 2 or not all(endpoints):
+                    raise sqlite3.DatabaseError(
+                        "Stored duplicate-relationship identity is invalid during device purge"
+                    )
+                references.update(endpoints)
+    return frozenset(references)
+
+
+def _finding_device_references(device_ids_json: str) -> frozenset[str]:
+    try:
+        device_ids = json.loads(device_ids_json)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise sqlite3.DatabaseError(
+            "Stored finding device identities are invalid during device purge"
+        ) from exc
+    if not isinstance(device_ids, list) or not all(
+        isinstance(device_id, str) and device_id for device_id in device_ids
+    ):
+        raise sqlite3.DatabaseError(
+            "Stored finding device identities are invalid during device purge"
+        )
+    return frozenset(device_ids)
+
+
 class SQLiteHealthStore:
     def __init__(
         self,
@@ -309,6 +479,18 @@ class SQLiteHealthStore:
             connection.execute("PRAGMA query_only=ON")
         else:
             connection.execute("PRAGMA journal_mode=WAL")
+        return connection
+
+    def _connect_existing_write(self) -> sqlite3.Connection:
+        """Open an existing store for a locked migration without initialization."""
+        if not self.path.is_file():
+            raise FileNotFoundError(f"Health store is not available: {self.path}")
+        connection = sqlite3.connect(
+            f"{self.path.resolve().as_uri()}?mode=rw", timeout=5.0, uri=True
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout=5000")
         return connection
 
     def _initialize(self) -> None:
@@ -518,7 +700,98 @@ class SQLiteHealthStore:
                 if foreign_key_errors:
                     raise sqlite3.DatabaseError("Health schema migration left invalid foreign keys")
                 connection.execute("PRAGMA foreign_keys=ON")
+            if 8 not in applied_versions:
+                self._ensure_schema_v8(connection)
             self._repair_current_assessments(connection)
+
+    @staticmethod
+    def _ensure_schema_v8(connection: sqlite3.Connection) -> None:
+        """Create preference/lineage tables and backfill legacy selections."""
+        for statement in (
+            """CREATE TABLE IF NOT EXISTS health_history_migrations (
+                migration_id TEXT PRIMARY KEY,
+                network_id TEXT NOT NULL,
+                dataset_id TEXT NOT NULL,
+                target_contract_digest TEXT NOT NULL,
+                source_inventory_digest TEXT NOT NULL,
+                input_schema_version INTEGER NOT NULL,
+                output_schema_version INTEGER NOT NULL,
+                started_at TEXT NOT NULL,
+                committed_at TEXT NOT NULL,
+                backup_path TEXT NOT NULL,
+                backup_manifest_digest TEXT NOT NULL,
+                counts_json TEXT NOT NULL,
+                reasons_json TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS health_assessment_upgrades (
+                source_assessment_id TEXT NOT NULL
+                    REFERENCES assessments(assessment_id) ON DELETE CASCADE,
+                target_contract_digest TEXT NOT NULL,
+                target_assessment_id TEXT NOT NULL
+                    REFERENCES assessments(assessment_id) ON DELETE CASCADE,
+                migration_id TEXT NOT NULL
+                    REFERENCES health_history_migrations(migration_id) ON DELETE RESTRICT,
+                replay_input_digest TEXT NOT NULL,
+                unavailable_domains_json TEXT NOT NULL,
+                PRIMARY KEY (source_assessment_id, target_contract_digest),
+                UNIQUE (target_assessment_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS health_assessment_preferences (
+                observation_id TEXT PRIMARY KEY
+                    REFERENCES observations(observation_id) ON DELETE CASCADE,
+                assessment_id TEXT NOT NULL
+                    REFERENCES assessments(assessment_id) ON DELETE CASCADE,
+                selection_basis_assessment_id TEXT NOT NULL
+                    REFERENCES assessments(assessment_id) ON DELETE CASCADE,
+                origin TEXT NOT NULL CHECK (origin IN ('native', 'migration')),
+                migration_id TEXT
+                    REFERENCES health_history_migrations(migration_id) ON DELETE RESTRICT,
+                CHECK ((origin = 'native' AND migration_id IS NULL)
+                    OR (origin = 'migration' AND migration_id IS NOT NULL))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_health_upgrades_target "
+            "ON health_assessment_upgrades(target_assessment_id)",
+            "CREATE INDEX IF NOT EXISTS idx_health_upgrades_migration "
+            "ON health_assessment_upgrades(migration_id)",
+            "CREATE INDEX IF NOT EXISTS idx_health_preferences_assessment "
+            "ON health_assessment_preferences(assessment_id)",
+            "CREATE INDEX IF NOT EXISTS idx_health_preferences_basis "
+            "ON health_assessment_preferences(selection_basis_assessment_id)",
+        ):
+            connection.execute(statement)
+
+        observations = connection.execute(
+            """SELECT o.observation_id, a.assessment_id, a.assessed_at,
+                      a.network_roster_revision
+               FROM observations o JOIN assessments a USING (observation_id)
+               ORDER BY o.observation_id"""
+        ).fetchall()
+        by_observation: dict[str, list[sqlite3.Row]] = {}
+        for row in observations:
+            by_observation.setdefault(row["observation_id"], []).append(row)
+        for observation_id, candidates in by_observation.items():
+            selected = max(
+                candidates,
+                key=lambda row: (
+                    int(row["network_roster_revision"]),
+                    SQLiteHealthStore._utc_instant(row["assessed_at"]),
+                    row["assessment_id"],
+                ),
+            )
+            connection.execute(
+                """INSERT OR IGNORE INTO health_assessment_preferences
+                   (observation_id, assessment_id, selection_basis_assessment_id,
+                    origin, migration_id)
+                   VALUES (?, ?, ?, 'native', NULL)""",
+                (
+                    observation_id,
+                    selected["assessment_id"],
+                    selected["assessment_id"],
+                ),
+            )
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (8, CURRENT_TIMESTAMP)"
+        )
 
     def save_processing_result(
         self, observation: Observation, assessment: Assessment,
@@ -540,16 +813,25 @@ class SQLiteHealthStore:
                         "Roster changed during health processing; retry with the current roster."
                     )
             observation_created = self._insert_observation(connection, observation)
+            had_assessment_before = connection.execute(
+                "SELECT 1 FROM assessments WHERE observation_id=? LIMIT 1",
+                (observation.observation_id,),
+            ).fetchone() is not None
             if not observation_created and assessment.sample_contract_version == ROUTE64_SAMPLE_CONTRACT_VERSION:
                 versions = {row[0] for row in connection.execute(
                     "SELECT DISTINCT sample_contract_version FROM assessments WHERE observation_id=?",
                     (observation.observation_id,),
                 )}
-                if versions != {ROUTE64_SAMPLE_CONTRACT_VERSION}:
+                if versions and versions != {ROUTE64_SAMPLE_CONTRACT_VERSION}:
                     raise ValueError("Cannot upgrade immutable observation samples to a new sample contract")
             if observation_created and roster_facts:
                 self._insert_roster_facts(connection, observation, roster_facts)
             assessment_created = self._insert_assessment(connection, assessment)
+            self.consider_native_preference(
+                connection,
+                assessment.assessment_id,
+                new_observation=observation_created or not had_assessment_before,
+            )
             self._auto_compare(connection, observation, assessment)
             self._set_current_assessment(
                 connection, observation.network_id, observation.dataset_id
@@ -734,7 +1016,8 @@ class SQLiteHealthStore:
     @staticmethod
     def _store_comparison(connection: sqlite3.Connection, before: tuple[Observation, Assessment],
                           after: tuple[Observation, Assessment], interval: ComparisonInterval,
-                          items: tuple[ComparisonItem, ...]) -> str:
+                          items: tuple[ComparisonItem, ...], *,
+                          enforce_retention: bool = True) -> str:
         old_obs, old_assessment = before
         new_obs, new_assessment = after
         reset_states = {item.reset_evidence.state for item in items if item.reset_evidence}
@@ -784,11 +1067,12 @@ class SQLiteHealthStore:
                  item.subject_id if item.scope == "relationship" and has_before else None,
                  item.subject_id if item.scope == "relationship" and has_after else None),
             )
-        connection.execute(
-            """DELETE FROM comparisons WHERE comparison_id IN (
-               SELECT comparison_id FROM comparisons ORDER BY after_observed_at DESC,
-               comparison_id DESC LIMIT -1 OFFSET 2000)"""
-        )
+        if enforce_retention:
+            connection.execute(
+                """DELETE FROM comparisons WHERE comparison_id IN (
+                   SELECT comparison_id FROM comparisons ORDER BY after_observed_at DESC,
+                   comparison_id DESC LIMIT -1 OFFSET 2000)"""
+            )
         return interval.comparison_id
 
     @staticmethod
@@ -858,7 +1142,124 @@ class SQLiteHealthStore:
                    ORDER BY after_observed_at DESC, comparison_id DESC LIMIT ? OFFSET ?""",
                 (network_id, dataset_id, limit, offset),
             ).fetchall()
-            return [dict(row) for row in rows], total
+            result = []
+            for value in rows:
+                row = dict(value)
+                for side in ("before", "after"):
+                    assessment_id = row[f"{side}_assessment_id"]
+                    observation_id = row[f"{side}_observation_id"]
+                    row[f"{side}_context_metadata"] = (
+                        self.assessment_context_metadata(
+                            connection, assessment_id
+                        )
+                        if row[f"{side}_retained"]
+                        else None
+                    )
+                    schema_version = int(
+                        connection.execute(
+                            "SELECT MAX(version) FROM schema_migrations"
+                        ).fetchone()[0]
+                        or 0
+                    )
+                    if not row[f"{side}_retained"]:
+                        revision_state = "pruned"
+                    elif schema_version < 8:
+                        revision_state = "preferred"
+                    else:
+                        preference = self.preferred_assessment_for_observation_on_connection(
+                            connection, observation_id
+                        )
+                        revision_state = (
+                            "preferred"
+                            if preference["assessment_id"] == assessment_id
+                            else "superseded"
+                        )
+                    row[f"{side}_revision_state"] = revision_state
+                result.append(row)
+            return result, total
+
+    @staticmethod
+    def assessment_context_metadata(
+        connection: sqlite3.Connection, assessment_id: str
+    ) -> dict:
+        schema_version = int(
+            connection.execute(
+                "SELECT MAX(version) FROM schema_migrations"
+            ).fetchone()[0]
+            or 0
+        )
+        assessment_columns = {
+            item["name"]
+            for item in connection.execute("PRAGMA table_info(assessments)")
+        }
+        roster_revision = (
+            "a.network_roster_revision"
+            if "network_roster_revision" in assessment_columns
+            else "0 AS network_roster_revision"
+        )
+        if schema_version >= 8:
+            row = connection.execute(
+                f"""SELECT a.coverage_json, a.reproduction_context_json,
+                          a.evaluator_version, {roster_revision},
+                          u.source_assessment_id, m.committed_at
+                   FROM assessments a
+                   LEFT JOIN health_assessment_upgrades u
+                     ON u.target_assessment_id=a.assessment_id
+                   LEFT JOIN health_history_migrations m USING (migration_id)
+                   WHERE a.assessment_id=?""",
+                (assessment_id,),
+            ).fetchone()
+        else:
+            row = connection.execute(
+                f"""SELECT coverage_json, reproduction_context_json,
+                          evaluator_version,
+                          {"network_roster_revision" if "network_roster_revision" in assessment_columns else "0 AS network_roster_revision"},
+                          NULL AS source_assessment_id, NULL AS committed_at
+                   FROM assessments WHERE assessment_id=?""",
+                (assessment_id,),
+            ).fetchone()
+        if row is None:
+            raise sqlite3.DatabaseError("Assessment context metadata is missing")
+        try:
+            coverage = json.loads(row["coverage_json"])
+            context = json.loads(row["reproduction_context_json"])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise sqlite3.DatabaseError(
+                "Stored assessment context metadata is invalid"
+            ) from exc
+        if not isinstance(coverage, dict) or not isinstance(context, dict):
+            raise sqlite3.DatabaseError("Stored assessment context metadata is invalid")
+        inputs = context.get("evaluationInputs")
+        domains = inputs.get("domains") if isinstance(inputs, dict) else None
+        roster_domain = domains.get("roster") if isinstance(domains, dict) else None
+        historical_revision = (
+            context.get("networkRosterRevision")
+            if isinstance(roster_domain, dict)
+            and roster_domain.get("state") == "available"
+            else None
+        )
+        return {
+            "evaluationContextComplete": coverage.get(
+                "evaluationContextComplete"
+            ),
+            "verdictContextComplete": coverage.get(
+                "verdictContextComplete"
+            ),
+            "unavailableEvaluationDomains": coverage.get(
+                "unavailableEvaluationDomains"
+            ),
+            "networkRosterRevision": row["network_roster_revision"],
+            "historicalRosterRevision": historical_revision,
+            "migration": (
+                {
+                    "sourceAssessmentId": row["source_assessment_id"],
+                    "targetEvaluatorVersion": row["evaluator_version"],
+                    "committedAt": row["committed_at"],
+                }
+                if row["source_assessment_id"] is not None
+                else None
+            ),
+        }
 
     @staticmethod
     def _utc_instant(value: str) -> datetime:
@@ -911,12 +1312,9 @@ class SQLiteHealthStore:
                 reverse=True,
             )
             by_id = {row["assessment_id"]: row for row in records}
-            candidate_records: list[dict] = []
-            seen_observations: set[str] = set()
-            for row in records:
-                if row["observation_id"] not in seen_observations:
-                    candidate_records.append(row)
-                    seen_observations.add(row["observation_id"])
+            candidate_records = self.preferred_assessments_on_connection(
+                connection, records
+            )
             if selected_assessment_id and selected_assessment_id not in by_id:
                 raise KeyError("Selected assessment endpoint not found")
             if side == "before":
@@ -976,6 +1374,9 @@ class SQLiteHealthStore:
             def public(row: dict | None) -> dict | None:
                 if row is None:
                     return None
+                metadata = self.assessment_context_metadata(
+                    connection, row["assessment_id"]
+                )
                 return {
                     "assessmentId": row["assessment_id"],
                     "networkRosterRevision": row["network_roster_revision"],
@@ -987,6 +1388,7 @@ class SQLiteHealthStore:
                     "observedAt": row["observed_at"],
                     "assessedAt": row["assessed_at"],
                     "completeness": row["completeness"],
+                    **metadata,
                 }
 
             selected_after = (
@@ -1043,6 +1445,39 @@ class SQLiteHealthStore:
         ).fetchone()
         if row is None:
             return None
+        header = dict(row)
+        for side in ("before", "after"):
+            header[f"{side}_context_metadata"] = (
+                SQLiteHealthStore.assessment_context_metadata(
+                    connection, row[f"{side}_assessment_id"]
+                )
+                if row[f"{side}_retained"]
+                else None
+            )
+            if not row[f"{side}_retained"]:
+                state = "pruned"
+            else:
+                schema_version = int(
+                    connection.execute(
+                        "SELECT MAX(version) FROM schema_migrations"
+                    ).fetchone()[0]
+                    or 0
+                )
+                if schema_version < 8:
+                    state = "preferred"
+                else:
+                    preference = (
+                        SQLiteHealthStore.preferred_assessment_for_observation_on_connection(
+                            connection, row[f"{side}_observation_id"]
+                        )
+                    )
+                    state = (
+                        "preferred"
+                        if preference["assessment_id"]
+                        == row[f"{side}_assessment_id"]
+                        else "superseded"
+                    )
+            header[f"{side}_revision_state"] = state
         pruned = not row["before_retained"] or not row["after_retained"]
         effective_result = "CASE WHEN ? OR comparable=0 THEN 'unknown' ELSE change END"
         filters = []
@@ -1063,7 +1498,7 @@ class SQLiteHealthStore:
                 ORDER BY scope, subject_id, item_kind, metric, item_id LIMIT ? OFFSET ?""",
             (comparison_id_value, *parameters, limit, offset),
         ).fetchall()
-        return {**dict(row), "filtered_item_count": count}, [dict(item) for item in items]
+        return {**header, "filtered_item_count": count}, [dict(item) for item in items]
 
     def compare_endpoint_pair(
         self, *, network_id: str, dataset_id: str, before_assessment_id: str,
@@ -1115,6 +1550,32 @@ class SQLiteHealthStore:
                 if page is not None:
                     return "stored", page[0], page[1]
 
+            endpoint_metadata: dict[str, dict] = {}
+            for side, endpoint_id in (
+                ("before", before_assessment_id),
+                ("after", after_assessment_id),
+            ):
+                endpoint_metadata[side] = self.assessment_context_metadata(
+                    connection, endpoint_id
+                )
+                observation_id = endpoint_rows[endpoint_id]["observation_id"]
+                schema_version = int(
+                    connection.execute(
+                        "SELECT MAX(version) FROM schema_migrations"
+                    ).fetchone()[0]
+                    or 0
+                )
+                if schema_version < 8:
+                    endpoint_metadata[f"{side}_revision_state"] = "preferred"
+                else:
+                    preference = self.preferred_assessment_for_observation_on_connection(
+                        connection, observation_id
+                    )
+                    endpoint_metadata[f"{side}_revision_state"] = (
+                        "preferred"
+                        if preference["assessment_id"] == endpoint_id
+                        else "superseded"
+                    )
             before = self._endpoint(connection, before_assessment_id)
             after = self._endpoint(connection, after_assessment_id)
             if before is None or after is None:
@@ -1134,6 +1595,14 @@ class SQLiteHealthStore:
                 "comparison_version": COMPARISON_VERSION,
                 "before_assessment_id": interval.before_assessment_id,
                 "after_assessment_id": interval.after_assessment_id,
+                "before_context_metadata": endpoint_metadata["before"],
+                "after_context_metadata": endpoint_metadata["after"],
+                "before_revision_state": endpoint_metadata[
+                    "before_revision_state"
+                ],
+                "after_revision_state": endpoint_metadata[
+                    "after_revision_state"
+                ],
                 "before_observation_id": interval.baseline_observation_id,
                 "after_observation_id": interval.after_observation_id,
                 "before_observed_at": interval.before_observed_at,
@@ -1394,41 +1863,27 @@ class SQLiteHealthStore:
     ) -> tuple[dict, list[dict]] | None:
         with closing(self._connect()) as connection:
             connection.execute("BEGIN")
-            row = connection.execute(
-                """SELECT c.*, EXISTS(SELECT 1 FROM observations o
-                   WHERE o.observation_id=c.before_observation_id) AS before_retained,
-                   EXISTS(SELECT 1 FROM observations o
-                   WHERE o.observation_id=c.after_observation_id) AS after_retained
-                   FROM comparisons c WHERE comparison_id=?""", (comparison_id,),
-            ).fetchone()
-            if row is None:
-                return None
-            pruned = not row["before_retained"] or not row["after_retained"]
-            effective_result = "CASE WHEN ? OR comparable=0 THEN 'unknown' ELSE change END"
-            filters = []
-            parameters: list[object] = []
-            if scope != "all":
-                filters.append("scope=?")
-                parameters.append(scope)
-            if result != "all":
-                filters.append(f"{effective_result}=?")
-                parameters.extend((pruned, result))
-            where = " AND ".join(filters) or "1"
-            count = connection.execute(
-                f"SELECT COUNT(*) FROM comparison_items WHERE comparison_id=? AND {where}",
-                (comparison_id, *parameters),
-            ).fetchone()[0]
-            items = connection.execute(
-                f"""SELECT * FROM comparison_items WHERE comparison_id=? AND {where}
-                    ORDER BY scope, subject_id, item_kind, metric, item_id LIMIT ? OFFSET ?""",
-                (comparison_id, *parameters, limit, offset),
-            ).fetchall()
-            return {**dict(row), "filtered_item_count": count}, [dict(item) for item in items]
+            return self._comparison_page_on_connection(
+                connection,
+                comparison_id_value=comparison_id,
+                limit=limit,
+                offset=offset,
+                scope=scope,
+                result=result,
+            )
 
-    def _auto_compare(self, connection: sqlite3.Connection, observation: Observation,
-                      assessment: Assessment) -> None:
+    def _auto_compare(
+        self,
+        connection: sqlite3.Connection,
+        observation: Observation,
+        assessment: Assessment,
+        *,
+        allowed_assessment_ids: frozenset[str] | None = None,
+        reserved_comparison_ids: frozenset[str] | None = None,
+        enforce_retention: bool = True,
+    ) -> tuple[int, int]:
         if observation.completeness is not Completeness.COMPLETE:
-            return
+            return (0, 0)
         try:
             after_time = self._utc_instant(observation.observed_at)
         except sqlite3.DatabaseError:
@@ -1442,6 +1897,11 @@ class SQLiteHealthStore:
                 (observation.network_id, observation.dataset_id),
             )
         ]
+        if allowed_assessment_ids is not None:
+            candidates = [
+                row for row in candidates
+                if row["assessment_id"] in allowed_assessment_ids
+            ]
         try:
             candidate_times = {
                 row["assessment_id"]: (
@@ -1457,7 +1917,7 @@ class SQLiteHealthStore:
             and candidate_times[row["assessment_id"]][0] == after_time
             for row in candidates
         ):
-            return
+            return (0, 0)
 
         candidates.sort(
             key=lambda row: (
@@ -1468,10 +1928,9 @@ class SQLiteHealthStore:
             ),
             reverse=True,
         )
-        latest_by_observation: dict[str, dict] = {}
-        for row in candidates:
-            latest_by_observation.setdefault(row["observation_id"], row)
-        candidates = list(latest_by_observation.values())
+        candidates = self.preferred_assessments_on_connection(
+            connection, candidates
+        )
         adjacent = next(
             (row for row in candidates
              if row["completeness"] == "complete"
@@ -1496,7 +1955,14 @@ class SQLiteHealthStore:
         unique_target_ids = list(dict.fromkeys(target_ids))
         after: tuple[Observation, Assessment] | None = None
         policy = ComparisonPolicy()
+        stored_count = 0
+        deferred_count = 0
         for before_assessment_id in unique_target_ids:
+            if allowed_assessment_ids is not None and (
+                before_assessment_id not in allowed_assessment_ids
+                or assessment.assessment_id not in allowed_assessment_ids
+            ):
+                continue
             expected_id = comparison_id(
                 before_assessment_id, assessment.assessment_id, policy
             )
@@ -1512,6 +1978,19 @@ class SQLiteHealthStore:
                         "Stored health comparison identity has inconsistent policy metadata"
                     )
                 continue
+            if (
+                reserved_comparison_ids is not None
+                and expected_id not in reserved_comparison_ids
+            ):
+                deferred_count += 1
+                continue
+            if not enforce_retention and int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM comparisons"
+                ).fetchone()[0]
+            ) >= 2000:
+                deferred_count += 1
+                continue
             before = self._endpoint(connection, before_assessment_id)
             if before is None:
                 raise sqlite3.DatabaseError(
@@ -1524,7 +2003,21 @@ class SQLiteHealthStore:
                     "Retained comparison endpoint could not be reconstructed"
                 )
             interval, items = self._derive_pair(connection, before, after)
-            self._store_comparison(connection, before, after, interval, items)
+            if enforce_retention:
+                self._store_comparison(
+                    connection, before, after, interval, items
+                )
+            else:
+                self._store_comparison(
+                    connection,
+                    before,
+                    after,
+                    interval,
+                    items,
+                    enforce_retention=False,
+                )
+            stored_count += 1
+        return stored_count, deferred_count
 
     def reconcile_current_assessments(self, active_dataset_ids: tuple[str, ...]) -> int:
         if not active_dataset_ids:
@@ -1747,10 +2240,213 @@ class SQLiteHealthStore:
         return count
 
     @staticmethod
+    def _retained_observation(
+        connection: sqlite3.Connection, assessment_row: sqlite3.Row
+    ) -> Observation:
+        from td_health_manifest import load_health_manifest
+
+        dataset = load_health_manifest().dataset(assessment_row["dataset_id"])
+        safe_sources = {
+            *dataset.files,
+            dataset.health_profile.identity_file,
+            *dataset.health_profile.required_outcomes,
+        }
+
+        def source_files(raw: str) -> tuple[str, ...]:
+            try:
+                values = json.loads(raw)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise sqlite3.DatabaseError("Invalid stored source filename list") from exc
+            if not isinstance(values, list) or not all(
+                isinstance(value, str) and value in safe_sources for value in values
+            ):
+                raise sqlite3.DatabaseError("Stored sample references an undeclared source")
+            return tuple(values)
+
+        try:
+            SQLiteHealthStore._utc_instant(assessment_row["observed_at"])
+            SQLiteHealthStore._utc_instant(assessment_row["ingested_at"])
+            completeness = Completeness(assessment_row["completeness"])
+        except (ValueError, sqlite3.DatabaseError) as exc:
+            raise sqlite3.DatabaseError("Invalid stored observation metadata") from exc
+        sources = tuple(
+            SourceEvidence(
+                item["filename"], item["digest"], item["kind"], item["state"],
+                item["source_observed_at"],
+            )
+            for item in connection.execute(
+                """SELECT filename, digest, kind, state, source_observed_at
+                   FROM observation_sources WHERE observation_id=? ORDER BY filename""",
+                (assessment_row["observation_id"],),
+            )
+        )
+        for item in sources:
+            if item.filename not in safe_sources:
+                raise sqlite3.DatabaseError("Stored observation references an undeclared source")
+            if item.source_observed_at is not None:
+                SQLiteHealthStore._utc_instant(item.source_observed_at)
+        verified_source_digest = hashlib.sha256(
+            "\0".join(
+                f"{item.filename}:{item.digest}"
+                for item in sorted(sources, key=lambda source: source.filename)
+            ).encode("utf-8")
+        ).hexdigest()
+        if verified_source_digest != assessment_row["source_set_digest"]:
+            raise sqlite3.DatabaseError("Stored observation source digest is inconsistent")
+        devices: list[DeviceSample] = []
+        for item in connection.execute(
+            """SELECT device_id, role, state, is_border_router, source_files_json
+               FROM device_samples WHERE observation_id=? ORDER BY device_id""",
+            (assessment_row["observation_id"],),
+        ):
+            try:
+                device_id = device_id_from_ext_address(
+                    item["device_id"].removeprefix("extaddr:")
+                )
+            except ValueError as exc:
+                raise sqlite3.DatabaseError("Invalid stored device identity") from exc
+            if device_id != item["device_id"]:
+                raise sqlite3.DatabaseError("Noncanonical stored device identity")
+            devices.append(
+                DeviceSample(
+                    device_id,
+                    device_id.removeprefix("extaddr:"),
+                    item["role"],
+                    item["state"],
+                    bool(item["is_border_router"]),
+                    source_files(item["source_files_json"]),
+                )
+            )
+        relationships: list[RelationshipSample] = []
+        for item in connection.execute(
+            """SELECT rs.*, r.from_device_id, r.to_device_id
+               FROM relationship_samples rs JOIN relationships r USING (relationship_id)
+               WHERE rs.observation_id=? ORDER BY rs.relationship_id""",
+            (assessment_row["observation_id"],),
+        ):
+            endpoints = (item["from_device_id"], item["to_device_id"])
+            try:
+                if any(
+                    device_id_from_ext_address(
+                        device_id.removeprefix("extaddr:")
+                    ) != device_id
+                    for device_id in endpoints
+                ):
+                    raise ValueError("noncanonical endpoint")
+            except (AttributeError, ValueError) as exc:
+                raise sqlite3.DatabaseError("Invalid stored relationship endpoint")
+            if endpoints[0] == endpoints[1]:
+                raise sqlite3.DatabaseError("Self relationship endpoint")
+            numeric_values = (
+                item["average_rssi"], item["last_rssi"], item["link_margin"],
+                item["frame_error_rate"], item["message_error_rate"],
+                item["queued_message_count"],
+            )
+            if any(
+                value is not None and not math.isfinite(float(value))
+                for value in numeric_values
+            ):
+                raise sqlite3.DatabaseError("Non-finite stored relationship sample")
+            if item["queued_message_count"] is not None and item["queued_message_count"] < 0:
+                raise sqlite3.DatabaseError("Negative stored queue count")
+            if item["link_quality_in"] is not None and item["link_quality_in"] not in {0, 1, 2, 3}:
+                raise sqlite3.DatabaseError("Invalid stored inbound link quality")
+            if item["link_quality_out"] is not None and item["link_quality_out"] not in {0, 1, 2, 3}:
+                raise sqlite3.DatabaseError("Invalid stored outbound link quality")
+            relationships.append(
+                RelationshipSample(
+                    item["relationship_id"], item["relationship_type"],
+                    item["from_device_id"], item["to_device_id"],
+                    item["link_quality_in"], item["link_quality_out"],
+                    item["average_rssi"], item["last_rssi"], item["link_margin"],
+                    item["frame_error_rate"], item["message_error_rate"],
+                    item["reporter_device_id"], source_files(item["source_files_json"]),
+                    item["queued_message_count"],
+                )
+            )
+        metrics: list[MetricSample] = []
+        metric_units = {
+            "route64Coverage": "flag",
+            "totalMacErrorRatio": "ratio",
+            "totalMacDiscardRatio": "ratio",
+            "parentChanges": "count",
+            "partitionIdChanges": "count",
+            "betterPartitionAttachAttempts": "count",
+            "totalParentPartitionChanges": "count",
+            "routerRolePercent": "percent",
+            "detachedDisabledPercent": "percent",
+            "diagnosticTimeout": "flag",
+            "observedLinkQuality1Count": "count",
+            "observedLinkQuality2Count": "count",
+            "observedLinkQuality3Count": "count",
+        }
+        for item in connection.execute(
+            """SELECT device_id, metric, value, unit, denominator, source_file
+               FROM metric_samples WHERE observation_id=?
+               ORDER BY device_id, metric, source_file""",
+            (assessment_row["observation_id"],),
+        ):
+            if (
+                device_id_from_ext_address(
+                    item["device_id"].removeprefix("extaddr:")
+                ) != item["device_id"]
+                or
+                not math.isfinite(float(item["value"]))
+                or item["denominator"] is not None
+                and (
+                    not math.isfinite(float(item["denominator"]))
+                    or item["denominator"] < 0
+                )
+                or item["unit"] == "count" and item["value"] < 0
+                or item["source_file"] not in safe_sources
+            ):
+                raise sqlite3.DatabaseError("Invalid stored metric sample")
+            if metric_units.get(item["metric"]) != item["unit"]:
+                raise sqlite3.DatabaseError("Stored metric unit does not match its contract")
+            if (
+                item["unit"] == "ratio"
+                and (
+                    item["denominator"] is None
+                    or item["denominator"] <= 0
+                    or not 0 <= item["value"] <= 1
+                )
+                or item["unit"] == "percent"
+                and not 0 <= item["value"] <= 100
+                or item["unit"] == "flag" and item["value"] not in {0, 1}
+            ):
+                raise sqlite3.DatabaseError("Stored metric value is outside its contract")
+            metrics.append(
+                MetricSample(
+                    item["device_id"], item["metric"], item["value"], item["unit"],
+                    item["denominator"], item["source_file"],
+                )
+            )
+        observation = Observation(
+            assessment_row["observation_id"], assessment_row["datasource_id"],
+            assessment_row["dataset_id"], assessment_row["network_id"],
+            assessment_row["network_name"], assessment_row["observed_at"],
+            assessment_row["ingested_at"], completeness,
+            assessment_row["source_set_digest"], sources, tuple(devices),
+            tuple(relationships), tuple(metrics),
+        )
+        try:
+            source_signature(
+                observation, source_roles_for_dataset(dataset)
+            )
+        except (UnsupportedSourceContractError, ValueError) as exc:
+            raise sqlite3.DatabaseError(
+                "Stored observation violates its approved source contract"
+            ) from exc
+        return observation
+
+    @staticmethod
     def _reassessment_inputs(
         connection: sqlite3.Connection, assessment_id: str
-    ) -> tuple[Observation, Assessment, object, object, dict]:
-        from td_health_evaluator import EVALUATOR_VERSION
+    ) -> tuple[Observation, Assessment, object, object, dict, EvaluationInputs]:
+        from td_health_evaluator import (
+            EVALUATOR_VERSION,
+            evaluation_inputs_from_payload,
+        )
         from td_health_manifest import HealthProfile
         from td_health_policy import HealthPolicy
 
@@ -1774,7 +2470,7 @@ class SQLiteHealthStore:
             ) from exc
         if (
             not isinstance(context, dict)
-            or context.get("schemaVersion") != 1
+            or context.get("schemaVersion") != 2
             or context.get("evaluatorVersion") != EVALUATOR_VERSION
             or row["evaluator_version"] != EVALUATOR_VERSION
         ):
@@ -1821,84 +2517,48 @@ class SQLiteHealthStore:
             raise ReassessmentBaselineUnavailable(
                 "reassessment-baseline-unavailable: stored policy identity does not match its saved context"
             )
+        try:
+            evaluation_inputs = evaluation_inputs_from_payload(
+                context.get("evaluationInputs")
+            )
+        except (TypeError, ValueError) as exc:
+            raise ReassessmentBaselineUnavailable(
+                "reassessment-baseline-unavailable: saved evaluation inputs are invalid"
+            ) from exc
+        if not isinstance(context.get("presenceInputs"), dict) or (
+            context["presenceInputs"].get("sampleContractVersion")
+            != row["sample_contract_version"]
+        ):
+            raise ReassessmentBaselineUnavailable(
+                "reassessment-baseline-unavailable: saved sample contract is inconsistent"
+            )
 
-        sources = tuple(
-            SourceEvidence(
-                item["filename"], item["digest"], item["kind"], item["state"],
-                item["source_observed_at"],
-            )
-            for item in connection.execute(
-                """SELECT filename, digest, kind, state, source_observed_at
-                   FROM observation_sources WHERE observation_id=? ORDER BY filename""",
-                (row["observation_id"],),
-            )
-        )
-        devices = tuple(
-            DeviceSample(
-                item["device_id"],
-                item["device_id"].removeprefix("extaddr:"),
-                item["role"],
-                item["state"],
-                bool(item["is_border_router"]),
-                tuple(json.loads(item["source_files_json"])),
-            )
-            for item in connection.execute(
-                """SELECT device_id, role, state, is_border_router, source_files_json
-                   FROM device_samples WHERE observation_id=? ORDER BY device_id""",
-                (row["observation_id"],),
-            )
-        )
-        relationships = tuple(
-            RelationshipSample(
-                item["relationship_id"], item["relationship_type"],
-                item["from_device_id"], item["to_device_id"],
-                item["link_quality_in"], item["link_quality_out"],
-                item["average_rssi"], item["last_rssi"], item["link_margin"],
-                item["frame_error_rate"], item["message_error_rate"],
-                item["reporter_device_id"], tuple(json.loads(item["source_files_json"])),
-                item["queued_message_count"],
-            )
-            for item in connection.execute(
-                """SELECT rs.*, r.from_device_id, r.to_device_id
-                   FROM relationship_samples rs JOIN relationships r USING (relationship_id)
-                   WHERE rs.observation_id=? ORDER BY rs.relationship_id""",
-                (row["observation_id"],),
-            )
-        )
-        metrics = tuple(
-            MetricSample(
-                item["device_id"], item["metric"], item["value"], item["unit"],
-                item["denominator"], item["source_file"],
-            )
-            for item in connection.execute(
-                """SELECT device_id, metric, value, unit, denominator, source_file
-                   FROM metric_samples WHERE observation_id=?
-                   ORDER BY device_id, metric, source_file""",
-                (row["observation_id"],),
-            )
-        )
-        observation = Observation(
-            row["observation_id"], row["datasource_id"], row["dataset_id"],
-            row["network_id"], row["network_name"], row["observed_at"],
-            row["ingested_at"], Completeness(row["completeness"]),
-            row["source_set_digest"], sources, devices, relationships, metrics,
-        )
+        observation = SQLiteHealthStore._retained_observation(connection, row)
         original = Assessment(
-            row["assessment_id"], row["observation_id"], row["policy_version"],
-            row["policy_digest"], row["evaluator_version"], row["profile_id"],
-            HealthStatus(row["status"]), Confidence(row["confidence"]),
-            json.loads(row["coverage_json"]), row["assessed_at"],
-            row["sample_contract_version"], row["health_policy_digest"],
-            row["roster_context_digest"], row["presence_input_digest"],
-            row["network_roster_revision"], context,
+            assessment_id=row["assessment_id"],
+            observation_id=row["observation_id"],
+            policy_version=row["policy_version"],
+            policy_digest=row["policy_digest"],
+            evaluator_version=row["evaluator_version"],
+            profile_id=row["profile_id"],
+            status=HealthStatus(row["status"]),
+            confidence=Confidence(row["confidence"]),
+            coverage=json.loads(row["coverage_json"]),
+            findings=(),
+            assessed_at=row["assessed_at"],
+            sample_contract_version=row["sample_contract_version"],
+            health_policy_digest=row["health_policy_digest"],
+            roster_context_digest=row["roster_context_digest"],
+            presence_input_digest=row["presence_input_digest"],
+            network_roster_revision=row["network_roster_revision"],
+            reproduction_context=context,
         )
-        return observation, original, policy, profile, context
+        return observation, original, policy, profile, context, evaluation_inputs
 
     def _reassess_network(
         self, connection: sqlite3.Connection, network_id: str
     ) -> list[dict]:
         from td_health_evaluator import (
-            EVALUATOR_VERSION,
             aggregate_assessment_state,
             evaluate_observation,
         )
@@ -1931,9 +2591,24 @@ class SQLiteHealthStore:
         ]
         revisions: list[dict] = []
         for pointer in pointers:
-            observation, previous, policy, profile, old_context = self._reassessment_inputs(
+            (
+                observation,
+                previous,
+                policy,
+                profile,
+                old_context,
+                old_evaluation_inputs,
+            ) = self._reassessment_inputs(
                 connection, pointer["assessment_id"]
             )
+            if (
+                old_evaluation_inputs.roster.state is EvaluationInputState.UNAVAILABLE
+                or old_evaluation_inputs.absence_history.state
+                is EvaluationInputState.UNAVAILABLE
+            ):
+                raise ReassessmentBaselineUnavailable(
+                    "reassessment-baseline-unavailable: historical roster or absence context is unavailable; refresh health from retained snapshots"
+                )
             endpoint = (self._utc_instant(observation.observed_at), observation.observation_id)
             old_roster = old_context.get("rosterContext", {}).get("records", [])
             old_records = {
@@ -1985,6 +2660,15 @@ class SQLiteHealthStore:
                 "networkRosterRevision": network_revision,
                 "records": roster_records,
             }
+            evaluation_inputs = replace(
+                old_evaluation_inputs,
+                roster=EvaluationInputDomain(EvaluationInputState.AVAILABLE),
+                expected_device_ids=frozenset(expected_ids),
+                absence_history=EvaluationInputDomain(EvaluationInputState.AVAILABLE),
+                prior_complete_absences=prior_absences,
+                roster_context=roster_context,
+                history_boundary=old_context.get("historyBoundary"),
+            )
             revised = evaluate_observation(
                 observation,
                 policy,
@@ -1995,9 +2679,12 @@ class SQLiteHealthStore:
                 roster_context=roster_context,
                 network_roster_revision=network_revision,
                 history_boundary=old_context.get("historyBoundary"),
+                evaluation_inputs=evaluation_inputs,
+                sample_contract_version=previous.sample_contract_version,
             )
             roster_rules = {
                 "device.missing", "device.offline", "network.offline-impact",
+                "observation.evaluation-context-unavailable",
             }
             previous_findings = [
                 Finding(
@@ -2023,32 +2710,14 @@ class SQLiteHealthStore:
                 ],
                 key=lambda item: (-int(item.rank), item.finding_id),
             ))
-            old_coverage = json.loads(
-                connection.execute(
-                    "SELECT coverage_json FROM assessments WHERE assessment_id=?",
-                    (previous.assessment_id,),
-                ).fetchone()["coverage_json"]
-            )
-            new_coverage = revised.coverage
-            coverage = dict(old_coverage)
-            coverage["expectedRosterCount"] = new_coverage["expectedRosterCount"]
-            coverage["offlineEligible"] = new_coverage["offlineEligible"]
-            observed_pillars = dict(coverage.get("observedPillars", {}))
-            observed_pillars["availability"] = new_coverage["observedPillars"]["availability"]
-            coverage["observedPillars"] = observed_pillars
-            sufficient = sum(
-                pillar.get("state") == "sufficient"
-                for pillar in observed_pillars.values()
-            )
-            reasons = list(coverage.get("confidenceReasons", []))
-            if reasons:
-                reasons[0] = f"{sufficient} of {len(observed_pillars)} pillars sufficient"
-            coverage["confidenceReasons"] = reasons
+            coverage = dict(revised.coverage)
+            observed_pillars = coverage["observedPillars"]
             status, confidence = aggregate_assessment_state(
                 revised_findings,
                 completeness=observation.completeness,
                 device_count=len(observation.devices),
                 observed_pillars=observed_pillars,
+                evaluation_inputs=evaluation_inputs,
             )
             assessment = replace(
                 revised,
@@ -2057,7 +2726,11 @@ class SQLiteHealthStore:
                 status=status,
                 confidence=confidence,
             )
-            if self._insert_assessment(connection, assessment):
+            assessment_created = self._insert_assessment(connection, assessment)
+            self.consider_native_preference(
+                connection, assessment.assessment_id
+            )
+            if assessment_created:
                 self._auto_compare(connection, observation, assessment)
             self._set_current_assessment(
                 connection, network_id, pointer["dataset_id"]
@@ -2088,6 +2761,228 @@ class SQLiteHealthStore:
         }
 
     @staticmethod
+    def consider_native_preference(
+        connection: sqlite3.Connection,
+        assessment_id: str,
+        *,
+        new_observation: bool = False,
+    ) -> None:
+        """Select a native assessment against the original lineage basis."""
+        candidate = connection.execute(
+            """SELECT assessment_id, observation_id, network_roster_revision,
+                      assessed_at
+               FROM assessments WHERE assessment_id=?""",
+            (assessment_id,),
+        ).fetchone()
+        if candidate is None:
+            raise sqlite3.DatabaseError("Native preference candidate is missing")
+        preference = connection.execute(
+            """SELECT observation_id, assessment_id,
+                      selection_basis_assessment_id, origin, migration_id
+               FROM health_assessment_preferences WHERE observation_id=?""",
+            (candidate["observation_id"],),
+        ).fetchone()
+        if preference is None:
+            if not new_observation:
+                raise sqlite3.DatabaseError(
+                    "Schema-8 assessment preference is missing for retained observation"
+                )
+            connection.execute(
+                """INSERT INTO health_assessment_preferences
+                   (observation_id, assessment_id, selection_basis_assessment_id,
+                    origin, migration_id)
+                   VALUES (?, ?, ?, 'native', NULL)""",
+                (
+                    candidate["observation_id"],
+                    assessment_id,
+                    assessment_id,
+                ),
+            )
+            return
+        basis = connection.execute(
+            """SELECT observation_id, assessment_id, network_roster_revision,
+                      assessed_at
+               FROM assessments WHERE assessment_id=?""",
+            (preference["selection_basis_assessment_id"],),
+        ).fetchone()
+        selected = connection.execute(
+            """SELECT observation_id FROM assessments WHERE assessment_id=?""",
+            (preference["assessment_id"],),
+        ).fetchone()
+        if (
+            basis is None
+            or selected is None
+            or basis["observation_id"] != candidate["observation_id"]
+            or selected["observation_id"] != candidate["observation_id"]
+            or preference["origin"] == "native"
+            and (
+                preference["migration_id"] is not None
+                or preference["assessment_id"]
+                != preference["selection_basis_assessment_id"]
+            )
+            or preference["origin"] == "migration"
+            and (
+                preference["migration_id"] is None
+                or connection.execute(
+                    """SELECT 1 FROM health_assessment_upgrades
+                       WHERE source_assessment_id=?
+                         AND target_assessment_id=?
+                         AND migration_id=?""",
+                    (
+                        preference["selection_basis_assessment_id"],
+                        preference["assessment_id"],
+                        preference["migration_id"],
+                    ),
+                ).fetchone()
+                is None
+            )
+        ):
+            raise sqlite3.DatabaseError("Corrupt native assessment preference")
+        candidate_key = (
+            int(candidate["network_roster_revision"]),
+            SQLiteHealthStore._utc_instant(candidate["assessed_at"]),
+            candidate["assessment_id"],
+        )
+        basis_key = (
+            int(basis["network_roster_revision"]),
+            SQLiteHealthStore._utc_instant(basis["assessed_at"]),
+            basis["assessment_id"],
+        )
+        if candidate_key > basis_key:
+            connection.execute(
+                """UPDATE health_assessment_preferences
+                   SET assessment_id=?, selection_basis_assessment_id=?,
+                       origin='native', migration_id=NULL
+                   WHERE observation_id=?""",
+                (assessment_id, assessment_id, candidate["observation_id"]),
+            )
+
+    @staticmethod
+    def preferred_assessments_on_connection(
+        connection: sqlite3.Connection, rows: list[dict]
+    ) -> list[dict]:
+        """Select one verified preferred revision per observation."""
+        schema_row = connection.execute(
+            "SELECT MAX(version) FROM schema_migrations"
+        ).fetchone()
+        by_observation: dict[str, list[dict]] = {}
+        for row in rows:
+            by_observation.setdefault(row["observation_id"], []).append(row)
+        if schema_row is None or int(schema_row[0] or 0) < 8:
+            return [
+                max(
+                    candidates,
+                    key=lambda row: (
+                        int(row.get("network_roster_revision", 0)),
+                        SQLiteHealthStore._utc_instant(row["assessed_at"]),
+                        row["assessment_id"],
+                    ),
+                )
+                for candidates in by_observation.values()
+            ]
+        preferred: list[dict] = []
+        for observation_id, candidates in by_observation.items():
+            preference = connection.execute(
+                """SELECT assessment_id, selection_basis_assessment_id,
+                          origin, migration_id
+                   FROM health_assessment_preferences WHERE observation_id=?""",
+                (observation_id,),
+            ).fetchone()
+            if preference is None:
+                raise sqlite3.DatabaseError(
+                    "Corrupt health store: assessment preference is missing"
+                )
+            selected = next(
+                (
+                    candidate for candidate in candidates
+                    if candidate["assessment_id"] == preference["assessment_id"]
+                ),
+                None,
+            )
+            basis = connection.execute(
+                """SELECT observation_id FROM assessments
+                   WHERE assessment_id=?""",
+                (preference["selection_basis_assessment_id"],),
+            ).fetchone()
+            if selected is None or basis is None or basis["observation_id"] != observation_id:
+                raise sqlite3.DatabaseError(
+                    "Corrupt health store: assessment preference crosses observations"
+                )
+            if preference["origin"] == "native":
+                if (
+                    preference["migration_id"] is not None
+                    or preference["assessment_id"]
+                    != preference["selection_basis_assessment_id"]
+                ):
+                    raise sqlite3.DatabaseError(
+                        "Corrupt health store: native assessment lineage is invalid"
+                    )
+                selected.update(
+                    {
+                        "migration_source_assessment_id": None,
+                        "migration_committed_at": None,
+                    }
+                )
+            elif preference["origin"] == "migration":
+                lineage = connection.execute(
+                    """SELECT u.source_assessment_id, u.target_assessment_id,
+                              u.migration_id, m.committed_at
+                       FROM health_assessment_upgrades u
+                       JOIN health_history_migrations m USING (migration_id)
+                       WHERE u.source_assessment_id=?
+                         AND u.target_assessment_id=?
+                         AND u.migration_id=?""",
+                    (
+                        preference["selection_basis_assessment_id"],
+                        preference["assessment_id"],
+                        preference["migration_id"],
+                    ),
+                ).fetchone()
+                if lineage is None:
+                    raise sqlite3.DatabaseError(
+                        "Corrupt health store: migrated assessment lineage is invalid"
+                    )
+                selected.update(
+                    {
+                        "migration_source_assessment_id": lineage[
+                            "source_assessment_id"
+                        ],
+                        "migration_committed_at": lineage["committed_at"],
+                    }
+                )
+            else:
+                raise sqlite3.DatabaseError(
+                    "Corrupt health store: assessment preference origin is invalid"
+                )
+            preferred.append(selected)
+        return preferred
+
+    @staticmethod
+    def preferred_assessment_for_observation_on_connection(
+        connection: sqlite3.Connection, observation_id: str
+    ) -> dict:
+        """Return a validated preferred endpoint without remapping pinned IDs."""
+        candidates = [
+            dict(row)
+            for row in connection.execute(
+                """SELECT a.assessment_id, a.assessed_at,
+                          a.network_roster_revision, o.observation_id,
+                          o.observed_at
+                   FROM assessments a JOIN observations o USING (observation_id)
+                   WHERE o.observation_id=?""",
+                (observation_id,),
+            )
+        ]
+        preferred = SQLiteHealthStore.preferred_assessments_on_connection(
+            connection, candidates
+        )
+        if len(preferred) != 1:
+            raise sqlite3.DatabaseError(
+                "Corrupt health store: retained comparison endpoint has no preferred assessment"
+            )
+        return preferred[0]
+
+    @staticmethod
     def _latest_assessment_id(
         connection: sqlite3.Connection, network_id: str, dataset_id: str
     ) -> str | None:
@@ -2098,16 +2993,16 @@ class SQLiteHealthStore:
                WHERE o.network_id=? AND o.dataset_id=?""",
             (network_id, dataset_id),
         ).fetchall()
-        if not rows:
+        preferred = SQLiteHealthStore.preferred_assessments_on_connection(
+            connection, [dict(row) for row in rows]
+        )
+        if not preferred:
             return None
         latest = max(
-            rows,
+            preferred,
             key=lambda row: (
                 SQLiteHealthStore._utc_instant(row["observed_at"]),
                 row["observation_id"],
-                row["network_roster_revision"],
-                SQLiteHealthStore._utc_instant(row["assessed_at"]),
-                row["assessment_id"],
             ),
         )
         return latest["assessment_id"]
@@ -2217,6 +3112,7 @@ class SQLiteHealthStore:
             before = self._table_counts(connection)
             connection.execute("DELETE FROM comparisons")
             connection.execute("DELETE FROM observations")
+            connection.execute("DELETE FROM health_history_migrations")
             connection.execute("DELETE FROM expected_devices")
             connection.execute("DELETE FROM roster_mutation_receipts")
             connection.execute("DELETE FROM roster_lifecycle_events")
@@ -2259,6 +3155,36 @@ class SQLiteHealthStore:
                     (device_id, device_id, device_id),
                 )
             }
+            referenced_observations: set[str] = set()
+            assessment_query = """SELECT a.reproduction_context_json,
+                                         o.observation_id, o.network_id
+                                  FROM assessments a
+                                  JOIN observations o USING (observation_id)"""
+            assessment_parameters: tuple[object, ...] = ()
+            if network_id is not None:
+                assessment_query += " WHERE o.network_id=?"
+                assessment_parameters = (network_id,)
+            for row in connection.execute(
+                assessment_query, assessment_parameters
+            ):
+                if device_id in _context_device_references(
+                    row["reproduction_context_json"]
+                ):
+                    networks.add(row["network_id"])
+                    referenced_observations.add(row["observation_id"])
+            finding_query = """SELECT f.device_ids_json, o.observation_id,
+                                      o.network_id
+                               FROM findings f
+                               JOIN assessments a USING (assessment_id)
+                               JOIN observations o USING (observation_id)"""
+            finding_parameters: tuple[object, ...] = ()
+            if network_id is not None:
+                finding_query += " WHERE o.network_id=?"
+                finding_parameters = (network_id,)
+            for row in connection.execute(finding_query, finding_parameters):
+                if device_id in _finding_device_references(row["device_ids_json"]):
+                    networks.add(row["network_id"])
+                    referenced_observations.add(row["observation_id"])
             if network_id is None and len(networks) > 1:
                 raise ValueError(
                     "Device exists in multiple networks; specify --network"
@@ -2272,7 +3198,7 @@ class SQLiteHealthStore:
             else:
                 network_clause = " AND o.network_id=?"
                 values = (device_id, selected_network)
-            affected_observations = [
+            affected_observations = {
                 row[0]
                 for row in connection.execute(
                     f"""SELECT DISTINCT o.observation_id
@@ -2294,7 +3220,18 @@ class SQLiteHealthStore:
                         ){network_clause}""",
                     (device_id, device_id, device_id, device_id, *values[1:]),
                 )
-            ]
+            }
+            affected_observations.update(
+                observation_id
+                for observation_id in referenced_observations
+                if selected_network is None
+                or connection.execute(
+                    "SELECT 1 FROM observations WHERE observation_id=? AND network_id=?",
+                    (observation_id, selected_network),
+                ).fetchone()
+                is not None
+            )
+            affected_observations = sorted(affected_observations)
             if affected_observations:
                 placeholders = ",".join("?" for _ in affected_observations)
                 connection.execute(
@@ -2580,14 +3517,18 @@ class SQLiteHealthStore:
 
     def latest_assessment(self, network_id: str, dataset_id: str) -> dict | None:
         with closing(self._connect()) as connection, connection:
+            assessment_id = self._latest_assessment_id(
+                connection, network_id, dataset_id
+            )
+            if assessment_id is None:
+                return None
             row = connection.execute(
                 """SELECT a.*, o.network_id, o.network_name, o.datasource_id,
                           o.dataset_id, o.completeness, o.observed_at
-                   FROM current_assessments c
-                   JOIN assessments a ON a.assessment_id=c.assessment_id
+                   FROM assessments a
                    JOIN observations o ON o.observation_id=a.observation_id
-                   WHERE c.network_id=? AND c.dataset_id=?""",
-                (network_id, dataset_id),
+                   WHERE a.assessment_id=?""",
+                (assessment_id,),
             ).fetchone()
             return dict(row) if row else None
 
@@ -2611,19 +3552,59 @@ class SQLiteHealthStore:
             values.append(network_id)
         where = " AND ".join(clauses) if clauses else "1=1"
         with closing(self._connect()) as connection, connection:
-            row = connection.execute(
+            rows = [
+                dict(row)
+                for row in connection.execute(
                 f"""SELECT a.*, o.network_id, o.network_name, o.datasource_id,
                            o.dataset_id, o.completeness, o.observed_at,
                            o.ingested_at, o.source_set_digest
                     FROM assessments a
                     JOIN observations o ON o.observation_id=a.observation_id
-                    WHERE {where}
-                    ORDER BY o.observed_at DESC, a.assessed_at DESC,
-                             a.assessment_id DESC
-                    LIMIT 1""",
+                    WHERE {where}""",
                 values,
-            ).fetchone()
-            return dict(row) if row else None
+                )
+            ]
+            if not rows:
+                return None
+            if assessment_id is None:
+                rows = self.preferred_assessments_on_connection(
+                    connection, rows
+                )
+            row = max(
+                rows,
+                key=lambda item: (
+                    self._utc_instant(item["observed_at"]),
+                    item["observation_id"],
+                    self._utc_instant(item["assessed_at"]),
+                    item["assessment_id"],
+                ),
+            )
+            metadata = self.assessment_context_metadata(
+                connection, row["assessment_id"]
+            )
+            row["evaluation_context_complete"] = metadata[
+                "evaluationContextComplete"
+            ]
+            row["verdict_context_complete"] = metadata[
+                "verdictContextComplete"
+            ]
+            row["unavailable_evaluation_domains"] = metadata[
+                "unavailableEvaluationDomains"
+            ]
+            row["historical_roster_revision"] = metadata[
+                "historicalRosterRevision"
+            ]
+            row["migration_source_assessment_id"] = (
+                metadata["migration"]["sourceAssessmentId"]
+                if metadata["migration"] is not None
+                else None
+            )
+            row["migration_committed_at"] = (
+                metadata["migration"]["committedAt"]
+                if metadata["migration"] is not None
+                else None
+            )
+            return row
 
     @staticmethod
     def _finding_filter(
@@ -2704,7 +3685,8 @@ class SQLiteHealthStore:
         values: list[object] = [network_id] if network_id else []
         values.extend((limit, offset))
         with closing(self._connect()) as connection, connection:
-            rows = connection.execute(
+            records = [
+                dict(row) for row in connection.execute(
                 f"""SELECT observation_id, datasource_id, dataset_id, network_id,
                            network_name, observed_at, ingested_at, completeness,
                            source_set_digest
@@ -2712,8 +3694,34 @@ class SQLiteHealthStore:
                     ORDER BY observed_at DESC, observation_id DESC
                     LIMIT ? OFFSET ?""",
                 values,
-            )
-            return [dict(row) for row in rows]
+                )
+            ]
+            if records:
+                observation_ids = [row["observation_id"] for row in records]
+                placeholders = ",".join("?" for _ in observation_ids)
+                candidates = [
+                    dict(row)
+                    for row in connection.execute(
+                        f"""SELECT a.assessment_id, a.assessed_at,
+                                   a.network_roster_revision, o.observation_id,
+                                   o.observed_at
+                            FROM assessments a
+                            JOIN observations o USING (observation_id)
+                            WHERE o.observation_id IN ({placeholders})""",
+                        observation_ids,
+                    )
+                ]
+                preferred = {
+                    row["observation_id"]: row["assessment_id"]
+                    for row in self.preferred_assessments_on_connection(
+                        connection, candidates
+                    )
+                }
+                for row in records:
+                    row["preferredAssessmentId"] = preferred.get(
+                        row["observation_id"]
+                    )
+            return records
 
     def device_record(
         self, *, assessment_id: str, device_id: str

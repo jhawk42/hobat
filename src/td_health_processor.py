@@ -20,6 +20,9 @@ from td_health_observation_model import (
     Assessment,
     Completeness,
     DeviceSample,
+    EvaluationInputDomain,
+    EvaluationInputState,
+    EvaluationInputs,
     MetricSample,
     Observation,
     RelationshipSample,
@@ -116,19 +119,24 @@ def _integer(value: Any) -> int | None:
     return int(number) if number is not None else None
 
 
-def _omr_prefix_from_identity(identity: Mapping[str, Any]) -> str | None:
+def _omr_prefix_from_identity(
+    identity: Mapping[str, Any],
+) -> tuple[str | None, str | None]:
     prefix = identity.get("prefixOmr")
     mesh = identity.get("prefixMeshLocal")
-    if (not isinstance(prefix, str) or "/" not in prefix or
-            not isinstance(mesh, str) or "/" not in mesh):
-        return None
+    if prefix is None:
+        return None, None
+    if not isinstance(prefix, str) or "/" not in prefix:
+        return None, "identity-invalid"
+    if not isinstance(mesh, str) or "/" not in mesh:
+        return None, "identity-invalid"
     try:
         network = ipaddress.IPv6Network(prefix)
         if network.overlaps(ipaddress.IPv6Network(mesh)):
-            return None
+            return None, "identity-invalid"
     except ValueError:
-        return None
-    return str(network)
+        return None, "identity-invalid"
+    return str(network), None
 
 
 def _normalize_samples(
@@ -168,6 +176,8 @@ def _normalize_samples(
                     "isBorderRouter": False,
                     "sourceFiles": set(),
                     "ipv6Addresses": set(),
+                    "ipv6AddressReported": False,
+                    "ipv6AddressInvalid": False,
                 },
             )
             current["sourceFiles"].add(filename)
@@ -177,7 +187,18 @@ def _normalize_samples(
             current["isBorderRouter"] = current["isBorderRouter"] or record.get("isBorderRouter") is True
             addresses = record.get("ipv6Addresses")
             if isinstance(addresses, list):
-                current["ipv6Addresses"].update(addr for addr in addresses if isinstance(addr, str))
+                validated_addresses: set[str] = set()
+                for address in addresses:
+                    if not isinstance(address, str):
+                        current["ipv6AddressInvalid"] = True
+                        continue
+                    try:
+                        validated_addresses.add(str(ipaddress.IPv6Address(address)))
+                    except ipaddress.AddressValueError:
+                        current["ipv6AddressInvalid"] = True
+                current["ipv6Addresses"].update(validated_addresses)
+                if not current["ipv6AddressInvalid"]:
+                    current["ipv6AddressReported"] = True
             rloc = record.get("rloc16")
             if isinstance(rloc, str):
                 rloc_devices[rloc.lower()] = device_id
@@ -315,6 +336,8 @@ def _normalize_samples(
                             "isBorderRouter": False,
                             "sourceFiles": {filename},
                             "ipv6Addresses": set(),
+                            "ipv6AddressReported": False,
+                            "ipv6AddressInvalid": False,
                         }
                     link_id = relationship_id(reporter_id, child_id)
                     if link_id in seen_in_file:
@@ -355,7 +378,7 @@ def _normalize_samples(
     device_ipv6_addresses = {
         device_id: tuple(sorted(value.get("ipv6Addresses", ())))
         for device_id, value in devices.items()
-        if value.get("ipv6Addresses")
+        if value.get("ipv6AddressReported") and not value.get("ipv6AddressInvalid")
     }
     return (
         device_samples,
@@ -381,6 +404,8 @@ def build_processing_result(
     sources: list[SourceEvidence] = []
     mtimes: list[int] = []
     identity_mtime: int | None = None
+    identity_digest: str | None = None
+    identity_source_time: str | None = None
     completeness = Completeness.COMPLETE
     read_time = processing_time or datetime.now(timezone.utc)
 
@@ -400,9 +425,16 @@ def build_processing_result(
         mtimes.append(mtime)
         if filename == dataset.health_profile.identity_file:
             identity_mtime = mtime
+            identity_digest = digest
+            identity_source_time = _source_time(mtime, read_time)
         sources.append(SourceEvidence(
             filename, digest, "identity" if filename == dataset.health_profile.identity_file else "final",
-            "valid", _source_time(mtime, read_time) if filename in dataset.files else None,
+            "valid", (
+                identity_source_time
+                if filename == dataset.health_profile.identity_file
+                else _source_time(mtime, read_time) if filename in dataset.files
+                else None
+            ),
         ))
         checkpoint = path.with_name(path.name.removesuffix(".json") + ".partial.json")
         if checkpoint.exists() and checkpoint.stat().st_mtime_ns > mtime:
@@ -463,10 +495,50 @@ def build_processing_result(
         for fact in extract_roster_facts(record, filename=filename, dataset=dataset,
                                          policy=manifest.roster_policy)
     )
-    omr_prefix = (
-        _omr_prefix_from_identity(identity)
-        if identity_mtime is not None and _source_time(identity_mtime, read_time) else None
+    omr_prefix, omr_reason = _omr_prefix_from_identity(identity)
+    external_routing_applicable = (
+        dataset.health_profile.border_router_authority
+        and dataset.health_profile.coverage["externalRouting"] != "missing"
     )
+    if not external_routing_applicable:
+        omr_domain = EvaluationInputDomain(EvaluationInputState.NOT_APPLICABLE)
+        omr_prefix = None
+        omr_source = None
+        ipv6_domain = EvaluationInputDomain(EvaluationInputState.NOT_APPLICABLE)
+        complete_ipv6_addresses = None
+        retained_ipv6_addresses: Mapping[str, tuple[str, ...]] = {}
+    else:
+        omr_source = (
+            {
+                "filename": dataset.health_profile.identity_file,
+                "digest": identity_digest or "",
+                "sourceObservedAt": identity_source_time or "",
+            }
+        )
+        if identity_mtime is None or identity_source_time is None:
+            omr_domain = EvaluationInputDomain(
+                EvaluationInputState.UNAVAILABLE,
+                ("identity-source-time-unavailable",),
+            )
+            omr_prefix = None
+        elif omr_reason is not None:
+            omr_domain = EvaluationInputDomain(
+                EvaluationInputState.UNAVAILABLE, (omr_reason,)
+            )
+            omr_prefix = None
+        else:
+            omr_domain = EvaluationInputDomain(EvaluationInputState.AVAILABLE)
+        retained_ipv6_addresses = device_ipv6_addresses
+        device_ids = frozenset(device.device_id for device in devices)
+        if device_ids <= device_ipv6_addresses.keys():
+            ipv6_domain = EvaluationInputDomain(EvaluationInputState.AVAILABLE)
+            complete_ipv6_addresses = dict(device_ipv6_addresses)
+        else:
+            ipv6_domain = EvaluationInputDomain(
+                EvaluationInputState.UNAVAILABLE,
+                ("device-addresses-not-retained",),
+            )
+            complete_ipv6_addresses = None
     source_set_digest = hashlib.sha256(
         "\0".join(f"{source.filename}:{source.digest}" for source in sorted(sources, key=lambda item: item.filename)).encode("utf-8")
     ).hexdigest()
@@ -505,30 +577,62 @@ def build_processing_result(
         )
         if store
         else {
-            "expectedDeviceIds": frozenset(),
-            "priorCompleteAbsences": {},
+            "expectedDeviceIds": None,
+            "priorCompleteAbsences": None,
             "networkRosterRevision": 0,
-            "rosterContext": {
-                "schemaVersion": 1,
-                "networkId": network_id,
-                "networkRosterRevision": 0,
-                "records": [],
-            },
+            "rosterContext": None,
             "historyBoundary": None,
         }
+    )
+    roster_available = store is not None
+    evaluation_inputs = EvaluationInputs(
+        roster=(
+            EvaluationInputDomain(EvaluationInputState.AVAILABLE)
+            if roster_available
+            else EvaluationInputDomain(
+                EvaluationInputState.UNAVAILABLE, ("input-not-retained",)
+            )
+        ),
+        expected_device_ids=roster_inputs["expectedDeviceIds"],
+        absence_history=(
+            EvaluationInputDomain(EvaluationInputState.AVAILABLE)
+            if roster_available
+            else EvaluationInputDomain(
+                EvaluationInputState.UNAVAILABLE, ("input-not-retained",)
+            )
+        ),
+        prior_complete_absences=roster_inputs["priorCompleteAbsences"],
+        duplicate_relationships=EvaluationInputDomain(
+            EvaluationInputState.AVAILABLE
+        ),
+        duplicate_relationship_ids=duplicate_relationship_ids,
+        omr_prefix=omr_domain,
+        omr_prefix_value=omr_prefix,
+        omr_source=omr_source,
+        device_ipv6_addresses=ipv6_domain,
+        device_ipv6_address_values=complete_ipv6_addresses,
+        observed_device_ipv6_address_values=retained_ipv6_addresses,
+        roster_context=roster_inputs["rosterContext"],
+        history_boundary=roster_inputs["historyBoundary"],
     )
     assessment = evaluate_observation(
         observation,
         policy,
         profile=dataset.health_profile,
-        expected_device_ids=roster_inputs["expectedDeviceIds"],
-        prior_complete_absences=roster_inputs["priorCompleteAbsences"],
+        expected_device_ids=roster_inputs["expectedDeviceIds"] or frozenset(),
+        prior_complete_absences=roster_inputs["priorCompleteAbsences"] or {},
         assessed_at=now.isoformat(),
         omr_prefix=omr_prefix,
         device_ipv6_addresses=device_ipv6_addresses,
         roster_context=roster_inputs["rosterContext"],
         network_roster_revision=roster_inputs["networkRosterRevision"],
         history_boundary=roster_inputs["historyBoundary"],
+        evaluation_inputs=evaluation_inputs,
+        sample_contract_version=(
+            ROUTE64_SAMPLE_CONTRACT_VERSION
+            if dataset.dataset_id == "otbr_cli_networkdiag_fetch_all"
+            else "comparison-v1"
+        ),
     )
     return ProcessingResult(observation, assessment, None, None, roster_facts)
 

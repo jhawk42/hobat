@@ -231,6 +231,8 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data mdns thread
 PYTHONPATH=src python3 -m td_cli --datadir ./data process-eve
 PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
   --dataset otbr_cli_networkdiag_fetch_all --dry-run
+PYTHONPATH=src python3 -m td_cli --datadir ./data health migrate-history \
+  --dataset all --policy-config-dir /absolute/path/to/server/config --dry-run --json
 PYTHONPATH=src python3 -m td_cli --datadir ./data merge-dataset
 
 # Health maintenance and complete data-directory backups
@@ -293,6 +295,10 @@ to process every active browser dataset marked `healthEligible: true`; the share
 manifest is kept in lockstep with that registry contract. Offline assessment
 requires an explicitly imported expected-device roster and two distinct complete
 observations. See [Thread Network Health](doc/thread_network_health.md).
+`health migrate-history` is an explicit, backup-first maintenance operation for
+replaying supported retained history; it does not collect data or infer missing
+historical context from current snapshots. Stop health writers and consult
+[Thread Network Health](doc/thread_network_health.md) before using it.
 For health-eligible datasets, the dashboard reads the current stored assessment
 through bounded, read-only `/api/health/*` routes. Run `health process-dataset`
 after a successful cache collection to refresh the assessment shown by the browser.
@@ -418,6 +424,12 @@ python3 -m pytest -q -m "not requires_data_dir"
 
 Everything else builds its own isolated data directory with `tmp_path` and
 `--datadir`/`TD_DATA_DIR`, so it does not depend on the contents of `data/`.
+
+The [cached adaptor contract test](tests/test_js_adaptor_contracts.py) checks
+output shape, node styling pairs, and graph integrity without pinning network
+identities or counts to an older capture. Exact role-to-style behavior is
+covered by deterministic cases in the
+[adaptor contract runner](tests/js/run-adaptor-contracts.mjs).
 
 ## Documentation
 

@@ -13,6 +13,9 @@ from td_health_observation_model import (
     Assessment,
     Completeness,
     Confidence,
+    EvaluationInputDomain,
+    EvaluationInputState,
+    EvaluationInputs,
     Finding,
     FindingRank,
     FindingScope,
@@ -25,7 +28,7 @@ from td_health_graph import GraphEdge, analyze_undirected_graph
 from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
-EVALUATOR_VERSION = "snapshot-v11"
+EVALUATOR_VERSION = "snapshot-v12"
 
 _DIRECT_THRESHOLD_COUNT_METRICS = frozenset(
     {"parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"}
@@ -74,35 +77,190 @@ def _stable_id(prefix: str, *parts: str) -> str:
     return f"{prefix}:{digest}"
 
 
-def _profile_digest(profile: HealthProfile) -> str:
-    payload = {
-        "evaluatorVersion": EVALUATOR_VERSION,
-        "profileId": profile.profile_id,
-        "coverage": dict(profile.coverage),
-        "topologyAuthority": profile.topology_authority,
-        "borderRouterAuthority": profile.border_router_authority,
-    }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-
-
 def _assessment_input_digest(
     policy: HealthPolicy,
     profile: HealthProfile,
-    expected_device_ids: frozenset[str],
-    prior_complete_absences: Mapping[str, int],
+    sample_contract_version: str,
+    evaluation_inputs: EvaluationInputs,
 ) -> str:
-    roster_payload = {
-        "expectedDeviceIds": sorted(expected_device_ids),
-        "priorCompleteAbsences": sorted(prior_complete_absences.items()),
+    payload = {
+        "evaluatorVersion": EVALUATOR_VERSION,
+        "healthPolicy": {
+            "version": policy.version,
+            "digest": policy.digest,
+            "offlineConsecutiveCompleteObservations": (
+                policy.offline_consecutive_complete_observations
+            ),
+            "offlinePoorDeviceRatioThreshold": policy.offline_poor_device_ratio_threshold,
+            "thresholds": {
+                metric: dict(bands) for metric, bands in policy.thresholds.items()
+            },
+        },
+        "healthProfile": {
+            "profileId": profile.profile_id,
+            "identityFile": profile.identity_file,
+            "requiredOutcomes": list(profile.required_outcomes),
+            "coverage": dict(profile.coverage),
+            "topologyAuthority": profile.topology_authority,
+            "borderRouterAuthority": profile.border_router_authority,
+        },
+        "sampleContractVersion": sample_contract_version,
+        "evaluationInputs": _evaluation_inputs_payload(evaluation_inputs),
     }
-    return hashlib.sha256(
-        (
-            f"{policy.digest}\0{_profile_digest(profile)}\0"
-            f"{json.dumps(roster_payload, sort_keys=True, separators=(',', ':'))}"
-        ).encode("utf-8")
-    ).hexdigest()
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _evaluation_inputs_payload(inputs: EvaluationInputs) -> dict[str, Any]:
+    return {
+        "domains": {
+            name: {
+                "state": domain.state.value,
+                "reasonCodes": list(domain.reason_codes),
+            }
+            for name, domain in inputs.domains().items()
+        },
+        "roster": {
+            "expectedDeviceIds": sorted(inputs.expected_device_ids or ()),
+            "context": dict(inputs.roster_context or {}),
+        },
+        "absenceHistory": {
+            "priorCompleteAbsences": dict(sorted(
+                (inputs.prior_complete_absences or {}).items()
+            )),
+            "historyBoundary": (
+                dict(inputs.history_boundary) if inputs.history_boundary else None
+            ),
+        },
+        "duplicateRelationshipIds": list(inputs.duplicate_relationship_ids or ()),
+        "omrPrefix": {
+            "value": inputs.omr_prefix_value,
+            "source": dict(inputs.omr_source or {}),
+        },
+        "deviceIpv6Addresses": {
+            "complete": dict(sorted(
+                (inputs.device_ipv6_address_values or {}).items()
+            )),
+            "observed": dict(sorted(inputs.observed_device_ipv6_address_values.items())),
+        },
+    }
+
+
+def evaluation_inputs_from_payload(raw: object) -> EvaluationInputs:
+    if not isinstance(raw, dict):
+        raise ValueError("Evaluation inputs must be an object")
+    domains = raw.get("domains")
+    roster = raw.get("roster")
+    absence = raw.get("absenceHistory")
+    omr = raw.get("omrPrefix")
+    addresses = raw.get("deviceIpv6Addresses")
+    duplicates = raw.get("duplicateRelationshipIds")
+    if not all(isinstance(value, dict) for value in (domains, roster, absence, omr, addresses)):
+        raise ValueError("Evaluation input payload is missing a domain object")
+    if not isinstance(duplicates, list) or not all(
+        isinstance(value, str) for value in duplicates
+    ):
+        raise ValueError("Invalid duplicate relationship evidence")
+
+    def domain(name: str) -> EvaluationInputDomain:
+        value = domains.get(name)
+        if not isinstance(value, dict):
+            raise ValueError(f"Missing evaluation input domain {name}")
+        try:
+            state = EvaluationInputState(value["state"])
+        except (KeyError, ValueError, TypeError) as exc:
+            raise ValueError(f"Invalid evaluation input state for {name}") from exc
+        reasons = value.get("reasonCodes")
+        if not isinstance(reasons, list) or not all(
+            isinstance(reason, str) and reason for reason in reasons
+        ):
+            raise ValueError(f"Invalid evaluation input reasons for {name}")
+        return EvaluationInputDomain(state, tuple(reasons))
+
+    expected = roster.get("expectedDeviceIds")
+    absence_values = absence.get("priorCompleteAbsences")
+    source = omr.get("source")
+    complete_addresses = addresses.get("complete")
+    observed_addresses = addresses.get("observed")
+    roster_context = roster.get("context")
+    history_boundary = absence.get("historyBoundary")
+    if not isinstance(expected, list) or not all(
+        isinstance(value, str) for value in expected
+    ):
+        raise ValueError("Invalid saved expected device IDs")
+    if not isinstance(absence_values, dict) or not all(
+        isinstance(key, str) and type(value) is int and value >= 0
+        for key, value in absence_values.items()
+    ):
+        raise ValueError("Invalid saved absence history")
+    if source is not None and (
+        not isinstance(source, dict)
+        or not all(isinstance(key, str) and isinstance(value, str) for key, value in source.items())
+    ):
+        raise ValueError("Invalid saved OMR provenance")
+    if not isinstance(roster_context, dict):
+        raise ValueError("Invalid saved roster context")
+    if history_boundary is not None and not isinstance(history_boundary, dict):
+        raise ValueError("Invalid saved history boundary")
+
+    def address_map(value: object, *, nullable: bool) -> Mapping[str, tuple[str, ...]] | None:
+        if value is None and nullable:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("Invalid saved device IPv6 address map")
+        result: dict[str, tuple[str, ...]] = {}
+        for device_id, values in value.items():
+            if not isinstance(device_id, str) or not isinstance(values, list) or not all(
+                isinstance(address, str) for address in values
+            ):
+                raise ValueError("Invalid saved device IPv6 address entry")
+            result[device_id] = tuple(values)
+        return result
+
+    return EvaluationInputs(
+        roster=domain("roster"),
+        expected_device_ids=(
+            frozenset(expected)
+            if domain("roster").state is EvaluationInputState.AVAILABLE
+            else None
+        ),
+        absence_history=domain("absenceHistory"),
+        prior_complete_absences=(
+            absence_values
+            if domain("absenceHistory").state is EvaluationInputState.AVAILABLE
+            else None
+        ),
+        duplicate_relationships=domain("duplicateRelationships"),
+        duplicate_relationship_ids=(
+            tuple(duplicates)
+            if domain("duplicateRelationships").state is EvaluationInputState.AVAILABLE
+            else None
+        ),
+        omr_prefix=domain("omrPrefix"),
+        omr_prefix_value=(
+            omr.get("value")
+            if domain("omrPrefix").state is EvaluationInputState.AVAILABLE
+            else None
+        ),
+        omr_source=source,
+        device_ipv6_addresses=domain("deviceIpv6Addresses"),
+        device_ipv6_address_values=(
+            address_map(complete_addresses, nullable=False)
+            if domain("deviceIpv6Addresses").state is EvaluationInputState.AVAILABLE
+            else None
+        ),
+        observed_device_ipv6_address_values=(
+            address_map(observed_addresses, nullable=False) or {}
+        ),
+        roster_context=(
+            roster_context
+            if domain("roster").state is EvaluationInputState.AVAILABLE
+            else None
+        ),
+        history_boundary=history_boundary,
+    )
 
 
 def _policy_value(policy: HealthPolicy, rule_id: str, key: str) -> Any:
@@ -242,6 +400,7 @@ def aggregate_assessment_state(
     completeness: Completeness,
     device_count: int,
     observed_pillars: Mapping[str, Mapping[str, Any]],
+    evaluation_inputs: EvaluationInputs,
 ) -> tuple[HealthStatus, Confidence]:
     material = [
         finding
@@ -262,6 +421,11 @@ def aggregate_assessment_state(
         status = HealthStatus.STRONG
     else:
         status = HealthStatus.UNKNOWN
+    verdict_context_complete = _verdict_context_complete(
+        evaluation_inputs, completeness, findings
+    )
+    if status is HealthStatus.STRONG and not verdict_context_complete:
+        status = HealthStatus.UNKNOWN
     sufficient_pillars = sum(
         pillar["state"] == "sufficient" for pillar in observed_pillars.values()
     )
@@ -277,7 +441,94 @@ def aggregate_assessment_state(
         confidence = Confidence.MEDIUM
     else:
         confidence = Confidence.LOW
+    if not verdict_context_complete and confidence is Confidence.HIGH:
+        confidence = Confidence.MEDIUM
     return status, confidence
+
+
+def _available_domain() -> EvaluationInputDomain:
+    return EvaluationInputDomain(EvaluationInputState.AVAILABLE)
+
+
+def _not_applicable_domain() -> EvaluationInputDomain:
+    return EvaluationInputDomain(EvaluationInputState.NOT_APPLICABLE)
+
+
+def _verdict_context_complete(
+    inputs: EvaluationInputs,
+    completeness: Completeness,
+    findings: tuple[Finding, ...] | list[Finding],
+) -> bool:
+    return (
+        inputs.roster.state is not EvaluationInputState.UNAVAILABLE
+        and not (
+            inputs.absence_history.state is EvaluationInputState.UNAVAILABLE
+            and completeness is Completeness.COMPLETE
+            and any(
+                finding.rule_id in {"device.missing", "device.offline"}
+                for finding in findings
+            )
+        )
+        and all(
+            domain.state is not EvaluationInputState.UNAVAILABLE
+            for domain in (inputs.omr_prefix, inputs.device_ipv6_addresses)
+        )
+    )
+
+
+def _legacy_evaluation_inputs(
+    observation: Observation,
+    *,
+    expected_device_ids: frozenset[str],
+    prior_complete_absences: Mapping[str, int],
+    roster_context: Mapping[str, Any] | None,
+    network_roster_revision: int,
+    history_boundary: Mapping[str, Any] | None,
+    omr_prefix: str | None,
+    device_ipv6_addresses: Mapping[str, tuple[str, ...]] | None,
+    profile: HealthProfile,
+) -> EvaluationInputs:
+    external_routing_applicable = (
+        profile.border_router_authority
+        and profile.coverage["externalRouting"] != "missing"
+    )
+    return EvaluationInputs(
+        roster=_available_domain(),
+        expected_device_ids=expected_device_ids,
+        absence_history=_available_domain(),
+        prior_complete_absences=dict(prior_complete_absences),
+        duplicate_relationships=_available_domain(),
+        duplicate_relationship_ids=observation.duplicate_relationship_ids,
+        omr_prefix=(
+            _available_domain() if external_routing_applicable
+            else _not_applicable_domain()
+        ),
+        omr_prefix_value=omr_prefix if external_routing_applicable else None,
+        omr_source=(
+            {"kind": "explicit-evaluator-input"}
+            if external_routing_applicable else None
+        ),
+        device_ipv6_addresses=(
+            _available_domain() if external_routing_applicable
+            else _not_applicable_domain()
+        ),
+        device_ipv6_address_values=(
+            dict(device_ipv6_addresses or {})
+            if external_routing_applicable else None
+        ),
+        observed_device_ipv6_address_values=(
+            dict(device_ipv6_addresses or {})
+            if external_routing_applicable else {}
+        ),
+        roster_context=dict(roster_context or {
+            "schemaVersion": 1,
+            "networkId": observation.network_id,
+            "networkRosterRevision": network_roster_revision,
+            "records": [],
+            "expectedDeviceIds": sorted(expected_device_ids),
+        }),
+        history_boundary=dict(history_boundary) if history_boundary else None,
+    )
 
 
 def evaluate_observation(
@@ -293,8 +544,40 @@ def evaluate_observation(
     roster_context: Mapping[str, Any] | None = None,
     network_roster_revision: int = 0,
     history_boundary: Mapping[str, Any] | None = None,
+    evaluation_inputs: EvaluationInputs | None = None,
+    sample_contract_version: str = "comparison-v1",
 ) -> Assessment:
-    absences = prior_complete_absences or {}
+    inputs = evaluation_inputs or _legacy_evaluation_inputs(
+        observation,
+        expected_device_ids=expected_device_ids,
+        prior_complete_absences=prior_complete_absences or {},
+        roster_context=roster_context,
+        network_roster_revision=network_roster_revision,
+        history_boundary=history_boundary,
+        omr_prefix=omr_prefix,
+        device_ipv6_addresses=device_ipv6_addresses,
+        profile=profile,
+    )
+    expected_device_ids = (
+        inputs.expected_device_ids or frozenset()
+        if inputs.roster.state is EvaluationInputState.AVAILABLE
+        else frozenset()
+    )
+    absences = (
+        inputs.prior_complete_absences or {}
+        if inputs.absence_history.state is EvaluationInputState.AVAILABLE
+        else {}
+    )
+    omr_prefix = (
+        inputs.omr_prefix_value
+        if inputs.omr_prefix.state is EvaluationInputState.AVAILABLE
+        else None
+    )
+    device_ipv6_addresses = (
+        inputs.device_ipv6_address_values or {}
+        if inputs.device_ipv6_addresses.state is EvaluationInputState.AVAILABLE
+        else {}
+    )
     findings: list[Finding] = []
     observed_ids = frozenset(device.device_id for device in observation.devices)
     complete = observation.completeness is Completeness.COMPLETE
@@ -335,10 +618,14 @@ def evaluate_observation(
     offline_required = _policy_value(
         policy, "device.offline", "offlineConsecutiveCompleteObservations"
     )
+    absence_history_available = (
+        inputs.absence_history.state is EvaluationInputState.AVAILABLE
+    )
     offline_candidate_ids = frozenset(
         device_id
         for device_id in missing_expected_ids
         if complete
+        and absence_history_available
         and absences.get(device_id, 0) + 1 >= offline_required
     )
     offline_device_ratio = (
@@ -352,7 +639,7 @@ def evaluate_observation(
     offline_poor_threshold_met = offline_device_ratio > offline_ratio_threshold
 
     for device_id in missing_expected_ids:
-        prior = absences.get(device_id, 0)
+        prior = absences.get(device_id, 0) if absence_history_available else None
         is_offline = device_id in offline_candidate_ids
         findings.append(
             _finding(
@@ -369,7 +656,9 @@ def evaluate_observation(
                 evidence={
                     "present": False,
                     "completeObservation": complete,
-                    "consecutiveCompleteAbsences": prior + 1 if complete else prior,
+                    "consecutiveCompleteAbsences": (
+                        prior + 1 if complete and prior is not None else prior
+                    ),
                     "required": offline_required,
                     "offlineCandidateCount": len(offline_candidate_ids),
                     "expectedRosterCount": len(expected_device_ids),
@@ -492,6 +781,8 @@ def evaluate_observation(
         profile.border_router_authority
         and complete
         and omr_prefix
+        and inputs.omr_prefix.state is EvaluationInputState.AVAILABLE
+        and inputs.device_ipv6_addresses.state is EvaluationInputState.AVAILABLE
         and _profile_supports_rule(profile, "network.external-routing")
     ):
         addresses = device_ipv6_addresses or {}
@@ -767,7 +1058,10 @@ def evaluate_observation(
             )
         )
 
-    if observation.duplicate_relationship_ids:
+    if (
+        inputs.duplicate_relationships.state is EvaluationInputState.AVAILABLE
+        and inputs.duplicate_relationship_ids
+    ):
         findings.append(
             _finding(
                 observation,
@@ -776,11 +1070,40 @@ def evaluate_observation(
                 scope=FindingScope.NETWORK,
                 rank=FindingRank.INFO,
                 summary=(
-                    f"{len(observation.duplicate_relationship_ids)} relationship(s) appeared more than "
+                    f"{len(inputs.duplicate_relationship_ids)} relationship(s) appeared more than "
                     "once within one source file."
                 ),
-                evidence={"relationshipIds": observation.duplicate_relationship_ids},
-                relationship_ids=observation.duplicate_relationship_ids,
+                evidence={"relationshipIds": inputs.duplicate_relationship_ids},
+                relationship_ids=inputs.duplicate_relationship_ids,
+                confidence=Confidence.LOW,
+            )
+        )
+
+    unavailable_domains = [
+        {
+            "domain": name,
+            "reasonCodes": list(domain.reason_codes),
+            "affectedRuleIds": {
+                "roster": ["device.missing", "device.offline", "network.offline-impact"],
+                "absenceHistory": ["device.offline", "network.offline-impact"],
+                "duplicateRelationships": ["observation.duplicate-source-entry"],
+                "omrPrefix": ["network.external-routing"],
+                "deviceIpv6Addresses": ["network.external-routing"],
+            }[name],
+        }
+        for name, domain in inputs.domains().items()
+        if domain.state is EvaluationInputState.UNAVAILABLE
+    ]
+    if unavailable_domains:
+        findings.append(
+            _finding(
+                observation,
+                rule_id="observation.evaluation-context-unavailable",
+                status=HealthStatus.UNKNOWN,
+                scope=FindingScope.NETWORK,
+                rank=FindingRank.INFO,
+                summary="One or more historical evaluation inputs are unavailable.",
+                evidence={"unavailableDomains": unavailable_domains},
                 confidence=Confidence.LOW,
             )
         )
@@ -1091,8 +1414,14 @@ def evaluate_observation(
     observed_counts = {
         "availability": {
             "observedDevices": len(observation.devices),
-            "expectedRosterEntries": len(expected_device_ids),
-            "expectedDevicesPresent": len(expected_device_ids & observed_ids),
+            "expectedRosterEntries": (
+                len(expected_device_ids)
+                if inputs.roster.state is EvaluationInputState.AVAILABLE else None
+            ),
+            "expectedDevicesPresent": (
+                len(expected_device_ids & observed_ids)
+                if inputs.roster.state is EvaluationInputState.AVAILABLE else None
+            ),
             "attachmentStates": sum(bool(device.state or device.role) for device in observation.devices),
             "offlineEligible": int(complete and bool(expected_device_ids)),
         },
@@ -1136,7 +1465,10 @@ def evaluate_observation(
     observed_pillars: dict[str, dict[str, object]] = {}
     for pillar, static_state in profile.coverage.items():
         counts = observed_counts[pillar]
-        evidence_present = any(value > 0 for value in counts.values())
+        evidence_present = any(
+            isinstance(value, (int, float)) and value > 0
+            for value in counts.values()
+        )
         reasons: list[str] = []
         if static_state == "missing":
             observed_state = "missing"
@@ -1158,11 +1490,46 @@ def evaluate_observation(
             "evidenceCounts": counts,
             "reasons": reasons,
         }
+    context_limited_pillars: dict[str, list[str]] = {}
+    if inputs.roster.state is EvaluationInputState.UNAVAILABLE:
+        context_limited_pillars.setdefault("availability", []).append("roster")
+    if (
+        inputs.absence_history.state is EvaluationInputState.UNAVAILABLE
+        and complete
+        and missing_expected_ids
+    ):
+        context_limited_pillars.setdefault("availability", []).append(
+            "absenceHistory"
+        )
+    if (
+        profile.border_router_authority
+        and _profile_supports_rule(profile, "network.external-routing")
+    ):
+        unavailable_routing = [
+            name
+            for name, domain in (
+                ("omrPrefix", inputs.omr_prefix),
+                ("deviceIpv6Addresses", inputs.device_ipv6_addresses),
+            )
+            if domain.state is EvaluationInputState.UNAVAILABLE
+        ]
+        if unavailable_routing:
+            context_limited_pillars["externalRouting"] = unavailable_routing
+    for pillar_name, domains in context_limited_pillars.items():
+        pillar = observed_pillars[pillar_name]
+        if pillar["state"] == "sufficient":
+            pillar["state"] = "limited"
+        reasons = list(pillar["reasons"])
+        reasons.append(
+            "evaluation context unavailable: " + ", ".join(domains)
+        )
+        pillar["reasons"] = reasons
     status, confidence = aggregate_assessment_state(
         findings,
         completeness=observation.completeness,
         device_count=len(observation.devices),
         observed_pillars=observed_pillars,
+        evaluation_inputs=inputs,
     )
     sufficient_pillars = sum(
         pillar["state"] == "sufficient" for pillar in observed_pillars.values()
@@ -1179,46 +1546,87 @@ def evaluate_observation(
         "borderRouterAuthority": profile.border_router_authority,
         "deviceCount": len(observation.devices),
         "relationshipCount": len(observation.relationships),
-        "expectedRosterCount": len(expected_device_ids),
-        "offlineEligible": complete and bool(expected_device_ids),
+        "expectedRosterCount": (
+            len(expected_device_ids)
+            if inputs.roster.state is EvaluationInputState.AVAILABLE else None
+        ),
+        "offlineEligible": (
+            complete
+            and bool(expected_device_ids)
+            and inputs.roster.state is EvaluationInputState.AVAILABLE
+            and inputs.absence_history.state is EvaluationInputState.AVAILABLE
+        ),
         "diagnosticTimeoutDeviceCount": len(diagnostic_timeout_device_ids),
         "diagnosticTimeoutRatio": (
             len(diagnostic_timeout_device_ids) / len(observation.devices)
             if observation.devices
             else 0.0
         ),
+        "evaluationInputs": {
+            name: {
+                "state": domain.state.value,
+                "reasonCodes": list(domain.reason_codes),
+            }
+            for name, domain in inputs.domains().items()
+        },
+        "evaluationContextComplete": inputs.evaluation_context_complete,
+        "verdictContextComplete": _verdict_context_complete(
+            inputs, observation.completeness, findings
+        ),
+        "unavailableEvaluationDomains": [
+            name
+            for name, domain in inputs.domains().items()
+            if domain.state is EvaluationInputState.UNAVAILABLE
+        ],
     }
     assessment_time = assessed_at or datetime.now(timezone.utc).isoformat()
     assessment_input_digest = _assessment_input_digest(
-        policy, profile, expected_device_ids, absences
+        policy, profile, sample_contract_version, inputs
     )
-    sample_contract_version = (
-        ROUTE64_SAMPLE_CONTRACT_VERSION if observation.dataset_id == "otbr_cli_networkdiag_fetch_all"
-        else "comparison-v1"
-    )
-    normalized_roster_context = dict(roster_context or {
-        "networkRosterRevision": network_roster_revision,
-        "expectedDeviceIds": sorted(expected_device_ids),
-    })
+    if sample_contract_version not in {"comparison-v1", ROUTE64_SAMPLE_CONTRACT_VERSION}:
+        raise ValueError(f"Unsupported sample contract: {sample_contract_version}")
+    normalized_roster_context = dict(inputs.roster_context or {})
     presence_inputs = {
         "complete": complete,
-        "expectedDeviceIds": sorted(expected_device_ids),
         "observedDeviceIds": sorted(observed_ids),
-        "priorCompleteAbsences": sorted(absences.items()),
         "sampleContractVersion": sample_contract_version,
+        "roster": {
+            "state": inputs.roster.state.value,
+            "expectedDeviceIds": sorted(expected_device_ids),
+            "reasonCodes": list(inputs.roster.reason_codes),
+        },
+        "absenceHistory": {
+            "state": inputs.absence_history.state.value,
+            "priorCompleteAbsences": dict(sorted(absences.items())),
+            "reasonCodes": list(inputs.absence_history.reason_codes),
+        },
     }
     roster_context_digest = hashlib.sha256(
-        json.dumps(normalized_roster_context, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(
+            {
+                "state": inputs.roster.state.value,
+                "reasonCodes": list(inputs.roster.reason_codes),
+                "context": normalized_roster_context,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
     ).hexdigest()
     presence_input_digest = hashlib.sha256(
-        json.dumps(presence_inputs, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(
+            presence_inputs,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
     ).hexdigest()
     assessment_id = _stable_id(
-        "assessment", "v2", observation.observation_id, assessment_input_digest,
+        "assessment", "v3", observation.observation_id, assessment_input_digest,
         roster_context_digest, presence_input_digest,
     )
     reproduction_context = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "evaluatorVersion": EVALUATOR_VERSION,
         "healthPolicy": {
             "version": policy.version,
@@ -1242,10 +1650,11 @@ def evaluate_observation(
         "networkRosterRevision": network_roster_revision,
         "rosterContext": normalized_roster_context,
         "historyProvenance": "retained-complete-observations",
-        "historyBoundary": dict(history_boundary) if history_boundary else None,
+        "historyBoundary": dict(inputs.history_boundary) if inputs.history_boundary else None,
         "presenceInputs": presence_inputs,
         "expectedDeviceIds": sorted(expected_device_ids),
         "priorCompleteAbsences": dict(sorted(absences.items())),
+        "evaluationInputs": _evaluation_inputs_payload(inputs),
         "endpointEligibility": {
             "complete": complete,
             "observedAt": observation.observed_at,

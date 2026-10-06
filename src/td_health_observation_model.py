@@ -39,6 +39,20 @@ class Confidence(StrEnum):
     LOW = "low"
 
 
+class EvaluationInputState(StrEnum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    NOT_APPLICABLE = "not-applicable"
+
+
+class HistoryMigrationEligibility(StrEnum):
+    ALREADY_CURRENT = "already-current"
+    REPLAYABLE = "replayable"
+    REPLAYABLE_WITH_GAPS = "replayable-with-gaps"
+    UNSUPPORTED = "unsupported"
+    INVALID = "invalid"
+
+
 class FindingRank(IntEnum):
     INFO = 10
     MODERATE = 20
@@ -150,6 +164,121 @@ class Assessment:
     presence_input_digest: str = "legacy-unknown"
     network_roster_revision: int = 0
     reproduction_context: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EvaluationInputDomain:
+    state: EvaluationInputState
+    reason_codes: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.state is EvaluationInputState.UNAVAILABLE and not self.reason_codes:
+            raise ValueError("Unavailable evaluation inputs require a reason")
+        if self.state is not EvaluationInputState.UNAVAILABLE and self.reason_codes:
+            raise ValueError("Only unavailable evaluation inputs may have reasons")
+
+
+@dataclass(frozen=True)
+class EvaluationInputs:
+    roster: EvaluationInputDomain
+    expected_device_ids: frozenset[str] | None
+    absence_history: EvaluationInputDomain
+    prior_complete_absences: Mapping[str, int] | None
+    duplicate_relationships: EvaluationInputDomain
+    duplicate_relationship_ids: tuple[str, ...] | None
+    omr_prefix: EvaluationInputDomain
+    omr_prefix_value: str | None
+    omr_source: Mapping[str, str] | None
+    device_ipv6_addresses: EvaluationInputDomain
+    device_ipv6_address_values: Mapping[str, tuple[str, ...]] | None
+    observed_device_ipv6_address_values: Mapping[str, tuple[str, ...]]
+    roster_context: Mapping[str, Any] | None
+    history_boundary: Mapping[str, Any] | None
+
+    def __post_init__(self) -> None:
+        values = (
+            (self.roster, self.expected_device_ids, "roster"),
+            (self.absence_history, self.prior_complete_absences, "absence history"),
+            (self.duplicate_relationships, self.duplicate_relationship_ids, "duplicate relationships"),
+            (self.device_ipv6_addresses, self.device_ipv6_address_values, "IPv6 addresses"),
+        )
+        for domain, value, name in values:
+            if domain.state is EvaluationInputState.AVAILABLE and value is None:
+                raise ValueError(f"Available {name} input requires a value")
+            if domain.state is not EvaluationInputState.AVAILABLE and value is not None:
+                raise ValueError(f"Unavailable {name} input cannot carry a value")
+        if self.roster.state is not EvaluationInputState.AVAILABLE and self.roster_context is not None:
+            raise ValueError("Unavailable roster input cannot carry a roster context")
+        if self.roster.state is EvaluationInputState.AVAILABLE and self.roster_context is None:
+            raise ValueError("Available roster input requires a roster context")
+        if (
+            self.omr_prefix.state is EvaluationInputState.AVAILABLE
+            and self.omr_source is None
+        ):
+            raise ValueError("Available OMR input requires source provenance")
+        if not isinstance(self.observed_device_ipv6_address_values, Mapping):
+            raise ValueError("Observed IPv6 address evidence must be a mapping")
+
+    @property
+    def evaluation_context_complete(self) -> bool:
+        return all(
+            domain.state is not EvaluationInputState.UNAVAILABLE
+            for domain in self.domains().values()
+        )
+
+    @property
+    def verdict_context_complete(self) -> bool:
+        return all(
+            domain.state is not EvaluationInputState.UNAVAILABLE
+            for domain in (
+                self.roster,
+                self.absence_history,
+                self.omr_prefix,
+                self.device_ipv6_addresses,
+            )
+        )
+
+    def domains(self) -> Mapping[str, EvaluationInputDomain]:
+        return {
+            "roster": self.roster,
+            "absenceHistory": self.absence_history,
+            "duplicateRelationships": self.duplicate_relationships,
+            "omrPrefix": self.omr_prefix,
+            "deviceIpv6Addresses": self.device_ipv6_addresses,
+        }
+
+
+@dataclass(frozen=True)
+class HistoryMigrationInventoryItem:
+    network_id: str
+    dataset_id: str
+    observation_id: str
+    source_assessment_id: str
+    eligibility: HistoryMigrationEligibility
+    reason_codes: tuple[str, ...]
+    evaluator_version: str
+    policy_digest: str | None
+    sample_contract_version: str
+    preferred_assessment_id: str | None = None
+    target_assessment_id: str | None = None
+    unavailable_domains: tuple[str, ...] = ()
+    before_status: str | None = None
+    after_status: str | None = None
+    before_finding_count: int | None = None
+    after_finding_count: int | None = None
+    before_coverage: Mapping[str, Any] | None = None
+    after_coverage: Mapping[str, Any] | None = None
+    replay_input_digest: str | None = None
+
+
+@dataclass(frozen=True)
+class HistoryMigrationInventory:
+    schema_version: int
+    target_contract_digest: str
+    source_inventory_digest: str
+    items: tuple[HistoryMigrationInventoryItem, ...]
+    dataset_ids: tuple[str, ...] = ()
+    network_id: str | None = None
 
 
 def device_id_from_ext_address(value: object) -> str:

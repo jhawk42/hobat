@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -14,6 +15,9 @@ from td_health_observation_model import (
     Completeness,
     Confidence,
     DeviceSample,
+    Finding,
+    FindingRank,
+    FindingScope,
     HealthStatus,
     MetricSample,
     Observation,
@@ -21,7 +25,11 @@ from td_health_observation_model import (
     SourceEvidence,
 )
 from td_health_observation_store import HealthStoreFutureSchemaError
-from td_health_comparison import COMPARISON_INTERVALS
+from td_health_comparison import (
+    COMPARISON_INTERVALS,
+    ComparisonPolicy,
+    comparison_id,
+)
 from td_health_read import TDHealthReadService
 from td_health_roster import RosterFact
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
@@ -550,6 +558,74 @@ def test_legacy_assessment_endpoint_uses_zero_roster_revision(tmp_path) -> None:
     assert page["items"][0]["networkRosterRevision"] == 0
 
 
+def test_schema_seven_endpoint_inventory_deduplicates_revisions(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    observation, assessment = _result()
+    store.save_processing_result(observation, assessment)
+    revised = replace(
+        assessment,
+        assessment_id="assessment-1-revision",
+        assessed_at="2026-09-02T00:00:00+00:00",
+        roster_context_digest="new-roster-context",
+    )
+    store.save_processing_result(observation, revised)
+    with closing(store._connect()) as connection, connection:
+        connection.execute("DELETE FROM schema_migrations WHERE version=8")
+
+    page = store.assessment_endpoint_page(
+        network_id=observation.network_id,
+        dataset_id=observation.dataset_id,
+        side="after",
+        limit=10,
+        offset=0,
+    )
+    pinned_page = store.assessment_endpoint_page(
+        network_id=observation.network_id,
+        dataset_id=observation.dataset_id,
+        side="after",
+        limit=10,
+        offset=0,
+        selected_assessment_id=assessment.assessment_id,
+    )
+
+    assert page["total"] == 1
+    assert [row["assessmentId"] for row in page["items"]] == [
+        revised.assessment_id
+    ]
+    assert pinned_page["total"] == 2
+    assert {row["assessmentId"] for row in pinned_page["items"]} == {
+        assessment.assessment_id,
+        revised.assessment_id,
+    }
+
+
+def test_reprocessing_purged_assessment_restores_preference_but_missing_preference_is_corrupt(
+    tmp_path,
+) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    observation, assessment = _result()
+    store.save_processing_result(observation, assessment)
+    with closing(store._connect()) as connection, connection:
+        connection.execute(
+            "DELETE FROM assessments WHERE assessment_id=?",
+            (assessment.assessment_id,),
+        )
+
+    restored = store.save_processing_result(observation, assessment)
+    assert restored.assessment_created
+
+    with closing(store._connect()) as connection, connection:
+        connection.execute(
+            "DELETE FROM health_assessment_preferences WHERE observation_id=?",
+            (observation.observation_id,),
+        )
+    with pytest.raises(
+        sqlite3.DatabaseError,
+        match="Schema-8 assessment preference is missing",
+    ):
+        store.save_processing_result(observation, assessment)
+
+
 def test_purge_device_preserves_other_network_fact_samples(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
     first, first_assessment = _result("1")
@@ -610,6 +686,71 @@ def test_purge_device_removes_relationship_but_preserves_other_endpoint(tmp_path
         ).fetchall() == [("extaddr:0011223344556677",)]
 
 
+def test_purge_device_discovers_saved_context_and_finding_only_references(
+    tmp_path,
+) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    observation, assessment = _result()
+    device_id = "extaddr:1111111111111111"
+    other_device_id = "extaddr:2222222222222222"
+    assessment = replace(
+        assessment,
+        reproduction_context={
+            "expectedDeviceIds": [device_id],
+            "priorCompleteAbsences": {device_id: 1},
+            "rosterContext": {"records": [{"deviceId": device_id}]},
+            "presenceInputs": {
+                "observedDeviceIds": [device_id],
+                "expectedDeviceIds": [],
+            },
+            "evaluationInputs": {
+                "roster": {
+                    "expectedDeviceIds": [],
+                    "context": {"records": [{"deviceId": device_id}]},
+                },
+                "absenceHistory": {"priorCompleteAbsences": {}},
+                "deviceIpv6Addresses": {
+                    "complete": {},
+                    "observed": {device_id: ["fe80::1"]},
+                },
+                "duplicateRelationshipIds": [
+                    f"link:{device_id}->{other_device_id}"
+                ],
+            },
+        },
+        findings=(
+            Finding(
+                finding_id="finding-device-reference",
+                rule_id="device.missing",
+                status=HealthStatus.POOR,
+                scope=FindingScope.DEVICE,
+                rank=FindingRank.POOR,
+                title="Device missing",
+                summary="Device evidence",
+                why_it_matters="Device evidence",
+                device_ids=(device_id,),
+                relationship_ids=(),
+                evidence={},
+                confidence=Confidence.HIGH,
+                action="Inspect",
+                verify="Recheck",
+                action_key="inspect",
+                verification_key="recheck",
+                source_files=(),
+            ),
+        ),
+    )
+    store.save_processing_result(observation, assessment)
+
+    result = store.purge_device(device_id)
+
+    assert result.deleted["assessments"] == 1
+    assert result.deleted["findings"] == 1
+    assert result.deleted["health_assessment_preferences"] == 1
+    assert result.deleted["health_assessment_upgrades"] == 0
+    assert store.assessment_record(assessment_id=assessment.assessment_id) is None
+
+
 def test_purge_rolls_back_completely_on_failure(tmp_path, monkeypatch) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
     store.save_processing_result(*_result())
@@ -644,6 +785,56 @@ def test_comparison_pair_is_atomic_idempotent_and_late_arrival_does_not_repoint(
             "SELECT before_assessment_id, after_assessment_id FROM comparisons ORDER BY after_observed_at"
         ).fetchall() == [("assessment-1", "assessment-2"), ("assessment-1", "assessment-3")]
     assert interval.comparison_id == store.compare_assessments("assessment-1", "assessment-3", dry_run=True)[0].comparison_id
+
+
+def test_comparison_revision_reads_reject_cross_observation_preference(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    before = _result("1")
+    after = _result("2")
+    store.save_processing_result(*before)
+    store.save_processing_result(*after)
+    with closing(store._connect()) as connection:
+        comparison_id = connection.execute(
+            "SELECT comparison_id FROM comparisons"
+        ).fetchone()["comparison_id"]
+        connection.execute(
+            """UPDATE health_assessment_preferences
+               SET assessment_id=?, selection_basis_assessment_id=?
+               WHERE observation_id=?""",
+            (
+                after[1].assessment_id,
+                after[1].assessment_id,
+                before[0].observation_id,
+            ),
+        )
+        connection.commit()
+
+    with pytest.raises(sqlite3.DatabaseError, match="crosses observations"):
+        store.comparison_rows(
+            network_id=before[0].network_id,
+            dataset_id=before[0].dataset_id,
+            limit=10,
+            offset=0,
+        )
+    with pytest.raises(sqlite3.DatabaseError, match="crosses observations"):
+        store.comparison_row(comparison_id, limit=10, offset=0)
+
+    with closing(store._connect()) as connection:
+        connection.execute(
+            "DELETE FROM comparisons WHERE comparison_id=?", (comparison_id,)
+        )
+        connection.commit()
+    with pytest.raises(sqlite3.DatabaseError, match="crosses observations"):
+        store.compare_endpoint_pair(
+            network_id=before[0].network_id,
+            dataset_id=before[0].dataset_id,
+            before_assessment_id=before[1].assessment_id,
+            after_assessment_id=after[1].assessment_id,
+            limit=10,
+            offset=0,
+            scope="all",
+            result="all",
+        )
 
 
 def test_auto_comparison_suppresses_equivalent_observation_instants(tmp_path) -> None:
@@ -1014,6 +1205,53 @@ def test_idempotent_retry_recreates_missing_comparison(tmp_path) -> None:
         assert connection.execute("SELECT comparison_id FROM comparisons").fetchone() == (comparison_id,)
 
 
+@pytest.mark.parametrize(
+    ("reserved", "expected"),
+    [
+        (True, (1, 0)),
+        (False, (0, 1)),
+    ],
+)
+def test_auto_comparison_filters_unavailable_endpoints_before_baseline_selection(
+    tmp_path, reserved, expected
+) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    first = _result("1")
+    unsupported = _result("2")
+    latest = _result("3")
+    for endpoint in (first, unsupported, latest):
+        store.save_processing_result(*endpoint)
+
+    target_pair = comparison_id(
+        first[1].assessment_id,
+        latest[1].assessment_id,
+        ComparisonPolicy(),
+    )
+    with closing(store._connect()) as connection, connection:
+        connection.execute("DELETE FROM comparisons")
+        result = store._auto_compare(
+            connection,
+            *latest,
+            allowed_assessment_ids=frozenset(
+                {first[1].assessment_id, latest[1].assessment_id}
+            ),
+            reserved_comparison_ids=(
+                frozenset({target_pair}) if reserved else frozenset()
+            ),
+            enforce_retention=False,
+        )
+        assert result == expected
+        stored = connection.execute(
+            "SELECT before_assessment_id, after_assessment_id FROM comparisons"
+        ).fetchall()
+        if reserved:
+            assert [(row[0], row[1]) for row in stored] == [
+                (first[1].assessment_id, latest[1].assessment_id)
+            ]
+        else:
+            assert stored == []
+
+
 def test_route64_contract_cannot_upgrade_immutable_observation_samples(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     observation, assessment = _result()
@@ -1024,6 +1262,12 @@ def test_route64_contract_cannot_upgrade_immutable_observation_samples(tmp_path)
         store.save_processing_result(observation, updated)
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("SELECT assessment_id FROM assessments").fetchall() == [(assessment.assessment_id,)]
+    with closing(store._connect()) as connection, connection:
+        connection.execute(
+            "DELETE FROM assessments WHERE assessment_id=?",
+            (assessment.assessment_id,),
+        )
+    assert store.save_processing_result(observation, updated).assessment_created
 
 
 def test_pruned_numeric_delta_is_suppressed_without_mutating_persisted_item(tmp_path) -> None:

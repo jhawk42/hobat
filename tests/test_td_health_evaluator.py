@@ -7,10 +7,17 @@ from types import MappingProxyType
 
 import pytest
 
-from td_health_evaluator import EVALUATOR_VERSION, evaluate_observation
+from td_health_evaluator import (
+    EVALUATOR_VERSION,
+    evaluate_observation,
+    evaluation_inputs_from_payload,
+)
 from td_health_observation_model import (
     Completeness,
     DeviceSample,
+    EvaluationInputDomain,
+    EvaluationInputState,
+    EvaluationInputs,
     HealthStatus,
     MetricSample,
     Observation,
@@ -160,7 +167,7 @@ def test_complete_topology_profile_reports_border_router_redundancy() -> None:
     )
 
     assert PROFILE.border_router_authority is True
-    assert EVALUATOR_VERSION == "snapshot-v11"
+    assert EVALUATOR_VERSION == "snapshot-v12"
     assert border_router_finding.status is HealthStatus.STRONG
     assert border_router_finding.evidence["observedBorderRouterCount"] == 2
     assert border_router_finding.evidence["moreThanOne"] is True
@@ -222,6 +229,136 @@ def test_profile_capability_changes_assessment_identity() -> None:
     changed = evaluate_observation(observation, policy, profile=changed_profile)
 
     assert changed.assessment_id != original.assessment_id
+
+
+def test_unavailable_roster_is_unknown_not_a_verified_empty_roster() -> None:
+    observation = _observation(_relationship())
+    unavailable = EvaluationInputs(
+        roster=EvaluationInputDomain(
+            EvaluationInputState.UNAVAILABLE, ("input-not-retained",)
+        ),
+        expected_device_ids=None,
+        absence_history=EvaluationInputDomain(
+            EvaluationInputState.UNAVAILABLE, ("input-not-retained",)
+        ),
+        prior_complete_absences=None,
+        duplicate_relationships=EvaluationInputDomain(
+            EvaluationInputState.AVAILABLE
+        ),
+        duplicate_relationship_ids=(),
+        omr_prefix=EvaluationInputDomain(
+            EvaluationInputState.NOT_APPLICABLE
+        ),
+        omr_prefix_value=None,
+        omr_source=None,
+        device_ipv6_addresses=EvaluationInputDomain(
+            EvaluationInputState.NOT_APPLICABLE
+        ),
+        device_ipv6_address_values=None,
+        observed_device_ipv6_address_values={},
+        roster_context=None,
+        history_boundary=None,
+    )
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=PROFILE,
+        evaluation_inputs=unavailable,
+    )
+
+    assert not any(
+        finding.rule_id in {"device.missing", "device.offline"}
+        for finding in assessment.findings
+    )
+    assert assessment.coverage["expectedRosterCount"] is None
+    assert assessment.coverage["evaluationContextComplete"] is False
+    assert assessment.coverage["verdictContextComplete"] is False
+    assert assessment.coverage["observedPillars"]["availability"]["state"] == "limited"
+    gap = next(
+        finding for finding in assessment.findings
+        if finding.rule_id == "observation.evaluation-context-unavailable"
+    )
+    assert gap.evidence["unavailableDomains"][0]["domain"] == "roster"
+
+
+def test_unavailable_absence_history_can_report_missing_but_not_offline() -> None:
+    expected_id = "extaddr:3333333333333333"
+    roster_context = {
+        "schemaVersion": 1,
+        "networkId": "extpan:78b9775b001c1cbe",
+        "networkRosterRevision": 2,
+        "records": [],
+    }
+    inputs = EvaluationInputs(
+        roster=EvaluationInputDomain(EvaluationInputState.AVAILABLE),
+        expected_device_ids=frozenset({expected_id}),
+        absence_history=EvaluationInputDomain(
+            EvaluationInputState.UNAVAILABLE, ("input-not-retained",)
+        ),
+        prior_complete_absences=None,
+        duplicate_relationships=EvaluationInputDomain(
+            EvaluationInputState.AVAILABLE
+        ),
+        duplicate_relationship_ids=(),
+        omr_prefix=EvaluationInputDomain(EvaluationInputState.NOT_APPLICABLE),
+        omr_prefix_value=None,
+        omr_source=None,
+        device_ipv6_addresses=EvaluationInputDomain(
+            EvaluationInputState.NOT_APPLICABLE
+        ),
+        device_ipv6_address_values=None,
+        observed_device_ipv6_address_values={},
+        roster_context=roster_context,
+        history_boundary=None,
+    )
+
+    assessment = evaluate_observation(
+        _observation(_relationship()),
+        load_health_policy(),
+        profile=PROFILE,
+        evaluation_inputs=inputs,
+    )
+
+    finding = next(
+        item for item in assessment.findings
+        if item.rule_id == "device.missing"
+    )
+    assert finding.evidence["consecutiveCompleteAbsences"] is None
+    assert not any(item.rule_id == "device.offline" for item in assessment.findings)
+    assert assessment.coverage["verdictContextComplete"] is False
+
+
+def test_informational_duplicate_context_gap_does_not_cap_verdict() -> None:
+    observation = _observation(_relationship())
+    baseline = evaluate_observation(
+        observation, load_health_policy(), profile=PROFILE
+    )
+    inputs = evaluation_inputs_from_payload(
+        baseline.reproduction_context["evaluationInputs"]
+    )
+    incomplete = replace(
+        inputs,
+        duplicate_relationships=EvaluationInputDomain(
+            EvaluationInputState.UNAVAILABLE, ("input-not-retained",)
+        ),
+        duplicate_relationship_ids=None,
+    )
+
+    assessment = evaluate_observation(
+        observation,
+        load_health_policy(),
+        profile=PROFILE,
+        evaluation_inputs=incomplete,
+    )
+
+    assert assessment.coverage["verdictContextComplete"] is True
+    assert assessment.status is baseline.status
+    assert assessment.confidence is baseline.confidence
+    assert any(
+        finding.rule_id == "observation.evaluation-context-unavailable"
+        for finding in assessment.findings
+    )
 
 
 def test_border_router_address_in_omr_prefix_is_strong_external_routing() -> None:
