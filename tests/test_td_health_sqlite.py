@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from contextlib import closing
@@ -92,6 +93,34 @@ def test_atomic_save_is_idempotent_and_sets_sqlite_guards(tmp_path) -> None:
         assert connection.execute(
             "SELECT evaluator_version, profile_id FROM assessments"
         ).fetchone() == ("snapshot-test", "profile-test")
+
+
+def test_initialized_schema_matches_frozen_contract(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+
+    with sqlite3.connect(store.path) as connection:
+        schema_objects = connection.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name"
+        ).fetchall()
+        max_migration = connection.execute(
+            "SELECT MAX(version) FROM schema_migrations"
+        ).fetchone()[0]
+
+    schema_objects_digest = hashlib.sha256(
+        json.dumps(
+            schema_objects,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert hashlib.sha256(_SCHEMA.encode("utf-8")).hexdigest() == (
+        "309af9199b3f0c778a99407e89433d1f6da6f052604fcf6bdc8cbf51b72e9189"
+    )
+    assert schema_objects_digest == (
+        "9cdea3a1c0665ab4f0a69904222cc8840cf00b891ecb398d4378b632b30b5fb4"
+    )
+    assert SCHEMA_VERSION == 8
+    assert max_migration == 8
 
 
 def test_roster_source_time_and_partial_observation_do_not_refresh_projection(tmp_path) -> None:

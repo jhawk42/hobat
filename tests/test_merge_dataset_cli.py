@@ -53,6 +53,56 @@ def test_merge_excludes_cross_instance_and_stale_sidecars(tmp_path: Path) -> Non
     assert len(records) == 1
 
 
+def test_in_memory_records_still_use_present_and_missing_scope_sidecars(
+    tmp_path: Path,
+) -> None:
+    cli_file = "td-otbr-cli-router-table.json"
+    rest_file = "td-otbr-restapi-devices.json"
+    ha_file = "td-ha-matter-ws-devices-fetch-all.json"
+    _write_json(tmp_path / cli_file, [])
+    _write_json(tmp_path / ha_file, [])
+    write_network_scope(
+        tmp_path / cli_file,
+        NetworkScope("78b9775b001c1cbe", None, "observed", None, "now", (cli_file,)),
+    )
+    write_network_scope(
+        tmp_path / ha_file,
+        NetworkScope("1111111111111111", None, "observed", None, "now", (ha_file,)),
+    )
+
+    records, report = merge_dataset.build_merged_records(
+        tmp_path,
+        "",
+        [cli_file, rest_file, ha_file],
+        {},
+        input_data={
+            cli_file: [{"rloc16": "0x1234", "extaddr": "aabbccddeeff0011", "name": "router"}],
+            rest_file: [{"rloc16": "0x1234", "extAddress": "aabbccddeeff0011", "deviceLabel": "Hall"}],
+            ha_file: [{"rloc16": "0x5678", "extaddr": "1122334455667788"}],
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["name"] == "router"
+    assert records[0]["deviceLabel"] == "Hall"
+    assert records[0]["_source_files"] == [cli_file, rest_file]
+    assert report["networkInstance"]["extPanId"] == "78b9775b001c1cbe"
+    assert report["networkInstance"]["excluded"] == [{
+        "filename": ha_file,
+        "extPanId": "1111111111111111",
+        "recordCount": 1,
+        "reason": "cross-instance",
+    }]
+    assert report["records_read_by_source"] == {
+        cli_file: 1,
+        ha_file: 1,
+        rest_file: 1,
+    }
+    assert report["new_nodes_by_source"] == {cli_file: 1}
+    assert report["matched_existing_by_source"] == {rest_file: 1}
+    assert not (tmp_path / rest_file).exists()
+
+
 def test_merge_all_unknown_sidecars_preserves_identity_join(tmp_path: Path) -> None:
     for name in ("first.json", "second.json"):
         _write_json(tmp_path / name, [{"rloc16": "0x1234"}])

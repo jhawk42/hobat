@@ -275,32 +275,48 @@ RELATIONSHIP_CATALOG: Mapping[str, tuple[str, str | None]] = {
 }
 
 
-def derive_comparison(
-    before: tuple[Observation, Assessment], after: tuple[Observation, Assessment],
-    *, source_roles: Mapping[str, str], policy: ComparisonPolicy = ComparisonPolicy(),
-    roster_device_ids: frozenset[str] = frozenset(),
-    endpoint_facts: Mapping[str, tuple[Mapping[str, object], ...]] | None = None,
-) -> tuple[ComparisonInterval, tuple[ComparisonItem, ...]]:
-    """Derive only endpoint evidence; roster IDs select candidates, never samples."""
-    before_obs, before_assessment = before
-    after_obs, after_assessment = after
-    interval = compare_interval(
-        before, after, before_assessment_id=before_assessment.assessment_id,
-        after_assessment_id=after_assessment.assessment_id, source_roles=source_roles, policy=policy,
-    )
+def _common_newer_source(
+    before_obs: Observation,
+    after_obs: Observation,
+    old_files: tuple[str, ...] | None,
+    new_files: tuple[str, ...] | None,
+) -> str | None:
+    filenames = sorted(set(old_files or ()) | set(new_files or ()))
+    for filename in filenames:
+        if old_files is not None and filename not in old_files:
+            continue
+        if new_files is not None and filename not in new_files:
+            continue
+        before_time = source_time_for_sample(before_obs, filename)
+        after_time = source_time_for_sample(after_obs, filename)
+        if (
+            before_time
+            and after_time
+            and _utc_timestamp(after_time) > _utc_timestamp(before_time)
+        ):
+            return filename
+    return None
+
+
+def _derive_device_comparison_items(
+    before_obs: Observation,
+    after_obs: Observation,
+    interval: ComparisonInterval,
+    roster_device_ids: frozenset[str],
+    endpoint_facts: Mapping[str, tuple[Mapping[str, object], ...]] | None,
+) -> list[ComparisonItem]:
     items: list[ComparisonItem] = []
     old_devices = {device.device_id: device for device in before_obs.devices}
     new_devices = {device.device_id: device for device in after_obs.devices}
     for device_id in sorted(old_devices.keys() | new_devices.keys() | roster_device_ids):
-        old_device, new_device = old_devices.get(device_id), new_devices.get(device_id)
-        source_files = tuple(sorted(set(old_device.source_files if old_device else ()) |
-                                    set(new_device.source_files if new_device else ())))
-        source_file = next((filename for filename in source_files if
-                            (old_device is None or filename in old_device.source_files) and
-                            (new_device is None or filename in new_device.source_files) and
-                            (before_time := source_time_for_sample(before_obs, filename)) and
-                            (after_time := source_time_for_sample(after_obs, filename)) and
-                            _utc_timestamp(after_time) > _utc_timestamp(before_time)), None)
+        old_device = old_devices.get(device_id)
+        new_device = new_devices.get(device_id)
+        old_files = old_device.source_files if old_device else None
+        new_files = new_device.source_files if new_device else None
+        source_files = tuple(sorted(set(old_files or ()) | set(new_files or ())))
+        source_file = _common_newer_source(
+            before_obs, after_obs, old_files, new_files
+        )
         old_time = source_time_for_sample(before_obs, source_file) if source_file else None
         new_time = source_time_for_sample(after_obs, source_file) if source_file else None
         if old_device or new_device:
@@ -313,65 +329,109 @@ def derive_comparison(
                 after_coverage_time=new_time if new_device is None else None,
             ))
         for field in ("role", "state"):
-            if old_device and new_device and getattr(old_device, field) is not None and getattr(new_device, field) is not None:
+            if (
+                old_device
+                and new_device
+                and getattr(old_device, field) is not None
+                and getattr(new_device, field) is not None
+            ):
                 items.append(derive_discrete_item(
                     interval, kind="categorical-transition", scope="device", subject_id=device_id,
-                    metric=field, before_value=getattr(old_device, field), after_value=getattr(new_device, field),
-                    before_source_time=old_time, after_source_time=new_time, source_files=source_files,
+                    metric=field, before_value=getattr(old_device, field),
+                    after_value=getattr(new_device, field), before_source_time=old_time,
+                    after_source_time=new_time, source_files=source_files,
                 ))
         if endpoint_facts:
-            for field, metric in (("leaderData.partitionId", "partition"), ("rloc16", "rloc16")):
-                matches = [fact for fact in endpoint_facts.get(before_obs.observation_id, ())
-                           if fact["device_id"] == device_id and fact["field_key"] == field
-                           and fact["conflict_state"] == "none"]
-                newer = [fact for fact in endpoint_facts.get(after_obs.observation_id, ())
-                         if fact["device_id"] == device_id and fact["field_key"] == field
-                         and fact["conflict_state"] == "none"]
+            for field, metric in (
+                ("leaderData.partitionId", "partition"),
+                ("rloc16", "rloc16"),
+            ):
+                matches = [
+                    fact for fact in endpoint_facts.get(before_obs.observation_id, ())
+                    if fact["device_id"] == device_id and fact["field_key"] == field
+                    and fact["conflict_state"] == "none"
+                ]
+                newer = [
+                    fact for fact in endpoint_facts.get(after_obs.observation_id, ())
+                    if fact["device_id"] == device_id and fact["field_key"] == field
+                    and fact["conflict_state"] == "none"
+                ]
                 for old_fact in matches:
-                    matching = [fact for fact in newer if fact["source_file"] == old_fact["source_file"]
-                                and fact["roster_policy_digest"] == old_fact["roster_policy_digest"]]
-                    if (len(matches) == len(newer) == len(matching) == 1
-                            and old_fact["roster_policy_digest"]
-                            and old_fact["source_observed_at"] == source_time_for_sample(before_obs, old_fact["source_file"])
-                            and matching[0]["source_observed_at"] == source_time_for_sample(after_obs, matching[0]["source_file"])):
+                    matching = [
+                        fact for fact in newer
+                        if fact["source_file"] == old_fact["source_file"]
+                        and fact["roster_policy_digest"] == old_fact["roster_policy_digest"]
+                    ]
+                    if (
+                        len(matches) == len(newer) == len(matching) == 1
+                        and old_fact["roster_policy_digest"]
+                        and old_fact["source_observed_at"]
+                        == source_time_for_sample(before_obs, old_fact["source_file"])
+                        and matching[0]["source_observed_at"]
+                        == source_time_for_sample(after_obs, matching[0]["source_file"])
+                    ):
                         items.append(derive_discrete_item(
-                            interval, kind="categorical-transition", scope="device", subject_id=device_id,
-                            metric=metric, before_value=old_fact["value"], after_value=matching[0]["value"],
+                            interval, kind="categorical-transition", scope="device",
+                            subject_id=device_id, metric=metric,
+                            before_value=old_fact["value"], after_value=matching[0]["value"],
                             before_source_time=old_fact["source_observed_at"],
                             after_source_time=matching[0]["source_observed_at"],
                             source_files=(old_fact["source_file"],),
                         ))
-        old_parents = [link for link in before_obs.relationships if link.relationship_type == "parent-child"
-                       and link.to_device_id == device_id]
-        new_parents = [link for link in after_obs.relationships if link.relationship_type == "parent-child"
-                       and link.to_device_id == device_id]
+        old_parents = [
+            link for link in before_obs.relationships
+            if link.relationship_type == "parent-child" and link.to_device_id == device_id
+        ]
+        new_parents = [
+            link for link in after_obs.relationships
+            if link.relationship_type == "parent-child" and link.to_device_id == device_id
+        ]
         if len(old_parents) == len(new_parents) == 1:
-            parent_files = tuple(sorted(set(old_parents[0].source_files) | set(new_parents[0].source_files)))
-            common_file = next((filename for filename in parent_files if filename in old_parents[0].source_files
-                                and filename in new_parents[0].source_files
-                                and (before_time := source_time_for_sample(before_obs, filename))
-                                and (after_time := source_time_for_sample(after_obs, filename))
-                                and _utc_timestamp(after_time) > _utc_timestamp(before_time)), None)
+            old_parent, new_parent = old_parents[0], new_parents[0]
+            parent_files = tuple(sorted(set(old_parent.source_files) | set(new_parent.source_files)))
+            common_file = _common_newer_source(
+                before_obs, after_obs, old_parent.source_files, new_parent.source_files
+            )
             items.append(derive_discrete_item(
                 interval, kind="categorical-transition", scope="device", subject_id=device_id,
-                metric="parent", before_value=old_parents[0].from_device_id,
-                after_value=new_parents[0].from_device_id,
+                metric="parent", before_value=old_parent.from_device_id,
+                after_value=new_parent.from_device_id,
                 before_source_time=source_time_for_sample(before_obs, common_file) if common_file else None,
                 after_source_time=source_time_for_sample(after_obs, common_file) if common_file else None,
                 source_files=parent_files,
             ))
-    old_metrics = {(item.device_id, item.metric, item.source_file): item for item in before_obs.metrics}
-    new_metrics = {(item.device_id, item.metric, item.source_file): item for item in after_obs.metrics}
+    return items
+
+
+def _derive_metric_comparison_items(
+    before_obs: Observation,
+    after_obs: Observation,
+    interval: ComparisonInterval,
+    policy: ComparisonPolicy,
+) -> list[ComparisonItem]:
+    items: list[ComparisonItem] = []
+    old_metrics = {
+        (item.device_id, item.metric, item.source_file): item for item in before_obs.metrics
+    }
+    new_metrics = {
+        (item.device_id, item.metric, item.source_file): item for item in after_obs.metrics
+    }
     for key in sorted(old_metrics.keys() | new_metrics.keys()):
         device_id, metric_name, filename = key
         if metric_name not in METRIC_CATALOG:
             continue
         kind, unit, denominator_kind, preference = METRIC_CATALOG[metric_name]
         old, new = old_metrics.get(key), new_metrics.get(key)
-        reset = (classify_reset(elapsed_seconds=interval.elapsed_seconds,
-                                before_counter=old.value if old else None,
-                                after_counter=new.value if new else None, policy=policy)
-                 if kind == "counter-delta" else None)
+        reset = (
+            classify_reset(
+                elapsed_seconds=interval.elapsed_seconds,
+                before_counter=old.value if old else None,
+                after_counter=new.value if new else None,
+                policy=policy,
+            )
+            if kind == "counter-delta"
+            else None
+        )
         items.append(derive_numeric_item(
             interval, scope="device", subject_id=device_id, kind=kind, metric=metric_name,
             unit=unit, denominator_kind=denominator_kind,
@@ -383,17 +443,23 @@ def derive_comparison(
             after_source_time=source_time_for_sample(after_obs, filename),
             source_files=(filename,), reset_evidence=reset, preference=preference,
         ))
+    return items
+
+
+def _derive_relationship_comparison_items(
+    before_obs: Observation,
+    after_obs: Observation,
+    interval: ComparisonInterval,
+) -> list[ComparisonItem]:
+    items: list[ComparisonItem] = []
     old_links = {item.relationship_id: item for item in before_obs.relationships}
     new_links = {item.relationship_id: item for item in after_obs.relationships}
     for link_id in sorted(old_links.keys() | new_links.keys()):
         old, new = old_links.get(link_id), new_links.get(link_id)
-        source_files = tuple(sorted(set(old.source_files if old else ()) | set(new.source_files if new else ())))
-        common = next((filename for filename in source_files if
-                       (old is None or filename in old.source_files) and
-                       (new is None or filename in new.source_files) and
-                       (before_time := source_time_for_sample(before_obs, filename)) and
-                       (after_time := source_time_for_sample(after_obs, filename)) and
-                       _utc_timestamp(after_time) > _utc_timestamp(before_time)), None)
+        old_files = old.source_files if old else None
+        new_files = new.source_files if new else None
+        source_files = tuple(sorted(set(old_files or ()) | set(new_files or ())))
+        common = _common_newer_source(before_obs, after_obs, old_files, new_files)
         old_time = source_time_for_sample(before_obs, common) if common else None
         new_time = source_time_for_sample(after_obs, common) if common else None
         relationship_type = old.relationship_type if old else new.relationship_type
@@ -404,25 +470,46 @@ def derive_comparison(
             before_source_time=old_time, after_source_time=new_time, source_files=source_files,
         )
         if old and new and old.relationship_type != new.relationship_type:
-            item = replace(item, compatibility=_compatibility(set(item.compatibility.reasons) | {"relationship-mismatch"}),
-                           change="unknown", transition=None)
+            item = replace(
+                item,
+                compatibility=_compatibility(
+                    set(item.compatibility.reasons) | {"relationship-mismatch"}
+                ),
+                change="unknown",
+                transition=None,
+            )
         if relationship_type == "router-route":
             reporter_id = (old or new).reporter_device_id
             if not common or not reporter_id or any(
-                not any(metric.device_id == reporter_id and metric.source_file == common
-                        and metric.metric == "route64Coverage" and metric.unit == "flag" and metric.value == 1.0
-                        for metric in observation.metrics)
+                not any(
+                    metric.device_id == reporter_id
+                    and metric.source_file == common
+                    and metric.metric == "route64Coverage"
+                    and metric.unit == "flag"
+                    and metric.value == 1.0
+                    for metric in observation.metrics
+                )
                 for observation in (before_obs, after_obs)
             ):
-                item = replace(item, compatibility=_compatibility(set(item.compatibility.reasons) | {"metric-missing"}),
-                               change="unknown", transition=None)
+                item = replace(
+                    item,
+                    compatibility=_compatibility(
+                        set(item.compatibility.reasons) | {"metric-missing"}
+                    ),
+                    change="unknown",
+                    transition=None,
+                )
         items.append(item)
-        if (old and old.queued_message_count is not None) or (new and new.queued_message_count is not None):
+        if (old and old.queued_message_count is not None) or (
+            new and new.queued_message_count is not None
+        ):
             items.append(derive_discrete_item(
                 interval, kind="queue-persistence", scope="relationship", subject_id=link_id,
-            metric="queuedMessageCount", before_value=old.queued_message_count if old else None,
-            after_value=new.queued_message_count if new else None, before_source_time=old_time,
-                after_source_time=new_time, source_files=source_files,
+                metric="queuedMessageCount",
+                before_value=old.queued_message_count if old else None,
+                after_value=new.queued_message_count if new else None,
+                before_source_time=old_time, after_source_time=new_time,
+                source_files=source_files,
             ))
         for field, (unit, preference) in RELATIONSHIP_CATALOG.items():
             old_value = getattr(old, field) if old else None
@@ -436,6 +523,29 @@ def derive_comparison(
                 before_source_time=old_time, after_source_time=new_time,
                 source_files=source_files, preference=preference,
             ))
+    return items
+
+
+def derive_comparison(
+    before: tuple[Observation, Assessment], after: tuple[Observation, Assessment],
+    *, source_roles: Mapping[str, str], policy: ComparisonPolicy = ComparisonPolicy(),
+    roster_device_ids: frozenset[str] = frozenset(),
+    endpoint_facts: Mapping[str, tuple[Mapping[str, object], ...]] | None = None,
+) -> tuple[ComparisonInterval, tuple[ComparisonItem, ...]]:
+    """Derive only endpoint evidence; roster IDs select candidates, never samples."""
+    before_obs, before_assessment = before
+    after_obs, after_assessment = after
+    interval = compare_interval(
+        before, after, before_assessment_id=before_assessment.assessment_id,
+        after_assessment_id=after_assessment.assessment_id, source_roles=source_roles, policy=policy,
+    )
+    items = [
+        *_derive_device_comparison_items(
+            before_obs, after_obs, interval, roster_device_ids, endpoint_facts
+        ),
+        *_derive_metric_comparison_items(before_obs, after_obs, interval, policy),
+        *_derive_relationship_comparison_items(before_obs, after_obs, interval),
+    ]
     return interval, tuple(sorted(items, key=lambda item: (item.scope, item.subject_id, item.kind, item.metric or "", item.item_id)))
 
 

@@ -5,7 +5,7 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from otbr_restapi_util import (
     BASIC_DIAGNOSTIC_TLVS,
@@ -352,6 +352,182 @@ def _write_checkpoint_best_effort(
         )
 
 
+def _dispatch_diagnostics_list(
+    client: OTBRRestApiClient,
+    args: argparse.Namespace,
+    raw_arg: object,
+    fields: dict[str, str] | None,
+    finish: Callable[[Any], Any],
+) -> Any:
+    diagnostics = client.list_diagnostics(
+        fields=fields,
+        raw=raw_arg,
+        with_meta=args.with_meta,
+    )
+    if raw_arg is True:
+        return finish(diagnostics)
+
+    no_enrich = getattr(args, "no_enrich_mac_counters", False)
+    if args.with_meta and isinstance(diagnostics, dict):
+        items = diagnostics.get("items")
+        if isinstance(items, list):
+            if not no_enrich:
+                _apply_mac_enrichment(items)
+                _apply_time_stats_enrichment(items)
+            _apply_border_router_enrichment(items)
+            _apply_role_evidence_normalization(items)
+        return finish(convert_keys_to_camel_case(diagnostics))
+
+    if isinstance(diagnostics, list):
+        if not no_enrich:
+            _apply_mac_enrichment(diagnostics)
+            _apply_time_stats_enrichment(diagnostics)
+        _apply_border_router_enrichment(diagnostics)
+        _apply_role_evidence_normalization(diagnostics)
+    return finish(convert_keys_to_camel_case(diagnostics))
+
+
+def _dispatch_diagnostics_get(
+    client: OTBRRestApiClient,
+    args: argparse.Namespace,
+    raw_arg: object,
+    finish: Callable[[Any], Any],
+) -> Any:
+    result = client.get_diagnostic(args.diagnostics_id, raw=raw_arg)
+    if raw_arg is True or not isinstance(result, dict):
+        return finish(result)
+    result = normalize_input_record(result, source="rest")
+    _apply_border_router_enrichment([result])
+    return finish(convert_keys_to_camel_case(result))
+
+
+def _dispatch_diagnostics_fetch(
+    client: OTBRRestApiClient,
+    args: argparse.Namespace,
+    raw_arg: object,
+    finish: Callable[[Any], Any],
+) -> Any:
+    primary_types = resolve_types(args)
+    fallback_types = resolve_fallback_types(args)
+    result = fetch_device_with_fallback(
+        client,
+        args.device_id,
+        primary_types,
+        fallback_types,
+        destination_type=args.destination_type,
+        task_timeout=args.task_timeout,
+        poll_interval=args.poll_interval,
+        poll_timeout=args.poll_timeout,
+        raw=raw_arg,
+    )
+    if raw_arg is True:
+        return finish(result)
+    if not getattr(args, "no_enrich_mac_counters", False):
+        _apply_mac_enrichment([result])
+    if isinstance(result, dict):
+        _apply_border_router_enrichment([result])
+        result = normalize_input_record(result, source="rest")
+    return finish(convert_keys_to_camel_case(result))
+
+
+def _dispatch_diagnostics_fetch_all(
+    client: OTBRRestApiClient,
+    args: argparse.Namespace,
+    raw_arg: object,
+    finish: Callable[[Any], Any],
+    output_path: str | Path | None,
+) -> Any:
+    resolved_types = resolve_types(args)
+    fallback_types = resolve_fallback_types(args)
+    progressive_fallback = use_progressive_fallback(args)
+    no_basic_fallback = getattr(args, "no_basic_fallback", False)
+    if no_basic_fallback and not progressive_fallback:
+        raise OTBRUsageError(
+            "--no-basic-fallback requires the default or recommended progressive fetch-all policy; "
+            "do not combine it with --types, a non-recommended --preset, --fallback-preset, or --no-fallback"
+        )
+    do_enrich = not getattr(args, "no_enrich_mac_counters", False)
+    do_update = not getattr(args, "no_update_devices", False)
+
+    if do_update:
+        devices = client.fetch_device_collection(
+            device_count=getattr(args, "device_count", 255),
+            items_only=True,
+        )
+    else:
+        devices = client.list_devices(raw=False)
+
+    requested_device_ids = getattr(args, "device_ids", None)
+    if requested_device_ids:
+        devices_by_id = {
+            device["id"].lower(): device
+            for device in devices
+            if isinstance(device, dict)
+            and isinstance(device.get("id"), str)
+        }
+        selected_devices = [
+            devices_by_id.get(device_id.lower(), device_id)
+            if isinstance(device_id, str)
+            else device_id
+            for device_id in requested_device_ids
+        ]
+    else:
+        selected_devices = devices
+
+    checkpoint_path = None
+    if output_path:
+        output_file = Path(output_path)
+        checkpoint_path = output_file.parent / create_checkpoint_filename(
+            output_file.name
+        )
+
+    def _on_checkpoint(results, _idx, _total, _device_id, _status):
+        if checkpoint_path is None:
+            return
+        if raw_arg is not True:
+            _apply_border_router_enrichment(results)
+        _write_checkpoint_best_effort(
+            results,
+            checkpoint_path,
+            "otbr-restapi diagnostics fetch-all",
+            "device",
+            raw=raw_arg is True,
+        )
+
+    progress_fn = make_progress_fn(
+        len(selected_devices), not getattr(args, "no_progress", False)
+    )
+    outcome = client.fetch_all_devices_diagnostics(
+        selected_devices,
+        types=resolved_types,
+        destination_type=args.destination_type,
+        task_timeout=args.task_timeout,
+        poll_interval=args.poll_interval,
+        poll_timeout=args.poll_timeout,
+        clear_diagnostics=not getattr(args, "preserve_diagnostics", False),
+        fallback_types=fallback_types,
+        progressive_fallback=progressive_fallback,
+        include_basic_fallback=not no_basic_fallback,
+        raw=raw_arg,
+        on_progress=progress_fn,
+        on_checkpoint=_on_checkpoint,
+    )
+    diagnostics = outcome["items"]
+    if raw_arg is not True:
+        if do_enrich:
+            _apply_mac_enrichment(diagnostics)
+            _apply_time_stats_enrichment(diagnostics)
+        _apply_border_router_enrichment(diagnostics)
+    if raw_arg is True:
+        if getattr(args, "items_only", False):
+            return finish(diagnostics)
+        return finish(outcome)
+    _apply_role_evidence_normalization(diagnostics)
+    if getattr(args, "items_only", False):
+        return finish(convert_keys_to_camel_case(diagnostics))
+    return finish(convert_keys_to_camel_case(outcome))
+
+
 def dispatch_diagnostics(
     client: OTBRRestApiClient,
     args: argparse.Namespace,
@@ -365,152 +541,19 @@ def dispatch_diagnostics(
             return emit_rest_command_output(
                 result, output_path, logger=logging.getLogger(__name__), raw=True
             )
-        return emit_rest_command_output(result, output_path, logger=logging.getLogger(__name__))
+        return emit_rest_command_output(
+            result, output_path, logger=logging.getLogger(__name__)
+        )
 
     if args.diagnostics_command == "list":
-        diagnostics = client.list_diagnostics(
-            fields=fields,
-            raw=raw_arg,
-            with_meta=args.with_meta,
-        )
-        if raw_arg is True:
-            return finish(diagnostics)
-
-        no_enrich = getattr(args, "no_enrich_mac_counters", False)
-
-        if args.with_meta and isinstance(diagnostics, dict):
-            items = diagnostics.get("items")
-            if isinstance(items, list):
-                if not no_enrich:
-                    _apply_mac_enrichment(items)
-                    _apply_time_stats_enrichment(items)
-                _apply_border_router_enrichment(items)
-                _apply_role_evidence_normalization(items)
-            return finish(convert_keys_to_camel_case(diagnostics))
-
-        if isinstance(diagnostics, list):
-            if not no_enrich:
-                _apply_mac_enrichment(diagnostics)
-                _apply_time_stats_enrichment(diagnostics)
-            _apply_border_router_enrichment(diagnostics)
-            _apply_role_evidence_normalization(diagnostics)
-        return finish(convert_keys_to_camel_case(diagnostics))
+        return _dispatch_diagnostics_list(client, args, raw_arg, fields, finish)
     if args.diagnostics_command == "get":
-        result = client.get_diagnostic(args.diagnostics_id, raw=raw_arg)
-        if raw_arg is True or not isinstance(result, dict):
-            return finish(result)
-        result = normalize_input_record(result, source="rest")
-        _apply_border_router_enrichment([result])
-        return finish(convert_keys_to_camel_case(result))
+        return _dispatch_diagnostics_get(client, args, raw_arg, finish)
     if args.diagnostics_command == "fetch":
-        primary_types = resolve_types(args)
-        fallback_types = resolve_fallback_types(args)
-        result = fetch_device_with_fallback(
-            client,
-            args.device_id,
-            primary_types,
-            fallback_types,
-            destination_type=args.destination_type,
-            task_timeout=args.task_timeout,
-            poll_interval=args.poll_interval,
-            poll_timeout=args.poll_timeout,
-            raw=raw_arg,
-        )
-        if raw_arg is True:
-            return finish(result)
-        if not getattr(args, "no_enrich_mac_counters", False):
-            _apply_mac_enrichment([result])
-        if isinstance(result, dict):
-            _apply_border_router_enrichment([result])
-            result = normalize_input_record(result, source="rest")
-        return finish(convert_keys_to_camel_case(result))
+        return _dispatch_diagnostics_fetch(client, args, raw_arg, finish)
     if args.diagnostics_command == "fetch-all":
-        resolved_types = resolve_types(args)
-        fallback_types = resolve_fallback_types(args)
-        progressive_fallback = use_progressive_fallback(args)
-        no_basic_fallback = getattr(args, "no_basic_fallback", False)
-        if no_basic_fallback and not progressive_fallback:
-            raise OTBRUsageError(
-                "--no-basic-fallback requires the default or recommended progressive fetch-all policy; "
-                "do not combine it with --types, a non-recommended --preset, --fallback-preset, or --no-fallback"
-            )
-        do_enrich = not getattr(args, "no_enrich_mac_counters", False)
-        do_update = not getattr(args, "no_update_devices", False)
-
-        if do_update:
-            devices = client.fetch_device_collection(
-                device_count=getattr(args, "device_count", 255),
-                items_only=True,
-            )
-        else:
-            devices = client.list_devices(raw=False)
-
-        requested_device_ids = getattr(args, "device_ids", None)
-        if requested_device_ids:
-            devices_by_id = {
-                device["id"].lower(): device
-                for device in devices
-                if isinstance(device, dict)
-                and isinstance(device.get("id"), str)
-            }
-            selected_devices = [
-                devices_by_id.get(device_id.lower(), device_id)
-                if isinstance(device_id, str)
-                else device_id
-                for device_id in requested_device_ids
-            ]
-        else:
-            selected_devices = devices
-
-        checkpoint_path = None
-        if output_path:
-            output_file = Path(output_path)
-            checkpoint_path = output_file.parent / create_checkpoint_filename(
-                output_file.name
-            )
-
-        def _on_checkpoint(results, _idx, _total, _device_id, _status):
-            if checkpoint_path is None:
-                return
-            if raw_arg is not True:
-                _apply_border_router_enrichment(results)
-            _write_checkpoint_best_effort(
-                results,
-                checkpoint_path,
-                "otbr-restapi diagnostics fetch-all",
-                "device",
-                raw=raw_arg is True,
-            )
-
-        progress_fn = make_progress_fn(len(selected_devices), not getattr(args, "no_progress", False))
-        outcome = client.fetch_all_devices_diagnostics(
-            selected_devices,
-            types=resolved_types,
-            destination_type=args.destination_type,
-            task_timeout=args.task_timeout,
-            poll_interval=args.poll_interval,
-            poll_timeout=args.poll_timeout,
-            clear_diagnostics=not getattr(args, "preserve_diagnostics", False),
-            fallback_types=fallback_types,
-            progressive_fallback=progressive_fallback,
-            include_basic_fallback=not no_basic_fallback,
-            raw=raw_arg,
-            on_progress=progress_fn,
-            on_checkpoint=_on_checkpoint,
+        return _dispatch_diagnostics_fetch_all(
+            client, args, raw_arg, finish, output_path
         )
-        diagnostics = outcome["items"]
-        if raw_arg is not True:
-            if do_enrich:
-                _apply_mac_enrichment(diagnostics)
-                _apply_time_stats_enrichment(diagnostics)
-            _apply_border_router_enrichment(diagnostics)
-        if raw_arg is True:
-            if getattr(args, "items_only", False):
-                return finish(diagnostics)
-            return finish(outcome)
-        _apply_role_evidence_normalization(diagnostics)
-        if getattr(args, "items_only", False):
-            return finish(convert_keys_to_camel_case(diagnostics))
-        return finish(convert_keys_to_camel_case(outcome))
 
     raise ValueError("Unsupported diagnostics command")

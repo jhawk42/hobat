@@ -49,6 +49,34 @@ class ProcessingResult:
     roster_facts: tuple[RosterFact, ...] = ()
 
 
+@dataclass(frozen=True)
+class _SampleRegistration:
+    normalized_by_file: dict[str, list[dict[str, Any]]]
+    devices: dict[str, dict[str, Any]]
+    rloc_devices: dict[str, str]
+    router_devices: dict[int, str | None]
+    route_reporter_counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class _SampleProjection:
+    devices: dict[str, dict[str, Any]]
+    relationships: dict[str, RelationshipSample]
+    metrics: dict[tuple[str, str, str], MetricSample]
+    duplicate_relationship_ids: set[str]
+
+
+@dataclass(frozen=True)
+class _ProcessingInputSnapshot:
+    payloads: dict[str, Any]
+    sources: list[SourceEvidence]
+    mtimes: list[int]
+    identity_mtime: int | None
+    identity_digest: str | None
+    identity_source_time: str | None
+    completeness: Completeness
+
+
 def _stable_read(path: Path) -> tuple[Any, str, int]:
     try:
         before = path.stat()
@@ -148,14 +176,46 @@ def _normalize_samples(
     tuple[str, ...],
     Mapping[str, tuple[str, ...]],
 ]:
+    ordered_files = sorted(
+        dataset.files, key=lambda filename: (-source_rank(filename), filename)
+    )
+    registration = _register_sample_devices(dataset, payloads, ordered_files)
+    projection = _project_sample_evidence(dataset, registration)
+    device_samples = tuple(
+        DeviceSample(
+            device_id=device_id,
+            ext_address=value["extAddress"],
+            role=value["role"],
+            state=value["state"],
+            is_border_router=value["isBorderRouter"],
+            source_files=tuple(sorted(value["sourceFiles"])),
+        )
+        for device_id, value in sorted(projection.devices.items())
+    )
+    device_ipv6_addresses = {
+        device_id: tuple(sorted(value.get("ipv6Addresses", ())))
+        for device_id, value in projection.devices.items()
+        if value.get("ipv6AddressReported") and not value.get("ipv6AddressInvalid")
+    }
+    return (
+        device_samples,
+        tuple(projection.relationships[key] for key in sorted(projection.relationships)),
+        tuple(projection.metrics[key] for key in sorted(projection.metrics)),
+        tuple(sorted(projection.duplicate_relationship_ids)),
+        device_ipv6_addresses,
+    )
+
+
+def _register_sample_devices(
+    dataset: HealthDataset,
+    payloads: Mapping[str, Any],
+    ordered_files: list[str],
+) -> _SampleRegistration:
     devices: dict[str, dict[str, Any]] = {}
     rloc_devices: dict[str, str] = {}
     router_devices: dict[int, str | None] = {}
     route_reporter_counts: dict[str, int] = {}
     normalized_by_file: dict[str, list[dict[str, Any]]] = {}
-    ordered_files = sorted(
-        dataset.files, key=lambda filename: (-source_rank(filename), filename)
-    )
     for filename in ordered_files:
         normalized_by_file[filename] = [
             normalize_input_record(record, source=filename)
@@ -210,11 +270,27 @@ def _normalize_samples(
                         router_devices[router_id] = None
                     else:
                         router_devices[router_id] = device_id
+    return _SampleRegistration(
+        normalized_by_file,
+        devices,
+        rloc_devices,
+        router_devices,
+        route_reporter_counts,
+    )
 
+
+def _project_sample_evidence(
+    dataset: HealthDataset,
+    registration: _SampleRegistration,
+) -> _SampleProjection:
+    devices = registration.devices
+    rloc_devices = registration.rloc_devices
+    router_devices = registration.router_devices
+    route_reporter_counts = registration.route_reporter_counts
     relationships: dict[str, RelationshipSample] = {}
     metrics: dict[tuple[str, str, str], MetricSample] = {}
     duplicate_relationship_ids: set[str] = set()
-    for filename, records in normalized_by_file.items():
+    for filename, records in registration.normalized_by_file.items():
         seen_in_file: set[str] = set()
         for record in records:
             reporter_id: str | None = None
@@ -363,43 +439,20 @@ def _normalize_samples(
                             child.get("queuedMessageCount") or child.get("q_msg")
                         ),
                     )
-
-    device_samples = tuple(
-        DeviceSample(
-            device_id=device_id,
-            ext_address=value["extAddress"],
-            role=value["role"],
-            state=value["state"],
-            is_border_router=value["isBorderRouter"],
-            source_files=tuple(sorted(value["sourceFiles"])),
-        )
-        for device_id, value in sorted(devices.items())
-    )
-    device_ipv6_addresses = {
-        device_id: tuple(sorted(value.get("ipv6Addresses", ())))
-        for device_id, value in devices.items()
-        if value.get("ipv6AddressReported") and not value.get("ipv6AddressInvalid")
-    }
-    return (
-        device_samples,
-        tuple(relationships[key] for key in sorted(relationships)),
-        tuple(metrics[key] for key in sorted(metrics)),
-        tuple(sorted(duplicate_relationship_ids)),
-        device_ipv6_addresses,
+    return _SampleProjection(
+        devices,
+        relationships,
+        metrics,
+        duplicate_relationship_ids,
     )
 
 
-def build_processing_result(
-    *,
+def _read_processing_inputs(
     data_dir: Path,
-    dataset_id: str,
-    policy: HealthPolicy,
-    allow_partial: bool = False,
-    store: SQLiteHealthStore | None = None,
-    processing_time: datetime | None = None,
-) -> ProcessingResult:
-    manifest = load_health_manifest()
-    dataset = manifest.dataset(dataset_id)
+    dataset: HealthDataset,
+    allow_partial: bool,
+    read_time: datetime,
+) -> _ProcessingInputSnapshot:
     payloads: dict[str, Any] = {}
     sources: list[SourceEvidence] = []
     mtimes: list[int] = []
@@ -407,8 +460,6 @@ def build_processing_result(
     identity_digest: str | None = None
     identity_source_time: str | None = None
     completeness = Completeness.COMPLETE
-    read_time = processing_time or datetime.now(timezone.utc)
-
     required = [*dataset.files, dataset.health_profile.identity_file]
     for filename in required:
         path = data_dir / filename
@@ -416,7 +467,11 @@ def build_processing_result(
             payload, digest, mtime = _stable_read(path)
         except HealthProcessingError:
             completeness = Completeness.PARTIAL
-            sources.append(SourceEvidence(filename, "", "identity" if filename == dataset.health_profile.identity_file else "final", "missing-or-invalid"))
+            sources.append(SourceEvidence(
+                filename, "",
+                "identity" if filename == dataset.health_profile.identity_file else "final",
+                "missing-or-invalid",
+            ))
             continue
         if not isinstance(payload, (dict, list)):
             completeness = Completeness.PARTIAL
@@ -428,15 +483,20 @@ def build_processing_result(
             identity_digest = digest
             identity_source_time = _source_time(mtime, read_time)
         sources.append(SourceEvidence(
-            filename, digest, "identity" if filename == dataset.health_profile.identity_file else "final",
-            "valid", (
+            filename,
+            digest,
+            "identity" if filename == dataset.health_profile.identity_file else "final",
+            "valid",
+            (
                 identity_source_time
                 if filename == dataset.health_profile.identity_file
                 else _source_time(mtime, read_time) if filename in dataset.files
                 else None
             ),
         ))
-        checkpoint = path.with_name(path.name.removesuffix(".json") + ".partial.json")
+        checkpoint = path.with_name(
+            path.name.removesuffix(".json") + ".partial.json"
+        )
         if checkpoint.exists() and checkpoint.stat().st_mtime_ns > mtime:
             completeness = Completeness.PARTIAL
 
@@ -467,7 +527,40 @@ def build_processing_result(
             "Required cached inputs are missing or invalid: " + ", ".join(missing)
         )
     if completeness is Completeness.PARTIAL and not allow_partial:
-        raise HealthProcessingError("Cached inputs are partial; use --allow-partial to persist provisional evidence")
+        raise HealthProcessingError(
+            "Cached inputs are partial; use --allow-partial to persist provisional evidence"
+        )
+    return _ProcessingInputSnapshot(
+        payloads,
+        sources,
+        mtimes,
+        identity_mtime,
+        identity_digest,
+        identity_source_time,
+        completeness,
+    )
+
+
+def build_processing_result(
+    *,
+    data_dir: Path,
+    dataset_id: str,
+    policy: HealthPolicy,
+    allow_partial: bool = False,
+    store: SQLiteHealthStore | None = None,
+    processing_time: datetime | None = None,
+) -> ProcessingResult:
+    manifest = load_health_manifest()
+    dataset = manifest.dataset(dataset_id)
+    read_time = processing_time or datetime.now(timezone.utc)
+    inputs = _read_processing_inputs(data_dir, dataset, allow_partial, read_time)
+    payloads = inputs.payloads
+    sources = inputs.sources
+    mtimes = inputs.mtimes
+    identity_mtime = inputs.identity_mtime
+    identity_digest = inputs.identity_digest
+    identity_source_time = inputs.identity_source_time
+    completeness = inputs.completeness
 
     identity = payloads.get(dataset.health_profile.identity_file)
     if not isinstance(identity, dict):

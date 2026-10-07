@@ -9,6 +9,7 @@ import logging
 
 from collections import defaultdict
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -608,6 +609,122 @@ def merge_nodes(
     return target_id
 
 
+@dataclass(frozen=True)
+class _MergeRecordOutcome:
+    node_id: int
+    created: bool
+    collision_candidate_ids: tuple[int, ...] = ()
+    collision_rloc16: str | None = None
+    collision_ext_address: str | None = None
+    collision_omr_address: str | None = None
+
+
+def _merge_record_into_nodes(
+    record: dict[str, Any],
+    filename: str,
+    output_id: str | None,
+    matter_identity_mode: str,
+    device_label_map: dict[str, str],
+    nodes: dict[int, dict[str, Any]],
+    by_rloc16: dict[str, int],
+    by_extaddr: dict[str, int],
+    by_omr: dict[str, int],
+    by_matter_fabric_node: dict[str, int],
+    new_node_id: int,
+) -> _MergeRecordOutcome:
+    identity_values = collect_merge_identity_values(record)
+    rloc16 = identity_values.get("rloc16")
+    extaddr = identity_values.get("extAddress")
+    omr = identity_values.get("omrIpv6Address")
+
+    candidate_ids = find_candidate_node_ids(
+        identity_values,
+        by_rloc16,
+        by_extaddr,
+        by_omr,
+        by_matter_fabric_node,
+    )
+    if isinstance(extaddr, str) and not is_placeholder_extaddr(extaddr):
+        candidate_ids = filter_candidate_ids_for_extaddr_consistency(
+            candidate_ids,
+            extaddr,
+            nodes,
+        )
+    if matter_identity_mode == MATTER_IDENTITY_MERGE_MODES["composite_guard"]:
+        candidate_ids = filter_candidate_ids_for_matter_identity_consistency(
+            candidate_ids,
+            record,
+            nodes,
+        )
+
+    created = not candidate_ids
+    collision_candidate_ids = (
+        tuple(sorted(candidate_ids)) if len(candidate_ids) > 1 else ()
+    )
+    if created:
+        node_id = new_node_id
+        nodes[node_id] = deepcopy(record)
+        if is_mdns_record(record):
+            update_mdns_aliases(nodes[node_id], record)
+    else:
+        node_id = min(candidate_ids)
+        for other_id in sorted(candidate_ids):
+            node_id = merge_nodes(
+                node_id,
+                other_id,
+                nodes,
+                by_rloc16,
+                by_extaddr,
+                by_omr,
+                by_matter_fabric_node,
+            )
+        merge_mdns_record_into_node(nodes[node_id], record)
+        existing_source = next(iter(nodes[node_id].get("_source_files", [])), "")
+        deep_merge(
+            nodes[node_id],
+            record,
+            context=create_merge_context(
+                existing_source,
+                filename,
+                SOURCE_PRECEDENCE,
+                owner_rloc16=normalize_identifier_text(nodes[node_id].get("rloc16")),
+                partition_id=get_partition_id(nodes[node_id]),
+                incoming_partition_id=get_partition_id(record),
+                network_scope=f"extpan:{output_id or 'unknown'}",
+                incoming_network_scope=f"extpan:{output_id or 'unknown'}",
+                conflict_target=nodes[node_id],
+                matter_identity_mode=matter_identity_mode,
+            ),
+        )
+        existing_sources = nodes[node_id].setdefault("_source_files", [])
+        if filename not in existing_sources:
+            existing_sources.append(filename)
+
+    active = nodes[node_id]
+    active_identity_values = index_node_identity_values(
+        active,
+        node_id,
+        by_rloc16,
+        by_extaddr,
+        by_omr,
+        by_matter_fabric_node,
+    )
+    active_extaddr = active_identity_values.get("extAddress")
+    if isinstance(active_extaddr, str):
+        mapped_label = device_label_map.get(active_extaddr)
+        if mapped_label and value_is_empty(active.get("deviceLabel")):
+            active["deviceLabel"] = mapped_label
+
+    return _MergeRecordOutcome(
+        node_id=node_id,
+        created=created,
+        collision_candidate_ids=collision_candidate_ids,
+        collision_rloc16=rloc16 if collision_candidate_ids else None,
+        collision_ext_address=extaddr if collision_candidate_ids else None,
+        collision_omr_address=omr if collision_candidate_ids else None,
+    )
+
+
 def build_merged_records(
     base_dir: Path,
     omr_prefix: str,
@@ -683,109 +800,36 @@ def build_merged_records(
             if filename not in record["_source_files"]:
                 record["_source_files"].append(filename)
 
-            identity_values = collect_merge_identity_values(record)
-            rloc16 = identity_values.get("rloc16")
-            extaddr = identity_values.get("extAddress")
-            omr = identity_values.get("omrIpv6Address")
-
-            candidate_ids = find_candidate_node_ids(
-                identity_values,
+            outcome = _merge_record_into_nodes(
+                record,
+                filename,
+                output_id,
+                matter_identity_mode,
+                device_label_map,
+                nodes,
                 by_rloc16,
                 by_extaddr,
                 by_omr,
                 by_matter_fabric_node,
+                next_id,
             )
-
-            # Guard against collapsing distinct devices that only share weak identities
-            # (e.g. reused rloc16/OMR) but have conflicting concrete extaddr values.
-            if isinstance(extaddr, str) and not is_placeholder_extaddr(extaddr):
-                candidate_ids = filter_candidate_ids_for_extaddr_consistency(
-                    candidate_ids,
-                    extaddr,
-                    nodes,
-                )
-
-            if matter_identity_mode == MATTER_IDENTITY_MERGE_MODES["composite_guard"]:
-                candidate_ids = filter_candidate_ids_for_matter_identity_consistency(
-                    candidate_ids,
-                    record,
-                    nodes,
-                )
-
-            if not candidate_ids:
-                node_id = next_id
+            if outcome.created:
                 next_id += 1
-                nodes[node_id] = deepcopy(record)
-                if is_mdns_record(record):
-                    update_mdns_aliases(nodes[node_id], record)
                 new_nodes_by_source[filename] += 1
             else:
                 matched_existing_by_source[filename] += 1
-                if len(candidate_ids) > 1:
+                if outcome.collision_candidate_ids:
                     identity_collision_count += 1
                     if len(identity_collision_examples) < 10:
                         identity_collision_examples.append(
                             {
                                 "source_file": filename,
-                                "candidate_node_ids": sorted(candidate_ids),
-                                "rloc16": rloc16,
-                                "extAddress": extaddr,
-                                "omrIpv6Address": omr,
+                                "candidate_node_ids": list(outcome.collision_candidate_ids),
+                                "rloc16": outcome.collision_rloc16,
+                                "extAddress": outcome.collision_ext_address,
+                                "omrIpv6Address": outcome.collision_omr_address,
                             }
                         )
-                node_id = min(candidate_ids)
-                for other_id in sorted(candidate_ids):
-                    node_id = merge_nodes(
-                        node_id,
-                        other_id,
-                        nodes,
-                        by_rloc16,
-                        by_extaddr,
-                        by_omr,
-                        by_matter_fabric_node,
-                    )
-                merge_mdns_record_into_node(nodes[node_id], record)
-                existing_source = next(
-                    iter(nodes[node_id].get("_source_files", [])), ""
-                )
-                deep_merge(
-                    nodes[node_id],
-                    record,
-                    context=create_merge_context(
-                        existing_source,
-                        filename,
-                        SOURCE_PRECEDENCE,
-                        owner_rloc16=normalize_identifier_text(
-                            nodes[node_id].get("rloc16")
-                        ),
-                        partition_id=get_partition_id(nodes[node_id]),
-                        incoming_partition_id=get_partition_id(record),
-                        network_scope=f"extpan:{output_id or 'unknown'}",
-                        incoming_network_scope=f"extpan:{output_id or 'unknown'}",
-                        conflict_target=nodes[node_id],
-                        matter_identity_mode=matter_identity_mode,
-                    ),
-                )
-                existing_sources = nodes[node_id].setdefault(
-                    "_source_files", [])
-                if filename not in existing_sources:
-                    existing_sources.append(filename)
-
-            # Re-read after merges in case node id changed.
-            active = nodes[node_id]
-            active_identity_values = index_node_identity_values(
-                active,
-                node_id,
-                by_rloc16,
-                by_extaddr,
-                by_omr,
-                by_matter_fabric_node,
-            )
-            active_extaddr = active_identity_values.get("extAddress")
-            if isinstance(active_extaddr, str):
-                mapped_label = device_label_map.get(active_extaddr)
-                if mapped_label and value_is_empty(active.get("deviceLabel")):
-                    active["deviceLabel"] = mapped_label
 
     merged_records: list[dict[str, Any]] = []
     for _, node in sorted(

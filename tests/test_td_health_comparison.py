@@ -491,6 +491,80 @@ def test_endpoint_derivation_uses_source_times_and_directional_relationships() -
     assert all(item.change == "unknown" for item in reused)
 
 
+def test_roster_candidates_use_endpoint_facts_without_creating_samples() -> None:
+    before, after = _endpoints()
+    observed_id = "extaddr:aaaaaaaaaaaaaaaa"
+    roster_only_id = "extaddr:cccccccccccccccc"
+    device = DeviceSample(
+        observed_id,
+        "aaaaaaaaaaaaaaaa",
+        "router",
+        None,
+        False,
+        ("devices.json",),
+    )
+    before_source = replace(
+        before[0].sources[0],
+        state="valid",
+        source_observed_at=before[0].observed_at,
+    )
+    after_source = replace(
+        after[0].sources[0],
+        state="valid",
+        source_observed_at=after[0].observed_at,
+    )
+    first_observation = replace(
+        before[0], sources=(before_source, before[0].sources[1]), devices=(device,)
+    )
+    second_observation = replace(
+        after[0], sources=(after_source, after[0].sources[1]), devices=(device,)
+    )
+    endpoint_facts = {
+        first_observation.observation_id: ({
+            "device_id": roster_only_id,
+            "field_key": "rloc16",
+            "source_file": "devices.json",
+            "source_observed_at": first_observation.observed_at,
+            "roster_policy_digest": "roster-policy",
+            "conflict_state": "none",
+            "value": "0x0400",
+        },),
+        second_observation.observation_id: ({
+            "device_id": roster_only_id,
+            "field_key": "rloc16",
+            "source_file": "devices.json",
+            "source_observed_at": second_observation.observed_at,
+            "roster_policy_digest": "roster-policy",
+            "conflict_state": "none",
+            "value": "0x0800",
+        },),
+    }
+
+    _, items = derive_comparison(
+        (first_observation, before[1]),
+        (second_observation, after[1]),
+        source_roles=ROLES,
+        roster_device_ids=frozenset({roster_only_id}),
+        endpoint_facts=endpoint_facts,
+    )
+
+    assert any(
+        item.subject_id == observed_id and item.kind == "presence-transition"
+        for item in items
+    )
+    assert any(
+        item.subject_id == roster_only_id
+        and item.kind == "categorical-transition"
+        and item.metric == "rloc16"
+        for item in items
+    )
+    assert not any(
+        item.subject_id == roster_only_id and item.kind == "presence-transition"
+        for item in items
+    )
+    assert not any(item.scope == "relationship" for item in items)
+
+
 def test_relationship_add_remove_requires_newer_authoritative_source() -> None:
     before, after = _endpoints()
     link_id = "link:extaddr:aaaaaaaaaaaaaaaa->extaddr:bbbbbbbbbbbbbbbb"
