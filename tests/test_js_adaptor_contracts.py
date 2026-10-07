@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -39,6 +40,19 @@ def test_cached_adaptor_outputs_preserve_contract(node_json) -> None:
         assert len(node_ids) == len(snapshot["nodeIds"]), dataset
         assert len(edge_ids) == len(set(edge_ids)), dataset
         assert all(edge[1] in node_ids and edge[2] in node_ids for edge in snapshot["edges"]), dataset
+
+
+def test_pinned_adaptor_outputs_match_exact_baseline(node_executable: str) -> None:
+    completed = subprocess.run(
+        [node_executable, str(RUNNER), "--pinned-snapshot"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=True,
+        text=True,
+        timeout=60,
+    )
+    baseline = REPO_ROOT / "tests" / "fixtures" / "adaptor_refactor_baseline.json"
+    assert completed.stdout == baseline.read_text(encoding="utf-8")
 
 
 def test_source_adaptors_emit_through_shared_model() -> None:

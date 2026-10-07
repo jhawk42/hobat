@@ -40,6 +40,217 @@ import { asArray, borderRouterEvidenceFields, emitThroughAdaptorModel, buildEdge
 
 // ── Adaptor 2c: Thread Tools native diagnostics (diagnostics.json) ───────────
 
+function registerThreadToolsRow(node, index, {
+  childByMacAddr, chooseThreadToolsNodeId, upsertThreadToolsNode, rawByIdForDetails,
+}) {
+  if (!isPlainObject(node)) return;
+  const childRecord = childByMacAddr.get(toFiniteNumber(node.macAddr));
+  const effectiveNode = node.isSynthesized === true && typeof childRecord?.isDeviceTypeFtd === 'boolean'
+    ? { ...node, mode: { ...node.mode, ftd: childRecord.isDeviceTypeFtd } }
+    : node;
+  const nodeId = chooseThreadToolsNodeId(effectiveNode, index);
+  const modeFtd = effectiveNode.mode?.ftd;
+  const isChildLike = modeFtd === false;
+  upsertThreadToolsNode(nodeId, effectiveNode, {
+    shape: isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router,
+    color: isChildLike ? NODE_COLORS.child : NODE_COLORS.router,
+  });
+
+  const existing = rawByIdForDetails.get(nodeId) || {};
+  rawByIdForDetails.set(
+    nodeId,
+    mergeForDisplay(existing, normalizeInputRecord(effectiveNode, { source: 'thread-tools' })),
+  );
+}
+
+function addThreadToolsRoute(route, fromId, fromNode, {
+  rloc16ToNodeId, nodeMap, upsertThreadToolsNode, edgeMap, edgeData,
+}) {
+  const routeId = route?.routeId ?? route?.routerId;
+  const toRloc16 = buildMainRouterRloc16(routeId);
+  if (!toRloc16) return;
+  const toId = rloc16ToNodeId.get(toRloc16.toLowerCase()) || toRloc16;
+  if (!nodeMap.has(toId)) {
+    upsertThreadToolsNode(toId, { rloc16: toRloc16, id: toId, mode: { ftd: true } },
+      { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
+  }
+
+  const lqi = Math.max(
+    toFiniteNumber(route.linkQualityOut ?? route.outLinkQuality) || 0,
+    toFiniteNumber(route.linkQualityIn ?? route.inLinkQuality) || 0,
+  );
+  const lqStyle = lqStyleFromAvgLqi(lqi, 3);
+  const toNodeEnriched = nodeMap.get(toId);
+  addEdge(edgeMap, edgeData, fromId, toId, {
+    ...lqStyle,
+    ...buildEdgeEndpointTitles(fromNode, toNodeEnriched, fromId, toId),
+    linkCategories: [EDGE_CATEGORY_OTBR_ROUTE],
+  });
+}
+
+function addThreadToolsChildTableRow(child, ci, fromId, fromNode, {
+  rloc16ToNodeId, nodeMap, upsertThreadToolsNode, edgeMap, edgeData,
+  routerIdsWithChildren, routerChildByRloc16,
+}) {
+  const childRloc16 = buildChildRloc16(toText(fromNode.rloc16), child.childId);
+  const childLq = toFiniteNumber(child.linkQuality ?? child.incomingLinkQuality);
+  const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {};
+  const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
+    || childRloc16
+    || `${fromId}-child-${ci + 1}`;
+
+  if (!nodeMap.has(childId)) {
+    upsertThreadToolsNode(childId, {
+      rloc16: childRloc16,
+      id: childId,
+      mode: child.mode,
+      type: child.mode?.ftd === false ? 'child' : '',
+    }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
+  }
+
+  const childNodeEnriched = nodeMap.get(childId);
+  addEdge(edgeMap, edgeData, fromId, childId, {
+    dashes: false,
+    isParentChild: true,
+    ...lqStyle,
+    ...buildEdgeEndpointTitles(fromNode, childNodeEnriched, fromId, childId),
+    linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
+  });
+  routerIdsWithChildren.add(fromId);
+
+  const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
+  if (fromRloc16) {
+    if (!routerChildByRloc16.has(fromRloc16)) {
+      routerChildByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_child_table: [] });
+    }
+    const childRow = routerChildByRloc16.get(fromRloc16);
+    if (Array.isArray(childRow.router_child_table)) {
+      const childForFilter = {
+        ...child,
+        linkQuality: toFiniteNumber(child.linkQuality ?? child.incomingLinkQuality),
+        rloc16: childRloc16,
+      };
+      const normalizedChild = normalizeNestedArrayFields([childForFilter])[0];
+      childRow.router_child_table.push(normalizedChild);
+    }
+  }
+}
+
+function addThreadToolsChild(child, ci, fromId, fromNode, {
+  normalizeThreadToolsChild, macAddrToRloc16, rloc16ToNodeId, nodeMap,
+  upsertThreadToolsNode, edgeMap, edgeData, routerIdsWithChildren, routerChildByRloc16,
+}) {
+  const childObj = normalizeThreadToolsChild(child) || {};
+  const childRloc16 = toText(childObj.rloc16) || macAddrToRloc16(childObj.macAddr);
+  const childExtaddr = toText(childObj.extAddress || childObj.extMacAddr || childObj.extaddr).toLowerCase();
+  const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
+    || childExtaddr
+    || childRloc16
+    || `${fromId}-children-${ci + 1}`;
+
+  if (!nodeMap.has(childId)) {
+    upsertThreadToolsNode(childId, {
+      id: childId,
+      rloc16: childRloc16,
+      extAddress: childExtaddr,
+      mode: { ...childObj.mode, ftd: childObj.isDeviceTypeFtd },
+      type: childObj.isDeviceTypeFtd === false ? 'child' : '',
+    }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
+  } else if (childExtaddr || childRloc16) {
+    upsertThreadToolsNode(childId, {
+      id: childId,
+      rloc16: childRloc16,
+      extAddress: childExtaddr,
+      mode: { ...childObj.mode, ftd: childObj.isDeviceTypeFtd },
+      type: childObj.isDeviceTypeFtd === false ? 'child' : '',
+    }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
+  }
+
+  const linkMargin = toFiniteNumber(childObj.linkMargin);
+  const childLq = toFiniteNumber(childObj.linkQuality ?? childObj.lq ?? childObj.incomingLinkQuality);
+  const lqStyle = Number.isFinite(linkMargin)
+    ? lqStyleFromLinkMargin(linkMargin)
+    : (Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {});
+  const childNodeEnriched = nodeMap.get(childId);
+  addEdge(edgeMap, edgeData, fromId, childId, {
+    dashes: false,
+    isParentChild: true,
+    ...lqStyle,
+    linkMargin,
+    ...buildEdgeEndpointTitles(fromNode, childNodeEnriched, fromId, childId),
+    linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
+  });
+  routerIdsWithChildren.add(fromId);
+
+  const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
+  if (fromRloc16) {
+    if (!routerChildByRloc16.has(fromRloc16)) {
+      routerChildByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_child_table: [] });
+    }
+    const childRow = routerChildByRloc16.get(fromRloc16);
+    if (Array.isArray(childRow.router_child_table)) {
+      const childForFilter = {
+        ...childObj,
+        linkQuality: toFiniteNumber(childObj.linkQuality ?? childObj.lq ?? childObj.incomingLinkQuality),
+        rloc16: childRloc16,
+        extAddress: childExtaddr,
+      };
+      const normalizedChild = normalizeNestedArrayFields([childForFilter])[0];
+      childRow.router_child_table.push(normalizedChild);
+    }
+  }
+}
+
+function addThreadToolsNeighbor(neighbor, fromId, fromNode, {
+  macAddrToRloc16, nodeMap, rloc16ToNodeId, upsertThreadToolsNode,
+  edgeMap, edgeData, routerNeighborByRloc16,
+}) {
+  const neighborObj = isPlainObject(neighbor) ? neighbor : {};
+  const neighborExtaddr = toText(neighborObj.extAddress || neighborObj.extMacAddr || neighborObj.extaddr).toLowerCase();
+  const neighborRloc16 = toText(neighborObj.rloc16).toLowerCase() || macAddrToRloc16(neighborObj.macAddr);
+  let toId = neighborExtaddr || neighborRloc16;
+  if (!toId) return;
+
+  if (neighborExtaddr && nodeMap.has(neighborExtaddr)) {
+    toId = neighborExtaddr;
+  } else if (neighborRloc16 && rloc16ToNodeId.has(neighborRloc16.toLowerCase())) {
+    toId = rloc16ToNodeId.get(neighborRloc16.toLowerCase());
+  } else if (!nodeMap.has(toId)) {
+    upsertThreadToolsNode(toId, {
+      extAddress: neighborExtaddr,
+      rloc16: neighborRloc16,
+      id: toId,
+      mode: { ftd: true },
+    }, { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
+  }
+
+  const linkMargin = toFiniteNumber(neighborObj.linkMargin);
+  const lqi = Math.max(
+    toFiniteNumber(neighborObj.linkQualityOut ?? neighborObj.outLinkQuality) || 0,
+    toFiniteNumber(neighborObj.linkQualityIn ?? neighborObj.inLinkQuality) || 0,
+  );
+  const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : lqStyleFromAvgLqi(lqi, 3);
+  const toNodeEnriched = nodeMap.get(toId);
+  addEdge(edgeMap, edgeData, fromId, toId, {
+    ...lqStyle,
+    linkMargin,
+    ...buildEdgeEndpointTitles(fromNode, toNodeEnriched, fromId, toId),
+    linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
+  });
+
+  const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
+  if (fromRloc16) {
+    if (!routerNeighborByRloc16.has(fromRloc16)) {
+      routerNeighborByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_neighbor_table: [] });
+    }
+    const neighborRow = routerNeighborByRloc16.get(fromRloc16);
+    if (Array.isArray(neighborRow.router_neighbor_table)) {
+      const normalizedNeighbor = normalizeNestedArrayFields([neighborObj])[0];
+      neighborRow.router_neighbor_table.push(normalizedNeighbor);
+    }
+  }
+}
+
 export function adaptThreadToolsNative(fileMap) {
   const raw = fileMap.values().next().value;
   const diagnostics = (raw && Array.isArray(raw.diagnostics)) ? raw.diagnostics
@@ -176,26 +387,16 @@ export function adaptThreadToolsNative(fileMap) {
   }
 
   diagnostics.forEach((node, index) => {
-    if (!isPlainObject(node)) return;
-    const childRecord = childByMacAddr.get(toFiniteNumber(node.macAddr));
-    const effectiveNode = node.isSynthesized === true && typeof childRecord?.isDeviceTypeFtd === 'boolean'
-      ? { ...node, mode: { ...node.mode, ftd: childRecord.isDeviceTypeFtd } }
-      : node;
-    const nodeId = chooseThreadToolsNodeId(effectiveNode, index);
-    const modeFtd = effectiveNode.mode?.ftd;
-    const isChildLike = modeFtd === false;
-    upsertThreadToolsNode(nodeId, effectiveNode, {
-      shape: isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router,
-      color: isChildLike ? NODE_COLORS.child : NODE_COLORS.router,
+    registerThreadToolsRow(node, index, {
+      childByMacAddr, chooseThreadToolsNodeId, upsertThreadToolsNode, rawByIdForDetails,
     });
-
-    const existing = rawByIdForDetails.get(nodeId) || {};
-    rawByIdForDetails.set(
-      nodeId,
-      mergeForDisplay(existing, normalizeInputRecord(effectiveNode, { source: 'thread-tools' })),
-    );
   });
 
+  const relationshipContext = {
+    normalizeThreadToolsChild, macAddrToRloc16, rloc16ToNodeId, nodeMap,
+    upsertThreadToolsNode, edgeMap, edgeData, routerIdsWithChildren,
+    routerChildByRloc16, routerNeighborByRloc16,
+  };
   diagnostics.forEach((node, index) => {
     if (!isPlainObject(node)) return;
     const fromId = chooseThreadToolsNodeId(node, index);
@@ -203,180 +404,19 @@ export function adaptThreadToolsNative(fileMap) {
     const fromNode = nodeMap.get(fromId);
 
     (Array.isArray(node.route64?.routeData) ? node.route64.routeData : []).forEach((route) => {
-      const routeId = route?.routeId ?? route?.routerId;
-      const toRloc16 = buildMainRouterRloc16(routeId);
-      if (!toRloc16) return;
-      const toId = rloc16ToNodeId.get(toRloc16.toLowerCase()) || toRloc16;
-      if (!nodeMap.has(toId)) {
-        upsertThreadToolsNode(toId, { rloc16: toRloc16, id: toId, mode: { ftd: true } },
-          { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
-      }
-
-      const lqi = Math.max(
-        toFiniteNumber(route.linkQualityOut ?? route.outLinkQuality) || 0,
-        toFiniteNumber(route.linkQualityIn ?? route.inLinkQuality) || 0,
-      );
-      const lqStyle = lqStyleFromAvgLqi(lqi, 3);
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        ...lqStyle,
-        ...buildEdgeEndpointTitles(fromNode, toNodeEnriched, fromId, toId),
-        linkCategories: [EDGE_CATEGORY_OTBR_ROUTE],
-      });
+      addThreadToolsRoute(route, fromId, fromNode, relationshipContext);
     });
 
     (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
-      const childRloc16 = buildChildRloc16(toText(fromNode.rloc16), child.childId);
-      const childLq = toFiniteNumber(child.linkQuality ?? child.incomingLinkQuality);
-      const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {};
-      const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
-        || childRloc16
-        || `${fromId}-child-${ci + 1}`;
-
-      if (!nodeMap.has(childId)) {
-        upsertThreadToolsNode(childId, {
-          rloc16: childRloc16,
-          id: childId,
-          mode: child.mode,
-          type: child.mode?.ftd === false ? 'child' : '',
-        }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
-      }
-
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false,
-        isParentChild: true,
-        ...lqStyle,
-        ...buildEdgeEndpointTitles(fromNode, childNodeEnriched, fromId, childId),
-        linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
-      });
-      routerIdsWithChildren.add(fromId);
-
-      const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
-      if (fromRloc16) {
-        if (!routerChildByRloc16.has(fromRloc16)) {
-          routerChildByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_child_table: [] });
-        }
-        const childRow = routerChildByRloc16.get(fromRloc16);
-        if (Array.isArray(childRow.router_child_table)) {
-          const childForFilter = {
-            ...child,
-            linkQuality: toFiniteNumber(child.linkQuality ?? child.incomingLinkQuality),
-            rloc16: childRloc16,
-          };
-          const normalizedChild = normalizeNestedArrayFields([childForFilter])[0];
-          childRow.router_child_table.push(normalizedChild);
-        }
-      }
+      addThreadToolsChildTableRow(child, ci, fromId, fromNode, relationshipContext);
     });
 
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
-      const childObj = normalizeThreadToolsChild(child) || {};
-      const childRloc16 = toText(childObj.rloc16) || macAddrToRloc16(childObj.macAddr);
-      const childExtaddr = toText(childObj.extAddress || childObj.extMacAddr || childObj.extaddr).toLowerCase();
-      const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
-        || childExtaddr
-        || childRloc16
-        || `${fromId}-children-${ci + 1}`;
-
-      if (!nodeMap.has(childId)) {
-        upsertThreadToolsNode(childId, {
-          id: childId,
-          rloc16: childRloc16,
-          extAddress: childExtaddr,
-          mode: { ...childObj.mode, ftd: childObj.isDeviceTypeFtd },
-          type: childObj.isDeviceTypeFtd === false ? 'child' : '',
-        }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
-      } else if (childExtaddr || childRloc16) {
-        upsertThreadToolsNode(childId, {
-          id: childId,
-          rloc16: childRloc16,
-          extAddress: childExtaddr,
-          mode: { ...childObj.mode, ftd: childObj.isDeviceTypeFtd },
-          type: childObj.isDeviceTypeFtd === false ? 'child' : '',
-        }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
-      }
-
-      const linkMargin = toFiniteNumber(childObj.linkMargin);
-      const childLq = toFiniteNumber(childObj.linkQuality ?? childObj.lq ?? childObj.incomingLinkQuality);
-      const lqStyle = Number.isFinite(linkMargin)
-        ? lqStyleFromLinkMargin(linkMargin)
-        : (Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {});
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false,
-        isParentChild: true,
-        ...lqStyle,
-        linkMargin,
-        ...buildEdgeEndpointTitles(fromNode, childNodeEnriched, fromId, childId),
-        linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
-      });
-      routerIdsWithChildren.add(fromId);
-
-      const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
-      if (fromRloc16) {
-        if (!routerChildByRloc16.has(fromRloc16)) {
-          routerChildByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_child_table: [] });
-        }
-        const childRow = routerChildByRloc16.get(fromRloc16);
-        if (Array.isArray(childRow.router_child_table)) {
-          const childForFilter = {
-            ...childObj,
-            linkQuality: toFiniteNumber(childObj.linkQuality ?? childObj.lq ?? childObj.incomingLinkQuality),
-            rloc16: childRloc16,
-            extAddress: childExtaddr,
-          };
-          const normalizedChild = normalizeNestedArrayFields([childForFilter])[0];
-          childRow.router_child_table.push(normalizedChild);
-        }
-      }
+      addThreadToolsChild(child, ci, fromId, fromNode, relationshipContext);
     });
 
     (Array.isArray(node.routerNeighbor) ? node.routerNeighbor : []).forEach((neighbor) => {
-      const neighborObj = isPlainObject(neighbor) ? neighbor : {};
-      const neighborExtaddr = toText(neighborObj.extAddress || neighborObj.extMacAddr || neighborObj.extaddr).toLowerCase();
-      const neighborRloc16 = toText(neighborObj.rloc16).toLowerCase() || macAddrToRloc16(neighborObj.macAddr);
-      let toId = neighborExtaddr || neighborRloc16;
-      if (!toId) return;
-
-      if (neighborExtaddr && nodeMap.has(neighborExtaddr)) {
-        toId = neighborExtaddr;
-      } else if (neighborRloc16 && rloc16ToNodeId.has(neighborRloc16.toLowerCase())) {
-        toId = rloc16ToNodeId.get(neighborRloc16.toLowerCase());
-      } else if (!nodeMap.has(toId)) {
-        upsertThreadToolsNode(toId, {
-          extAddress: neighborExtaddr,
-          rloc16: neighborRloc16,
-          id: toId,
-          mode: { ftd: true },
-        }, { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
-      }
-
-      const linkMargin = toFiniteNumber(neighborObj.linkMargin);
-      const lqi = Math.max(
-        toFiniteNumber(neighborObj.linkQualityOut ?? neighborObj.outLinkQuality) || 0,
-        toFiniteNumber(neighborObj.linkQualityIn ?? neighborObj.inLinkQuality) || 0,
-      );
-      const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : lqStyleFromAvgLqi(lqi, 3);
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        ...lqStyle,
-        linkMargin,
-        ...buildEdgeEndpointTitles(fromNode, toNodeEnriched, fromId, toId),
-        linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
-      });
-
-      const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
-      if (fromRloc16) {
-        if (!routerNeighborByRloc16.has(fromRloc16)) {
-          routerNeighborByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_neighbor_table: [] });
-        }
-        const neighborRow = routerNeighborByRloc16.get(fromRloc16);
-        if (Array.isArray(neighborRow.router_neighbor_table)) {
-          const normalizedNeighbor = normalizeNestedArrayFields([neighborObj])[0];
-          neighborRow.router_neighbor_table.push(normalizedNeighbor);
-        }
-      }
+      addThreadToolsNeighbor(neighbor, fromId, fromNode, relationshipContext);
     });
   });
 

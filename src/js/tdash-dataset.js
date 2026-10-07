@@ -505,6 +505,42 @@ function _extractResponseCacheMetadata(response) {
   return { responseMaxAge, lastModifiedAt };
 }
 
+function _datasetRequestHeaders(filename, forceFresh) {
+  if (forceFresh || _forceFresh) return { "Cache-Control": "no-cache" };
+  if (_onlyCache) {
+    return {
+      "Cache-Control": `only-if-cached, max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`,
+    };
+  }
+  const cached = fileMaxAgeCache.get(filename);
+  return cached ? { "Cache-Control": `max-age=${cached.maxAge}` } : {};
+}
+
+function _updateFileCacheMetadata(filename, responseMaxAge, lastModifiedAt) {
+  // Response metadata is number-or-null; missing headers retain prior values.
+  if (responseMaxAge != null || lastModifiedAt != null) {
+    const previous = fileMaxAgeCache.get(filename);
+    fileMaxAgeCache.set(filename, {
+      maxAge: responseMaxAge ?? previous?.maxAge ?? 0,
+      fetchedAt: Date.now(),
+      lastModifiedAt: lastModifiedAt ?? previous?.lastModifiedAt ?? null,
+    });
+  }
+}
+
+function _oldestLoadedFileTimestamp(loadedFiles) {
+  let oldestLastModifiedAt = null;
+  for (const filename of loadedFiles) {
+    const cached = fileMaxAgeCache.get(filename);
+    if (cached?.lastModifiedAt != null) {
+      if (oldestLastModifiedAt === null || cached.lastModifiedAt < oldestLastModifiedAt) {
+        oldestLastModifiedAt = cached.lastModifiedAt;
+      }
+    }
+  }
+  return oldestLastModifiedAt;
+}
+
 // accepts optional request headers; returns { data, responseMaxAge }.
 // handles HTTP 202 by delegating to pollJobUntilDone.
 async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpointData = null) {
@@ -768,15 +804,7 @@ function _buildPartialDataset(entry, rawFiles, loadStartTime) {
       : normalizeDatasetPayload(file, NORMALIZE_OPTIONS_CANONICAL_OUTPUT),
   );
 
-  let oldestLastModifiedAt = null;
-  for (const f of loadedFiles) {
-    const cached = fileMaxAgeCache.get(f);
-    if (cached?.lastModifiedAt != null) {
-      if (oldestLastModifiedAt === null || cached.lastModifiedAt < oldestLastModifiedAt) {
-        oldestLastModifiedAt = cached.lastModifiedAt;
-      }
-    }
-  }
+  const oldestLastModifiedAt = _oldestLoadedFileTimestamp(loadedFiles);
 
   return {
     entry,
@@ -861,16 +889,7 @@ export async function loadDataset(entryValue, options = {}) {
   try {
     const datasetRequests = Promise.allSettled(
       entry.files.map((f, fileIdx) => {
-        const reqHeaders = {};
-        if (forceFresh || _forceFresh) {
-          reqHeaders["Cache-Control"] = "no-cache";
-        } else if (_onlyCache) {
-          reqHeaders["Cache-Control"] =
-            `only-if-cached, max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`;
-        } else {
-          const cached = fileMaxAgeCache.get(f);
-          if (cached) reqHeaders["Cache-Control"] = `max-age=${cached.maxAge}`;
-        }
+        const reqHeaders = _datasetRequestHeaders(f, forceFresh);
         // Per-file callback: called by pollJobUntilDone whenever a fresher checkpoint is available.
         const onCheckpointData = onFileReady !== null && progressiveEnabled
           ? (checkpointData) => {
@@ -891,14 +910,7 @@ export async function loadDataset(entryValue, options = {}) {
           : null;
         return fetchJson(`/api/data/${f}`, reqHeaders, sessionId, onCheckpointData).then(
           ({ data, responseMaxAge, lastModifiedAt }) => {
-            if (responseMaxAge !== null || lastModifiedAt != null) {
-              const prev = fileMaxAgeCache.get(f);
-              fileMaxAgeCache.set(f, {
-                maxAge: responseMaxAge ?? prev?.maxAge ?? 0,
-                fetchedAt: Date.now(),
-                lastModifiedAt: lastModifiedAt ?? prev?.lastModifiedAt ?? null,
-              });
-            }
+            _updateFileCacheMetadata(f, responseMaxAge, lastModifiedAt);
             if (onFileReady !== null && progressiveEnabled && _isFetchSessionActive(sessionId)) {
               rawFilesInProgress[fileIdx] = normalizeDatasetFilePayload(
                 entry,
@@ -919,26 +931,10 @@ export async function loadDataset(entryValue, options = {}) {
       }),
     );
     const auxiliaryRequests = Promise.allSettled(auxiliaryFileNames.map((filename) => {
-      const reqHeaders = {};
-      if (forceFresh || _forceFresh) {
-        reqHeaders["Cache-Control"] = "no-cache";
-      } else if (_onlyCache) {
-        reqHeaders["Cache-Control"] =
-          `only-if-cached, max-age=${_CACHE_ONLY_MAX_AGE_SECONDS}`;
-      } else {
-        const cached = fileMaxAgeCache.get(filename);
-        if (cached) reqHeaders["Cache-Control"] = `max-age=${cached.maxAge}`;
-      }
+      const reqHeaders = _datasetRequestHeaders(filename, forceFresh);
       return fetchJson(`/api/data/${filename}`, reqHeaders, sessionId).then(
         ({ data, responseMaxAge, lastModifiedAt }) => {
-          if (responseMaxAge !== null || lastModifiedAt !== null) {
-            const previous = fileMaxAgeCache.get(filename);
-            fileMaxAgeCache.set(filename, {
-              maxAge: responseMaxAge ?? previous?.maxAge ?? 0,
-              fetchedAt: Date.now(),
-              lastModifiedAt: lastModifiedAt ?? previous?.lastModifiedAt ?? null,
-            });
-          }
+          _updateFileCacheMetadata(filename, responseMaxAge, lastModifiedAt);
           return data;
         },
       );
@@ -1021,15 +1017,9 @@ export async function loadDataset(entryValue, options = {}) {
   );
 
   // Use the oldest lastModifiedAt across all loaded files (most stale piece of the dataset)
-  let oldestLastModifiedAt = null;
-  for (const f of [...loadedFiles, ...loadedAuxiliaryFiles]) {
-    const cached = fileMaxAgeCache.get(f);
-    if (cached?.lastModifiedAt != null) {
-      if (oldestLastModifiedAt === null || cached.lastModifiedAt < oldestLastModifiedAt) {
-        oldestLastModifiedAt = cached.lastModifiedAt;
-      }
-    }
-  }
+  const oldestLastModifiedAt = _oldestLoadedFileTimestamp([
+    ...loadedFiles, ...loadedAuxiliaryFiles,
+  ]);
 
   currentDataset = {
     entry,

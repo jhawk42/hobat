@@ -39,6 +39,200 @@ import { asArray, borderRouterEvidenceFields, emitThroughAdaptorModel, buildEdge
 
 // ── Adaptor 3: Merged detailed topology ──────────────────────────────────────
 
+function registerMergedRow(node, index, {
+  isMergedRowEveOnly, chooseMergedId, rawNodeById, upsertMergedNode,
+  routerNeighborByRloc16, routerChildByRloc16,
+}) {
+  if (isMergedRowEveOnly(node)) return;
+  const nodeId = chooseMergedId(node, index);
+  rawNodeById.set(nodeId, node);
+  const rloc16Text = toText(node.rloc16).toLowerCase();
+  const routerNeighbors = Array.isArray(node.routerNeighbors)
+    ? node.routerNeighbors
+    : (Array.isArray(node.router_neighbor_table) ? node.router_neighbor_table : []);
+  const childTable = Array.isArray(node.childTable)
+    ? node.childTable
+    : (Array.isArray(node.router_child_table) ? node.router_child_table : []);
+  const modeDevice = toText(node['mode.device'] || node.mode?.device).toUpperCase();
+  const isRouterLike = rloc16Text.endsWith('00') || modeDevice === 'FTD' || toText(node.role).toLowerCase() === 'router';
+  const isChildLike = modeDevice === 'MTD' || toText(node.role).toLowerCase().includes('child');
+  upsertMergedNode(nodeId, node, {
+    source: 'merged-detailed',
+    shape: isChildLike && !isRouterLike ? NODE_SHAPES.child : NODE_SHAPES.router,
+    color: isChildLike && !isRouterLike ? NODE_COLORS.child : NODE_COLORS.eve
+  });
+  if (routerNeighbors.length > 0 && rloc16Text) {
+    routerNeighborByRloc16.set(rloc16Text, node);
+  }
+  const rloc16ForChild = toText(node.parentRloc16 || node.parent_rloc16 || node.rloc16).toLowerCase();
+  if (childTable.length > 0 && rloc16ForChild) {
+    routerChildByRloc16.set(rloc16ForChild, node);
+  }
+}
+
+function addMergedLinkFamily(node, fromId, canonical, legacy, { ensureNodeForLink, nodeMap, edgeMap, edgeData }) {
+  const lqStyle = lqStyleFromField(legacy);
+  const links = Array.isArray(node[canonical]) ? node[canonical] : node[legacy];
+  (Array.isArray(links) ? links : []).forEach((link) => {
+    const toId = ensureNodeForLink(link, link.rloc16 || link.id);
+    if (!toId) return;
+    const toNodeEnriched = nodeMap.get(toId);
+    addEdge(edgeMap, edgeData, fromId, toId, {
+      ...lqStyle,
+      ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
+      linkCategories: [legacy === '3_links' ? EDGE_CATEGORY_DEFAULT_3 : legacy === '2_links' ? EDGE_CATEGORY_DEFAULT_2 : EDGE_CATEGORY_DEFAULT_1],
+      edgeKeySuffix: `merged-${legacy}`
+    });
+  });
+}
+
+function addMergedNeighbor(neighbor, node, fromId, { ensureNodeForLink, nodeMap, edgeMap, edgeData }) {
+  const toId = ensureNodeForLink(neighbor, neighbor.rloc16 || neighbor.extAddress || neighbor.id);
+  if (!toId) return;
+  const linkMargin = toFiniteNumber(neighbor.rss_margin ?? neighbor.linkMargin);
+  const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
+  const toNodeEnriched = nodeMap.get(toId);
+  addEdge(edgeMap, edgeData, fromId, toId, {
+    width: 1.5,
+    ...lqStyle,
+    linkMargin,
+    ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
+    linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
+    edgeKeySuffix: 'merged-router-neighbor'
+  });
+}
+
+function addMergedRoute(route, node, fromId, routeCategories, { ensureNodeForLink, nodeMap, edgeMap, edgeData }) {
+  if (routeCategories.length === 0) return;
+  const toRloc16 = buildMainRouterRloc16(route.routeId);
+  const toId = ensureNodeForLink({ rloc16: toRloc16, id: toRloc16, device_label: toRloc16 }, toRloc16);
+  if (!toId) return;
+  const lqiIn = toFiniteNumber(route.linkQualityIn ?? route.inLinkQuality);
+  const lqiOut = toFiniteNumber(route.linkQualityOut ?? route.outLinkQuality);
+  const lqi = Math.max(lqiOut || 0, lqiIn || 0);
+  const lqStyle = lqStyleFromAvgLqi(lqi, 3);
+  const toNodeEnriched = nodeMap.get(toId);
+  addEdge(edgeMap, edgeData, fromId, toId, {
+    ...lqStyle,
+    lqiIn,
+    lqiOut,
+    routeCost: toFiniteNumber(route.routeCost),
+    ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
+    linkCategories: routeCategories,
+    edgeKeySuffix: 'merged-otbr-route'
+  });
+}
+
+function addMergedChildTableRow(child, ci, node, fromId, {
+  ensureNodeForLink, upsertMergedNode, nodeMap, edgeMap, edgeData, routerIdsWithChildren,
+}) {
+  const childRloc16 = toText(child.rloc16) || buildChildRloc16(node.rloc16, child.childId);
+  const childExtaddr = getCanonicalExtaddr(child);
+  const childFallbackId = `${fromId}-rest-child-${ci + 1}`;
+  const childLabel = toText(child.device_label) || toText(child.deviceLabel);
+  const childRecord = {
+    ...child,
+    rloc16: childRloc16,
+    extaddr: childExtaddr,
+    id: toText(child.id) || childRloc16 || childExtaddr || childFallbackId,
+    device_label: childLabel
+      || (!childRloc16 && child.childId !== undefined ? `${fromId} child ${child.childId}` : ''),
+  };
+  const childId = ensureNodeForLink(
+    childRecord,
+    childRloc16 || childExtaddr || childFallbackId
+  );
+  if (!childId) return;
+  upsertMergedNode(childId, childRecord, {
+    source: 'merged-detailed',
+    shape: NODE_SHAPES.child,
+    color: NODE_COLORS.child,
+  });
+  const childLq = toFiniteNumber(child.linkQuality ?? child.incomingLinkQuality ?? child.lq);
+  const linkMargin = toFiniteNumber(child.rss_margin ?? child.linkMargin);
+  const lqStyle = Number.isFinite(childLq)
+    ? lqStyleFromAvgLqi(childLq, 3)
+    : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
+  const childNodeEnriched = nodeMap.get(childId);
+  addEdge(edgeMap, edgeData, fromId, childId, {
+    dashes: false,
+    isParentChild: true,
+    ...lqStyle,
+    linkMargin,
+    averageRssi: toFiniteNumber(child.rss_ave ?? child.averageRssi),
+    lastRssi: toFiniteNumber(child.rss_last ?? child.lastRssi),
+    frameErrorRate: toFiniteNumber(child.err_rate_frame_pct ?? child.frameErrorRate),
+    messageErrorRate: toFiniteNumber(child.err_rate_msg_pct ?? child.messageErrorRate),
+    ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
+    linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
+    edgeKeySuffix: 'merged-otbr-child'
+  });
+  routerIdsWithChildren.add(fromId);
+}
+
+function addMergedChild(child, ci, node, fromId, {
+  ensureNodeForLink, nodeMap, edgeMap, edgeData, routerIdsWithChildren,
+}) {
+  const childNode = typeof child === 'string' ? { id: child } : (child || {});
+  if (typeof child === 'string') return; // skip eve-only string children
+  if (!toText(childNode.rloc16) && !toText(childNode.extaddr)) return; // skip object refs without Thread identity
+  const childId = ensureNodeForLink(childNode, `${fromId}-child-${ci + 1}`);
+  if (!childId) return;
+  const childLq = toFiniteNumber(childNode.linkQuality ?? childNode.incomingLinkQuality ?? childNode.lq);
+  const linkMargin = toFiniteNumber(childNode.rss_margin ?? childNode.linkMargin);
+  const lqStyle = Number.isFinite(linkMargin)
+    ? lqStyleFromLinkMargin(linkMargin)
+    : (Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {});
+  const childNodeEnriched = nodeMap.get(childId);
+  addEdge(edgeMap, edgeData, fromId, childId, {
+    dashes: false,
+    isParentChild: true,
+    ...lqStyle,
+    linkMargin,
+    averageRssi: toFiniteNumber(childNode.rss_ave ?? childNode.averageRssi),
+    lastRssi: toFiniteNumber(childNode.rss_last ?? childNode.lastRssi),
+    frameErrorRate: toFiniteNumber(childNode.err_rate_frame_pct ?? childNode.frameErrorRate),
+    messageErrorRate: toFiniteNumber(childNode.err_rate_msg_pct ?? childNode.messageErrorRate),
+    ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
+    linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN],
+    edgeKeySuffix: 'merged-default-child'
+  });
+  routerIdsWithChildren.add(fromId);
+}
+
+function addMergedRouterChild(child, ci, node, fromId, {
+  upsertMergedNode, rawNodeById, nodeMap, edgeMap, edgeData, routerIdsWithChildren,
+}) {
+  const childId = toText(child.rloc16) || `${fromId}-rct-child-${ci + 1}`;
+  const linkMargin = toFiniteNumber(child.rss_margin);
+  const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
+  const childType = toText(child.type).toLowerCase();
+  const isChildLikeNode = childType === 'mtd' || child.rx_on === false;
+  const isRouterLikeNode = childType === 'ftd' && childId.toLowerCase().endsWith('00');
+  upsertMergedNode(childId, {
+    rloc16: toText(child.rloc16),
+    extaddr: toText(child.extaddr),
+    device_label: toText(child.device_label),
+    type: childType,
+    threadVersion: toText(child.threadVersion)
+  }, {
+    source: 'merged-detailed',
+    shape: isChildLikeNode && !isRouterLikeNode ? NODE_SHAPES.child : NODE_SHAPES.router,
+    color: isChildLikeNode && !isRouterLikeNode ? NODE_COLORS.child : NODE_COLORS.eve
+  });
+  if (!rawNodeById.has(childId)) rawNodeById.set(childId, child);
+  const childNodeEnriched = nodeMap.get(childId);
+  addEdge(edgeMap, edgeData, fromId, childId, {
+    dashes: false, isParentChild: true,
+    ...lqStyle,
+    linkMargin,
+    ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
+    linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN],
+    edgeKeySuffix: 'merged-rct-child'
+  });
+  routerIdsWithChildren.add(fromId);
+}
+
 export function adaptMergedDetailed(fileMap) {
   const rows = asArray(fileMap.values().next().value);
   const nodeMap = new Map();
@@ -181,35 +375,16 @@ export function adaptMergedDetailed(fileMap) {
   }
 
   rows.forEach((node, index) => {
-    if (isMergedRowEveOnly(node)) return;
-    const nodeId = chooseMergedId(node, index);
-    rawNodeById.set(nodeId, node);
-    const rloc16Text = toText(node.rloc16).toLowerCase();
-    const routerNeighbors = Array.isArray(node.routerNeighbors)
-      ? node.routerNeighbors
-      : (Array.isArray(node.router_neighbor_table) ? node.router_neighbor_table : []);
-    const childTable = Array.isArray(node.childTable)
-      ? node.childTable
-      : (Array.isArray(node.router_child_table) ? node.router_child_table : []);
-    const modeDevice = toText(node['mode.device'] || node.mode?.device).toUpperCase();
-    const isRouterLike = rloc16Text.endsWith('00') || modeDevice === 'FTD' || toText(node.role).toLowerCase() === 'router';
-    const isChildLike = modeDevice === 'MTD' || toText(node.role).toLowerCase().includes('child');
-    upsertMergedNode(nodeId, node, {
-      source: 'merged-detailed',
-      shape: isChildLike && !isRouterLike ? NODE_SHAPES.child : NODE_SHAPES.router,
-      color: isChildLike && !isRouterLike ? NODE_COLORS.child : NODE_COLORS.eve
+    registerMergedRow(node, index, {
+      isMergedRowEveOnly, chooseMergedId, rawNodeById, upsertMergedNode,
+      routerNeighborByRloc16, routerChildByRloc16,
     });
-    // populate routerNeighborByRloc16 for filter support
-    if (routerNeighbors.length > 0 && rloc16Text) {
-      routerNeighborByRloc16.set(rloc16Text, node);
-    }
-    // populate routerChildByRloc16 for filter support
-    const rloc16ForChild = toText(node.parentRloc16 || node.parent_rloc16 || node.rloc16).toLowerCase();
-    if (childTable.length > 0 && rloc16ForChild) {
-      routerChildByRloc16.set(rloc16ForChild, node);
-    }
   });
 
+  const relationshipContext = {
+    ensureNodeForLink, upsertMergedNode, rawNodeById, nodeMap,
+    edgeMap, edgeData, routerIdsWithChildren,
+  };
   rows.forEach((node, index) => {
     if (isMergedRowEveOnly(node)) return;
     const fromId = chooseMergedId(node, index);
@@ -219,158 +394,25 @@ export function adaptMergedDetailed(fileMap) {
       { canonical: 'links2', legacy: '2_links' },
       { canonical: 'links1', legacy: '1_links' },
     ].forEach(({ canonical, legacy }) => {
-      const lqStyle = lqStyleFromField(legacy);
-      const links = Array.isArray(node[canonical]) ? node[canonical] : node[legacy];
-      (Array.isArray(links) ? links : []).forEach((link) => {
-        const toId = ensureNodeForLink(link, link.rloc16 || link.id);
-        if (!toId) return;
-        const toNodeEnriched = nodeMap.get(toId);
-        addEdge(edgeMap, edgeData, fromId, toId, {
-          ...lqStyle,
-          ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-          linkCategories: [legacy === '3_links' ? EDGE_CATEGORY_DEFAULT_3 : legacy === '2_links' ? EDGE_CATEGORY_DEFAULT_2 : EDGE_CATEGORY_DEFAULT_1],
-          edgeKeySuffix: `merged-${legacy}`
-        });
-      });
+      addMergedLinkFamily(node, fromId, canonical, legacy, relationshipContext);
     });
     const routerNeighbors = Array.isArray(node.routerNeighbors)
       ? node.routerNeighbors
       : (Array.isArray(node.router_neighbor_table) ? node.router_neighbor_table : []);
     routerNeighbors.forEach((neighbor) => {
-      const toId = ensureNodeForLink(neighbor, neighbor.rloc16 || neighbor.extAddress || neighbor.id);
-      if (!toId) return;
-      const linkMargin = toFiniteNumber(neighbor.rss_margin ?? neighbor.linkMargin);
-      const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        width: 1.5,
-        ...lqStyle,
-        linkMargin,
-        ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-        linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
-        edgeKeySuffix: 'merged-router-neighbor'
-      });
+      addMergedNeighbor(neighbor, node, fromId, relationshipContext);
     });
     (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
-      if (routeCategories.length === 0) return;
-      const toRloc16 = buildMainRouterRloc16(route.routeId);
-      const toId = ensureNodeForLink({ rloc16: toRloc16, id: toRloc16, device_label: toRloc16 }, toRloc16);
-      if (!toId) return;
-      const lqiIn = toFiniteNumber(route.linkQualityIn ?? route.inLinkQuality);
-      const lqiOut = toFiniteNumber(route.linkQualityOut ?? route.outLinkQuality);
-      const lqi = Math.max(lqiOut || 0, lqiIn || 0);
-      const lqStyle = lqStyleFromAvgLqi(lqi, 3);
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        ...lqStyle,
-        lqiIn,
-        lqiOut,
-        routeCost: toFiniteNumber(route.routeCost),
-        ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-        linkCategories: routeCategories,
-        edgeKeySuffix: 'merged-otbr-route'
-      });
+      addMergedRoute(route, node, fromId, routeCategories, relationshipContext);
     });
     (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
-      const childRloc16 = toText(child.rloc16) || buildChildRloc16(node.rloc16, child.childId);
-      const childExtaddr = getCanonicalExtaddr(child);
-      const childFallbackId = `${fromId}-rest-child-${ci + 1}`;
-      const childLabel = toText(child.device_label) || toText(child.deviceLabel);
-      const childRecord = {
-        ...child,
-        rloc16: childRloc16,
-        extaddr: childExtaddr,
-        id: toText(child.id) || childRloc16 || childExtaddr || childFallbackId,
-        device_label: childLabel
-          || (!childRloc16 && child.childId !== undefined ? `${fromId} child ${child.childId}` : ''),
-      };
-      const childId = ensureNodeForLink(
-        childRecord,
-        childRloc16 || childExtaddr || childFallbackId
-      );
-      if (!childId) return;
-      upsertMergedNode(childId, childRecord, {
-        source: 'merged-detailed',
-        shape: NODE_SHAPES.child,
-        color: NODE_COLORS.child,
-      });
-      const childLq = toFiniteNumber(child.linkQuality ?? child.incomingLinkQuality ?? child.lq);
-      const linkMargin = toFiniteNumber(child.rss_margin ?? child.linkMargin);
-      const lqStyle = Number.isFinite(childLq)
-        ? lqStyleFromAvgLqi(childLq, 3)
-        : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false,
-        isParentChild: true,
-        ...lqStyle,
-        linkMargin,
-        averageRssi: toFiniteNumber(child.rss_ave ?? child.averageRssi),
-        lastRssi: toFiniteNumber(child.rss_last ?? child.lastRssi),
-        frameErrorRate: toFiniteNumber(child.err_rate_frame_pct ?? child.frameErrorRate),
-        messageErrorRate: toFiniteNumber(child.err_rate_msg_pct ?? child.messageErrorRate),
-        ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
-        linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
-        edgeKeySuffix: 'merged-otbr-child'
-      });
-      routerIdsWithChildren.add(fromId);
+      addMergedChildTableRow(child, ci, node, fromId, relationshipContext);
     });
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
-      const childNode = typeof child === 'string' ? { id: child } : (child || {});
-      if (typeof child === 'string') return; // skip eve-only string children
-      if (!toText(childNode.rloc16) && !toText(childNode.extaddr)) return; // skip object refs without Thread identity
-      const childId = ensureNodeForLink(childNode, `${fromId}-child-${ci + 1}`);
-      if (!childId) return;
-      const childLq = toFiniteNumber(childNode.linkQuality ?? childNode.incomingLinkQuality ?? childNode.lq);
-      const linkMargin = toFiniteNumber(childNode.rss_margin ?? childNode.linkMargin);
-      const lqStyle = Number.isFinite(linkMargin)
-        ? lqStyleFromLinkMargin(linkMargin)
-        : (Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {});
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false,
-        isParentChild: true,
-        ...lqStyle,
-        linkMargin,
-        averageRssi: toFiniteNumber(childNode.rss_ave ?? childNode.averageRssi),
-        lastRssi: toFiniteNumber(childNode.rss_last ?? childNode.lastRssi),
-        frameErrorRate: toFiniteNumber(childNode.err_rate_frame_pct ?? childNode.frameErrorRate),
-        messageErrorRate: toFiniteNumber(childNode.err_rate_msg_pct ?? childNode.messageErrorRate),
-        ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
-        linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN],
-        edgeKeySuffix: 'merged-default-child'
-      });
-      routerIdsWithChildren.add(fromId);
+      addMergedChild(child, ci, node, fromId, relationshipContext);
     });
     (Array.isArray(node.router_child_table) ? node.router_child_table : []).forEach((child, ci) => {
-      const childId = toText(child.rloc16) || `${fromId}-rct-child-${ci + 1}`;
-      const linkMargin = toFiniteNumber(child.rss_margin);
-      const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
-      const childType = toText(child.type).toLowerCase();
-      const isChildLikeNode = childType === 'mtd' || child.rx_on === false;
-      const isRouterLikeNode = childType === 'ftd' && childId.toLowerCase().endsWith('00');
-      upsertMergedNode(childId, {
-        rloc16: toText(child.rloc16),
-        extaddr: toText(child.extaddr),
-        device_label: toText(child.device_label),
-        type: childType,
-        threadVersion: toText(child.threadVersion)
-      }, {
-        source: 'merged-detailed',
-        shape: isChildLikeNode && !isRouterLikeNode ? NODE_SHAPES.child : NODE_SHAPES.router,
-        color: isChildLikeNode && !isRouterLikeNode ? NODE_COLORS.child : NODE_COLORS.eve
-      });
-      if (!rawNodeById.has(childId)) rawNodeById.set(childId, child);
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false, isParentChild: true,
-        ...lqStyle,
-        linkMargin,
-        ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
-        linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN],
-        edgeKeySuffix: 'merged-rct-child'
-      });
-      routerIdsWithChildren.add(fromId);
+      addMergedRouterChild(child, ci, node, fromId, relationshipContext);
     });
   });
 

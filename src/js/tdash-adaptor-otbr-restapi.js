@@ -111,6 +111,201 @@ export function adaptOtbrRestApi(fileMap, mergedRows = []) {
   return emitAdaptorResult(buildOtbrRestApiModel(sources, mergedRows));
 }
 
+function registerRestDevice(node, { upsertOtbrRestApiNode, rawByIdForDetails }) {
+  const nodeId = toText(node.extAddress || node.extaddr).toLowerCase() || toText(node.id);
+  if (!nodeId) return;
+  const roleText = toText(node.role).toLowerCase();
+  const isChildLike = roleText === 'child' || roleText.includes('sleepy');
+  upsertOtbrRestApiNode(nodeId, node, {
+    shape: isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router,
+    color: isChildLike ? NODE_COLORS.child : NODE_COLORS.router
+  });
+  rawByIdForDetails.set(nodeId, node);
+}
+
+function registerRestDiagnostic(node, { upsertOtbrRestApiNode, rloc16ToNodeId, rawByIdForDetails }) {
+  const nodeId = toText(node.extAddress || node.extaddr).toLowerCase() || toText(node.id);
+  if (!nodeId) return;
+  upsertOtbrRestApiNode(nodeId, node, {
+    shape: NODE_SHAPES.router,
+    color: NODE_COLORS.router
+  });
+  const rloc16Val = toText(node.rloc16).toLowerCase();
+  if (rloc16Val) rloc16ToNodeId.set(rloc16Val, nodeId);
+  const existing = rawByIdForDetails.get(nodeId) || {};
+  rawByIdForDetails.set(nodeId, mergeForDisplay(existing, node));
+}
+
+function enrichRestMergedDetails(row, rawByIdForDetails) {
+  if (!isPlainObject(row)) return;
+  const nodeId = getCanonicalExtaddr(row);
+  if (!nodeId || !rawByIdForDetails.has(nodeId)) return;
+  rawByIdForDetails.set(
+    nodeId,
+    mergeForDisplay(rawByIdForDetails.get(nodeId), row),
+  );
+}
+
+function addRestRoute(route, fromId, fromNode, routeCategories, {
+  rloc16ToNodeId, nodeMap, upsertOtbrRestApiNode, edgeMap, edgeData,
+}) {
+  if (routeCategories.length === 0) return;
+  const toRloc16 = buildMainRouterRloc16(route.routeId);
+  if (!toRloc16) return;
+  let toId = rloc16ToNodeId.get(toRloc16.toLowerCase()) || toRloc16;
+  if (!nodeMap.has(toId)) {
+    upsertOtbrRestApiNode(toId, { rloc16: toRloc16, id: toId },
+      { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
+  }
+  const lqiIn = toFiniteNumber(route.linkQualityIn);
+  const lqiOut = toFiniteNumber(route.linkQualityOut);
+  const lqi = Math.max(lqiOut || 0, lqiIn || 0);
+  const lqStyle = lqStyleFromAvgLqi(lqi, 3);
+  const toNodeEnriched = nodeMap.get(toId);
+  addEdge(edgeMap, edgeData, fromId, toId, {
+    ...lqStyle,
+    lqiIn,
+    lqiOut,
+    ...buildEdgeEndpointTitles(fromNode, toNodeEnriched, fromId, toId),
+    linkCategories: routeCategories
+  });
+}
+
+function addRestChildTableRow(child, ci, fromId, fromNode, {
+  rloc16ToNodeId, nodeMap, upsertOtbrRestApiNode, edgeMap, edgeData, routerIdsWithChildren,
+}) {
+  const childRloc16 = buildChildRloc16(toText(fromNode.rloc16), child.childId);
+  const childLq = toFiniteNumber(child.linkQuality);
+  const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {};
+  const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
+    || childRloc16
+    || `${fromId}-child-${ci + 1}`;
+  if (!nodeMap.has(childId)) {
+    upsertOtbrRestApiNode(childId, { rloc16: childRloc16, id: childId, mode: child.mode },
+      { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
+  }
+  if (childRloc16) rloc16ToNodeId.set(childRloc16.toLowerCase(), childId);
+  const childNodeEnriched = nodeMap.get(childId);
+  addEdge(edgeMap, edgeData, fromId, childId, {
+    dashes: false,
+    isParentChild: true,
+    ...lqStyle,
+    ...buildEdgeEndpointTitles(
+      fromNode,
+      childNodeEnriched,
+      fromId,
+      childId,
+    ),
+    linkCategories: [EDGE_CATEGORY_OTBR_CHILD]
+  });
+  routerIdsWithChildren.add(fromId);
+}
+
+function addRestMeshChild(child, ci, fromId, fromNode, {
+  rloc16ToNodeId, nodeMap, upsertOtbrRestApiNode, edgeMap, edgeData,
+  routerIdsWithChildren, routerChildByRloc16,
+}) {
+  const childRloc16 = toText(child.rloc16);
+  const childExtaddr = toText(child.extAddress).toLowerCase();
+  const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
+    || childExtaddr
+    || childRloc16
+    || `${fromId}-children-${ci + 1}`;
+  if (!nodeMap.has(childId)) {
+    upsertOtbrRestApiNode(childId, {
+      id: childId,
+      rloc16: childRloc16,
+      extAddress: childExtaddr,
+      mode: { deviceTypeFTD: child.deviceTypeFTD },
+    }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
+  } else if (childExtaddr || childRloc16) {
+    upsertOtbrRestApiNode(childId, {
+      id: childId,
+      rloc16: childRloc16,
+      extAddress: childExtaddr,
+      mode: { deviceTypeFTD: child.deviceTypeFTD },
+    }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
+  }
+  if (childRloc16) rloc16ToNodeId.set(childRloc16.toLowerCase(), childId);
+  const linkMargin = toFiniteNumber(child.linkMargin);
+  const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
+  const childNodeEnriched = nodeMap.get(childId);
+  addEdge(edgeMap, edgeData, fromId, childId, {
+    dashes: false,
+    isParentChild: true,
+    ...lqStyle,
+    linkMargin,
+    ...buildEdgeEndpointTitles(
+      fromNode,
+      childNodeEnriched,
+      fromId,
+      childId,
+    ),
+    linkCategories: [EDGE_CATEGORY_OTBR_CHILD]
+  });
+  routerIdsWithChildren.add(fromId);
+
+  const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
+  if (fromRloc16) {
+    if (!routerChildByRloc16.has(fromRloc16)) {
+      routerChildByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_child_table: [] });
+    }
+    const childRow = routerChildByRloc16.get(fromRloc16);
+    if (Array.isArray(childRow.router_child_table)) {
+      const normalizedChild = normalizeNestedArrayFields([child])[0];
+      childRow.router_child_table.push(normalizedChild);
+    }
+  }
+}
+
+function addRestMeshNeighbor(neighbor, fromId, fromNode, {
+  nodeMap, rloc16ToNodeId, upsertOtbrRestApiNode, edgeMap, edgeData, routerNeighborByRloc16,
+}) {
+  const neighborExtaddr = toText(neighbor.extAddress).toLowerCase();
+  const neighborRloc16 = toText(neighbor.rloc16).toLowerCase();
+  let toId = neighborExtaddr || neighborRloc16;
+  if (!toId) return;
+
+  if (neighborExtaddr && nodeMap.has(neighborExtaddr)) {
+    toId = neighborExtaddr;
+  } else if (neighborRloc16 && rloc16ToNodeId.has(neighborRloc16)) {
+    toId = rloc16ToNodeId.get(neighborRloc16);
+  } else if (!nodeMap.has(toId)) {
+    upsertOtbrRestApiNode(toId, {
+      extAddress: neighborExtaddr,
+      rloc16: neighborRloc16,
+      id: toId
+    }, { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
+    if (neighborRloc16) rloc16ToNodeId.set(neighborRloc16, toId);
+  }
+
+  const lqStyle = lqStyleFromLinkMargin(neighbor.linkMargin);
+  const toNodeEnriched = nodeMap.get(toId);
+  addEdge(edgeMap, edgeData, fromId, toId, {
+    ...lqStyle,
+    linkMargin: neighbor.linkMargin,
+    ...buildEdgeEndpointTitles(
+      fromNode,
+      toNodeEnriched,
+      fromId,
+      toId,
+    ),
+    linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR]
+  });
+
+  const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
+  if (fromRloc16) {
+    if (!routerNeighborByRloc16.has(fromRloc16)) {
+      routerNeighborByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_neighbor_table: [] });
+    }
+    const neighborRow = routerNeighborByRloc16.get(fromRloc16);
+    if (Array.isArray(neighborRow.router_neighbor_table)) {
+      const normalizedNeighbor = normalizeNestedArrayFields([neighbor])[0];
+      neighborRow.router_neighbor_table.push(normalizedNeighbor);
+    }
+  }
+}
+
 export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostics = diagnostics.length > 0, hasMeshDiagnostics = false }, mergedRows = []) {
 
   const nodeMap = new Map();
@@ -173,41 +368,22 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
 
   // Pass 1: register nodes from devices (extAddress as node ID)
   devices.forEach((node) => {
-    const nodeId = toText(node.extAddress || node.extaddr).toLowerCase() || toText(node.id);
-    if (!nodeId) return;
-    const roleText = toText(node.role).toLowerCase();
-    const isChildLike = roleText === 'child' || roleText.includes('sleepy');
-    upsertOtbrRestApiNode(nodeId, node, {
-      shape: isChildLike ? NODE_SHAPES.child : NODE_SHAPES.router,
-      color: isChildLike ? NODE_COLORS.child : NODE_COLORS.router
-    });
-    rawByIdForDetails.set(nodeId, node);
+    registerRestDevice(node, { upsertOtbrRestApiNode, rawByIdForDetails });
   });
 
   // Pass 2: augment from diagnostics — adds rloc16, route, childTable
   diagnostics.forEach((node) => {
-    const nodeId = toText(node.extAddress || node.extaddr).toLowerCase() || toText(node.id);
-    if (!nodeId) return;
-    upsertOtbrRestApiNode(nodeId, node, {
-      shape: NODE_SHAPES.router,
-      color: NODE_COLORS.router
-    });
-    const rloc16Val = toText(node.rloc16).toLowerCase();
-    if (rloc16Val) rloc16ToNodeId.set(rloc16Val, nodeId);
-    const existing = rawByIdForDetails.get(nodeId) || {};
-    rawByIdForDetails.set(nodeId, mergeForDisplay(existing, node));
+    registerRestDiagnostic(node, { upsertOtbrRestApiNode, rloc16ToNodeId, rawByIdForDetails });
   });
 
   mergedRows.forEach((row) => {
-    if (!isPlainObject(row)) return;
-    const nodeId = getCanonicalExtaddr(row);
-    if (!nodeId || !rawByIdForDetails.has(nodeId)) return;
-    rawByIdForDetails.set(
-      nodeId,
-      mergeForDisplay(rawByIdForDetails.get(nodeId), row),
-    );
+    enrichRestMergedDetails(row, rawByIdForDetails);
   });
 
+  const relationshipContext = {
+    rloc16ToNodeId, nodeMap, upsertOtbrRestApiNode, edgeMap, edgeData,
+    routerIdsWithChildren, routerChildByRloc16, routerNeighborByRloc16,
+  };
   // Pass 3: edges from diagnostics route.routeData (router routes) + childTable
   diagnostics.forEach((node) => {
     const fromId = toText(node.extAddress || node.extaddr).toLowerCase() || toText(node.id);
@@ -216,163 +392,21 @@ export function buildOtbrRestApiModel({ devices, diagnostics, hasBasicDiagnostic
     const routeCategories = getOtbrRouteCategories(node);
 
     (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
-      if (routeCategories.length === 0) return;
-      const toRloc16 = buildMainRouterRloc16(route.routeId);
-      if (!toRloc16) return;
-      let toId = rloc16ToNodeId.get(toRloc16.toLowerCase()) || toRloc16;
-      if (!nodeMap.has(toId)) {
-        upsertOtbrRestApiNode(toId, { rloc16: toRloc16, id: toId },
-          { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
-      }
-      const lqiIn = toFiniteNumber(route.linkQualityIn);
-      const lqiOut = toFiniteNumber(route.linkQualityOut);
-      const lqi = Math.max(lqiOut || 0, lqiIn || 0);
-      const lqStyle = lqStyleFromAvgLqi(lqi, 3);
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        ...lqStyle,
-        lqiIn,
-        lqiOut,
-        ...buildEdgeEndpointTitles(fromNode, toNodeEnriched, fromId, toId),
-        linkCategories: routeCategories
-      });
+      addRestRoute(route, fromId, fromNode, routeCategories, relationshipContext);
     });
 
     (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
-      const childRloc16 = buildChildRloc16(toText(fromNode.rloc16), child.childId);
-      const childLq = toFiniteNumber(child.linkQuality);
-      const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {};
-      const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
-        || childRloc16
-        || `${fromId}-child-${ci + 1}`;
-      if (!nodeMap.has(childId)) {
-        upsertOtbrRestApiNode(childId, { rloc16: childRloc16, id: childId, mode: child.mode },
-          { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
-      }
-      if (childRloc16) rloc16ToNodeId.set(childRloc16.toLowerCase(), childId);
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false,
-        isParentChild: true,
-        ...lqStyle,
-        ...buildEdgeEndpointTitles(
-          fromNode,
-          childNodeEnriched,
-          fromId,
-          childId,
-        ),
-        linkCategories: [EDGE_CATEGORY_OTBR_CHILD]
-      });
-      routerIdsWithChildren.add(fromId);
+      addRestChildTableRow(child, ci, fromId, fromNode, relationshipContext);
     });
 
     // Pass 3a: edges from children[] (mesh-diagnostics-fetch-all)
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
-      const childRloc16 = toText(child.rloc16);
-      const childExtaddr = toText(child.extAddress).toLowerCase();
-      const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
-        || childExtaddr
-        || childRloc16
-        || `${fromId}-children-${ci + 1}`;
-      if (!nodeMap.has(childId)) {
-        upsertOtbrRestApiNode(childId, {
-          id: childId,
-          rloc16: childRloc16,
-          extAddress: childExtaddr,
-          mode: { deviceTypeFTD: child.deviceTypeFTD },
-        }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
-      } else if (childExtaddr || childRloc16) {
-        upsertOtbrRestApiNode(childId, {
-          id: childId,
-          rloc16: childRloc16,
-          extAddress: childExtaddr,
-          mode: { deviceTypeFTD: child.deviceTypeFTD },
-        }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
-      }
-      if (childRloc16) rloc16ToNodeId.set(childRloc16.toLowerCase(), childId);
-      const linkMargin = toFiniteNumber(child.linkMargin);
-      const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false,
-        isParentChild: true,
-        ...lqStyle,
-        linkMargin,
-        ...buildEdgeEndpointTitles(
-          fromNode,
-          childNodeEnriched,
-          fromId,
-          childId,
-        ),
-        linkCategories: [EDGE_CATEGORY_OTBR_CHILD]
-      });
-      routerIdsWithChildren.add(fromId);
-      
-      // Store child data for diagnostic filter support
-      const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
-      if (fromRloc16) {
-        if (!routerChildByRloc16.has(fromRloc16)) {
-          routerChildByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_child_table: [] });
-        }
-        const childRow = routerChildByRloc16.get(fromRloc16);
-        if (Array.isArray(childRow.router_child_table)) {
-          // Normalize field names (frameErrorRate → err_rate_frame_pct, etc.) and convert decimals to percentages
-          const normalizedChild = normalizeNestedArrayFields([child])[0];
-          childRow.router_child_table.push(normalizedChild);
-        }
-      }
+      addRestMeshChild(child, ci, fromId, fromNode, relationshipContext);
     });
 
     // Pass 3b: edges from routerNeighbors (mesh-diagnostics-fetch-all)
     (Array.isArray(node.routerNeighbors) ? node.routerNeighbors : []).forEach((neighbor) => {
-      const neighborExtaddr = toText(neighbor.extAddress).toLowerCase();
-      const neighborRloc16 = toText(neighbor.rloc16).toLowerCase();
-      let toId = neighborExtaddr || neighborRloc16;
-      if (!toId) return;
-
-      // Prefer extAddress-based lookup, fallback to rloc16
-      if (neighborExtaddr && nodeMap.has(neighborExtaddr)) {
-        toId = neighborExtaddr;
-      } else if (neighborRloc16 && rloc16ToNodeId.has(neighborRloc16)) {
-        toId = rloc16ToNodeId.get(neighborRloc16);
-      } else if (!nodeMap.has(toId)) {
-        // Create placeholder node for neighbor
-        upsertOtbrRestApiNode(toId, {
-          extAddress: neighborExtaddr,
-          rloc16: neighborRloc16,
-          id: toId
-        }, { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
-        if (neighborRloc16) rloc16ToNodeId.set(neighborRloc16, toId);
-      }
-
-      // Style link based on linkMargin (dB)
-      const lqStyle = lqStyleFromLinkMargin(neighbor.linkMargin);
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        ...lqStyle,
-        linkMargin: neighbor.linkMargin,
-        ...buildEdgeEndpointTitles(
-          fromNode,
-          toNodeEnriched,
-          fromId,
-          toId,
-        ),
-        linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR]
-      });
-
-      // Store neighbor data for potential detail display
-      const fromRloc16 = toText(fromNode.rloc16).toLowerCase();
-      if (fromRloc16) {
-        if (!routerNeighborByRloc16.has(fromRloc16)) {
-          routerNeighborByRloc16.set(fromRloc16, { rloc16: fromRloc16, router_neighbor_table: [] });
-        }
-        const neighborRow = routerNeighborByRloc16.get(fromRloc16);
-        if (Array.isArray(neighborRow.router_neighbor_table)) {
-          // Normalize field names (frameErrorRate → err_rate_frame_pct, etc.) and convert decimals to percentages
-          const normalizedNeighbor = normalizeNestedArrayFields([neighbor])[0];
-          neighborRow.router_neighbor_table.push(normalizedNeighbor);
-        }
-      }
+      addRestMeshNeighbor(neighbor, fromId, fromNode, relationshipContext);
     });
   });
 

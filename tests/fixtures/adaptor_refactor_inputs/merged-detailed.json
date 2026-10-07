@@ -1,0 +1,66 @@
+{
+  "files": {
+    "td-merged-topology-all.json": [
+      {
+        "rloc16": "0x1000",
+        "extAddress": "aa00112233445566",
+        "role": "router",
+        "links3": [
+          {
+            "rloc16": "0x2000"
+          }
+        ],
+        "routerNeighbors": [
+          {
+            "rloc16": "0x3000",
+            "extAddress": "cc00112233445566",
+            "linkMargin": 30
+          }
+        ],
+        "route": {
+          "routeData": [
+            {
+              "routeId": 8,
+              "linkQualityIn": 2,
+              "linkQualityOut": 3,
+              "routeCost": 1
+            }
+          ]
+        },
+        "childTable": [
+          {
+            "childId": 1,
+            "extAddress": "dd00112233445566",
+            "linkQuality": 2
+          }
+        ],
+        "children": [
+          {
+            "rloc16": "0x1002",
+            "extAddress": "ee00112233445566",
+            "linkMargin": 19
+          }
+        ],
+        "router_child_table": [
+          {
+            "rloc16": "0x1003",
+            "extAddress": "ff00112233445566",
+            "rss_margin": 17
+          }
+        ]
+      },
+      {
+        "rloc16": "0x2000",
+        "extAddress": "bb00112233445566",
+        "role": "router"
+      },
+      {
+        "id": "eve-only",
+        "_sources": [
+          "td-eve-topology.json"
+        ],
+        "role": "router"
+      }
+    ]
+  }
+}

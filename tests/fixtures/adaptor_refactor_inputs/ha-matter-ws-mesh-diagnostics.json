@@ -1,0 +1,33 @@
+{
+  "files": {
+    "td-ha-matter-ws-dashboard.json": {
+      "topology": [
+        {
+          "topologyId": "relationship-only",
+          "rloc16": "0x3000",
+          "relationshipOnly": true,
+          "role": "unknown"
+        }
+      ]
+    }
+  },
+  "entry": {
+    "source": "ha-matter-ws",
+    "mergeStrategy": "none",
+    "rowExtractor": "ha-matter-ws-mesh-diagnostics"
+  },
+  "rows": [
+    {
+      "topologyId": "commissioned",
+      "extAddress": "bb00000000000001",
+      "rloc16": "0x2000",
+      "role": "Router",
+      "neighborTable": [
+        {
+          "rloc16": "0x3000",
+          "linkMargin": 20
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "files": {
+    "td-otbr-cli-meshdiag-topology.json": [
+      {
+        "id": "router-a",
+        "rloc16": "0x1000",
+        "extAddress": "aa00112233445566",
+        "omrIpv6Address": "fd00::1000",
+        "device_label": "Primary router label",
+        "role": "router",
+        "children": [
+          {
+            "rloc16": "0x1001",
+            "device_label": "Mesh child",
+            "lq": 3
+          }
+        ],
+        "route": {
+          "routeData": [
+            {
+              "rloc16": "0x2000",
+              "linkQualityIn": 2,
+              "linkQualityOut": 3
+            }
+          ]
+        }
+      },
+      {
+        "id": "router-b",
+        "rloc16": "0x2000",
+        "role": "router",
+        "links2": [
+          {
+            "rloc16": "0x3000",
+            "device_label": "Fallback router"
+          }
+        ]
+      }
+    ],
+    "td-otbr-cli-networkdiag-fetch-all.json": [
+      {
+        "rloc16": "0x3000",
+        "role": "router",
+        "children": [
+          {
+            "rloc16": "0x3001",
+            "device_label": "Network child"
+          }
+        ],
+        "route": {
+          "routeData": [
+            {
+              "rloc16": "0x6000",
+              "linkQualityIn": 1,
+              "linkQualityOut": 2
+            }
+          ]
+        }
+      },
+      {
+        "id": "isolated-unknown-a",
+        "role": "unknown"
+      },
+      {
+        "id": "isolated-unknown-b",
+        "role": "unknown"
+      }
+    ],
+    "td-otbr-cli-meshdiag-router-neighbortables.json": [
+      {
+        "rloc16": "0x1000",
+        "router_neighbor_table": [
+          {
+            "rloc16": "0x3000",
+            "extaddr": "cc00112233445566",
+            "rss_margin": 24
+          }
+        ]
+      }
+    ],
+    "td-otbr-cli-meshdiag-router-childtables.json": [
+      {
+        "parent_rloc16": "0x1000",
+        "router_child_table": [
+          {
+            "rloc16": "0x1001",
+            "rss_margin": 18
+          }
+        ]
+      }
+    ],
+    "td-otbr-restapi-mesh-diagnostics-fetch-all.json": [
+      {
+        "rloc16": "0x2000",
+        "routerNeighbors": [
+          {
+            "rloc16": "0x3000",
+            "extAddress": "cc00112233445566",
+            "linkMargin": 30
+          },
+          {
+            "rloc16": "0x7000",
+            "extAddress": "ff00112233445566",
+            "linkMargin": 27
+          }
+        ],
+        "children": [
+          {
+            "rloc16": "0x2001",
+            "extAddress": "dd00112233445566",
+            "linkMargin": 20
+          }
+        ]
+      }
+    ],
+    "td-otbr-restapi-diagnostics.json": {
+      "data": [
+        {
+          "id": "rest-a",
+          "type": "diagnostic",
+          "attributes": {
+            "rloc16": "0x4000",
+            "role": "router",
+            "route": {
+              "routeData": [
+                {
+                  "routeId": 20,
+                  "linkQualityIn": 3,
+                  "linkQualityOut": 3
+                }
+              ]
+            },
+            "childTable": [
+              {
+                "childId": 1,
+                "linkQuality": 2
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "td-mdns-scopes-thread.json": [
+      {
+        "omrIpv6Address": "fd00::1000",
+        "device_label": "Supplementary OMR label",
+        "modelName": "Pinned model"
+      },
+      {
+        "extAddress": "aa00112233445566",
+        "device_label": "Supplementary extaddr label",
+        "vendorName": "Pinned vendor"
+      }
+    ]
+  },
+  "mergedRows": [
+    {
+      "rloc16": "0x1000",
+      "deviceLabel": "Pinned border router"
+    }
+  ]
+}

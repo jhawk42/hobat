@@ -1,0 +1,64 @@
+{
+  "files": {
+    "diagnostics.json": {
+      "diagnostics": [
+        {
+          "macAddr": 4096,
+          "extMacAddr": "aa00112233445566",
+          "mode": {
+            "ftd": true
+          },
+          "route64": {
+            "routeData": [
+              {
+                "routeId": 8,
+                "linkQualityIn": 2,
+                "linkQualityOut": 3
+              }
+            ]
+          },
+          "childTable": [
+            {
+              "childId": 1,
+              "linkQuality": 2
+            }
+          ],
+          "children": [
+            {
+              "macAddr": 4097,
+              "extAddress": "ee00112233445566",
+              "isDeviceTypeMtd": false,
+              "linkQuality": 1
+            },
+            {
+              "macAddr": 4098,
+              "extAddress": "cc00112233445566",
+              "isDeviceTypeMtd": false,
+              "linkMargin": 22,
+              "linkQuality": 1
+            }
+          ],
+          "routerNeighbor": [
+            {
+              "macAddr": 12288,
+              "extAddress": "dd00112233445566",
+              "linkMargin": 28
+            }
+          ]
+        },
+        {
+          "macAddr": 8192,
+          "extMacAddr": "bb00112233445566",
+          "mode": {
+            "ftd": true
+          }
+        },
+        {
+          "macAddr": 4097,
+          "isSynthesized": true,
+          "mode": {}
+        }
+      ]
+    }
+  }
+}

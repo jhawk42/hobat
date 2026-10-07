@@ -258,7 +258,10 @@ def test_network_insights_uses_aggregation_and_dataset_refresh_lifecycle() -> No
     assert "aggregateNetworkDiagnosticsForRows," in ui_text
     assert "function renderNetworkInsights()" in ui_text
     assert "contentEl.replaceChildren();" in ui_text
-    assert "aggregateNetworkDiagnosticsForRows(currentDataset.rows)" in ui_text
+    legacy_start = ui_text.index("function renderLegacyNetworkInsights(contentEl, dataset)")
+    legacy_source = ui_text[legacy_start:ui_text.index("\nfunction ", legacy_start + 1)]
+    assert "aggregateNetworkDiagnosticsForRows(dataset.rows)" in legacy_source
+    assert "renderLegacyNetworkInsights(contentEl, currentDataset);" in ui_text
     assert 'id="health-insights-workspace" hidden' in html
     assert 'id="health-insights-announcement"' in html
     assert "renderHealthInsights(healthWorkspaceEl" in ui_text
@@ -267,7 +270,7 @@ def test_network_insights_uses_aggregation_and_dataset_refresh_lifecycle() -> No
     assert "NETWORK_INSIGHT_DEVICE_LIMIT = 10" in ui_text
     assert "condition.triggeredDevices.slice(0, NETWORK_INSIGHT_DEVICE_LIMIT)" in ui_text
     assert "Load a dataset to view network diagnostic insights." in ui_text
-    assert "currentDataset.entry.healthEligible === false" in ui_text
+    assert "dataset.entry.healthEligible === false" in legacy_source
     assert "Health assessment is unavailable for this dataset." in ui_text
     assert "No eligible Thread devices are available in this dataset." in ui_text
     assert "Eligible Thread devices do not provide diagnostic metrics." in ui_text

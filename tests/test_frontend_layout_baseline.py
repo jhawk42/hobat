@@ -355,12 +355,25 @@ def test_insights_activation_collapses_context_details_panel() -> None:
 
 def test_dataset_health_refresh_preserves_context_details_visibility() -> None:
     ui_text = _read_text(UI_JS)
+    dataset_reset_start = ui_text.index("function resetHealthInsightsForDatasetChange()")
+    network_reset_start = ui_text.index("function resetHealthInsightsForNetworkChange()")
     refresh_start = ui_text.index("async function refreshHealthAssessment()")
-    dataset_state_start = ui_text.index("  healthInsightsState.datasetId =", refresh_start)
-    dataset_change_source = ui_text[refresh_start:dataset_state_start]
+    dataset_change_source = ui_text[dataset_reset_start:network_reset_start]
+    network_change_source = ui_text[network_reset_start:refresh_start]
+    refresh_source = ui_text[refresh_start:ui_text.index("\nfunction ", refresh_start)]
 
     assert 'setContextDetailsMode("device");' in dataset_change_source
     assert "contextDetailsController.setCollapsed" not in dataset_change_source
+    assert "contextDetailsController.setCollapsed(true);" in network_change_source
+    assert "if (datasetChanged) resetHealthInsightsForDatasetChange();" in refresh_source
+    assessment_read = refresh_source.index("await fetchHealthAssessment(entry.value)")
+    version_guard = refresh_source.index(
+        "if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;",
+        assessment_read,
+    )
+    assert assessment_read < version_guard < refresh_source.index(
+        "if (networkChanged) resetHealthInsightsForNetworkChange();",
+    )
 
 
 def test_vis_navigation_rules_are_not_nested_under_unused_heading() -> None:

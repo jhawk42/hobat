@@ -795,49 +795,26 @@ export function renderHealthComparison(container, page, comparison, viewState = 
   const selectedComparisonId = endpointSelection
     ? comparison?.comparisonId || ""
     : viewState.comparisonId || comparison?.comparisonId || "";
+  renderHealthComparisonControls(
+    container, page, comparison, viewState, actions, liveStatus, selectedComparisonId,
+    appendError, appendRetry,
+  );
+  renderSelectedHealthComparison(
+    container, comparison, viewState, actions, selectedComparisonId, appendError, appendRetry,
+  );
+  restoreDisclosureFocus();
+}
+
+function renderHealthComparisonControls(
+  container, page, comparison, viewState, actions, liveStatus, selectedComparisonId,
+  appendError, appendRetry,
+) {
+  const endpointSelection = viewState.endpointSelection === true;
   const controls = appendText(container, "div", "", "health-comparison-controls");
   if (endpointSelection) {
-    appendComparisonPresets(controls, viewState, actions, liveStatus);
-    const customControls = appendText(container, "div", "", "health-comparison-custom");
-    customControls.id = "health-comparison-custom-controls";
-    customControls.hidden = viewState.customOpen !== true;
-    if (!customControls.hidden) {
-      for (const side of ["before", "after"]) {
-        const endpointGroup = appendText(customControls, "div", "", "health-comparison-endpoint-group");
-        appendEndpointPicker(endpointGroup, side, viewState.endpointPages?.[side],
-          viewState[`${side}AssessmentId`], viewState[side],
-          viewState.endpointLoading?.[side], actions);
-        appendEndpointHistoryNavigation(endpointGroup, side, viewState.endpointPages?.[side],
-          viewState.endpointLoading?.[side], actions);
-      }
-    }
+    renderHealthComparisonEndpointControls(container, controls, viewState, actions, liveStatus);
   } else {
-    const picker = document.createElement("select");
-    picker.setAttribute("aria-label", "Stored comparison");
-    const now = Date.now();
-    const comparisonLabel = (item) => `Before: ${formatComparisonTime(item.beforeObservedAt, now)} · After: ${formatComparisonTime(item.afterObservedAt, now)}`;
-    const prompt = document.createElement("option");
-    prompt.value = "";
-    prompt.textContent = "Select a comparison";
-    picker.appendChild(prompt);
-    page.items.forEach((item) => {
-      const option = document.createElement("option");
-      option.value = item.comparisonId;
-      option.textContent = comparisonLabel(item);
-      picker.appendChild(option);
-    });
-    if (selectedComparisonId && !page.items.some((item) => item.comparisonId === selectedComparisonId)) {
-      const pinned = document.createElement("option");
-      pinned.value = selectedComparisonId;
-      const selectedComparison = comparison?.comparisonId === selectedComparisonId ? comparison : null;
-      pinned.textContent = selectedComparison
-        ? `${comparisonLabel(selectedComparison)} (selected)`
-        : `${selectedComparisonId} (selected)`;
-      picker.appendChild(pinned);
-    }
-    picker.value = selectedComparisonId;
-    picker.addEventListener("change", () => actions.select?.(picker.value));
-    controls.appendChild(picker);
+    renderHealthComparisonStoredControls(controls, page, comparison, selectedComparisonId, actions);
   }
   if (endpointSelection) {
     if (viewState.endpointErrors?.before) {
@@ -892,26 +869,74 @@ export function renderHealthComparison(container, page, comparison, viewState = 
     next.disabled = page.offset + page.items.length >= page.total;
     next.addEventListener("click", () => actions.page?.(page.offset + page.limit));
   }
+}
+
+function renderHealthComparisonEndpointControls(container, controls, viewState, actions, liveStatus) {
+  appendComparisonPresets(controls, viewState, actions, liveStatus);
+  const customControls = appendText(container, "div", "", "health-comparison-custom");
+  customControls.id = "health-comparison-custom-controls";
+  customControls.hidden = viewState.customOpen !== true;
+  if (!customControls.hidden) {
+    for (const side of ["before", "after"]) {
+      const endpointGroup = appendText(customControls, "div", "", "health-comparison-endpoint-group");
+      appendEndpointPicker(endpointGroup, side, viewState.endpointPages?.[side],
+        viewState[`${side}AssessmentId`], viewState[side],
+        viewState.endpointLoading?.[side], actions);
+      appendEndpointHistoryNavigation(endpointGroup, side, viewState.endpointPages?.[side],
+        viewState.endpointLoading?.[side], actions);
+    }
+  }
+}
+
+function renderHealthComparisonStoredControls(controls, page, comparison, selectedComparisonId, actions) {
+  const picker = document.createElement("select");
+  picker.setAttribute("aria-label", "Stored comparison");
+  const now = Date.now();
+  const comparisonLabel = (item) => `Before: ${formatComparisonTime(item.beforeObservedAt, now)} · After: ${formatComparisonTime(item.afterObservedAt, now)}`;
+  const prompt = document.createElement("option");
+  prompt.value = "";
+  prompt.textContent = "Select a comparison";
+  picker.appendChild(prompt);
+  page.items.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.comparisonId;
+    option.textContent = comparisonLabel(item);
+    picker.appendChild(option);
+  });
+  if (selectedComparisonId && !page.items.some((item) => item.comparisonId === selectedComparisonId)) {
+    const pinned = document.createElement("option");
+    pinned.value = selectedComparisonId;
+    const selectedComparison = comparison?.comparisonId === selectedComparisonId ? comparison : null;
+    pinned.textContent = selectedComparison
+      ? `${comparisonLabel(selectedComparison)} (selected)`
+      : `${selectedComparisonId} (selected)`;
+    picker.appendChild(pinned);
+  }
+  picker.value = selectedComparisonId;
+  picker.addEventListener("change", () => actions.select?.(picker.value));
+  controls.appendChild(picker);
+}
+
+function renderSelectedHealthComparison(
+  container, comparison, viewState, actions, selectedComparisonId, appendError, appendRetry,
+) {
+  const endpointSelection = viewState.endpointSelection === true;
   if (viewState.endpointPairLoading || viewState.detailLoading) {
     appendText(container, "p", "Loading comparison rows…").setAttribute("role", "status");
-    restoreDisclosureFocus();
     return;
   }
   if (viewState.endpointPairError || viewState.detailError) {
     appendError(`Comparison rows could not be loaded: ${viewState.endpointPairError || viewState.detailError}`);
     appendRetry(endpointSelection ? actions.retry : actions.retryDetail);
-    restoreDisclosureFocus();
     return;
   }
   if (!comparison || (!endpointSelection && comparison.comparisonId !== selectedComparisonId)) {
-    restoreDisclosureFocus();
     return;
   }
   if (endpointSelection && (
     comparison.beforeAssessmentId !== viewState.beforeAssessmentId
     || comparison.afterAssessmentId !== viewState.afterAssessmentId
   )) {
-    restoreDisclosureFocus();
     return;
   }
   const heading = appendText(container, "p",
@@ -1054,7 +1079,6 @@ export function renderHealthComparison(container, page, comparison, viewState = 
   appendComparisonRowPagination(
     container, comparison, viewState.itemsLoading === true, actions,
   );
-  restoreDisclosureFocus();
 }
 
 const ROSTER_COLUMNS = [
@@ -1952,6 +1976,14 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
     return;
   }
 
+  renderHealthFindingHeader(container, model);
+  renderHealthFindingInvestigation(container, model, actions);
+  renderHealthFindingAffectedItems(container, model, actions);
+  renderHealthFindingRelatedDevices(container, model, actions);
+  renderHealthFindingSources(container, model);
+}
+
+function renderHealthFindingHeader(container, model) {
   appendText(container, "p", model.summary, "health-finding-detail-summary");
   const priority = document.createElement("div");
   priority.className = "health-finding-detail-priority";
@@ -1975,7 +2007,9 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
 
   appendSharedDetailSection(container, "Recommended action", model.shared.action || "Varies by affected item.");
   appendSharedDetailSection(container, "Verify", model.shared.verify || "Varies by affected item.");
+}
 
+function renderHealthFindingInvestigation(container, model, actions) {
   const investigation = document.createElement("section");
   investigation.className = "health-finding-detail-section health-finding-investigation";
   appendText(investigation, "h3", "Investigate");
@@ -2005,7 +2039,9 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
     investigation.appendChild(actionBar);
     container.appendChild(investigation);
   }
+}
 
+function renderHealthFindingAffectedItems(container, model, actions) {
   const affectedSection = document.createElement("section");
   affectedSection.className = "health-finding-detail-section";
   appendText(affectedSection, "h3", "Affected items");
@@ -2104,7 +2140,9 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
   });
   affectedSection.appendChild(list);
   container.appendChild(affectedSection);
+}
 
+function renderHealthFindingRelatedDevices(container, model, actions) {
   if ((model.relatedDevices || []).length > 0) {
     const relatedSection = document.createElement("section");
     relatedSection.className = "health-finding-detail-section";
@@ -2145,7 +2183,9 @@ export function renderHealthFindingDetails(container, model, actions = {}) {
     }
     container.appendChild(relatedSection);
   }
+}
 
+function renderHealthFindingSources(container, model) {
   if (model.shared.sourceFiles.length > 0) {
     appendSharedDetailSection(container, "Sources", model.shared.sourceFiles.join(", "));
   }

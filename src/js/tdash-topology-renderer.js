@@ -262,77 +262,7 @@ function _meshTreeUpperText(value) {
   return typeof value === "string" ? value.trim().toUpperCase() : "";
 }
 
-// ── Main renderer ─────────────────────────────────────────────────────────────
-
-export function renderTopologyForDataset(
-  dataset,
-  physicsEnabled,
-  physicsProfileName = "mesh-baseline",
-  statusDatasetToken = dataset,
-) {
-  const container = document.getElementById("topology-view");
-  const nodeFilterEl = document.getElementById("node-filter");
-  const linkFilterEl = document.getElementById("link-filter");
-  const diagnosticFilterEl = document.getElementById("diagnostic-filter");
-  let lastStatusCounts = null;
-  let lastStabilizationMs = null;
-  const renderStartedAt = (typeof performance !== "undefined" && typeof performance.now === "function")
-    ? performance.now()
-    : Date.now();
-  const physicsProfile = getPhysicsProfile(physicsProfileName);
-  const physicsProfileLabel = getPhysicsProfileLabel(physicsProfileName);
-
-  if (_topologyRenderOwner) {
-    _topologyRenderOwner.dispose();
-    _topologyRenderOwner = null;
-  } else if (_visNetwork) {
-    _visNetwork.destroy();
-  }
-  _visNetwork = null;
-  _topologyFilterHandlers = null;
-  _topologyNodeData = null;
-  _topologyRawRows = null;
-  _topologyDatasetCounts = null;
-  _originalNodeStyling = null;
-  container.innerHTML = "";
-
-  // Reset all details lists
-  document.getElementById("summary-list").innerHTML =
-    "<li>Click a node or row to view its properties.</li>";
-  document
-    .querySelectorAll(
-      "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
-    )
-    .forEach((list) => {
-      list.innerHTML = "";
-      list.classList.add("hidden");
-    });
-
-  let adaptorResult;
-  try {
-    adaptorResult = runAdaptor(dataset);
-  } catch (err) {
-    publishViewStatus("topology", `Topology error: ${err.message}`, statusDatasetToken);
-    return;
-  }
-
-  const {
-    nodeData,
-    edgeData,
-  } = adaptorResult;
-
-  if (physicsProfileName === PHYSICS_PROFILE_MESH_RING) {
-    applyExtractedRingStarSeedLayout(nodeData, edgeData);
-  } else if (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT) {
-    applyExtractedMeshLabHybridSeedLayout(nodeData, edgeData);
-  } else if (physicsProfileName === PHYSICS_PROFILE_MESH_TREE_HORIZONTAL) {
-    applyExtractedMeshTreeHorizontalSeedLayout(nodeData, edgeData);
-  } else if (physicsProfileName === PHYSICS_PROFILE_MESH_TREE_VERTICAL) {
-    applyExtractedMeshTreeVerticalSeedLayout(nodeData, edgeData);
-  }
-
-  assignParallelEdgeCurves(edgeData, nodeData);
-
+export function applyProfileEdgeConstraints(nodeData, edgeData, physicsProfileName) {
   const isMeshTreeProfile =
     physicsProfileName === PHYSICS_PROFILE_MESH_TREE_HORIZONTAL ||
     physicsProfileName === PHYSICS_PROFILE_MESH_TREE_VERTICAL;
@@ -469,6 +399,79 @@ export function renderTopologyForDataset(
       applyMinEdgeLength(minBorderRouterLength);
     });
   }
+}
+
+// ── Main renderer ─────────────────────────────────────────────────────────────
+
+export function renderTopologyForDataset(
+  dataset,
+  physicsEnabled,
+  physicsProfileName = "mesh-baseline",
+  statusDatasetToken = dataset,
+) {
+  const container = document.getElementById("topology-view");
+  const nodeFilterEl = document.getElementById("node-filter");
+  const linkFilterEl = document.getElementById("link-filter");
+  const diagnosticFilterEl = document.getElementById("diagnostic-filter");
+  let lastStatusCounts = null;
+  let lastStabilizationMs = null;
+  const renderStartedAt = (typeof performance !== "undefined" && typeof performance.now === "function")
+    ? performance.now()
+    : Date.now();
+  const physicsProfile = getPhysicsProfile(physicsProfileName);
+  const physicsProfileLabel = getPhysicsProfileLabel(physicsProfileName);
+
+  if (_topologyRenderOwner) {
+    _topologyRenderOwner.dispose();
+    _topologyRenderOwner = null;
+  } else if (_visNetwork) {
+    _visNetwork.destroy();
+  }
+  _visNetwork = null;
+  _topologyFilterHandlers = null;
+  _topologyNodeData = null;
+  _topologyRawRows = null;
+  _topologyDatasetCounts = null;
+  _originalNodeStyling = null;
+  container.innerHTML = "";
+
+  // Reset all details lists
+  document.getElementById("summary-list").innerHTML =
+    "<li>Click a node or row to view its properties.</li>";
+  document
+    .querySelectorAll(
+      "#identity-list, #highlights-list, #network-list, #connections-list, #mdns-list, #routes-links-list, #neighbors-list, #children-list, #counters-list, #details-list",
+    )
+    .forEach((list) => {
+      list.innerHTML = "";
+      list.classList.add("hidden");
+    });
+
+  let adaptorResult;
+  try {
+    adaptorResult = runAdaptor(dataset);
+  } catch (err) {
+    publishViewStatus("topology", `Topology error: ${err.message}`, statusDatasetToken);
+    return;
+  }
+
+  const {
+    nodeData,
+    edgeData,
+  } = adaptorResult;
+
+  if (physicsProfileName === PHYSICS_PROFILE_MESH_RING) {
+    applyExtractedRingStarSeedLayout(nodeData, edgeData);
+  } else if (physicsProfileName === PHYSICS_PROFILE_MESH_COMPACT) {
+    applyExtractedMeshLabHybridSeedLayout(nodeData, edgeData);
+  } else if (physicsProfileName === PHYSICS_PROFILE_MESH_TREE_HORIZONTAL) {
+    applyExtractedMeshTreeHorizontalSeedLayout(nodeData, edgeData);
+  } else if (physicsProfileName === PHYSICS_PROFILE_MESH_TREE_VERTICAL) {
+    applyExtractedMeshTreeVerticalSeedLayout(nodeData, edgeData);
+  }
+
+  assignParallelEdgeCurves(edgeData, nodeData);
+  applyProfileEdgeConstraints(nodeData, edgeData, physicsProfileName);
 
   const capabilities = computeTopologyCapabilities(nodeData, edgeData, {
     rolePolicy: dataset.rolePolicy,

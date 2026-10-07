@@ -49,7 +49,7 @@ def test_javascript_policy_metadata_matches_python() -> None:
 
 
 MERGE_JS = REPO_ROOT / "src" / "js" / "tdash-merge.js"
-ADAPTORS_JS = REPO_ROOT / "src" / "js" / "tdash-adaptor-otbr-cli.js"
+ADAPTOR_BASELINE = REPO_ROOT / "tests" / "fixtures" / "adaptor_refactor_baseline.json"
 
 
 def _read_text(path: Path) -> str:
@@ -77,18 +77,10 @@ def test_sort_row_groups_uses_descending_source_priority() -> None:
 
 
 def test_supplementary_details_merge_does_not_clobber_primary_fields() -> None:
-    """Regression guard: supplementary mdns enrichment must not override primary labels."""
-    text = _read_text(ADAPTORS_JS)
+    """Regression guard: supplementary mDNS enrichment must not override primary labels."""
+    snapshot = json.loads(ADAPTOR_BASELINE.read_text(encoding="utf-8"))["otbrCli"]
+    details = dict(snapshot["rawByIdForDetails"]["$map"])["0x1000"]
 
-    # In the supplementary-file merge path, we expect mergeForDisplay(record, existing)
-    # so existing primary values win over supplementary values when both are non-empty.
-    pattern = r"rawByIdForDetails\.set\(nodeId,\s*mergeForDisplay\(record,\s*existing\)\);"
-    assert re.search(pattern, text), (
-        "Supplementary merge must call mergeForDisplay(record, existing) so "
-        "supplementary records only enrich missing values"
-    )
-
-    forbidden = r"rawByIdForDetails\.set\(nodeId,\s*mergeForDisplay\(existing,\s*record\)\);"
-    assert not re.search(forbidden, text), (
-        "Found old clobbering merge order mergeForDisplay(existing, record)"
-    )
+    assert details["deviceLabel"] == "Primary router label"
+    assert details["modelName"] == "Pinned model"
+    assert details["vendorName"] == "Pinned vendor"

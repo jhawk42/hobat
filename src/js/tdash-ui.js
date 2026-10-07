@@ -2382,9 +2382,13 @@ function renderNetworkInsights() {
     renderHealthRefreshStatus();
     return;
   }
+  renderLegacyNetworkInsights(contentEl, currentDataset);
+}
+
+function renderLegacyNetworkInsights(contentEl, dataset) {
   contentEl.replaceChildren();
 
-  if (!currentDataset) {
+  if (!dataset) {
     appendNetworkInsightElement(
       contentEl,
       "p",
@@ -2394,7 +2398,7 @@ function renderNetworkInsights() {
     return;
   }
 
-  if (currentDataset.entry.healthEligible === false) {
+  if (dataset.entry.healthEligible === false) {
     appendNetworkInsightElement(
       contentEl,
       "p",
@@ -2404,7 +2408,7 @@ function renderNetworkInsights() {
     return;
   }
 
-  const model = aggregateNetworkDiagnosticsForRows(currentDataset.rows);
+  const model = aggregateNetworkDiagnosticsForRows(dataset.rows);
   if (model.eligibleDeviceCount === 0) {
     appendNetworkInsightElement(
       contentEl,
@@ -4238,29 +4242,47 @@ function selectComparison(comparisonId, offset = 0) {
   return healthComparisonDetailController.select(comparisonId, offset);
 }
 
+function resetHealthInsightsForDatasetChange() {
+  findingRosterActionEligibility.clear();
+  findingRosterActionPending.clear();
+  clearRosterMutationRefreshStatus();
+  healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;
+  healthInsightsState.assessment = null;
+  healthInsightsViewState.assessmentId = null;
+  resetHealthFindingState();
+  resetHealthComparisonState();
+  healthInsightsState.capabilities = null;
+  healthNavigationContext = null;
+  document.getElementById("btn-health-return")?.setAttribute("hidden", "");
+  findingDeviceReturnContext = null;
+  resetHealthRosterViewState();
+  healthInsightsState.rosterDetail = null;
+  contextDetailsState.finding = { assessmentId: null, groupId: null, findingId: null };
+  setContextDetailsMode("device");
+}
+
+function resetHealthInsightsForNetworkChange() {
+  clearRosterMutationRefreshStatus();
+  healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;
+  resetHealthFindingState();
+  resetHealthComparisonState();
+  healthInsightsState.capabilities = null;
+  healthNavigationContext = null;
+  document.getElementById("btn-health-return")?.setAttribute("hidden", "");
+  findingDeviceReturnContext = null;
+  resetHealthRosterViewState();
+  healthInsightsState.rosterDetail = null;
+  contextDetailsState.finding = { assessmentId: null, groupId: null, findingId: null };
+  setContextDetailsMode("device");
+  contextDetailsController.setCollapsed(true);
+}
+
 async function refreshHealthAssessment() {
   const entry = currentDataset?.entry;
   const previousAssessmentId = healthInsightsState.assessment?.assessmentId;
   const previousNetworkId = healthInsightsState.assessment?.networkId;
   const datasetChanged = healthInsightsState.datasetId !== entry?.value;
-  if (datasetChanged) {
-    findingRosterActionEligibility.clear();
-    findingRosterActionPending.clear();
-    clearRosterMutationRefreshStatus();
-    healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;
-    healthInsightsState.assessment = null;
-    healthInsightsViewState.assessmentId = null;
-    resetHealthFindingState();
-    resetHealthComparisonState();
-    healthInsightsState.capabilities = null;
-    healthNavigationContext = null;
-    document.getElementById("btn-health-return")?.setAttribute("hidden", "");
-    findingDeviceReturnContext = null;
-    resetHealthRosterViewState();
-    healthInsightsState.rosterDetail = null;
-    contextDetailsState.finding = { assessmentId: null, groupId: null, findingId: null };
-    setContextDetailsMode("device");
-  }
+  if (datasetChanged) resetHealthInsightsForDatasetChange();
   healthInsightsState.datasetId = entry?.value ?? null;
   healthInsightsState.error = "";
   healthInsightsState.supportError = "";
@@ -4289,21 +4311,7 @@ async function refreshHealthAssessment() {
     const assessment = await fetchHealthAssessment(entry.value);
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
     const networkChanged = Boolean(previousNetworkId && previousNetworkId !== assessment.networkId);
-    if (networkChanged) {
-      clearRosterMutationRefreshStatus();
-      healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;
-      resetHealthFindingState();
-      resetHealthComparisonState();
-      healthInsightsState.capabilities = null;
-      healthNavigationContext = null;
-      document.getElementById("btn-health-return")?.setAttribute("hidden", "");
-      findingDeviceReturnContext = null;
-      resetHealthRosterViewState();
-      healthInsightsState.rosterDetail = null;
-      contextDetailsState.finding = { assessmentId: null, groupId: null, findingId: null };
-      setContextDetailsMode("device");
-      contextDetailsController.setCollapsed(true);
-    }
+    if (networkChanged) resetHealthInsightsForNetworkChange();
     healthInsightsState.assessment = assessment;
     if (previousAssessmentId !== assessment.assessmentId) {
       findingRosterActionEligibility.clear();
@@ -5024,6 +5032,77 @@ function resetFetchTimeTakenProgressToDefault() {
   progressEl.removeAttribute("value");
 }
 
+function handleDatasetFetchCancellation(selectedValue, fetchStartedAt) {
+  recordWorkspaceActivity("dataset-sync", "Dataset sync cancelled", {
+    dataset: selectedValue,
+  });
+  resetFetchTimeTakenProgressToDefault();
+
+  const statusEl = document.getElementById("fetch-status-line-content");
+  const hasPartialResult = currentDataset &&
+    currentDataset.entry?.value === selectedValue &&
+    currentDataset.isPartial === true;
+
+  if (hasPartialResult) {
+    // Partial-with-warning committed state: render what loaded and surface the cancellation.
+    const loadedCount = currentDataset.loadedFiles?.length ?? 0;
+    const totalCount = currentDataset.entry?.files?.length ?? 0;
+    _pinFetchStatusLineMessage(
+      `⚠ Cancelled — partial result: ${loadedCount} of ${totalCount} files loaded`,
+    );
+    renderCurrentView();
+    updateFetchStatusBar(fetchStartedAt);
+  } else {
+    if (statusEl) statusEl.textContent = `Fetch cancelled for "${selectedValue}".`;
+    // No partial data available: keep current view or clear bars.
+    if (currentDataset) {
+      activateViewStatus(currentView, currentDataset);
+      renderCurrentView();
+      updateFetchStatusBar(fetchStartedAt);
+    } else {
+      _setStatusSpans(_FETCH_STATUS_IDS, "—");
+      _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+    }
+  }
+}
+
+function handleDatasetFetchError(err, selectedValue, selectedDataset, refreshIntent, fetchStartedAt) {
+  restoreLastKnownGoodDataset();
+  recordWorkspaceActivity("dataset-sync", "Dataset sync failed", {
+    dataset: selectedValue,
+    error: err?.message || String(err),
+  });
+  console.error("loadDataset threw:", err);
+  const attempted = datasetIdentityLabel({ entry: selectedDataset ?? { value: selectedValue, label: selectedValue } });
+  const displayed = currentDataset
+    ? `Still displaying ${datasetIdentityLabel(currentDataset)}.`
+    : "No dataset is available to display.";
+  const sameDataset = currentDataset?.entry?.value === selectedValue;
+  fetchFailureState = currentDataset && sameDataset && refreshIntent
+    ? `Refresh failed for ${datasetIdentityLabel(currentDataset)}; the prior snapshot remains displayed and freshness is unconfirmed.`
+    : `Sync failed for ${attempted}. ${displayed}`;
+  if (currentDataset) {
+    renderCurrentView();
+    updateFetchStatusBar(fetchStartedAt);
+  } else {
+    clearRenderedDatasetViews({
+      ...(selectedDataset ?? {}),
+      entry: selectedDataset ?? { value: selectedValue, label: selectedValue },
+      rows: [],
+      rawFiles: [],
+      loadedFiles: [],
+      deviceProjections: new Map(),
+      auxiliaryFiles: {},
+    });
+    _setStatusSpans(_FETCH_STATUS_IDS, "—");
+    _setStatusSpans(_DEVICE_STATUS_IDS, "—");
+  }
+  const statusEl = document.getElementById("fetch-status-line-content");
+  if (statusEl) statusEl.textContent = fetchFailureState;
+  _pinFetchStatusLineMessage(fetchFailureState, Number.POSITIVE_INFINITY);
+  supersedeViewStatus(`Error loading "${selectedValue}": ${err?.message || String(err)}`);
+}
+
 // Fetch dataset function
 async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}) {
   if (_fetchInProgress) return;
@@ -5094,72 +5173,9 @@ async function doFetchDataset({ userInitiated = false, forceFresh = false } = {}
   } catch (err) {
     if (_incrementalRenderTimer !== null) { clearTimeout(_incrementalRenderTimer); _incrementalRenderTimer = null; }
     if (isFetchCancelledError(err)) {
-      recordWorkspaceActivity("dataset-sync", "Dataset sync cancelled", {
-        dataset: selectedValue,
-      });
-      resetFetchTimeTakenProgressToDefault();
-
-      const statusEl = document.getElementById("fetch-status-line-content");
-      const hasPartialResult = currentDataset &&
-        currentDataset.entry?.value === selectedValue &&
-        currentDataset.isPartial === true;
-
-      if (hasPartialResult) {
-        // Partial-with-warning committed state: render what loaded and surface the cancellation.
-        const loadedCount = currentDataset.loadedFiles?.length ?? 0;
-        const totalCount = currentDataset.entry?.files?.length ?? 0;
-        _pinFetchStatusLineMessage(
-          `⚠ Cancelled — partial result: ${loadedCount} of ${totalCount} files loaded`,
-        );
-        renderCurrentView();
-        updateFetchStatusBar(_lastFetchStartedAt);
-      } else {
-        if (statusEl) statusEl.textContent = `Fetch cancelled for "${selectedValue}".`;
-        // No partial data available: keep current view or clear bars.
-        if (currentDataset) {
-          activateViewStatus(currentView, currentDataset);
-          renderCurrentView();
-          updateFetchStatusBar(_lastFetchStartedAt);
-        } else {
-          _setStatusSpans(_FETCH_STATUS_IDS, "—");
-          _setStatusSpans(_DEVICE_STATUS_IDS, "—");
-        }
-      }
+      handleDatasetFetchCancellation(selectedValue, _lastFetchStartedAt);
     } else {
-      restoreLastKnownGoodDataset();
-      recordWorkspaceActivity("dataset-sync", "Dataset sync failed", {
-        dataset: selectedValue,
-        error: err?.message || String(err),
-      });
-      console.error("loadDataset threw:", err);
-      const attempted = datasetIdentityLabel({ entry: selectedDataset ?? { value: selectedValue, label: selectedValue } });
-      const displayed = currentDataset
-        ? `Still displaying ${datasetIdentityLabel(currentDataset)}.`
-        : "No dataset is available to display.";
-      const sameDataset = currentDataset?.entry?.value === selectedValue;
-      fetchFailureState = currentDataset && sameDataset && refreshIntent
-        ? `Refresh failed for ${datasetIdentityLabel(currentDataset)}; the prior snapshot remains displayed and freshness is unconfirmed.`
-        : `Sync failed for ${attempted}. ${displayed}`;
-      if (currentDataset) {
-        renderCurrentView();
-        updateFetchStatusBar(_lastFetchStartedAt);
-      } else {
-        clearRenderedDatasetViews({
-          ...(selectedDataset ?? {}),
-          entry: selectedDataset ?? { value: selectedValue, label: selectedValue },
-          rows: [],
-          rawFiles: [],
-          loadedFiles: [],
-          deviceProjections: new Map(),
-          auxiliaryFiles: {},
-        });
-        _setStatusSpans(_FETCH_STATUS_IDS, "—");
-        _setStatusSpans(_DEVICE_STATUS_IDS, "—");
-      }
-      const statusEl = document.getElementById("fetch-status-line-content");
-      if (statusEl) statusEl.textContent = fetchFailureState;
-      _pinFetchStatusLineMessage(fetchFailureState, Number.POSITIVE_INFINITY);
-      supersedeViewStatus(`Error loading "${selectedValue}": ${err?.message || String(err)}`);
+      handleDatasetFetchError(err, selectedValue, selectedDataset, refreshIntent, _lastFetchStartedAt);
     }
     return;
   } finally {

@@ -290,177 +290,157 @@ export function computeTopologyCapabilities(nodeData, edgeData, options = {}) {
   };
 }
 
+function _createTableCapabilitiesAccumulator() {
+  return {
+    hasFtdNodes: false,
+    hasMtdNodes: false,
+    hasReedNodes: false,
+    hasRouters: false,
+    hasBorderRouters: false,
+    hasRoutersWithChildren: false,
+    hasRoutersWithoutChildren: false,
+    edgeCategories: new Set(),
+    hasFieldMacTotalErrorsPct: false,
+    hasFieldMacDiscardPct: false,
+    hasFieldPartitionChanges: false,
+    hasFieldParentChanges: false,
+    hasNeighborFrameErrRate: false,
+    hasNeighborMsgErrRate: false,
+    hasNeighborRss: false,
+    hasLinkQualityDistribution: false,
+    hasChildLinkQuality: false,
+    hasChildFrameErrRate: false,
+    hasChildMsgErrRate: false,
+    hasChildRss: false,
+    hasChildRssMargin: false,
+    hasChildQueuedMsgs: false,
+    hasFieldMacTotalErrorsRatio: false,
+    hasFieldMacTotalDiscardsRatio: false,
+    hasFieldBetterPartitionAttach: false,
+    hasFieldTotalParentPartitionChanges: false,
+    hasFieldRouterPct: false,
+    hasFieldDetachedDisabledPct: false,
+  };
+}
+
+function _accumulateTableCapabilitiesForRow(capabilities, row) {
+  const md = toText(getColumnValue(row, "mode.device")).toUpperCase();
+  if (md === "FTD") capabilities.hasFtdNodes = true;
+  if (md === "MTD") capabilities.hasMtdNodes = true;
+
+  const rloc16Text = toText(getColumnValue(row, "rloc16")).toLowerCase();
+  // rloc16 starts with 0x and ends with 00 and has a length of 6
+  const isRouter = rloc16Text.startsWith("0x") && rloc16Text.endsWith("00") && rloc16Text.length === 6;
+  if (isRouter) capabilities.hasRouters = true;
+
+  const isBorderRouter = isExplicitTrue(getColumnValue(row, "isBorderRouter"));
+  if (isBorderRouter) capabilities.hasBorderRouters = true;
+  if (isReedDevice(md, getColumnValue(row, "role"), isRouter, isBorderRouter))
+    capabilities.hasReedNodes = true;
+
+  const totalChildren = toFiniteNumber(getColumnValue(row, "total_children"));
+  const childrenValue = getColumnValue(row, "children");
+  const childrenCount = Array.isArray(childrenValue)
+    ? childrenValue.length
+    : undefined;
+  const hasChildren =
+    (Number.isFinite(totalChildren) && totalChildren > 0) ||
+    (Number.isFinite(childrenCount) && childrenCount > 0);
+
+  if (isRouter && hasChildren) capabilities.hasRoutersWithChildren = true;
+  if (isRouter && !hasChildren) capabilities.hasRoutersWithoutChildren = true;
+
+  const macInerrors = getColumnValue(row, "mac_counters.ifinerrors_pct");
+  const macOuterrors = getColumnValue(row, "mac_counters.ifouterrors_pct");
+  if (
+    Number.isFinite(toFiniteNumber(macInerrors)) ||
+    Number.isFinite(toFiniteNumber(macOuterrors))
+  )
+    capabilities.hasFieldMacTotalErrorsPct = true;
+
+  const macDiscard = getColumnValue(row, "mac_counters.ifindiscards_pct");
+  if (Number.isFinite(toFiniteNumber(macDiscard)))
+    capabilities.hasFieldMacDiscardPct = true;
+
+  const partChanges = getColumnValue(row, "mleCounters.partIdChangesCount")
+    ?? getColumnValue(row, "mle_counters.partitionidchanges");
+  if (Number.isFinite(toFiniteNumber(partChanges)))
+    capabilities.hasFieldPartitionChanges = true;
+
+  const parentChanges = getColumnValue(row, "mleCounters.newParentCount")
+    ?? getColumnValue(row, "mle_counters.parentchanges");
+  if (Number.isFinite(toFiniteNumber(parentChanges)))
+    capabilities.hasFieldParentChanges = true;
+
+  const neighborRows = Array.isArray(
+    getColumnValue(row, "routerNeighbors"),
+  )
+    ? getColumnValue(row, "routerNeighbors")
+    : [];
+  for (const neighbor of neighborRows) {
+    if (Number.isFinite(toFiniteNumber(neighbor?.frameErrorRate)))
+      capabilities.hasNeighborFrameErrRate = true;
+    if (Number.isFinite(toFiniteNumber(neighbor?.messageErrorRate)))
+      capabilities.hasNeighborMsgErrRate = true;
+    if (Number.isFinite(toFiniteNumber(neighbor?.averageRssi)))
+      capabilities.hasNeighborRss = true;
+  }
+
+  if (
+    Number.isFinite(toFiniteNumber(getColumnValue(row, "links3"))) &&
+    Number.isFinite(toFiniteNumber(getColumnValue(row, "totalLinks")))
+  )
+    capabilities.hasLinkQualityDistribution = true;
+
+  const childrenForLQ = Array.isArray(getColumnValue(row, "children"))
+    ? getColumnValue(row, "children")
+    : [];
+  for (const child of childrenForLQ) {
+    const lqRaw = child?.lq !== undefined ? child.lq : child?.linkQuality;
+    if (Number.isFinite(Number.parseInt(lqRaw, 10)))
+      capabilities.hasChildLinkQuality = true;
+  }
+
+  const childTableRows = Array.isArray(getColumnValue(row, "childTable"))
+    ? getColumnValue(row, "childTable")
+    : [];
+  for (const child of childTableRows) {
+    if (Number.isFinite(toFiniteNumber(child?.frameErrorRate)))
+      capabilities.hasChildFrameErrRate = true;
+    if (Number.isFinite(toFiniteNumber(child?.messageErrorRate)))
+      capabilities.hasChildMsgErrRate = true;
+    if (Number.isFinite(toFiniteNumber(child?.averageRssi)))
+      capabilities.hasChildRss = true;
+    if (Number.isFinite(toFiniteNumber(child?.linkMargin)))
+      capabilities.hasChildRssMargin = true;
+    const qMsg = toFiniteNumber(child?.queuedMessageCount);
+    if (Number.isFinite(qMsg) && qMsg > 0)
+      capabilities.hasChildQueuedMsgs = true;
+  }
+
+  if (Number.isFinite(toFiniteNumber(getColumnValue(row, "macCounters.ifTotalErrorsTotalPktsRatio"))))
+    capabilities.hasFieldMacTotalErrorsRatio = true;
+  if (Number.isFinite(toFiniteNumber(getColumnValue(row, "macCounters.ifTotalDiscardsTotalPktsRatio"))))
+    capabilities.hasFieldMacTotalDiscardsRatio = true;
+  if (Number.isFinite(toFiniteNumber(getColumnValue(row, "mleCounters.betterPartIdAttachAttemptsCount"))))
+    capabilities.hasFieldBetterPartitionAttach = true;
+  if (Number.isFinite(toFiniteNumber(getColumnValue(row, "mleCounters.totalParentPartitionChangesCount"))))
+    capabilities.hasFieldTotalParentPartitionChanges = true;
+  if (Number.isFinite(toFiniteNumber(getColumnValue(row, "timeStatistics.routerPct"))))
+    capabilities.hasFieldRouterPct = true;
+  if (Number.isFinite(toFiniteNumber(getColumnValue(row, "timeStatistics.detachedDisabledPct"))))
+    capabilities.hasFieldDetachedDisabledPct = true;
+}
+
 // Called at the top of renderTableForDataset.
 // Scans normalised row objects (including router_neighbor_table sub-arrays).
 // edgeCategories is always an empty Set (table view has no topology edges).
 export function scanTableCapabilities(rows) {
-  let hasFtdNodes = false;
-  let hasMtdNodes = false;
-  let hasReedNodes = false;
-  let hasRouters = false;
-  let hasBorderRouters = false;
-  let hasRoutersWithChildren = false;
-  let hasRoutersWithoutChildren = false;
-  let hasFieldMacTotalErrorsPct = false;
-  let hasFieldMacDiscardPct = false;
-  let hasFieldPartitionChanges = false;
-  let hasFieldParentChanges = false;
-  let hasNeighborFrameErrRate = false;
-  let hasNeighborMsgErrRate = false;
-  let hasNeighborRss = false;
-  let hasLinkQualityDistribution = false;
-  let hasChildLinkQuality = false;
-  let hasChildFrameErrRate = false;
-  let hasChildMsgErrRate = false;
-  let hasChildRss = false;
-  let hasChildRssMargin = false;
-  let hasChildQueuedMsgs = false;
-  let hasFieldMacTotalErrorsRatio = false;
-  let hasFieldMacTotalDiscardsRatio = false;
-  let hasFieldBetterPartitionAttach = false;
-  let hasFieldTotalParentPartitionChanges = false;
-  let hasFieldRouterPct = false;
-  let hasFieldDetachedDisabledPct = false;
-
+  const capabilities = _createTableCapabilitiesAccumulator();
   for (const row of rows) {
-    const md = toText(getColumnValue(row, "mode.device")).toUpperCase();
-    if (md === "FTD") hasFtdNodes = true;
-    if (md === "MTD") hasMtdNodes = true;
-
-    const rloc16Text = toText(getColumnValue(row, "rloc16")).toLowerCase();
-    // rloc16 starts with 0x and ends with 00 and has a length of 6
-    const isRouter = rloc16Text.startsWith("0x") && rloc16Text.endsWith("00") && rloc16Text.length === 6;
-    if (isRouter) hasRouters = true;
-
-    const isBorderRouter = isExplicitTrue(getColumnValue(row, "isBorderRouter"));
-    if (isBorderRouter) hasBorderRouters = true;
-    if (isReedDevice(md, getColumnValue(row, "role"), isRouter, isBorderRouter))
-      hasReedNodes = true;
-
-    const totalChildren = toFiniteNumber(getColumnValue(row, "total_children"));
-    const childrenValue = getColumnValue(row, "children");
-    const childrenCount = Array.isArray(childrenValue)
-      ? childrenValue.length
-      : undefined;
-    const hasChildren =
-      (Number.isFinite(totalChildren) && totalChildren > 0) ||
-      (Number.isFinite(childrenCount) && childrenCount > 0);
-   
-    if (isRouter && hasChildren) hasRoutersWithChildren = true;
-    if (isRouter && !hasChildren) hasRoutersWithoutChildren = true;
-
-    const macInerrors = getColumnValue(row, "mac_counters.ifinerrors_pct");
-    const macOuterrors = getColumnValue(row, "mac_counters.ifouterrors_pct");
-    if (
-      Number.isFinite(toFiniteNumber(macInerrors)) ||
-      Number.isFinite(toFiniteNumber(macOuterrors))
-    )
-      hasFieldMacTotalErrorsPct = true;
-
-    const macDiscard = getColumnValue(row, "mac_counters.ifindiscards_pct");
-    if (Number.isFinite(toFiniteNumber(macDiscard)))
-      hasFieldMacDiscardPct = true;
-
-    const partChanges = getColumnValue(row, "mleCounters.partIdChangesCount")
-      ?? getColumnValue(row, "mle_counters.partitionidchanges");
-    if (Number.isFinite(toFiniteNumber(partChanges)))
-      hasFieldPartitionChanges = true;
-
-    const parentChanges = getColumnValue(row, "mleCounters.newParentCount")
-      ?? getColumnValue(row, "mle_counters.parentchanges");
-    if (Number.isFinite(toFiniteNumber(parentChanges)))
-      hasFieldParentChanges = true;
-
-    const neighborRows = Array.isArray(
-      getColumnValue(row, "routerNeighbors"),
-    )
-      ? getColumnValue(row, "routerNeighbors")
-      : [];
-    for (const neighbor of neighborRows) {
-      if (Number.isFinite(toFiniteNumber(neighbor?.frameErrorRate)))
-        hasNeighborFrameErrRate = true;
-      if (Number.isFinite(toFiniteNumber(neighbor?.messageErrorRate)))
-        hasNeighborMsgErrRate = true;
-      if (Number.isFinite(toFiniteNumber(neighbor?.averageRssi)))
-        hasNeighborRss = true;
-    }
-
-    if (
-      Number.isFinite(toFiniteNumber(getColumnValue(row, "links3"))) &&
-      Number.isFinite(toFiniteNumber(getColumnValue(row, "totalLinks")))
-    )
-      hasLinkQualityDistribution = true;
-
-    const childrenForLQ = Array.isArray(getColumnValue(row, "children"))
-      ? getColumnValue(row, "children")
-      : [];
-    for (const child of childrenForLQ) {
-      const lqRaw = child?.lq !== undefined ? child.lq : child?.linkQuality;
-      if (Number.isFinite(Number.parseInt(lqRaw, 10)))
-        hasChildLinkQuality = true;
-    }
-
-    const childTableRows = Array.isArray(getColumnValue(row, "childTable"))
-      ? getColumnValue(row, "childTable")
-      : [];
-    for (const child of childTableRows) {
-      if (Number.isFinite(toFiniteNumber(child?.frameErrorRate)))
-        hasChildFrameErrRate = true;
-      if (Number.isFinite(toFiniteNumber(child?.messageErrorRate)))
-        hasChildMsgErrRate = true;
-      if (Number.isFinite(toFiniteNumber(child?.averageRssi)))
-        hasChildRss = true;
-      if (Number.isFinite(toFiniteNumber(child?.linkMargin)))
-        hasChildRssMargin = true;
-      const qMsg = toFiniteNumber(child?.queuedMessageCount);
-      if (Number.isFinite(qMsg) && qMsg > 0)
-        hasChildQueuedMsgs = true;
-    }
-
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "macCounters.ifTotalErrorsTotalPktsRatio"))))
-      hasFieldMacTotalErrorsRatio = true;
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "macCounters.ifTotalDiscardsTotalPktsRatio"))))
-      hasFieldMacTotalDiscardsRatio = true;
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "mleCounters.betterPartIdAttachAttemptsCount"))))
-      hasFieldBetterPartitionAttach = true;
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "mleCounters.totalParentPartitionChangesCount"))))
-      hasFieldTotalParentPartitionChanges = true;
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "timeStatistics.routerPct"))))
-      hasFieldRouterPct = true;
-    if (Number.isFinite(toFiniteNumber(getColumnValue(row, "timeStatistics.detachedDisabledPct"))))
-      hasFieldDetachedDisabledPct = true;
+    _accumulateTableCapabilitiesForRow(capabilities, row);
   }
-
-  return {
-    hasFtdNodes,
-    hasMtdNodes,
-    hasReedNodes,
-    hasRouters,
-    hasBorderRouters,
-    hasRoutersWithChildren,
-    hasRoutersWithoutChildren,
-    edgeCategories: new Set(),
-    hasFieldMacTotalErrorsPct,
-    hasFieldMacDiscardPct,
-    hasFieldPartitionChanges,
-    hasFieldParentChanges,
-    hasNeighborFrameErrRate,
-    hasNeighborMsgErrRate,
-    hasNeighborRss,
-    hasLinkQualityDistribution,
-    hasChildLinkQuality,
-    hasChildFrameErrRate,
-    hasChildMsgErrRate,
-    hasChildRss,
-    hasChildRssMargin,
-    hasChildQueuedMsgs,
-    hasFieldMacTotalErrorsRatio,
-    hasFieldMacTotalDiscardsRatio,
-    hasFieldBetterPartitionAttach,
-    hasFieldTotalParentPartitionChanges,
-    hasFieldRouterPct,
-    hasFieldDetachedDisabledPct,
-  };
+  return capabilities;
 }
 
 export function computeTableCapabilities(rows, projections = buildDeviceProjections(rows)) {

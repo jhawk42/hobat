@@ -1,0 +1,35 @@
+{
+  "files": {
+    "td-ha-matter-ws-topology.json": {
+      "topology": []
+    }
+  },
+  "entry": {
+    "source": "ha-matter-ws",
+    "mergeStrategy": "none",
+    "rowExtractor": "ha-matter-ws-topology"
+  },
+  "rolePolicy": true,
+  "adaptorRows": [
+    {
+      "topologyId": "role:border-router",
+      "extAddress": "aa00000000000001",
+      "rloc16": "0x1000",
+      "role": "Router",
+      "isBorderRouter": true,
+      "isRouter": true,
+      "isLeader": false,
+      "isReed": false
+    },
+    {
+      "topologyId": "role:reed",
+      "extAddress": "aa00000000000002",
+      "rloc16": "0x1001",
+      "role": "Reed",
+      "isBorderRouter": false,
+      "isRouter": false,
+      "isLeader": false,
+      "isReed": true
+    }
+  ]
+}

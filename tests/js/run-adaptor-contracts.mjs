@@ -37,6 +37,23 @@ if (process.argv.includes("--snapshot") && !process.argv.includes("--write-basel
   process.exit(0);
 }
 
+if (process.argv.includes("--pinned-snapshot")) {
+  const {
+    createPinnedAdaptorSnapshot,
+    stringifyPinnedAdaptorSnapshot,
+    writePinnedAdaptorSnapshot,
+  } = await import("./run-adaptor-output-snapshot.mjs");
+  if (process.argv.includes("--write-baseline")) {
+    writePinnedAdaptorSnapshot();
+    process.exit(0);
+  }
+  await new Promise((resolve) => process.stdout.write(
+    stringifyPinnedAdaptorSnapshot(createPinnedAdaptorSnapshot()),
+    resolve,
+  ));
+  process.exit(0);
+}
+
 function run(adaptor, files, rawFiles, rows = []) {
   return runAdaptor({ entry: { adaptor, files }, rawFiles, rows });
 }

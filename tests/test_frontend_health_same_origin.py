@@ -807,6 +807,7 @@ def test_comparison_presets_stay_latest_anchored_and_disclosures_keep_focus() ->
     script = r"""
       import {renderHealthComparison} from "./src/js/tdash-health.js";
 
+      const focusCalls = [];
       class Element {
         constructor(tagName) {
           this.tagName = tagName;
@@ -827,7 +828,10 @@ def test_comparison_presets_stay_latest_anchored_and_disclosures_keep_focus() ->
         setAttribute(name, value) { this[name] = value; }
         getAttribute(name) { return this[name] ?? null; }
         addEventListener(name, listener) { this.listeners[name] = listener; }
-        focus() { globalThis.document.activeElement = this; }
+        focus(options) {
+          focusCalls.push([this.getAttribute("aria-controls"), options]);
+          globalThis.document.activeElement = this;
+        }
         querySelectorAll(selector) {
           const matches = (element) => selector === "button[aria-controls]"
             ? element.tagName === "button" && element.getAttribute("aria-controls")
@@ -929,6 +933,7 @@ def test_comparison_presets_stay_latest_anchored_and_disclosures_keep_focus() ->
           document.activeElement === expandedDetailsToggle,
           expandedDetails.children.some((element) => element.className === "health-comparison-origin")],
         selectedEndpoints,
+        focusCalls,
       }));
     """
     completed = subprocess.run(
@@ -947,7 +952,19 @@ def test_comparison_presets_stay_latest_anchored_and_disclosures_keep_focus() ->
         "status": "Unknown",
         "detailsExpanded": ["true", False, True, True],
         "selectedEndpoints": [],
+        "focusCalls": [
+            ["health-comparison-custom-controls", {"preventScroll": True}],
+            ["health-comparison-details", {"preventScroll": True}],
+        ],
     }
+
+
+def test_health_detail_sections_preserve_dom_and_action_contracts() -> None:
+    completed = subprocess.run(
+        ["node", "tests/js/run-health-detail-contracts.mjs"],
+        cwd=ROOT, check=True, capture_output=True, text=True,
+    )
+    assert completed.stdout.strip() == "Health detail contracts passed"
 
 
 def test_off_page_shortcut_candidate_remains_available_while_before_page_loads() -> None:

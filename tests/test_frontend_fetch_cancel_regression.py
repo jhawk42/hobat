@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -91,7 +92,9 @@ def test_shift_sync_uses_the_direct_refresh_request_intent() -> None:
     assert "forceFresh: event.shiftKey" in ui_text
     assert "forceFresh," in ui_text
     assert "const forceFresh = options.forceFresh === true;" in dataset_text
-    assert "if (forceFresh || _forceFresh)" in dataset_text
+    assert "_datasetRequestHeaders(f, forceFresh)" in dataset_text
+    assert "_datasetRequestHeaders(filename, forceFresh)" in dataset_text
+    assert "forceFresh || _forceFresh" in dataset_text
 
 
 
@@ -102,16 +105,42 @@ def test_ui_cancel_path_keeps_current_view_on_cancellation() -> None:
     assert "if (isFetchCancelledError(err))" in text
     assert "statusEl.textContent = `Fetch cancelled for \"${selectedValue}\".`;" in text
 
-    cancelled_branch_start = text.find("if (isFetchCancelledError(err))")
-    cancelled_branch_end = text.find("return;", cancelled_branch_start)
-    assert cancelled_branch_start != -1 and cancelled_branch_end != -1
+    cancellation = text.split("function handleDatasetFetchCancellation(", 1)[1].split(
+        "function handleDatasetFetchError(", 1
+    )[0]
+    assert "resetFetchTimeTakenProgressToDefault();" in cancellation
+    assert "if (currentDataset) {" in cancellation
+    assert "renderCurrentView();" in cancellation
+    assert "updateFetchStatusBar(fetchStartedAt);" in cancellation
+    assert "_setStatusSpans(_FETCH_STATUS_IDS, \"—\");" in cancellation
+    assert "currentDataset.isPartial === true" in cancellation
+    assert "activateViewStatus(currentView, currentDataset);" in cancellation
 
-    cancelled_branch = text[cancelled_branch_start:cancelled_branch_end]
-    assert "resetFetchTimeTakenProgressToDefault();" in cancelled_branch
-    assert "if (currentDataset) {" in cancelled_branch
-    assert "renderCurrentView();" in cancelled_branch
-    assert "updateFetchStatusBar(_lastFetchStartedAt);" in cancelled_branch
-    assert "_setStatusSpans(_FETCH_STATUS_IDS, \"—\");" in cancelled_branch
+
+def test_fetch_attempt_owns_cleanup_and_distinct_no_result_transition() -> None:
+    text = _read_text(UI_JS)
+    owner = text.split("async function doFetchDataset(", 1)[1]
+    catch_transition = owner.split("} catch (err) {", 1)[1].split("} finally {", 1)[0]
+    cleanup = owner.split("} finally {", 1)[1].split(
+        "if (!loadedDataset || currentDataset !== loadedDataset)", 1
+    )[0]
+
+    assert "clearTimeout(_incrementalRenderTimer)" in catch_transition
+    assert "handleDatasetFetchCancellation(selectedValue, _lastFetchStartedAt)" in catch_transition
+    assert "handleDatasetFetchError(err, selectedValue, selectedDataset, refreshIntent, _lastFetchStartedAt)" in catch_transition
+    assert "await " not in catch_transition
+    assert "return;" in catch_transition
+    assert "endFetchSession(sessionId)" in cleanup
+    assert "_fetchInProgress = false" in cleanup
+    assert "setFetchButtonsState(false)" in cleanup
+    no_result = owner.split(
+        "if (!loadedDataset || currentDataset !== loadedDataset)", 1
+    )[1].split("// Cancel any pending incremental render", 1)[0]
+    assert "failureDetails" in no_result
+    assert "Dataset sync produced no usable data" in no_result
+    assert "handleDatasetFetchError(" not in no_result
+    for helper in ("handleDatasetFetchCancellation", "handleDatasetFetchError"):
+        assert not re.search(rf"(?:async|export)\s+function\s+{helper}\b", text)
 
 
 def test_ui_cancel_path_resets_progress_to_default() -> None:

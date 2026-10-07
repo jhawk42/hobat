@@ -91,6 +91,232 @@ function applyMergedRowLabels(nodeMap, mergedRows) {
 
 // ── Adaptor 1: meshdiag + networkdiag + routerNeighbors + restApi ─────────────
 
+function registerMeshdiagRow(node, index, { meshdiagById, meshIdToUnifiedId, upsertNode }) {
+  const uid = chooseNodeId(node, 'meshdiag-node', index + 1);
+  meshdiagById.set(uid, node);
+  const meshRawId = toText(node.id);
+  if (meshRawId) meshIdToUnifiedId.set(meshRawId, uid);
+  upsertNode(uid, node, {
+    source: 'meshdiag', shape: NODE_SHAPES.router,
+    color: mergeBorderRouterEvidence(node) === true ? NODE_COLORS.borderRouter : NODE_COLORS.router
+  });
+}
+
+function registerDiagnosticRow(node, index, prefix, byId, upsertNode) {
+  const uid = chooseNodeId(node, prefix, index + 1);
+  byId.set(uid, node);
+  upsertNode(uid, node, { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.router });
+}
+
+function addOtbrRouteDataEdges(node, fromId, source, { ensureNode, nodeMap, edgeMap, edgeData }) {
+  const routeData = Array.isArray(node.route?.routeData) ? node.route.routeData : [];
+  const routeCategories = getOtbrRouteCategories(node);
+  if (routeCategories.length === 0) return routeData.length > 0;
+
+  routeData.forEach((route) => {
+    const toRloc16 = toText(route.rloc16);
+    if (!toRloc16) return;
+    const toId = ensureNode(
+      toRloc16,
+      { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
+      { source, shape: NODE_SHAPES.router, color: NODE_COLORS.router }
+    );
+    const lqIn = toFiniteNumber(route.linkQualityIn) || 0;
+    const lqOut = toFiniteNumber(route.linkQualityOut) || 0;
+    const lqStyle = lqStyleFromAvgLqi(Math.max(lqIn, lqOut), 3);
+    const toNodeEnriched = nodeMap.get(toId);
+    addEdge(edgeMap, edgeData, fromId, toId, {
+      ...lqStyle,
+      ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
+      linkCategories: routeCategories,
+    });
+  });
+  return routeData.length > 0;
+}
+
+function addDiagnosticChildEdges(node, fromId, source, {
+  findRouterChildLinkMargin, upsertNode, nodeMap, edgeMap, edgeData, routerIdsWithChildren,
+}) {
+  (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
+    const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
+    const linkMargin = findRouterChildLinkMargin(node.rloc16, child.rloc16);
+    const childLq = toFiniteNumber(child.lq) || toFiniteNumber(child.link_quality);
+    const lqStyle = Number.isFinite(childLq)
+      ? lqStyleFromAvgLqi(childLq, 3)
+      : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
+    upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
+      { source, shape: NODE_SHAPES.child, color: NODE_COLORS.child });
+    const childNodeEnriched = nodeMap.get(childId);
+    addEdge(edgeMap, edgeData, fromId, childId, {
+      dashes: false,
+      isParentChild: true,
+      ...lqStyle,
+      linkMargin,
+      ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
+      linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN]
+    });
+    routerIdsWithChildren.add(fromId);
+  });
+}
+
+function addMeshdiagLinkEdges(node, fromId, { meshIdToUnifiedId, nodeMap, upsertNode, edgeMap, edgeData }) {
+  [
+    ['links3', '3_links', EDGE_CATEGORY_DEFAULT_3],
+    ['links2', '2_links', EDGE_CATEGORY_DEFAULT_2],
+    ['links1', '1_links', EDGE_CATEGORY_DEFAULT_1],
+  ].forEach(([field, legacyField, category]) => {
+    const links = Array.isArray(node[field])
+      ? node[field]
+      : (Array.isArray(node[legacyField]) ? node[legacyField] : []);
+    const lqStyle = lqStyleFromField(legacyField);
+    links.forEach((link) => {
+      const linkMeshId = toText(link.id);
+      const toId = meshIdToUnifiedId.get(linkMeshId) || toText(link.rloc16) || linkMeshId;
+      if (!toId) return;
+      if (!nodeMap.has(toId)) {
+        upsertNode(toId, { device_label: toText(link.device_label), rloc16: toText(link.rloc16), id: linkMeshId || toId },
+          { source: 'meshdiag', shape: NODE_SHAPES.router, color: NODE_COLORS.eve });
+      }
+      const toNodeEnriched = nodeMap.get(toId);
+      addEdge(edgeMap, edgeData, fromId, toId, {
+        ...lqStyle,
+        ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
+        linkCategories: [category]
+      });
+    });
+  });
+}
+
+function addRouterNeighborEdges(node, fromId, neighborRow, { ensureNode, nodeMap, edgeMap, edgeData }) {
+  (Array.isArray(neighborRow?.router_neighbor_table) ? neighborRow.router_neighbor_table : []).forEach((neighbor) => {
+    const toId = ensureNode(
+      toText(neighbor.rloc16) || toText(neighbor.extaddr),
+      {
+        rloc16: toText(neighbor.rloc16), extaddr: toText(neighbor.extaddr), device_label: toText(neighbor.device_label),
+        id: toText(neighbor.rloc16) || toText(neighbor.extaddr)
+      },
+      { source: 'meshdiag', shape: NODE_SHAPES.router, color: NODE_COLORS.eve }
+    );
+    const toNodeEnriched = nodeMap.get(toId);
+    addEdge(edgeMap, edgeData, fromId, toId, {
+      width: 1.5,
+      linkMargin: toFiniteNumber(neighbor.rss_margin),
+      ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
+      linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
+    });
+  });
+}
+
+function addRestMeshNeighborEdges(node, fromId, restMeshRow, { ensureNode, nodeMap, edgeMap, edgeData }) {
+  (Array.isArray(restMeshRow?.routerNeighbors) ? restMeshRow.routerNeighbors : []).forEach((neighbor) => {
+    const toId = ensureNode(
+      toText(neighbor.rloc16) || toText(neighbor.extAddress),
+      {
+        rloc16: toText(neighbor.rloc16),
+        extaddr: toText(neighbor.extAddress),
+        device_label: toText(neighbor.device_label),
+        id: toText(neighbor.rloc16) || toText(neighbor.extAddress)
+      },
+      { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.eve }
+    );
+    const toNodeEnriched = nodeMap.get(toId);
+    addEdge(edgeMap, edgeData, fromId, toId, {
+      ...lqStyleFromLinkMargin(neighbor.linkMargin),
+      linkMargin: toFiniteNumber(neighbor.linkMargin),
+      ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
+      linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
+    });
+  });
+}
+
+function addRestMeshChildEdges(node, fromId, restMeshRow, {
+  ensureNode, nodeMap, edgeMap, edgeData, routerIdsWithChildren,
+}) {
+  (Array.isArray(restMeshRow?.children) ? restMeshRow.children : []).forEach((child, ci) => {
+    const childId = ensureNode(
+      toText(child.rloc16) || toText(child.extAddress) || `${fromId}-restmesh-child-${ci + 1}`,
+      {
+        rloc16: toText(child.rloc16),
+        extaddr: toText(child.extAddress),
+        device_label: toText(child.device_label),
+        id: toText(child.rloc16) || toText(child.extAddress) || `${fromId}-restmesh-child-${ci + 1}`
+      },
+      { source: 'networkdiagnostic', shape: NODE_SHAPES.child, color: NODE_COLORS.child }
+    );
+    const linkMargin = toFiniteNumber(child.linkMargin);
+    const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
+    const childNodeEnriched = nodeMap.get(childId);
+    addEdge(edgeMap, edgeData, fromId, childId, {
+      dashes: false,
+      isParentChild: true,
+      ...lqStyle,
+      linkMargin,
+      ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
+      linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
+    });
+    routerIdsWithChildren.add(fromId);
+  });
+}
+
+function addRestDiagnosticRouteEdges(node, fromId, routeCategories, { ensureNode, nodeMap, edgeMap, edgeData }) {
+  (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
+    if (routeCategories.length === 0) return;
+    const toRloc16 = buildMainRouterRloc16(route.routeId);
+    if (!toRloc16) return;
+    const toId = ensureNode(toRloc16, { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
+      { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.router });
+    const toNodeEnriched = nodeMap.get(toId);
+    addEdge(edgeMap, edgeData, fromId, toId, {
+      width: 1.5,
+      ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
+      linkCategories: routeCategories,
+    });
+  });
+}
+
+function addRestDiagnosticChildEdges(node, fromId, {
+  findRouterChildLinkMargin, ensureNode, nodeMap, edgeMap, edgeData, routerIdsWithChildren,
+}) {
+  (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
+    const childRloc16 = buildChildRloc16(node.rloc16, child.childId);
+    const linkMargin = findRouterChildLinkMargin(node.rloc16, childRloc16);
+    const childLq = toFiniteNumber(child.linkQuality);
+    const lqStyle = Number.isFinite(childLq)
+      ? lqStyleFromAvgLqi(childLq, 3)
+      : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
+    const childId = ensureNode(
+      childRloc16 || `${fromId}-rest-child-${ci + 1}`,
+      {
+        rloc16: childRloc16, id: childRloc16 || `${fromId}-rest-child-${ci + 1}`,
+        device_label: childRloc16 || `${fromId} child ${child.childId}`
+      },
+      { source: 'networkdiagnostic', shape: NODE_SHAPES.child, color: NODE_COLORS.child }
+    );
+    const childNodeEnriched = nodeMap.get(childId);
+    addEdge(edgeMap, edgeData, fromId, childId, {
+      dashes: false,
+      isParentChild: true,
+      ...lqStyle,
+      linkMargin,
+      ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
+      linkCategories: [EDGE_CATEGORY_OTBR_CHILD]
+    });
+    routerIdsWithChildren.add(fromId);
+  });
+}
+
+function enrichSupplementaryDetails(record, { omrToNodeId, extaddrToNodeId, rawByIdForDetails }) {
+  if (!isPlainObject(record)) return;
+  const omr = getCanonicalOmrIpv6Address(record);
+  const ea = getCanonicalExtaddr(record);
+  const nodeId = (omr && !isPlaceholderOmrAddress(omr) && omrToNodeId.get(omr))
+    || (ea && extaddrToNodeId.get(ea));
+  if (!nodeId) return;
+  const existing = rawByIdForDetails.get(nodeId) || {};
+  // Supplementary records enrich missing fields without replacing primary values.
+  rawByIdForDetails.set(nodeId, mergeForDisplay(record, existing));
+}
+
 export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
   const meshdiag = asArray(fileMap.get(FILE_MESHDIAG));
   const networkDiag = asArray(
@@ -255,26 +481,15 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
   }
 
   meshdiag.forEach((node, index) => {
-    const uid = chooseNodeId(node, 'meshdiag-node', index + 1);
-    meshdiagById.set(uid, node);
-    const meshRawId = toText(node.id);
-    if (meshRawId) meshIdToUnifiedId.set(meshRawId, uid);
-    upsertNode(uid, node, {
-      source: 'meshdiag', shape: NODE_SHAPES.router,
-      color: mergeBorderRouterEvidence(node) === true ? NODE_COLORS.borderRouter : NODE_COLORS.router
-    });
+    registerMeshdiagRow(node, index, { meshdiagById, meshIdToUnifiedId, upsertNode });
   });
 
   networkDiag.forEach((node, index) => {
-    const uid = chooseNodeId(node, 'netdiag-node', index + 1);
-    networkDiagById.set(uid, node);
-    upsertNode(uid, node, { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.router });
+    registerDiagnosticRow(node, index, 'netdiag-node', networkDiagById, upsertNode);
   });
 
   restApiDiagnostics.forEach((node, index) => {
-    const uid = chooseNodeId(node, 'restapi-node', index + 1);
-    restApiById.set(uid, node);
-    upsertNode(uid, node, { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.router });
+    registerDiagnosticRow(node, index, 'restapi-node', restApiById, upsertNode);
   });
 
   routerNeighborTables.forEach((row) => {
@@ -306,215 +521,38 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
     return toFiniteNumber(childRow?.rss_margin);
   }
 
-  function addOtbrRouteDataEdges(node, fromId, source) {
-    const routeData = Array.isArray(node.route?.routeData) ? node.route.routeData : [];
-    const routeCategories = getOtbrRouteCategories(node);
-    if (routeCategories.length === 0) return routeData.length > 0;
-
-    routeData.forEach((route) => {
-      const toRloc16 = toText(route.rloc16);
-      if (!toRloc16) return;
-      const toId = ensureNode(
-        toRloc16,
-        { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
-        { source, shape: NODE_SHAPES.router, color: NODE_COLORS.router }
-      );
-      const lqIn = toFiniteNumber(route.linkQualityIn) || 0;
-      const lqOut = toFiniteNumber(route.linkQualityOut) || 0;
-      const lqStyle = lqStyleFromAvgLqi(Math.max(lqIn, lqOut), 3);
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        ...lqStyle,
-        ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-        linkCategories: routeCategories,
-      });
-    });
-    return routeData.length > 0;
-  }
+  const relationshipContext = {
+    ensureNode, upsertNode, nodeMap, edgeMap, edgeData, routerIdsWithChildren,
+    findRouterChildLinkMargin, meshIdToUnifiedId,
+  };
 
   for (const node of meshdiag) {
     const fromId = chooseNodeId(node, 'meshdiag-parent', 0);
-    (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
-      const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
-      const linkMargin = findRouterChildLinkMargin(node.rloc16, child.rloc16);
-      const childLq = toFiniteNumber(child.lq) || toFiniteNumber(child.link_quality);
-      const lqStyle = Number.isFinite(childLq)
-        ? lqStyleFromAvgLqi(childLq, 3)
-        : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
-      upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
-        { source: 'meshdiag', shape: NODE_SHAPES.child, color: NODE_COLORS.child });
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false,
-        isParentChild: true,
-        ...lqStyle,
-        linkMargin,
-        ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
-        linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN]
-      });
-      routerIdsWithChildren.add(fromId);
-    });
+    addDiagnosticChildEdges(node, fromId, 'meshdiag', relationshipContext);
 
-    const hasRouteData = addOtbrRouteDataEdges(node, fromId, 'meshdiag');
-    if (!hasRouteData) [
-      ['links3', '3_links', EDGE_CATEGORY_DEFAULT_3],
-      ['links2', '2_links', EDGE_CATEGORY_DEFAULT_2],
-      ['links1', '1_links', EDGE_CATEGORY_DEFAULT_1],
-    ].forEach(([field, legacyField, category]) => {
-      const links = Array.isArray(node[field])
-        ? node[field]
-        : (Array.isArray(node[legacyField]) ? node[legacyField] : []);
-      const lqStyle = lqStyleFromField(legacyField);
-      links.forEach((link) => {
-        const linkMeshId = toText(link.id);
-        const toId = meshIdToUnifiedId.get(linkMeshId) || toText(link.rloc16) || linkMeshId;
-        if (!toId) return;
-        if (!nodeMap.has(toId)) {
-          upsertNode(toId, { device_label: toText(link.device_label), rloc16: toText(link.rloc16), id: linkMeshId || toId },
-            { source: 'meshdiag', shape: NODE_SHAPES.router, color: NODE_COLORS.eve });
-        }
-        const toNodeEnriched = nodeMap.get(toId);
-        addEdge(edgeMap, edgeData, fromId, toId, {
-          ...lqStyle,
-          ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-          linkCategories: [category]
-        });
-      });
-    });
+    const hasRouteData = addOtbrRouteDataEdges(node, fromId, 'meshdiag', relationshipContext);
+    if (!hasRouteData) addMeshdiagLinkEdges(node, fromId, relationshipContext);
 
     const neighborRow = routerNeighborByRloc16.get(toText(node.rloc16).toLowerCase());
-    (Array.isArray(neighborRow?.router_neighbor_table) ? neighborRow.router_neighbor_table : []).forEach((neighbor) => {
-      const toId = ensureNode(
-        toText(neighbor.rloc16) || toText(neighbor.extaddr),
-        {
-          rloc16: toText(neighbor.rloc16), extaddr: toText(neighbor.extaddr), device_label: toText(neighbor.device_label),
-          id: toText(neighbor.rloc16) || toText(neighbor.extaddr)
-        },
-        { source: 'meshdiag', shape: NODE_SHAPES.router, color: NODE_COLORS.eve }
-      );
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        width: 1.5,
-        linkMargin: toFiniteNumber(neighbor.rss_margin),
-        ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-        linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
-      });
-    });
+    addRouterNeighborEdges(node, fromId, neighborRow, relationshipContext);
 
     const restMeshRow = restMeshByRloc16.get(toText(node.rloc16).toLowerCase());
-    (Array.isArray(restMeshRow?.routerNeighbors) ? restMeshRow.routerNeighbors : []).forEach((neighbor) => {
-      const toId = ensureNode(
-        toText(neighbor.rloc16) || toText(neighbor.extAddress),
-        {
-          rloc16: toText(neighbor.rloc16),
-          extaddr: toText(neighbor.extAddress),
-          device_label: toText(neighbor.device_label),
-          id: toText(neighbor.rloc16) || toText(neighbor.extAddress)
-        },
-        { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.eve }
-      );
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        ...lqStyleFromLinkMargin(neighbor.linkMargin),
-        linkMargin: toFiniteNumber(neighbor.linkMargin),
-        ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-        linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
-      });
-    });
+    addRestMeshNeighborEdges(node, fromId, restMeshRow, relationshipContext);
 
-    (Array.isArray(restMeshRow?.children) ? restMeshRow.children : []).forEach((child, ci) => {
-      const childId = ensureNode(
-        toText(child.rloc16) || toText(child.extAddress) || `${fromId}-restmesh-child-${ci + 1}`,
-        {
-          rloc16: toText(child.rloc16),
-          extaddr: toText(child.extAddress),
-          device_label: toText(child.device_label),
-          id: toText(child.rloc16) || toText(child.extAddress) || `${fromId}-restmesh-child-${ci + 1}`
-        },
-        { source: 'networkdiagnostic', shape: NODE_SHAPES.child, color: NODE_COLORS.child }
-      );
-      const linkMargin = toFiniteNumber(child.linkMargin);
-      const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false,
-        isParentChild: true,
-        ...lqStyle,
-        linkMargin,
-        ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
-        linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
-      });
-      routerIdsWithChildren.add(fromId);
-    });
+    addRestMeshChildEdges(node, fromId, restMeshRow, relationshipContext);
   }
 
   for (const node of networkDiag) {
     const fromId = chooseNodeId(node, 'netdiag-parent', 0);
-    (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
-      const childId = toText(child.rloc16) || `${fromId}-child-${ci + 1}`;
-      const linkMargin = findRouterChildLinkMargin(node.rloc16, child.rloc16);
-      const childLq = toFiniteNumber(child.lq) || toFiniteNumber(child.link_quality);
-      const lqStyle = Number.isFinite(childLq)
-        ? lqStyleFromAvgLqi(childLq, 3)
-        : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
-      upsertNode(childId, { device_label: toText(child.device_label), rloc16: toText(child.rloc16), id: childId },
-        { source: 'networkdiagnostic', shape: NODE_SHAPES.child, color: NODE_COLORS.child });
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false,
-        isParentChild: true,
-        ...lqStyle,
-        linkMargin,
-        ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
-        linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN]
-      });
-      routerIdsWithChildren.add(fromId);
-    });
-    addOtbrRouteDataEdges(node, fromId, 'networkdiagnostic');
+    addDiagnosticChildEdges(node, fromId, 'networkdiagnostic', relationshipContext);
+    addOtbrRouteDataEdges(node, fromId, 'networkdiagnostic', relationshipContext);
   }
 
   restApiDiagnostics.forEach((node) => {
     const fromId = chooseNodeId(node, 'restapi-parent', 0);
     const routeCategories = getOtbrRouteCategories(node);
-    (Array.isArray(node.route?.routeData) ? node.route.routeData : []).forEach((route) => {
-      if (routeCategories.length === 0) return;
-      const toRloc16 = buildMainRouterRloc16(route.routeId);
-      if (!toRloc16) return;
-      const toId = ensureNode(toRloc16, { rloc16: toRloc16, id: toRloc16, device_label: toRloc16 },
-        { source: 'networkdiagnostic', shape: NODE_SHAPES.router, color: NODE_COLORS.router });
-      const toNodeEnriched = nodeMap.get(toId);
-      addEdge(edgeMap, edgeData, fromId, toId, {
-        width: 1.5,
-        ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
-        linkCategories: routeCategories,
-      });
-    });
-    (Array.isArray(node.childTable) ? node.childTable : []).forEach((child, ci) => {
-      const childRloc16 = buildChildRloc16(node.rloc16, child.childId);
-      const linkMargin = findRouterChildLinkMargin(node.rloc16, childRloc16);
-      const childLq = toFiniteNumber(child.linkQuality);
-      const lqStyle = Number.isFinite(childLq)
-        ? lqStyleFromAvgLqi(childLq, 3)
-        : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
-      const childId = ensureNode(
-        childRloc16 || `${fromId}-rest-child-${ci + 1}`,
-        {
-          rloc16: childRloc16, id: childRloc16 || `${fromId}-rest-child-${ci + 1}`,
-          device_label: childRloc16 || `${fromId} child ${child.childId}`
-        },
-        { source: 'networkdiagnostic', shape: NODE_SHAPES.child, color: NODE_COLORS.child }
-      );
-      const childNodeEnriched = nodeMap.get(childId);
-      addEdge(edgeMap, edgeData, fromId, childId, {
-        dashes: false,
-        isParentChild: true,
-        ...lqStyle,
-        linkMargin,
-        ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
-        linkCategories: [EDGE_CATEGORY_OTBR_CHILD]
-      });
-      routerIdsWithChildren.add(fromId);
-    });
+    addRestDiagnosticRouteEdges(node, fromId, routeCategories, relationshipContext);
+    addRestDiagnosticChildEdges(node, fromId, relationshipContext);
   });
 
   applyMergedRowLabels(nodeMap, mergedRows);
@@ -548,16 +586,7 @@ export function adaptMeshdiagNetworkdiag(fileMap, mergedRows = []) {
     if (MESHDIAG_PRIMARY_FILES.has(supplementaryFileName)) continue;
     if (!Array.isArray(extraFile)) continue;
     extraFile.forEach((record) => {
-      if (!isPlainObject(record)) return;
-      const omr = getCanonicalOmrIpv6Address(record);
-      const ea = getCanonicalExtaddr(record);
-      const nodeId = (omr && !isPlaceholderOmrAddress(omr) && omrToNodeId.get(omr))
-        || (ea && extaddrToNodeId.get(ea));
-      if (!nodeId) return;
-      const existing = rawByIdForDetails.get(nodeId) || {};
-        // Supplementary files (e.g. mdns) should enrich missing fields but not
-        // clobber canonical values already derived from primary topology files.
-        rawByIdForDetails.set(nodeId, mergeForDisplay(record, existing));
+      enrichSupplementaryDetails(record, { omrToNodeId, extaddrToNodeId, rawByIdForDetails });
     });
   }
 
