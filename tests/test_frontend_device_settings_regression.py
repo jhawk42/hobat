@@ -149,6 +149,17 @@ def test_thread_details_section_precedes_matter_and_uses_source_fields() -> None
     assert '`${listIdPrefix}thread-list`,' in utils_text
 
 
+def test_reed_role_is_in_device_details_highlights() -> None:
+    constants_text = _read_text(CONSTANTS_JS)
+    highlights_start = constants_text.index('sectionId: "highlights-list"')
+    highlights_end = constants_text.index('sectionId: "network-list"', highlights_start)
+    details_start = constants_text.index('sectionId: "details-list"')
+    details_end = constants_text.index("]);", details_start)
+
+    assert '"isReed"' in constants_text[highlights_start:highlights_end]
+    assert '"isReed"' not in constants_text[details_start:details_end]
+
+
 def test_requested_native_field_registry_entries_are_available() -> None:
     constants_text = _read_text(CONSTANTS_JS)
     utils_text = _read_text(UTILS_JS)

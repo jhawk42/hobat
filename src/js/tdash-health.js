@@ -1067,7 +1067,10 @@ function renderSelectedHealthComparison(
         appendText(row, "td", `${item.metric || item.itemKind} · ${item.sampleCount} ${item.sampleCount === 1 ? "sample" : "samples"}`);
         appendText(row, "td", format(item.beforeValue));
         appendText(row, "td", format(item.afterValue));
-        appendText(row, "td", item.delta == null ? "—" : `${item.delta} ${item.unit || ""}`);
+        const delta = Number.isFinite(item.delta) && !Number.isInteger(item.delta)
+          ? item.delta.toFixed(1)
+          : item.delta;
+        appendText(row, "td", item.delta == null ? "—" : `${delta} ${item.unit || ""}`);
         appendText(row, "td", item.comparable ? `${item.change}${item.direction ? ` · ${item.direction}` : ""}` : `Unknown · ${item.primaryReason || "unqualified"}`);
         appendText(row, "td", `${item.sourceFiles?.join(", ") || "Unknown"} · ${item.resetState}`);
         body.appendChild(row);

@@ -265,6 +265,62 @@ def test_comparison_show_in_table_targets_only_the_current_row_device() -> None:
     }
 
 
+def test_comparison_delta_formats_floating_point_values_to_one_decimal_place() -> None:
+    script = r"""
+      import {renderHealthComparison} from "./src/js/tdash-health.js";
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.listeners = {};
+        }
+        appendChild(child) { this.children.push(child); return child; }
+        replaceChildren() { this.children = []; }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+      }
+      globalThis.document = {createElement: (tagName) => new Element(tagName)};
+      const comparison = {
+        comparisonId: "pair", beforeObservedAt: "2026-10-01T00:00:00Z",
+        afterObservedAt: "2026-10-02T00:00:00Z", elapsedSeconds: 86400,
+        comparable: true, resetState: "known", reasons: [], baselineState: "available",
+        gapState: "within-policy", origin: "stored", itemCount: 4, filteredItemCount: 4,
+        offset: 0, limit: 25, items: [
+          {subjectId: "device-a", metric: "ratio", sampleCount: 1, delta: -9.999999999999964,
+            unit: "ratio", comparable: true, change: "changed", resetState: "known"},
+          {subjectId: "device-b", metric: "fraction", sampleCount: 1, delta: 1.2,
+            unit: "dBm", comparable: true, change: "changed", resetState: "known"},
+          {subjectId: "device-c", metric: "count", sampleCount: 1, delta: 5,
+            unit: "count", comparable: true, change: "changed", resetState: "known"},
+          {subjectId: "device-d", metric: "unknown", sampleCount: 1, delta: null,
+            unit: "ratio", comparable: false, change: "unknown", resetState: "known"},
+        ],
+      };
+      const page = {total: 1, offset: 0, limit: 25, items: [{comparisonId: "pair"}]};
+      const container = new Element("section");
+      renderHealthComparison(container, page, comparison, {
+        capabilityKnown: true, comparisonReadModel: true, assessmentAvailable: true,
+        endpointSelection: false, comparisonId: "pair", scope: "all", result: "all",
+      }, {});
+      const find = (element, className) => element.className === className
+        ? element
+        : element.children.map((child) => find(child, className)).find(Boolean);
+      const rows = find(container, "health-comparison-table-wrap").children[0]
+        .children[1].children;
+      console.log(JSON.stringify(rows.map((row) => row.children[4].textContent)));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    assert json.loads(completed.stdout) == [
+        "-10.0 ratio",
+        "1.2 dBm",
+        "5 count",
+        "—",
+    ]
+
+
 def test_table_device_selection_uses_direct_identity_not_nested_references() -> None:
     script = r"""
       import {findTableRowByDeviceId} from "./src/js/tdash-table-renderer.js";

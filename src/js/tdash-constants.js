@@ -914,6 +914,7 @@ export const DEVICE_DETAILS_SECTIONS = Object.freeze([
       "isBorderRouter",
       "isLeader",
       "isRouter",
+      "isReed",
       "isPrimaryBBR",
       "status",
       "mode.device",

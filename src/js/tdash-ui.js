@@ -1899,6 +1899,12 @@ function appendDiagnosticResultRow(listEl, label, value) {
   listEl.append(termEl, valueEl);
 }
 
+function formatDiagnosticDuration(durationSeconds) {
+  return Number.isFinite(durationSeconds)
+    ? `${Math.round(durationSeconds * 1000)} ms`
+    : "Not reported";
+}
+
 function renderDeviceDiagnosticResult(result, detail = "") {
   const contentEl = document.getElementById("device-diagnostics-result");
   contentEl.replaceChildren();
@@ -1910,9 +1916,11 @@ function renderDeviceDiagnosticResult(result, detail = "") {
   appendDiagnosticResultRow(listEl, "Observed", result.observedAt
     ? new Date(result.observedAt).toLocaleString()
     : "Not reported");
-  appendDiagnosticResultRow(listEl, "Duration", Number.isFinite(result.durationSeconds)
-    ? formatDuration(result.durationSeconds * 1000)
-    : "Not reported");
+  appendDiagnosticResultRow(
+    listEl,
+    "Duration",
+    formatDiagnosticDuration(result.durationSeconds),
+  );
   if (result.sent !== undefined) {
     appendDiagnosticResultRow(listEl, "Packets", `${result.received}/${result.sent} received`);
     appendDiagnosticResultRow(listEl, "Loss", `${Math.round(Number(result.loss) * 100)}%`);
@@ -1943,9 +1951,7 @@ function renderDeviceDiagnosticResult(result, detail = "") {
     : (result.attempts || []).map((attempt) => ({
       label: `Attempt ${attempt.attempt}`,
       status: deviceActionStatusLabel(attempt.outcome),
-      duration: Number.isFinite(attempt.durationSeconds)
-        ? formatDuration(attempt.durationSeconds * 1000)
-        : "Not reported",
+      duration: formatDiagnosticDuration(attempt.durationSeconds),
     }));
   if (rows.length) {
     const tableEl = document.createElement("table");
