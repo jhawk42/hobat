@@ -28,7 +28,7 @@ reachability probes. Device labels use a separate static-map read/update API.
 
 | Layer | Owners | Responsibility |
 |---|---|---|
-| Browser | `src/tdash.html`, `src/tdash.css`, `src/js/*.js` | Dataset selection, fetch sessions, merge/adaptation, filters, layouts, topology/table rendering, health views, and device actions |
+| Browser | `src/tdash.html`, `src/tdash.css`, `src/js/*.js` | Dataset selection, fetch sessions, merge/adaptation, filters, layouts, topology/table and Thread Network views, health views, and device actions |
 | HTTP server | `td_webserver.py` | Static assets, catalog and source capabilities, data allowlist, cache policy, jobs, health APIs, device actions, and device labels |
 | CLI dispatcher | `td_cli.py` | Top-level command tree and command-family dispatch |
 | Collectors | `otbr_cli_*.py`, `otbr_restapi_*.py`, `ha_matter_ws_*.py`, `mdns_*.py`, `eve_process.py` | Live collection, parsing, normalization, checkpoints, final snapshots |
@@ -47,6 +47,7 @@ uses vendored vis-network and sortable table libraries.
 |---|---|
 | `td_cli.py` | Unified dispatcher for `otbr-cli`, `otbr-restapi`, `ha-matter-ws`, `mdns`, `process-eve`, `health`, `system`, `merge-dataset`/`merge-data`, and `merge-extaddr` |
 | `td_webserver.py` | aiohttp application, dataset catalog, source capabilities, file action registry, HTTP caching, background jobs, health APIs, device actions, and device-label API |
+| `td_logging.py` | Shared CLI logging configuration and redaction of Thread secrets in sensitive output |
 | `td_dataset_catalog.py` | Dataset manifest validation and runtime catalog loading, including health roster policy projections |
 | `td_source_capabilities.py` | Cached source/file inventory and deduplicated, bounded live availability probes |
 | `td_source_authority.py` | Source-priority and per-field authority resolution from the catalog |
@@ -133,6 +134,7 @@ explicitly absent. It does not replace OTBR network-wide collection.
 | `mdns_thread_scopes.py`, `mdns_hap.py`, `mdns_matter.py`, `mdns_meshcop.py`, `mdns_thread_util.py` | Zeroconf discovery and source-specific service normalization |
 | `eve_process.py` | Eve export parsing, identifier conversion, and topology enrichment |
 | `merge_dataset.py` | Input selection, normalization, identity-aware merge, validation report, and merged snapshot |
+| `merge_policy_identity.py`, `merge_policy_mdns.py`, `merge_policy_relationship.py` | Domain-specific identity matching, mDNS record handling, and relationship/route merge policy used by dataset merging |
 | `merge_extaddr_device_label_map.py` | Bulk merge plus single-record read/upsert for the static label map |
 | `extaddr_device_label_map.py` | Static label-map loading |
 | `td_health_manifest.py`, `td-dataset-manifest.json` | Approved health dataset/profile contracts shared with browser registry metadata |
@@ -142,7 +144,7 @@ explicitly absent. It does not replace OTBR network-wide collection.
 | `td_health_observation_model.py`, `td_health_policy.py` | Frozen domain contracts and validated health policy |
 | `td_health_observation_store.py`, `td_health_sqlite.py`, `td_health_history.py` | Observation persistence boundary, SQLite transactions, current assessment, and bounded retention |
 | `td_health_migration.py` | Read-only retained-history inventory, replay adapters, backup-first transactional migration, and report generation |
-| `td_health_graph.py`, `td_health_roster.py`, `td_health_comparison.py` | Topology evidence graph, expected/observed roster operations, and stored-assessment comparisons |
+| `td_health_graph.py`, `td_health_roster.py`, `td_health_roster_mutation.py`, `td_health_comparison.py` | Topology evidence graph, roster projections and lifecycle mutations, and stored-assessment comparisons |
 | `td_health_read.py`, `td_webserver.py` health routes | Query-only SQLite projections, assessment pinning, grouped findings, bounded history, and no-store HTTP responses |
 | `td_system_backups.py`, `td_system_cli.py`, `td_system_database.py`, `td_system_ping.py` | Data-directory backup/restore, SQLite database repacking, and bounded host ping |
 | `util_data.py` | Data-directory resolution and atomic JSON/text writes |
@@ -172,6 +174,8 @@ datasets. It does not contain health thresholds or reclassify evidence.
 | `tdash-source-authority.js` | Browser projection of catalog source authority for merge ordering |
 | `tdash-device-diagnostics.js` | Eligible device targets and supported transient diagnostic actions |
 | `tdash-health.js` | Health API requests and rendering of server-owned assessments, roster, and comparisons |
+| `tdash-ha-matter-ws-roles.js` | File- and extractor-scoped Home Assistant Matter role normalization and evidence handling |
+| `tdash-thread-network.js` | Thread Network facts, device/link counts, role holders, and source evidence derived from the active dataset |
 | `tdash-topology-view-model.js` | Indexed topology state and pure filter/search visibility calculations |
 | `tdash-topology-utils.js` | Node/edge helpers, indexes, styles, labels, and isolated-node anchors |
 | `tdash-topology-renderer.js` | vis-network lifecycle, rendering, interaction, search highlights, and layout selection |

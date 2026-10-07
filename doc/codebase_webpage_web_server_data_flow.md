@@ -35,11 +35,13 @@ separate bounded probe path in the Python web server, not a collector refresh.
 See the [data-flow ownership table](merge_thread_device_info.md#ownership) for
 the field, identity, authority, and projection owners in both runtimes.
 
-The dashboard also uses API paths outside snapshot assembly. Health processing
-consumes approved cached files and writes assessments to `hobat_v1.db`; health
-GET routes read stored projections from that database. Device diagnostics run
-as transient actions and do not update snapshots or health history. Device
-labels use their own static-map API.
+The dashboard also uses API paths and views outside snapshot assembly. Health
+processing consumes approved cached files and writes assessments to
+`hobat_v1.db`; health GET routes read stored projections from that database.
+Device diagnostics run as transient actions and do not update snapshots or
+health history. Device labels use their own static-map API. The Thread Network
+workspace summarizes network facts and device/link evidence from the loaded
+dataset and capabilities; it does not trigger a separate live collection.
 
 ## Server Routes
 
@@ -291,13 +293,15 @@ last-write-wins.
 
 | Layer | Owners | Responsibility |
 |---|---|---|
-| Controls | `tdash.html`, `tdash-ui.js` | Source/dataset selection, Sync/Cancel, views, filters, settings, insights, device actions, activity logs, and pending jobs |
+| Controls | `tdash.html`, `tdash-ui.js` | Source/dataset selection, Sync/Cancel, topology/table and Thread Network views, filters, settings, insights, device actions, activity logs, and pending jobs |
 | Browser activity | `tdash-activity.js` | Bounded in-memory activity, route/metadata sanitization, subscriptions, and tracked HTTP requests |
 | Source and catalog capabilities | `tdash-capabilities.js`, `tdash-catalog-fallback.js` | Source/file availability and bundled fallback for catalog loading |
 | Fetch and assembly | `tdash-dataset.js`, `tdash-dataset-registry.js` | Catalog lookup, cache policy, jobs, checkpoints, extractors, and final/partial datasets |
 | Field and merge contract | `tdash-device-fields.js`, `tdash-source-authority.js`, `tdash-merge.js`, `tdash-utils.js` | Preferred fields, aliases, identities, normalization, precedence, conflicts, and provenance |
+| Home Assistant Matter roles | `tdash-ha-matter-ws-roles.js` | Validates supported file/extractor contexts and normalizes role evidence without treating unrelated records as Matter role data |
 | Adaptation | `tdash-adaptors.js`, `tdash-adaptor-*.js`, `tdash-adaptor-model.js` | Source-specific records to canonical devices, relationships, and details |
 | View model | `tdash-device-projection.js`, `tdash-topology-view-model.js`, `tdash-filters.js`, `tdash-search.js` | Derived device state, indexed visibility, diagnostic matching, and search state |
+| Thread Network view model | `tdash-thread-network.js`, `tdash-ui.js` | Network facts with source attribution, network-instance context, and available device/link/role summaries for the Thread Network workspace |
 | Presentation | `tdash-layouts.js`, `tdash-topology-utils.js`, `tdash-topology-renderer.js`, `tdash-table-renderer.js` | Seed layouts, vis-network lifecycle, topology interaction, and sortable tables |
 | Device diagnostics | `tdash-device-diagnostics.js` | Device-action eligibility, target selection, and result presentation inputs |
 | Health | `tdash-health.js` | Assessment, findings, roster, comparison, and health-job API/rendering workflows |
@@ -359,6 +363,13 @@ Python remains the only verdict owner. The finding view defaults to All for
 each dataset and is held only in browser memory; reloads, dataset changes, and
 Reset restore All.
 
+Home Assistant Matter role normalization is restricted to catalog entries and
+file/extractor combinations recognized by `tdash-ha-matter-ws-roles.js`.
+`tdash-dataset.js` applies the allowed context while normalizing payloads;
+adaptors use the same policy when interpreting topology roles. This keeps
+commissioned-device, diagnostic, native-topology, and border-router-inventory
+role evidence tied to its declared source shape.
+
 On Sync, `tdash-dataset.js` `loadDataset()` starts per-file requests concurrently and uses
 `Promise.allSettled` so successful files can still produce a partial result when
 another file fails or is cancelled. `buildDatasetRows()` is the pure assembly
@@ -378,6 +389,22 @@ The three browser merge strategies are:
 First non-empty values win after source-priority ordering. Conflicting
 non-empty values are retained in `_merge_conflicts` and contributing files in
 `_source_files`.
+
+## Thread Network Workspace
+
+The Thread Network tab is a browser-only projection of the currently loaded
+dataset. `tdash-thread-network.js` gathers network facts from loaded and
+auxiliary payloads, associates each fact with its source files, and uses
+`/api/capabilities` metadata to report network-instance context. Conflicting
+equally preferred payload facts are shown as Mixed rather than silently
+selecting one. For Ext PAN ID, a known capabilities instance ID takes
+precedence over payload facts; payload evidence is used when no instance ID is
+available, and a mixed instance is reported as Mixed. It derives device role
+and link-quality summaries from assembled rows and the adaptor relationship
+model when available, using cached status counts when provided. Leader and
+primary-BBR entries retain their source-file evidence and can link back to a
+selectable device when an identity is available. Missing or ambiguous evidence
+is shown as unavailable rather than initiating a live refresh.
 
 ## Topology Pipeline
 
