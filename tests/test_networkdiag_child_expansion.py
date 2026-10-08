@@ -26,9 +26,11 @@ def test_child_fetch_policies_preserve_attempts_and_delays() -> None:
     assert fast.stop_after_first_response is True
 
     assert detail.mode == "detail"
-    assert detail.minimum_attempts == 3
-    assert [attempt.detail_level for attempt in detail.attempts] == [170, 180, 190, 190, 200]
-    assert [attempt.delay_after_failure_s for attempt in detail.attempts] == [0.25, 0.5, 0.75, 1.0, None]
+    assert detail.minimum_attempts == 7
+    assert [attempt.detail_level for attempt in detail.attempts] == [150, 160, 170, 170, 180, 190, 200]
+    assert [attempt.delay_after_failure_s for attempt in detail.attempts] == [
+        0.25, 0.5, 0.75, 1.0, 1.25, 1.5, None
+    ]
     assert detail.stop_after_first_response is False
     assert all(attempt.tlv_values for attempt in (*fast.attempts, *detail.attempts))
 
@@ -126,16 +128,18 @@ def test_fetch_child_with_retries_is_pure_and_obeys_terminal_states() -> None:
         ),
         lambda seconds: pytest.fail(f"unexpected delay: {seconds}"),
     )
-    assert detail_calls == [170, 180, 190, 190, 200]
+    assert detail_calls == [150, 160, 170, 170, 180, 190, 200]
     assert complete.terminal_reason == "responded"
-    assert len(complete.observations) == 5
+    assert len(complete.observations) == 7
 
     failed_delays: list[float] = []
     exhausted = topology.fetch_child_with_retries(
         _target(), detail, {}, lambda _target, _attempt: None, failed_delays.append
     )
-    assert [attempt.detail_level for attempt in exhausted.attempted] == [170, 180, 190]
-    assert failed_delays == [0.25, 0.5]
+    assert [attempt.detail_level for attempt in exhausted.attempted] == [
+        150, 160, 170, 170, 180, 190, 200
+    ]
+    assert failed_delays == [0.25, 0.5, 0.75, 1.0, 1.25, 1.5]
     assert exhausted.terminal_reason == "exhausted"
 
     with pytest.raises(RuntimeError, match="transport"):
@@ -201,8 +205,10 @@ def test_fast_coverage_does_not_skip_opt_in_detailed_child_policy() -> None:
         lambda _seconds: None,
     )
 
-    assert calls == [170, 180, 190]
-    assert [attempt.detail_level for attempt in outcome.attempted] == [170, 180, 190]
+    assert calls == [150, 160, 170, 170, 180, 190, 200]
+    assert [attempt.detail_level for attempt in outcome.attempted] == [
+        150, 160, 170, 170, 180, 190, 200
+    ]
     assert outcome.terminal_reason == "exhausted"
 
 
@@ -465,7 +471,9 @@ def test_child_ping_runs_once_after_all_diagnostic_policies_exhaust(monkeypatch)
         True,
     )
 
-    assert fetch_calls == [170, 170, 150, 170, 180, 190]
+    assert fetch_calls == [
+        170, 170, 150, 150, 160, 170, 170, 180, 190, 200
+    ]
     assert [request.target for request in ping_requests] == [
         "fd3b:a255:4aa6:5483:0:ff:fe00:4c92"
     ]
