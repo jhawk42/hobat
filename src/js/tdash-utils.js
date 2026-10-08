@@ -865,7 +865,8 @@ export function sortDetailsWithPriority(details) {
     "leaderData.leaderRouterId",
     
     // === TIER 5: Advanced/Diagnostic ===
-    "tlvValues",
+    "tlvRequestValues",
+    "tlvResponseValues",
     "macCounters.ifinerrors_pct",
     "macCounters.ifouterrors_pct",
     "macCounters.ifindiscards_pct",

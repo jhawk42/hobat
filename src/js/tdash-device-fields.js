@@ -60,7 +60,8 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "networkName", aliases: ["network_name"], transform: "identity" },
   { path: "deviceLabel", aliases: ["device_label", "hostName", "hostname"], transform: "identity" },
   { path: "nodeId", aliases: ["node_id"], transform: "identity" },
-  { path: "tlvValues", aliases: ["tlv_values"], transform: "identity" },
+  { path: "tlvRequestValues", aliases: ["tlv_request_values", "tlvValues", "tlv_values"], transform: "identity" },
+  { path: "tlvResponseValues", aliases: ["tlv_response_values"], transform: "identity" },
   { path: "lastAttemptResponded", aliases: ["last_attempt_responded"], transform: "number" },
   { path: "lastAttemptTlvDetailLevel", aliases: ["last_attempt_tlv_detail_level"], transform: "number" },
   { path: "networkDiagnosticStatus", aliases: ["network_diagnostic_status"], transform: "identity" },
@@ -471,7 +472,16 @@ export function normalizeInputRecord(record, options = {}) {
       });
       return;
     }
-    const selected = foundValues.find((item) => !isNormalizationEmpty(item.value)) ?? foundValues[0];
+    const explicitTlvSummaryCandidates = definition.path === "tlvRequestValues"
+      ? new Set([definition.path, definition.aliases[0]])
+      : (definition.path === "tlvResponseValues"
+        ? new Set([definition.path, ...definition.aliases])
+        : null);
+    const selected = (explicitTlvSummaryCandidates
+      ? foundValues.find((item) => explicitTlvSummaryCandidates.has(item.path))
+      : undefined)
+      ?? foundValues.find((item) => !isNormalizationEmpty(item.value))
+      ?? foundValues[0];
     const transformed = transformValue(definition.transform, selected.value, options.source, options.canonicalMetrics);
     if (["eui", "threadVersion", "threadVersionDecimal", "threadStackVersion"].includes(definition.path)) {
       foundValues.forEach((item) => {

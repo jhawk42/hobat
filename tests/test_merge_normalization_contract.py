@@ -75,3 +75,37 @@ def test_offline_merge_emits_canonical_border_router_with_alias_conflict(tmp_pat
     assert record["_merge_conflicts"] == [
         {"path": "isBorderRouter", "current": False, "incoming": True}
     ]
+
+
+def test_offline_merge_keeps_tlv_summaries_collection_scoped(tmp_path: Path) -> None:
+    fetch_all = "td-otbr-cli-networkdiag-fetch-all.json"
+    multicast = "td-otbr-cli-networkdiag-multicast-network.json"
+    records, _report = build_merged_records(
+        tmp_path,
+        "",
+        [fetch_all, multicast],
+        {},
+        input_data={
+            fetch_all: [{
+                "extaddr": "0011223344556677",
+                "rloc16": "0x0400",
+                "tlv_values": "0 1 2 8",
+                "tlv_response_values": "0 1 2",
+            }],
+            multicast: [{
+                "extaddr": "0011223344556677",
+                "rloc16": "0x0400",
+                "tlvRequestValues": "0 1 2 8 9",
+                "tlvResponseValues": "0 1 2 8 9",
+            }],
+        },
+    )
+
+    [record] = records
+    assert record["tlvRequestValues"] == "0 1 2 8"
+    assert record["tlvResponseValues"] == "0 1 2"
+    assert "tlvValues" not in record
+    assert {
+        conflict["path"]
+        for conflict in record.get("_merge_conflicts", [])
+    } >= {"tlvRequestValues", "tlvResponseValues"}

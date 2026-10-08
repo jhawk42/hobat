@@ -10,7 +10,10 @@ import uuid
 from collections.abc import Mapping
 from copy import deepcopy
 
-from otbr_cli_networkdiag_util import device_type_from_mode
+from otbr_cli_networkdiag_util import (
+    DIAGNOSTIC_TLV_CONTROL_TYPES,
+    device_type_from_mode,
+)
 from util_network import decode_short_thread_version
 from util_mac_counters import derive_mac_counter_metrics, enrich_mac_counters
 
@@ -33,7 +36,6 @@ SINGLE_VALUE_DIAGNOSTIC_TLV_TYPES = frozenset({
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 16, 17, 18, 19,
     23, 24, 25, 26, 27, 28, 32, 33, 34,
 })
-DIAGNOSTIC_TLV_CONTROL_TYPES = frozenset({32, 33})
 DIAGNOSTIC_STRING_TLV_MAX_LENGTHS = {25: 32, 26: 32, 27: 16, 28: 64}
 DIAGNOSTIC_RESPONSE_PREFIX = "DIAG_GET.rsp/ans from "
 
@@ -927,6 +929,7 @@ def create_diagnostic_collection_context() -> dict:
     return {
         "collection_id": uuid.uuid4().hex,
         "request_attempts": [],
+        "sent_request_ids": [],
         "query_origins": {},
         "observations": [],
         "parsed_records": [],
@@ -960,6 +963,20 @@ def register_diagnostic_request(
     }
     collection_context["request_attempts"].append(request)
     return request
+
+
+def mark_diagnostic_request_sent(
+    collection_context: dict | None,
+    request: dict | None,
+) -> None:
+    if collection_context is None or request is None:
+        return
+    request_id = request.get("request_id")
+    if request_id is None:
+        return
+    sent_request_ids = collection_context.setdefault("sent_request_ids", [])
+    if request_id not in sent_request_ids:
+        sent_request_ids.append(request_id)
 
 
 def _attribute_response_observation(
@@ -1500,7 +1517,6 @@ def parse_multicast_diag_output(
         if response_group_key is not None:
             response_groups[response_group_key] = deepcopy(result[extaddr])
 
-    logging.info(f"Parsed {len(result)} unique devices from multicast output")
+    logging.info(f"Parsed {len(result)} unique devices from output")
     return result
-
 

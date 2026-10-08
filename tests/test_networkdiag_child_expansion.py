@@ -20,14 +20,14 @@ def test_child_fetch_policies_preserve_attempts_and_delays() -> None:
     fast, detail = topology.build_child_fetch_policies(True, True)
 
     assert fast.mode == "fast"
-    assert fast.minimum_attempts == 2
-    assert [attempt.detail_level for attempt in fast.attempts] == [1, 1]
-    assert [attempt.delay_after_failure_s for attempt in fast.attempts] == [0.25, None]
+    assert fast.minimum_attempts == 3
+    assert [attempt.detail_level for attempt in fast.attempts] == [170, 170, 150]
+    assert [attempt.delay_after_failure_s for attempt in fast.attempts] == [0.25, 0.5, None]
     assert fast.stop_after_first_response is True
 
     assert detail.mode == "detail"
     assert detail.minimum_attempts == 3
-    assert [attempt.detail_level for attempt in detail.attempts] == [1, 2, 3, 3, 4]
+    assert [attempt.detail_level for attempt in detail.attempts] == [170, 180, 190, 190, 200]
     assert [attempt.delay_after_failure_s for attempt in detail.attempts] == [0.25, 0.5, 0.75, 1.0, None]
     assert detail.stop_after_first_response is False
     assert all(attempt.tlv_values for attempt in (*fast.attempts, *detail.attempts))
@@ -37,7 +37,7 @@ def test_child_fetch_policies_preserve_attempts_and_delays() -> None:
     with pytest.raises(ValueError, match="detail level"):
         topology.ChildFetchAttempt(0, 8, "0 1 2 8", None)
     with pytest.raises(ValueError, match="TLVs"):
-        topology.ChildFetchAttempt(0, 1, "invalid", None)
+        topology.ChildFetchAttempt(0, 170, "invalid", None)
 
 
 def test_collect_child_targets_is_stable_deduplicated_and_non_mutating() -> None:
@@ -82,15 +82,15 @@ def test_fetch_child_with_retries_is_pure_and_obeys_terminal_states() -> None:
     outcome = topology.fetch_child_with_retries(
         _target(), fast, {}, fetch, delays.append
     )
-    assert calls == [(0, 1), (1, 1)]
+    assert calls == [(0, 170), (1, 170)]
     assert delays == [0.25]
     assert outcome.terminal_reason == "responded"
     assert outcome.observations[0]["last_attempt_responded"] == 1
-    assert outcome.observations[0]["last_attempt_tlv_detail_level"] == 1
+    assert outcome.observations[0]["last_attempt_tlv_detail_level"] == 170
 
     calls.clear()
     skipped = topology.fetch_child_with_retries(
-        _target(), detail, {"last_attempt_tlv_detail_level": 4}, fetch, delays.append
+        _target(), detail, {"last_attempt_tlv_detail_level": 200}, fetch, delays.append
     )
     assert skipped.terminal_reason == "already-satisfied"
     assert calls == []
@@ -98,7 +98,7 @@ def test_fetch_child_with_retries_is_pure_and_obeys_terminal_states() -> None:
     retained = topology.fetch_child_with_retries(
         _target(), detail, {
             "last_attempt_responded": 0,
-            "last_attempt_tlv_detail_level": 1,
+            "last_attempt_tlv_detail_level": 170,
         }, lambda _target, _attempt: None, delays.append
     )
     assert retained.terminal_reason == "retained-prior"
@@ -126,7 +126,7 @@ def test_fetch_child_with_retries_is_pure_and_obeys_terminal_states() -> None:
         ),
         lambda seconds: pytest.fail(f"unexpected delay: {seconds}"),
     )
-    assert detail_calls == [1, 2, 3, 3, 4]
+    assert detail_calls == [170, 180, 190, 190, 200]
     assert complete.terminal_reason == "responded"
     assert len(complete.observations) == 5
 
@@ -134,7 +134,7 @@ def test_fetch_child_with_retries_is_pure_and_obeys_terminal_states() -> None:
     exhausted = topology.fetch_child_with_retries(
         _target(), detail, {}, lambda _target, _attempt: None, failed_delays.append
     )
-    assert [attempt.detail_level for attempt in exhausted.attempted] == [1, 2, 3]
+    assert [attempt.detail_level for attempt in exhausted.attempted] == [170, 180, 190]
     assert failed_delays == [0.25, 0.5]
     assert exhausted.terminal_reason == "exhausted"
 
@@ -201,8 +201,8 @@ def test_fast_coverage_does_not_skip_opt_in_detailed_child_policy() -> None:
         lambda _seconds: None,
     )
 
-    assert calls == [1, 2, 3]
-    assert [attempt.detail_level for attempt in outcome.attempted] == [1, 2, 3]
+    assert calls == [170, 180, 190]
+    assert [attempt.detail_level for attempt in outcome.attempted] == [170, 180, 190]
     assert outcome.terminal_reason == "exhausted"
 
 
@@ -228,7 +228,7 @@ def test_multicast_covered_child_skips_fast_fetch_and_preserves_identity(monkeyp
     monkeypatch.setattr(
         topology,
         "fetch_network_diag_for_device",
-        lambda *_args: pytest.fail("complete multicast child data should skip fast fetch"),
+        lambda *_args, **_kwargs: pytest.fail("complete multicast child data should skip fast fetch"),
     )
     monkeypatch.setattr(
         topology,
@@ -252,7 +252,9 @@ def test_child_expansion_reconciles_move_and_checkpoints_once(monkeypatch) -> No
     fetch_calls: list[tuple[str, int]] = []
     checkpoints: list[dict] = []
 
-    def fetch(rloc16, _prefix, _labels, _routers, _addresses, detail_level):
+    def fetch(
+        rloc16, _prefix, _labels, _routers, _addresses, detail_level, **_kwargs
+    ):
         fetch_calls.append((rloc16, detail_level))
         return {
             "rloc16": "0x1001",
@@ -282,7 +284,7 @@ def test_child_expansion_reconciles_move_and_checkpoints_once(monkeypatch) -> No
         "checkpoint.json",
     )
 
-    assert fetch_calls == [("0x1001", 1)]
+    assert fetch_calls == [("0x1001", 170)]
     assert "0x0001" not in network_topology_map
     assert network_topology_map["0x1001"]["extaddr"] == "child-ext"
     assert extaddr_to_rloc["child-ext"] == "0x1001"
@@ -290,7 +292,10 @@ def test_child_expansion_reconciles_move_and_checkpoints_once(monkeypatch) -> No
 
 
 def test_exhausted_child_inserts_one_fallback_but_retains_known_record(monkeypatch) -> None:
-    monkeypatch.setattr(topology, "fetch_network_diag_for_device", lambda *_args: None)
+    monkeypatch.setattr(
+        topology, "fetch_network_diag_for_device",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(topology.time, "sleep", lambda _seconds: None)
     checkpoints: list[dict] = []
     monkeypatch.setattr(
@@ -419,7 +424,7 @@ def test_child_ping_runs_once_after_all_diagnostic_policies_exhaust(monkeypatch)
     monkeypatch.setattr(
         topology,
         "fetch_network_diag_for_device",
-        lambda *_args: fetch_calls.append(_args[-1]) or None,
+        lambda *_args, **_kwargs: fetch_calls.append(_args[-1]) or None,
     )
     monkeypatch.setattr(topology.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
@@ -460,7 +465,7 @@ def test_child_ping_runs_once_after_all_diagnostic_policies_exhaust(monkeypatch)
         True,
     )
 
-    assert fetch_calls == [1, 1, 1, 2, 3]
+    assert fetch_calls == [170, 170, 150, 170, 180, 190]
     assert [request.target for request in ping_requests] == [
         "fd3b:a255:4aa6:5483:0:ff:fe00:4c92"
     ]
@@ -473,7 +478,10 @@ def test_child_ping_runs_once_after_all_diagnostic_policies_exhaust(monkeypatch)
 
 
 def test_child_ping_unavailable_keeps_reachability_unknown(monkeypatch) -> None:
-    monkeypatch.setattr(topology, "fetch_network_diag_for_device", lambda *_args: None)
+    monkeypatch.setattr(
+        topology, "fetch_network_diag_for_device",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(topology.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
         topology.otbr_cli_device,
@@ -530,7 +538,7 @@ def test_checkpoint_serializes_child_liveness_evidence(tmp_path) -> None:
             "rloc16": "0x1001",
             "extaddr": "found-0x1001",
             "last_attempt_responded": -1,
-            "last_attempt_tlv_detail_level": 1,
+            "last_attempt_tlv_detail_level": 170,
             "network_diagnostic_status": "no-response",
             "reachability": "unknown",
             "ping": {"status": "no-reply", "timeout_seconds": 3},
@@ -539,7 +547,7 @@ def test_checkpoint_serializes_child_liveness_evidence(tmp_path) -> None:
 
     payload = json.loads(checkpoint.read_text(encoding="utf-8"))[0]
     assert payload["lastAttemptResponded"] == -1
-    assert payload["lastAttemptTlvDetailLevel"] == 1
+    assert payload["lastAttemptTlvDetailLevel"] == 170
     assert payload["networkDiagnosticStatus"] == "no-response"
     assert payload["reachability"] == "unknown"
     assert payload["ping"] == {"status": "no-reply", "timeoutSeconds": 3}

@@ -11,6 +11,9 @@ import re
 import util_ot_ctl
 
 
+DIAGNOSTIC_TLV_CONTROL_TYPES = frozenset({32, 33})
+
+
 # Thread TLV (Type-Length-Value)
 # TLV value sets used for different detail levels by networkdiag functions to request Thread diagnostic information from devices.
 # Some devices fail to return any TLV data when the list contains certain TLVs e.g. 28 Thread Stack Version TLV.
@@ -43,13 +46,77 @@ import util_ot_ctl
 # ROUTER TLVs - includes childtable
 TLV_VALUES_DETAILED = "0 1 2 23 8 4 6 24 25 26 27 28 5 16 9 34"
 TLV_VALUES_MEDIUM = "0 1 2 8 16 9"
-TLV_VALUES_BASIC = "0 1 2 8"
+TLV_VALUES_BASIC_8 = "0 1 2 8"
+TLV_VALUES_BASIC_28 = "0 1 2 28"
+TLV_VALUES_BASIC_2 = "0 1 2"
 
 # CHILD TLVs (excludes TLV 16 Child Table and TLV 6 Leader Data)
 TLV_VALUES_CHILD_DETAILED = "0 1 2 8 9 28 34"
 TLV_VALUES_CHILD_MEDIUM_MAC_MLE = "0 1 2 8 9 34"
 TLV_VALUES_CHILD_MEDIUM_MAC = "0 1 2 8 9"
-TLV_VALUES_CHILD_BASIC = "0 1 2 8"
+TLV_VALUES_CHILD_BASIC_8 = "0 1 2 8"
+TLV_VALUES_CHILD_BASIC_28 = "0 1 2 28"
+TLV_VALUES_CHILD_BASIC_2 = "0 1 2"
+
+
+def _distinct_application_tlv_ids(values: object) -> list[int]:
+    if isinstance(values, str):
+        values = values.split()
+    if not isinstance(values, (list, tuple, set, frozenset)):
+        return []
+    type_ids = set()
+    for value in values:
+        try:
+            type_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if type_id not in DIAGNOSTIC_TLV_CONTROL_TYPES:
+            type_ids.add(type_id)
+    return sorted(type_ids)
+
+
+def format_tlv_summary(values: object) -> str:
+    return " ".join(str(type_id) for type_id in _distinct_application_tlv_ids(values))
+
+
+def summarize_tlv_request_values(request_attempts: object) -> str | None:
+    if not isinstance(request_attempts, (list, tuple)):
+        return None
+    best_ids = None
+    for request in request_attempts:
+        if not isinstance(request, dict) or not isinstance(
+            request.get("requested_type_ids"), list
+        ):
+            continue
+        type_ids = _distinct_application_tlv_ids(request["requested_type_ids"])
+        if best_ids is None or len(type_ids) > len(best_ids):
+            best_ids = type_ids
+    return format_tlv_summary(best_ids) if best_ids is not None else None
+
+
+def summarize_tlv_response_values(history: object) -> str | None:
+    if not isinstance(history, list):
+        return None
+    received_type_ids = set()
+    has_received_evidence = False
+    for observation in history:
+        if not isinstance(observation, dict):
+            continue
+        parse_status = observation.get(
+            "parse_status", observation.get("parseStatus")
+        )
+        if parse_status not in ("valid", "valid-with-malformed-tlvs"):
+            continue
+        values = observation.get(
+            "received_type_ids", observation.get("receivedTypeIds")
+        )
+        if not isinstance(values, list):
+            continue
+        has_received_evidence = True
+        received_type_ids.update(_distinct_application_tlv_ids(values))
+    if not has_received_evidence:
+        return None
+    return format_tlv_summary(received_type_ids)
 
 
 def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
@@ -57,32 +124,40 @@ def get_tlv_values_for_detail_level(tlv_detail_level: int) -> str:
     Maps a detail level to the appropriate TLV values string for network diagnostics.
 
     Args:
-        tlv_detail_level: Detail level (6=DETAILED, 5=MEDIUM, 4/3/2/1=SIMPLE, etc.)
-                         Levels 10-6 are for routers, 5-1 are for child devices.
+        tlv_detail_level: Router levels 500-460 and child levels 200-150,
+                          with higher values requesting more detail.
 
     Returns:
         TLV values string (space-separated TLV numbers)
     """
     match tlv_detail_level:
         # ROUTER TLV sets
-        case 10:
+        case 500:
             return TLV_VALUES_DETAILED
-        case 9:
+        case 490:
             return TLV_VALUES_MEDIUM
-        case 8:
-            return TLV_VALUES_BASIC
+        case 480:
+            return TLV_VALUES_BASIC_8
+        case 470:
+            return TLV_VALUES_BASIC_28
+        case 460:
+            return TLV_VALUES_BASIC_2
 
         # CHILD TLV sets
-        case 4:
+        case 200:
             return TLV_VALUES_CHILD_DETAILED
-        case 3:
+        case 190:
             return TLV_VALUES_CHILD_MEDIUM_MAC_MLE
-        case 2:
+        case 180:
             return TLV_VALUES_CHILD_MEDIUM_MAC
-        case 1:
-            return TLV_VALUES_CHILD_BASIC
+        case 170:
+            return TLV_VALUES_CHILD_BASIC_8
+        case 160:
+            return TLV_VALUES_CHILD_BASIC_28
+        case 150:
+            return TLV_VALUES_CHILD_BASIC_2
         case _:
-            return TLV_VALUES_BASIC
+            return TLV_VALUES_BASIC_8
 
 
 def _parse_meshdiag_ipv6_addresses(output: str) -> dict[str, list[str]]:
@@ -241,10 +316,6 @@ def reconcile_device_record(existing: dict, incoming: dict) -> dict:
         elif field in ("type", "role"):
             if not value_is_empty(new) and (value_is_empty(old) or (old == "router" and new == "border router")):
                 apply(field, new)
-        elif field == "tlvValues" and isinstance(new, dict):
-            if value_is_empty(old) or (isinstance(old, dict) and len(new) > len(old)):
-                if new:
-                    apply(field, new)
         elif field == "threadStackVersion":
             if not value_is_empty(new) and (value_is_empty(old) or old == "Unknown" or len(str(new)) > len(str(old))):
                 apply(field, new)

@@ -84,7 +84,8 @@ EXPLICIT_KEY_MAP: dict[str, str] = {
     "rx_on": "rxOnWhenIdle",
     "rx_on_when_idle": "rxOnWhenIdle",
     "full_net": "fullNetworkData",
-    "tlv_values": "tlvValues",
+    "tlv_values": "tlvRequestValues",
+    "tlv_response_values": "tlvResponseValues",
 
     # Network dataset fields.
     "active_timestamp": "activeTimestamp",

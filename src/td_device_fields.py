@@ -69,7 +69,8 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "networkName", "aliases": ("network_name",), "transform": "identity"},
     {"path": "deviceLabel", "aliases": ("device_label", "hostName", "hostname"), "transform": "identity"},
     {"path": "nodeId", "aliases": ("node_id",), "transform": "identity"},
-    {"path": "tlvValues", "aliases": ("tlv_values",), "transform": "identity"},
+    {"path": "tlvRequestValues", "aliases": ("tlv_request_values", "tlvValues", "tlv_values"), "transform": "identity"},
+    {"path": "tlvResponseValues", "aliases": ("tlv_response_values",), "transform": "identity"},
     {"path": "lastAttemptResponded", "aliases": ("last_attempt_responded",), "transform": "number"},
     {"path": "lastAttemptTlvDetailLevel", "aliases": ("last_attempt_tlv_detail_level",), "transform": "number"},
     {"path": "networkDiagnosticStatus", "aliases": ("network_diagnostic_status",), "transform": "identity"},
@@ -460,10 +461,22 @@ def normalize_input_record(
                 if candidate != preferred:
                     _delete_path(result, candidate)
             continue
-        selected = next(
-            (item for item in found_values if not value_is_empty(item[1])),
-            found_values[0],
-        )
+        if preferred in {"tlvRequestValues", "tlvResponseValues"}:
+            explicit_candidates = (
+                {preferred, *definition["aliases"][:1]}
+                if preferred == "tlvRequestValues"
+                else {preferred, *definition["aliases"]}
+            )
+            selected = next(
+                (item for item in found_values if item[0] in explicit_candidates),
+                None,
+            )
+        else:
+            selected = None
+        selected = selected or next(
+                (item for item in found_values if not value_is_empty(item[1])),
+                found_values[0],
+            )
         selected_path, value = selected
         transformed = _transform_value(definition["transform"], value, source)
         if preferred in {"eui", "threadVersion", "threadVersionDecimal", "threadStackVersion"}:

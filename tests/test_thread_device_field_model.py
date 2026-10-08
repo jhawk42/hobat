@@ -159,6 +159,24 @@ def test_thread_version_aliases_do_not_reinterpret_generic_version() -> None:
     }
 
 
+def test_legacy_tlv_fields_normalize_as_request_only_metadata() -> None:
+    assert normalize_input_record({"tlv_values": "0 1 2 8"}) == {
+        "tlvRequestValues": "0 1 2 8"
+    }
+    assert normalize_input_record({
+        "tlv_request_values": "0 1 2",
+        "tlv_response_values": "0 1",
+    }) == {
+        "tlvRequestValues": "0 1 2",
+        "tlvResponseValues": "0 1",
+    }
+    assert normalize_input_record({
+        "tlvRequestValues": None,
+        "tlvValues": "0 1 2 8",
+    }) == {"tlvRequestValues": None}
+    assert "tlvValues" not in PREFERRED_FIELD_NAMES.values()
+
+
 def test_snapshot_files_exist() -> None:
     missing = [name for name in MODEL["snapshotFiles"] if not (REPO_ROOT / "data" / name).is_file()]
     assert missing == []

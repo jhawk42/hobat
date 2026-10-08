@@ -9,9 +9,11 @@ import ipaddress
 
 import otbr_cli_networkdiag_topology as topology
 from otbr_cli_networkdiag_util import (
-    TLV_VALUES_BASIC,
+    TLV_VALUES_BASIC_8,
     TLV_VALUES_CHILD_DETAILED,
     TLV_VALUES_DETAILED,
+    summarize_tlv_response_values,
+    summarize_tlv_request_values,
 )
 from otbr_cli_networkdiag_parsers import (
     build_tlv_response_observation,
@@ -476,7 +478,7 @@ def test_multicast_query_id_correlation_groups_answers_and_keeps_unknown_ids_unk
     assert first_observation["requested_type_ids"] == [int(t) for t in TLV_VALUES_DETAILED.split()]
 
     basic_request = register_diagnostic_request(
-        collection, "multicast-network", "ff03::1", 1, TLV_VALUES_BASIC
+        collection, "multicast-network", "ff03::1", 1, TLV_VALUES_BASIC_8
     )
     answer_zero = _response(
         "fd00::1",
@@ -541,7 +543,7 @@ def test_later_exclusive_tlv_binds_prior_same_query_observation() -> None:
         collection, "multicast-network", "ff03::1", 0, TLV_VALUES_DETAILED
     )
     basic_request = register_diagnostic_request(
-        collection, "multicast-network", "ff03::1", 1, TLV_VALUES_BASIC
+        collection, "multicast-network", "ff03::1", 1, TLV_VALUES_BASIC_8
     )
     extaddr = "0011223344556677"
     common_payload = (
@@ -628,7 +630,7 @@ def test_multicast_answer_frames_merge_fields_and_retain_grouped_history() -> No
         capture_attempt_index=0,
     )[extaddr]
     basic_request = register_diagnostic_request(
-        collection, "multicast-network", "ff03::1", 1, TLV_VALUES_BASIC
+        collection, "multicast-network", "ff03::1", 1, TLV_VALUES_BASIC_8
     )
     [record] = parse_multicast_diag_output(
         answer_one,
@@ -691,7 +693,7 @@ def test_direct_router_path_decodes_raw_version_and_preserves_empty_vendor(monke
         {},
         {},
         {},
-        10,
+        500,
         collection_context=collection,
         capture_stage="direct-router",
         capture_attempt_index=0,
@@ -741,7 +743,7 @@ def test_direct_child_path_records_child_request_provenance_and_retries(monkeypa
             {},
             {},
             {},
-            4,
+            200,
             collection_context=collection,
             capture_stage="direct-child-detail",
             capture_attempt_index=attempt,
@@ -766,13 +768,133 @@ def test_direct_child_path_records_child_request_provenance_and_retries(monkeypa
     assert len(collection["observations"]) == 2
 
 
+def test_tlv_summaries_use_sent_largest_request_and_cumulative_received_coverage():
+    assert summarize_tlv_request_values([
+        {"requested_type_ids": [0, 1, 2, 8, 32]},
+        {"requested_type_ids": [0, 1, 2, 8, 9, 32, 33]},
+        {"requested_type_ids": [0, 1, 2, 8, 9, 33]},
+    ]) == "0 1 2 8 9"
+    assert summarize_tlv_response_values([
+        {
+            "parse_status": "valid",
+            "received_type_ids": [0, 1, 2, 32, 33],
+        },
+        {
+            "parseStatus": "valid-with-malformed-tlvs",
+            "receivedTypeIds": [8, 24, 24],
+        },
+        {
+            "parse_status": "malformed",
+            "received_type_ids": [99],
+        },
+    ]) == "0 1 2 8 24"
+    assert summarize_tlv_response_values([
+        {"parse_status": "valid", "received_type_ids": [32, 33]}
+    ]) == ""
+    assert summarize_tlv_response_values([
+        {"parse_status": "raw-unavailable", "received_type_ids": []}
+    ]) is None
+
+
+def test_request_summary_does_not_use_unrelated_direct_or_unsent_requests():
+    collection = create_diagnostic_collection_context()
+    direct = register_diagnostic_request(
+        collection, "direct-router", "fd00::400", 0, TLV_VALUES_DETAILED,
+        "0x0400",
+    )
+    unsent = register_diagnostic_request(
+        collection, "direct-router", "fd00::800", 0, TLV_VALUES_BASIC_8,
+        "0x0800",
+    )
+    from otbr_cli_networkdiag_parsers import mark_diagnostic_request_sent
+
+    mark_diagnostic_request_sent(collection, direct)
+    record = {
+        "rloc16": "0x0800",
+        "tlv_response_history": [{
+            "capture_stage": "direct-router",
+            "capture_target": "fd00::400",
+            "parse_status": "valid",
+            "received_type_ids": [0, 1, 2],
+        }],
+    }
+
+    topology._refresh_record_tlv_summaries(record, collection)
+
+    assert record.get("tlv_request_values") is None
+    assert record["tlv_response_values"] == "0 1 2"
+    assert unsent["request_id"] not in collection["sent_request_ids"]
+
+
+def test_request_summary_includes_network_multicast_for_directly_discovered_device():
+    collection = create_diagnostic_collection_context()
+    multicast = register_diagnostic_request(
+        collection, "multicast-network", "ff03::1", 0, TLV_VALUES_DETAILED
+    )
+    direct = register_diagnostic_request(
+        collection, "direct-child-detail", "fd00::1001", 0,
+        TLV_VALUES_CHILD_DETAILED, "0x1001",
+    )
+    from otbr_cli_networkdiag_parsers import mark_diagnostic_request_sent
+
+    mark_diagnostic_request_sent(collection, multicast)
+    mark_diagnostic_request_sent(collection, direct)
+    record = {
+        "rloc16": "0x1001",
+        "tlv_response_history": [{
+            "capture_stage": "direct-child-detail",
+            "capture_target": "fd00::1001",
+            "parse_status": "valid",
+            "received_type_ids": [0, 1, 2],
+        }],
+    }
+
+    topology._refresh_record_tlv_summaries(record, collection)
+
+    assert record["tlv_request_values"] == "0 1 2 4 5 6 8 9 16 23 24 25 26 27 28 34"
+
+
+def test_generic_multicast_summary_uses_target_device_eligibility():
+    from otbr_cli_networkdiag_parsers import mark_diagnostic_request_sent
+
+    expected_request_summaries = {
+        1: "0 1 2 4 5 6 8 9 16 23 24 25 26 27 28 34",
+        0: "0 1 2 8 9 28 34",
+    }
+    for rx_on_when_idle, expected_summary in expected_request_summaries.items():
+        collection = create_diagnostic_collection_context()
+        multicast = register_diagnostic_request(
+            collection, "multicast", "ff03::1", 0, TLV_VALUES_DETAILED
+        )
+        direct = register_diagnostic_request(
+            collection, "direct-child-detail", "fd00::1001", 0,
+            TLV_VALUES_CHILD_DETAILED, "0x1001",
+        )
+        mark_diagnostic_request_sent(collection, multicast)
+        mark_diagnostic_request_sent(collection, direct)
+        record = {
+            "rloc16": "0x1001",
+            "mode": {"rx_on_when_idle": rx_on_when_idle},
+            "tlv_response_history": [{
+                "capture_stage": "direct-child-detail",
+                "capture_target": "fd00::1001",
+                "parse_status": "valid",
+                "received_type_ids": [0, 1, 2],
+            }],
+        }
+
+        topology._refresh_record_tlv_summaries(record, collection)
+
+        assert record["tlv_request_values"] == expected_summary
+
+
 def test_unseen_query_id_cannot_bind_unicast_or_backfill_multicast_history() -> None:
     collection = create_diagnostic_collection_context()
     detailed = register_diagnostic_request(
         collection, "multicast-network", "ff03::1", 0, TLV_VALUES_DETAILED
     )
     basic = register_diagnostic_request(
-        collection, "multicast-network", "ff03::1", 1, TLV_VALUES_BASIC
+        collection, "multicast-network", "ff03::1", 1, TLV_VALUES_BASIC_8
     )
     extaddr = "0011223344556677"
     shared_payload = (
@@ -893,6 +1015,3 @@ Child Table:
     assert parsed["0011223344556677"]["children"] == []
     assert parsed["8899aabbccddeeff"]["children"][0]["rloc16"] == "0x2402"
 # Run this module through the repository pytest entry point.
-
-
-

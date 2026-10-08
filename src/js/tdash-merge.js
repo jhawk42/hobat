@@ -18,6 +18,8 @@ import {
   formatValue,
 } from "./tdash-utils.js";
 
+const TLV_SUMMARY_PRIORITY_FIELD = "_tlv_summary_source_priority";
+
 // ── Row normalisation (used by table renderer + merge strategies) ────────────
 
 export function normalizeRows(rawData, sourceName = "", options = {}) {
@@ -39,11 +41,11 @@ export function normalizeRows(rawData, sourceName = "", options = {}) {
   };
   if (Array.isArray(rawData)) {
     return rawData.map((row, index) => {
-      if (isPlainObject(row))
-        return withRowProvenance(
-          normalizeRelationshipsAndRoles(row),
-          sourceName,
-        );
+      if (isPlainObject(row)) {
+        const normalized = normalizeRelationshipsAndRoles(row);
+        delete normalized[TLV_SUMMARY_PRIORITY_FIELD];
+        return withRowProvenance(normalized, sourceName);
+      }
       return withRowProvenance({ row_index: index, value: row }, sourceName);
     });
   }
@@ -55,6 +57,7 @@ export function normalizeRows(rawData, sourceName = "", options = {}) {
           normalizeRow({ _row_key: key, ...row }),
           { source: fieldSource },
         );
+        delete normalized[TLV_SUMMARY_PRIORITY_FIELD];
         return withRowProvenance(
           normalizeRow(normalized),
           sourceName,
@@ -231,6 +234,22 @@ export function appendRowConflict(target, path, currentValue, incomingValue, lim
   );
   if (!duplicate) {
     conflicts.push({ path, current: currentText, incoming: incomingText });
+  }
+  target._merge_conflicts = conflicts;
+}
+
+function appendTlvSummaryConflict(target, path, currentValue, incomingValue, limit = 20) {
+  const conflicts = Array.isArray(target._merge_conflicts)
+    ? [...target._merge_conflicts]
+    : [];
+  const entry = { path, current: currentValue, incoming: incomingValue };
+  if (conflicts.length < limit && !conflicts.some(
+    (existing) => existing
+      && existing.path === path
+      && existing.current === currentValue
+      && existing.incoming === incomingValue,
+  )) {
+    conflicts.push(entry);
   }
   target._merge_conflicts = conflicts;
 }
@@ -530,10 +549,42 @@ export const MERGE_FIELD_HANDLERS = Object.freeze({
 export function mergeRowFields(target, source, context = {}) {
   mergeMdnsRowIntoTarget(target, source);
   mergeRowMetadata(target, source);
+  const tlvSummaryFields = ["tlvRequestValues", "tlvResponseValues"];
+  const sourceHasTlvSummaries = tlvSummaryFields.some((key) =>
+    Object.prototype.hasOwnProperty.call(source, key));
+  const targetHasTlvSummaries = tlvSummaryFields.some((key) =>
+    Object.prototype.hasOwnProperty.call(target, key));
+  if (sourceHasTlvSummaries) {
+    const existingTlvPriority = Number.isInteger(target[TLV_SUMMARY_PRIORITY_FIELD])
+      ? target[TLV_SUMMARY_PRIORITY_FIELD]
+      : (context.existingPriority ?? 0);
+    const incomingTlvPriority = Number.isInteger(source[TLV_SUMMARY_PRIORITY_FIELD])
+      ? source[TLV_SUMMARY_PRIORITY_FIELD]
+      : (context.incomingPriority ?? 0);
+    tlvSummaryFields.forEach((key) => {
+      if (
+        Object.prototype.hasOwnProperty.call(target, key)
+        && Object.prototype.hasOwnProperty.call(source, key)
+        && !areMergeValuesEquivalent(target[key], source[key])
+      ) {
+        appendTlvSummaryConflict(target, key, target[key], source[key], context.conflictLimit ?? 20);
+      }
+    });
+    if (!targetHasTlvSummaries || incomingTlvPriority > existingTlvPriority) {
+      tlvSummaryFields.forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(source, key)) target[key] = source[key];
+        else delete target[key];
+      });
+      target[TLV_SUMMARY_PRIORITY_FIELD] = incomingTlvPriority;
+    } else if (!Number.isInteger(target[TLV_SUMMARY_PRIORITY_FIELD])) {
+      target[TLV_SUMMARY_PRIORITY_FIELD] = existingTlvPriority;
+    }
+  }
   Object.keys(source).forEach((key) => {
     if (key.startsWith("_")) return;
     // Guard against prototype-pollution keys
     if (key === "__proto__" || key === "constructor" || key === "prototype") return;
+    if (tlvSummaryFields.includes(key)) return;
     const sv = source[key];
     const tv = target[key];
     const handler = MERGE_FIELD_HANDLERS[key];
@@ -977,7 +1028,10 @@ export function mergeRowsByStrategy(rowGroups, strategy, options = {}) {
     });
   });
 
-  return Array.from(mergedRows.values());
+  return Array.from(mergedRows.values()).map((row) => {
+    delete row[TLV_SUMMARY_PRIORITY_FIELD];
+    return row;
+  });
 }
 
 export function mergeRowsByRloc16(rowGroups, options = {}) {

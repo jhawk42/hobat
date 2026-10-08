@@ -280,6 +280,15 @@ positive reachability, while no reply remains unknown and does not mark a sleepy
 child offline. The same option is available on `otbr-cli topology` and applies
 only to its `networkdiag fetch-all` step.
 
+Network Diagnostic snapshots record `tlvRequestValues` as the largest
+applicable request actually sent and `tlvResponseValues` as the cumulative
+application-TLV coverage observed in complete response envelopes. Both are
+numeric-sorted, distinct ID lists that exclude control IDs 32 and 33; `null`
+means the evidence is unavailable, while an empty string means coverage is
+known to be empty. Legacy cached `tlvValues` remains readable as request
+metadata only. Router records without sufficient received coverage continue
+through the existing bounded direct-diagnostic retry sequence.
+
 `otbr-cli device ping` sends bounded active Thread traffic and returns one
 complete result. Its default timeout is 3 seconds, or 10 seconds with
 `--allow-sed`; an explicit `--timeout` overrides either default.

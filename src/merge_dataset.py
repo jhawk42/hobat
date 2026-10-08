@@ -218,7 +218,8 @@ PRIORITY_FIELDS = [
     "vendorName",
     "vendorModel",
     "vendorSwVersion",
-    "tlvValues",              # CLI TLV values
+    "tlvRequestValues",       # CLI request summary (legacy tlvValues accepted)
+    "tlvResponseValues",      # CLI response coverage summary
     
     # MAC Counters (CLI only)
     "macCounters.ifInErrorsPct",
@@ -359,6 +360,9 @@ MERGE_FIELD_HANDLERS = {
     "routerNeighbors": _merge_neighbor_field,
 }
 
+TLV_SUMMARY_FIELDS = ("tlvRequestValues", "tlvResponseValues")
+TLV_SUMMARY_PRIORITY_FIELD = "_tlv_summary_source_priority"
+
 
 def deep_merge(
     base: dict[str, Any],
@@ -390,7 +394,52 @@ def deep_merge(
             conflict_target=conflict_target,
         )
 
+    if not path_prefix:
+        incoming_has_tlv_summaries = any(
+            field in incoming for field in TLV_SUMMARY_FIELDS
+        )
+        existing_has_tlv_summaries = any(
+            field in base for field in TLV_SUMMARY_FIELDS
+        )
+        if incoming_has_tlv_summaries:
+            existing_tlv_priority = base.get(
+                TLV_SUMMARY_PRIORITY_FIELD, context.existing_priority
+            )
+            incoming_tlv_priority = incoming.get(
+                TLV_SUMMARY_PRIORITY_FIELD, context.incoming_priority
+            )
+            if not isinstance(existing_tlv_priority, int):
+                existing_tlv_priority = context.existing_priority
+            if not isinstance(incoming_tlv_priority, int):
+                incoming_tlv_priority = context.incoming_priority
+            for field in TLV_SUMMARY_FIELDS:
+                if (
+                    field in base
+                    and field in incoming
+                    and not values_equivalent(base[field], incoming[field])
+                ):
+                    append_merge_conflict(
+                        conflict_target, field, base[field], incoming[field],
+                        limit=context.conflict_limit,
+                    )
+            if (
+                not existing_has_tlv_summaries
+                or incoming_tlv_priority > existing_tlv_priority
+            ):
+                for field in TLV_SUMMARY_FIELDS:
+                    if field in incoming:
+                        base[field] = deepcopy(incoming[field])
+                    else:
+                        base.pop(field, None)
+                base[TLV_SUMMARY_PRIORITY_FIELD] = incoming_tlv_priority
+            elif TLV_SUMMARY_PRIORITY_FIELD not in base:
+                base[TLV_SUMMARY_PRIORITY_FIELD] = existing_tlv_priority
+
     for key, value in incoming.items():
+        if not path_prefix and key in TLV_SUMMARY_FIELDS:
+            continue
+        if not path_prefix and key == TLV_SUMMARY_PRIORITY_FIELD:
+            continue
         if key == "_merge_conflicts":
             existing_conflicts = conflict_target.setdefault(
                 "_merge_conflicts", [])
@@ -788,6 +837,7 @@ def build_merged_records(
             record = normalize_identifiers(
                 raw_record, omr_prefix, source=_field_source_for_filename(filename)
             )
+            record.pop(TLV_SUMMARY_PRIORITY_FIELD, None)
 
             record_extaddr = record.get("extAddress")
             if isinstance(record_extaddr, str):
@@ -835,6 +885,7 @@ def build_merged_records(
     for _, node in sorted(
         nodes.items(), key=lambda x: (x[1].get("rloc16") or "", x[0])
     ):
+        node.pop(TLV_SUMMARY_PRIORITY_FIELD, None)
         source_files = node.get("_source_files")
 
         # Build _merge_identity_keys (mirrors JS mergeRowsByStrategy output).

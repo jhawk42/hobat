@@ -33,6 +33,7 @@ AREAS = {
     "matter",
     "provenance",
     "conflict",
+    "tlvSummary",
 }
 OPERATIONS = {"normalize", "merge", "network-identity", "collector-reconciliation"}
 ENFORCEMENT_STATES = {"baseline", "contract"}

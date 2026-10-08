@@ -170,6 +170,124 @@
       }
     },
     {
+      "id": "tlv-summary-null-pair-conflict",
+      "area": "tlvSummary",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "A null response summary remains paired with its request instead of borrowing another collection's response.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {"name": "alpha.json", "records": [{"rloc16": "0xabcd", "tlvRequestValues": "0, 1", "tlvResponseValues": null}]},
+          {"name": "beta.json", "records": [{"rloc16": "0xabcd", "tlvRequestValues": "0, 2", "tlvResponseValues": "4, 5"}]}
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0xabcd",
+            "tlvRequestValues": "0, 1",
+            "tlvResponseValues": null,
+            "_source_files": ["alpha.json", "beta.json"],
+            "_merge_conflicts": [
+              {"path": "tlvRequestValues", "current": "0, 1", "incoming": "0, 2"},
+              {"path": "tlvResponseValues", "current": null, "incoming": "4, 5"}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "tlv-summary-empty-pair-conflict",
+      "area": "tlvSummary",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "A known-empty response summary remains distinct from a populated response from another collection.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {"name": "alpha.json", "records": [{"rloc16": "0xabcd", "tlvRequestValues": "0, 1", "tlvResponseValues": ""}]},
+          {"name": "beta.json", "records": [{"rloc16": "0xabcd", "tlvRequestValues": "0, 2", "tlvResponseValues": "4, 5"}]}
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0xabcd",
+            "tlvRequestValues": "0, 1",
+            "tlvResponseValues": "",
+            "_source_files": ["alpha.json", "beta.json"],
+            "_merge_conflicts": [
+              {"path": "tlvRequestValues", "current": "0, 1", "incoming": "0, 2"},
+              {"path": "tlvResponseValues", "current": "", "incoming": "4, 5"}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "tlv-summary-legacy-request-only",
+      "area": "tlvSummary",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "A legacy request-only summary is normalized without borrowing a response from another collection.",
+      "inputs": {
+        "strategy": "by-rloc16",
+        "sources": [
+          {"name": "alpha.json", "records": [{"rloc16": "0xabcd", "tlvValues": "0, 1"}]},
+          {"name": "beta.json", "records": [{"rloc16": "0xabcd", "tlvRequestValues": "0, 2", "tlvResponseValues": "4, 5"}]}
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "rloc16": "0xabcd",
+            "tlvRequestValues": "0, 1",
+            "_source_files": ["alpha.json", "beta.json"],
+            "_merge_conflicts": [
+              {"path": "tlvRequestValues", "current": "0, 1", "incoming": "0, 2"}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "tlv-summary-source-priority-identity-bridge",
+      "area": "tlvSummary",
+      "operation": "merge",
+      "enforcement": "contract",
+      "description": "A higher-priority fetch-all summary remains authoritative when an identity bridge joins rows after a lower-priority multicast summary was merged.",
+      "inputs": {
+        "strategy": "by-identity",
+        "sources": [
+          {"name": "td-static-extaddr-device-label.json", "records": [{"extAddress": "aa11bb22cc33dd44", "deviceLabel": "Router A"}]},
+          {"name": "td-otbr-cli-networkdiag-fetch-all.json", "records": [{"rloc16": "0x1234", "tlvRequestValues": "0 1 2", "tlvResponseValues": "0 1"}]},
+          {"name": "td-otbr-cli-networkdiag-multicast-network.json", "records": [{"extAddress": "aa11bb22cc33dd44", "tlvValues": "0"}]},
+          {"name": "td-otbr-cli-meshdiag-topology.json", "records": [{"extAddress": "aa11bb22cc33dd44", "rloc16": "0x1234"}]}
+        ]
+      },
+      "expected": {
+        "contract": [
+          {
+            "extAddress": "aa11bb22cc33dd44",
+            "rloc16": "0x1234",
+            "deviceLabel": "Router A",
+            "tlvRequestValues": "0 1 2",
+            "tlvResponseValues": "0 1",
+            "_source_files": [
+              "td-static-extaddr-device-label.json",
+              "td-otbr-cli-networkdiag-multicast-network.json",
+              "td-otbr-cli-networkdiag-fetch-all.json",
+              "td-otbr-cli-meshdiag-topology.json"
+            ],
+            "_merge_conflicts": [
+              {"path": "tlvRequestValues", "current": "0", "incoming": "0 1 2"}
+            ]
+          }
+        ]
+      }
+    },
+    {
       "id": "scalar-source-priority-reversed-input",
       "area": "precedence",
       "operation": "merge",

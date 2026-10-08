@@ -296,6 +296,7 @@ def test_networkdiag_final_and_checkpoint_persist_canonical_response_history(tmp
     }]
     record = {
         "extaddr": "0011223344556677",
+        "tlv_request_values": "0 1 2 8",
         "tlv_response_history": history,
     }
     final_path = tmp_path / OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
@@ -320,6 +321,10 @@ def test_networkdiag_final_and_checkpoint_persist_canonical_response_history(tmp
         assert observation["receivedTypeIds"] == [0, 1, 2, 8, 32, 33]
         assert observation["attributedRequest"]["captureStage"] == "multicast-network"
         assert "tlv_response_history" not in saved
+        assert saved["tlvRequestValues"] == "0 1 2 8"
+        assert saved["tlvResponseValues"] == "0 1 2 8"
+        assert "tlvValues" not in saved
+        assert "tlv_values" not in saved
 
 
 def test_standalone_multicast_persists_per_attempt_response_history(monkeypatch, tmp_path):
@@ -358,10 +363,13 @@ def test_standalone_multicast_persists_per_attempt_response_history(monkeypatch,
 
     for path in (final_path, checkpoint_path):
         [saved] = json.loads(path.read_text(encoding="utf-8"))
-        assert len(saved["tlvResponseHistory"]) == 2
-        assert [entry["captureAttemptIndex"] for entry in saved["tlvResponseHistory"]] == [0, 1]
-        assert len({entry["observationId"] for entry in saved["tlvResponseHistory"]}) == 2
+        assert len(saved["tlvResponseHistory"]) == 4
+        assert [entry["captureAttemptIndex"] for entry in saved["tlvResponseHistory"]] == [0, 1, 2, 3]
+        assert len({entry["observationId"] for entry in saved["tlvResponseHistory"]}) == 4
         assert all(entry["receivedTypeIds"] == [0, 1, 2, 8, 24, 32, 33] for entry in saved["tlvResponseHistory"])
+        assert saved["tlvRequestValues"] == "0 1 2 4 5 6 8 9 16 23 24 25 26 27 28 34"
+        assert saved["tlvResponseValues"] == "0 1 2 8 24"
+        assert "tlvValues" not in saved
 
 
 def test_late_multicast_query_id_backfill_reaches_peer_final_and_checkpoint_records(
@@ -388,7 +396,7 @@ def test_late_multicast_query_id_backfill_reaches_peer_final_and_checkpoint_reco
         "IP6 Address List:\n    - fd00::2\n"
         "Vendor Name: Acme\n"
     )
-    outputs = iter((first_output, late_detailed_output))
+    outputs = iter((first_output, late_detailed_output, "", ""))
     monkeypatch.setattr(networkdiag.util_ot_ctl, "exec_ot_ctl", lambda _command: next(outputs))
     monkeypatch.setattr(networkdiag.time, "sleep", lambda _seconds: None)
     final_path = tmp_path / "td-otbr-cli-networkdiag-multicast-network.json"
@@ -424,6 +432,75 @@ def test_late_multicast_query_id_backfill_reaches_peer_final_and_checkpoint_reco
         assert associations == {"query-id", "request-set"}
 
 
+@pytest.mark.parametrize(
+    ("existing_record", "skip_direct"),
+    [
+        pytest.param({"tlv_response_history": []}, False, id="empty-snake-case-history"),
+        pytest.param({"tlvResponseHistory": []}, False, id="empty-camel-case-history"),
+        pytest.param({"tlv_response_history": None}, False, id="null-history"),
+        pytest.param(
+            {
+                "tlv_response_history": [{
+                    "parse_status": "valid",
+                    "received_type_ids": [0, 1, 2, 8],
+                }]
+            },
+            True,
+            id="four-received-application-ids",
+        ),
+        pytest.param(
+            {
+                "tlvResponseHistory": [{
+                    "parseStatus": "valid",
+                    "receivedTypeIds": [0, 1, 2, 32, 33],
+                }]
+            },
+            False,
+            id="three-received-application-ids-and-control-tlvs",
+        ),
+        pytest.param({}, False, id="missing-history"),
+        pytest.param(None, False, id="missing-record"),
+    ],
+)
+def test_direct_router_requires_history_field_to_skip_queries(
+    monkeypatch, existing_record, skip_direct
+):
+    rloc16 = "0x0400"
+    identity = {"rloc16": rloc16, "extaddr": "0011223344556677"}
+    topology_map = {}
+    if existing_record is not None:
+        topology_map[rloc16] = {**identity, **existing_record}
+    calls = []
+    delays = []
+
+    def fetch(*args, **kwargs):
+        calls.append(args[5])
+        return None if len(calls) == 1 else {
+            **identity,
+            "tlv_response_history": [{"observation_id": "direct-router-response"}],
+        }
+
+    monkeypatch.setattr(networkdiag, "fetch_network_diag_for_device", fetch)
+    monkeypatch.setattr(networkdiag.time, "sleep", delays.append)
+    monkeypatch.setattr(networkdiag, "save_topology_to_json_file", lambda *_args, **_kwargs: None)
+
+    networkdiag.fetch_network_diag_topology_detail_routers(
+        [rloc16], topology_map, {}, {}, {}, None, None, {}, None
+    )
+
+    assert calls == ([] if skip_direct else [500, 490])
+    assert delays == ([] if skip_direct else [0.1])
+    assert topology_map[rloc16]["extaddr"] == identity["extaddr"]
+    if not skip_direct:
+        history = topology_map[rloc16].get(
+            "tlv_response_history", topology_map[rloc16].get("tlvResponseHistory")
+        )
+        assert any(
+            observation.get("observation_id") == "direct-router-response"
+            for observation in history
+        )
+
+
 def test_exhausted_direct_router_checkpoints_both_no_response_attempts(monkeypatch):
     collection = networkdiag.create_diagnostic_collection_context()
     target = networkdiag.util_network.build_rloc16_ipv6_address(
@@ -436,7 +513,7 @@ def test_exhausted_direct_router_checkpoints_both_no_response_attempts(monkeypat
             "direct-router",
             target,
             attempt_index,
-            networkdiag.get_tlv_values_for_detail_level(10 if attempt_index == 0 else 9),
+            networkdiag.get_tlv_values_for_detail_level(500 if attempt_index == 0 else 490),
             "0x0400",
         )
         networkdiag.build_unframed_tlv_response_observation(
@@ -614,9 +691,36 @@ def test_networkdiag_multicast_collector_checkpoint_final_and_return_order(monke
     assert events == ["collect", checkpoint_path, output_path, "returned"]
 
 
-def test_multicast_networkdiag_uses_detailed_then_basic_tlvs(monkeypatch):
+@pytest.mark.parametrize("multicast_addr", ["ff03::1", "ff02::1"])
+def test_multicast_networkdiag_request_metadata_matches_commands(monkeypatch, multicast_addr):
     commands = []
     delays = []
+    parsed_requests = []
+    collection = networkdiag.create_diagnostic_collection_context()
+    expected_tlv_sets = [
+        networkdiag.TLV_VALUES_DETAILED,
+        "0 1 2 8",
+        "0 1 2 28",
+        "0 1 2",
+    ]
+    expected_type_ids = [
+        [int(value) for value in tlv_values.split()]
+        for tlv_values in expected_tlv_sets
+    ]
+
+    def parse_output(_output, _extaddr_map, **kwargs):
+        request = kwargs["request_context"]
+        attempt_index = kwargs["capture_attempt_index"]
+        assert kwargs["collection_context"] is collection
+        assert kwargs["capture_target"] == multicast_addr
+        assert request["capture_target"] == multicast_addr
+        assert request["attempt_index"] == attempt_index
+        assert [
+            item["requested_type_ids"] for item in collection["request_attempts"]
+        ] == expected_type_ids
+        parsed_requests.append(request["requested_type_ids"])
+        return {}
+
     monkeypatch.setattr(
         networkdiag.util_ot_ctl,
         "exec_ot_ctl",
@@ -625,24 +729,26 @@ def test_multicast_networkdiag_uses_detailed_then_basic_tlvs(monkeypatch):
     monkeypatch.setattr(
         networkdiag,
         "parse_multicast_diag_output",
-        lambda *_args, **_kwargs: {},
+        parse_output,
     )
     monkeypatch.setattr(networkdiag.time, "sleep", delays.append)
 
     result = networkdiag.fetch_network_diag_multicast(
-        "ff03::1",
+        multicast_addr,
         extaddr_map={},
         thread_network_info={},
         router_table_by_router_id={},
         primary_bbr_observation=None,
+        collection_context=collection,
     )
 
     assert result == {}
     assert commands == [
-        f"networkdiagnostic get ff03::1 {networkdiag.TLV_VALUES_DETAILED}",
-        f"networkdiagnostic get ff03::1 {networkdiag.TLV_VALUES_BASIC}",
+        f"networkdiagnostic get {multicast_addr} {tlv_values}"
+        for tlv_values in expected_tlv_sets
     ]
-    assert delays == [0.1]
+    assert parsed_requests == expected_type_ids
+    assert delays == [0.1, 0.1, 0.1]
 
 
 def test_multicast_basic_retry_retains_detailed_thread_version(monkeypatch):
@@ -651,7 +757,7 @@ def test_multicast_basic_retry_retains_detailed_thread_version(monkeypatch):
         "DIAG_GET.rsp/ans from fd00::1: 00088e3b369df65e949601027c00\n"
         "Ext Address: 8e3b369df65e9496\nRloc16: 0x7c00\n"
     )
-    responses = iter((detailed, basic))
+    responses = iter((detailed, basic, basic, basic))
     monkeypatch.setattr(networkdiag.util_ot_ctl, "exec_ot_ctl", lambda _command: next(responses))
     monkeypatch.setattr(networkdiag.time, "sleep", lambda _delay: None)
 
