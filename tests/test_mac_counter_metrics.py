@@ -110,6 +110,36 @@ def test_derive_mac_counter_metrics_preserves_rounding_and_key_presence() -> Non
     }
 
 
+def test_mac_discard_ratio_can_exceed_one_across_source_adapters() -> None:
+    raw = {
+        "ifinucastpkts": 2_930_670,
+        "ifindiscards": 21_226_370,
+    }
+    expected_ratio = 7.2
+
+    raw_enriched = enrich_raw_mac_counters(raw)
+    assert raw_enriched["iftotalpkts"] == 2_930_670
+    assert raw_enriched["iftotaldiscards_totalpkts_ratio"] == expected_ratio
+
+    cli_enriched = parse_mac_counters(
+        "MAC Counters:\n"
+        "    IfInUcastPkts: 2930670\n"
+        "    IfInDiscards: 21226370\n"
+    )
+    assert cli_enriched["iftotalpkts"] == 2_930_670
+    assert cli_enriched["iftotaldiscards_totalpkts_ratio"] == expected_ratio
+
+    rest_counters = {"ifInUcastPkts": 2_930_670, "ifInDiscards": 21_226_370}
+    enrich_mac_counters(rest_counters)
+    assert rest_counters["iftotalpkts"] == 2_930_670
+    assert rest_counters["iftotaldiscards_totalpkts_ratio"] == expected_ratio
+
+    camel_rest_counters = dict(rest_counters)
+    enrich_camel_mac_counters(camel_rest_counters)
+    assert camel_rest_counters["ifTotalPkts"] == 2_930_670
+    assert camel_rest_counters["ifTotalDiscardsTotalPktsRatio"] == expected_ratio
+
+
 def test_parse_mac_counters_composes_raw_and_derived_results() -> None:
     output = """MAC Counters:
     IfInUcastPkts: 2

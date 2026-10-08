@@ -252,6 +252,161 @@ def test_migrate_history_creates_verified_backup_and_revision(tmp_path) -> None:
         assert target["assessment_id"] != source["assessment_id"]
 
 
+def test_history_replay_accepts_gt_one_mac_ratios_without_rewriting_history(tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _seed(data_dir)
+    snapshot = data_dir / "td-otbr-cli-networkdiag-fetch-all.json"
+    snapshot.write_text(
+        json.dumps([{
+            "extAddress": "8672766ae0578187",
+            "role": "router",
+            "macCounters": {
+                "ifTotalPkts": 2_930_670,
+                "ifTotalErrorsTotalPktsRatio": 1.5,
+                "ifTotalDiscardsTotalPktsRatio": 7.2,
+            },
+        }]),
+        encoding="utf-8",
+    )
+    database_path = data_dir / HOBAT_DATABASE_FILENAME
+    store = SQLiteHealthStore(database_path)
+    processed = process_health(
+        data_dir=data_dir,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=store,
+    )
+    observation_id = processed.observation.observation_id
+    assessment_id = processed.assessment.assessment_id
+    with closing(store._connect()) as connection, connection:
+        connection.execute(
+            """UPDATE assessments
+               SET evaluator_version='snapshot-v10', reproduction_context_json='{}'
+               WHERE assessment_id=?""",
+            (assessment_id,),
+        )
+        original_rows = {
+            "observation": connection.execute(
+                """SELECT source_set_digest, observed_at, completeness
+                   FROM observations WHERE observation_id=?""",
+                (observation_id,),
+            ).fetchone(),
+            "sources": connection.execute(
+                """SELECT filename, digest, kind, state, source_observed_at
+                   FROM observation_sources WHERE observation_id=?
+                   ORDER BY filename""",
+                (observation_id,),
+            ).fetchall(),
+            "metrics": connection.execute(
+                """SELECT metric, value, unit, denominator, source_file
+                   FROM metric_samples WHERE observation_id=?
+                   ORDER BY metric, source_file""",
+                (observation_id,),
+            ).fetchall(),
+            "assessment": connection.execute(
+                """SELECT evaluator_version, status, confidence, coverage_json,
+                          sample_contract_version, health_policy_digest,
+                          reproduction_context_json
+                   FROM assessments WHERE assessment_id=?""",
+                (assessment_id,),
+            ).fetchone(),
+            "findings": connection.execute(
+                """SELECT finding_id, rule_id, status, scope, rank, title, summary,
+                          why_it_matters, evidence_json, confidence, action, verify,
+                          source_files_json, device_ids_json, relationship_ids_json
+                   FROM findings WHERE assessment_id=? ORDER BY finding_id""",
+                (assessment_id,),
+            ).fetchall(),
+        }
+    assert {
+        row[0]: (row[1], row[2], row[3])
+        for row in original_rows["metrics"]
+        if row[0] in {"totalMacErrorRatio", "totalMacDiscardRatio"}
+    } == {
+        "totalMacErrorRatio": (1.5, "ratio", 2_930_670.0),
+        "totalMacDiscardRatio": (7.2, "ratio", 2_930_670.0),
+    }
+
+    policy = load_health_policy()
+    inventory = inventory_health_history(
+        SQLiteHealthStore(database_path, read_only=True),
+        target_policy=policy,
+        dataset_ids=("otbr_cli_networkdiag_fetch_all",),
+    )
+    item = next(item for item in inventory.items if item.observation_id == observation_id)
+    assert item.eligibility.value != "invalid"
+    report = migrate_health_history(
+        SQLiteHealthStore(database_path, read_only=True),
+        data_dir=data_dir,
+        target_policy=policy,
+        inventory=inventory,
+        backup_output=tmp_path / "backup",
+    )
+    assert report["outcome"] == "complete"
+    assert report["totals"]["created"] == 1
+
+    with closing(store._connect()) as connection:
+        assert connection.execute(
+            """SELECT source_set_digest, observed_at, completeness
+               FROM observations WHERE observation_id=?""",
+            (observation_id,),
+        ).fetchone() == original_rows["observation"]
+        assert connection.execute(
+            """SELECT filename, digest, kind, state, source_observed_at
+               FROM observation_sources WHERE observation_id=?
+               ORDER BY filename""",
+            (observation_id,),
+        ).fetchall() == original_rows["sources"]
+        assert connection.execute(
+            """SELECT metric, value, unit, denominator, source_file
+               FROM metric_samples WHERE observation_id=?
+               ORDER BY metric, source_file""",
+            (observation_id,),
+        ).fetchall() == original_rows["metrics"]
+        assert connection.execute(
+            """SELECT evaluator_version, status, confidence, coverage_json,
+                      sample_contract_version, health_policy_digest,
+                      reproduction_context_json
+               FROM assessments WHERE assessment_id=?""",
+            (assessment_id,),
+        ).fetchone() == original_rows["assessment"]
+        assert connection.execute(
+            """SELECT finding_id, rule_id, status, scope, rank, title, summary,
+                      why_it_matters, evidence_json, confidence, action, verify,
+                      source_files_json, device_ids_json, relationship_ids_json
+               FROM findings WHERE assessment_id=? ORDER BY finding_id""",
+            (assessment_id,),
+        ).fetchall() == original_rows["findings"]
+        target_assessment_id = connection.execute(
+            """SELECT target_assessment_id FROM health_assessment_upgrades
+               WHERE source_assessment_id=?""",
+            (assessment_id,),
+        ).fetchone()[0]
+        migrated_findings = connection.execute(
+            """SELECT finding_id, rule_id, status, scope, rank, title, summary,
+                      why_it_matters, evidence_json, confidence, action, verify,
+                      source_files_json, device_ids_json, relationship_ids_json
+               FROM findings WHERE assessment_id=? ORDER BY finding_id""",
+            (target_assessment_id,),
+        ).fetchall()
+    assert {
+        row[1]: (row[2], row[8])
+        for row in migrated_findings
+        if row[1] in {
+            "device.totalMacErrorRatio",
+            "device.totalMacDiscardRatio",
+        }
+    } == {
+        row[1]: (row[2], row[8])
+        for row in original_rows["findings"]
+        if row[1] in {
+            "device.totalMacErrorRatio",
+            "device.totalMacDiscardRatio",
+        }
+    }
+
+
 def test_migrate_history_missing_datadir_does_not_create_it(tmp_path) -> None:
     missing = tmp_path / "missing"
     assert td_health_cli.main([

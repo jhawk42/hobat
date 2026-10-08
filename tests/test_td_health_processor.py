@@ -1344,6 +1344,48 @@ def test_mac_counter_ratios_remain_unit_ratios(tmp_path) -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("dataset_id", "filename"),
+    [
+        (
+            "otbr_cli_networkdiag_fetch_all",
+            "td-otbr-cli-networkdiag-fetch-all.json",
+        ),
+        (
+            "otbr_restapi_devices_fetch_diagnostics_fetch_all",
+            "td-otbr-restapi-diagnostics-fetch-all.json",
+        ),
+        (
+            "merged_otbr_topology_mdns_health",
+            "td-otbr-restapi-diagnostics-fetch-all.json",
+        ),
+    ],
+)
+def test_mac_ratio_projection_preserves_values_and_packet_denominator(
+    dataset_id, filename
+) -> None:
+    dataset = load_health_manifest().dataset(dataset_id)
+    payloads = {source_file: [] for source_file in dataset.files}
+    payloads[filename] = [
+        {
+            "extAddress": "0000000000000001",
+            "macCounters": {
+                "ifTotalPkts": 2_930_670,
+                "ifTotalErrorsTotalPktsRatio": 0.1,
+                "ifTotalDiscardsTotalPktsRatio": 7.2,
+            },
+        },
+    ]
+
+    _, _, metrics, _, _ = _normalize_samples(dataset, payloads)
+
+    projected = {metric.metric: metric for metric in metrics}
+    assert projected["totalMacErrorRatio"].value == 0.1
+    assert projected["totalMacErrorRatio"].denominator == 2_930_670
+    assert projected["totalMacDiscardRatio"].value == 7.2
+    assert projected["totalMacDiscardRatio"].denominator == 2_930_670
+
+
 def test_merged_dataset_normalizes_relationship_error_rates_by_file_source() -> None:
     dataset = load_health_manifest().dataset("merged_otbr_topology_mdns_health")
     payloads = {filename: [] for filename in dataset.files}

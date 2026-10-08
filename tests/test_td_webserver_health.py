@@ -149,7 +149,15 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                 encoding="utf-8",
             )
             (data_dir / "td-otbr-cli-networkdiag-fetch-all.json").write_text(
-                json.dumps([{"extaddr": "8672766ae0578187", "state": "detached"}]),
+                json.dumps([{
+                    "extaddr": "8672766ae0578187",
+                    "state": "detached",
+                    "macCounters": {
+                        "ifTotalPkts": 2_930_670,
+                        "ifTotalErrorsTotalPktsRatio": 1.5,
+                        "ifTotalDiscardsTotalPktsRatio": 7.2,
+                    },
+                }]),
                 encoding="utf-8",
             )
             processed = process_health(
@@ -158,6 +166,24 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             )
             observation, assessment = processed.observation, processed.assessment
             device_id = observation.devices[0].device_id
+            with sqlite3.connect(store.path) as connection:
+                original_metric_rows = connection.execute(
+                    """SELECT metric, value, unit, denominator, source_file
+                       FROM metric_samples WHERE observation_id=?
+                       ORDER BY metric, source_file""",
+                    (observation.observation_id,),
+                ).fetchall()
+                original_finding_rows = connection.execute(
+                    """SELECT finding_id, rule_id, status, summary, evidence_json
+                       FROM findings WHERE assessment_id=? ORDER BY finding_id""",
+                    (assessment.assessment_id,),
+                ).fetchall()
+                original_assessment_row = connection.execute(
+                    """SELECT status, confidence, coverage_json, assessed_at,
+                              reproduction_context_json
+                       FROM assessments WHERE assessment_id=?""",
+                    (assessment.assessment_id,),
+                ).fetchone()
             initial_detail = await td_webserver.handle_health_roster_device_api(_request(
                 data_dir,
                 query={"network": observation.network_id, "assessment": assessment.assessment_id},
@@ -194,9 +220,115 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result["changed"])
             self.assertEqual(result["rosterState"], "expected")
             self.assertEqual(result["revision"], 1)
+            self.assertEqual(result["networkRosterRevision"], 1)
+            self.assertEqual(result["reassessment"]["state"], "complete")
+            with sqlite3.connect(store.path) as connection:
+                enrolled = connection.execute(
+                    """SELECT roster_state, revision, reason
+                       FROM expected_devices WHERE network_id=? AND device_id=?""",
+                    (observation.network_id, device_id),
+                ).fetchone()
+                self.assertEqual(enrolled, ("expected", 1, "Managed device"))
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT revision FROM network_roster_revisions WHERE network_id=?",
+                        (observation.network_id,),
+                    ).fetchone(),
+                    (1,),
+                )
+                event = connection.execute(
+                    """SELECT request_id, action, context_assessment_id,
+                              device_revision, network_revision
+                       FROM roster_lifecycle_events WHERE network_id=?""",
+                    (observation.network_id,),
+                ).fetchone()
+                self.assertEqual(
+                    event,
+                    (
+                        payload["requestId"],
+                        "enroll",
+                        assessment.assessment_id,
+                        1,
+                        1,
+                    ),
+                )
+                receipt = connection.execute(
+                    """SELECT request_id, event_id, result_revision, response_json
+                       FROM roster_mutation_receipts WHERE network_id=?""",
+                    (observation.network_id,),
+                ).fetchone()
+                self.assertEqual(receipt[:3], (payload["requestId"], result["eventId"], 1))
+                self.assertEqual(json.loads(receipt[3]), result)
+                current = connection.execute(
+                    """SELECT assessment_id FROM current_assessments
+                       WHERE network_id=? AND dataset_id=?""",
+                    (observation.network_id, observation.dataset_id),
+                ).fetchone()
+                self.assertIsNotNone(current)
+                self.assertNotEqual(current[0], assessment.assessment_id)
+                self.assertEqual(
+                    connection.execute(
+                        """SELECT status, confidence, coverage_json, assessed_at,
+                                  reproduction_context_json
+                           FROM assessments WHERE assessment_id=?""",
+                        (assessment.assessment_id,),
+                    ).fetchone(),
+                    original_assessment_row,
+                )
+                self.assertEqual(
+                    connection.execute(
+                        """SELECT metric, value, unit, denominator, source_file
+                           FROM metric_samples WHERE observation_id=?
+                           ORDER BY metric, source_file""",
+                        (observation.observation_id,),
+                    ).fetchall(),
+                    original_metric_rows,
+                )
+                self.assertEqual(
+                    connection.execute(
+                        """SELECT finding_id, rule_id, status, summary, evidence_json
+                           FROM findings WHERE assessment_id=? ORDER BY finding_id""",
+                        (assessment.assessment_id,),
+                    ).fetchall(),
+                    original_finding_rows,
+                )
+                current_mac_findings = connection.execute(
+                    """SELECT rule_id, status, summary, evidence_json
+                       FROM findings WHERE assessment_id=?
+                         AND rule_id IN (
+                             'device.totalMacErrorRatio',
+                             'device.totalMacDiscardRatio'
+                         )
+                       ORDER BY rule_id""",
+                    (current[0],),
+                ).fetchall()
+                original_mac_findings = sorted(
+                    (row[1], row[2], row[3], row[4])
+                    for row in original_finding_rows
+                    if row[1] in {
+                        "device.totalMacErrorRatio",
+                        "device.totalMacDiscardRatio",
+                    }
+                )
+                self.assertEqual(current_mac_findings, original_mac_findings)
             replay = await td_webserver.handle_health_roster_device_patch_api(request)
             self.assertEqual(json.loads(replay.text), result)
             self.assertEqual(replay.status, 201)
+            with sqlite3.connect(store.path) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM roster_lifecycle_events WHERE network_id=?",
+                        (observation.network_id,),
+                    ).fetchone(),
+                    (1,),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM roster_mutation_receipts WHERE network_id=?",
+                        (observation.network_id,),
+                    ).fetchone(),
+                    (1,),
+                )
 
             no_op_payload = dict(
                 payload,
@@ -260,6 +392,108 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
                 _request(data_dir)
             )
             self.assertEqual(json.loads(capabilities.text)["rosterMutation"], 1)
+
+    async def test_roster_patch_rolls_back_when_unrelated_retained_sample_is_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+            (data_dir / "td-otbr-cli-thread-network-info.json").write_text(
+                json.dumps({"extPanId": "78b9775b001c1cbe", "networkName": "island"}),
+                encoding="utf-8",
+            )
+            (data_dir / "td-otbr-cli-networkdiag-fetch-all.json").write_text(
+                json.dumps([{
+                    "extaddr": "8672766ae0578187",
+                    "state": "detached",
+                    "macCounters": {
+                        "ifTotalPkts": 100,
+                        "ifTotalDiscardsTotalPktsRatio": 7.2,
+                    },
+                    "timeStatistics": {"routerPct": 50.0},
+                }]),
+                encoding="utf-8",
+            )
+            processed = process_health(
+                data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+                policy=load_health_policy(), store=store,
+            )
+            observation, assessment = processed.observation, processed.assessment
+            device_id = observation.devices[0].device_id
+            with sqlite3.connect(store.path) as connection:
+                connection.execute(
+                    """UPDATE metric_samples SET value=101
+                       WHERE observation_id=? AND metric='routerRolePercent'""",
+                    (observation.observation_id,),
+                )
+                connection.commit()
+                self.assertEqual(
+                    connection.execute(
+                        """SELECT value FROM metric_samples
+                           WHERE observation_id=? AND metric='routerRolePercent'""",
+                        (observation.observation_id,),
+                    ).fetchone(),
+                    (101.0,),
+                )
+
+            request_id = "73b4c344-c7f9-41ce-9f3e-a62d4eb7b116"
+            payload = {
+                "action": "enroll",
+                "requestId": request_id,
+                "expectedRevision": 0,
+                "contextAssessmentId": assessment.assessment_id,
+            }
+            with self.assertRaises(aiohttp.web.HTTPInternalServerError):
+                await td_webserver.handle_health_roster_device_patch_api(_patch_request(
+                    data_dir,
+                    network=observation.network_id,
+                    device_id=device_id,
+                    payload=payload,
+                ))
+
+            with sqlite3.connect(store.path) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM expected_devices WHERE network_id=?",
+                        (observation.network_id,),
+                    ).fetchone(),
+                    (0,),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM roster_lifecycle_events WHERE network_id=?",
+                        (observation.network_id,),
+                    ).fetchone(),
+                    (0,),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM roster_mutation_receipts WHERE network_id=?",
+                        (observation.network_id,),
+                    ).fetchone(),
+                    (0,),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM network_roster_revisions WHERE network_id=?",
+                        (observation.network_id,),
+                    ).fetchone(),
+                    (0,),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        """SELECT assessment_id FROM current_assessments
+                           WHERE network_id=? AND dataset_id=?""",
+                        (observation.network_id, observation.dataset_id),
+                    ).fetchone(),
+                    (assessment.assessment_id,),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM assessments WHERE observation_id=?",
+                        (observation.observation_id,),
+                    ).fetchone(),
+                    (1,),
+                )
 
     async def test_roster_patch_rejects_invalid_content_and_boolean_revision(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

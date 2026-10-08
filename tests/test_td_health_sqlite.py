@@ -78,6 +78,59 @@ def _result(suffix: str = "1") -> tuple[Observation, Assessment]:
     return observation, assessment
 
 
+def _result_with_metric(
+    metric: str,
+    value: float,
+    unit: str,
+    denominator: float | None,
+    *,
+    suffix: str = "1",
+) -> tuple[Observation, Assessment]:
+    observation, assessment = _result(suffix)
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    source = SourceEvidence(
+        filename, "source-digest", "final", "valid", observation.observed_at
+    )
+    observation = replace(
+        observation,
+        source_set_digest=hashlib.sha256(
+            f"{filename}:source-digest".encode("utf-8")
+        ).hexdigest(),
+        sources=(source,),
+        devices=tuple(
+            replace(device, source_files=(filename,))
+            for device in observation.devices
+        ),
+        metrics=(
+            MetricSample(
+                observation.devices[0].device_id,
+                metric,
+                value,
+                unit,
+                denominator,
+                filename,
+            ),
+        ),
+    )
+    return observation, assessment
+
+
+def _reconstruct_observation(
+    store: SQLiteHealthStore, assessment_id: str
+) -> Observation:
+    with closing(store._connect()) as connection:
+        row = connection.execute(
+            """SELECT a.*, o.datasource_id, o.dataset_id, o.network_id,
+                      o.network_name, o.observed_at, o.ingested_at, o.completeness,
+                      o.source_set_digest
+               FROM assessments a JOIN observations o USING (observation_id)
+               WHERE a.assessment_id=?""",
+            (assessment_id,),
+        ).fetchone()
+        assert row is not None
+        return SQLiteHealthStore._retained_observation(connection, row)
+
+
 def test_atomic_save_is_idempotent_and_sets_sqlite_guards(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / "health.db")
     observation, assessment = _result()
@@ -1297,6 +1350,118 @@ def test_route64_contract_cannot_upgrade_immutable_observation_samples(tmp_path)
             (assessment.assessment_id,),
         )
     assert store.save_processing_result(observation, updated).assessment_created
+
+
+@pytest.mark.parametrize(
+    ("metric", "value"),
+    [
+        (metric, value)
+        for metric in ("totalMacErrorRatio", "totalMacDiscardRatio")
+        for value in (0.0, 1.0, 1.5, 7.2)
+    ],
+)
+def test_retained_mac_ratios_round_trip_without_rescaling(tmp_path, metric, value) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result_with_metric(metric, value, "ratio", 100.0)
+    store.save_processing_result(observation, assessment)
+
+    retained = _reconstruct_observation(store, assessment.assessment_id)
+
+    sample = next(item for item in retained.metrics if item.metric == metric)
+    assert sample.value == value
+    assert sample.denominator == 100.0
+
+
+@pytest.mark.parametrize(
+    ("metric", "value", "denominator"),
+    [
+        ("totalMacErrorRatio", -0.1, 100.0),
+        ("totalMacDiscardRatio", -0.1, 100.0),
+        ("totalMacErrorRatio", float("inf"), 100.0),
+        ("totalMacDiscardRatio", float("inf"), 100.0),
+        ("totalMacErrorRatio", 1.5, None),
+        ("totalMacDiscardRatio", 1.5, None),
+        ("totalMacErrorRatio", 1.5, 0.0),
+        ("totalMacDiscardRatio", 1.5, 0.0),
+        ("totalMacErrorRatio", 1.5, -1.0),
+        ("totalMacDiscardRatio", 1.5, -1.0),
+        ("totalMacErrorRatio", 1.5, float("inf")),
+        ("totalMacDiscardRatio", 1.5, float("inf")),
+    ],
+)
+def test_retained_mac_ratios_reject_invalid_values_and_denominators(
+    tmp_path, metric, value, denominator
+) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result_with_metric(metric, value, "ratio", denominator)
+    store.save_processing_result(observation, assessment)
+
+    with pytest.raises(sqlite3.DatabaseError):
+        _reconstruct_observation(store, assessment.assessment_id)
+
+
+@pytest.mark.parametrize(
+    ("metric", "unit", "value", "denominator", "valid"),
+    [
+        ("routerRolePercent", "percent", 100.0, None, True),
+        ("routerRolePercent", "percent", 100.1, None, False),
+        ("route64Coverage", "flag", 1.0, None, True),
+        ("route64Coverage", "flag", 2.0, None, False),
+        ("parentChanges", "count", 0.0, None, True),
+        ("parentChanges", "count", -1.0, None, False),
+    ],
+)
+def test_retained_non_mac_metric_bounds_remain_unchanged(
+    tmp_path, metric, unit, value, denominator, valid
+) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result_with_metric(metric, value, unit, denominator)
+    store.save_processing_result(observation, assessment)
+
+    if valid:
+        retained = _reconstruct_observation(store, assessment.assessment_id)
+        assert retained.metrics[0].value == value
+    else:
+        with pytest.raises(sqlite3.DatabaseError):
+            _reconstruct_observation(store, assessment.assessment_id)
+
+
+def test_mac_ratio_comparison_read_preserves_values_units_and_delta(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    for suffix, value in (("1", 1.5), ("2", 7.2)):
+        observation, assessment = _result_with_metric(
+            "totalMacDiscardRatio", value, "ratio", 100.0, suffix=suffix
+        )
+        store.save_processing_result(
+            observation,
+            replace(
+                assessment,
+                sample_contract_version="comparison-v1",
+                health_policy_digest="health-policy",
+            ),
+        )
+    service = TDHealthReadService(tmp_path)
+    listing = service.comparisons(
+        network_id="extpan:78b9775b001c1cbe",
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        limit=25,
+        offset=0,
+    )
+
+    assert listing["total"] == 1
+    comparison = service.comparison(
+        comparison_id=listing["items"][0]["comparisonId"],
+        limit=25,
+        offset=0,
+    )
+    item = next(
+        item for item in comparison["items"]
+        if item["metric"] == "totalMacDiscardRatio"
+    )
+    assert item["unit"] == "ratio"
+    assert item["beforeValue"] == 1.5
+    assert item["afterValue"] == 7.2
+    assert item["delta"] == 570.0
 
 
 def test_pruned_numeric_delta_is_suppressed_without_mutating_persisted_item(tmp_path) -> None:

@@ -2380,6 +2380,7 @@ class SQLiteHealthStore:
             "observedLinkQuality2Count": "count",
             "observedLinkQuality3Count": "count",
         }
+        mac_ratio_metrics = {"totalMacErrorRatio", "totalMacDiscardRatio"}
         for item in connection.execute(
             """SELECT device_id, metric, value, unit, denominator, source_file
                FROM metric_samples WHERE observation_id=?
@@ -2408,7 +2409,9 @@ class SQLiteHealthStore:
                 and (
                     item["denominator"] is None
                     or item["denominator"] <= 0
-                    or not 0 <= item["value"] <= 1
+                    or item["value"] < 0
+                    or item["metric"] not in mac_ratio_metrics
+                    and item["value"] > 1
                 )
                 or item["unit"] == "percent"
                 and not 0 <= item["value"] <= 100
