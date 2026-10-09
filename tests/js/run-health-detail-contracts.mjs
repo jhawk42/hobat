@@ -1,15 +1,27 @@
 import assert from "node:assert/strict";
-import {renderHealthFindingDetails, renderHealthComparison} from "../../src/js/tdash-health.js";
+import {
+  renderHealthFindingDetails, renderHealthComparison, renderHealthRoster,
+} from "../../src/js/tdash-health.js";
 
 class Element {
   constructor(tagName) {
-    Object.assign(this, {tagName, children: [], dataset: {}, attributes: {}, listeners: {}});
+    Object.assign(this, {tagName, children: [], dataset: {}, attributes: {}, listeners: {},
+      classList: {toggle: () => {}}});
   }
   get childNodes() { return this.children; }
   appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
   replaceChildren() { this.children = []; }
   setAttribute(name, value) { this.attributes[name] = value; }
   addEventListener(name, listener) { this.listeners[name] = listener; }
+  createTHead() { return this.appendChild(new Element("thead")); }
+  createTBody() { return this.appendChild(new Element("tbody")); }
+  insertRow() { return this.appendChild(new Element("tr")); }
+  insertCell() { return this.appendChild(new Element("td")); }
+  click() {
+    for (let element = this; element; element = element.parentNode) {
+      element.listeners.click?.({target: this, currentTarget: element});
+    }
+  }
 }
 globalThis.document = {createElement: (tag) => new Element(tag)};
 const nodes = (root) => [root, ...root.children.flatMap(nodes)];
@@ -18,6 +30,26 @@ const container = new Element("section");
 renderHealthFindingDetails(container, null);
 assert.deepEqual(texts(container), ["Select a finding group to inspect its evidence."]);
 assert.equal(container.children[0].className, "network-insights-empty");
+
+const rosterContainer = new Element("section");
+const selectedDevices = [];
+renderHealthRoster(rosterContainer, {
+  filteredTotal: 1, total: 1, offset: 0, limit: 25, activeExpectedTotal: 1,
+  devices: [{
+    deviceId: "extaddr:roster", displayLabel: "Roster device", presenceState: "observed",
+    rosterState: "active", lastEndpointPresenceAt: null,
+    fieldCounts: {fresh: 1, stale: 0, conflicted: 0},
+  }],
+}, {selectedDeviceId: null, loading: false, search: "", presence: "all", rosterState: "all",
+  sort: {column: "label", direction: "ascending"}}, {
+  select: (deviceId) => selectedDevices.push(deviceId),
+});
+const rosterRow = nodes(rosterContainer).find((node) => node.tagName === "tr" && node.listeners.click);
+const rosterCells = rosterRow.children;
+rosterCells[1].click();
+assert.deepEqual(selectedDevices, ["extaddr:roster"]);
+rosterCells[0].children[0].click();
+assert.deepEqual(selectedDevices, ["extaddr:roster", "extaddr:roster"]);
 
 const deviceId = "extaddr:a/b";
 const findingId = "finding:one/two";
