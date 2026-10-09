@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -22,7 +23,8 @@ from td_health_observation_model import (
 )
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_policy import load_health_policy
-from td_health_read import TDHealthReadService
+from td_health_read import HealthCorruptStoreError, ROSTER_TABLE_FIELDS, TDHealthReadService
+from td_health_roster import RosterFact
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
 
@@ -501,6 +503,223 @@ def test_pinned_roster_sorts_and_filters_complete_population_before_paging(tmp_p
                 assert ordered["devices"][0]["deviceId"] == observation.devices[0].device_id
             if sort == "quality":
                 assert ordered["devices"][0]["deviceId"] == "extaddr:1000000000000000"
+
+
+def test_pinned_roster_projects_and_sorts_stored_table_facts(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    observation = replace(
+        observation,
+        observed_at=now.isoformat(),
+        ingested_at=now.isoformat(),
+        sources=(SourceEvidence(filename, "digest", "final", "valid", now.isoformat()),),
+    )
+    assessment = replace(assessment, assessed_at=now.isoformat())
+    records = {
+        "extaddr:0000000000000001": {
+            "extAddress": "0000000000000001", "rloc16": "0x0010",
+            "eui": "0011223344556677", "omrIpv6Address": "2001:db8::2",
+            "isBorderRouter": False, "isRouter": True, "isLeader": False,
+            "leaderData.partitionId": 10, "threadVersion": "Zeta",
+            "threadStackVersion": "1.2", "vendorName": "zeta",
+            "vendorModel": "Model-B", "vendorSwVersion": "v10",
+        },
+        "extaddr:0000000000000002": {
+            "extAddress": "0000000000000002", "rloc16": "0x0002",
+            "eui": "0011223344556677", "omrIpv6Address": "2001:db8::10",
+            "isBorderRouter": False, "isRouter": False, "isLeader": True,
+            "leaderData.partitionId": 2, "threadVersion": "Alpha",
+            "threadStackVersion": "1.10", "vendorName": "Alpha",
+            "vendorModel": "model-a", "vendorSwVersion": "v2",
+        },
+        "extaddr:0000000000000003": {
+            "extAddress": "0000000000000003", "rloc16": "0x0001",
+            "eui": "1011223344556677", "omrIpv6Address": "2001:db8::1",
+            "isBorderRouter": True, "isRouter": False, "isLeader": False,
+            "leaderData.partitionId": 0, "threadVersion": "bravo",
+            "threadStackVersion": "1.1", "vendorName": "bravo",
+            "vendorModel": "model-c", "vendorSwVersion": "v1",
+        },
+    }
+    devices = tuple(
+        DeviceSample(device_id, values["extAddress"], "router", None, False, (filename,))
+        for device_id, values in records.items()
+    )
+    observation = replace(observation, devices=observation.devices + devices)
+    facts = tuple(
+        RosterFact(
+            device_id, field, json.dumps(value), "transient", filename, 3, "high",
+        )
+        for device_id, values in records.items()
+        for field, value in values.items()
+    )
+    store.save_processing_result(observation, assessment, roster_facts=facts)
+    policy = load_health_manifest().roster_policy
+    eui = json.dumps("0011223344556677")
+    with sqlite3.connect(store.path) as connection:
+        for device_id in (
+            "extaddr:0000000000000001", "extaddr:0000000000000002",
+        ):
+            connection.execute(
+                """INSERT OR REPLACE INTO device_last_known
+                   (network_id, device_id, field_key, value_json, value_class, source_file,
+                    observation_id, source_observed_at, roster_policy_digest, source_rank,
+                    confidence, conflict_state)
+                   VALUES (?, ?, 'eui', ?, 'alias', ?, ?, ?, ?, 3, 'high', 'none')""",
+                (observation.network_id, device_id, eui, filename,
+                 observation.observation_id, now.isoformat(), policy.digest),
+            )
+        connection.execute(
+            """INSERT OR REPLACE INTO device_last_known
+               (network_id, device_id, field_key, value_json, value_class, source_file,
+                observation_id, source_observed_at, roster_policy_digest, source_rank,
+                confidence, conflict_state)
+               VALUES (?, ?, 'eui', ?, 'alias', ?, ?, ?, ?, 3, 'high', 'none')""",
+            (observation.network_id, "extaddr:0000000000000003",
+             json.dumps("1011223344556677"), filename, observation.observation_id,
+             now.isoformat(), policy.digest),
+        )
+        connection.execute(
+            """INSERT INTO device_identity_conflicts
+               (network_id, device_id, field_key, value_json, other_device_id,
+                observation_id, source_observed_at, roster_policy_digest, confidence)
+               VALUES (?, ?, 'eui', ?, ?, ?, ?, ?, 'high')""",
+            (observation.network_id, "extaddr:0000000000000001", eui,
+             "extaddr:0000000000000002", observation.observation_id,
+             now.isoformat(), policy.digest),
+        )
+    service = TDHealthReadService(tmp_path)
+    base = {
+        "network_id": observation.network_id,
+        "assessment_id": assessment.assessment_id,
+        "presence": "all",
+        "limit": 2,
+        "read_time": now,
+    }
+    all_rows = {**base, "limit": 100}
+
+    page = service.roster(**all_rows)
+    row = next(device for device in page["devices"]
+               if device["deviceId"] == "extaddr:0000000000000001")
+    assert tuple(row["fields"]) == ROSTER_TABLE_FIELDS
+    assert row["fields"]["leaderData.partitionId"]["value"] == 10
+    assert row["fields"]["isBorderRouter"]["value"] is False
+    detail = service.roster_device(
+        network_id=observation.network_id,
+        assessment_id=assessment.assessment_id,
+        device_id=row["deviceId"],
+        read_time=now,
+    )
+    assert detail is not None
+    assert all(row["fields"][field] == detail["fields"][field]
+               for field in ROSTER_TABLE_FIELDS)
+    assert detail["fields"]["eui"]["conflictState"] == "alias-collision"
+    assert detail["fields"]["eui"]["otherDeviceId"] == "extaddr:0000000000000002"
+    absent = next(device for device in page["devices"]
+                  if device["deviceId"] == observation.devices[0].device_id)
+    assert absent["fields"]["eui"] == {
+        "value": None, "freshness": "absent", "conflictState": "none",
+    }
+    assert absent["fields"]["extAddress"]["value"] is None
+    zero_partition = next(
+        device for device in page["devices"]
+        if device["deviceId"] == "extaddr:0000000000000003"
+    )
+    assert zero_partition["fields"]["leaderData.partitionId"]["value"] == 0
+
+    expected_partition = [
+        "extaddr:0000000000000003", "extaddr:0000000000000002",
+        "extaddr:0000000000000001",
+    ]
+    for direction, ordered in (
+        ("ascending", expected_partition),
+        ("descending", list(reversed(expected_partition))),
+    ):
+        pages = [
+            service.roster(**base, sort="leaderData.partitionId",
+                           direction=direction, offset=offset)
+            for offset in (0, 2)
+        ]
+        actual = [device["deviceId"] for result in pages for device in result["devices"]]
+        assert actual == ordered + [observation.devices[0].device_id]
+
+    ids = {
+        "one": "extaddr:0000000000000001",
+        "two": "extaddr:0000000000000002",
+        "three": "extaddr:0000000000000003",
+        "absent": observation.devices[0].device_id,
+    }
+    expected_orders = {
+        "extAddress": (("one", "two", "three"), ("three", "two", "one")),
+        "rloc16": (("three", "two", "one"), ("one", "two", "three")),
+        "eui": (("one", "two", "three"), ("three", "one", "two")),
+        "omrIpv6Address": (("three", "one", "two"), ("two", "one", "three")),
+        "isBorderRouter": (("one", "two", "three"), ("three", "one", "two")),
+        "isRouter": (("two", "three", "one"), ("one", "two", "three")),
+        "isLeader": (("one", "three", "two"), ("two", "one", "three")),
+        "leaderData.partitionId": (("three", "two", "one"), ("one", "two", "three")),
+        "threadVersion": (("two", "three", "one"), ("one", "three", "two")),
+        "threadStackVersion": (("three", "two", "one"), ("one", "two", "three")),
+        "vendorName": (("two", "three", "one"), ("one", "three", "two")),
+        "vendorModel": (("two", "one", "three"), ("three", "one", "two")),
+        "vendorSwVersion": (("three", "one", "two"), ("two", "one", "three")),
+    }
+    assert tuple(expected_orders) == ROSTER_TABLE_FIELDS
+    for field, (ascending, descending) in expected_orders.items():
+        for direction, expected in (
+            ("ascending", ascending), ("descending", descending),
+        ):
+            ordered = service.roster(**all_rows, sort=field, direction=direction)
+            actual = [device["deviceId"] for device in ordered["devices"]]
+            assert actual == [
+                *(ids[name] for name in expected), ids["absent"],
+            ], f"Unexpected {direction} ordering for {field}"
+
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            """UPDATE device_last_known SET roster_policy_digest=NULL
+               WHERE device_id=? AND field_key='vendorName'""",
+            ("extaddr:0000000000000002",),
+        )
+        connection.execute(
+            """UPDATE device_last_known SET conflict_state='cross-source'
+               WHERE device_id=? AND field_key='threadVersion'""",
+            ("extaddr:0000000000000003",),
+        )
+    unknown_page = service.roster(**all_rows, sort="label")
+    unknown = next(device for device in unknown_page["devices"]
+                   if device["deviceId"] == ids["two"])
+    assert unknown["fields"]["vendorName"]["value"] == "Alpha"
+    assert unknown["fields"]["vendorName"]["freshness"] == "unknown"
+    conflicted = next(device for device in unknown_page["devices"]
+                      if device["deviceId"] == ids["three"])
+    assert conflicted["fields"]["threadVersion"]["value"] == "bravo"
+    assert conflicted["fields"]["threadVersion"]["conflictState"] == "cross-source"
+
+    expiring_field = next(
+        field for field in ROSTER_TABLE_FIELDS
+        if policy.freshness_seconds[field] is not None
+    )
+    expiry = policy.freshness_seconds[expiring_field]
+    stale_page = service.roster(
+        **{**all_rows, "read_time": now + timedelta(seconds=expiry + 1)},
+        sort="label",
+    )
+    stale = next(device for device in stale_page["devices"]
+                 if device["deviceId"] == ids["one"])
+    assert stale["fields"][expiring_field]["value"] == records[ids["one"]][expiring_field]
+    assert stale["fields"][expiring_field]["freshness"] == "stale"
+
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            """UPDATE device_last_known SET value_json='"not-an-ipv6-address"'
+               WHERE device_id=? AND field_key='omrIpv6Address'""",
+            ("extaddr:0000000000000001",),
+        )
+    with pytest.raises(HealthCorruptStoreError, match="Invalid stored roster IPv6 address"):
+        service.roster(**base, sort="omrIpv6Address")
 
 
 def test_intermittent_roster_actions_do_not_offer_mark_offline(tmp_path) -> None:

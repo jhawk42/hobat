@@ -18,7 +18,9 @@ import td_webserver
 from td_health_observation_model import SourceEvidence
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_policy import load_health_policy
+from td_health_read import ROSTER_TABLE_FIELDS
 from td_health_processor import process_health
+from td_health_roster import RosterFact
 from td_health_sqlite import SQLiteHealthStore
 from test_td_health_sqlite import _result
 
@@ -117,17 +119,40 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             data_dir = Path(directory)
             store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
             observation, assessment = _result()
-            store.save_processing_result(observation, assessment)
+            filename = "td-otbr-cli-networkdiag-fetch-all.json"
+            observation = replace(
+                observation,
+                sources=(SourceEvidence(
+                    filename, "digest", "final", "valid", observation.observed_at,
+                ),),
+            )
+            fact = RosterFact(
+                observation.devices[0].device_id, "extAddress",
+                json.dumps("8672766ae0578187"), "identity", filename, 3, "high",
+            )
+            store.save_processing_result(observation, assessment, roster_facts=(fact,))
             base = {"network": observation.network_id, "assessment": assessment.assessment_id}
             response = await td_webserver.handle_health_roster_api(_request(data_dir, query=base))
             payload = json.loads(response.text)
             self.assertEqual(response.headers["Cache-Control"], "no-store")
             self.assertEqual(payload["schemaVersion"], 2)
             self.assertEqual(payload["devices"][0]["presenceState"], "observed")
+            self.assertEqual(tuple(payload["devices"][0]["fields"]), ROSTER_TABLE_FIELDS)
+            for sort in ROSTER_TABLE_FIELDS:
+                sorted_response = await td_webserver.handle_health_roster_api(
+                    _request(data_dir, query={**base, "sort": sort})
+                )
+                self.assertEqual(
+                    json.loads(sorted_response.text)["sort"]["column"], sort,
+                )
             legacy = await td_webserver.handle_health_roster_api(
                 _request(data_dir, query={"network": observation.network_id})
             )
             self.assertEqual(json.loads(legacy.text)["schemaVersion"], 1)
+            self.assertEqual(
+                tuple(json.loads(legacy.text)["devices"][0]["fields"]),
+                ROSTER_TABLE_FIELDS,
+            )
             for key, value in (("presence", "healthy"), ("rosterState", "online"),
                                ("sort", "unknown"), ("direction", "sideways"),
                                ("q", "x" * 121), ("limit", "101")):

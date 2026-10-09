@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -26,7 +27,15 @@ MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 25
 ROSTER_PRESENCE = ("observed", "missing", "offline", "not-assessed")
 ROSTER_STATES = ("expected", "intentionally-offline", "intermittent", "retired", "untracked")
-ROSTER_SORTS = ("label", "presence", "rosterState", "lastObserved", "quality")
+ROSTER_TABLE_FIELDS = (
+    "extAddress", "rloc16", "eui", "omrIpv6Address", "isBorderRouter",
+    "isRouter", "isLeader", "leaderData.partitionId", "threadVersion",
+    "threadStackVersion", "vendorName", "vendorModel", "vendorSwVersion",
+)
+ROSTER_SORTS = (
+    "label", "presence", "rosterState", "lastObserved", "quality",
+    *ROSTER_TABLE_FIELDS,
+)
 COMPARISON_SCOPES = ("network", "device", "relationship")
 COMPARISON_RESULTS = ("changed", "unchanged", "unknown")
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
@@ -223,6 +232,12 @@ class TDHealthReadService:
         if detailed:
             result["fields"] = {field: fields.get(field, {"value": None, "freshness": "absent",
                                                   "conflictState": "none"}) for field in ROSTER_FIELDS}
+        else:
+            result["fields"] = {
+                field: fields.get(field, {"value": None, "freshness": "absent",
+                                          "conflictState": "none"})
+                for field in ROSTER_TABLE_FIELDS
+            }
         return result
 
     def _disambiguate_roster_labels(self, devices: list[dict], *, network_id: str,
@@ -322,8 +337,36 @@ class TDHealthReadService:
                 if sort == "lastObserved":
                     timestamp = device["lastEndpointPresenceAt"]
                     return datetime.fromisoformat(timestamp) if timestamp else None
-                counts = device["fieldCounts"]
-                return (counts["fresh"], counts["stale"], counts["conflicted"]) if any(counts.values()) else None
+                if sort == "quality":
+                    counts = device["fieldCounts"]
+                    return ((counts["fresh"], counts["stale"], counts["conflicted"])
+                            if any(counts.values()) else None)
+                value = device["fields"][sort]["value"]
+                if value is None:
+                    return None
+                if sort == "omrIpv6Address":
+                    if not isinstance(value, str):
+                        raise HealthCorruptStoreError("Invalid stored roster IPv6 address")
+                    try:
+                        return int(ipaddress.IPv6Address(value))
+                    except ipaddress.AddressValueError as exc:
+                        raise HealthCorruptStoreError(
+                            "Invalid stored roster IPv6 address"
+                        ) from exc
+                if sort in {"isBorderRouter", "isRouter", "isLeader"}:
+                    if type(value) is not bool:
+                        raise HealthCorruptStoreError("Invalid stored roster boolean")
+                    return value
+                if sort == "leaderData.partitionId":
+                    if type(value) is not int:
+                        raise HealthCorruptStoreError("Invalid stored roster partition ID")
+                    return value
+                if not isinstance(value, str):
+                    raise HealthCorruptStoreError("Invalid stored roster string")
+                return value.casefold() if sort in {
+                    "threadVersion", "threadStackVersion", "vendorName",
+                    "vendorModel", "vendorSwVersion",
+                } else value
 
             def compare(left: dict, right: dict) -> int:
                 first, second = sort_value(left), sort_value(right)

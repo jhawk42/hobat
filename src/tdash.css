@@ -1579,7 +1579,12 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 
 .health-roster-results { color: var(--muted); font-size: 12px; }
 .health-roster-table-wrap { max-height: min(58vh, 680px); overflow: auto; border: 1px solid var(--line); }
-.health-roster-table-wrap table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.health-roster-table-wrap table {
+  width: 100%;
+  min-width: 2570px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
 .health-roster-table-wrap thead { position: sticky; top: 0; z-index: 1; background: var(--surface-raised); }
 .health-roster-table-wrap th, .health-roster-table-wrap td {
   padding: 7px 8px;
@@ -1589,9 +1594,45 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   overflow-wrap: anywhere;
 }
 .health-roster-table-wrap th button { border: 0; background: transparent; font: inherit; cursor: pointer; text-align: left; }
+.health-roster-table-wrap th[data-column="extAddress"],
+.health-roster-table-wrap td[data-column="extAddress"] { width: 150px; }
+.health-roster-table-wrap th[data-column="rloc16"],
+.health-roster-table-wrap td[data-column="rloc16"] { width: 90px; }
+.health-roster-table-wrap th[data-column="eui"],
+.health-roster-table-wrap td[data-column="eui"] { width: 150px; }
+.health-roster-table-wrap th[data-column="label"],
+.health-roster-table-wrap td[data-column="label"] { width: 195px; }
+.health-roster-table-wrap th[data-column="presence"],
+.health-roster-table-wrap td[data-column="presence"] { width: 105px; }
+.health-roster-table-wrap th[data-column="rosterState"],
+.health-roster-table-wrap td[data-column="rosterState"] { width: 145px; }
+.health-roster-table-wrap th[data-column="lastObserved"],
+.health-roster-table-wrap td[data-column="lastObserved"] { width: 180px; }
+.health-roster-table-wrap th[data-column="quality"],
+.health-roster-table-wrap td[data-column="quality"] { width: 165px; }
+.health-roster-table-wrap th[data-column="omrIpv6Address"],
+.health-roster-table-wrap td[data-column="omrIpv6Address"] { width: 210px; }
+.health-roster-table-wrap th[data-column="isBorderRouter"],
+.health-roster-table-wrap td[data-column="isBorderRouter"],
+.health-roster-table-wrap th[data-column="isRouter"],
+.health-roster-table-wrap td[data-column="isRouter"],
+.health-roster-table-wrap th[data-column="isLeader"],
+.health-roster-table-wrap td[data-column="isLeader"] { width: 110px; }
+.health-roster-table-wrap th[data-column="leaderData.partitionId"],
+.health-roster-table-wrap td[data-column="leaderData.partitionId"] { width: 140px; }
+.health-roster-table-wrap th[data-column="threadVersion"],
+.health-roster-table-wrap td[data-column="threadVersion"] { width: 120px; }
+.health-roster-table-wrap th[data-column="threadStackVersion"],
+.health-roster-table-wrap td[data-column="threadStackVersion"] { width: 140px; }
+.health-roster-table-wrap th[data-column="vendorName"],
+.health-roster-table-wrap td[data-column="vendorName"],
+.health-roster-table-wrap th[data-column="vendorModel"],
+.health-roster-table-wrap td[data-column="vendorModel"],
+.health-roster-table-wrap th[data-column="vendorSwVersion"],
+.health-roster-table-wrap td[data-column="vendorSwVersion"] { width: 150px; }
 .health-roster-table-wrap tbody tr.selected { background: var(--surface-raised); }
 .health-roster-table-wrap tbody tr { cursor: pointer; }
-.health-roster-table-wrap td:first-child button { border: 0; background: transparent; color: var(--accent); text-align: left; cursor: pointer; }
+.health-roster-device-button { border: 0; background: transparent; color: var(--accent); text-align: left; cursor: pointer; }
 .health-roster-mobile-meta { display: none; }
 .health-roster-identity { user-select: text; overflow-wrap: anywhere; }
 #health-roster-details table { width: 100%; border-collapse: collapse; }
@@ -1602,9 +1643,15 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 
 @media (max-width: 600px) {
   .health-roster-controls label { min-width: min(100%, 140px); flex: 1; }
-  .health-roster-table-wrap th:nth-child(n+3),
-  .health-roster-table-wrap td:nth-child(n+3) { display: none; }
-  .health-roster-table-wrap th:first-child { width: 70%; }
+  .health-roster-table-wrap table { width: 100%; min-width: 0; }
+  .health-roster-table-wrap th:not([data-column="label"]):not([data-column="presence"]),
+  .health-roster-table-wrap td:not([data-column="label"]):not([data-column="presence"]) {
+    display: none;
+  }
+  .health-roster-table-wrap th[data-column="label"],
+  .health-roster-table-wrap td[data-column="label"] { width: 72%; }
+  .health-roster-table-wrap th[data-column="presence"],
+  .health-roster-table-wrap td[data-column="presence"] { width: 28%; }
   .health-roster-mobile-meta { display: block; color: var(--muted); font-size: 11px; }
 }
 

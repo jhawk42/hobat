@@ -120,15 +120,22 @@ selected stored assessment. Presence defaults to **Observed** and describes
 that assessment, not network health; the separate roster designation reflects
 the current operator-managed state. Missing and Offline come from stored
 assessment findings, not device age. Selecting a device opens its stored facts
-in the details panel. From Findings or Device Roster, confirmed per-device
-actions can enroll an observed untracked device, mark an expected device
-intentionally offline, clear that designation, retire a tracked device, or
-unretire a retired device. These actions update the expected roster and
-reassess retained evidence; they do not collect data, change snapshots, or
-rewrite historical assessments. Enrollment does not update the static label
-map. The same lifecycle changes are available through the health CLI; see
-[Thread Network Health](doc/thread_network_health.md) for transitions,
-idempotence, audit, retention, and API details.
+in the details panel. On desktop the roster includes stored address and inventory
+facts alongside the existing columns, with sortable headings. On mobile the
+table stays compact with Device and Presence; select a device to inspect all
+facts and their freshness/conflict metadata in the details panel. Table values
+are network-scoped last-known facts and do not necessarily describe the pinned
+assessment or certify freshness; use Data quality and device details for
+evidence quality. Missing values display as **Absent**.
+
+From Findings or Device Roster, confirmed per-device actions can enroll an
+observed untracked device, mark an expected device intentionally offline, clear
+that designation, retire a tracked device, or unretire a retired device. These
+actions update the expected roster and reassess retained evidence; they do not
+collect data, change snapshots, or rewrite historical assessments. Enrollment
+does not update the static label map. The same lifecycle changes are available
+through the health CLI; see [Thread Network Health](doc/thread_network_health.md)
+for transitions, idempotence, audit, retention, and API details.
 
 The **Comparison** tab offers **1D**, **3D**, and **1W** as the primary choices;
 each resolves its baseline against the latest retained **After** assessment.

@@ -1085,8 +1085,25 @@ function renderSelectedHealthComparison(
 }
 
 const ROSTER_COLUMNS = [
-  ["label", "Device"], ["presence", "Presence"], ["rosterState", "Roster designation"],
-  ["lastObserved", "Last observed"], ["quality", "Data quality"],
+  {key: "extAddress", title: "extAddress", field: "extAddress"},
+  {key: "rloc16", title: "rloc16", field: "rloc16"},
+  {key: "eui", title: "eui", field: "eui"},
+  {key: "label", title: "Device", className: "health-roster-device-column"},
+  {key: "presence", title: "Presence", className: "health-roster-presence-column"},
+  {key: "rosterState", title: "Roster designation"},
+  {key: "lastObserved", title: "Last observed"},
+  {key: "quality", title: "Data quality"},
+  {key: "omrIpv6Address", title: "omrIpv6Address", field: "omrIpv6Address"},
+  {key: "isBorderRouter", title: "isBorderRouter", field: "isBorderRouter"},
+  {key: "isRouter", title: "isRouter", field: "isRouter"},
+  {key: "isLeader", title: "isLeader", field: "isLeader"},
+  {key: "leaderData.partitionId", title: "leaderData.partitionId",
+    field: "leaderData.partitionId"},
+  {key: "threadVersion", title: "threadVersion", field: "threadVersion"},
+  {key: "threadStackVersion", title: "threadStackVersion", field: "threadStackVersion"},
+  {key: "vendorName", title: "vendorName", field: "vendorName"},
+  {key: "vendorModel", title: "vendorModel", field: "vendorModel"},
+  {key: "vendorSwVersion", title: "vendorSwVersion", field: "vendorSwVersion"},
 ];
 
 function rosterLabel(value) {
@@ -1115,13 +1132,15 @@ export function renderHealthRoster(container, page, view, actions = {}) {
   const wrap = appendText(container, "div", "", "health-roster-table-wrap");
   const table = document.createElement("table");
   const head = table.createTHead().insertRow();
-  ROSTER_COLUMNS.forEach(([column, title]) => {
+  ROSTER_COLUMNS.forEach((column) => {
     const cell = document.createElement("th");
     cell.scope = "col";
-    const button = appendText(cell, "button", title);
+    cell.dataset.column = column.key;
+    if (column.className) cell.className = column.className;
+    const button = appendText(cell, "button", column.title);
     button.type = "button";
-    button.addEventListener("click", () => actions.sort?.(column));
-    if (view.sort.column === column) {
+    button.addEventListener("click", () => actions.sort?.(column.key));
+    if (view.sort.column === column.key) {
       cell.setAttribute("aria-sort", view.sort.direction);
       appendText(button, "span", view.sort.direction === "ascending" ? " ▲" : " ▼", "health-sort-icon");
     }
@@ -1132,22 +1151,35 @@ export function renderHealthRoster(container, page, view, actions = {}) {
     const row = body.insertRow();
     row.classList.toggle("selected", view.selectedDeviceId === device.deviceId);
     row.addEventListener("click", () => actions.select?.(device.deviceId));
-    const deviceCell = row.insertCell();
-    const button = appendText(deviceCell, "button", device.displayLabel);
-    button.type = "button";
-    button.dataset.deviceId = device.deviceId;
-    button.title = device.deviceId;
-    button.setAttribute("aria-label", `${device.displayLabel}, ${device.deviceId}, inspect device`);
-    button.setAttribute("aria-expanded", String(view.selectedDeviceId === device.deviceId));
-    appendText(deviceCell, "small", `${rosterLabel(device.presenceState)} · ${rosterLabel(device.rosterState)} · ${
-      device.lastEndpointPresenceAt ? formatAge(device.lastEndpointPresenceAt) : "Never observed"}`,
-    "health-roster-mobile-meta");
-    appendText(row.insertCell(), "span", rosterLabel(device.presenceState));
-    appendText(row.insertCell(), "span", rosterLabel(device.rosterState));
-    appendText(row.insertCell(), "time", device.lastEndpointPresenceAt
-      ? `${formatAge(device.lastEndpointPresenceAt)} · ${device.lastEndpointPresenceAt}` : "Unknown");
-    const counts = device.fieldCounts;
-    appendText(row.insertCell(), "span", `${counts.fresh} fresh · ${counts.stale} stale · ${counts.conflicted} conflicted`);
+    ROSTER_COLUMNS.forEach((column) => {
+      const cell = row.insertCell();
+      cell.dataset.column = column.key;
+      if (column.className) cell.className = column.className;
+      if (column.field) {
+        const value = device.fields?.[column.field]?.value;
+        appendText(cell, "span", value == null ? "Absent" : String(value));
+      } else if (column.key === "label") {
+        const button = appendText(cell, "button", device.displayLabel, "health-roster-device-button");
+        button.type = "button";
+        button.dataset.deviceId = device.deviceId;
+        button.title = device.deviceId;
+        button.setAttribute("aria-label", `${device.displayLabel}, ${device.deviceId}, inspect device`);
+        button.setAttribute("aria-expanded", String(view.selectedDeviceId === device.deviceId));
+        appendText(cell, "small", `${rosterLabel(device.presenceState)} · ${rosterLabel(device.rosterState)} · ${
+          device.lastEndpointPresenceAt ? formatAge(device.lastEndpointPresenceAt) : "Never observed"}`,
+        "health-roster-mobile-meta");
+      } else if (column.key === "presence") {
+        appendText(cell, "span", rosterLabel(device.presenceState));
+      } else if (column.key === "rosterState") {
+        appendText(cell, "span", rosterLabel(device.rosterState));
+      } else if (column.key === "lastObserved") {
+        appendText(cell, "time", device.lastEndpointPresenceAt
+          ? `${formatAge(device.lastEndpointPresenceAt)} · ${device.lastEndpointPresenceAt}` : "Unknown");
+      } else {
+        const counts = device.fieldCounts;
+        appendText(cell, "span", `${counts.fresh} fresh · ${counts.stale} stale · ${counts.conflicted} conflicted`);
+      }
+    });
   });
   wrap.appendChild(table);
   const navigation = appendText(container, "div", "", "health-roster-navigation");

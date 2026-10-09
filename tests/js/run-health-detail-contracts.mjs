@@ -33,23 +33,87 @@ assert.equal(container.children[0].className, "network-insights-empty");
 
 const rosterContainer = new Element("section");
 const selectedDevices = [];
+const rosterSorts = [];
+const rosterColumns = [
+  "extAddress", "rloc16", "eui", "label", "presence", "rosterState",
+  "lastObserved", "quality", "omrIpv6Address", "isBorderRouter", "isRouter",
+  "isLeader", "leaderData.partitionId", "threadVersion", "threadStackVersion",
+  "vendorName", "vendorModel", "vendorSwVersion",
+];
 renderHealthRoster(rosterContainer, {
   filteredTotal: 1, total: 1, offset: 0, limit: 25, activeExpectedTotal: 1,
   devices: [{
     deviceId: "extaddr:roster", displayLabel: "Roster device", presenceState: "observed",
     rosterState: "active", lastEndpointPresenceAt: null,
     fieldCounts: {fresh: 1, stale: 0, conflicted: 0},
+    fields: {
+      extAddress: {value: "0011223344556677"},
+      rloc16: {value: "0x1234"},
+      omrIpv6Address: {value: "2001:db8::1"},
+      isBorderRouter: {value: false},
+      isRouter: {value: true},
+      isLeader: {value: false},
+      "leaderData.partitionId": {value: 0},
+      threadVersion: {value: "1.4"},
+      threadStackVersion: {value: "1.4.0"},
+      vendorName: {value: "Vendor"},
+      vendorModel: {value: "Model"},
+      vendorSwVersion: {value: "Version"},
+    },
   }],
 }, {selectedDeviceId: null, loading: false, search: "", presence: "all", rosterState: "all",
   sort: {column: "label", direction: "ascending"}}, {
   select: (deviceId) => selectedDevices.push(deviceId),
+  sort: (column) => rosterSorts.push(column),
 });
 const rosterRow = nodes(rosterContainer).find((node) => node.tagName === "tr" && node.listeners.click);
 const rosterCells = rosterRow.children;
-rosterCells[1].click();
-assert.deepEqual(selectedDevices, ["extaddr:roster"]);
-rosterCells[0].children[0].click();
-assert.deepEqual(selectedDevices, ["extaddr:roster", "extaddr:roster"]);
+const rosterHeader = nodes(rosterContainer).find(
+  (node) => node.tagName === "tr" && node.children.length === 18
+    && node.children[0].tagName === "th",
+);
+assert.deepEqual(rosterHeader.children.map((cell) => cell.dataset.column), rosterColumns);
+assert.deepEqual(rosterHeader.children.map((cell) => cell.children[0].textContent), [
+  "extAddress", "rloc16", "eui", "Device", "Presence", "Roster designation",
+  "Last observed", "Data quality", "omrIpv6Address", "isBorderRouter", "isRouter",
+  "isLeader", "leaderData.partitionId", "threadVersion", "threadStackVersion",
+  "vendorName", "vendorModel", "vendorSwVersion",
+]);
+assert.equal(rosterHeader.children[3].attributes["aria-sort"], "ascending");
+rosterHeader.children.filter((cell) => cell.dataset.column !== "label"
+  && cell.dataset.column !== "presence" && cell.dataset.column !== "rosterState"
+  && cell.dataset.column !== "lastObserved" && cell.dataset.column !== "quality")
+  .forEach((cell) => cell.children[0].click());
+assert.deepEqual(rosterSorts, rosterColumns.filter((column) => ![
+  "label", "presence", "rosterState", "lastObserved", "quality",
+].includes(column)));
+assert.equal(rosterCells.length, 18);
+assert.deepEqual(rosterCells.map((cell) => cell.dataset.column), rosterColumns);
+assert.equal(rosterCells[0].children[0].textContent, "0011223344556677");
+assert.equal(rosterCells[1].children[0].textContent, "0x1234");
+assert.equal(rosterCells[2].children[0].textContent, "Absent");
+assert.equal(rosterCells[9].children[0].textContent, "false");
+assert.equal(rosterCells[12].children[0].textContent, "0");
+assert.equal(rosterCells[3].children[0].className, "health-roster-device-button");
+rosterCells.find((cell) => cell.dataset.column === "presence").click();
+rosterCells.find((cell) => cell.dataset.column === "eui").click();
+rosterCells.find((cell) => cell.dataset.column === "label").children[0].click();
+assert.deepEqual(selectedDevices, Array(3).fill("extaddr:roster"));
+
+const oldPayloadContainer = new Element("section");
+renderHealthRoster(oldPayloadContainer, {
+  filteredTotal: 1, total: 1, offset: 0, limit: 25, activeExpectedTotal: 0,
+  devices: [{
+    deviceId: "extaddr:old", displayLabel: "Older server", presenceState: "observed",
+    rosterState: "untracked", lastEndpointPresenceAt: null,
+    fieldCounts: {fresh: 0, stale: 0, conflicted: 0},
+  }],
+}, {selectedDeviceId: null, loading: false, search: "", presence: "all", rosterState: "all",
+  sort: {column: "label", direction: "ascending"}});
+const oldRow = nodes(oldPayloadContainer).find(
+  (node) => node.tagName === "tr" && node.listeners.click,
+);
+assert.equal(oldRow.children[0].children[0].textContent, "Absent");
 
 const deviceId = "extaddr:a/b";
 const findingId = "finding:one/two";

@@ -127,6 +127,11 @@ processing path stores the adjacent comparison and unique complete-only
 1/3/7/30-day interval pairs in the same SQLite transaction, subject to the
 existing 2,000-pair cap.
 
+The Device Roster list projection combines presence from the pinned assessment
+with network-scoped last-known fields from SQLite; list reads do not fetch
+individual device details. See [Thread Network Health](thread_network_health.md#read-api-and-dashboard)
+for the additive field and sorting contract.
+
 The endpoint inventory GET pages retained assessment metadata and resolves
 defaults and interval candidates over the full history. The arbitrary pair GET
 uses an exact stored pair or derives one from retained evidence in a query-only

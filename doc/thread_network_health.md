@@ -422,6 +422,26 @@ identity from labels, EUI-64, RLOC16, or IPv6 addresses. Read-only
 devices; `GET /api/health/roster/extaddr:...?network=extpan:...` shows each
 approved field, including absent and stale fields. Health Insights shows the
 same projection under Observed devices.
+
+Pinned roster list rows add a `fields` map for the table facts
+`extAddress`, `rloc16`, `eui`, `omrIpv6Address`, `isBorderRouter`, `isRouter`,
+`isLeader`, `leaderData.partitionId`, `threadVersion`, `threadStackVersion`,
+`vendorName`, `vendorModel`, and `vendorSwVersion`. Each entry uses the same
+value and evidence-metadata envelope as the device detail response; the dotted
+partition key is literal. Missing or null values display as `Absent`, while
+`false` and `0` remain visible values. The roster sort keys include those
+thirteen field names as well as `label`, `presence`, `rosterState`,
+`lastObserved`, and `quality`. Booleans and partition IDs sort by type, OMR
+IPv6 addresses sort numerically, and inventory/version strings sort
+case-insensitively. Missing values remain last in either direction, with
+device ID as a stable tie-break.
+
+These are network-scoped last-known facts, not values reconstructed for the
+pinned historical assessment; they can be stale or have unknown freshness.
+Roster cells show values only and do not certify freshness. Use the Data quality
+column and device details to inspect freshness, confidence, provenance, and
+conflicts. List reads remain query-only and no-store.
+
 Stale observed labels without a higher-priority label display a canonical
 address suffix with `stale label` text; their original value and provenance
 remain in the field details. Duplicate selected labels across devices show a
