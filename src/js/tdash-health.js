@@ -1131,6 +1131,7 @@ export function renderHealthRoster(container, page, view, actions = {}) {
   page.devices.forEach((device) => {
     const row = body.insertRow();
     row.classList.toggle("selected", view.selectedDeviceId === device.deviceId);
+    row.addEventListener("click", () => actions.select?.(device.deviceId));
     const deviceCell = row.insertCell();
     const button = appendText(deviceCell, "button", device.displayLabel);
     button.type = "button";
@@ -1138,7 +1139,6 @@ export function renderHealthRoster(container, page, view, actions = {}) {
     button.title = device.deviceId;
     button.setAttribute("aria-label", `${device.displayLabel}, ${device.deviceId}, inspect device`);
     button.setAttribute("aria-expanded", String(view.selectedDeviceId === device.deviceId));
-    button.addEventListener("click", () => actions.select?.(device.deviceId));
     appendText(deviceCell, "small", `${rosterLabel(device.presenceState)} · ${rosterLabel(device.rosterState)} · ${
       device.lastEndpointPresenceAt ? formatAge(device.lastEndpointPresenceAt) : "Never observed"}`,
     "health-roster-mobile-meta");

@@ -3388,14 +3388,6 @@ async function selectRosterDevice(deviceId) {
   const assessmentId = healthInsightsState.assessment?.assessmentId;
   const version = ++healthRosterViewState.detailVersion;
   if (!networkId) return;
-  if (healthRosterViewState.selectedDeviceId === deviceId) {
-    healthRosterViewState.selectedDeviceId = null;
-    healthInsightsState.rosterDetail = null;
-    document.getElementById("device-details").classList.remove("roster-selected");
-    contextDetailsController.setCollapsed(true);
-    renderNetworkInsights();
-    return;
-  }
   healthRosterViewState.selectedDeviceId = deviceId;
   healthInsightsState.rosterDetailPresence = healthInsightsState.roster?.devices.find(
     (device) => device.deviceId === deviceId,

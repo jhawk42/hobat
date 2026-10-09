@@ -1590,6 +1590,7 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 }
 .health-roster-table-wrap th button { border: 0; background: transparent; font: inherit; cursor: pointer; text-align: left; }
 .health-roster-table-wrap tbody tr.selected { background: var(--surface-raised); }
+.health-roster-table-wrap tbody tr { cursor: pointer; }
 .health-roster-table-wrap td:first-child button { border: 0; background: transparent; color: var(--accent); text-align: left; cursor: pointer; }
 .health-roster-mobile-meta { display: none; }
 .health-roster-identity { user-select: text; overflow-wrap: anywhere; }
