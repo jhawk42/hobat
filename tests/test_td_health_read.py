@@ -278,6 +278,255 @@ def test_comparison_endpoint_pages_and_query_only_pair_projection(tmp_path) -> N
     assert after_counts == before_counts == (0, 0)
 
 
+def test_comparison_labels_batch_current_roster_and_disambiguate_candidates(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    observation = replace(
+        observation, observed_at=now.isoformat(), ingested_at=now.isoformat(),
+    )
+    store.save_processing_result(observation, assessment)
+    expected_ids = (
+        "extaddr:8672766ae0578187",
+        "extaddr:0000000000000001",
+    )
+    with sqlite3.connect(store.path) as connection:
+        connection.executemany(
+            """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
+               VALUES (?, ?, ?, 'expected')""",
+            [
+                (observation.network_id, device_id, "Expected duplicate")
+                for device_id in expected_ids
+            ],
+        )
+
+    static_ids = (
+        "extaddr:0000000000000002",
+        "extaddr:0000000000000003",
+    )
+    static_id = "extaddr:0000000000000004"
+    stale_id = "extaddr:0000000000000005"
+    conflicted_id = "extaddr:0000000000000006"
+    stale_expected_id = "extaddr:000000000000000a"
+    conflicted_unlabeled_id = "extaddr:000000000000000c"
+    fresh_ids = (
+        "extaddr:0000000000000007",
+        "extaddr:0000000000000008",
+    )
+    static_map = {
+        device_id.removeprefix("extaddr:"): "Static duplicate"
+        for device_id in static_ids
+    }
+    static_map[static_id.removeprefix("extaddr:")] = "Static preferred"
+    static_map[conflicted_id.removeprefix("extaddr:")] = "Static over conflict"
+    (tmp_path / "td-static-extaddr-device-label.json").write_text(
+        json.dumps([
+            {"extAddress": address, "deviceLabel": label}
+            for address, label in static_map.items()
+        ]),
+        encoding="utf-8",
+    )
+    policy = load_health_manifest().roster_policy
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
+               VALUES (?, ?, 'Expected over stale', 'expected')""",
+            (observation.network_id, stale_expected_id),
+        )
+        for device_id, label, age, conflict in (
+            (stale_id, "Stale observed", timedelta(days=180), "none"),
+            (stale_expected_id, "Stale with expected", timedelta(days=180), "none"),
+            (conflicted_id, "Conflicted observed", timedelta(0), "cross-source"),
+            (conflicted_unlabeled_id, "Conflicted without preferred label",
+             timedelta(0), "cross-source"),
+            (fresh_ids[0], "Fresh duplicate", timedelta(0), "none"),
+            (fresh_ids[1], "Fresh duplicate", timedelta(0), "none"),
+        ):
+            observed_at = (now - age).isoformat()
+            connection.execute(
+                """INSERT INTO device_last_known
+                   (network_id, device_id, field_key, value_json, value_class, source_file,
+                    observation_id, source_observed_at, roster_policy_digest, source_rank,
+                    confidence, conflict_state)
+                   VALUES (?, ?, 'deviceLabel', ?, 'transient', 'snapshot.json',
+                           ?, ?, ?, 3, 'high', ?)""",
+                (
+                    observation.network_id, device_id, json.dumps(label),
+                    observation.observation_id, observed_at, policy.digest, conflict,
+                ),
+            )
+
+    service = TDHealthReadService(tmp_path)
+    original_batch_read = service.store.roster_device_rows
+    batch_calls = []
+
+    def record_batch_read(**kwargs):
+        batch_calls.append(kwargs)
+        return original_batch_read(**kwargs)
+
+    service.store.roster_device_rows = record_batch_read
+    requested_ids = [
+        *expected_ids, *static_ids, static_id, stale_id, conflicted_id,
+        stale_expected_id, conflicted_unlabeled_id, *fresh_ids,
+        expected_ids[0], "extaddr:0000000000000009",
+    ]
+    labels = service._resolve_comparison_device_labels(
+        network_id=observation.network_id, device_ids=requested_ids,
+    )
+
+    assert batch_calls == [{
+        "network_id": observation.network_id,
+        "device_ids": list(dict.fromkeys(requested_ids)),
+    }]
+    for device_id in expected_ids:
+        assert labels[device_id] == (
+            f"Expected duplicate · {device_id[-8:]} (duplicate label)"
+        )
+    for device_id in static_ids:
+        assert labels[device_id] == (
+            f"Static duplicate · {device_id[-8:]} (duplicate label)"
+        )
+    assert labels[static_id] == "Static preferred"
+    assert labels[conflicted_id] == "Static over conflict"
+    assert labels[stale_expected_id] == "Expected over stale"
+    for device_id in fresh_ids:
+        assert labels[device_id] == (
+            f"Fresh duplicate · {device_id[-8:]} (duplicate label)"
+        )
+    assert stale_id not in labels
+    assert conflicted_unlabeled_id not in labels
+    assert "extaddr:0000000000000009" not in labels
+
+
+def test_stored_legacy_and_derived_comparisons_annotate_only_returned_page(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    subject_id = "extaddr:8672766ae0578187"
+    old_parent = "extaddr:0000000000000010"
+    new_parent = "extaddr:0000000000000011"
+    before, before_assessment = _result("1")
+    after, after_assessment = _result("2")
+    parent_devices = tuple(DeviceSample(
+        device_id, device_id.removeprefix("extaddr:"), "router", None, False,
+        ("snapshot.json",),
+    ) for device_id in (old_parent, new_parent))
+    before = replace(before, devices=before.devices + parent_devices)
+    after = replace(after, devices=after.devices + parent_devices)
+    before = replace(before, relationships=(RelationshipSample(
+        "link:old-parent", "parent-child", old_parent, subject_id,
+        None, None, None, None, None, None, None, subject_id,
+        ("snapshot.json",),
+    ),))
+    after = replace(after, relationships=(RelationshipSample(
+        "link:new-parent", "parent-child", new_parent, subject_id,
+        None, None, None, None, None, None, None, subject_id,
+        ("snapshot.json",),
+    ),))
+    store.save_processing_result(before, before_assessment)
+    store.save_processing_result(after, after_assessment)
+    with sqlite3.connect(store.path) as connection:
+        connection.executemany(
+            """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
+               VALUES (?, ?, ?, 'expected')""",
+            [
+                (before.network_id, subject_id, "Child device"),
+                (before.network_id, old_parent, "Old parent"),
+            ],
+        )
+    (tmp_path / "td-static-extaddr-device-label.json").write_text(
+        json.dumps([{"extAddress": new_parent.removeprefix("extaddr:"),
+                     "deviceLabel": "New parent"}]),
+        encoding="utf-8",
+    )
+    service = TDHealthReadService(tmp_path)
+    resolve = service._resolve_comparison_device_labels
+    resolver_calls = []
+
+    def capture_resolver(**kwargs):
+        resolver_calls.append(kwargs)
+        return resolve(**kwargs)
+
+    service._resolve_comparison_device_labels = capture_resolver
+    query = {
+        "network_id": before.network_id,
+        "dataset_id": before.dataset_id,
+        "before_assessment_id": before_assessment.assessment_id,
+        "after_assessment_id": after_assessment.assessment_id,
+        "limit": 100,
+        "offset": 0,
+        "scope": "all",
+        "result": "all",
+    }
+    stored = service.comparison_pair(**query)
+    assert stored is not None and stored["origin"] == "stored"
+    parent_item = next(item for item in stored["items"] if item["metric"] == "parent")
+    assert parent_item["subjectId"] == subject_id
+    assert parent_item["subjectDisplayLabel"] == "Child device"
+    assert parent_item["beforeValue"] == old_parent
+    assert parent_item["afterValue"] == new_parent
+    assert parent_item["beforeDeviceDisplayLabel"] == "Old parent"
+    assert parent_item["afterDeviceDisplayLabel"] == "New parent"
+    full_page_ids = list(dict.fromkeys(
+        value for item in stored["items"] if item["scope"] == "device"
+        for value in (
+            item["subjectId"],
+            *(item[side] for side in ("beforeValue", "afterValue")
+              if item["metric"] == "parent"),
+        )
+        if TDHealthReadService._canonical_comparison_extaddr(value)
+    ))
+    assert resolver_calls == [{
+        "network_id": before.network_id, "device_ids": full_page_ids,
+    }]
+
+    legacy = service.comparison(
+        comparison_id=stored["comparisonId"], limit=100, offset=0,
+    )
+    assert legacy is not None
+    legacy_parent = next(item for item in legacy["items"] if item["metric"] == "parent")
+    assert legacy_parent["subjectDisplayLabel"] == "Child device"
+    assert legacy_parent["beforeDeviceDisplayLabel"] == "Old parent"
+    assert legacy_parent["afterDeviceDisplayLabel"] == "New parent"
+    assert len(resolver_calls) == 2
+
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DELETE FROM comparison_items")
+        connection.execute("DELETE FROM comparisons")
+        connection.commit()
+    derived = service.comparison_pair(**query)
+    assert derived is not None and derived["origin"] == "derived"
+    derived_parent = next(item for item in derived["items"] if item["metric"] == "parent")
+    assert {
+        key: derived_parent[key]
+        for key in (
+            "subjectId", "subjectDisplayLabel", "beforeValue", "beforeDeviceDisplayLabel",
+            "afterValue", "afterDeviceDisplayLabel",
+        )
+    } == {
+        key: parent_item[key]
+        for key in (
+            "subjectId", "subjectDisplayLabel", "beforeValue", "beforeDeviceDisplayLabel",
+            "afterValue", "afterDeviceDisplayLabel",
+        )
+    }
+    assert len(resolver_calls) == 3
+
+    paged = service.comparison_pair(**{**query, "limit": 1})
+    assert paged is not None and len(paged["items"]) == 1
+    page_item = paged["items"][0]
+    page_ids = list(dict.fromkeys(
+        value for value in (
+            page_item["subjectId"],
+            *(page_item[side] for side in ("beforeValue", "afterValue")
+              if page_item["metric"] == "parent"),
+        )
+        if page_item["scope"] == "device"
+        and TDHealthReadService._canonical_comparison_extaddr(value)
+    ))
+    assert resolver_calls[-1] == {
+        "network_id": before.network_id, "device_ids": page_ids,
+    }
+
+
 def test_endpoint_inventory_orders_equivalent_utc_instants_and_rejects_same_time_before(
     tmp_path,
 ) -> None:

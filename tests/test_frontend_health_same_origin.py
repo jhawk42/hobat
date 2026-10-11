@@ -321,6 +321,124 @@ def test_comparison_delta_formats_floating_point_values_to_one_decimal_place() -
     ]
 
 
+def test_comparison_device_labels_keep_canonical_identity_and_scope() -> None:
+    script = r"""
+      import {renderHealthComparison} from "./src/js/tdash-health.js";
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.listeners = {};
+          this.dataset = {};
+          this.className = "";
+        }
+        appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+        replaceChildren() { this.children = []; }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+      }
+      globalThis.document = {createElement: (tagName) => new Element(tagName)};
+      const subjectId = "extaddr:8672766ae0578187";
+      const beforeParent = "extaddr:0000000000000002";
+      const afterParent = "extaddr:0000000000000003";
+      const comparison = {
+        comparisonId: "pair", beforeObservedAt: "2026-10-01T00:00:00Z",
+        afterObservedAt: "2026-10-02T00:00:00Z", elapsedSeconds: 86400,
+        comparable: true, resetState: "known", reasons: [], baselineState: "available",
+        gapState: "within-policy", origin: "stored", itemCount: 4, filteredItemCount: 4,
+        offset: 0, limit: 25, items: [
+          {subjectId, subjectDisplayLabel: "<img src=x>", scope: "device",
+            metric: "parent", sampleCount: 1, beforeValue: beforeParent,
+            beforeDeviceDisplayLabel: "Old parent", afterValue: afterParent,
+            afterDeviceDisplayLabel: "New parent", delta: null, comparable: true,
+            change: "changed", sourceFiles: [], resetState: "known"},
+          {subjectId: "relationship:abc", scope: "relationship", metric: "parent",
+            sampleCount: 1, beforeValue: beforeParent,
+            beforeDeviceDisplayLabel: "Must not render", afterValue: afterParent,
+            afterDeviceDisplayLabel: "Must not render", sourceFiles: [], resetState: "known"},
+          {subjectId, subjectDisplayLabel: "Must not replace value", scope: "device",
+            metric: "role", sampleCount: 1, beforeValue: "router", beforeDeviceDisplayLabel: "Old",
+            afterValue: "leader", afterDeviceDisplayLabel: "New", sourceFiles: [], resetState: "known"},
+          {subjectId: "extaddr:0000000000000009", scope: "device", metric: "parent",
+            sampleCount: 1, beforeValue: "extaddr:0000000000000010",
+            afterValue: null, sourceFiles: [], resetState: "known"},
+        ],
+      };
+      const page = {total: 1, offset: 0, limit: 25, items: [{comparisonId: "pair"}]};
+      const container = new Element("section");
+      const inspected = [];
+      renderHealthComparison(container, page, comparison, {
+        capabilityKnown: true, comparisonReadModel: true, assessmentAvailable: true,
+        endpointSelection: false, comparisonId: "pair", scope: "all", result: "all",
+      }, {
+        canInspect: (id) => id === subjectId,
+        inspect: (id) => inspected.push(id),
+      });
+      const wrap = container.children.find(({className}) => className === "health-comparison-table-wrap");
+      const rows = wrap.children[0].children[1].children;
+      const identityNote = container.children.find(
+        ({className}) => className === "health-comparison-identity-note",
+      );
+      const described = (cell) => cell.children.map(({tagName, className, textContent}) => [
+        tagName, className, textContent,
+      ]);
+      const subjectAction = rows[0].children[0].children[2];
+      subjectAction.listeners.click();
+      console.log(JSON.stringify({
+        subject: described(rows[0].children[0]),
+        before: described(rows[0].children[2]),
+        after: described(rows[0].children[3]),
+        relationshipSubject: described(rows[1].children[0]),
+        relationshipBefore: described(rows[1].children[2]),
+        nonParentBefore: described(rows[2].children[2]),
+        unlabeledSubject: described(rows[3].children[0]),
+        unlabeledBefore: described(rows[3].children[2]),
+        unlabeledAfter: described(rows[3].children[3]),
+        identityNote: identityNote?.textContent ?? null,
+        actionLabel: subjectAction["aria-label"],
+        focusKey: subjectAction.dataset.healthFocusKey,
+        inspected,
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["subject"] == [
+        ["span", "health-comparison-device-label", "<img src=x>"],
+        ["span", "health-comparison-device-id", "extaddr:8672766ae0578187"],
+        ["button", "", "Show in table"],
+    ]
+    assert result["before"] == [
+        ["span", "health-comparison-device-label", "Old parent"],
+        ["span", "health-comparison-device-id", "extaddr:0000000000000002"],
+    ]
+    assert result["after"] == [
+        ["span", "health-comparison-device-label", "New parent"],
+        ["span", "health-comparison-device-id", "extaddr:0000000000000003"],
+    ]
+    assert result["relationshipSubject"][0][2] == "relationship:abc"
+    assert result["relationshipBefore"] == [["span", "", "extaddr:0000000000000002"]]
+    assert result["nonParentBefore"] == [["span", "", "router"]]
+    assert result["unlabeledSubject"][0] == [
+        "span", "", "extaddr:0000000000000009",
+    ]
+    assert result["unlabeledBefore"] == [["span", "", "extaddr:0000000000000010"]]
+    assert result["unlabeledAfter"] == [["span", "", "Unknown"]]
+    assert result["identityNote"] == (
+        "Device names are current roster annotations; canonical IDs and Before/After values "
+        "remain the comparison evidence."
+    )
+    assert result["actionLabel"] == "Show extaddr:8672766ae0578187 in table"
+    assert result["focusKey"] == "comparison-device:extaddr:8672766ae0578187"
+    assert result["inspected"] == ["extaddr:8672766ae0578187"]
+
+
 def test_table_device_selection_uses_direct_identity_not_nested_references() -> None:
     script = r"""
       import {findTableRowByDeviceId} from "./src/js/tdash-table-renderer.js";

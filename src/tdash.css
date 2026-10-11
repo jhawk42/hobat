@@ -1750,6 +1750,7 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .health-comparison-pair-summary { margin: 8px 0 2px; font-size: 0.95em; }
 .health-comparison-primary-status { font-weight: 700; margin: 4px 0; }
 .health-comparison-caveat { margin: 4px 0; color: var(--muted); }
+.health-comparison-identity-note { margin: 4px 0; color: var(--muted); }
 .health-comparison-details { margin: 6px 0 10px; padding-left: 10px; border-left: 2px solid var(--line); }
 .health-comparison-filter-row select { min-width: min(12rem, 100%); }
 .health-comparison-table-wrap { overflow: auto; max-height: min(58vh, 680px); }
@@ -1763,6 +1764,10 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   vertical-align: top;
   overflow-wrap: anywhere;
 }
+.health-comparison-device-label,
+.health-comparison-device-id { display: block; }
+.health-comparison-device-label { font-weight: 600; }
+.health-comparison-device-id { color: var(--muted); }
 
 .health-finding-table-wrap {
   container-type: inline-size;

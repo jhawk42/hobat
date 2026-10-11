@@ -1053,6 +1053,11 @@ function renderSelectedHealthComparison(
   if (!comparison.items?.length) {
     appendText(container, "p", "No rows match the selected comparison filters.");
   } else {
+    appendText(
+      container, "p",
+      "Device names are current roster annotations; canonical IDs and Before/After values remain the comparison evidence.",
+      "health-comparison-identity-note",
+    );
     const wrap = appendText(container, "div", "", "health-comparison-table-wrap");
     const table = document.createElement("table");
     const header = document.createElement("tr");
@@ -1064,7 +1069,15 @@ function renderSelectedHealthComparison(
     comparison.items.forEach((item) => {
         const row = document.createElement("tr");
         const format = (value) => value == null ? "Unknown" : typeof value === "string" ? value : JSON.stringify(value);
-        const subject = appendText(row, "td", item.subjectId);
+        const subject = appendText(row, "td", "");
+        const canonicalSubject = typeof item.subjectId === "string"
+          && /^extaddr:[0-9a-f]{16}$/.test(item.subjectId);
+        if (item.scope === "device" && canonicalSubject && item.subjectDisplayLabel) {
+          appendText(subject, "span", item.subjectDisplayLabel, "health-comparison-device-label");
+          appendText(subject, "span", item.subjectId, "health-comparison-device-id");
+        } else {
+          appendText(subject, "span", item.subjectId);
+        }
         if (item.scope === "device" && actions.canInspect?.(item.subjectId)) {
           const inspect = appendText(subject, "button", "Show in table");
           inspect.type = "button";
@@ -1073,8 +1086,20 @@ function renderSelectedHealthComparison(
           inspect.addEventListener("click", () => actions.inspect?.(item.subjectId));
         }
         appendText(row, "td", `${item.metric || item.itemKind} · ${item.sampleCount} ${item.sampleCount === 1 ? "sample" : "samples"}`);
-        appendText(row, "td", format(item.beforeValue));
-        appendText(row, "td", format(item.afterValue));
+        const appendComparisonValue = (cell, value, label) => {
+          if (item.scope === "device" && item.metric === "parent"
+              && typeof value === "string" && /^extaddr:[0-9a-f]{16}$/.test(value)
+              && label) {
+            appendText(cell, "span", label, "health-comparison-device-label");
+            appendText(cell, "span", value, "health-comparison-device-id");
+          } else {
+            appendText(cell, "span", format(value));
+          }
+        };
+        appendComparisonValue(row.appendChild(document.createElement("td")),
+          item.beforeValue, item.beforeDeviceDisplayLabel);
+        appendComparisonValue(row.appendChild(document.createElement("td")),
+          item.afterValue, item.afterDeviceDisplayLabel);
         const delta = Number.isFinite(item.delta) && !Number.isInteger(item.delta)
           ? item.delta.toFixed(1)
           : item.delta;

@@ -165,6 +165,84 @@ class TDHealthReadService:
         ext_address = device_id.removeprefix("extaddr:").lower()
         return labels.get(ext_address) or f"…{ext_address[-8:]}"
 
+    @staticmethod
+    def _canonical_comparison_extaddr(value: object) -> bool:
+        return (
+            isinstance(value, str)
+            and len(value) == 24
+            and value.startswith("extaddr:")
+            and all(character in "0123456789abcdef" for character in value[8:])
+        )
+
+    def _resolve_comparison_device_labels(
+        self, *, network_id: str, device_ids: list[str],
+    ) -> dict[str, str]:
+        requested = list(dict.fromkeys(
+            device_id for device_id in device_ids
+            if self._canonical_comparison_extaddr(device_id)
+        ))
+        if not requested:
+            return {}
+        labels = self._labels()
+        roster_rows = self.store.roster_device_rows(
+            network_id=network_id, device_ids=requested,
+        )
+        now = datetime.now(timezone.utc)
+        devices = []
+        for device_id in requested:
+            row = roster_rows.get(device_id, {
+                "deviceId": device_id, "fields": [], "conflicts": [],
+                "expectedLabel": None,
+            })
+            devices.append(self._roster_projection(
+                row, now=now, labels=labels, detailed=False,
+            ))
+        self._disambiguate_roster_labels(
+            devices, network_id=network_id, now=now, labels=labels,
+        )
+        return {
+            device["deviceId"]: device["displayLabel"]
+            for device in devices if device["labelOrigin"] != "fallback"
+        }
+
+    def _annotate_comparison_items(
+        self, items: list[dict[str, Any]], *, network_id: str,
+    ) -> None:
+        device_ids = []
+        for item in items:
+            if item["scope"] != "device":
+                continue
+            subject_id = item["subjectId"]
+            if self._canonical_comparison_extaddr(subject_id):
+                device_ids.append(subject_id)
+            if item["metric"] == "parent":
+                for value in (item["beforeValue"], item["afterValue"]):
+                    if self._canonical_comparison_extaddr(value):
+                        device_ids.append(value)
+        labels = self._resolve_comparison_device_labels(
+            network_id=network_id, device_ids=list(dict.fromkeys(device_ids)),
+        )
+        for item in items:
+            if item["scope"] != "device":
+                continue
+            subject_id = item["subjectId"]
+            label = (
+                labels.get(subject_id)
+                if self._canonical_comparison_extaddr(subject_id) else None
+            )
+            if label:
+                item["subjectDisplayLabel"] = label
+            if item["metric"] != "parent":
+                continue
+            for side in ("before", "after"):
+                value = item[f"{side}Value"]
+                label = (
+                    labels.get(value)
+                    if self._canonical_comparison_extaddr(value) else None
+                )
+                if label:
+                    item[f"{side}DeviceDisplayLabel"] = label
+
     def _roster_projection(self, data: dict, *, now: datetime, labels: dict[str, str],
                            detailed: bool) -> dict[str, Any]:
         policy = load_health_manifest().roster_policy
@@ -958,6 +1036,7 @@ class TDHealthReadService:
                 })
         if origin == "derived":
             row["created_at"] = None
+        self._annotate_comparison_items(projected_items, network_id=header["networkId"])
         return {
             **header, "filteredItemCount": filtered_count,
             "limit": limit, "offset": offset, "items": projected_items,
@@ -1050,6 +1129,7 @@ class TDHealthReadService:
                 "comparable": comparable,
                 "primaryReason": reasons[0] if reasons else None, "reasons": reasons,
             })
+        self._annotate_comparison_items(items, network_id=header["networkId"])
         return {
             **header, "filteredItemCount": row["filtered_item_count"],
             "limit": limit, "offset": offset, "items": items,

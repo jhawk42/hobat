@@ -1857,6 +1857,59 @@ class SQLiteHealthStore:
             return [self._roster_device_rows(connection, network_id, row["device_id"])
                     for row in rows]
 
+    def roster_device_rows(
+        self, *, network_id: str, device_ids: list[str]
+    ) -> dict[str, dict]:
+        requested = list(dict.fromkeys(device_ids))
+        if not requested:
+            return {}
+        placeholders = ",".join("?" for _ in requested)
+        parameters = (network_id, *requested)
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN")
+            records = {
+                device_id: {
+                    "deviceId": device_id, "fields": [], "conflicts": [],
+                    "expectedLabel": None, "rosterState": "untracked",
+                    "lastEndpointPresenceAt": None,
+                }
+                for device_id in requested
+            }
+            for row in connection.execute(
+                f"""SELECT * FROM device_last_known
+                    WHERE network_id=? AND device_id IN ({placeholders})
+                    ORDER BY device_id, field_key""",
+                parameters,
+            ):
+                records[row["device_id"]]["fields"].append(dict(row))
+            for row in connection.execute(
+                f"""SELECT device_id, label, roster_state FROM expected_devices
+                    WHERE network_id=? AND device_id IN ({placeholders})""",
+                parameters,
+            ):
+                records[row["device_id"]]["expectedLabel"] = row["label"]
+                records[row["device_id"]]["rosterState"] = row["roster_state"]
+            for row in connection.execute(
+                f"""SELECT c.device_id, c.field_key, c.value_json, c.other_device_id,
+                           c.source_observed_at,
+                           other.source_observed_at AS other_source_observed_at
+                    FROM device_identity_conflicts c JOIN device_last_known other
+                    ON other.network_id=c.network_id AND other.device_id=c.other_device_id
+                    AND other.field_key=c.field_key AND other.value_json=c.value_json
+                    WHERE c.network_id=? AND c.device_id IN ({placeholders})""",
+                parameters,
+            ):
+                records[row["device_id"]]["conflicts"].append(dict(row))
+            for row in connection.execute(
+                f"""SELECT ds.device_id, MAX(o.observed_at) AS last_seen
+                    FROM device_samples ds JOIN observations o USING (observation_id)
+                    WHERE o.network_id=? AND ds.device_id IN ({placeholders})
+                    GROUP BY ds.device_id""",
+                parameters,
+            ):
+                records[row["device_id"]]["lastEndpointPresenceAt"] = row["last_seen"]
+            return records
+
     def comparison_row(
         self, comparison_id: str, *, limit: int, offset: int,
         scope: str = "all", result: str = "all",

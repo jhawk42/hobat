@@ -644,6 +644,13 @@ restarts item paging at the first matching row. This view does not create pairs 
 values. Old stored-pair APIs remain supported for clients that need to inspect
 a pruned pair by its ID.
 
+When a current expected, static, or fresh unconflicted observed roster name is
+available, Comparison annotates device-scope subjects and parent-transition
+extaddrs with that name. The complete canonical extaddr remains visible, and
+the original Before/After values remain the comparison evidence. These are
+current roster annotations at read time, not names recorded at either
+comparison endpoint; labels are not persisted in comparison history.
+
 The aiohttp server exposes query-only, `Cache-Control: no-store` routes for the
 latest or pinned assessment, grouped or ungrouped findings, one attributed
 device, bounded observations, and store capabilities. Finding and observation
