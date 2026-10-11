@@ -1317,6 +1317,10 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   background: var(--surface);
 }
 
+.workspace-placeholder h2 {
+  font-size: 18px;
+}
+
 .workspace-placeholder h2,
 .workspace-placeholder h3,
 .workspace-placeholder p {
