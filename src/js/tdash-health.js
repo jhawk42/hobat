@@ -618,6 +618,14 @@ function formatElapsedInterval(seconds) {
   return parts.join(" ");
 }
 
+export function formatHealthAssessmentObservation(timestamp, now = Date.now()) {
+  const formattedTimestamp = formatUtcComparisonTimestamp(timestamp);
+  if (formattedTimestamp === "unknown") return "Observed unknown · Age: unknown";
+  const observedAt = Date.parse(timestamp);
+  const elapsedSeconds = Math.max(0, Math.floor((now - observedAt) / 1000));
+  return `Observed ${formattedTimestamp} UTC · Age: ${formatElapsedInterval(elapsedSeconds)}`;
+}
+
 function formatComparisonCount(value) {
   return new Intl.NumberFormat().format(value);
 }

@@ -113,7 +113,9 @@ Network Insights opens on **Findings** and offers three peer tabs:
 selection, disclosures, pagination, and table position while switching tabs or
 using **Show in table** and **Return**. The assessment summary is labeled
 **Selected assessment**; it describes the pinned Findings/Roster assessment,
-not an arbitrary comparison pair or necessarily its After endpoint.
+not an arbitrary comparison pair or necessarily its After endpoint. Its
+observation time uses the comparison tab's UTC date-time format and includes
+the elapsed age of the observation.
 
 **Device Roster** shows a searchable, sortable, paginated inventory for the
 selected stored assessment. Presence defaults to **Observed** and describes

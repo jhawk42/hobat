@@ -138,6 +138,7 @@ import {
   renderHealthRosterDetail,
   renderHealthComparison,
   renderHealthStatus,
+  formatHealthAssessmentObservation,
   startHealthProcessing,
 } from "./tdash-health.js";
 import {
@@ -2278,7 +2279,9 @@ function renderNetworkInsights() {
     if (assessment) {
       appendNetworkInsightElement(summary, "strong",
         `Selected assessment: ${assessment.status} · ${assessment.completeness} · ${assessment.confidence} confidence`);
-      appendNetworkInsightElement(summary, "span", `Observed ${assessment.observedAt || "unknown"}`);
+      const observedAt = appendNetworkInsightElement(summary, "span",
+        formatHealthAssessmentObservation(assessment.observedAt));
+      if (assessment.observedAt) observedAt.title = assessment.observedAt;
       appendNetworkInsightElement(summary, "span", `${assessment.coverage?.deviceCount ?? "Unknown"} observed devices`);
     }
     const findingCount = projectHealthSummaryRows(assessment?.findingGroups || [], healthInsightsViewState).length;

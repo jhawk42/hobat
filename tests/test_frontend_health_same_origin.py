@@ -1760,6 +1760,30 @@ def test_health_status_summary_is_informational_not_a_coloring_control() -> None
     assert result["toggledColoring"] == 0
 
 
+def test_health_assessment_observation_uses_comparison_timestamp_and_age_format() -> None:
+    script = r"""
+      import {formatHealthAssessmentObservation} from "./src/js/tdash-health.js";
+
+      const now = Date.parse("2026-10-11T16:22:25Z");
+      console.log(JSON.stringify({
+        observed: formatHealthAssessmentObservation("2026-10-10T02:57:24.898604+00:00", now),
+        unknown: formatHealthAssessmentObservation("not-a-date", now),
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(completed.stdout) == {
+        "observed": "Observed 2026-10-10 02:57:24 UTC · Age: 1 day 13 hours 25 minutes",
+        "unknown": "Observed unknown · Age: unknown",
+    }
+
+
 def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     html = (ROOT / "src/tdash.html").read_text(encoding="utf-8")
     health_js = (ROOT / "src/js/tdash-health.js").read_text(encoding="utf-8")
