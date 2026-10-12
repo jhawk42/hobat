@@ -37,7 +37,11 @@ from td_health_observation_model import (
 )
 from td_health_observation_store import HOBAT_DATABASE_FILENAME, HealthStoreError
 from td_health_policy import HealthPolicy
-from td_health_sqlite import SQLiteHealthStore
+from td_health_sqlite import (
+    SQLiteHealthStore,
+    apply_registered_schema_migrations,
+    validate_health_schema_connection,
+)
 
 
 _SUPPORTED_EVALUATORS = frozenset({"snapshot-v10", "snapshot-v11", EVALUATOR_VERSION})
@@ -554,18 +558,7 @@ def inventory_health_history(
     )
     with closing(store._connect()) as connection:
         connection.execute("BEGIN")
-        schema_table = connection.execute(
-            """SELECT 1 FROM sqlite_master
-               WHERE type='table' AND name='schema_migrations'"""
-        ).fetchone()
-        if schema_table is None:
-            raise HealthMigrationInventoryError(
-                "Health-history database has no supported schema"
-            )
-        schema_row = connection.execute(
-            "SELECT MAX(version) AS version FROM schema_migrations"
-        ).fetchone()
-        schema_version = int(schema_row["version"] or 0)
+        schema_version = validate_health_schema_connection(connection)
         if schema_version not in {7, 8}:
             raise HealthMigrationInventoryError(
                 f"Health-history migration supports database schemas 7 and 8, not {schema_version}"
@@ -1376,7 +1369,9 @@ def migrate_health_history(
                     f"Health-history migration does not support schema {current_schema}"
                 )
             if current_schema == 7:
-                SQLiteHealthStore._ensure_schema_v8(connection)
+                apply_registered_schema_migrations(
+                    connection, expected_source_version=current_schema
+                )
 
             plans = []
             created_count = 0

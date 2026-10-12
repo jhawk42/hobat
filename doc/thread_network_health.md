@@ -41,6 +41,35 @@ PYTHONPATH=src python3 -m td_cli --datadir ./data health process-dataset \
 For `--dataset all`, JSON output is an array of result documents. Roster
 operations and `--export-latest` require one concrete dataset ID.
 
+## Migrating Health Store Schema
+
+Health schema version 8 is the current contract. Inspect an existing database
+without creating a store or changing any files:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health migrate --check --json
+```
+
+Apply supported online-additive upgrades explicitly with:
+
+```bash
+PYTHONPATH=src python3 -m td_cli --datadir ./data health migrate --apply --json
+```
+
+Normal writable health-store startup uses the same ordered migration registry.
+Before changing a non-empty store it creates and integrity-checks a
+SQLite-API database-only recovery copy in `./data/.migration-backups/`, with
+JSON metadata recording source/target schema versions and verification. Copies
+are retained after success and failure; failed migrations roll back their
+schema, rows, and version ledger. Check-only and read-only health paths never
+create a recovery copy or repair an existing store.
+
+Full data-directory backups omit `.migration-backups/` to avoid recursively
+copying recovery history. Restore preserves the active directory's existing
+recovery copies and refuses a same-name collision rather than overwriting one.
+Remove recovery copies only after the upgraded database and a separate backup
+have been verified and the copies are no longer needed for recovery.
+
 ## Migrating Retained Health History
 
 `health migrate-history` replays validated retained observations under the
@@ -49,6 +78,10 @@ today's snapshots, run collectors, probe devices, or rewrite original
 observations and assessments. Schema 8 records immutable upgrade mappings and
 preferred revisions; explicit assessment and comparison IDs continue to refer
 to the original pinned records.
+
+This history replay is separate from `health migrate --check` and
+`health migrate --apply`, which only change database schema and never replay
+assessments or process snapshots.
 
 Run this only during a maintenance window after stopping the dashboard's
 write-capable health server, scheduled health processing, roster actions, and

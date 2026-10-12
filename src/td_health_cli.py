@@ -15,14 +15,17 @@ from typing import Any, Sequence
 from td_health_history import import_expected_roster_from_label_map, network_id_for_dataset
 from td_health_manifest import load_health_manifest
 from td_health_observation_model import device_id_from_ext_address
-from td_health_observation_store import HOBAT_DATABASE_FILENAME
+from td_health_observation_store import HOBAT_DATABASE_FILENAME, HealthStoreError
 from td_health_policy import load_health_policy
 from td_health_processor import ProcessingResult, build_processing_result, process_health
 from td_health_roster_mutation import set_cli_roster_device
-from td_health_sqlite import SQLiteHealthStore
+from td_health_sqlite import (
+    SQLiteHealthStore,
+    apply_health_schema_migrations,
+    inspect_health_schema_migrations,
+)
 from td_health_migration import (
     HealthMigrationError,
-    HealthMigrationInventoryError,
     history_migration_report,
     inventory_health_history,
     migrate_health_history,
@@ -102,6 +105,18 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--json", action="store_true", dest="json_output")
     migrate.add_argument("--yes", action="store_true")
     migrate.add_argument("--backup-output", type=Path, default=None)
+    schema_migrate = commands.add_parser(
+        "migrate",
+        description="Inspect or apply registered health database schema migrations.",
+    )
+    schema_action = schema_migrate.add_mutually_exclusive_group(required=True)
+    schema_action.add_argument(
+        "--check", action="store_true", help="Show a read-only schema migration plan."
+    )
+    schema_action.add_argument(
+        "--apply", action="store_true", help="Apply supported schema migrations."
+    )
+    schema_migrate.add_argument("--json", action="store_true", dest="json_output")
     for name, help_text in (
         ("purge", "Delete health records older than a UTC cutoff"),
         ("purge-all", "Delete all health-domain records"),
@@ -249,7 +264,7 @@ def _run_history_migration(
             dataset_ids=dataset_ids,
             network_id=args.network_id,
         )
-    except (OSError, ValueError, HealthMigrationInventoryError) as exc:
+    except (OSError, ValueError, HealthStoreError) as exc:
         print(f"Health history preflight failed: {exc}", file=__import__("sys").stderr)
         return 2
 
@@ -355,13 +370,55 @@ def _run_history_migration(
     return return_code
 
 
+def _run_schema_migration(args, data_dir: Path) -> int:
+    database_path = data_dir / HOBAT_DATABASE_FILENAME
+    report = (
+        inspect_health_schema_migrations(database_path)
+        if args.check
+        else apply_health_schema_migrations(database_path)
+    )
+    if args.json_output:
+        print(json.dumps(report, sort_keys=True))
+    elif report["outcome"] == "refused":
+        print(
+            f"Health schema migration refused [{report['errorCategory']}]: "
+            f"{report.get('message', 'migration could not be completed')}",
+            file=sys.stderr,
+        )
+    elif report["outcome"] == "pending":
+        print(
+            f"Health schema migration pending: "
+            f"v{report['sourceSchemaVersion']} -> v{report['targetSchemaVersion']}."
+        )
+        for migration in report["migrations"]:
+            print(
+                f"- {migration['id']} "
+                f"({migration['fromVersion']} -> {migration['toVersion']}, "
+                f"{migration['mode']})"
+            )
+    elif report["outcome"] == "applied":
+        print(
+            f"Health schema migrated: v{report['sourceSchemaVersion']} -> "
+            f"v{report['targetSchemaVersion']}; verified recovery copy: "
+            f"{report.get('backupPath')}"
+        )
+    else:
+        print(
+            f"Health schema migration {report['outcome']}: "
+            f"schema v{report['targetSchemaVersion']}."
+        )
+    return 1 if report["outcome"] == "refused" else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     data_dir = resolve_data_dir(
         args.datadir,
-        create_default=args.health_command != "migrate-history",
+        create_default=args.health_command not in {"migrate-history", "migrate"},
     )
+    if args.health_command == "migrate":
+        return _run_schema_migration(args, data_dir)
     if args.health_command == "migrate-history":
         return _run_history_migration(args, parser, data_dir)
     if args.health_command in {"purge", "purge-all", "purge-by-device"}:

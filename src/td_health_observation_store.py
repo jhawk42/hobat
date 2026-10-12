@@ -21,6 +21,21 @@ class HealthStoreFutureSchemaError(HealthStoreError):
     """Raised when the database schema is newer than this application."""
 
 
+class HealthStoreMigrationError(HealthStoreError):
+    """Raised when the health-store schema cannot be inspected or upgraded."""
+
+    def __init__(
+        self,
+        category: str,
+        message: str,
+        *,
+        recovery_backup_path: str | None = None,
+    ):
+        super().__init__(message)
+        self.category = category
+        self.recovery_backup_path = recovery_backup_path
+
+
 @dataclass(frozen=True)
 class StoreResult:
     observation_created: bool

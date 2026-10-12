@@ -42,6 +42,11 @@ before the REST subcommand.
   with the same path when regeneration is needed.
 - Eve layout, Thread Tools diagnostics, and the static label map can be supplied
   by the operator.
+- Health schema migration recovery copies live under
+  `.migration-backups/`. Full directory backups exclude that recovery
+  directory, and restore preserves copies already present at the destination.
+  Review and clean up recovery copies explicitly after a schema upgrade is
+  verified.
 
 Atomic replacement protects readers from partial files. It does not serialize
 independent writer processes; concurrent external writes remain last-write-wins.

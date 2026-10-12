@@ -6,8 +6,10 @@ import io
 import json
 import hashlib
 import os
-from contextlib import closing, redirect_stdout
+import sqlite3
+from contextlib import closing, redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import td_cli
@@ -22,6 +24,7 @@ from td_health_migration import (
 from td_health_policy import load_health_policy
 from td_health_processor import process_health
 from test_td_health_sqlite import _result
+from test_td_health_migrations import _create_schema_fixture
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 
 
@@ -34,6 +37,96 @@ def _seed(data_dir) -> None:
         json.dumps([{"extAddress": "8672766ae0578187", "role": "router"}]),
         encoding="utf-8",
     )
+
+
+def test_schema_migration_check_is_read_only_and_apply_is_verified(tmp_path) -> None:
+    database_path = tmp_path / HOBAT_DATABASE_FILENAME
+    _create_schema_fixture(database_path, 3)
+    before_database = database_path.read_bytes()
+    before_entries = sorted(path.name for path in tmp_path.iterdir())
+
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert td_health_cli.main(
+            ["--datadir", str(tmp_path), "migrate", "--check", "--json"]
+        ) == 0
+    check = json.loads(output.getvalue())
+    assert check["operation"] == "check"
+    assert check["outcome"] == "pending"
+    assert check["sourceSchemaVersion"] == 3
+    assert check["targetSchemaVersion"] == 8
+    assert [item["toVersion"] for item in check["migrations"]] == [4, 5, 6, 7, 8]
+    assert check["backupRequired"] and not check["backupVerified"]
+    assert database_path.read_bytes() == before_database
+    assert sorted(path.name for path in tmp_path.iterdir()) == before_entries
+
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert td_health_cli.main(
+            ["--datadir", str(tmp_path), "migrate", "--apply", "--json"]
+        ) == 0
+    applied = json.loads(output.getvalue())
+    assert applied["operation"] == "apply"
+    assert applied["outcome"] == "applied"
+    assert applied["backupVerified"]
+    backup_path = Path(applied["backupPath"])
+    assert backup_path.is_file()
+    metadata = json.loads(backup_path.with_suffix(".json").read_text(encoding="utf-8"))
+    assert metadata["sourceSchemaVersion"] == 3
+    assert metadata["targetSchemaVersion"] == 8
+    assert metadata["integrityCheck"] == "ok"
+
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert td_health_cli.main(
+            ["--datadir", str(tmp_path), "migrate", "--apply", "--json"]
+        ) == 0
+    assert json.loads(output.getvalue())["outcome"] == "current"
+
+
+def test_schema_migration_check_does_not_create_missing_data_directory(tmp_path) -> None:
+    missing = tmp_path / "not-created"
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert td_health_cli.main(
+            ["--datadir", str(missing), "migrate", "--check", "--json"]
+        ) == 0
+    report = json.loads(output.getvalue())
+    assert report["outcome"] == "no-store"
+    assert not missing.exists()
+
+
+def test_migrate_history_reports_invalid_schema_without_traceback(tmp_path) -> None:
+    database_path = tmp_path / HOBAT_DATABASE_FILENAME
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations "
+            "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        connection.executemany(
+            "INSERT INTO schema_migrations VALUES (?, CURRENT_TIMESTAMP)",
+            ((2,), (4,)),
+        )
+
+    error_output = io.StringIO()
+    with redirect_stderr(error_output):
+        result = td_health_cli.main(
+            [
+                "--datadir",
+                str(tmp_path),
+                "migrate-history",
+                "--dataset",
+                "all",
+                "--policy-config-dir",
+                str(Path(__file__).resolve().parents[1] / "config"),
+                "--dry-run",
+                "--json",
+            ]
+        )
+
+    assert result == 2
+    assert "Health history preflight failed:" in error_output.getvalue()
+    assert "gapped" in error_output.getvalue()
 
 
 def test_dry_run_json_does_not_create_database(tmp_path) -> None:

@@ -61,6 +61,56 @@ def test_backup_and_restore_round_trip_complete_data_directory(tmp_path) -> None
         assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
 
 
+def test_backup_excludes_migration_recovery_and_restore_preserves_it(tmp_path) -> None:
+    data_dir = _data_dir(tmp_path)
+    recovery_dir = data_dir / ".migration-backups"
+    recovery_dir.mkdir()
+    recovery_copy = recovery_dir / "hobat_v1-schema-v3-to-v8-verified.sqlite"
+    recovery_copy.write_bytes(b"verified recovery copy")
+    recovery_metadata = recovery_copy.with_suffix(".json")
+    recovery_metadata.write_text('{"sourceSchemaVersion":3}\n', encoding="utf-8")
+    backup_dir = tmp_path / "backup"
+
+    manifest = create_backup(data_dir, backup_dir)
+
+    assert not any(name.startswith(".migration-backups/") for name in manifest["files"])
+    assert not (backup_dir / ".migration-backups").exists()
+    restore_backup(data_dir, backup_dir)
+
+    assert recovery_copy.read_bytes() == b"verified recovery copy"
+    assert recovery_metadata.read_text(encoding="utf-8") == '{"sourceSchemaVersion":3}\n'
+
+
+def test_restore_refuses_to_overwrite_same_named_migration_recovery_copy(tmp_path) -> None:
+    data_dir = _data_dir(tmp_path)
+    backup_dir = tmp_path / "backup"
+    create_backup(data_dir, backup_dir)
+    restored_recovery_dir = backup_dir / ".migration-backups"
+    restored_recovery_dir.mkdir()
+    duplicate_name = "recovery.sqlite"
+    (restored_recovery_dir / duplicate_name).write_bytes(b"backup copy")
+    manifest_path = backup_dir / BACKUP_MANIFEST_FILENAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"][".migration-backups/recovery.sqlite"] = td_system_backups._sha256(
+        restored_recovery_dir / duplicate_name
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (data_dir / ".migration-backups").mkdir()
+    (data_dir / ".migration-backups" / duplicate_name).write_bytes(b"operator copy")
+
+    with pytest.raises(BackupError, match="must not contain migration-recovery"):
+        restore_backup(data_dir, backup_dir)
+    staging_dir = tmp_path / "staging"
+    collision_dir = staging_dir / ".migration-backups"
+    collision_dir.mkdir(parents=True)
+    (collision_dir / duplicate_name).write_bytes(b"backup copy")
+    with pytest.raises(BackupError, match="overwrite"):
+        td_system_backups._preserve_migration_recovery_files(data_dir, staging_dir)
+    assert (
+        data_dir / ".migration-backups" / duplicate_name
+    ).read_bytes() == b"operator copy"
+
+
 def test_backup_rejects_output_inside_data_directory(tmp_path) -> None:
     data_dir = _data_dir(tmp_path)
     with pytest.raises(BackupError, match="outside"):

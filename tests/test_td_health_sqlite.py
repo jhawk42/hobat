@@ -26,6 +26,7 @@ from td_health_observation_model import (
     SourceEvidence,
 )
 from td_health_observation_store import HealthStoreFutureSchemaError
+from td_health_observation_store import HealthStoreMigrationError
 from td_health_comparison import (
     COMPARISON_INTERVALS,
     ComparisonPolicy,
@@ -258,14 +259,15 @@ def test_future_schema_is_rejected(tmp_path) -> None:
         SQLiteHealthStore(path)
 
 
-def test_status_vocabulary_migrates_from_schema_version_one(tmp_path) -> None:
+def test_ledger_only_schema_downgrade_is_rejected(tmp_path) -> None:
     path = tmp_path / "health.db"
     store = SQLiteHealthStore(path)
     observation, assessment = _result()
     store.save_processing_result(observation, assessment)
 
     with sqlite3.connect(path) as connection:
-        connection.execute("UPDATE schema_migrations SET version=1 WHERE version=2")
+        connection.execute("DELETE FROM schema_migrations WHERE version > 1")
+        connection.execute("UPDATE schema_migrations SET version=1")
         connection.execute("UPDATE assessments SET status='healthy'")
         connection.execute(
             "INSERT INTO findings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -289,11 +291,13 @@ def test_status_vocabulary_migrates_from_schema_version_one(tmp_path) -> None:
             ),
         )
 
-    SQLiteHealthStore(path)
+    with pytest.raises(HealthStoreMigrationError) as error:
+        SQLiteHealthStore(path)
+    assert error.value.category == "schema-invalid"
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute("SELECT status FROM assessments").fetchone() == ("strong",)
-        assert connection.execute("SELECT status FROM findings").fetchone() == ("poor",)
+        assert connection.execute("SELECT status FROM assessments").fetchone() == ("healthy",)
+        assert connection.execute("SELECT status FROM findings").fetchone() == ("unhealthy",)
 
 
 def test_schema_three_records_explicit_assessment_provenance(tmp_path) -> None:
@@ -313,7 +317,7 @@ def test_schema_three_records_explicit_assessment_provenance(tmp_path) -> None:
     assert 3 in versions
 
 
-def test_schema_two_assessments_migrate_with_unknown_legacy_provenance(tmp_path) -> None:
+def test_incomplete_schema_two_store_is_rejected_without_bootstrapping(tmp_path) -> None:
     path = tmp_path / "health.db"
     with sqlite3.connect(path) as connection:
         connection.execute(
@@ -354,17 +358,16 @@ def test_schema_two_assessments_migrate_with_unknown_legacy_provenance(tmp_path)
             ("a", "o", "p", "d", "strong", "high", "{}", "2026-09-01T00:00:00+00:00"),
         )
 
-    SQLiteHealthStore(path)
+    with pytest.raises(HealthStoreMigrationError) as error:
+        SQLiteHealthStore(path)
+    assert error.value.category == "schema-invalid"
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute(
-            "SELECT evaluator_version, profile_id FROM assessments"
-        ).fetchone() == ("legacy-unknown", "legacy-unknown")
         assert connection.execute("SELECT assessment_id FROM assessments").fetchone() == ("a",)
-        assert connection.execute(
-            "SELECT roster_context_digest, presence_input_digest FROM assessments"
-        ).fetchone() == ("legacy-unknown", "legacy-unknown")
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute(
+            "SELECT version FROM schema_migrations"
+        ).fetchall() == [(2,)]
 
 
 def test_current_assessment_orders_offset_timestamps_by_utc_instant(tmp_path) -> None:
@@ -608,7 +611,7 @@ def test_schema_seven_adds_and_backfills_receipt_device_scope(tmp_path) -> None:
     with sqlite3.connect(path) as connection:
         connection.execute("DROP INDEX idx_roster_receipts_network_device")
         connection.execute("ALTER TABLE roster_mutation_receipts DROP COLUMN device_id")
-        connection.execute("DELETE FROM schema_migrations WHERE version=7")
+        connection.execute("DELETE FROM schema_migrations WHERE version>=7")
 
     migrated = SQLiteHealthStore(path)
 
@@ -1089,7 +1092,9 @@ def test_real_v3_migration_backfills_only_lossless_device_facts(tmp_path) -> Non
     path = tmp_path / HOBAT_DATABASE_FILENAME
     with sqlite3.connect(path) as connection:
         connection.executescript(_SCHEMA)
-        connection.execute("INSERT INTO schema_migrations VALUES (3, CURRENT_TIMESTAMP)")
+        connection.executemany(
+            "INSERT INTO schema_migrations VALUES (?, CURRENT_TIMESTAMP)", ((2,), (3,))
+        )
         connection.execute("INSERT INTO devices VALUES (?, ?)", ("extaddr:8672766ae0578187", "8672766ae0578187"))
         connection.execute(
             """INSERT INTO observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -1119,7 +1124,9 @@ def test_v3_upgrade_reopen_keeps_comparison_and_roster_provenance(tmp_path) -> N
     path = tmp_path / HOBAT_DATABASE_FILENAME
     with sqlite3.connect(path) as connection:
         connection.executescript(_SCHEMA)
-        connection.execute("INSERT INTO schema_migrations VALUES (3, CURRENT_TIMESTAMP)")
+        connection.executemany(
+            "INSERT INTO schema_migrations VALUES (?, CURRENT_TIMESTAMP)", ((2,), (3,))
+        )
     store = SQLiteHealthStore(path)
     filename = "td-otbr-cli-networkdiag-fetch-all.json"
     for suffix in ("1", "2"):
@@ -1165,7 +1172,7 @@ def test_comparison_failure_rolls_back_observation_and_current_pointer(tmp_path,
         assert connection.execute("SELECT COUNT(*) FROM comparisons").fetchone() == (0,)
 
 
-def test_schema_five_migration_adds_roster_lifecycle_columns_to_v4_rows(tmp_path) -> None:
+def test_incomplete_schema_four_store_is_rejected_before_migration(tmp_path) -> None:
     path = tmp_path / "health.db"
     network_id = "extpan:78b9775b001c1cbe"
     device_id = "extaddr:8672766ae0578187"
@@ -1183,19 +1190,17 @@ def test_schema_five_migration_adds_roster_lifecycle_columns_to_v4_rows(tmp_path
             VALUES ('extpan:78b9775b001c1cbe', 'extaddr:8672766ae0578187', 'Router', 'expected');
         """)
 
-    SQLiteHealthStore(path)
+    with pytest.raises(HealthStoreMigrationError) as error:
+        SQLiteHealthStore(path)
+    assert error.value.category == "schema-invalid"
     with sqlite3.connect(path) as connection:
-        columns = {row[1] for row in connection.execute("PRAGMA table_info(expected_devices)")}
-        assert {"revision", "reason", "expected_since", "change_source"} <= columns
         assert connection.execute(
-            "SELECT label, roster_state, revision, expected_since, change_source "
-            "FROM expected_devices WHERE network_id=? AND device_id=?",
+            "SELECT label, roster_state FROM expected_devices WHERE network_id=? AND device_id=?",
             (network_id, device_id),
-        ).fetchone() == ("Router", "expected", 0, None, "legacy")
+        ).fetchone() == ("Router", "expected")
         assert connection.execute(
-            "SELECT revision FROM network_roster_revisions WHERE network_id=?",
-            (network_id,),
-        ).fetchone() == (0,)
+            "SELECT version FROM schema_migrations"
+        ).fetchall() == [(4,)]
 
 
 def test_roster_cli_writes_are_audited_revisioned_and_label_only_is_nonreactivating(tmp_path) -> None:

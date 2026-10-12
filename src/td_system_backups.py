@@ -19,6 +19,7 @@ from td_health_sqlite import SCHEMA_VERSION
 BACKUP_FORMAT_VERSION = 1
 BACKUP_MANIFEST_FILENAME = "hobat-backup-manifest.json"
 _EXCLUDED_SUFFIXES = ("-wal", "-shm", "-journal", ".lock")
+_MIGRATION_BACKUP_DIRECTORY = ".migration-backups"
 
 
 class BackupError(RuntimeError):
@@ -82,19 +83,29 @@ def _copy_sqlite(source: Path, destination: Path) -> int:
 
 
 def _copy_data_files(data_dir: Path, destination: Path) -> None:
-    for source in sorted(data_dir.rglob("*")):
-        relative = source.relative_to(data_dir)
-        if source.is_symlink():
-            raise BackupError(f"Data directory contains unsupported symlink: {relative}")
-        if source.is_dir():
-            continue
-        if relative == Path(HOBAT_DATABASE_FILENAME):
-            continue
-        if source.name.endswith(_EXCLUDED_SUFFIXES) or source.name.endswith(".tmp"):
-            continue
-        target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+    for root, directories, filenames in os.walk(data_dir, topdown=True, followlinks=False):
+        root_path = Path(root)
+        for directory in tuple(directories):
+            source_dir = root_path / directory
+            relative_dir = source_dir.relative_to(data_dir)
+            if relative_dir == Path(_MIGRATION_BACKUP_DIRECTORY):
+                directories.remove(directory)
+            elif source_dir.is_symlink():
+                raise BackupError(
+                    f"Data directory contains unsupported symlink: {relative_dir}"
+                )
+        for filename in sorted(filenames):
+            source = root_path / filename
+            relative = source.relative_to(data_dir)
+            if source.is_symlink():
+                raise BackupError(f"Data directory contains unsupported symlink: {relative}")
+            if relative == Path(HOBAT_DATABASE_FILENAME):
+                continue
+            if source.name.endswith(_EXCLUDED_SUFFIXES) or source.name.endswith(".tmp"):
+                continue
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
 
 
 def _manifest_files(directory: Path) -> dict[str, str]:
@@ -102,6 +113,7 @@ def _manifest_files(directory: Path) -> dict[str, str]:
         path.relative_to(directory).as_posix(): _sha256(path)
         for path in sorted(directory.rglob("*"))
         if path.is_file() and path.name != BACKUP_MANIFEST_FILENAME
+        and path.relative_to(directory).parts[0] != _MIGRATION_BACKUP_DIRECTORY
     }
 
 
@@ -158,6 +170,8 @@ def validate_backup(input_dir: Path) -> dict[str, Any]:
         relative = Path(name)
         if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != name:
             raise BackupError(f"Unsafe backup path: {name}")
+        if relative.parts[0] == _MIGRATION_BACKUP_DIRECTORY:
+            raise BackupError("Backup must not contain migration-recovery copies")
         path = input_dir / relative
         if path.is_symlink():
             raise BackupError(f"Backup contains unsupported symlink: {name}")
@@ -218,6 +232,35 @@ def _restore_mount_contents(data_dir: Path, staging: Path, previous: Path) -> No
         raise
 
 
+def _preserve_migration_recovery_files(data_dir: Path, staging: Path) -> None:
+    source = data_dir / _MIGRATION_BACKUP_DIRECTORY
+    if not source.exists():
+        return
+    if source.is_symlink() or not source.is_dir():
+        raise BackupError("Migration-recovery path must be a regular directory")
+    for item in source.rglob("*"):
+        if item.is_symlink():
+            raise BackupError(
+                "Migration-recovery directory contains an unsupported symlink"
+            )
+    destination = staging / _MIGRATION_BACKUP_DIRECTORY
+    if destination.exists() and (destination.is_symlink() or not destination.is_dir()):
+        raise BackupError("Backup contains an invalid migration-recovery path")
+    if destination.exists():
+        conflicts = []
+        for item in source.rglob("*"):
+            target = destination / item.relative_to(source)
+            if target.exists() and (
+                item.is_file() or target.is_file() or item.is_symlink() or target.is_symlink()
+            ):
+                conflicts.append(item.relative_to(source))
+        if conflicts:
+            raise BackupError(
+                "Restore would overwrite an existing migration-recovery copy"
+            )
+    shutil.copytree(source, destination, dirs_exist_ok=True)
+
+
 def restore_backup(data_dir: Path, input_dir: Path) -> dict[str, Any]:
     data_dir = data_dir.resolve()
     input_dir = input_dir.resolve()
@@ -235,6 +278,8 @@ def restore_backup(data_dir: Path, input_dir: Path) -> dict[str, Any]:
             staging,
             ignore=shutil.ignore_patterns(BACKUP_MANIFEST_FILENAME),
         )
+        if data_dir.is_dir():
+            _preserve_migration_recovery_files(data_dir, staging)
         _database_schema_version(staging / HOBAT_DATABASE_FILENAME)
         _assert_database_available_for_restore(data_dir)
         had_existing = data_dir.exists()

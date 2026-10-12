@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 import hashlib
 import math
+import os
 import sqlite3
+import uuid
 from contextlib import closing
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
-from typing import Iterator
+from typing import Callable, Iterator
 
 from td_health_comparison import (
     COMPARISON_INTERVALS, COMPARISON_VERSION, METRIC_CATALOG, ROUTE64_SAMPLE_CONTRACT_VERSION,
@@ -29,6 +31,7 @@ from td_health_observation_model import (
 from td_health_observation_store import (
     MAX_OBSERVATIONS,
     HealthStoreFutureSchemaError,
+    HealthStoreMigrationError,
     PurgeResult,
     StoreResult,
 )
@@ -60,6 +63,82 @@ _PURGE_TABLES = (
     "device_last_known",
     "device_identity_conflicts",
 )
+
+
+_SCHEMA_V2 = """
+CREATE TABLE schema_migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL
+);
+CREATE TABLE observations (
+    observation_id TEXT PRIMARY KEY, datasource_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL, network_id TEXT NOT NULL, network_name TEXT,
+    observed_at TEXT NOT NULL, ingested_at TEXT NOT NULL,
+    completeness TEXT NOT NULL CHECK (completeness IN ('complete','degraded','partial')),
+    source_set_digest TEXT NOT NULL
+);
+CREATE INDEX idx_observations_network_time
+    ON observations(network_id, observed_at DESC);
+CREATE TABLE observation_sources (
+    observation_id TEXT NOT NULL REFERENCES observations(observation_id) ON DELETE CASCADE,
+    filename TEXT NOT NULL, digest TEXT NOT NULL, kind TEXT NOT NULL,
+    state TEXT NOT NULL, PRIMARY KEY (observation_id, filename)
+);
+CREATE TABLE devices (device_id TEXT PRIMARY KEY, ext_address TEXT NOT NULL UNIQUE);
+CREATE TABLE device_samples (
+    observation_id TEXT NOT NULL REFERENCES observations(observation_id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL REFERENCES devices(device_id),
+    role TEXT, state TEXT, is_border_router INTEGER NOT NULL,
+    source_files_json TEXT NOT NULL, PRIMARY KEY (observation_id, device_id)
+);
+CREATE TABLE relationships (
+    relationship_id TEXT PRIMARY KEY,
+    from_device_id TEXT NOT NULL REFERENCES devices(device_id),
+    to_device_id TEXT NOT NULL REFERENCES devices(device_id)
+);
+CREATE TABLE relationship_samples (
+    observation_id TEXT NOT NULL REFERENCES observations(observation_id) ON DELETE CASCADE,
+    relationship_id TEXT NOT NULL REFERENCES relationships(relationship_id),
+    relationship_type TEXT NOT NULL, link_quality_in INTEGER, link_quality_out INTEGER,
+    average_rssi REAL, last_rssi REAL, link_margin REAL, frame_error_rate REAL,
+    message_error_rate REAL, reporter_device_id TEXT REFERENCES devices(device_id),
+    source_files_json TEXT NOT NULL, PRIMARY KEY (observation_id, relationship_id)
+);
+CREATE TABLE metric_samples (
+    observation_id TEXT NOT NULL REFERENCES observations(observation_id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL REFERENCES devices(device_id),
+    metric TEXT NOT NULL, value REAL NOT NULL, unit TEXT NOT NULL,
+    denominator REAL, source_file TEXT NOT NULL,
+    PRIMARY KEY (observation_id, device_id, metric, source_file)
+);
+CREATE TABLE assessments (
+    assessment_id TEXT PRIMARY KEY,
+    observation_id TEXT NOT NULL REFERENCES observations(observation_id) ON DELETE CASCADE,
+    policy_version TEXT NOT NULL, policy_digest TEXT NOT NULL, status TEXT NOT NULL,
+    confidence TEXT NOT NULL, coverage_json TEXT NOT NULL, assessed_at TEXT NOT NULL,
+    UNIQUE (observation_id, policy_digest)
+);
+CREATE TABLE findings (
+    assessment_id TEXT NOT NULL REFERENCES assessments(assessment_id) ON DELETE CASCADE,
+    finding_id TEXT NOT NULL, rule_id TEXT NOT NULL, status TEXT NOT NULL,
+    scope TEXT NOT NULL, rank INTEGER NOT NULL, title TEXT NOT NULL,
+    summary TEXT NOT NULL, why_it_matters TEXT NOT NULL, evidence_json TEXT NOT NULL,
+    confidence TEXT NOT NULL, action TEXT NOT NULL, verify TEXT NOT NULL,
+    source_files_json TEXT NOT NULL, device_ids_json TEXT NOT NULL,
+    relationship_ids_json TEXT NOT NULL, PRIMARY KEY (assessment_id, finding_id)
+);
+CREATE TABLE current_assessments (
+    network_id TEXT NOT NULL, dataset_id TEXT NOT NULL,
+    assessment_id TEXT NOT NULL REFERENCES assessments(assessment_id) ON DELETE CASCADE,
+    PRIMARY KEY (network_id, dataset_id)
+);
+CREATE TABLE expected_devices (
+    network_id TEXT NOT NULL, device_id TEXT NOT NULL, label TEXT,
+    roster_state TEXT NOT NULL DEFAULT 'expected',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (network_id, device_id)
+);
+"""
 
 
 _SCHEMA = """
@@ -464,6 +543,9 @@ class SQLiteHealthStore:
         if not read_only:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._initialize()
+        elif self.path.is_file():
+            with closing(self._connect()) as connection:
+                _schema_version_from_ledger(connection)
 
     def _connect(self) -> sqlite3.Connection:
         if self.read_only:
@@ -494,215 +576,7 @@ class SQLiteHealthStore:
         return connection
 
     def _initialize(self) -> None:
-        with closing(self._connect()) as connection, connection:
-            table = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
-            ).fetchone()
-            if table:
-                row = connection.execute(
-                    "SELECT MAX(version) AS version FROM schema_migrations"
-                ).fetchone()
-                version = row["version"] if row else None
-                if version is not None and version > SCHEMA_VERSION:
-                    raise HealthStoreFutureSchemaError(
-                        f"Database schema {version} is newer than supported {SCHEMA_VERSION}"
-                    )
-                if version is not None and version < 6:
-                    connection.execute("PRAGMA foreign_keys=OFF")
-            connection.executescript(_SCHEMA)
-            applied_versions = {
-                row["version"]
-                for row in connection.execute("SELECT version FROM schema_migrations")
-            }
-            if 2 not in applied_versions:
-                connection.execute(
-                    "UPDATE assessments SET status=CASE status "
-                    "WHEN 'healthy' THEN 'strong' WHEN 'unstable' THEN 'moderate' "
-                    "WHEN 'unhealthy' THEN 'poor' ELSE status END"
-                )
-                connection.execute(
-                    "UPDATE findings SET status=CASE status "
-                    "WHEN 'healthy' THEN 'strong' WHEN 'unstable' THEN 'moderate' "
-                    "WHEN 'unhealthy' THEN 'poor' ELSE status END"
-                )
-                connection.execute(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
-                    (2,),
-                )
-            if 3 not in applied_versions:
-                assessment_columns = {
-                    row["name"]
-                    for row in connection.execute("PRAGMA table_info(assessments)")
-                }
-                if "evaluator_version" not in assessment_columns:
-                    connection.execute(
-                        "ALTER TABLE assessments ADD COLUMN evaluator_version "
-                        "TEXT NOT NULL DEFAULT 'legacy-unknown'"
-                    )
-                if "profile_id" not in assessment_columns:
-                    connection.execute(
-                        "ALTER TABLE assessments ADD COLUMN profile_id "
-                        "TEXT NOT NULL DEFAULT 'legacy-unknown'"
-                    )
-                connection.execute(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
-                    (3,),
-                )
-            if 4 not in applied_versions:
-                for table, column, definition in (
-                    ("assessments", "sample_contract_version", "TEXT NOT NULL DEFAULT 'legacy-unknown'"),
-                    ("assessments", "health_policy_digest", "TEXT"),
-                    ("metric_samples", "metric_kind", "TEXT NOT NULL DEFAULT 'legacy-unknown'"),
-                    ("metric_samples", "denominator_kind", "TEXT NOT NULL DEFAULT 'legacy-unknown'"),
-                    ("observation_sources", "source_observed_at", "TEXT"),
-                    ("relationship_samples", "queued_message_count", "REAL"),
-                ):
-                    columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
-                    if column not in columns:
-                        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-                for statement in _V4_TABLES:
-                    connection.execute(statement)
-                for item in connection.execute(
-                    """SELECT ds.observation_id, ds.device_id, ds.role, ds.state
-                       FROM device_samples ds ORDER BY ds.observation_id, ds.device_id"""
-                ):
-                    for field, value, value_class in (
-                        ("extAddress", item["device_id"].removeprefix("extaddr:"), "identity"),
-                        ("role", item["role"], "transient"),
-                        ("state", item["state"], "transient"),
-                    ):
-                        if value is not None:
-                            connection.execute(
-                                """INSERT INTO device_fact_samples
-                                   (observation_id, device_id, field_key, source_file,
-                                    value_json, value_class) VALUES (?, ?, ?, ?, ?, ?)""",
-                                (item["observation_id"], item["device_id"], field,
-                                 "legacy-unknown", json.dumps(value), value_class),
-                            )
-                connection.execute(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
-                    (4,),
-                )
-            if 5 not in applied_versions:
-                expected_columns = {
-                    row["name"]
-                    for row in connection.execute("PRAGMA table_info(expected_devices)")
-                }
-                for column, definition in (
-                    ("revision", "INTEGER NOT NULL DEFAULT 0"),
-                    ("reason", "TEXT"),
-                    ("expected_since", "TEXT"),
-                    ("change_source", "TEXT NOT NULL DEFAULT 'legacy'"),
-                ):
-                    if column not in expected_columns:
-                        connection.execute(
-                            f"ALTER TABLE expected_devices ADD COLUMN {column} {definition}"
-                        )
-                connection.execute(
-                    """INSERT OR IGNORE INTO network_roster_revisions
-                       (network_id, revision, updated_at)
-                       SELECT DISTINCT network_id, 0, CURRENT_TIMESTAMP
-                       FROM expected_devices"""
-                )
-                connection.execute(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
-                    (5,),
-                )
-            if 6 not in applied_versions:
-                indexes = connection.execute("PRAGMA index_list(assessments)").fetchall()
-                legacy_unique = False
-                for index in indexes:
-                    if not index["unique"]:
-                        continue
-                    columns = [
-                        row["name"] for row in connection.execute(
-                            f"PRAGMA index_info('{index['name']}')"
-                        )
-                    ]
-                    if columns == ["observation_id", "policy_digest"]:
-                        legacy_unique = True
-                        break
-                if legacy_unique:
-                    connection.execute(
-                        """CREATE TABLE assessments_v6 (
-                            assessment_id TEXT PRIMARY KEY,
-                            observation_id TEXT NOT NULL REFERENCES observations(observation_id) ON DELETE CASCADE,
-                            policy_version TEXT NOT NULL,
-                            policy_digest TEXT NOT NULL,
-                            evaluator_version TEXT NOT NULL,
-                            profile_id TEXT NOT NULL,
-                            status TEXT NOT NULL,
-                            confidence TEXT NOT NULL,
-                            coverage_json TEXT NOT NULL,
-                            assessed_at TEXT NOT NULL,
-                            sample_contract_version TEXT NOT NULL DEFAULT 'legacy-unknown',
-                            health_policy_digest TEXT,
-                            roster_context_digest TEXT NOT NULL DEFAULT 'legacy-unknown',
-                            network_roster_revision INTEGER NOT NULL DEFAULT 0,
-                            presence_input_digest TEXT NOT NULL DEFAULT 'legacy-unknown',
-                            reproduction_context_json TEXT NOT NULL DEFAULT '{}',
-                            UNIQUE(observation_id, policy_digest, roster_context_digest)
-                        )"""
-                    )
-                    connection.execute(
-                        """INSERT INTO assessments_v6
-                           (assessment_id, observation_id, policy_version, policy_digest,
-                            evaluator_version, profile_id, status, confidence, coverage_json,
-                            assessed_at, sample_contract_version, health_policy_digest,
-                            roster_context_digest, network_roster_revision,
-                            presence_input_digest, reproduction_context_json)
-                           SELECT assessment_id, observation_id, policy_version, policy_digest,
-                                  evaluator_version, profile_id, status, confidence, coverage_json,
-                                  assessed_at, sample_contract_version, health_policy_digest,
-                                  'legacy-unknown', 0, 'legacy-unknown', '{}'
-                           FROM assessments"""
-                    )
-                    connection.execute("DROP TABLE assessments")
-                    connection.execute("ALTER TABLE assessments_v6 RENAME TO assessments")
-                connection.execute(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
-                    (6,),
-                )
-            if 7 not in applied_versions:
-                receipt_columns = {
-                    row["name"]
-                    for row in connection.execute("PRAGMA table_info(roster_mutation_receipts)")
-                }
-                if "device_id" not in receipt_columns:
-                    connection.execute(
-                        "ALTER TABLE roster_mutation_receipts ADD COLUMN device_id TEXT"
-                    )
-                for receipt in connection.execute(
-                    """SELECT network_id, request_id, response_json
-                       FROM roster_mutation_receipts WHERE device_id IS NULL"""
-                ).fetchall():
-                    try:
-                        response = json.loads(receipt["response_json"])
-                    except (TypeError, json.JSONDecodeError):
-                        continue
-                    device_id = response.get("deviceId") if isinstance(response, dict) else None
-                    if isinstance(device_id, str):
-                        connection.execute(
-                            """UPDATE roster_mutation_receipts SET device_id=?
-                               WHERE network_id=? AND request_id=?""",
-                            (device_id, receipt["network_id"], receipt["request_id"]),
-                        )
-                connection.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_roster_receipts_network_device "
-                    "ON roster_mutation_receipts(network_id, device_id)"
-                )
-                connection.execute(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)",
-                    (7,),
-                )
-                connection.commit()
-                foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
-                if foreign_key_errors:
-                    raise sqlite3.DatabaseError("Health schema migration left invalid foreign keys")
-                connection.execute("PRAGMA foreign_keys=ON")
-            if 8 not in applied_versions:
-                self._ensure_schema_v8(connection)
-            self._repair_current_assessments(connection)
+        initialize_health_store(self)
 
     @staticmethod
     def _ensure_schema_v8(connection: sqlite3.Connection) -> None:
@@ -789,10 +663,6 @@ class SQLiteHealthStore:
                     selected["assessment_id"],
                 ),
             )
-        connection.execute(
-            "INSERT INTO schema_migrations(version, applied_at) VALUES (8, CURRENT_TIMESTAMP)"
-        )
-
     def save_processing_result(
         self, observation: Observation, assessment: Assessment,
         *, roster_facts: tuple[RosterFact, ...] = (),
@@ -3816,3 +3686,874 @@ class SQLiteHealthStore:
             "assessmentCount": assessment_count,
             "expectedRosterCount": roster_count,
         }
+
+
+@dataclass(frozen=True)
+class SchemaMigration:
+    migration_id: str
+    from_version: int
+    to_version: int
+    mode: str
+    apply: Callable[[sqlite3.Connection], None]
+
+
+def _table_exists(connection: sqlite3.Connection, name: str) -> bool:
+    return connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def _index_columns(connection: sqlite3.Connection, table: str) -> set[tuple[str, ...]]:
+    unique_indexes: set[tuple[str, ...]] = set()
+    for index in connection.execute(f"PRAGMA index_list({table})"):
+        if not index[2]:
+            continue
+        escaped_name = index[1].replace('"', '""')
+        unique_indexes.add(
+            tuple(
+                row[2]
+                for row in connection.execute(
+                    f'PRAGMA index_info("{escaped_name}")'
+                )
+            )
+        )
+    return unique_indexes
+
+
+def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    if not _table_exists(connection, table):
+        return set()
+    return {
+        row[1] for row in connection.execute(f"PRAGMA table_info({table})")
+    }
+
+
+def _require_columns(
+    connection: sqlite3.Connection, table: str, required: set[str], version: int
+) -> None:
+    if not required <= _columns(connection, table):
+        raise HealthStoreMigrationError(
+            "schema-invalid",
+            f"Schema ledger v{version} does not match the {table} table layout",
+        )
+
+
+def _validate_schema_structure(connection: sqlite3.Connection, version: int) -> None:
+    base_table_columns = {
+        "observations": {
+            "observation_id", "datasource_id", "dataset_id", "network_id",
+            "observed_at", "ingested_at", "completeness", "source_set_digest",
+        },
+        "observation_sources": {"observation_id", "filename", "digest", "kind", "state"},
+        "devices": {"device_id", "ext_address"},
+        "device_samples": {
+            "observation_id", "device_id", "role", "state", "is_border_router",
+            "source_files_json",
+        },
+        "relationships": {"relationship_id", "from_device_id", "to_device_id"},
+        "relationship_samples": {
+            "observation_id", "relationship_id", "relationship_type", "source_files_json",
+        },
+        "metric_samples": {
+            "observation_id", "device_id", "metric", "value", "unit", "source_file",
+        },
+        "findings": {
+            "assessment_id", "finding_id", "rule_id", "status", "scope", "rank",
+            "title", "summary", "why_it_matters", "evidence_json", "confidence",
+            "action", "verify", "source_files_json", "device_ids_json",
+            "relationship_ids_json",
+        },
+        "current_assessments": {"network_id", "dataset_id", "assessment_id"},
+        "expected_devices": {"network_id", "device_id", "label", "roster_state", "updated_at"},
+    }
+    missing = sorted(
+        table for table in base_table_columns if not _table_exists(connection, table)
+    )
+    if missing:
+        raise HealthStoreMigrationError(
+            "schema-invalid",
+            f"Schema ledger v{version} is missing required tables: {', '.join(missing)}",
+        )
+    for table, required in base_table_columns.items():
+        _require_columns(connection, table, required, version)
+    required_assessment_columns = {
+        "assessment_id",
+        "observation_id",
+        "policy_digest",
+        "status",
+        "confidence",
+        "coverage_json",
+        "assessed_at",
+    }
+    _require_columns(connection, "assessments", required_assessment_columns, version)
+    if version >= 3:
+        _require_columns(
+            connection, "assessments", {"evaluator_version", "profile_id"}, version
+        )
+    if version >= 4:
+        _require_columns(
+            connection,
+            "assessments",
+            {"sample_contract_version", "health_policy_digest"},
+            version,
+        )
+        _require_columns(
+            connection, "metric_samples", {"metric_kind", "denominator_kind"}, version
+        )
+        _require_columns(connection, "observation_sources", {"source_observed_at"}, version)
+        _require_columns(
+            connection, "relationship_samples", {"queued_message_count"}, version
+        )
+        required_v4_tables = {
+            "device_fact_samples",
+            "device_last_known",
+            "device_identity_conflicts",
+            "comparisons",
+            "comparison_items",
+        }
+        missing_v4 = sorted(
+            table for table in required_v4_tables if not _table_exists(connection, table)
+        )
+        if missing_v4:
+            raise HealthStoreMigrationError(
+                "schema-invalid",
+                f"Schema ledger v{version} is missing v4 tables: {', '.join(missing_v4)}",
+            )
+    if version >= 5:
+        _require_columns(
+            connection,
+            "expected_devices",
+            {"revision", "reason", "expected_since", "change_source"},
+            version,
+        )
+        if not _table_exists(connection, "network_roster_revisions"):
+            raise HealthStoreMigrationError(
+                "schema-invalid", f"Schema ledger v{version} is missing roster revisions"
+            )
+        for table in ("roster_lifecycle_events", "roster_mutation_receipts"):
+            if not _table_exists(connection, table):
+                raise HealthStoreMigrationError(
+                    "schema-invalid", f"Schema ledger v{version} is missing {table}"
+                )
+        _require_columns(
+            connection,
+            "network_roster_revisions",
+            {"network_id", "revision", "updated_at"},
+            version,
+        )
+        _require_columns(
+            connection,
+            "roster_lifecycle_events",
+            {
+                "event_id", "network_id", "device_id", "action", "to_state",
+                "occurred_at", "device_revision", "network_revision",
+            },
+            version,
+        )
+        _require_columns(
+            connection,
+            "roster_mutation_receipts",
+            {
+                "network_id", "request_id", "request_digest", "result_revision",
+                "response_json", "committed_at",
+            },
+            version,
+        )
+    if version >= 6:
+        _require_columns(
+            connection,
+            "assessments",
+            {
+                "roster_context_digest",
+                "network_roster_revision",
+                "presence_input_digest",
+                "reproduction_context_json",
+            },
+            version,
+        )
+        if (
+            "observation_id",
+            "policy_digest",
+            "roster_context_digest",
+        ) not in _index_columns(connection, "assessments"):
+            raise HealthStoreMigrationError(
+                "schema-invalid", f"Schema ledger v{version} has an invalid assessment key"
+            )
+    if version >= 7:
+        _require_columns(connection, "roster_mutation_receipts", {"device_id"}, version)
+        if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='index' "
+                "AND name='idx_roster_receipts_network_device'"
+            ).fetchone() is None:
+            raise HealthStoreMigrationError(
+                "schema-invalid", f"Schema ledger v{version} is missing the receipt index"
+            )
+    if version >= 8:
+        required_v8_tables = {
+            "health_history_migrations",
+            "health_assessment_upgrades",
+            "health_assessment_preferences",
+        }
+        missing_v8 = sorted(
+            table for table in required_v8_tables if not _table_exists(connection, table)
+        )
+        if missing_v8:
+            raise HealthStoreMigrationError(
+                "schema-invalid",
+                f"Schema ledger v{version} is missing v8 tables: {', '.join(missing_v8)}",
+            )
+
+
+def _migration_v2(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "UPDATE assessments SET status=CASE status "
+        "WHEN 'healthy' THEN 'strong' WHEN 'unstable' THEN 'moderate' "
+        "WHEN 'unhealthy' THEN 'poor' ELSE status END"
+    )
+    connection.execute(
+        "UPDATE findings SET status=CASE status "
+        "WHEN 'healthy' THEN 'strong' WHEN 'unstable' THEN 'moderate' "
+        "WHEN 'unhealthy' THEN 'poor' ELSE status END"
+    )
+
+
+def _migration_v3(connection: sqlite3.Connection) -> None:
+    for column in ("evaluator_version", "profile_id"):
+        if column not in _columns(connection, "assessments"):
+            connection.execute(
+                f"ALTER TABLE assessments ADD COLUMN {column} "
+                "TEXT NOT NULL DEFAULT 'legacy-unknown'"
+            )
+
+
+def _migration_v4(connection: sqlite3.Connection) -> None:
+    for table, column, definition in (
+        ("assessments", "sample_contract_version", "TEXT NOT NULL DEFAULT 'legacy-unknown'"),
+        ("assessments", "health_policy_digest", "TEXT"),
+        ("metric_samples", "metric_kind", "TEXT NOT NULL DEFAULT 'legacy-unknown'"),
+        ("metric_samples", "denominator_kind", "TEXT NOT NULL DEFAULT 'legacy-unknown'"),
+        ("observation_sources", "source_observed_at", "TEXT"),
+        ("relationship_samples", "queued_message_count", "REAL"),
+    ):
+        if column not in _columns(connection, table):
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    for statement in _V4_TABLES:
+        tokens = statement.split()
+        object_type = "table" if tokens[1] == "TABLE" else "index"
+        object_name = tokens[2]
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type=? AND name=?",
+            (object_type, object_name),
+        ).fetchone() is None:
+            connection.execute(statement)
+    for item in connection.execute(
+        """SELECT ds.observation_id, ds.device_id, ds.role, ds.state
+           FROM device_samples ds ORDER BY ds.observation_id, ds.device_id"""
+    ):
+        for field, value, value_class in (
+            ("extAddress", item["device_id"].removeprefix("extaddr:"), "identity"),
+            ("role", item["role"], "transient"),
+            ("state", item["state"], "transient"),
+        ):
+            if value is not None:
+                connection.execute(
+                    """INSERT OR IGNORE INTO device_fact_samples
+                       (observation_id, device_id, field_key, source_file,
+                        value_json, value_class) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        item["observation_id"],
+                        item["device_id"],
+                        field,
+                        "legacy-unknown",
+                        json.dumps(value),
+                        value_class,
+                    ),
+                )
+
+
+_ROSTER_TABLES_V5 = (
+    """CREATE TABLE IF NOT EXISTS network_roster_revisions (
+        network_id TEXT PRIMARY KEY,
+        revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+        updated_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS roster_lifecycle_events (
+        event_id TEXT PRIMARY KEY, request_id TEXT, network_id TEXT NOT NULL,
+        device_id TEXT NOT NULL, action TEXT NOT NULL, from_state TEXT,
+        to_state TEXT NOT NULL, previous_label TEXT, new_label TEXT,
+        previous_expected_since TEXT, new_expected_since TEXT, reason TEXT,
+        occurred_at TEXT NOT NULL, origin TEXT NOT NULL, actor TEXT NOT NULL,
+        context_assessment_id TEXT, context_observation_id TEXT, evidence_basis TEXT,
+        device_revision INTEGER NOT NULL, network_revision INTEGER NOT NULL
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_roster_lifecycle_network_device
+       ON roster_lifecycle_events(network_id, device_id, occurred_at)""",
+    """CREATE TABLE IF NOT EXISTS roster_mutation_receipts (
+        network_id TEXT NOT NULL, request_id TEXT NOT NULL, request_digest TEXT NOT NULL,
+        event_id TEXT, result_revision INTEGER NOT NULL, response_json TEXT NOT NULL,
+        committed_at TEXT NOT NULL, PRIMARY KEY (network_id, request_id)
+    )""",
+)
+
+
+def _migration_v5(connection: sqlite3.Connection) -> None:
+    expected_columns = _columns(connection, "expected_devices")
+    for column, definition in (
+        ("revision", "INTEGER NOT NULL DEFAULT 0"),
+        ("reason", "TEXT"),
+        ("expected_since", "TEXT"),
+        ("change_source", "TEXT NOT NULL DEFAULT 'legacy'"),
+    ):
+        if column not in expected_columns:
+            connection.execute(
+                f"ALTER TABLE expected_devices ADD COLUMN {column} {definition}"
+            )
+    for statement in _ROSTER_TABLES_V5:
+        connection.execute(statement)
+    connection.execute(
+        """INSERT OR IGNORE INTO network_roster_revisions
+           (network_id, revision, updated_at)
+           SELECT DISTINCT network_id, 0, CURRENT_TIMESTAMP FROM expected_devices"""
+    )
+
+
+def _migration_v6(connection: sqlite3.Connection) -> None:
+    unique_shapes = _index_columns(connection, "assessments")
+    old_key = ("observation_id", "policy_digest")
+    new_key = ("observation_id", "policy_digest", "roster_context_digest")
+    if new_key in unique_shapes:
+        return
+    if old_key not in unique_shapes:
+        raise HealthStoreMigrationError(
+            "schema-invalid", "Schema v5 assessment uniqueness is inconsistent"
+        )
+    connection.execute(
+        """CREATE TABLE assessments_v6 (
+            assessment_id TEXT PRIMARY KEY,
+            observation_id TEXT NOT NULL REFERENCES observations(observation_id) ON DELETE CASCADE,
+            policy_version TEXT NOT NULL,
+            policy_digest TEXT NOT NULL,
+            evaluator_version TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            confidence TEXT NOT NULL,
+            coverage_json TEXT NOT NULL,
+            assessed_at TEXT NOT NULL,
+            sample_contract_version TEXT NOT NULL DEFAULT 'legacy-unknown',
+            health_policy_digest TEXT,
+            roster_context_digest TEXT NOT NULL DEFAULT 'legacy-unknown',
+            network_roster_revision INTEGER NOT NULL DEFAULT 0,
+            presence_input_digest TEXT NOT NULL DEFAULT 'legacy-unknown',
+            reproduction_context_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE(observation_id, policy_digest, roster_context_digest)
+        )"""
+    )
+    connection.execute(
+        """INSERT INTO assessments_v6
+           (assessment_id, observation_id, policy_version, policy_digest,
+            evaluator_version, profile_id, status, confidence, coverage_json,
+            assessed_at, sample_contract_version, health_policy_digest,
+            roster_context_digest, network_roster_revision,
+            presence_input_digest, reproduction_context_json)
+           SELECT assessment_id, observation_id, policy_version, policy_digest,
+                  evaluator_version, profile_id, status, confidence, coverage_json,
+                  assessed_at, sample_contract_version, health_policy_digest,
+                  'legacy-unknown', 0, 'legacy-unknown', '{}'
+           FROM assessments"""
+    )
+    connection.execute("DROP TABLE assessments")
+    connection.execute("ALTER TABLE assessments_v6 RENAME TO assessments")
+
+
+def _migration_v7(connection: sqlite3.Connection) -> None:
+    receipt_columns = _columns(connection, "roster_mutation_receipts")
+    if "device_id" not in receipt_columns:
+        connection.execute(
+            "ALTER TABLE roster_mutation_receipts ADD COLUMN device_id TEXT"
+        )
+    for receipt in connection.execute(
+        """SELECT network_id, request_id, response_json
+           FROM roster_mutation_receipts WHERE device_id IS NULL"""
+    ).fetchall():
+        try:
+            response = json.loads(receipt["response_json"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        device_id = response.get("deviceId") if isinstance(response, dict) else None
+        if isinstance(device_id, str):
+            connection.execute(
+                """UPDATE roster_mutation_receipts SET device_id=?
+                   WHERE network_id=? AND request_id=?""",
+                (device_id, receipt["network_id"], receipt["request_id"]),
+            )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_roster_receipts_network_device "
+        "ON roster_mutation_receipts(network_id, device_id)"
+    )
+
+
+def _migration_v8(connection: sqlite3.Connection) -> None:
+    SQLiteHealthStore._ensure_schema_v8(connection)
+
+
+SCHEMA_MIGRATIONS = (
+    SchemaMigration("health-schema-v2-status-vocabulary", 1, 2, "online-additive", _migration_v2),
+    SchemaMigration("health-schema-v3-assessment-provenance", 2, 3, "online-additive", _migration_v3),
+    SchemaMigration("health-schema-v4-retained-device-facts", 3, 4, "online-additive", _migration_v4),
+    SchemaMigration("health-schema-v5-roster-lifecycle", 4, 5, "online-additive", _migration_v5),
+    SchemaMigration("health-schema-v6-roster-context-assessments", 5, 6, "online-additive", _migration_v6),
+    SchemaMigration("health-schema-v7-receipt-device-identity", 6, 7, "online-additive", _migration_v7),
+    SchemaMigration("health-schema-v8-assessment-preferences", 7, 8, "online-additive", _migration_v8),
+)
+
+
+def _schema_version_from_ledger(connection: sqlite3.Connection) -> int:
+    if not _table_exists(connection, "schema_migrations"):
+        raise HealthStoreMigrationError(
+            "schema-invalid", "Health store has no schema_migrations ledger"
+        )
+    ledger_columns = _columns(connection, "schema_migrations")
+    if not {"version", "applied_at"} <= ledger_columns:
+        raise HealthStoreMigrationError(
+            "schema-invalid", "Health schema_migrations ledger has an invalid layout"
+        )
+    try:
+        versions = [
+            int(row[0])
+            for row in connection.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        ]
+    except (TypeError, ValueError, sqlite3.DatabaseError) as exc:
+        raise HealthStoreMigrationError(
+            "schema-invalid", "Health schema_migrations ledger is unreadable"
+        ) from exc
+    if not versions:
+        raise HealthStoreMigrationError(
+            "schema-invalid", "Health schema_migrations ledger is empty"
+        )
+    version = versions[-1]
+    if version > SCHEMA_VERSION:
+        raise HealthStoreFutureSchemaError(
+            f"Database schema {version} is newer than supported {SCHEMA_VERSION}"
+        )
+    expected = list(range(versions[0], version + 1))
+    if versions[0] not in {1, 2} or versions != expected:
+        raise HealthStoreMigrationError(
+            "schema-invalid", "Health schema_migrations ledger is missing or gapped"
+        )
+    _validate_schema_structure(connection, version)
+    return version
+
+
+def validate_health_schema_connection(connection: sqlite3.Connection) -> int:
+    """Validate a read-only or caller-owned connection's schema ledger and layout."""
+    return _schema_version_from_ledger(connection)
+
+
+def _migration_plan(connection: sqlite3.Connection) -> dict:
+    source_version = _schema_version_from_ledger(connection)
+    pending = [
+        migration
+        for migration in SCHEMA_MIGRATIONS
+        if source_version < migration.to_version <= SCHEMA_VERSION
+    ]
+    return {
+        "sourceSchemaVersion": source_version,
+        "targetSchemaVersion": SCHEMA_VERSION,
+        "migrations": [
+            {
+                "id": migration.migration_id,
+                "fromVersion": migration.from_version,
+                "toVersion": migration.to_version,
+                "mode": migration.mode,
+            }
+            for migration in pending
+        ],
+        "backupRequired": bool(pending),
+    }
+
+
+def apply_registered_schema_migrations(
+    connection: sqlite3.Connection,
+    *,
+    expected_source_version: int | None = None,
+    target_version: int = SCHEMA_VERSION,
+) -> int:
+    """Apply registered operations on the caller's transaction and connection."""
+    source_version = _schema_version_from_ledger(connection)
+    if (
+        expected_source_version is not None
+        and source_version != expected_source_version
+    ):
+        raise HealthStoreMigrationError(
+            "schema-invalid", "Health schema changed after migration planning"
+        )
+    if target_version > SCHEMA_VERSION or target_version < source_version:
+        raise HealthStoreMigrationError(
+            "schema-invalid", "Requested health schema target is unsupported"
+        )
+    pending = [
+        migration
+        for migration in SCHEMA_MIGRATIONS
+        if source_version < migration.to_version <= target_version
+    ]
+    if any(migration.mode != "online-additive" for migration in pending):
+        raise HealthStoreMigrationError(
+            "maintenance-required",
+            "A pending health schema migration requires maintenance mode",
+        )
+    for migration in pending:
+        migration.apply(connection)
+        try:
+            _validate_schema_structure(connection, migration.to_version)
+        except HealthStoreMigrationError as exc:
+            raise HealthStoreMigrationError(
+                "postcheck-failed",
+                f"Health migration {migration.migration_id} failed its postcheck",
+            ) from exc
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) "
+            "VALUES (?, CURRENT_TIMESTAMP)",
+            (migration.to_version,),
+        )
+        source_version = migration.to_version
+    if connection.execute("PRAGMA foreign_key_check").fetchall():
+        raise HealthStoreMigrationError(
+            "postcheck-failed",
+            "Health schema migration left invalid foreign keys",
+        )
+    return source_version
+
+
+def _create_migration_backup(
+    database_path: Path,
+    source_version: int,
+    target_version: int,
+) -> Path:
+    backup_dir = database_path.parent / ".migration-backups"
+    temporary_path: Path | None = None
+    backup_path: Path | None = None
+    metadata_path: Path | None = None
+    backup_published = False
+    metadata_published = False
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        created_at = datetime.now(timezone.utc)
+        stamp = created_at.strftime("%Y%m%dT%H%M%S%fZ")
+        backup_path = backup_dir / (
+            f"hobat_v1-schema-v{source_version}-to-v{target_version}-{stamp}-{uuid.uuid4().hex[:8]}.sqlite"
+        )
+        metadata_path = backup_path.with_suffix(".json")
+        temporary_path = backup_dir / f".{backup_path.name}.partial"
+        source = sqlite3.connect(
+            f"{database_path.resolve().as_uri()}?mode=ro", timeout=5.0, uri=True
+        )
+        destination = sqlite3.connect(temporary_path)
+        try:
+            source.execute("PRAGMA busy_timeout=5000")
+            source.backup(destination)
+            destination.commit()
+        finally:
+            destination.close()
+            source.close()
+        with sqlite3.connect(temporary_path) as verify:
+            integrity = verify.execute("PRAGMA integrity_check").fetchone()
+            if not integrity or integrity[0] != "ok":
+                raise sqlite3.DatabaseError("Migration backup integrity check failed")
+            if verify.execute("PRAGMA foreign_key_check").fetchall():
+                raise sqlite3.DatabaseError(
+                    "Migration backup failed foreign-key verification"
+                )
+            copied_version = _schema_version_from_ledger(verify)
+            if copied_version != source_version:
+                raise sqlite3.DatabaseError("Migration backup schema metadata changed")
+        os.link(temporary_path, backup_path)
+        backup_published = True
+        temporary_path.unlink()
+        if not backup_path.is_file() or backup_path.stat().st_size == 0:
+            raise sqlite3.DatabaseError("Published migration backup is missing")
+        metadata_temporary = backup_dir / f".{metadata_path.name}.partial"
+        metadata = {
+            "formatVersion": 1,
+            "createdAt": created_at.isoformat(),
+            "sourceSchemaVersion": source_version,
+            "targetSchemaVersion": target_version,
+            "databaseFile": backup_path.name,
+            "integrityCheck": "ok",
+            "foreignKeyCheck": "ok",
+        }
+        try:
+            metadata_temporary.write_text(
+                json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            os.link(metadata_temporary, metadata_path)
+            metadata_published = True
+        finally:
+            metadata_temporary.unlink(missing_ok=True)
+        with sqlite3.connect(
+            f"{backup_path.resolve().as_uri()}?mode=ro&immutable=1",
+            uri=True,
+        ) as published:
+            integrity = published.execute("PRAGMA integrity_check").fetchone()
+            if not integrity or integrity[0] != "ok":
+                raise sqlite3.DatabaseError(
+                    "Published migration backup failed integrity verification"
+                )
+            if published.execute("PRAGMA foreign_key_check").fetchall():
+                raise sqlite3.DatabaseError(
+                    "Published migration backup failed foreign-key verification"
+                )
+            if _schema_version_from_ledger(published) != source_version:
+                raise sqlite3.DatabaseError(
+                    "Published migration backup schema metadata changed"
+                )
+        published_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if published_metadata != metadata:
+            raise sqlite3.DatabaseError(
+                "Published migration backup metadata failed verification"
+            )
+        return backup_path
+    except Exception as exc:
+        if metadata_published and metadata_path is not None:
+            metadata_path.unlink(missing_ok=True)
+        if backup_published and backup_path is not None:
+            backup_path.unlink(missing_ok=True)
+        if temporary_path is not None:
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                candidate = Path(f"{temporary_path}{suffix}")
+                if candidate.exists():
+                    candidate.unlink()
+        if isinstance(exc, HealthStoreMigrationError):
+            message = str(exc)
+        else:
+            message = f"Could not create verified health migration backup: {exc}"
+        raise HealthStoreMigrationError("backup-failed", message) from exc
+
+
+def _run_schema_migrations(
+    connection: sqlite3.Connection,
+    database_path: Path,
+    *,
+    create_backup: bool,
+) -> Path | None:
+    before = _migration_plan(connection)
+    if not before["migrations"]:
+        return None
+    if any(migration["mode"] != "online-additive" for migration in before["migrations"]):
+        raise HealthStoreMigrationError(
+            "maintenance-required",
+            "A pending health schema migration requires maintenance mode",
+        )
+    connection.execute("PRAGMA foreign_keys=OFF")
+    backup_path: Path | None = None
+    try:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as exc:
+            raise HealthStoreMigrationError(
+                "migration-busy",
+                "Health store is busy; wait for writers to finish and retry",
+            ) from exc
+        locked = _migration_plan(connection)
+        if locked["sourceSchemaVersion"] != before["sourceSchemaVersion"]:
+            raise HealthStoreMigrationError(
+                "schema-invalid", "Health schema changed while waiting for its writer lock"
+            )
+        if create_backup and locked["backupRequired"]:
+            backup_path = _create_migration_backup(
+                database_path,
+                locked["sourceSchemaVersion"],
+                locked["targetSchemaVersion"],
+            )
+        apply_registered_schema_migrations(
+            connection,
+            expected_source_version=locked["sourceSchemaVersion"],
+        )
+        foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+        if foreign_key_errors:
+            raise HealthStoreMigrationError(
+                "postcheck-failed",
+                "Health schema migration left invalid foreign keys",
+            )
+        connection.commit()
+        return backup_path
+    except Exception as exc:
+        if connection.in_transaction:
+            connection.rollback()
+        if isinstance(exc, HealthStoreMigrationError):
+            if backup_path is not None and exc.recovery_backup_path is None:
+                exc.recovery_backup_path = str(backup_path)
+            raise
+        if isinstance(exc, sqlite3.OperationalError) and (
+            "locked" in str(exc).lower() or "busy" in str(exc).lower()
+        ):
+            raise HealthStoreMigrationError(
+                "migration-busy",
+                "Health store is busy; wait for writers to finish and retry",
+                recovery_backup_path=str(backup_path) if backup_path else None,
+            ) from exc
+        raise HealthStoreMigrationError(
+            "migration-failed",
+            "Health schema migration failed",
+            recovery_backup_path=str(backup_path) if backup_path else None,
+        ) from exc
+    finally:
+        if connection.in_transaction:
+            connection.rollback()
+        connection.execute("PRAGMA foreign_keys=ON")
+
+
+def _database_has_user_tables(connection: sqlite3.Connection) -> bool:
+    return connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name NOT LIKE 'sqlite_%' LIMIT 1"
+    ).fetchone() is not None
+
+
+def initialize_health_store(store: SQLiteHealthStore) -> None:
+    connection = store._connect_existing_write() if store.path.is_file() else store._connect()
+    try:
+        if not _database_has_user_tables(connection):
+            connection.execute("PRAGMA foreign_keys=OFF")
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                for statement in _SCHEMA.split(";"):
+                    if statement.strip():
+                        connection.execute(statement)
+                _migration_v4(connection)
+                _migration_v7(connection)
+                _migration_v8(connection)
+                connection.executemany(
+                    "INSERT INTO schema_migrations(version, applied_at) "
+                    "VALUES (?, CURRENT_TIMESTAMP)",
+                    ((version,) for version in range(2, SCHEMA_VERSION + 1)),
+                )
+                foreign_key_errors = connection.execute(
+                    "PRAGMA foreign_key_check"
+                ).fetchall()
+                if foreign_key_errors:
+                    raise HealthStoreMigrationError(
+                        "postcheck-failed",
+                        "Fresh health-store bootstrap left invalid foreign keys",
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.execute("PRAGMA foreign_keys=ON")
+        else:
+            _run_schema_migrations(connection, store.path, create_backup=True)
+        connection.execute("PRAGMA journal_mode=WAL")
+        with connection:
+            store._repair_current_assessments(connection)
+    finally:
+        connection.close()
+
+
+def inspect_health_schema_migrations(database_path: Path) -> dict:
+    report = {
+        "schemaVersion": 1,
+        "operation": "check",
+        "outcome": "no-store",
+        "sourceSchemaVersion": None,
+        "targetSchemaVersion": SCHEMA_VERSION,
+        "migrations": [],
+        "backupRequired": False,
+        "backupVerified": False,
+        "errorCategory": None,
+    }
+
+    def record_readable_source_version() -> None:
+        try:
+            connection = sqlite3.connect(
+                f"{database_path.resolve().as_uri()}?mode=ro",
+                timeout=5.0,
+                uri=True,
+            )
+            try:
+                if _table_exists(connection, "schema_migrations"):
+                    row = connection.execute(
+                        "SELECT MAX(version) FROM schema_migrations"
+                    ).fetchone()
+                    report["sourceSchemaVersion"] = int(row[0]) if row[0] is not None else None
+            finally:
+                connection.close()
+        except (sqlite3.DatabaseError, OSError, TypeError, ValueError):
+            return
+
+    if not database_path.is_file():
+        return report
+    try:
+        connection = sqlite3.connect(
+            f"{database_path.resolve().as_uri()}?mode=ro",
+            timeout=5.0,
+            uri=True,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+        try:
+            if not _database_has_user_tables(connection):
+                return report
+            plan = _migration_plan(connection)
+        finally:
+            connection.close()
+        report.update(plan)
+        report["outcome"] = "pending" if plan["migrations"] else "current"
+    except HealthStoreFutureSchemaError as exc:
+        report.update(outcome="refused", errorCategory="future-schema", message=str(exc))
+        record_readable_source_version()
+    except HealthStoreMigrationError as exc:
+        report.update(outcome="refused", errorCategory=exc.category, message=str(exc))
+        record_readable_source_version()
+    except (sqlite3.DatabaseError, OSError) as exc:
+        report.update(
+            outcome="refused",
+            errorCategory="schema-invalid",
+            message=f"Health schema cannot be read: {exc}",
+        )
+        record_readable_source_version()
+    return report
+
+
+def apply_health_schema_migrations(database_path: Path) -> dict:
+    report = inspect_health_schema_migrations(database_path)
+    report["operation"] = "apply"
+    if report["outcome"] in {"no-store", "current"}:
+        report["outcome"] = "no-op" if report["outcome"] == "no-store" else "current"
+        return report
+    if report["outcome"] == "refused":
+        return report
+    try:
+        connection = sqlite3.connect(
+            f"{database_path.resolve().as_uri()}?mode=rw",
+            timeout=5.0,
+            uri=True,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout=5000")
+        try:
+            backup_path = _run_schema_migrations(
+                connection, database_path, create_backup=True
+            )
+            connection.execute("PRAGMA journal_mode=WAL")
+            report["outcome"] = "applied" if backup_path else "current"
+            report["backupVerified"] = backup_path is not None
+            report["backupPath"] = str(backup_path) if backup_path else None
+        finally:
+            connection.close()
+    except HealthStoreFutureSchemaError as exc:
+        report.update(outcome="refused", errorCategory="future-schema", message=str(exc))
+    except HealthStoreMigrationError as exc:
+        report.update(outcome="refused", errorCategory=exc.category, message=str(exc))
+        report["backupVerified"] = exc.recovery_backup_path is not None
+        report["backupPath"] = exc.recovery_backup_path
+    except (sqlite3.DatabaseError, OSError) as exc:
+        report.update(
+            outcome="refused",
+            errorCategory="migration-failed",
+            message=f"Health schema migration failed: {exc}",
+        )
+    return report
