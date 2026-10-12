@@ -453,7 +453,11 @@ def test_comparison_device_labels_keep_canonical_identity_and_scope() -> None:
             beforeDeviceDisplayLabel: "Old parent", afterValue: afterParent,
             afterDeviceDisplayLabel: "New parent", delta: null, comparable: true,
             change: "changed", sourceFiles: [], resetState: "known"},
-          {subjectId: "relationship:abc", scope: "relationship", metric: "parent",
+          {subjectId: `link:${beforeParent}->${afterParent}`,
+            subjectDeviceDisplayLabels: {
+              [beforeParent]: "Old parent", [afterParent]: "New parent",
+            },
+            scope: "relationship", metric: "parent",
             sampleCount: 1, beforeValue: beforeParent,
             beforeDeviceDisplayLabel: "Must not render", afterValue: afterParent,
             afterDeviceDisplayLabel: "Must not render", sourceFiles: [], resetState: "known"},
@@ -523,7 +527,14 @@ def test_comparison_device_labels_keep_canonical_identity_and_scope() -> None:
         ["span", "health-comparison-device-label", "New parent"],
         ["span", "health-comparison-device-id", "extaddr:0000000000000003"],
     ]
-    assert result["relationshipSubject"][0][2] == "relationship:abc"
+    assert result["relationshipSubject"] == [
+        ["span", "", "link:"],
+        ["span", "health-comparison-device-label", "Old parent"],
+        ["span", "health-comparison-device-id", "extaddr:0000000000000002"],
+        ["span", "", "->"],
+        ["span", "health-comparison-device-label", "New parent"],
+        ["span", "health-comparison-device-id", "extaddr:0000000000000003"],
+    ]
     assert result["relationshipBefore"] == [["span", "", "extaddr:0000000000000002"]]
     assert result["nonParentBefore"] == [["span", "", "router"]]
     assert result["unlabeledSubject"][0] == [

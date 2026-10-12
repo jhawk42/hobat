@@ -1093,6 +1093,29 @@ function renderSelectedHealthComparison(
         if (item.scope === "device" && canonicalSubject && item.subjectDisplayLabel) {
           appendText(subject, "span", item.subjectDisplayLabel, "health-comparison-device-label");
           appendText(subject, "span", item.subjectId, "health-comparison-device-id");
+        } else if (item.scope === "relationship" && typeof item.subjectId === "string") {
+          const endpointPattern = /extaddr:[0-9a-f]{16}/g;
+          const endpoints = [...item.subjectId.matchAll(endpointPattern)];
+          if (endpoints.length === 2) {
+            let offset = 0;
+            endpoints.forEach((match) => {
+              const deviceId = match[0];
+              const prefix = item.subjectId.slice(offset, match.index);
+              if (prefix) appendText(subject, "span", prefix);
+              const label = item.subjectDeviceDisplayLabels?.[deviceId];
+              if (label) {
+                appendText(subject, "span", label, "health-comparison-device-label");
+                appendText(subject, "span", deviceId, "health-comparison-device-id");
+              } else {
+                appendText(subject, "span", deviceId);
+              }
+              offset = match.index + deviceId.length;
+            });
+            const suffix = item.subjectId.slice(offset);
+            if (suffix) appendText(subject, "span", suffix);
+          } else {
+            appendText(subject, "span", item.subjectId);
+          }
         } else {
           appendText(subject, "span", item.subjectId);
         }

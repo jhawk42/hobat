@@ -539,6 +539,38 @@ def test_stored_legacy_and_derived_comparisons_annotate_only_returned_page(tmp_p
     }
 
 
+def test_comparison_relationship_endpoints_use_roster_or_static_device_labels(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result()
+    store.save_processing_result(observation, assessment)
+    roster_device_id = observation.devices[0].device_id
+    static_device_id = "extaddr:0000000000000011"
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
+               VALUES (?, ?, ?, 'expected')""",
+            (observation.network_id, roster_device_id, "Hallway sensor"),
+        )
+    (tmp_path / "td-static-extaddr-device-label.json").write_text(
+        json.dumps([{
+            "extAddress": static_device_id.removeprefix("extaddr:"),
+            "deviceLabel": "Kitchen sensor",
+        }]),
+        encoding="utf-8",
+    )
+    relationship_id = f"link:{roster_device_id}->{static_device_id}"
+    item = {"scope": "relationship", "subjectId": relationship_id}
+
+    TDHealthReadService(tmp_path)._annotate_comparison_items(
+        [item], network_id=observation.network_id,
+    )
+
+    assert item["subjectDeviceDisplayLabels"] == {
+        roster_device_id: "Hallway sensor",
+        static_device_id: "Kitchen sensor",
+    }
+
+
 def test_legacy_comparison_without_relationship_type_column_stays_read_only(tmp_path) -> None:
     store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
     before, before_assessment = _result("1")

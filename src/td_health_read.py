@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from functools import cmp_to_key
@@ -178,6 +179,13 @@ class TDHealthReadService:
             and all(character in "0123456789abcdef" for character in value[8:])
         )
 
+    @staticmethod
+    def _comparison_relationship_device_ids(subject_id: object) -> list[str]:
+        if not isinstance(subject_id, str) or not subject_id.startswith("link:"):
+            return []
+        device_ids = re.findall(r"extaddr:[0-9a-f]{16}", subject_id)
+        return device_ids if len(device_ids) == 2 else []
+
     def _resolve_comparison_device_labels(
         self, *, network_id: str, device_ids: list[str],
     ) -> dict[str, str]:
@@ -214,6 +222,11 @@ class TDHealthReadService:
     ) -> None:
         device_ids = []
         for item in items:
+            if item["scope"] == "relationship":
+                device_ids.extend(
+                    self._comparison_relationship_device_ids(item["subjectId"])
+                )
+                continue
             if item["scope"] != "device":
                 continue
             subject_id = item["subjectId"]
@@ -227,6 +240,15 @@ class TDHealthReadService:
             network_id=network_id, device_ids=list(dict.fromkeys(device_ids)),
         )
         for item in items:
+            if item["scope"] == "relationship":
+                endpoints = self._comparison_relationship_device_ids(item["subjectId"])
+                endpoint_labels = {
+                    device_id: labels[device_id]
+                    for device_id in endpoints if device_id in labels
+                }
+                if endpoint_labels:
+                    item["subjectDeviceDisplayLabels"] = endpoint_labels
+                continue
             if item["scope"] != "device":
                 continue
             subject_id = item["subjectId"]
