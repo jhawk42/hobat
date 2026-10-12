@@ -15,7 +15,7 @@ import aiohttp.web
 from aiohttp.test_utils import TestClient, TestServer
 
 import td_webserver
-from td_health_observation_model import SourceEvidence
+from td_health_observation_model import RelationshipSample, SourceEvidence
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
 from td_health_policy import load_health_policy
 from td_health_read import ROSTER_TABLE_FIELDS
@@ -54,6 +54,46 @@ def _chunked_content(*chunks):
 
 
 class HealthApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_comparison_detail_route_includes_relationship_type(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_dir = Path(directory)
+            store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+            before, before_assessment = _result("1")
+            after, after_assessment = _result("2")
+            subject_id = before.devices[0].device_id
+            relationship = RelationshipSample(
+                "link:api", "router-neighbor", subject_id, subject_id,
+                None, None, None, None, None, None, None, None,
+                ("snapshot.json",),
+            )
+            store.save_processing_result(
+                replace(before, relationships=(relationship,)), before_assessment,
+            )
+            store.save_processing_result(
+                replace(after, relationships=(relationship,)), after_assessment,
+            )
+            response = await td_webserver.handle_health_comparison_pair_api(
+                _request(
+                    data_dir,
+                    query={
+                        "network": before.network_id,
+                        "dataset": before.dataset_id,
+                        "before": before_assessment.assessment_id,
+                        "after": after_assessment.assessment_id,
+                    },
+                )
+            )
+            payload = json.loads(response.text)
+            assert response.headers["Cache-Control"] == "no-store"
+            relationship_items = [
+                item for item in payload["items"]
+                if item["itemKind"] == "relationship-change"
+            ]
+            assert relationship_items
+            assert {
+                item["relationshipType"] for item in relationship_items
+            } == {"router-neighbor"}
+
     async def test_derived_pair_reports_corrupt_source_timestamp_as_server_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)

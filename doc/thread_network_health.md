@@ -43,7 +43,7 @@ operations and `--export-latest` require one concrete dataset ID.
 
 ## Migrating Health Store Schema
 
-Health schema version 8 is the current contract. Inspect an existing database
+Health schema version 9 is the current contract. Inspect an existing database
 without creating a store or changing any files:
 
 ```bash
@@ -676,6 +676,15 @@ comparison, and reload restore Changed and All scopes. Changing a filter
 restarts item paging at the first matching row. This view does not create pairs or infer deltas from roster
 values. Old stored-pair APIs remain supported for clients that need to inspect
 a pruned pair by its ID.
+
+Relationship-change Evidence labels identify the immutable relationship type
+captured at the comparison endpoints (`Parent/child`, `Router/neighbor`,
+`Router/route`, or `REED/route`). Legacy comparisons without stored type
+metadata display `Unknown relationship type`; the server does not reconstruct
+or backfill it from relationship IDs or current roster facts. A relationship
+type label is descriptive evidence only and does not qualify a comparison's
+Result. Route membership remains a discrete destination-membership comparison,
+not next-hop, route-cost, duration, or trend history.
 
 When a current expected, static, or fresh unconflicted observed roster name is
 available, Comparison annotates device-scope subjects and parent-transition

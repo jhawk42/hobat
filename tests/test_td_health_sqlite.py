@@ -171,10 +171,10 @@ def test_initialized_schema_matches_frozen_contract(tmp_path) -> None:
         "309af9199b3f0c778a99407e89433d1f6da6f052604fcf6bdc8cbf51b72e9189"
     )
     assert schema_objects_digest == (
-        "9cdea3a1c0665ab4f0a69904222cc8840cf00b891ecb398d4378b632b30b5fb4"
+        "0f6903675166afd7ce7756b1f4c9ae92322fd595ac3cf3522e838635722bd297"
     )
-    assert SCHEMA_VERSION == 8
-    assert max_migration == 8
+    assert SCHEMA_VERSION == 9
+    assert max_migration == 9
 
 
 def test_roster_source_time_and_partial_observation_do_not_refresh_projection(tmp_path) -> None:
@@ -1118,6 +1118,60 @@ def test_real_v3_migration_backfills_only_lossless_device_facts(tmp_path) -> Non
         assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone() == (
             SCHEMA_VERSION,
         )
+        relationship_column = next(
+            row for row in connection.execute(
+                "PRAGMA table_info(comparison_items)"
+            )
+            if row[1] == "relationship_type"
+        )
+        assert relationship_column[2:5] == ("TEXT", 0, None)
+
+
+def test_comparison_writer_persists_type_and_retry_keeps_legacy_null(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    link_id = "link:opaque-id"
+    device_id = "extaddr:8672766ae0578187"
+
+    def endpoint(suffix: str):
+        observation, assessment = _result(suffix)
+        relationship = RelationshipSample(
+            link_id, "router-neighbor", device_id, device_id, None, None,
+            None, None, None, None, None, None, ("snapshot.json",),
+        )
+        return replace(observation, relationships=(relationship,)), assessment
+
+    first, first_assessment = endpoint("1")
+    second, second_assessment = endpoint("2")
+    store.save_processing_result(first, first_assessment)
+    store.save_processing_result(second, second_assessment)
+
+    with sqlite3.connect(store.path) as connection:
+        rows = connection.execute(
+            "SELECT item_kind, relationship_type FROM comparison_items "
+            "ORDER BY item_kind, item_id"
+        ).fetchall()
+        relationship_row = next(row for row in rows if row[0] == "relationship-change")
+        assert relationship_row == ("relationship-change", "router-neighbor")
+        assert all(
+            relationship_type is None
+            for item_kind, relationship_type in rows
+            if item_kind != "relationship-change"
+        )
+        connection.execute(
+            "UPDATE comparison_items SET relationship_type=NULL "
+            "WHERE item_kind='relationship-change'"
+        )
+
+    _, _, inserted = store.compare_assessments(
+        first_assessment.assessment_id,
+        second_assessment.assessment_id,
+    )
+    assert not inserted
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute(
+            "SELECT relationship_type FROM comparison_items "
+            "WHERE item_kind='relationship-change'"
+        ).fetchone() == (None,)
 
 
 def test_v3_upgrade_reopen_keeps_comparison_and_roster_provenance(tmp_path) -> None:

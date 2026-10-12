@@ -121,6 +121,7 @@ class ComparisonItem:
     after_source_time: str | None
     transition: str | None = None
     reset_evidence: ResetEvidence | None = None
+    relationship_type: str | None = None
 
 
 def derive_numeric_item(
@@ -243,7 +244,8 @@ def derive_discrete_item(
                            for value in (before_value, after_value))
     return ComparisonItem(item_id, scope, subject_id, kind, metric, None, None,
                           before_value, after_value, None, None, change, sample_count,
-                          compatibility, sorted_files, before_source_time, source_time, transition)
+                          compatibility, sorted_files, before_source_time, source_time, transition,
+                          relationship_type=relationship_type if kind == "relationship-change" else None)
 
 
 def _finite(value: float | None) -> bool:
@@ -477,6 +479,7 @@ def _derive_relationship_comparison_items(
                 ),
                 change="unknown",
                 transition=None,
+                relationship_type=None,
             )
         if relationship_type == "router-route":
             reporter_id = (old or new).reporter_device_id

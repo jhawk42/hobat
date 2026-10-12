@@ -321,6 +321,107 @@ def test_comparison_delta_formats_floating_point_values_to_one_decimal_place() -
     ]
 
 
+def test_comparison_evidence_labels_relationship_types_and_preserves_other_rows() -> None:
+    script = r"""
+      import {renderHealthComparison} from "./src/js/tdash-health.js";
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.className = "";
+        }
+        appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+        replaceChildren() { this.children = []; }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener() {}
+      }
+      globalThis.document = {createElement: (tagName) => new Element(tagName)};
+      const types = [
+        ["parent-child", "Parent/child"],
+        ["router-neighbor", "Router/neighbor"],
+        ["router-route", "Router/route"],
+        ["reed-route", "REED/route"],
+        [null, "Unknown relationship type"],
+        [undefined, "Unknown relationship type"],
+        ["__proto__", "Unknown relationship type"],
+        ["<img src=x>", "Unknown relationship type"],
+      ];
+      const items = types.map(([relationshipType], index) => ({
+        subjectId: `link:${index}`, itemKind: "relationship-change",
+        metric: "must-not-override-kind", relationshipType,
+        sampleCount: index % 3,
+        comparable: index !== 0,
+        change: index === 0 ? "unknown" : "changed",
+        primaryReason: index === 0 ? "endpoint-incomplete" : null,
+      }));
+      items.push({
+        subjectId: "device", itemKind: "queue-persistence",
+        metric: "queuedMessageCount", relationshipType: "router-route",
+        sampleCount: 1, comparable: true, change: "changed",
+      });
+      const comparison = {
+        comparisonId: "pair", comparable: true, resetState: "known",
+        reasons: [], baselineState: "available", gapState: "within-policy",
+        origin: "derived", itemCount: items.length, filteredItemCount: items.length,
+        offset: 0, limit: 25, items,
+      };
+      const page = {total: 1, offset: 0, limit: 25, items: [{comparisonId: "pair"}]};
+      const container = new Element("section");
+      renderHealthComparison(container, page, comparison, {
+        capabilityKnown: true, comparisonReadModel: true, assessmentAvailable: true,
+        endpointSelection: false, comparisonId: "pair", scope: "all", result: "all",
+      }, {});
+      const find = (element, className) => element.className === className
+        ? element
+        : element.children.map((child) => find(child, className)).find(Boolean);
+      const rows = find(container, "health-comparison-table-wrap").children[0]
+        .children[1].children;
+      console.log(JSON.stringify(rows.map((row) => ({
+        evidence: row.children[1].textContent,
+        result: row.children[5].textContent,
+      }))));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    assert json.loads(completed.stdout) == [
+        {
+            "evidence": "Relationship change · Parent/child · 0 samples",
+            "result": "Unknown · endpoint-incomplete",
+        },
+        {
+            "evidence": "Relationship change · Router/neighbor · 1 sample",
+            "result": "changed",
+        },
+        {
+            "evidence": "Relationship change · Router/route · 2 samples",
+            "result": "changed",
+        },
+        {
+            "evidence": "Relationship change · REED/route · 0 samples",
+            "result": "changed",
+        },
+        {
+            "evidence": "Relationship change · Unknown relationship type · 1 sample",
+            "result": "changed",
+        },
+        {
+            "evidence": "Relationship change · Unknown relationship type · 2 samples",
+            "result": "changed",
+        },
+        {
+            "evidence": "Relationship change · Unknown relationship type · 0 samples",
+            "result": "changed",
+        },
+        {
+            "evidence": "Relationship change · Unknown relationship type · 1 sample",
+            "result": "changed",
+        },
+        {"evidence": "queuedMessageCount · 1 sample", "result": "changed"},
+    ]
+
+
 def test_comparison_device_labels_keep_canonical_identity_and_scope() -> None:
     script = r"""
       import {renderHealthComparison} from "./src/js/tdash-health.js";

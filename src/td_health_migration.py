@@ -38,6 +38,7 @@ from td_health_observation_model import (
 from td_health_observation_store import HOBAT_DATABASE_FILENAME, HealthStoreError
 from td_health_policy import HealthPolicy
 from td_health_sqlite import (
+    SCHEMA_VERSION,
     SQLiteHealthStore,
     apply_registered_schema_migrations,
     validate_health_schema_connection,
@@ -559,9 +560,9 @@ def inventory_health_history(
     with closing(store._connect()) as connection:
         connection.execute("BEGIN")
         schema_version = validate_health_schema_connection(connection)
-        if schema_version not in {7, 8}:
+        if schema_version not in {7, 8, 9}:
             raise HealthMigrationInventoryError(
-                f"Health-history migration supports database schemas 7 and 8, not {schema_version}"
+                f"Health-history migration supports database schemas 7, 8, and 9, not {schema_version}"
             )
         rows = connection.execute(
             f"""SELECT a.*, o.datasource_id, o.dataset_id, o.network_id,
@@ -1040,7 +1041,7 @@ def history_migration_report(
             },
         },
         "sourceSchemaVersion": inventory.schema_version,
-        "outputSchemaVersion": 8,
+        "outputSchemaVersion": SCHEMA_VERSION,
         "inventoryDigest": inventory.source_inventory_digest,
         "backupPath": str(backup_path) if backup_path else None,
         "totals": counts,
@@ -1364,11 +1365,11 @@ def migrate_health_history(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
             )
-            if current_schema not in {7, 8}:
+            if current_schema not in {7, 8, 9}:
                 raise HealthMigrationError(
                     f"Health-history migration does not support schema {current_schema}"
                 )
-            if current_schema == 7:
+            if current_schema < SCHEMA_VERSION:
                 apply_registered_schema_migrations(
                     connection, expected_source_version=current_schema
                 )
@@ -1467,7 +1468,7 @@ def migrate_health_history(
                         input_schema_version, output_schema_version, started_at,
                         committed_at, backup_path, backup_manifest_digest,
                         counts_json, reasons_json)
-                       VALUES (?, ?, ?, ?, ?, ?, 8, ?, ?, ?, ?, ?, ?)""",
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         migration_id,
                         network_id,
@@ -1475,6 +1476,7 @@ def migrate_health_history(
                         inventory.target_contract_digest,
                         inventory.source_inventory_digest,
                         current_schema,
+                        SCHEMA_VERSION,
                         now,
                         now,
                         str(backup_output.resolve()),

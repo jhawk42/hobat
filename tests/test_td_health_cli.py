@@ -54,8 +54,8 @@ def test_schema_migration_check_is_read_only_and_apply_is_verified(tmp_path) -> 
     assert check["operation"] == "check"
     assert check["outcome"] == "pending"
     assert check["sourceSchemaVersion"] == 3
-    assert check["targetSchemaVersion"] == 8
-    assert [item["toVersion"] for item in check["migrations"]] == [4, 5, 6, 7, 8]
+    assert check["targetSchemaVersion"] == 9
+    assert [item["toVersion"] for item in check["migrations"]] == [4, 5, 6, 7, 8, 9]
     assert check["backupRequired"] and not check["backupVerified"]
     assert database_path.read_bytes() == before_database
     assert sorted(path.name for path in tmp_path.iterdir()) == before_entries
@@ -73,7 +73,7 @@ def test_schema_migration_check_is_read_only_and_apply_is_verified(tmp_path) -> 
     assert backup_path.is_file()
     metadata = json.loads(backup_path.with_suffix(".json").read_text(encoding="utf-8"))
     assert metadata["sourceSchemaVersion"] == 3
-    assert metadata["targetSchemaVersion"] == 8
+    assert metadata["targetSchemaVersion"] == 9
     assert metadata["integrityCheck"] == "ok"
 
     output = io.StringIO()

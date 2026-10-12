@@ -17,7 +17,9 @@ from td_health_comparison import (
 )
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from td_health_manifest import ROSTER_FIELDS, load_health_manifest
-from td_health_observation_store import HOBAT_DATABASE_FILENAME
+from td_health_observation_store import (
+    HOBAT_DATABASE_FILENAME, HealthStoreMigrationError,
+)
 from td_health_observation_model import device_id_from_ext_address, network_id_from_ext_pan_id
 from td_health_sqlite import SQLiteHealthStore
 from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
@@ -147,6 +149,8 @@ class TDHealthReadService:
             raise HealthCorruptStoreError("Health store cannot be opened") from exc
         except (sqlite3.DatabaseError, ValueError) as exc:
             raise HealthCorruptStoreError("Health store cannot be opened") from exc
+        except HealthStoreMigrationError as exc:
+            raise HealthCorruptStoreError("Health store schema is corrupt") from exc
 
     def _labels(self) -> dict[str, str]:
         path = self.data_dir / EXTADDR_DEVICE_LABEL_MAP_FILENAME
@@ -933,6 +937,7 @@ class TDHealthReadService:
             "subject_id": item.subject_id,
             "item_kind": item.kind,
             "metric": item.metric,
+            "relationship_type": item.relationship_type,
             "unit": item.unit,
             "denominator_kind": item.denominator_kind,
             "before_value": item.before_value,
@@ -959,6 +964,21 @@ class TDHealthReadService:
             "after_relationship_id": item.subject_id if item.scope == "relationship" and after_present else None,
         }
 
+    @staticmethod
+    def _comparison_relationship_type(item: dict[str, Any]) -> str | None:
+        relationship_type = item.get("relationship_type")
+        if relationship_type is not None and (
+            not isinstance(relationship_type, str) or not relationship_type
+        ):
+            raise HealthCorruptStoreError(
+                "Invalid stored comparison relationship type"
+            )
+        return (
+            relationship_type
+            if item.get("item_kind") == "relationship-change"
+            else None
+        )
+
     def _comparison_detail_projection(
         self, *, origin: str, row: dict[str, Any], item_rows: list[dict[str, Any]],
         limit: int, offset: int, scope: str, result: str,
@@ -970,6 +990,7 @@ class TDHealthReadService:
         filtered_count = 0 if derived else row["filtered_item_count"]
         for item in item_rows:
             item = self._derived_item_row(item) if isinstance(item, ComparisonItem) else item
+            relationship_type = self._comparison_relationship_type(item)
             _validate_stored_timestamp(
                 item["before_source_time"], field="comparison Before source timestamp",
             )
@@ -1001,6 +1022,7 @@ class TDHealthReadService:
                     "itemId": item["item_id"], "scope": item["scope"],
                     "subjectId": item["subject_id"], "itemKind": item["item_kind"],
                     "metric": item["metric"], "unit": item["unit"],
+                    "relationshipType": relationship_type,
                     "denominatorKind": item["denominator_kind"],
                     "beforeValue": _decode_json(item["before_json"], field="before value")
                     if "before_json" in item else item["before_value"],
@@ -1093,6 +1115,7 @@ class TDHealthReadService:
         pruned = header["baselineState"] == "pruned"
         items = []
         for item in item_rows:
+            relationship_type = self._comparison_relationship_type(item)
             persisted_reasons = _decode_json(item["reasons_json"], field="item reasons")
             if not isinstance(persisted_reasons, list) or any(
                 not isinstance(reason, str) for reason in persisted_reasons
@@ -1107,6 +1130,7 @@ class TDHealthReadService:
                 "itemId": item["item_id"], "scope": item["scope"],
                 "subjectId": item["subject_id"], "itemKind": item["item_kind"],
                 "metric": item["metric"], "unit": item["unit"],
+                "relationshipType": relationship_type,
                 "denominatorKind": item["denominator_kind"],
                 "beforeValue": _decode_json(item["before_json"], field="before value"),
                 "afterValue": _decode_json(item["after_json"], field="after value"),

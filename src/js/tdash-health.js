@@ -42,6 +42,24 @@ const FINDING_SECTIONS = Object.freeze([
 const HEALTH_STATUS_ORDER = Object.freeze({ poor: 0, moderate: 1, unknown: 2, strong: 3 });
 const HEALTH_MATERIALITY_ORDER = Object.freeze({ network: 0, relationship: 1, device: 2, informational: 3 });
 const HEALTH_CONFIDENCE_ORDER = Object.freeze({ high: 0, medium: 1, low: 2 });
+const RELATIONSHIP_TYPE_LABELS = Object.freeze({
+  "parent-child": "Parent/child",
+  "router-neighbor": "Router/neighbor",
+  "router-route": "Router/route",
+  "reed-route": "REED/route",
+});
+
+function comparisonEvidence(item) {
+  const count = `${item.sampleCount} ${item.sampleCount === 1 ? "sample" : "samples"}`;
+  if (item.itemKind === "relationship-change") {
+    const category = typeof item.relationshipType === "string"
+      && Object.hasOwn(RELATIONSHIP_TYPE_LABELS, item.relationshipType)
+      ? RELATIONSHIP_TYPE_LABELS[item.relationshipType]
+      : "Unknown relationship type";
+    return `Relationship change · ${category} · ${count}`;
+  }
+  return `${item.metric || item.itemKind} · ${count}`;
+}
 
 function appendText(parent, tagName, text, className = "") {
   const element = document.createElement(tagName);
@@ -1085,7 +1103,7 @@ function renderSelectedHealthComparison(
           inspect.dataset.healthFocusKey = `comparison-device:${item.subjectId}`;
           inspect.addEventListener("click", () => actions.inspect?.(item.subjectId));
         }
-        appendText(row, "td", `${item.metric || item.itemKind} · ${item.sampleCount} ${item.sampleCount === 1 ? "sample" : "samples"}`);
+        appendText(row, "td", comparisonEvidence(item));
         const appendComparisonValue = (cell, value, label) => {
           if (item.scope === "device" && item.metric === "parent"
               && typeof value === "string" && /^extaddr:[0-9a-f]{16}$/.test(value)

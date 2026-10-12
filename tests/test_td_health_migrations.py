@@ -115,6 +115,9 @@ def _create_schema_fixture(path, version: int) -> None:
             SQLiteHealthStore._ensure_schema_v8(connection)
             connection.execute("DELETE FROM schema_migrations")
 
+        if version >= 9:
+            td_health_sqlite._migration_v9(connection)
+
         connection.execute("DELETE FROM schema_migrations")
         if version == 1:
             connection.execute(
@@ -273,6 +276,12 @@ def test_historical_schema_fixture_has_version_specific_layout(tmp_path, version
         )
         assert ("network_roster_revisions" in tables) is (version >= 5)
         assert ("health_assessment_preferences" in tables) is (version >= 8)
+        comparison_columns = {
+            row[1] for row in connection.execute(
+                "PRAGMA table_info(comparison_items)"
+            )
+        } if version >= 4 else set()
+        assert ("relationship_type" in comparison_columns) is (version >= 9)
         assessment_unique_shapes = {
             tuple(
                 row[2]
@@ -305,7 +314,7 @@ def test_historical_schema_fixture_has_version_specific_layout(tmp_path, version
 
 
 @pytest.mark.parametrize("version", range(1, SCHEMA_VERSION + 1))
-def test_historical_schema_upgrades_to_v8_with_rows_preserved(tmp_path, version) -> None:
+def test_historical_schema_upgrades_to_current_with_rows_preserved(tmp_path, version) -> None:
     path = tmp_path / f"upgrade-v{version}.db"
     _create_schema_fixture(path, version)
 
@@ -421,6 +430,71 @@ def test_migration_failure_rolls_back_schema_data_and_ledger_then_retry_succeeds
         ).fetchone() == (SCHEMA_VERSION,)
 
 
+def test_schema_v9_failure_rolls_back_column_and_ledger_then_retry_succeeds(
+    tmp_path, monkeypatch
+) -> None:
+    path = tmp_path / "retry-v9.db"
+    _create_schema_fixture(path, 8)
+    with sqlite3.connect(path) as connection:
+        before_objects = connection.execute(
+            "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+        ).fetchall()
+        before_ledger = connection.execute(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version"
+        ).fetchall()
+
+    original_registry = td_health_sqlite.SCHEMA_MIGRATIONS
+    original_v9 = next(
+        migration for migration in original_registry
+        if migration.to_version == 9
+    )
+
+    def fail_after_v9(connection):
+        original_v9.apply(connection)
+        raise RuntimeError("injected after schema v9 DDL")
+
+    monkeypatch.setattr(
+        td_health_sqlite,
+        "SCHEMA_MIGRATIONS",
+        tuple(
+            replace(migration, apply=fail_after_v9)
+            if migration.to_version == 9
+            else migration
+            for migration in original_registry
+        ),
+    )
+    with pytest.raises(HealthStoreMigrationError) as error:
+        SQLiteHealthStore(path)
+    assert error.value.category == "migration-failed"
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+        ).fetchall() == before_objects
+        assert connection.execute(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version"
+        ).fetchall() == before_ledger
+        assert "relationship_type" not in {
+            row[1] for row in connection.execute(
+                "PRAGMA table_info(comparison_items)"
+            )
+        }
+    monkeypatch.setattr(
+        td_health_sqlite, "SCHEMA_MIGRATIONS", original_registry
+    )
+    SQLiteHealthStore(path)
+    with sqlite3.connect(path) as connection:
+        relationship_type = next(
+            row for row in connection.execute(
+                "PRAGMA table_info(comparison_items)"
+            )
+            if row[1] == "relationship_type"
+        )
+        assert relationship_type[2:5] == ("TEXT", 0, None)
+        assert connection.execute(
+            "SELECT MAX(version) FROM schema_migrations"
+        ).fetchone() == (9,)
+
+
 def test_backup_publication_failure_leaves_database_unchanged(
     tmp_path, monkeypatch
 ) -> None:
@@ -454,7 +528,7 @@ def test_backup_publication_failure_leaves_database_unchanged(
     assert not list(recovery_dir.glob("*.partial"))
 
 
-@pytest.mark.parametrize("versions", [(2, 4), (0,), (9,)])
+@pytest.mark.parametrize("versions", [(2, 4), (0,), (SCHEMA_VERSION + 1,)])
 def test_invalid_ledgers_fail_closed(versions, tmp_path) -> None:
     path = tmp_path / "invalid-ledger.db"
     with sqlite3.connect(path) as connection:
@@ -466,7 +540,7 @@ def test_invalid_ledgers_fail_closed(versions, tmp_path) -> None:
             ((version,) for version in versions),
         )
 
-    if versions == (9,):
+    if versions == (SCHEMA_VERSION + 1,):
         error = td_health_sqlite.HealthStoreFutureSchemaError
     else:
         error = HealthStoreMigrationError

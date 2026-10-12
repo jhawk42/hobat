@@ -427,6 +427,80 @@ def test_discrete_item_kinds(kind, before, after, transition, change) -> None:
     )
     assert item.compatibility.comparable
     assert (item.change, item.transition, item.delta) == (change, transition, None)
+    assert item.relationship_type == (
+        "router-neighbor" if kind == "relationship-change" else None
+    )
+
+
+@pytest.mark.parametrize(
+    "relationship_type",
+    ("parent-child", "router-neighbor", "router-route", "reed-route"),
+)
+@pytest.mark.parametrize(
+    ("before_value", "after_value", "transition", "sample_count"),
+    (
+        (False, True, "added", 1),
+        (True, False, "removed", 1),
+        (True, True, "retained", 2),
+    ),
+)
+def test_relationship_change_keeps_immutable_endpoint_type(
+    relationship_type, before_value, after_value, transition, sample_count,
+) -> None:
+    item = derive_discrete_item(
+        _compare(), kind="relationship-change", scope="relationship",
+        subject_id="link:opaque-id", metric=None,
+        relationship_type=relationship_type,
+        before_value=before_value, after_value=after_value,
+        before_source_time="2026-09-01T00:00:00+00:00",
+        after_source_time="2026-09-02T00:00:00+00:00",
+    )
+    assert item.relationship_type == relationship_type
+    assert item.transition == transition
+    assert item.sample_count == sample_count
+
+
+def test_relationship_type_mismatch_clears_display_metadata_without_identity_change() -> None:
+    before, after = _endpoints()
+    link_id = "link:opaque-id"
+
+    def endpoint(pair, relationship_type):
+        observation, assessment = pair
+        source = replace(
+            observation.sources[0],
+            state="valid",
+            source_observed_at=observation.observed_at,
+        )
+        link = RelationshipSample(
+            link_id, relationship_type, "extaddr:aaaaaaaaaaaaaaaa",
+            "extaddr:bbbbbbbbbbbbbbbb", None, None, None, None, None, None,
+            None, None, ("devices.json",),
+        )
+        return replace(
+            observation, sources=(source, observation.sources[1]),
+            relationships=(link,),
+        ), assessment
+
+    _, mismatch_items = derive_comparison(
+        endpoint(before, "router-neighbor"),
+        endpoint(after, "parent-child"),
+        source_roles=ROLES,
+    )
+    mismatch = next(
+        item for item in mismatch_items if item.kind == "relationship-change"
+    )
+    _, same_type_items = derive_comparison(
+        endpoint(before, "router-neighbor"),
+        endpoint(after, "router-neighbor"),
+        source_roles=ROLES,
+    )
+    same_type = next(
+        item for item in same_type_items if item.kind == "relationship-change"
+    )
+    assert mismatch.relationship_type is None
+    assert mismatch.item_id == same_type.item_id
+    assert mismatch.change == "unknown" and mismatch.transition is None
+    assert "relationship-mismatch" in mismatch.compatibility.reasons
 
 
 def test_missing_presence_needs_same_source_coverage_and_no_roster_fallback() -> None:

@@ -38,7 +38,7 @@ from td_health_observation_store import (
 from td_health_roster import RosterFact
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 _PURGE_TABLES = (
     "observations",
     "observation_sources",
@@ -919,8 +919,17 @@ class SQLiteHealthStore:
                 item.kind not in {"presence-transition", "relationship-change"} or item.after_value is True
             )
             connection.execute(
-                """INSERT INTO comparison_items VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO comparison_items (
+                    comparison_id, item_id, scope, subject_id, item_kind, metric,
+                    unit, denominator_kind, before_json, after_json, delta_json,
+                    direction, change, transition_state, sample_count, comparable,
+                    primary_reason, reasons_json, source_files_json,
+                    before_source_time, after_source_time, reset_state,
+                    reset_witness_json, before_device_id, after_device_id,
+                    before_relationship_id, after_relationship_id, relationship_type
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?)""",
                 (interval.comparison_id, item.item_id, item.scope, item.subject_id,
                  item.kind, item.metric, item.unit, item.denominator_kind,
                  json.dumps(item.before_value, allow_nan=False), json.dumps(item.after_value, allow_nan=False),
@@ -935,7 +944,8 @@ class SQLiteHealthStore:
                  item.subject_id if item.scope == "device" and has_before else None,
                  item.subject_id if item.scope == "device" and has_after else None,
                  item.subject_id if item.scope == "relationship" and has_before else None,
-                 item.subject_id if item.scope == "relationship" and has_after else None),
+                 item.subject_id if item.scope == "relationship" and has_after else None,
+                 item.relationship_type if item.kind == "relationship-change" else None),
             )
         if enforce_retention:
             connection.execute(
@@ -1306,6 +1316,13 @@ class SQLiteHealthStore:
         connection: sqlite3.Connection, *, comparison_id_value: str, limit: int,
         offset: int, scope: str, result: str,
     ) -> tuple[dict, list[dict]] | None:
+        schema_version = _schema_version_from_ledger(connection)
+        if schema_version >= 9 and "relationship_type" not in _columns(
+            connection, "comparison_items"
+        ):
+            raise sqlite3.DatabaseError(
+                "Schema ledger v9 is missing comparison_items.relationship_type"
+            )
         row = connection.execute(
             """SELECT c.*, EXISTS(SELECT 1 FROM observations o
                WHERE o.observation_id=c.before_observation_id) AS before_retained,
@@ -3902,6 +3919,29 @@ def _validate_schema_structure(connection: sqlite3.Connection, version: int) -> 
                 "schema-invalid",
                 f"Schema ledger v{version} is missing v8 tables: {', '.join(missing_v8)}",
             )
+    if version >= 9:
+        _require_columns(
+            connection, "comparison_items", {"relationship_type"}, version
+        )
+        relationship_type = next(
+            (
+                row for row in connection.execute(
+                    "PRAGMA table_info(comparison_items)"
+                )
+                if row[1] == "relationship_type"
+            ),
+            None,
+        )
+        if (
+            relationship_type is None
+            or relationship_type[2].upper() != "TEXT"
+            or relationship_type[3] != 0
+            or relationship_type[4] is not None
+        ):
+            raise HealthStoreMigrationError(
+                "schema-invalid",
+                "Schema ledger v9 does not match the comparison_items relationship_type layout",
+            )
 
 
 def _migration_v2(connection: sqlite3.Connection) -> None:
@@ -4096,6 +4136,13 @@ def _migration_v8(connection: sqlite3.Connection) -> None:
     SQLiteHealthStore._ensure_schema_v8(connection)
 
 
+def _migration_v9(connection: sqlite3.Connection) -> None:
+    if "relationship_type" not in _columns(connection, "comparison_items"):
+        connection.execute(
+            "ALTER TABLE comparison_items ADD COLUMN relationship_type TEXT"
+        )
+
+
 SCHEMA_MIGRATIONS = (
     SchemaMigration("health-schema-v2-status-vocabulary", 1, 2, "online-additive", _migration_v2),
     SchemaMigration("health-schema-v3-assessment-provenance", 2, 3, "online-additive", _migration_v3),
@@ -4104,6 +4151,7 @@ SCHEMA_MIGRATIONS = (
     SchemaMigration("health-schema-v6-roster-context-assessments", 5, 6, "online-additive", _migration_v6),
     SchemaMigration("health-schema-v7-receipt-device-identity", 6, 7, "online-additive", _migration_v7),
     SchemaMigration("health-schema-v8-assessment-preferences", 7, 8, "online-additive", _migration_v8),
+    SchemaMigration("health-schema-v9-comparison-relationship-type", 8, 9, "online-additive", _migration_v9),
 )
 
 
@@ -4424,6 +4472,7 @@ def initialize_health_store(store: SQLiteHealthStore) -> None:
                 _migration_v4(connection)
                 _migration_v7(connection)
                 _migration_v8(connection)
+                _migration_v9(connection)
                 connection.executemany(
                     "INSERT INTO schema_migrations(version, applied_at) "
                     "VALUES (?, CURRENT_TIMESTAMP)",

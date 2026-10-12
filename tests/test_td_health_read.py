@@ -458,6 +458,10 @@ def test_stored_legacy_and_derived_comparisons_annotate_only_returned_page(tmp_p
     }
     stored = service.comparison_pair(**query)
     assert stored is not None and stored["origin"] == "stored"
+    assert {
+        item["relationshipType"] for item in stored["items"]
+        if item["itemKind"] == "relationship-change"
+    } == {"parent-child"}
     parent_item = next(item for item in stored["items"] if item["metric"] == "parent")
     assert parent_item["subjectId"] == subject_id
     assert parent_item["subjectDisplayLabel"] == "Child device"
@@ -482,6 +486,10 @@ def test_stored_legacy_and_derived_comparisons_annotate_only_returned_page(tmp_p
         comparison_id=stored["comparisonId"], limit=100, offset=0,
     )
     assert legacy is not None
+    assert {
+        item["relationshipType"] for item in legacy["items"]
+        if item["itemKind"] == "relationship-change"
+    } == {"parent-child"}
     legacy_parent = next(item for item in legacy["items"] if item["metric"] == "parent")
     assert legacy_parent["subjectDisplayLabel"] == "Child device"
     assert legacy_parent["beforeDeviceDisplayLabel"] == "Old parent"
@@ -494,6 +502,10 @@ def test_stored_legacy_and_derived_comparisons_annotate_only_returned_page(tmp_p
         connection.commit()
     derived = service.comparison_pair(**query)
     assert derived is not None and derived["origin"] == "derived"
+    assert {
+        item["relationshipType"] for item in derived["items"]
+        if item["itemKind"] == "relationship-change"
+    } == {"parent-child"}
     derived_parent = next(item for item in derived["items"] if item["metric"] == "parent")
     assert {
         key: derived_parent[key]
@@ -525,6 +537,75 @@ def test_stored_legacy_and_derived_comparisons_annotate_only_returned_page(tmp_p
     assert resolver_calls[-1] == {
         "network_id": before.network_id, "device_ids": page_ids,
     }
+
+
+def test_legacy_comparison_without_relationship_type_column_stays_read_only(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    before, before_assessment = _result("1")
+    after, after_assessment = _result("2")
+    subject_id = "extaddr:8672766ae0578187"
+    link = RelationshipSample(
+        "link:legacy", "router-neighbor", subject_id, subject_id,
+        None, None, None, None, None, None, None, None, ("snapshot.json",),
+    )
+    store.save_processing_result(replace(before, relationships=(link,)), before_assessment)
+    store.save_processing_result(replace(after, relationships=(link,)), after_assessment)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("ALTER TABLE comparison_items DROP COLUMN relationship_type")
+        connection.execute("DELETE FROM schema_migrations WHERE version=9")
+        connection.commit()
+    before_read = (tmp_path / HOBAT_DATABASE_FILENAME).read_bytes()
+
+    service = TDHealthReadService(tmp_path)
+    comparison = service.comparison_pair(
+        network_id=before.network_id,
+        dataset_id=before.dataset_id,
+        before_assessment_id=before_assessment.assessment_id,
+        after_assessment_id=after_assessment.assessment_id,
+        limit=25, offset=0,
+    )
+    assert comparison is not None
+    assert all(
+        item["relationshipType"] is None
+        for item in comparison["items"]
+        if item["itemKind"] == "relationship-change"
+    )
+    assert (tmp_path / HOBAT_DATABASE_FILENAME).read_bytes() == before_read
+
+
+def test_comparison_relationship_type_rejects_corrupt_metadata_and_schema(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    before, before_assessment = _result("1")
+    after, after_assessment = _result("2")
+    subject_id = "extaddr:8672766ae0578187"
+    link = RelationshipSample(
+        "link:corrupt", "router-neighbor", subject_id, subject_id,
+        None, None, None, None, None, None, None, None, ("snapshot.json",),
+    )
+    store.save_processing_result(replace(before, relationships=(link,)), before_assessment)
+    store.save_processing_result(replace(after, relationships=(link,)), after_assessment)
+    service = TDHealthReadService(tmp_path)
+    query = {
+        "network_id": before.network_id,
+        "dataset_id": before.dataset_id,
+        "before_assessment_id": before_assessment.assessment_id,
+        "after_assessment_id": after_assessment.assessment_id,
+        "limit": 25, "offset": 0,
+    }
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "UPDATE comparison_items SET relationship_type='' "
+            "WHERE item_kind='relationship-change'"
+        )
+    with pytest.raises(HealthCorruptStoreError, match="relationship type"):
+        service.comparison_pair(**query)
+
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "ALTER TABLE comparison_items DROP COLUMN relationship_type"
+        )
+    with pytest.raises(HealthCorruptStoreError, match="schema"):
+        TDHealthReadService(tmp_path)
 
 
 def test_endpoint_inventory_orders_equivalent_utc_instants_and_rejects_same_time_before(
