@@ -317,10 +317,15 @@ an observed sole path.
 
 The network-scoped `network.partition-distribution` finding uses unique,
 identified Thread devices with one unambiguous `leaderData.partitionId` claim in
-the current observation. A complete, fully attributed single partition is
-Strong. Multiple partitions are Moderate when the largest contains at least
-75% of identified devices and Poor below 75%. Partial, invalid, conflicting,
-or degraded evidence is Unknown; it never classifies from a known subset.
+the current observation. Within a complete observation, one reported partition
+is Strong. Multiple partitions are Moderate when the largest contains at least
+75% of devices reporting valid membership and Poor below 75%. Devices without
+partition claims are excluded from this denominator, not assumed to share a
+partition; the finding reports coverage and uses medium confidence when
+membership is missing for some observed devices. Missing all membership,
+invalid or conflicting claims, unresolved scope, and partial or degraded
+observations remain Unknown. Evaluator `snapshot-v14` implements this
+reporting-device contract; earlier assessments retain their original results.
 
 An optional `config/td-health-policy.json` replaces the defaults after strict
 validation. It must include the complete `snapshot-v2` threshold contract and
@@ -402,7 +407,7 @@ also project catalog-owned `evidenceKind`, `materiality`, `actionKey`, and
 | `network.current-path-redundancy` | Router Path Redundancy | Identifies router-neighbor bridges and articulation Routers in the currently observed routing graph. |
 | `network.observed-link-quality-ratios` | Network Link Quality Distribution | Summarizes the distribution of observed non-missing link-quality reports. |
 | `network.offline-impact` | Offline Device Network Impact | Separately assesses whether individually Offline devices are material to network health. |
-| `network.partition-distribution` | Thread Partition Distribution | Classifies source-backed Thread partition membership within one complete network observation. |
+| `network.partition-distribution` | Thread Partition Distribution | Classifies valid reported Thread partition membership within one complete network observation; devices without claims are excluded and coverage is reported. |
 | `observation.duplicate-source-entry` | Duplicate Relationships in Source Data | Reports duplicate source relationships as a collection artifact. |
 | `observation.evaluation-context-unavailable` | Historical Evaluation Context Unavailable | Identifies evaluator inputs that were not retained or cannot be verified for this observation. |
 | `device.observed` | Observed Devices | Records device presence in the current cached observation. |

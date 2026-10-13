@@ -29,7 +29,7 @@ from td_health_graph import GraphAnalysis, GraphEdge, analyze_undirected_graph
 from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
-EVALUATOR_VERSION = "snapshot-v13"
+EVALUATOR_VERSION = "snapshot-v14"
 
 _DIRECT_THRESHOLD_COUNT_METRICS = frozenset(
     {"parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"}
@@ -1417,7 +1417,7 @@ def _evaluate_partition_distribution(
     assigned_devices = assigned_devices if type(assigned_devices) is int and assigned_devices >= 0 else 0
     dominant = max(partitions, key=lambda item: item["deviceCount"], default=None)
     dominant_count = dominant["deviceCount"] if dominant else 0
-    dominant_ratio = dominant_count / total_devices if total_devices > 0 else None
+    dominant_ratio = dominant_count / assigned_devices if assigned_devices > 0 else None
     raw_state = raw.get("membershipState", "unavailable")
     scope_resolved = raw.get("networkId") == observation.network_id
     observation_complete = (
@@ -1425,14 +1425,15 @@ def _evaluate_partition_distribution(
         and raw.get("observationCompleteness", Completeness.COMPLETE.value)
         == Completeness.COMPLETE.value
     )
-    fully_assigned = (
+    membership_supported = (
         scope_resolved
         and observation_complete
-        and raw_state == "supported"
-        and total_devices > 0
-        and assigned_devices == total_devices
+        and raw_state in {"supported", "partial"}
+        and 0 < assigned_devices <= total_devices
+        and not raw.get("invalidDeviceIds")
+        and not raw.get("conflictingDeviceIds")
         and len(partitions) > 0
-        and sum(item["deviceCount"] for item in partitions) == total_devices
+        and sum(item["deviceCount"] for item in partitions) == assigned_devices
     )
 
     status = HealthStatus.UNKNOWN
@@ -1445,10 +1446,10 @@ def _evaluate_partition_distribution(
             "Partition membership is Unknown because the observation is "
             f"{observation.completeness.value}."
         )
-    elif fully_assigned and len(partitions) == 1:
+    elif membership_supported and len(partitions) == 1:
         status = HealthStatus.STRONG
-        reason = "All identified devices have one supported partition membership."
-    elif fully_assigned and len(partitions) > 1:
+        reason = "All devices reporting valid partition membership share one partition."
+    elif membership_supported and len(partitions) > 1:
         threshold = _policy_value(
             policy, rule_id, "thresholds.partitionDistribution"
         )["moderateAtOrAbove"]
@@ -1459,12 +1460,19 @@ def _evaluate_partition_distribution(
         )
         reason = (
             f"{len(partitions)} supported partitions are present; the largest "
-            f"contains {dominant_ratio:.1%} of identified devices."
+            f"contains {dominant_ratio:.1%} of devices reporting valid membership."
         )
     elif raw_state in {"partial", "conflicting", "invalid", "missing"}:
         reason = (
             f"Partition membership is {raw_state}; all identified devices "
             "must have one unambiguous source-backed claim."
+        )
+
+    if membership_supported and assigned_devices < total_devices:
+        reason += (
+            f" Membership is reported for {assigned_devices} of {total_devices} "
+            "observed devices; devices without claims are excluded from the "
+            "distribution, not assumed to share a partition."
         )
 
     evidence = {
@@ -1521,7 +1529,8 @@ def _evaluate_partition_distribution(
             )),
             source_files=evidence["sourceFiles"],
             confidence=(
-                Confidence.HIGH if fully_assigned
+                Confidence.HIGH if membership_supported and assigned_devices == total_devices
+                else Confidence.MEDIUM if membership_supported
                 else Confidence.LOW
             ),
         )

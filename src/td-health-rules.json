@@ -129,7 +129,7 @@
       "ruleId": "network.partition-distribution",
       "order": 1065,
       "title": "Thread Partition Distribution",
-      "description": "Classifies source-backed Thread partition membership within one complete network observation.",
+      "description": "Classifies valid reported Thread partition membership within one complete network observation; devices without claims are excluded and coverage is reported.",
       "evidenceKind": "snapshot",
       "scopes": ["network"],
       "roles": [],
@@ -138,7 +138,7 @@
       "materiality": "network",
       "thresholdKeys": ["thresholds.partitionDistribution"],
       "action": "Inspect the Thread network's active partition state and confirm that devices are expected to share the same partition.",
-      "verify": "Process another complete observation with unambiguous partition membership for every identified device."
+      "verify": "Process another complete observation and confirm valid reporting devices share one partition; inspect membership coverage separately."
     },
     {
       "ruleId": "observation.duplicate-source-entry",

@@ -178,7 +178,7 @@ def test_reprocessing_snapshot_counts_preserves_prior_assessment_and_projection(
     assert old_projection is not None
     assert current_projection is not None
     assert old_projection["evaluatorVersion"] == "snapshot-v10"
-    assert current_projection["evaluatorVersion"] == "snapshot-v13"
+    assert current_projection["evaluatorVersion"] == "snapshot-v14"
     assert next(
         finding for finding in old_projection["findings"]
         if finding["ruleId"] == "device.parentChanges"

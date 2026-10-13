@@ -167,7 +167,7 @@ def test_complete_topology_profile_reports_border_router_redundancy() -> None:
     )
 
     assert PROFILE.border_router_authority is True
-    assert EVALUATOR_VERSION == "snapshot-v13"
+    assert EVALUATOR_VERSION == "snapshot-v14"
     assert border_router_finding.status is HealthStatus.STRONG
     assert border_router_finding.evidence["observedBorderRouterCount"] == 2
     assert border_router_finding.evidence["moreThanOne"] is True

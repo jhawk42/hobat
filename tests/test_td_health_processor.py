@@ -159,6 +159,7 @@ def test_partition_distribution_deduplicates_devices_and_persists_reproduction_e
          "leaderData": {"partitionId": "0x1472c6c1"}},
         {"extAddress": "2222222222222222", "role": "child",
          "leaderData": {"partitionId": 0x1472C6C1}},
+        {"extAddress": "3333333333333333", "role": "child"},
     ]
     _write_seed(tmp_path, rows)
     database = tmp_path / HOBAT_DATABASE_FILENAME
@@ -174,8 +175,13 @@ def test_partition_distribution_deduplicates_devices_and_persists_reproduction_e
     )
 
     assert finding.status is HealthStatus.STRONG
-    assert finding.evidence["totalDeviceCount"] == 2
+    assert finding.evidence["totalDeviceCount"] == 3
     assert finding.evidence["assignedDeviceCount"] == 2
+    assert finding.evidence["membershipState"] == "partial"
+    assert finding.evidence["dominantPartitionRatio"] == 1.0
+    assert finding.confidence.value == "medium"
+    assert "2 of 3 observed devices" in finding.summary
+    assert "not assumed to share a partition" in finding.summary
     assert finding.evidence["partitionCounts"] == (
         {
             "partitionId": 0x1472C6C1,
@@ -210,6 +216,36 @@ def test_partition_distribution_deduplicates_devices_and_persists_reproduction_e
     assert replay_finding.status is finding.status
     assert replay_finding.evidence == finding.evidence
 
+    for completeness in (Completeness.PARTIAL, Completeness.DEGRADED):
+        incomplete = evaluate_observation(
+            replace(result.observation, completeness=completeness),
+            load_health_policy(),
+            profile=load_health_manifest().dataset(
+                "otbr_cli_networkdiag_fetch_all"
+            ).health_profile,
+            evaluation_inputs=replay_inputs,
+        )
+        incomplete_finding = next(
+            item for item in incomplete.findings
+            if item.rule_id == "network.partition-distribution"
+        )
+        assert incomplete_finding.status is HealthStatus.UNKNOWN
+
+    wrong_scope = evaluate_observation(
+        replace(result.observation, network_id="extpan:1111222233334444"),
+        load_health_policy(),
+        profile=load_health_manifest().dataset(
+            "otbr_cli_networkdiag_fetch_all"
+        ).health_profile,
+        evaluation_inputs=replay_inputs,
+    )
+    wrong_scope_finding = next(
+        item for item in wrong_scope.findings
+        if item.rule_id == "network.partition-distribution"
+    )
+    assert wrong_scope_finding.status is HealthStatus.UNKNOWN
+    assert wrong_scope_finding.evidence["membershipState"] == "unresolved-scope"
+
 
 @pytest.mark.parametrize(
     ("partition_sizes", "expected_status"),
@@ -220,8 +256,9 @@ def test_partition_distribution_deduplicates_devices_and_persists_reproduction_e
         ((17, 6), HealthStatus.POOR),
     ],
 )
+@pytest.mark.parametrize("missing_devices", [0, 2])
 def test_partition_distribution_severity_boundary(
-    tmp_path, partition_sizes, expected_status
+    tmp_path, partition_sizes, expected_status, missing_devices
 ) -> None:
     rows = []
     next_device = 1
@@ -233,6 +270,10 @@ def test_partition_distribution_severity_boundary(
                 "leaderData": {"partitionId": partition_id},
             })
             next_device += 1
+    rows.extend(
+        {"extAddress": f"{next_device + offset:016x}", "role": "child"}
+        for offset in range(missing_devices)
+    )
     _write_seed(tmp_path, rows)
 
     result = build_processing_result(
@@ -246,6 +287,11 @@ def test_partition_distribution_severity_boundary(
     )
 
     assert finding.status is expected_status
+    assert finding.evidence["dominantPartitionRatio"] == (
+        max(partition_sizes) / sum(partition_sizes)
+    )
+    assert finding.evidence["totalDeviceCount"] == sum(partition_sizes) + missing_devices
+    assert finding.evidence["assignedDeviceCount"] == sum(partition_sizes)
 
 
 @pytest.mark.parametrize(
@@ -253,10 +299,10 @@ def test_partition_distribution_severity_boundary(
     [
         (
             [
-                {"extAddress": "1111111111111111", "leaderData": {"partitionId": 1}},
+                {"extAddress": "1111111111111111"},
                 {"extAddress": "2222222222222222"},
             ],
-            "partial",
+            "missing",
         ),
         (
             [
