@@ -83,6 +83,10 @@ This history replay is separate from `health migrate --check` and
 `health migrate --apply`, which only change database schema and never replay
 assessments or process snapshots.
 
+In short, `health migrate` changes the database structure; `health
+migrate-history` revisits retained health evidence under the current evaluator
+and policy. Neither command collects data or checks current network health.
+
 Run this only during a maintenance window after stopping the dashboard's
 write-capable health server, scheduled health processing, roster actions, and
 collectors. Use the same absolute policy directory for migration and subsequent
