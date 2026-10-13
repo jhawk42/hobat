@@ -550,6 +550,8 @@ filesystem access and treat Home Assistant backup inclusion as sensitive.
 
 ## Read API and Dashboard
 
+### Health Compare Two Assessments
+
 Compare two stored assessments explicitly without reading or refreshing cached
 collector files:
 
@@ -600,6 +602,8 @@ Stored roster addresses are sourced
 display values, not verified stable OMR aliases; prefix provenance is not yet
 persisted with those facts.
 
+### Health REST API
+
 `GET /api/health/comparison-endpoints?network=...&dataset=...&side=after&limit=25&offset=0`
 pages retained assessment endpoints. Use `side=before` with `after=ASSESSMENT_ID`
 to page only assessments strictly earlier than the selected After. The response
@@ -620,6 +624,8 @@ remain available for stored pair history, including pruned endpoints. All four
 GET routes are read-only and no-store. Stored responses distinguish persisted
 comparability from a read-time `baseline-pruned` override; no GET creates or
 repairs a comparison.
+
+### Health Insights Tabs: Findings, Comparison, and Device Roster
 
 Network Insights offers **Findings**, **Comparison**, and **Device Roster** as
 peer tabs, with Findings selected initially. Each tab retains its own
