@@ -162,8 +162,78 @@ const explicitRouterFalse = buildThreadNetworkModel({
 assert.equal(explicitRouterFalse.deviceCounts.total, 1);
 assert.equal(explicitRouterFalse.deviceCounts.routers, "n/a");
 
+const partitionDataset = {
+  entry: { label: "Partition snapshot", source: "otbr-cli", files: [filename] },
+  loadedFiles: [filename],
+  rawFiles: [[]],
+  rows: [
+    { extAddress: "0011223344556677", role: "router", leaderData: { partitionId: 0x20 }, _source_files: [filename] },
+    { extAddress: "0011223344556677", role: "router", leaderData: { partitionId: "0x00000020" }, _source_files: [filename] },
+    { extAddress: "8899aabbccddeeff", role: "child", leaderData: { partitionId: 5 }, _source_files: [filename] },
+    { extAddress: "aaaaaaaaaaaaaaaa", role: "child", leaderData: { partitionId: 5 }, _source_files: [filename] },
+    { extAddress: "bbbbbbbbbbbbbbbb", role: "child" },
+    { role: "child", leaderData: { partitionId: 9 } },
+  ],
+};
+const partitionCapabilities = {
+  files: { [filename]: { networkInstance: { extPanId: "78b9775b001c1cbe", provenance: "observed" } } },
+};
+const partitions = buildThreadNetworkModel(
+  partitionDataset, partitionCapabilities, adaptorResult,
+);
+assert.equal(partitions.partitions.state, "partial");
+assert.deepEqual(partitions.partitions.partitions, [
+  { partitionId: "0x00000005", count: 2, sourceFiles: [filename] },
+  { partitionId: "0x00000020", count: 1, sourceFiles: [filename] },
+]);
+assert.equal(partitions.partitions.totalDeviceCount, 4);
+assert.equal(partitions.partitions.assignedDeviceCount, 3);
+assert.equal(partitions.partitions.missingDeviceCount, 1);
+assert.equal(partitions.partitions.unidentifiedClaimCount, 1);
+assert.equal(partitions.deviceCounts.total, 6);
+
+const conflictingPartitions = buildThreadNetworkModel({
+  ...partitionDataset,
+  rows: [
+    { extAddress: "0011223344556677", role: "router", leaderData: { partitionId: 2 } },
+    { extAddress: "0011223344556677", role: "router", leaderData: { partitionId: 3 } },
+    { extAddress: "8899aabbccddeeff", role: "child", leaderData: { partitionId: -1 } },
+  ],
+}, partitionCapabilities, adaptorResult);
+assert.equal(conflictingPartitions.partitions.state, "conflicting");
+assert.deepEqual(conflictingPartitions.partitions.partitions, []);
+assert.equal(conflictingPartitions.partitions.conflictingDeviceCount, 1);
+assert.equal(conflictingPartitions.partitions.invalidDeviceCount, 1);
+
+const onePartition = buildThreadNetworkModel({
+  ...partitionDataset,
+  rows: [
+    { extAddress: "0011223344556677", role: "router", leaderData: { partitionId: 7 } },
+    { extAddress: "8899aabbccddeeff", role: "child", leaderData: { partitionId: 7 } },
+  ],
+}, partitionCapabilities, adaptorResult);
+assert.equal(onePartition.partitions.state, "supported");
+assert.deepEqual(onePartition.partitions.partitions, [
+  { partitionId: "0x00000007", count: 2, sourceFiles: [] },
+]);
+
+const partialPartitions = buildThreadNetworkModel({
+  ...partitionDataset,
+  isPartial: true,
+  rows: [{ extAddress: "0011223344556677", role: "router", leaderData: { partitionId: 7 } }],
+}, partitionCapabilities, adaptorResult);
+assert.equal(partialPartitions.partitions.state, "partial");
+
+const unresolvedPartitionScope = buildThreadNetworkModel({
+  ...partitionDataset,
+  rows: [{ extAddress: "0011223344556677", role: "router", leaderData: { partitionId: 7 } }],
+}, { files: {} }, adaptorResult);
+assert.equal(unresolvedPartitionScope.partitions.state, "unresolved-scope");
+assert.deepEqual(unresolvedPartitionScope.partitions.partitions, []);
+
 const notLoaded = buildThreadNetworkModel(null, {}, null);
 assert.equal(notLoaded.loaded, false);
 assert.ok(notLoaded.networkFacts.every(({ value }) => value === "n/a"));
+assert.equal(notLoaded.partitions.state, "unresolved-scope");
 
 console.log(JSON.stringify({ uniqueLinks: model.links.total, threadDevices: model.deviceCounts.total }));

@@ -2057,6 +2057,17 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   border-collapse: collapse;
 }
 
+.thread-network-partitions-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.thread-network-partition-sources {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .thread-network-table th,
 .thread-network-table td {
   padding: 6px 8px;

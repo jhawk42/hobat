@@ -41,7 +41,8 @@ processing consumes approved cached files and writes assessments to
 Device diagnostics run as transient actions and do not update snapshots or
 health history. Device labels use their own static-map API. The Thread Network
 workspace summarizes network facts and device/link evidence from the loaded
-dataset and capabilities; it does not trigger a separate live collection.
+dataset and capabilities, including observation-scoped partition membership;
+it does not trigger a separate live collection.
 
 ## Server Routes
 

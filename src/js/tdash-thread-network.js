@@ -1,6 +1,7 @@
 import { getRowRoleProjection } from "./tdash-filters.js";
 import { getColumnValue, toText } from "./tdash-utils.js";
 import { resolveNetworkInstance } from "./tdash-view-status.js";
+import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
 
 const NETWORK_FACT_KEYS = Object.freeze({
   networkName: { label: "Name", priority: 0 },
@@ -139,6 +140,121 @@ function isThreadDeviceRow(row, entry, threadFiles) {
     ROUTER_ROLES.has(role) || END_DEVICE_ROLES.has(role) || role === "reed",
   )) return true;
   return false;
+}
+
+function normalizePartitionId(value) {
+  let number;
+  if (typeof value === "number" && Number.isSafeInteger(value)) {
+    number = value;
+  } else if (typeof value === "string") {
+    const text = value.trim();
+    if (/^0x[0-9a-f]{1,8}$/i.test(text)) number = Number.parseInt(text.slice(2), 16);
+  }
+  return Number.isInteger(number) && number >= 0 && number <= 0xffffffff
+    ? number : null;
+}
+
+function summarizePartitions(threadRows, networkInstance, isPartial) {
+  const empty = {
+    state: "no-evidence",
+    partitions: [],
+    isPartialDataset: isPartial,
+    totalDeviceCount: 0,
+    assignedDeviceCount: 0,
+    missingDeviceCount: 0,
+    invalidDeviceCount: 0,
+    conflictingDeviceCount: 0,
+    unidentifiedClaimCount: 0,
+  };
+  if (networkInstance.status !== "known" || !networkInstance.extPanId) {
+    return { ...empty, state: "unresolved-scope" };
+  }
+
+  const devices = new Map();
+  let unidentifiedClaimCount = 0;
+  threadRows.forEach((row) => {
+    const rawPartitionId = getColumnValue(row, "leaderData.partitionId");
+    const hasClaim = rawPartitionId !== null && rawPartitionId !== undefined
+      && !(typeof rawPartitionId === "string" && rawPartitionId.trim() === "");
+    const identity = getDeviceIdentityKeys(row)[0];
+    if (!identity) {
+      if (hasClaim) unidentifiedClaimCount += 1;
+      return;
+    }
+    const device = devices.get(identity) ?? {
+      partitionIds: new Set(),
+      invalid: false,
+      sourceFiles: new Set(),
+    };
+    if (hasClaim) {
+      const partitionId = normalizePartitionId(rawPartitionId);
+      if (partitionId === null) device.invalid = true;
+      else device.partitionIds.add(partitionId);
+      const sources = getColumnValue(row, "_source_files") ?? getColumnValue(row, "sourceFiles");
+      if (Array.isArray(sources)) {
+        sources.filter((filename) => typeof filename === "string").forEach((filename) => device.sourceFiles.add(filename));
+      } else if (typeof sources === "string") {
+        sources.split(",").map((filename) => filename.trim()).filter(Boolean)
+          .forEach((filename) => device.sourceFiles.add(filename));
+      }
+    }
+    devices.set(identity, device);
+  });
+
+  const partitionDevices = new Map();
+  let missingDeviceCount = 0;
+  let invalidDeviceCount = 0;
+  let conflictingDeviceCount = 0;
+  let hasEvidence = unidentifiedClaimCount > 0;
+  devices.forEach((device) => {
+    if (device.partitionIds.size || device.invalid) hasEvidence = true;
+    if (device.invalid) {
+      invalidDeviceCount += 1;
+      return;
+    }
+    if (device.partitionIds.size > 1) {
+      conflictingDeviceCount += 1;
+      return;
+    }
+    if (!device.partitionIds.size) {
+      missingDeviceCount += 1;
+      return;
+    }
+    const [partitionId] = device.partitionIds;
+    const partition = partitionDevices.get(partitionId) ?? {
+      count: 0,
+      sourceFiles: new Set(),
+    };
+    partition.count += 1;
+    device.sourceFiles.forEach((filename) => partition.sourceFiles.add(filename));
+    partitionDevices.set(partitionId, partition);
+  });
+
+  const partitions = [...partitionDevices.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([partitionId, value]) => ({
+      partitionId: `0x${partitionId.toString(16).padStart(8, "0")}`,
+      count: value.count,
+      sourceFiles: [...value.sourceFiles].sort(),
+    }));
+  const assignedDeviceCount = partitions.reduce((total, item) => total + item.count, 0);
+  let state = "no-evidence";
+  if (hasEvidence) {
+    if (conflictingDeviceCount) state = "conflicting";
+    else if (isPartial || missingDeviceCount || invalidDeviceCount || unidentifiedClaimCount) state = "partial";
+    else state = "supported";
+  }
+  return {
+    state,
+    partitions,
+    isPartialDataset: isPartial,
+    totalDeviceCount: devices.size,
+    assignedDeviceCount,
+    missingDeviceCount,
+    invalidDeviceCount,
+    conflictingDeviceCount,
+    unidentifiedClaimCount,
+  };
 }
 
 function classifyThreadDevice(row) {
@@ -359,6 +475,11 @@ export function buildThreadNetworkModel(dataset, capabilities, adaptorResult, su
     leaders: rows.filter((row) => row?.isLeader === true).map(roleHolder),
     primaryBbrs: rows.filter((row) => row?.isPrimaryBBR === true).map(roleHolder),
   };
+  const partitions = summarizePartitions(
+    threadRows,
+    networkInstance,
+    dataset?.isPartial === true,
+  );
 
   return {
     loaded,
@@ -367,5 +488,6 @@ export function buildThreadNetworkModel(dataset, capabilities, adaptorResult, su
     deviceCounts,
     links,
     roleHolders,
+    partitions,
   };
 }

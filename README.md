@@ -78,6 +78,11 @@ Open `http://localhost:9165/`. The root redirects to `/tdash.html`.
 
 On startup the dashboard does not fetch a dataset until **Sync** is selected. Default is **Auto**. Enable **Cache Only** before Sync to not trigger live collection. **Force Refresh** requests regeneration. Long actions return a background job that the browser polls and can cancel.
 
+**Operations > Thread Network** includes source-backed partition identifiers
+and counts of uniquely identified devices in the currently loaded observation.
+Partial or conflicting membership is called out, and the counts are not a
+complete mesh census; viewing the panel does not collect additional data.
+
 For a health-eligible dataset, the **Refresh Health** control in Network
 Insights processes the currently loaded cached snapshot with partial input
 allowed. It writes health history in `hobat_v1.db`, but does not collect source

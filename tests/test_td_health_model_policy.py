@@ -114,6 +114,30 @@ def test_legacy_policy_defaults_queue_threshold_and_normalizes_digest(tmp_path) 
     assert legacy_policy.digest == load_health_policy(tmp_path).digest
 
 
+def test_legacy_policy_defaults_partition_distribution_threshold(tmp_path) -> None:
+    default = load_health_policy()
+    thresholds = {
+        metric: dict(bands)
+        for metric, bands in default.thresholds.items()
+        if metric != "partitionDistribution"
+    }
+    legacy = {
+        "version": "custom-v1",
+        "offlineConsecutiveCompleteObservations": 2,
+        "offlinePoorDeviceRatioThreshold": 0.15,
+        "thresholds": thresholds,
+    }
+    (tmp_path / "td-health-policy.json").write_text(
+        json.dumps(legacy), encoding="utf-8"
+    )
+
+    policy = load_health_policy(tmp_path)
+
+    assert policy.thresholds["partitionDistribution"] == {
+        "moderateAtOrAbove": 0.75,
+    }
+
+
 def test_queue_threshold_override_is_independent_of_mle_thresholds(tmp_path) -> None:
     default = load_health_policy()
     thresholds = {

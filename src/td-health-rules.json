@@ -13,6 +13,7 @@
     "network.current-path-redundancy": ["routerCount", "routerNeighborEdgeCount", "bridgeRelationshipIds", "articulationDeviceIds"],
     "network.observed-link-quality-ratios": ["observedCount", "lq3Ratio", "lq1Ratio"],
     "network.offline-impact": ["offlineDeviceIds", "offlineDeviceRatio", "threshold"],
+    "network.partition-distribution": ["membershipState", "partitionCounts", "totalDeviceCount", "assignedDeviceCount", "dominantPartitionCount", "dominantPartitionRatio", "threshold", "networkId", "sourceFiles"],
     "observation.duplicate-source-entry": ["relationshipIds"],
     "observation.evaluation-context-unavailable": ["unavailableDomains"],
     "device.observed": ["present", "completeness"],
@@ -123,6 +124,21 @@
       "thresholdKeys": ["offlinePoorDeviceRatioThreshold"],
       "action": "Restore Offline devices or revise the expected roster after confirming their operational role.",
       "verify": "Process another complete observation and confirm the Offline ratio falls below policy."
+    },
+    {
+      "ruleId": "network.partition-distribution",
+      "order": 1065,
+      "title": "Thread Partition Distribution",
+      "description": "Classifies source-backed Thread partition membership within one complete network observation.",
+      "evidenceKind": "snapshot",
+      "scopes": ["network"],
+      "roles": [],
+      "relationshipTypes": [],
+      "requiredCapability": "resilience",
+      "materiality": "network",
+      "thresholdKeys": ["thresholds.partitionDistribution"],
+      "action": "Inspect the Thread network's active partition state and confirm that devices are expected to share the same partition.",
+      "verify": "Process another complete observation with unambiguous partition membership for every identified device."
     },
     {
       "ruleId": "observation.duplicate-source-entry",

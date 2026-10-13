@@ -915,6 +915,74 @@ function appendThreadRoleTable(target, title, roleHolders) {
   target.appendChild(section);
 }
 
+function appendThreadPartitionsSection(target, partitions) {
+  const section = document.createElement("section");
+  section.className = "thread-network-section";
+  const heading = document.createElement("h3");
+  heading.textContent = "Partitions";
+  section.appendChild(heading);
+
+  const messages = {
+    supported: "Counts are unique identified Thread devices observed in the loaded dataset; this is not a complete mesh census.",
+    partial: "Known observed membership only. Some devices or source records could not be attributed to a partition; counts are not a complete mesh census.",
+    conflicting: "Known observed membership only. Conflicting partition claims prevent some devices from being attributed; counts are not a complete mesh census.",
+    "no-evidence": "No valid partition membership evidence is available in the loaded dataset. This does not mean there are zero partitions.",
+    "unresolved-scope": "The active network identity is mixed or unresolved, so partition membership cannot be safely attributed.",
+  };
+  const notice = document.createElement("p");
+  notice.textContent = partitions.state === "no-evidence" && partitions.isPartialDataset
+    ? "No valid partition membership evidence is available in the loaded partial dataset. This does not mean there are zero partitions."
+    : messages[partitions.state] ?? messages["no-evidence"];
+  section.appendChild(notice);
+
+  if (partitions.partitions.length) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "thread-network-table-wrap";
+    const table = document.createElement("table");
+    table.className = "thread-network-table";
+    table.classList.add("thread-network-partitions-table");
+    const head = document.createElement("thead");
+    const headerRow = document.createElement("tr");
+    ["Partition ID", partitions.state === "supported"
+      ? "Unique identified devices" : "Known observed devices", "Source file(s)"].forEach((text) => {
+      const cell = document.createElement("th");
+      cell.scope = "col";
+      cell.textContent = text;
+      headerRow.appendChild(cell);
+    });
+    head.appendChild(headerRow);
+    table.appendChild(head);
+
+    const body = document.createElement("tbody");
+    partitions.partitions.forEach((partition) => {
+      const row = document.createElement("tr");
+      const id = document.createElement("td");
+      id.textContent = partition.partitionId;
+      const count = document.createElement("td");
+      count.textContent = String(partition.count);
+      const source = document.createElement("td");
+      if (partition.sourceFiles.length) {
+        const sourceList = document.createElement("ul");
+        sourceList.className = "thread-network-partition-sources";
+        partition.sourceFiles.forEach((filename) => {
+          const item = document.createElement("li");
+          item.textContent = filename;
+          sourceList.appendChild(item);
+        });
+        source.appendChild(sourceList);
+      } else {
+        source.textContent = "Source filename unavailable in loaded row evidence.";
+      }
+      row.append(id, count, source);
+      body.appendChild(row);
+    });
+    table.appendChild(body);
+    wrapper.appendChild(table);
+    section.appendChild(wrapper);
+  }
+  target.appendChild(section);
+}
+
 function renderThreadNetworkPanel() {
   const content = document.getElementById("thread-network-content");
   if (!content) return;
@@ -964,6 +1032,7 @@ function renderThreadNetworkPanel() {
     ["LQI1", model.links.lqi[1].count === "n/a"
       ? "n/a" : `${model.links.lqi[1].count} (${model.links.lqi[1].percent}%)`],
   ]);
+  appendThreadPartitionsSection(content, model.partitions);
   if (error) {
     const notice = document.createElement("p");
     notice.className = "thread-network-error";

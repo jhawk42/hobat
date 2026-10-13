@@ -315,6 +315,13 @@ provisional. RSS alone is supporting evidence and cannot produce Poor. Critical
 delivery evidence escalates only when direct current evidence also identifies
 an observed sole path.
 
+The network-scoped `network.partition-distribution` finding uses unique,
+identified Thread devices with one unambiguous `leaderData.partitionId` claim in
+the current observation. A complete, fully attributed single partition is
+Strong. Multiple partitions are Moderate when the largest contains at least
+75% of identified devices and Poor below 75%. Partial, invalid, conflicting,
+or degraded evidence is Unknown; it never classifies from a known subset.
+
 An optional `config/td-health-policy.json` replaces the defaults after strict
 validation. It must include the complete `snapshot-v2` threshold contract and
 an Offline requirement of at least two complete observations. The applied
@@ -322,9 +329,10 @@ policy version and digest, evaluator version, and health profile ID are stored
 with every assessment. Policy, evaluator, and profile capability digests
 participate in assessment identity, so any semantic change creates a new
 assessment over the same observation. Policies written before the queue-depth
-threshold was added may omit `thresholds.queuedMessages`; those policies inherit
-the independent defaults of 2 and 5 and are digested with the normalized
-threshold entry.
+and partition-distribution thresholds were added may omit
+`thresholds.queuedMessages` and `thresholds.partitionDistribution`; those
+policies inherit defaults of 2 and 5 for queue depth and 0.75 for partition
+distribution and are digested with the normalized threshold entries.
 
 Every finding has a stable ID, scope, status, confidence, affected device or
 relationship IDs, structured evidence, source files, action, and verification
@@ -394,6 +402,7 @@ also project catalog-owned `evidenceKind`, `materiality`, `actionKey`, and
 | `network.current-path-redundancy` | Router Path Redundancy | Identifies router-neighbor bridges and articulation Routers in the currently observed routing graph. |
 | `network.observed-link-quality-ratios` | Network Link Quality Distribution | Summarizes the distribution of observed non-missing link-quality reports. |
 | `network.offline-impact` | Offline Device Network Impact | Separately assesses whether individually Offline devices are material to network health. |
+| `network.partition-distribution` | Thread Partition Distribution | Classifies source-backed Thread partition membership within one complete network observation. |
 | `observation.duplicate-source-entry` | Duplicate Relationships in Source Data | Reports duplicate source relationships as a collection artifact. |
 | `observation.evaluation-context-unavailable` | Historical Evaluation Context Unavailable | Identifies evaluator inputs that were not retained or cannot be verified for this observation. |
 | `device.observed` | Observed Devices | Records device presence in the current cached observation. |

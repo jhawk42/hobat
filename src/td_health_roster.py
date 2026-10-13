@@ -66,6 +66,14 @@ def _source_value(record: Mapping[str, Any], field: str) -> Any:
     return None
 
 
+def normalize_partition_id(value: Any) -> int | None:
+    if isinstance(value, str) and re.fullmatch(r"0x[0-9a-fA-F]{1,8}", value):
+        value = int(value[2:], 16)
+    if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
+        return None
+    return value
+
+
 def _validated(field: str, value: Any, policy: RosterPolicy) -> Any:
     if field in {"extAddress", "eui"}:
         if not isinstance(value, str):
@@ -95,8 +103,8 @@ def _validated(field: str, value: Any, policy: RosterPolicy) -> Any:
             return None
         return f"0x{int(value.removeprefix('0x'), 16):04x}"
     if field in _INTEGER_FIELDS:
-        if field == "leaderData.partitionId" and isinstance(value, str) and re.fullmatch(r"0x[0-9a-fA-F]{1,8}", value):
-            value = int(value, 16)
+        if field == "leaderData.partitionId":
+            return normalize_partition_id(value)
         if type(value) is not int:
             return None
         upper = 0xffffffff if field == "leaderData.partitionId" else 62

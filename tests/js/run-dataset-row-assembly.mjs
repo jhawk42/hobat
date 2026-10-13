@@ -276,13 +276,37 @@ const haMatterMergeRows = buildDatasetRows(
   haMatterMergeEntry.files.map((file) => JSON.parse(fs.readFileSync(`data/${file}`, "utf8"))),
 ).rows;
 assert.ok(haMatterMergeRows.every((row) => row._row_key === undefined));
-assert.equal(
-  haMatterMergeRows.reduce(
-    (count, row) => count + (Array.isArray(row.route?.routeData) ? row.route.routeData.length : 0),
-    0,
-  ),
-  29,
+const haMatterRouteRows = [
+  {
+    extAddress: "0011223344556677",
+    route: { routeData: [
+      { sourceId: "router-a", targetId: "router-b", pathCost: 1 },
+      { sourceId: "router-a", targetId: "router-c", pathCost: 2 },
+    ] },
+  },
+  {
+    extAddress: "8899aabbccddeeff",
+    route: { routeData: [
+      { sourceId: "router-b", targetId: "router-c", pathCost: 1 },
+    ] },
+  },
+];
+const haMatterRouteFiles = haMatterMergeEntry.files.map((filename) => {
+  if ([
+    "td-ha-matter-ws-mesh-diagnostics-fetch-all.json",
+    "td-ha-matter-ws-topology.json",
+  ].includes(filename)) return structuredClone(haMatterRouteRows);
+  if (filename === "td-ha-matter-ws-dashboard.json") {
+    return { topology: structuredClone(haMatterRouteRows) };
+  }
+  return null;
+});
+const haMatterRouteAssembly = buildDatasetRows(haMatterMergeEntry, haMatterRouteFiles);
+assert.deepEqual(
+  haMatterRouteAssembly.rows.map(({ extAddress, route }) => ({ extAddress, route })),
+  haMatterRouteRows,
 );
+assert.ok(haMatterRouteAssembly.rows.every((row) => row._row_key === undefined));
 
 const haDeviceEntry = DATASET_REGISTRY.find(
   (dataset) => dataset.value === "ha_matter_ws_devices_fetch_all",

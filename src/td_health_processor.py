@@ -32,7 +32,11 @@ from td_health_observation_model import (
     relationship_id,
 )
 from td_health_policy import HealthPolicy
-from td_health_roster import RosterFact, extract_roster_facts
+from td_health_roster import (
+    RosterFact,
+    extract_roster_facts,
+    normalize_partition_id,
+)
 from td_health_sqlite import SQLiteHealthStore, StaleRosterContextError
 
 
@@ -203,6 +207,114 @@ def _normalize_samples(
         tuple(projection.metrics[key] for key in sorted(projection.metrics)),
         tuple(sorted(projection.duplicate_relationship_ids)),
         device_ipv6_addresses,
+    )
+
+
+def _partition_membership_inputs(
+    *,
+    dataset: HealthDataset,
+    payloads: Mapping[str, Any],
+    devices: tuple[DeviceSample, ...],
+    network_id: str,
+    completeness: Completeness,
+    manifest,
+) -> tuple[EvaluationInputDomain, Mapping[str, Any] | None]:
+    partition_field = "leaderData.partitionId"
+    authorized_sources = manifest.roster_policy.sources.get(partition_field, {})
+    source_files = tuple(
+        filename for filename in dataset.files if filename in authorized_sources
+    )
+    if not source_files:
+        return (
+            EvaluationInputDomain(EvaluationInputState.NOT_APPLICABLE),
+            None,
+        )
+
+    observed_ids = frozenset(device.device_id for device in devices)
+    claims: dict[str, set[int]] = {}
+    sources_by_device: dict[str, set[str]] = {}
+    invalid_devices: set[str] = set()
+    source_files_with_claims: set[str] = set()
+    for filename in source_files:
+        for raw_record in _records(payloads.get(filename)):
+            record = normalize_input_record(raw_record, source=filename)
+            leader_data = record.get("leaderData")
+            if not isinstance(leader_data, Mapping) or "partitionId" not in leader_data:
+                continue
+            raw_partition_id = leader_data["partitionId"]
+            if raw_partition_id is None:
+                continue
+            try:
+                device_id = device_id_from_ext_address(
+                    get_canonical_ext_address(record)
+                )
+            except ValueError:
+                continue
+            if device_id not in observed_ids:
+                continue
+
+            source_files_with_claims.add(filename)
+            sources_by_device.setdefault(device_id, set()).add(filename)
+            partition_id = normalize_partition_id(raw_partition_id)
+            if partition_id is None:
+                invalid_devices.add(device_id)
+            else:
+                claims.setdefault(device_id, set()).add(partition_id)
+
+    conflicting_devices = {
+        device_id for device_id, values in claims.items() if len(values) > 1
+    }
+    missing_devices = observed_ids - set(claims) - invalid_devices
+    partition_devices: dict[int, list[str]] = {}
+    partition_sources: dict[int, set[str]] = {}
+    for device_id, values in claims.items():
+        if len(values) != 1 or device_id in invalid_devices:
+            continue
+        partition_id = next(iter(values))
+        partition_devices.setdefault(partition_id, []).append(device_id)
+        partition_sources.setdefault(partition_id, set()).update(
+            sources_by_device.get(device_id, ())
+        )
+    partitions = [
+        {
+            "partitionId": partition_id,
+            "deviceIds": sorted(partition_devices[partition_id]),
+            "sourceFiles": sorted(partition_sources[partition_id]),
+        }
+        for partition_id in sorted(partition_devices)
+    ]
+    assigned_devices = {
+        device_id for partition in partitions for device_id in partition["deviceIds"]
+    }
+    unassigned_devices = (
+        missing_devices | invalid_devices | conflicting_devices
+    )
+    if conflicting_devices:
+        membership_state = "conflicting"
+    elif invalid_devices:
+        membership_state = "invalid"
+    elif not assigned_devices:
+        membership_state = "missing"
+    elif unassigned_devices:
+        membership_state = "partial"
+    else:
+        membership_state = "supported"
+
+    return (
+        EvaluationInputDomain(EvaluationInputState.AVAILABLE),
+        {
+            "membershipState": membership_state,
+            "networkId": network_id,
+            "totalDeviceCount": len(observed_ids),
+            "assignedDeviceCount": len(assigned_devices),
+            "missingDeviceIds": sorted(missing_devices),
+            "invalidDeviceIds": sorted(invalid_devices),
+            "conflictingDeviceIds": sorted(conflicting_devices),
+            "unassignedDeviceIds": sorted(unassigned_devices),
+            "partitions": partitions,
+            "sourceFiles": sorted(source_files_with_claims),
+            "observationCompleteness": completeness.value,
+        },
     )
 
 
@@ -588,6 +700,16 @@ def build_processing_result(
         for fact in extract_roster_facts(record, filename=filename, dataset=dataset,
                                          policy=manifest.roster_policy)
     )
+    partition_membership, partition_membership_evidence = (
+        _partition_membership_inputs(
+            dataset=dataset,
+            payloads=available_finals,
+            devices=devices,
+            network_id=network_id,
+            completeness=completeness,
+            manifest=manifest,
+        )
+    )
     omr_prefix, omr_reason = _omr_prefix_from_identity(identity)
     external_routing_applicable = (
         dataset.health_profile.border_router_authority
@@ -707,6 +829,8 @@ def build_processing_result(
         observed_device_ipv6_address_values=retained_ipv6_addresses,
         roster_context=roster_inputs["rosterContext"],
         history_boundary=roster_inputs["historyBoundary"],
+        partition_membership=partition_membership,
+        partition_membership_evidence=partition_membership_evidence,
     )
     assessment = evaluate_observation(
         observation,

@@ -29,7 +29,7 @@ from td_health_graph import GraphAnalysis, GraphEdge, analyze_undirected_graph
 from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 
-EVALUATOR_VERSION = "snapshot-v12"
+EVALUATOR_VERSION = "snapshot-v13"
 
 _DIRECT_THRESHOLD_COUNT_METRICS = frozenset(
     {"parentChanges", "partitionIdChanges", "betterPartitionAttachAttempts"}
@@ -60,6 +60,7 @@ EVALUATOR_THRESHOLD_OWNERS = {
     "thresholds.totalParentPartitionChanges": frozenset({"device.totalParentPartitionChanges"}),
     "thresholds.routerRolePercent": frozenset({"device.routerRolePercent"}),
     "thresholds.detachedDisabledPercent": frozenset({"device.detachedDisabledPercent"}),
+    "thresholds.partitionDistribution": frozenset({"network.partition-distribution"}),
 }
 
 _LIFETIME_EVIDENCE_METRICS = frozenset(
@@ -564,6 +565,10 @@ def _evaluation_inputs_payload(inputs: EvaluationInputs) -> dict[str, Any]:
             )),
             "observed": dict(sorted(inputs.observed_device_ipv6_address_values.items())),
         },
+        "partitionMembershipEvidence": (
+            dict(inputs.partition_membership_evidence)
+            if inputs.partition_membership_evidence is not None else None
+        ),
     }
 
 
@@ -597,6 +602,18 @@ def evaluation_inputs_from_payload(raw: object) -> EvaluationInputs:
         ):
             raise ValueError(f"Invalid evaluation input reasons for {name}")
         return EvaluationInputDomain(state, tuple(reasons))
+
+    partition_domain = (
+        domain("partitionMembership")
+        if "partitionMembership" in domains
+        else EvaluationInputDomain(EvaluationInputState.NOT_APPLICABLE)
+    )
+    partition_evidence = raw.get("partitionMembershipEvidence")
+    if partition_domain.state is EvaluationInputState.AVAILABLE:
+        if not isinstance(partition_evidence, dict):
+            raise ValueError("Invalid saved partition membership evidence")
+    elif partition_evidence is not None:
+        raise ValueError("Unavailable partition input cannot carry evidence")
 
     expected = roster.get("expectedDeviceIds")
     absence_values = absence.get("priorCompleteAbsences")
@@ -679,6 +696,8 @@ def evaluation_inputs_from_payload(raw: object) -> EvaluationInputs:
             else None
         ),
         history_boundary=history_boundary,
+        partition_membership=partition_domain,
+        partition_membership_evidence=partition_evidence,
     )
 
 
@@ -1364,6 +1383,151 @@ def _evaluate_relationships(
     )
 
 
+def _evaluate_partition_distribution(
+    observation: Observation,
+    policy: HealthPolicy,
+    profile: HealthProfile,
+    inputs: EvaluationInputs,
+) -> list[Finding]:
+    rule_id = "network.partition-distribution"
+    if (
+        inputs.partition_membership.state is EvaluationInputState.NOT_APPLICABLE
+        or not _profile_supports_rule(profile, rule_id)
+    ):
+        return []
+
+    raw = inputs.partition_membership_evidence or {}
+    raw_partitions = raw.get("partitions", ())
+    partitions = [
+        {
+            "partitionId": partition["partitionId"],
+            "deviceCount": len(partition["deviceIds"]),
+            "sourceFiles": tuple(sorted(partition["sourceFiles"])),
+        }
+        for partition in raw_partitions
+        if isinstance(partition, Mapping)
+        and isinstance(partition.get("partitionId"), int)
+        and isinstance(partition.get("deviceIds"), list)
+        and isinstance(partition.get("sourceFiles"), list)
+    ]
+    partitions.sort(key=lambda item: item["partitionId"])
+    total_devices = raw.get("totalDeviceCount", len(observation.devices))
+    assigned_devices = raw.get("assignedDeviceCount", 0)
+    total_devices = total_devices if type(total_devices) is int and total_devices >= 0 else 0
+    assigned_devices = assigned_devices if type(assigned_devices) is int and assigned_devices >= 0 else 0
+    dominant = max(partitions, key=lambda item: item["deviceCount"], default=None)
+    dominant_count = dominant["deviceCount"] if dominant else 0
+    dominant_ratio = dominant_count / total_devices if total_devices > 0 else None
+    raw_state = raw.get("membershipState", "unavailable")
+    scope_resolved = raw.get("networkId") == observation.network_id
+    observation_complete = (
+        observation.completeness is Completeness.COMPLETE
+        and raw.get("observationCompleteness", Completeness.COMPLETE.value)
+        == Completeness.COMPLETE.value
+    )
+    fully_assigned = (
+        scope_resolved
+        and observation_complete
+        and raw_state == "supported"
+        and total_devices > 0
+        and assigned_devices == total_devices
+        and len(partitions) > 0
+        and sum(item["deviceCount"] for item in partitions) == total_devices
+    )
+
+    status = HealthStatus.UNKNOWN
+    reason = "Partition membership is incomplete or unsupported."
+    if not scope_resolved:
+        raw_state = "unresolved-scope"
+        reason = "Partition evidence does not match the current network scope."
+    elif not observation_complete:
+        reason = (
+            "Partition membership is Unknown because the observation is "
+            f"{observation.completeness.value}."
+        )
+    elif fully_assigned and len(partitions) == 1:
+        status = HealthStatus.STRONG
+        reason = "All identified devices have one supported partition membership."
+    elif fully_assigned and len(partitions) > 1:
+        threshold = _policy_value(
+            policy, rule_id, "thresholds.partitionDistribution"
+        )["moderateAtOrAbove"]
+        status = (
+            HealthStatus.MODERATE
+            if dominant_ratio is not None and dominant_ratio >= threshold
+            else HealthStatus.POOR
+        )
+        reason = (
+            f"{len(partitions)} supported partitions are present; the largest "
+            f"contains {dominant_ratio:.1%} of identified devices."
+        )
+    elif raw_state in {"partial", "conflicting", "invalid", "missing"}:
+        reason = (
+            f"Partition membership is {raw_state}; all identified devices "
+            "must have one unambiguous source-backed claim."
+        )
+
+    evidence = {
+        "membershipState": raw_state,
+        "partitionCounts": tuple(partitions),
+        "totalDeviceCount": total_devices,
+        "assignedDeviceCount": assigned_devices,
+        "dominantPartitionCount": dominant_count,
+        "dominantPartitionRatio": dominant_ratio,
+        "networkId": observation.network_id,
+        "sourceFiles": tuple(sorted(
+            source
+            for source in raw.get("sourceFiles", ())
+            if isinstance(source, str)
+        )),
+    }
+    if dominant is not None:
+        evidence["dominantPartitionId"] = dominant["partitionId"]
+    evidence["unassignedDeviceIds"] = tuple(sorted(
+        value for value in raw.get("unassignedDeviceIds", ())
+        if isinstance(value, str)
+    ))
+    evidence["invalidDeviceIds"] = tuple(sorted(
+        value for value in raw.get("invalidDeviceIds", ())
+        if isinstance(value, str)
+    ))
+    evidence["conflictingDeviceIds"] = tuple(sorted(
+        value for value in raw.get("conflictingDeviceIds", ())
+        if isinstance(value, str)
+    ))
+    evidence["threshold"] = (
+        _policy_value(policy, rule_id, "thresholds.partitionDistribution")
+        ["moderateAtOrAbove"]
+    )
+    return [
+        _finding(
+            observation,
+            rule_id="network.partition-distribution",
+            status=status,
+            scope=FindingScope.NETWORK,
+            rank=(
+                FindingRank.POOR if status is HealthStatus.POOR
+                else FindingRank.MODERATE if status is HealthStatus.MODERATE
+                else FindingRank.INFO
+            ),
+            summary=reason,
+            evidence=evidence,
+            device_ids=tuple(sorted(
+                device_id
+                for partition in raw_partitions
+                if isinstance(partition, Mapping)
+                for device_id in partition.get("deviceIds", ())
+                if isinstance(device_id, str)
+            )),
+            source_files=evidence["sourceFiles"],
+            confidence=(
+                Confidence.HIGH if fully_assigned
+                else Confidence.LOW
+            ),
+        )
+    ]
+
+
 def evaluate_observation(
     observation: Observation,
     policy: HealthPolicy,
@@ -1480,6 +1644,7 @@ def evaluate_observation(
                 "duplicateRelationships": ["observation.duplicate-source-entry"],
                 "omrPrefix": ["network.external-routing"],
                 "deviceIpv6Addresses": ["network.external-routing"],
+                "partitionMembership": ["network.partition-distribution"],
             }[name],
         }
         for name, domain in inputs.domains().items()
@@ -1498,6 +1663,11 @@ def evaluate_observation(
                 confidence=Confidence.LOW,
             )
         )
+
+    partition_membership_findings = _evaluate_partition_distribution(
+        observation, policy, profile, inputs
+    )
+    findings.extend(partition_membership_findings)
 
     observed_lq_total = sum(lq_counts.values())
     if observed_lq_total > 0 and _profile_supports_rule(

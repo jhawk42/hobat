@@ -54,6 +54,7 @@ _SNAPSHOT_V2_RAW: dict[str, Any] = {
         "totalParentPartitionChanges": {"unstable": 3, "high": 8},
         "routerRolePercent": {"unstableBelow": 80.0, "highBelow": 50.0},
         "detachedDisabledPercent": {"unstable": 1.0, "high": 5.0},
+        "partitionDistribution": {"moderateAtOrAbove": 0.75},
     },
 }
 SNAPSHOT_V2: Mapping[str, Any] = _freeze(_SNAPSHOT_V2_RAW)
@@ -61,7 +62,9 @@ _REQUIRED_THRESHOLD_BANDS = {
     metric: frozenset(bands)
     for metric, bands in _SNAPSHOT_V2_RAW["thresholds"].items()
 }
-_DEFAULTED_LEGACY_THRESHOLDS = frozenset({"queuedMessages"})
+_DEFAULTED_LEGACY_THRESHOLDS = frozenset(
+    {"queuedMessages", "partitionDistribution"}
+)
 POLICY_THRESHOLD_KEYS = frozenset(
     {
         "offlineConsecutiveCompleteObservations",

@@ -194,6 +194,12 @@ class EvaluationInputs:
     observed_device_ipv6_address_values: Mapping[str, tuple[str, ...]]
     roster_context: Mapping[str, Any] | None
     history_boundary: Mapping[str, Any] | None
+    partition_membership: EvaluationInputDomain = field(
+        default_factory=lambda: EvaluationInputDomain(
+            EvaluationInputState.NOT_APPLICABLE
+        )
+    )
+    partition_membership_evidence: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         values = (
@@ -218,6 +224,16 @@ class EvaluationInputs:
             raise ValueError("Available OMR input requires source provenance")
         if not isinstance(self.observed_device_ipv6_address_values, Mapping):
             raise ValueError("Observed IPv6 address evidence must be a mapping")
+        if (
+            self.partition_membership.state is EvaluationInputState.AVAILABLE
+            and not isinstance(self.partition_membership_evidence, Mapping)
+        ):
+            raise ValueError("Available partition input requires evidence")
+        if (
+            self.partition_membership.state is not EvaluationInputState.AVAILABLE
+            and self.partition_membership_evidence is not None
+        ):
+            raise ValueError("Unavailable partition input cannot carry evidence")
 
     @property
     def evaluation_context_complete(self) -> bool:
@@ -245,6 +261,7 @@ class EvaluationInputs:
             "duplicateRelationships": self.duplicate_relationships,
             "omrPrefix": self.omr_prefix,
             "deviceIpv6Addresses": self.device_ipv6_addresses,
+            "partitionMembership": self.partition_membership,
         }
 
 

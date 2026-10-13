@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from td_device_fields import normalize_input_record
+from td_health_evaluator import evaluate_observation, evaluation_inputs_from_payload
 from td_health_observation_model import Completeness, HealthStatus
 from td_health_comparison import source_time_for_sample
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
@@ -146,6 +147,150 @@ def test_roster_partition_accepts_explicit_cli_hex_and_rejects_invalid_values(va
     partition = next((json.loads(fact.value_json) for fact in facts
                       if fact.field_key == "leaderData.partitionId"), None)
     assert partition == expected
+
+
+def test_partition_distribution_deduplicates_devices_and_persists_reproduction_evidence(
+    tmp_path,
+) -> None:
+    rows = [
+        {"extAddress": "1111111111111111", "role": "router",
+         "leaderData": {"partitionId": 0x1472C6C1}},
+        {"extAddress": "1111111111111111", "role": "router",
+         "leaderData": {"partitionId": "0x1472c6c1"}},
+        {"extAddress": "2222222222222222", "role": "child",
+         "leaderData": {"partitionId": 0x1472C6C1}},
+    ]
+    _write_seed(tmp_path, rows)
+    database = tmp_path / HOBAT_DATABASE_FILENAME
+    result = process_health(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+        store=SQLiteHealthStore(database),
+    )
+    finding = next(
+        item for item in result.assessment.findings
+        if item.rule_id == "network.partition-distribution"
+    )
+
+    assert finding.status is HealthStatus.STRONG
+    assert finding.evidence["totalDeviceCount"] == 2
+    assert finding.evidence["assignedDeviceCount"] == 2
+    assert finding.evidence["partitionCounts"] == (
+        {
+            "partitionId": 0x1472C6C1,
+            "deviceCount": 2,
+            "sourceFiles": ("td-otbr-cli-networkdiag-fetch-all.json",),
+        },
+    )
+    with sqlite3.connect(database) as connection:
+        stored = connection.execute(
+            "SELECT reproduction_context_json FROM assessments WHERE assessment_id=?",
+            (result.assessment.assessment_id,),
+        ).fetchone()
+    reproduction = json.loads(stored[0])
+    evidence = reproduction["evaluationInputs"]["partitionMembershipEvidence"]
+    assert evidence["networkId"] == result.observation.network_id
+    assert evidence["assignedDeviceCount"] == 2
+    replay_inputs = evaluation_inputs_from_payload(
+        reproduction["evaluationInputs"]
+    )
+    replay = evaluate_observation(
+        result.observation,
+        load_health_policy(),
+        profile=load_health_manifest().dataset(
+            "otbr_cli_networkdiag_fetch_all"
+        ).health_profile,
+        evaluation_inputs=replay_inputs,
+    )
+    replay_finding = next(
+        item for item in replay.findings
+        if item.rule_id == "network.partition-distribution"
+    )
+    assert replay_finding.status is finding.status
+    assert replay_finding.evidence == finding.evidence
+
+
+@pytest.mark.parametrize(
+    ("partition_sizes", "expected_status"),
+    [
+        ((3, 1), HealthStatus.MODERATE),
+        ((2, 1), HealthStatus.POOR),
+        ((19, 1), HealthStatus.MODERATE),
+        ((17, 6), HealthStatus.POOR),
+    ],
+)
+def test_partition_distribution_severity_boundary(
+    tmp_path, partition_sizes, expected_status
+) -> None:
+    rows = []
+    next_device = 1
+    for partition_id, size in enumerate(partition_sizes, start=1):
+        for _ in range(size):
+            rows.append({
+                "extAddress": f"{next_device:016x}",
+                "role": "router",
+                "leaderData": {"partitionId": partition_id},
+            })
+            next_device += 1
+    _write_seed(tmp_path, rows)
+
+    result = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+    )
+    finding = next(
+        item for item in result.assessment.findings
+        if item.rule_id == "network.partition-distribution"
+    )
+
+    assert finding.status is expected_status
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected_membership_state"),
+    [
+        (
+            [
+                {"extAddress": "1111111111111111", "leaderData": {"partitionId": 1}},
+                {"extAddress": "2222222222222222"},
+            ],
+            "partial",
+        ),
+        (
+            [
+                {"extAddress": "1111111111111111", "leaderData": {"partitionId": 1}},
+                {"extAddress": "2222222222222222", "leaderData": {"partitionId": "bad"}},
+            ],
+            "invalid",
+        ),
+        (
+            [
+                {"extAddress": "1111111111111111", "leaderData": {"partitionId": 1}},
+                {"extAddress": "1111111111111111", "leaderData": {"partitionId": 2}},
+            ],
+            "conflicting",
+        ),
+    ],
+)
+def test_partition_distribution_unknown_for_incomplete_membership(
+    tmp_path, rows, expected_membership_state
+) -> None:
+    _write_seed(tmp_path, rows)
+
+    result = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(),
+    )
+    finding = next(
+        item for item in result.assessment.findings
+        if item.rule_id == "network.partition-distribution"
+    )
+
+    assert finding.status is HealthStatus.UNKNOWN
+    assert finding.evidence["membershipState"] == expected_membership_state
 
 
 def test_otbr_cli_route64_requires_resolved_bounded_reporter_coverage() -> None:
