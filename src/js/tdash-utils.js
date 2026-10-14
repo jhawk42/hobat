@@ -618,7 +618,7 @@ function _appendGrouped(entries, listEl) {
 
 // Sets up collapsible section headings and a global collapse/expand-all control
 // for the given panel element. Call once after the DOM is ready.
-export function initDetailPanelToggles(panelEl) {
+export function initDetailPanelToggles(panelEl, onClose = () => {}) {
   const headings = Array.from(panelEl.querySelectorAll("h2"));
   let isAllCollapsed = false;
 
@@ -691,7 +691,17 @@ export function initDetailPanelToggles(panelEl) {
           });
       });
 
+      const closeBtn = document.createElement("button");
+      closeBtn.id = "btn-device-details-heading-close";
+      closeBtn.className = "detail-header-close";
+      closeBtn.type = "button";
+      closeBtn.title = "Close device details panel";
+      closeBtn.setAttribute("aria-label", "Close device details panel");
+      closeBtn.textContent = "✕";
+      closeBtn.addEventListener("click", onClose);
+
       headerActions.appendChild(allBtn);
+      headerActions.appendChild(closeBtn);
 
       h2.appendChild(headerActions);
     }

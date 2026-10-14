@@ -342,6 +342,45 @@ def test_details_collapse_targets_explicit_details_owner_and_notifies_renderer()
     assert "setMode," in controller_source
 
 
+def test_device_details_heading_close_uses_shared_cleanup_and_restores_focus() -> None:
+    utils_text = _read_text(UTILS_JS)
+    toggles_start = utils_text.index("export function initDetailPanelToggles")
+    toggles_end = utils_text.index("export function initContextDetailsPanel", toggles_start)
+    toggles_source = utils_text[toggles_start:toggles_end]
+    close_button_start = toggles_source.index('closeBtn.id = "btn-device-details-heading-close"')
+    close_button_source = toggles_source[close_button_start:]
+
+    assert 'closeBtn.type = "button";' in close_button_source
+    assert 'closeBtn.title = "Close device details panel";' in close_button_source
+    assert 'closeBtn.setAttribute("aria-label", "Close device details panel");' in close_button_source
+    assert 'closeBtn.textContent = "✕";' in close_button_source
+    assert 'closeBtn.setAttribute("aria-expanded"' not in close_button_source
+    assert toggles_source.index("headerActions.appendChild(allBtn);") < toggles_source.index(
+        "headerActions.appendChild(closeBtn);"
+    )
+    assert "closeBtn.addEventListener(\"click\", onClose);" in close_button_source
+
+    ui_text = _read_text(UI_JS)
+    assert "closeDeviceDetailsPanel({ restoreFocus: true })" in ui_text
+    assert 'document.getElementById("btn-device-details-close")?.addEventListener("click", () => {' in ui_text
+    close_action_start = ui_text.index("function closeDeviceDetailsPanel")
+    close_action_end = ui_text.index("\n}\n", close_action_start)
+    close_action_source = ui_text[close_action_start:close_action_end]
+
+    invalidation = close_action_source.index("rosterNavigationGeneration += 1;")
+    selected_device_clear = close_action_source.index("healthRosterViewState.selectedDeviceId = null;")
+    roster_detail_clear = close_action_source.index("healthInsightsState.rosterDetail = null;")
+    selection_class_clear = close_action_source.index('classList.remove("roster-selected")')
+    collapse = close_action_source.index("contextDetailsController.setCollapsed(true);")
+    restore_focus = close_action_source.index("requestAnimationFrame(")
+    assert invalidation < selected_device_clear < roster_detail_clear < selection_class_clear < collapse
+    assert collapse < restore_focus
+    assert 'document.getElementById("btn-details-panel-toggle")?.focus()' in close_action_source
+    assert "closeDeviceDetailsPanel();" in ui_text[ui_text.index(
+        'document.getElementById("btn-device-details-close")?.addEventListener("click", () => {'
+    ):]
+
+
 def test_insights_activation_collapses_context_details_panel() -> None:
     ui_text = _read_text(UI_JS)
     insights_start = ui_text.index('view: "insights"')

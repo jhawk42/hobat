@@ -4981,13 +4981,17 @@ initDeviceInsights();
 initDeviceDiagnostics();
 renderNetworkInsights();
 initDeviceDetailsPanelTabs();
-initDetailPanelToggles(document.getElementById("device-details"));
+initDetailPanelToggles(
+  document.getElementById("device-details"),
+  () => closeDeviceDetailsPanel({ restoreFocus: true }),
+);
 contextDetailsController = initContextDetailsPanel({
   host: document.getElementById("panel-context-details"),
   toggleButton: document.getElementById("btn-details-panel-toggle"),
   onVisibilityChanged: handleDetailsPanelVisibilityChanged,
 });
-document.getElementById("btn-device-details-close")?.addEventListener("click", () => {
+
+function closeDeviceDetailsPanel({ restoreFocus = false } = {}) {
   if (healthInsightsTab === "roster" && healthRosterViewState.selectedDeviceId) {
     rosterNavigationGeneration += 1;
     healthRosterViewState.selectedDeviceId = null;
@@ -4995,6 +4999,13 @@ document.getElementById("btn-device-details-close")?.addEventListener("click", (
     document.getElementById("device-details")?.classList.remove("roster-selected");
   }
   contextDetailsController.setCollapsed(true);
+  if (restoreFocus) {
+    requestAnimationFrame(() => document.getElementById("btn-details-panel-toggle")?.focus());
+  }
+}
+
+document.getElementById("btn-device-details-close")?.addEventListener("click", () => {
+  closeDeviceDetailsPanel();
 });
 
 // Cache checkbox helper: make checkboxes mutually exclusive
