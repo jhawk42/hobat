@@ -42,6 +42,18 @@ BEHAVIOR_IDS = (
     "lq-legend",
     "view-table",
     "view-insights",
+    "health-insights-workspace",
+    "health-insights-summary",
+    "health-insights-navigation",
+    "health-insights-tabs",
+    "health-findings-count",
+    "health-roster-count",
+    "health-tab-findings",
+    "health-tab-comparison",
+    "health-tab-roster",
+    "health-panel-findings",
+    "health-panel-comparison",
+    "health-panel-roster",
     "view-settings",
     "view-operations",
     "device-details",
@@ -82,6 +94,8 @@ class _IdParentParser(HTMLParser):
         self.tag_by_id: dict[str, str] = {}
         self.attributes_by_id: dict[str, dict[str, str | None]] = {}
         self.inside_dashboard_shell_by_id: dict[str, bool] = {}
+        self.inside_health_insights_sticky_by_id: dict[str, bool] = {}
+        self.inside_health_insights_workspace_by_id: dict[str, bool] = {}
         self.id_order: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -99,6 +113,14 @@ class _IdParentParser(HTMLParser):
             self.inside_dashboard_shell_by_id[element_id] = any(
                 "dashboard-shell" in ancestor_classes
                 for _, _, ancestor_classes in self.stack
+            )
+            self.inside_health_insights_sticky_by_id[element_id] = any(
+                "health-insights-sticky" in ancestor_classes
+                for _, _, ancestor_classes in self.stack
+            )
+            self.inside_health_insights_workspace_by_id[element_id] = any(
+                ancestor_id == "health-insights-workspace"
+                for _, ancestor_id, _ in self.stack
             )
             self.id_order.append(element_id)
         if tag not in self._VOID_ELEMENTS:
@@ -218,6 +240,37 @@ def test_health_insights_comparison_is_an_ordered_peer_tab() -> None:
     assert 'let healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;' in ui_text
     assert 'healthInsightsTab === "comparison" && currentView === "insights"' in ui_text
     assert "ensureHealthComparisonLoaded();" in ui_text
+
+
+def test_health_insights_header_is_common_and_preserves_panel_ownership() -> None:
+    parser = _IdParentParser()
+    html = _read_text(HTML)
+    css = _read_text(CSS)
+    parser.feed(html)
+
+    for element_id, parent_id in (
+        ("health-insights-summary", "view-insights"),
+        ("health-insights-navigation", "view-insights"),
+        ("health-insights-tabs", "health-insights-navigation"),
+    ):
+        assert parser.inside_health_insights_sticky_by_id[element_id]
+        assert not parser.inside_health_insights_workspace_by_id[element_id]
+        assert parser.parent_by_id[element_id] == parent_id
+    assert parser.inside_health_insights_workspace_by_id["health-panel-findings"]
+    assert parser.inside_health_insights_workspace_by_id["health-panel-comparison"]
+    assert parser.inside_health_insights_workspace_by_id["health-panel-roster"]
+    assert "hidden" in parser.attributes_by_id["health-insights-navigation"]
+    assert "hidden" in parser.attributes_by_id["health-insights-workspace"]
+    assert parser.attributes_by_id["health-findings-count"]["aria-hidden"] == "true"
+    assert parser.attributes_by_id["health-roster-count"]["aria-hidden"] == "true"
+    assert re.search(
+        r'<div class="health-insights-heading-row">\s*'
+        r'<h2>Insights: Health</h2>\s*'
+        r'<div id="health-insights-summary" hidden></div>\s*</div>',
+        html,
+    )
+    assert "#health-insights-summary[hidden] { display: none; }" in css
+    assert "min-height: 44px;" in css[css.index("#health-insights-tabs button {"):]
 
 
 def test_topology_controls_use_container_layout_and_native_legend_disclosure() -> None:

@@ -655,6 +655,15 @@ describes the assessment pinned to Findings and Device Roster. It must not be
 read as the health of an arbitrary comparison pair or necessarily its After
 endpoint.
 
+The Insights heading, selected-assessment summary, and peer tabs share one
+compact sticky header. Findings' numeric badge is the current filtered matching
+group count; Device Roster's badge is the current filtered matching-device
+count. These are not population totals. Zero remains visible, but an unavailable
+roster count is blank and its accessible tab name has no count. Comparison has
+no tab badge; its result count remains local to its panel. Badge text is hidden
+from assistive technology because each counted tab exposes the full count and
+unit in its accessible name.
+
 For health-eligible datasets with comparison-read capability, the Comparison
 tab opens with the 1D preset selected and Custom collapsed. The 1D, 3D, and 1W
 presets resolve against the latest retained After assessment, at or before

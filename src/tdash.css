@@ -1391,27 +1391,56 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
+.health-insights-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+}
+.health-insights-heading-row h2 {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.5;
+}
 #health-insights-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
-  padding: 8px 0;
+  flex: 1 1 32rem;
+  min-width: 0;
+  gap: 2px 8px;
+  padding: 0;
   font-size: 12px;
+  line-height: 1.5;
   color: var(--muted);
 }
+#health-insights-summary[hidden] { display: none; }
 #health-insights-tabs { display: flex; gap: 4px; min-width: 0; }
 #health-insights-tabs button {
   flex: 1 1 0;
   max-width: none;
   min-width: 0;
+  min-height: 44px;
   border: 0;
   border-bottom: 3px solid transparent;
   background: transparent;
   padding: 9px clamp(2px, 0.75vw, 8px);
   color: var(--muted);
   cursor: pointer;
-  overflow-wrap: normal;
+  overflow-wrap: anywhere;
   white-space: normal;
+}
+.health-insights-count {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--muted);
+  font-size: 0.85em;
+  font-weight: 600;
+  line-height: 1.25;
 }
 #health-insights-tabs button[aria-selected="true"] {
   border-bottom-color: var(--accent);

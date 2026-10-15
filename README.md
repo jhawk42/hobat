@@ -133,6 +133,13 @@ not an arbitrary comparison pair or necessarily its After endpoint. Its
 observation time uses the comparison tab's UTC date-time format and includes
 the elapsed age of the observation.
 
+The Insights heading, selected-assessment summary, and tabs share a compact
+sticky header. The Findings badge counts currently matching filtered groups;
+the Device Roster badge counts currently matching filtered devices. These are
+not population totals: zero is shown explicitly, while an unavailable roster
+count stays blank. Comparison has no tab badge; its result count stays in that
+panel.
+
 Findings can be ordered by priority or a visible table field. **Reset Findings**
 resets only its filters, order, and selection; Comparison and Device Roster
 remain unchanged.

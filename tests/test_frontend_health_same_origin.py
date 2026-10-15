@@ -2181,6 +2181,33 @@ def test_health_assessment_observation_uses_comparison_timestamp_and_age_format(
     }
 
 
+def test_health_insights_tab_accessible_names_distinguish_counts_and_missing_data() -> None:
+    script = r"""
+      import {formatHealthInsightsTabAccessibleName} from "./src/js/tdash-health.js";
+
+      console.log(JSON.stringify({
+        zero: formatHealthInsightsTabAccessibleName("Findings", 0, "group"),
+        singular: formatHealthInsightsTabAccessibleName("Findings", 1, "group"),
+        multiple: formatHealthInsightsTabAccessibleName("Device Roster", 65, "device"),
+        missing: formatHealthInsightsTabAccessibleName("Device Roster", null, "device"),
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(completed.stdout) == {
+        "zero": "Findings, 0 matching groups",
+        "singular": "Findings, 1 matching group",
+        "multiple": "Device Roster, 65 matching devices",
+        "missing": "Device Roster",
+    }
+
+
 def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     html = (ROOT / "src/tdash.html").read_text(encoding="utf-8")
     health_js = (ROOT / "src/js/tdash-health.js").read_text(encoding="utf-8")

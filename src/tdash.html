@@ -307,18 +307,22 @@
 
         <div id="view-insights" class="workspace-view workspace-placeholder" role="tabpanel"
           aria-labelledby="btn-insights" hidden>
-          <h2>Insights: Health</h2>
+          <div class="health-insights-sticky">
+            <div class="health-insights-heading-row">
+              <h2>Insights: Health</h2>
+              <div id="health-insights-summary" hidden></div>
+            </div>
+            <div id="health-insights-navigation" hidden>
+              <div id="health-roster-mutation-status" class="health-roster-mutation-status" hidden
+                role="status" aria-live="polite"></div>
+              <div id="health-insights-tabs" role="tablist" aria-label="Health insights">
+                <button id="health-tab-findings" type="button" role="tab" aria-controls="health-panel-findings" aria-selected="true" tabindex="0">Findings <span id="health-findings-count" class="health-insights-count" aria-hidden="true"></span></button>
+                <button id="health-tab-comparison" type="button" role="tab" aria-controls="health-panel-comparison" aria-selected="false" tabindex="-1">Comparison</button>
+                <button id="health-tab-roster" type="button" role="tab" aria-controls="health-panel-roster" aria-selected="false" tabindex="-1">Device Roster <span id="health-roster-count" class="health-insights-count" aria-hidden="true"></span></button>
+              </div>
+            </div>
+          </div>
           <div id="health-insights-workspace" hidden>
-            <div class="health-insights-sticky">
-            <div id="health-insights-summary"></div>
-            <div id="health-roster-mutation-status" class="health-roster-mutation-status" hidden
-              role="status" aria-live="polite"></div>
-            <div id="health-insights-tabs" role="tablist" aria-label="Health insights">
-              <button id="health-tab-findings" type="button" role="tab" aria-controls="health-panel-findings" aria-selected="true" tabindex="0">Findings <span id="health-findings-count"></span></button>
-              <button id="health-tab-comparison" type="button" role="tab" aria-controls="health-panel-comparison" aria-selected="false" tabindex="-1">Comparison</button>
-              <button id="health-tab-roster" type="button" role="tab" aria-controls="health-panel-roster" aria-selected="false" tabindex="-1">Device Roster <span id="health-roster-count"></span></button>
-            </div>
-            </div>
             <section id="health-panel-findings" role="tabpanel" aria-labelledby="health-tab-findings">
               <div id="health-insights-filters" class="health-insights-filters" hidden>
                 <label title="Choose actionable, healthy, or all finding groups.">View

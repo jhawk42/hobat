@@ -696,6 +696,11 @@ export function formatHealthAssessmentObservation(timestamp, now = Date.now()) {
   return `Observed ${formattedTimestamp} UTC · Age: ${formatElapsedInterval(elapsedSeconds)}`;
 }
 
+export function formatHealthInsightsTabAccessibleName(label, count, unit) {
+  if (count === null) return label;
+  return `${label}, ${count} matching ${unit}${count === 1 ? "" : "s"}`;
+}
+
 function formatComparisonCount(value) {
   return new Intl.NumberFormat().format(value);
 }

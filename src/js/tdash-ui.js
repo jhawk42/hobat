@@ -140,6 +140,7 @@ import {
   renderHealthComparison,
   renderHealthStatus,
   formatHealthAssessmentObservation,
+  formatHealthInsightsTabAccessibleName,
   startHealthProcessing,
 } from "./tdash-health.js";
 import {
@@ -2326,9 +2327,14 @@ function renderNetworkInsightCondition(parent, condition, eligibleDeviceCount) {
 function renderNetworkInsights() {
   const contentEl = document.getElementById("network-insights-content");
   const healthWorkspaceEl = document.getElementById("health-insights-workspace");
+  const summaryEl = document.getElementById("health-insights-summary");
+  const navigationEl = document.getElementById("health-insights-navigation");
   const tableWrapEl = document.getElementById("health-finding-table-wrap");
   if (!contentEl) return;
   const healthEligible = currentDataset?.entry?.healthEligible === true;
+  summaryEl?.toggleAttribute("hidden", !healthEligible || !healthInsightsState.assessment);
+  navigationEl?.toggleAttribute("hidden", !healthEligible);
+  if (!healthEligible) summaryEl?.replaceChildren();
   document.getElementById("health-insights-filters")?.toggleAttribute("hidden", !healthEligible);
   healthWorkspaceEl?.toggleAttribute("hidden", !healthEligible);
   contentEl.toggleAttribute("hidden", healthEligible);
@@ -2376,7 +2382,7 @@ function renderNetworkInsights() {
       },
     });
     document.getElementById("health-findings-sort").value = healthInsightsViewState.sort.column;
-    const summary = document.getElementById("health-insights-summary");
+    const summary = summaryEl;
     summary.replaceChildren();
     if (assessment) {
       appendNetworkInsightElement(summary, "strong",
@@ -2387,9 +2393,15 @@ function renderNetworkInsights() {
       appendNetworkInsightElement(summary, "span", `${assessment.coverage?.deviceCount ?? "Unknown"} observed devices`);
     }
     const findingCount = projectHealthSummaryRows(assessment?.findingGroups || [], healthInsightsViewState).length;
-    document.getElementById("health-findings-count").textContent = `${findingCount} groups`;
-    document.getElementById("health-roster-count").textContent = healthInsightsState.roster
-      ? `${healthInsightsState.roster.filteredTotal} matching devices` : "";
+    document.getElementById("health-findings-count").textContent = String(findingCount);
+    document.getElementById("health-tab-findings").setAttribute("aria-label",
+      formatHealthInsightsTabAccessibleName("Findings", findingCount, "group"));
+    const rosterCount = healthInsightsState.roster
+      ? healthInsightsState.roster.filteredTotal : null;
+    document.getElementById("health-roster-count").textContent = rosterCount === null
+      ? "" : String(rosterCount);
+    document.getElementById("health-tab-roster").setAttribute("aria-label",
+      formatHealthInsightsTabAccessibleName("Device Roster", rosterCount, "device"));
     for (const { id, buttonId, panelId } of HEALTH_INSIGHTS_TABS) {
       const active = healthInsightsTab === id;
       const button = document.getElementById(buttonId);
