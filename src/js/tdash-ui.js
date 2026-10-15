@@ -124,6 +124,7 @@ import {
   isComparisonPageForAssessment,
   isHealthComparisonEndpointPageForQuery,
   isHealthComparisonPairForQuery,
+  isHealthRosterPageForQuery,
   fetchHealthSupport,
   projectHealthFindingDetail,
   projectVisibleHealthFindingGroups,
@@ -373,6 +374,11 @@ const healthInsightsViewState = {
   comparisonId: null,
   comparisonScope: "all",
   comparisonResult: "changed",
+  comparisonSearch: "",
+  comparisonSort: "subject",
+  comparisonDirection: "ascending",
+  comparisonLimit: 100,
+  comparisonControlFocusTarget: null,
   comparisonOffset: 0,
   comparisonItemOffset: 0,
   comparisonIntent: "1d",
@@ -380,6 +386,7 @@ const healthInsightsViewState = {
   comparisonDetailsOpen: false,
   comparisonFocusTarget: null,
   comparisonTableScrollTop: 0,
+  comparisonTableScrollLeft: 0,
   beforeAssessmentId: null,
   afterAssessmentId: null,
   beforeHistoryOffset: 0,
@@ -392,6 +399,10 @@ const healthComparisonDetailController = createHealthComparisonDetailController(
     comparisonId: healthInsightsViewState.comparisonId,
     scope: healthInsightsViewState.comparisonScope,
     result: healthInsightsViewState.comparisonResult,
+    q: healthInsightsViewState.comparisonSearch,
+    sort: healthInsightsViewState.comparisonSort,
+    direction: healthInsightsViewState.comparisonDirection,
+    limit: healthInsightsViewState.comparisonLimit,
   }),
   getSummary: (comparisonId) => healthInsightsState.comparisonPage?.items.find(
     (item) => item.comparisonId === comparisonId,
@@ -399,7 +410,15 @@ const healthComparisonDetailController = createHealthComparisonDetailController(
   getOffset: () => healthInsightsViewState.comparisonItemOffset,
   setOffset: (offset) => { healthInsightsViewState.comparisonItemOffset = offset; },
   updateSelection: (filter, value) => {
-    healthInsightsViewState[filter === "scope" ? "comparisonScope" : "comparisonResult"] = value;
+    const key = {
+      scope: "comparisonScope",
+      result: "comparisonResult",
+      q: "comparisonSearch",
+      sort: "comparisonSort",
+      direction: "comparisonDirection",
+      limit: "comparisonLimit",
+    }[filter];
+    if (key) healthInsightsViewState[key] = value;
   },
   onChange: () => renderNetworkInsights(),
 });
@@ -415,11 +434,15 @@ const healthRosterViewState = {
   presence: "observed",
   rosterState: "all",
   sort: { column: "label", direction: "ascending" },
+  limit: 100,
   offset: 0,
   selectedDeviceId: null,
   tableScrollTop: 0,
+  tableScrollLeft: 0,
   requestVersion: 0,
   detailVersion: 0,
+  sortFocusColumn: null,
+  pageFocusTarget: null,
 };
 let rosterMutationPendingDeviceId = null;
 let activeRosterAction = null;
@@ -2340,9 +2363,11 @@ function renderNetworkInsights() {
       changeSort: (sort) => {
         healthInsightsViewState.sort = sort;
         healthInsightsViewState.sortWasChanged = true;
+        document.getElementById("health-findings-sort").value = sort.column;
         renderNetworkInsights();
       },
     });
+    document.getElementById("health-findings-sort").value = healthInsightsViewState.sort.column;
     const summary = document.getElementById("health-insights-summary");
     summary.replaceChildren();
     if (assessment) {
@@ -2356,7 +2381,7 @@ function renderNetworkInsights() {
     const findingCount = projectHealthSummaryRows(assessment?.findingGroups || [], healthInsightsViewState).length;
     document.getElementById("health-findings-count").textContent = `${findingCount} groups`;
     document.getElementById("health-roster-count").textContent = healthInsightsState.roster
-      ? `${healthInsightsState.roster.filteredTotal} of ${healthInsightsState.roster.total} devices` : "";
+      ? `${healthInsightsState.roster.filteredTotal} matching devices` : "";
     for (const { id, buttonId, panelId } of HEALTH_INSIGHTS_TABS) {
       const active = healthInsightsTab === id;
       const button = document.getElementById(buttonId);
@@ -2365,21 +2390,38 @@ function renderNetworkInsights() {
       document.getElementById(panelId).hidden = !active;
     }
     const rosterWrap = document.querySelector(".health-roster-table-wrap");
-    if (rosterWrap && healthInsightsTab === "roster") healthRosterViewState.tableScrollTop = rosterWrap.scrollTop;
+    if (rosterWrap && healthInsightsTab === "roster") {
+      healthRosterViewState.tableScrollTop = rosterWrap.scrollTop;
+      healthRosterViewState.tableScrollLeft = rosterWrap.scrollLeft;
+    }
     renderHealthRoster(document.getElementById("health-roster"), healthInsightsState.roster,
       { ...healthRosterViewState, loading: healthInsightsState.rosterLoading,
         error: healthInsightsState.rosterError }, {
         select: selectRosterDevice,
-        page: (offset) => {
+        page: (offset, action) => {
           rosterNavigationGeneration += 1;
+          healthRosterViewState.pageFocusTarget = action;
           void loadRosterPage(offset);
         },
+        pageSize: changeRosterPageSize,
         sort: changeRosterSort,
+        focusRestored: () => {
+          healthRosterViewState.sortFocusColumn = null;
+          healthRosterViewState.pageFocusTarget = null;
+        },
       });
     const newRosterWrap = document.querySelector(".health-roster-table-wrap");
-    if (newRosterWrap) newRosterWrap.scrollTop = healthRosterViewState.tableScrollTop;
+    if (newRosterWrap) {
+      newRosterWrap.scrollTop = healthRosterViewState.tableScrollTop;
+      newRosterWrap.scrollLeft = healthRosterViewState.tableScrollLeft;
+    }
     const endpointSelectionAvailable =
       healthInsightsState.capabilities?.comparisonEndpointSelection === 1;
+    const previousComparisonWrap = document.querySelector(".health-comparison-table-wrap");
+    if (previousComparisonWrap && healthInsightsTab === "comparison") {
+      healthInsightsViewState.comparisonTableScrollTop = previousComparisonWrap.scrollTop;
+      healthInsightsViewState.comparisonTableScrollLeft = previousComparisonWrap.scrollLeft;
+    }
     const comparisonEl = document.getElementById("health-comparison");
     if (tableWrapEl) tableWrapEl.hidden = false;
     if (healthInsightsTab === "comparison" && currentView === "insights") {
@@ -2432,11 +2474,19 @@ function renderNetworkInsights() {
           tableScrollTop: healthInsightsViewState.comparisonTableScrollTop,
           scope: healthInsightsViewState.comparisonScope,
           result: healthInsightsViewState.comparisonResult,
+          q: healthInsightsViewState.comparisonSearch,
+          sort: healthInsightsViewState.comparisonSort,
+          direction: healthInsightsViewState.comparisonDirection,
+          controlFocusTarget: healthInsightsViewState.comparisonControlFocusTarget,
         }, {
           select: selectComparison, page: loadComparisonPage, items: loadComparisonItems,
+          pageSize: changeComparisonPageSize,
           retry: () => { void refreshHealthAssessment(); },
           retryDetail: () => { void healthComparisonDetailController.retrySelected(); },
           focusRestored: () => { healthInsightsViewState.comparisonFocusTarget = null; },
+          controlFocusRestored: () => {
+            healthInsightsViewState.comparisonControlFocusTarget = null;
+          },
           endpointSelect: selectComparisonEndpoint,
           endpointPage: loadComparisonEndpointPage,
           preset: selectComparisonPreset,
@@ -2447,6 +2497,8 @@ function renderNetworkInsights() {
           },
           scope: (scope) => changeComparisonFilter("scope", scope),
           result: (result) => changeComparisonFilter("result", result),
+          search: changeComparisonSearch,
+          order: changeComparisonOrder,
           canInspect: (deviceId) => Boolean(findCurrentDeviceRecord(deviceId)),
           inspect: (deviceId) => navigateToHealthTargets("table", { deviceIds: [deviceId] }),
         });
@@ -2454,6 +2506,7 @@ function renderNetworkInsights() {
     const updatedComparisonWrap = document.querySelector(".health-comparison-table-wrap");
     if (currentView === "insights" && healthInsightsTab === "comparison" && updatedComparisonWrap) {
       updatedComparisonWrap.scrollTop = healthInsightsViewState.comparisonTableScrollTop;
+      updatedComparisonWrap.scrollLeft = healthInsightsViewState.comparisonTableScrollLeft;
     }
     if (tableWrapEl) tableWrapEl.scrollTop = healthInsightsViewState.tableScrollTop;
     renderSelectedHealthFinding();
@@ -2876,9 +2929,15 @@ function rememberHealthNavigationContext() {
   if (healthNavigationContext) return;
   const tableWrap = document.getElementById("health-finding-table-wrap");
   const comparisonWrap = document.querySelector(".health-comparison-table-wrap");
+  const rosterWrap = document.querySelector(".health-roster-table-wrap");
   if (tableWrap) healthInsightsViewState.tableScrollTop = tableWrap.scrollTop;
   if (comparisonWrap) {
     healthInsightsViewState.comparisonTableScrollTop = comparisonWrap.scrollTop;
+    healthInsightsViewState.comparisonTableScrollLeft = comparisonWrap.scrollLeft;
+  }
+  if (rosterWrap) {
+    healthRosterViewState.tableScrollTop = rosterWrap.scrollTop;
+    healthRosterViewState.tableScrollLeft = rosterWrap.scrollLeft;
   }
   healthNavigationContext = {
     view: currentView,
@@ -2905,6 +2964,11 @@ function rememberHealthNavigationContext() {
       comparisonId: healthInsightsViewState.comparisonId,
       comparisonScope: healthInsightsViewState.comparisonScope,
       comparisonResult: healthInsightsViewState.comparisonResult,
+      comparisonSearch: healthInsightsViewState.comparisonSearch,
+      comparisonSort: healthInsightsViewState.comparisonSort,
+      comparisonDirection: healthInsightsViewState.comparisonDirection,
+      comparisonLimit: healthInsightsViewState.comparisonLimit,
+      comparisonControlFocusTarget: healthInsightsViewState.comparisonControlFocusTarget,
       comparisonOffset: healthInsightsViewState.comparisonOffset,
       comparisonItemOffset: healthInsightsViewState.comparisonItemOffset,
       comparisonIntent: healthInsightsViewState.comparisonIntent,
@@ -2912,6 +2976,18 @@ function rememberHealthNavigationContext() {
       comparisonDetailsOpen: healthInsightsViewState.comparisonDetailsOpen,
       comparisonFocusTarget: healthInsightsViewState.comparisonFocusTarget,
       comparisonTableScrollTop: healthInsightsViewState.comparisonTableScrollTop,
+      comparisonTableScrollLeft: healthInsightsViewState.comparisonTableScrollLeft,
+      roster: {
+        search: healthRosterViewState.search,
+        presence: healthRosterViewState.presence,
+        rosterState: healthRosterViewState.rosterState,
+        sort: { ...healthRosterViewState.sort },
+        limit: healthRosterViewState.limit,
+        offset: healthRosterViewState.offset,
+        selectedDeviceId: healthRosterViewState.selectedDeviceId,
+        tableScrollTop: healthRosterViewState.tableScrollTop,
+        tableScrollLeft: healthRosterViewState.tableScrollLeft,
+      },
       beforeAssessmentId: healthInsightsViewState.beforeAssessmentId,
       afterAssessmentId: healthInsightsViewState.afterAssessmentId,
       beforeHistoryOffset: healthInsightsViewState.beforeHistoryOffset,
@@ -3123,6 +3199,8 @@ function resetHealthFindingState() {
   healthInsightsViewState.detailsOpen = false;
   const viewFilter = document.getElementById("health-view-filter");
   if (viewFilter) viewFilter.value = "all";
+  const sortFilter = document.getElementById("health-findings-sort");
+  if (sortFilter) sortFilter.value = "priority";
   for (const id of ["health-status-filter", "health-scope-filter", "health-evidence-filter"]) {
     const element = document.getElementById(id);
     if (element) element.value = "all";
@@ -3134,9 +3212,13 @@ function resetHealthRosterViewState() {
   healthRosterViewState.presence = "observed";
   healthRosterViewState.rosterState = "all";
   healthRosterViewState.sort = { column: "label", direction: "ascending" };
+  healthRosterViewState.limit = 100;
   healthRosterViewState.offset = 0;
   healthRosterViewState.selectedDeviceId = null;
   healthRosterViewState.tableScrollTop = 0;
+  healthRosterViewState.tableScrollLeft = 0;
+  healthRosterViewState.sortFocusColumn = null;
+  healthRosterViewState.pageFocusTarget = null;
   document.getElementById("health-roster-search").value = "";
   document.getElementById("health-roster-presence").value = "observed";
   document.getElementById("health-roster-designation").value = "all";
@@ -3179,6 +3261,17 @@ function restoreHealthNavigationContext() {
     document.getElementById("health-status-filter").value = healthInsightsViewState.filters.status;
     document.getElementById("health-scope-filter").value = healthInsightsViewState.filters.scope;
     document.getElementById("health-evidence-filter").value = healthInsightsViewState.filters.evidenceKind;
+    const rosterContext = context.insights.roster;
+    if (rosterContext) {
+      Object.assign(healthRosterViewState, rosterContext, {
+        sort: { ...rosterContext.sort },
+        limit: rosterContext.limit ?? 100,
+        tableScrollLeft: rosterContext.tableScrollLeft ?? 0,
+      });
+      document.getElementById("health-roster-search").value = healthRosterViewState.search;
+      document.getElementById("health-roster-presence").value = healthRosterViewState.presence;
+      document.getElementById("health-roster-designation").value = healthRosterViewState.rosterState;
+    }
     healthInsightsState.comparisonDetailError = "";
   }
   lastRenderedDatasetByView.delete("topology");
@@ -3223,6 +3316,11 @@ function updateSavedComparisonNavigationContext() {
     "comparisonId",
     "comparisonScope",
     "comparisonResult",
+    "comparisonSearch",
+    "comparisonSort",
+    "comparisonDirection",
+    "comparisonLimit",
+    "comparisonControlFocusTarget",
     "comparisonOffset",
     "comparisonItemOffset",
     "comparisonIntent",
@@ -3230,6 +3328,7 @@ function updateSavedComparisonNavigationContext() {
     "comparisonDetailsOpen",
     "comparisonFocusTarget",
     "comparisonTableScrollTop",
+    "comparisonTableScrollLeft",
     "beforeAssessmentId",
     "afterAssessmentId",
     "beforeHistoryOffset",
@@ -3263,6 +3362,70 @@ function resetHealthWorkflow() {
   document.getElementById("btn-health-return")?.setAttribute("hidden", "");
   switchView("insights");
   renderNetworkInsights();
+}
+
+function updateSavedFindingNavigationContext() {
+  const savedInsights = healthNavigationContext?.insights;
+  if (!savedInsights) return;
+  for (const key of [
+    "view", "filters", "sort", "sortWasChanged", "selectedGroupId",
+    "selectedFindingId", "selectedEndpointId", "tableScrollTop", "detailsOpen",
+  ]) {
+    savedInsights[key] = key === "filters"
+      ? { ...healthInsightsViewState.filters }
+      : key === "sort"
+        ? { ...healthInsightsViewState.sort }
+        : healthInsightsViewState[key];
+  }
+}
+
+function updateSavedRosterNavigationContext() {
+  const savedInsights = healthNavigationContext?.insights;
+  if (!savedInsights) return;
+  savedInsights.roster = {
+    search: healthRosterViewState.search,
+    presence: healthRosterViewState.presence,
+    rosterState: healthRosterViewState.rosterState,
+    sort: { ...healthRosterViewState.sort },
+    limit: healthRosterViewState.limit,
+    offset: healthRosterViewState.offset,
+    selectedDeviceId: healthRosterViewState.selectedDeviceId,
+    tableScrollTop: healthRosterViewState.tableScrollTop,
+    tableScrollLeft: healthRosterViewState.tableScrollLeft,
+  };
+}
+
+function resetHealthFindings() {
+  resetHealthFindingState();
+  updateSavedFindingNavigationContext();
+  if (contextDetailsState.mode === "finding") {
+    contextDetailsState.finding = { assessmentId: null, groupId: null, findingId: null };
+    setContextDetailsMode("device");
+    contextDetailsController.setCollapsed(true);
+  }
+  renderNetworkInsights();
+}
+
+function resetHealthRoster() {
+  clearTimeout(rosterSearchTimer);
+  rosterNavigationGeneration += 1;
+  healthRosterViewState.requestVersion += 1;
+  healthRosterViewState.detailVersion += 1;
+  resetHealthRosterViewState();
+  healthInsightsState.rosterDetail = null;
+  healthInsightsState.rosterDetailPresence = null;
+  healthInsightsState.roster = null;
+  healthInsightsState.rosterError = "";
+  healthInsightsState.rosterLoading = false;
+  document.getElementById("device-details").classList.remove("roster-selected");
+  contextDetailsController.setCollapsed(true);
+  updateSavedRosterNavigationContext();
+  if (healthInsightsTab === "roster" && currentView === "insights"
+      && healthInsightsState.assessment) {
+    void loadRosterPage(0);
+  } else {
+    renderNetworkInsights();
+  }
 }
 
 const deviceInsightsState = {
@@ -3434,6 +3597,9 @@ async function loadRosterPage(offset) {
     const page = await fetchHealthRoster(assessment.networkId, assessment.assessmentId, query);
     if (version !== healthRosterViewState.requestVersion ||
         assessment.assessmentId !== healthInsightsState.assessment?.assessmentId) return;
+    if (!isHealthRosterPageForQuery(page, assessment.assessmentId, offset, query.limit)) {
+      throw new Error("Invalid device roster response for the selected page.");
+    }
     healthInsightsState.roster = page;
     if (healthRosterViewState.selectedDeviceId && offset === 0 &&
         page.devices.some((device) => device.deviceId === healthRosterViewState.selectedDeviceId)) {
@@ -3824,8 +3990,18 @@ async function submitRosterAction(event) {
 
 function changeRosterSort(column) {
   rosterNavigationGeneration += 1;
+  healthRosterViewState.sortFocusColumn = column;
   healthRosterViewState.sort = { column, direction: healthRosterViewState.sort.column === column &&
     healthRosterViewState.sort.direction === "ascending" ? "descending" : "ascending" };
+  resetRosterScroll();
+  void loadRosterPage(0);
+}
+
+function changeRosterPageSize(limit) {
+  if (![25, 50, 100].includes(limit) || healthRosterViewState.limit === limit) return;
+  rosterNavigationGeneration += 1;
+  healthRosterViewState.limit = limit;
+  healthRosterViewState.pageFocusTarget = "page-size";
   resetRosterScroll();
   void loadRosterPage(0);
 }
@@ -3926,6 +4102,11 @@ function resetComparisonEndpointState() {
   healthInsightsViewState.comparisonId = null;
   healthInsightsViewState.comparisonScope = "all";
   healthInsightsViewState.comparisonResult = "changed";
+  healthInsightsViewState.comparisonSearch = "";
+  healthInsightsViewState.comparisonSort = "subject";
+  healthInsightsViewState.comparisonDirection = "ascending";
+  healthInsightsViewState.comparisonLimit = 100;
+  healthInsightsViewState.comparisonControlFocusTarget = null;
   healthInsightsViewState.comparisonOffset = 0;
   healthInsightsViewState.comparisonItemOffset = 0;
   healthInsightsViewState.comparisonIntent = "1d";
@@ -4042,6 +4223,10 @@ async function loadComparisonEndpointPair(offset = 0) {
     comparisonVersion,
     scope: healthInsightsViewState.comparisonScope,
     result: healthInsightsViewState.comparisonResult,
+    q: healthInsightsViewState.comparisonSearch,
+    sort: healthInsightsViewState.comparisonSort,
+    direction: healthInsightsViewState.comparisonDirection,
+    limit: healthInsightsViewState.comparisonLimit,
     offset,
   };
   const version = ++healthInsightsState.comparisonEndpointPairRequestVersion;
@@ -4059,6 +4244,10 @@ async function loadComparisonEndpointPair(offset = 0) {
     && healthInsightsViewState.afterAssessmentId === query.afterAssessmentId
     && healthInsightsViewState.comparisonScope === query.scope
     && healthInsightsViewState.comparisonResult === query.result
+    && healthInsightsViewState.comparisonSearch === query.q
+    && healthInsightsViewState.comparisonSort === query.sort
+    && healthInsightsViewState.comparisonDirection === query.direction
+    && healthInsightsViewState.comparisonLimit === query.limit
     && healthInsightsState.capabilities?.comparisonPolicyDigest === query.comparisonPolicyDigest
     && healthInsightsState.capabilities?.comparisonVersion === query.comparisonVersion;
   try {
@@ -4291,9 +4480,61 @@ async function loadComparisonItems(offset, focusTarget = null) {
   if (comparisonId) await selectComparison(comparisonId, offset);
 }
 
+let comparisonSearchTimer = null;
+
+function loadComparisonFromFirstPage() {
+  healthInsightsViewState.comparisonItemOffset = 0;
+  if (endpointSelectionEnabled()) return loadComparisonEndpointPair(0);
+  const comparisonId = healthInsightsViewState.comparisonId;
+  if (comparisonId) return selectComparison(comparisonId, 0);
+  renderNetworkInsights();
+}
+
+function changeComparisonSearch(value) {
+  const search = String(value).slice(0, 120);
+  if (healthInsightsViewState.comparisonSearch === search) return;
+  healthInsightsViewState.comparisonSearch = search;
+  healthInsightsViewState.comparisonControlFocusTarget = "search";
+  healthInsightsViewState.comparisonItemOffset = 0;
+  resetComparisonTableScroll();
+  clearTimeout(comparisonSearchTimer);
+  comparisonSearchTimer = setTimeout(() => {
+    comparisonSearchTimer = null;
+    void loadComparisonFromFirstPage();
+  }, 250);
+}
+
+function changeComparisonOrder(sort, direction) {
+  if (!["subject", "evidence", "result"].includes(sort)
+      || !["ascending", "descending"].includes(direction)) return;
+  if (healthInsightsViewState.comparisonSort === sort
+      && healthInsightsViewState.comparisonDirection === direction) return;
+  clearTimeout(comparisonSearchTimer);
+  comparisonSearchTimer = null;
+  healthInsightsViewState.comparisonSort = sort;
+  healthInsightsViewState.comparisonDirection = direction;
+  healthInsightsViewState.comparisonControlFocusTarget = "order";
+  resetComparisonTableScroll();
+  return loadComparisonFromFirstPage();
+}
+
+function changeComparisonPageSize(limit) {
+  if (![25, 50, 100].includes(limit)
+      || healthInsightsViewState.comparisonLimit === limit) return;
+  clearTimeout(comparisonSearchTimer);
+  comparisonSearchTimer = null;
+  healthInsightsViewState.comparisonLimit = limit;
+  healthInsightsViewState.comparisonFocusTarget = "page-size";
+  resetComparisonTableScroll();
+  return loadComparisonFromFirstPage();
+}
+
 function changeComparisonFilter(filter, value) {
+  clearTimeout(comparisonSearchTimer);
+  comparisonSearchTimer = null;
   resetComparisonTableScroll();
   healthInsightsViewState.comparisonFocusTarget = null;
+  healthInsightsViewState.comparisonControlFocusTarget = filter;
   if (endpointSelectionEnabled()) {
     const key = filter === "scope" ? "comparisonScope" : "comparisonResult";
     if (healthInsightsViewState[key] === value) return;
@@ -4611,9 +4852,12 @@ function activateHealthTab(tab) {
   if (healthInsightsTab === "comparison") {
     healthInsightsViewState.comparisonTableScrollTop =
       document.querySelector(".health-comparison-table-wrap")?.scrollTop ?? 0;
+    healthInsightsViewState.comparisonTableScrollLeft =
+      document.querySelector(".health-comparison-table-wrap")?.scrollLeft ?? 0;
   }
   if (healthInsightsTab === "roster") {
     healthRosterViewState.tableScrollTop = document.querySelector(".health-roster-table-wrap")?.scrollTop ?? 0;
+    healthRosterViewState.tableScrollLeft = document.querySelector(".health-roster-table-wrap")?.scrollLeft ?? 0;
   }
   const tabChanged = healthInsightsTab !== tab;
   healthInsightsTab = tab;
@@ -4631,6 +4875,10 @@ function activateHealthTab(tab) {
   renderNetworkInsights();
   document.getElementById(`health-tab-${tab}`)?.focus();
   if (tab === "comparison" && tabChanged) ensureHealthComparisonLoaded();
+  if (tab === "roster" && tabChanged && !healthInsightsState.roster
+      && !healthInsightsState.rosterLoading && healthInsightsState.assessment) {
+    void loadRosterPage(healthRosterViewState.offset);
+  }
 }
 
 for (const { id, buttonId } of HEALTH_INSIGHTS_TABS) {
@@ -4671,6 +4919,11 @@ for (const [id, key] of [["health-roster-presence", "presence"],
   healthInsightsViewState.filters[key] = event.target.value;
   renderNetworkInsights();
 }));
+document.getElementById("health-findings-sort")?.addEventListener("change", (event) => {
+  healthInsightsViewState.sort = { column: event.target.value, direction: "ascending" };
+  healthInsightsViewState.sortWasChanged = true;
+  renderNetworkInsights();
+});
 document.getElementById("btn-health-return")?.addEventListener("click", restoreHealthNavigationContext);
 document.addEventListener("scroll", (event) => {
   if (currentView !== "insights"
@@ -4681,8 +4934,9 @@ document.getElementById("btn-health-finding-close")?.addEventListener("click", (
   closeHealthFindingDetails();
 });
 document.getElementById("btn-back-to-health-finding")?.addEventListener("click", returnToHealthFinding);
-document.getElementById("btn-health-reset")?.addEventListener("click", resetHealthWorkflow);
+document.getElementById("btn-health-reset")?.addEventListener("click", resetHealthFindings);
 document.getElementById("btn-health-comparison-reset")?.addEventListener("click", resetHealthComparison);
+document.getElementById("btn-health-roster-reset")?.addEventListener("click", resetHealthRoster);
 document.getElementById("btn-health-export")?.addEventListener("click", () => {
   exportHealthAssessment(healthInsightsState.assessment);
 });

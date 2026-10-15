@@ -1234,6 +1234,20 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   gap: 4px 10px;
   overflow-wrap: anywhere;
 }
+.health-value-disclosure { min-width: 0; }
+.health-value-disclosure summary {
+  max-height: 2.8em;
+  overflow: hidden;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.health-full-value {
+  max-width: min(42rem, 72vw);
+  margin: 6px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
 .health-related-devices li > div { display: grid; min-width: 0; gap: 2px; }
 .health-related-device-inspect { margin-left: auto; }
 .health-affected-chevron {
@@ -1412,6 +1426,7 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   color: var(--muted);
   font-size: 12px;
 }
+#health-findings-sort { min-width: 10rem; }
 
 .health-assessment-header {
   justify-content: space-between;
@@ -1589,7 +1604,16 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   border-collapse: collapse;
   table-layout: fixed;
 }
-.health-roster-table-wrap thead { position: sticky; top: 0; z-index: 1; background: var(--surface-raised); }
+.health-roster-table-wrap thead { position: sticky; top: 0; z-index: 2; background: var(--surface-raised); }
+.health-roster-table-wrap th:first-child,
+.health-roster-table-wrap td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+}
+.health-roster-table-wrap th:first-child { z-index: 2; }
+.health-roster-table-wrap tbody tr.selected td:first-child { background: var(--surface-raised); }
 .health-roster-table-wrap th, .health-roster-table-wrap td {
   padding: 7px 8px;
   border-bottom: 1px solid var(--line);
@@ -1605,7 +1629,10 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
 .health-roster-table-wrap th[data-column="eui"],
 .health-roster-table-wrap td[data-column="eui"] { width: 150px; }
 .health-roster-table-wrap th[data-column="label"],
-.health-roster-table-wrap td[data-column="label"] { width: 195px; }
+.health-roster-table-wrap td[data-column="label"] {
+  width: 195px;
+  min-width: 195px;
+}
 .health-roster-table-wrap th[data-column="presence"],
 .health-roster-table-wrap td[data-column="presence"] { width: 105px; }
 .health-roster-table-wrap th[data-column="rosterState"],
@@ -1677,7 +1704,14 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   text-align: left;
   overflow-wrap: anywhere;
 }
-.health-roster-navigation { display: flex; gap: 8px; }
+.health-roster-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+.health-roster-page-position { color: var(--muted); }
 
 .health-comparison-panel-actions,
 .health-comparison-navigation,
@@ -1814,6 +1848,12 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   font-weight: 700;
 }
 .health-sort-icon { color: var(--muted); font-size: 11px; }
+.health-sort-button:focus-visible,
+.table-sort-button:focus-visible,
+.table-identity-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 .health-finding-select {
   padding: 0;
   border: 0;
@@ -2701,6 +2741,37 @@ td .td-array-idx {
   max-height: calc(100vh - 180px);
 }
 
+#data-table .table-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+#data-table .table-sort-icon {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+#data-table .table-identity-action {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 table {
   width: max-content;
   min-width: 100%;
@@ -2715,6 +2786,18 @@ thead th {
   background: var(--accent-soft);
   color: var(--text-heading);
   border-bottom: 1px solid var(--line);
+}
+
+#data-table[data-identity-column] th:first-child,
+#data-table[data-identity-column] td:first-child {
+  position: sticky;
+  left: 0;
+  background: var(--surface-raised);
+}
+#data-table[data-identity-column] thead th:first-child { z-index: 3; }
+#data-table[data-identity-column] tbody td:first-child { z-index: 1; }
+#data-table[data-identity-column] .selected-row td:first-child {
+  background: var(--accent-soft) !important;
 }
 
 th,

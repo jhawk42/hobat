@@ -1314,12 +1314,15 @@ class SQLiteHealthStore:
     @staticmethod
     def _comparison_page_on_connection(
         connection: sqlite3.Connection, *, comparison_id_value: str, limit: int,
-        offset: int, scope: str, result: str,
+        offset: int, scope: str, result: str, q: str = "",
+        matching_device_ids: list[str] | None = None,
+        sort: str = "subject", direction: str = "ascending",
     ) -> tuple[dict, list[dict]] | None:
         schema_version = _schema_version_from_ledger(connection)
-        if schema_version >= 9 and "relationship_type" not in _columns(
+        has_relationship_type = "relationship_type" in _columns(
             connection, "comparison_items"
-        ):
+        )
+        if schema_version >= 9 and not has_relationship_type:
             raise sqlite3.DatabaseError(
                 "Schema ledger v9 is missing comparison_items.relationship_type"
             )
@@ -1375,21 +1378,79 @@ class SQLiteHealthStore:
         if result != "all":
             filters.append(f"{effective_result}=?")
             parameters.extend((pruned, result))
+        if q:
+            filters.append(
+                """(instr(lower(subject_id), ?) > 0
+                   OR EXISTS (
+                       SELECT 1 FROM json_each(?) AS matching_device
+                       WHERE instr(subject_id, matching_device.value) > 0
+                   ))"""
+            )
+            parameters.extend((
+                q.casefold(),
+                json.dumps(matching_device_ids or [], separators=(",", ":")),
+            ))
         where = " AND ".join(filters) or "1"
         count = connection.execute(
             f"SELECT COUNT(*) FROM comparison_items WHERE comparison_id=? AND {where}",
             (comparison_id_value, *parameters),
         ).fetchone()[0]
+        if sort not in {"subject", "evidence", "result"}:
+            raise ValueError("Invalid comparison sort")
+        if direction not in {"ascending", "descending"}:
+            raise ValueError("Invalid comparison sort direction")
+        relationship_type_expression = (
+            "item.relationship_type" if has_relationship_type else "NULL"
+        )
+        sort_direction = "ASC" if direction == "ascending" else "DESC"
+        sort_orders = {
+            "subject": (
+                "lower(subject_id), scope, subject_id, item_kind, "
+                "COALESCE(metric, ''), item_id"
+            ),
+            "evidence": (
+                "item_kind, COALESCE(relationship_type_sort, ''), COALESCE(metric, ''), sample_count, "
+                "scope, subject_id, item_id"
+            ),
+            "result": (
+                "effective_change, scope, subject_id, item_kind, COALESCE(metric, ''), item_id"
+            ),
+        }
         items = connection.execute(
-            f"""SELECT * FROM comparison_items WHERE comparison_id=? AND {where}
-                ORDER BY scope, subject_id, item_kind, metric, item_id LIMIT ? OFFSET ?""",
-            (comparison_id_value, *parameters, limit, offset),
+            f"""WITH effective_items AS (
+                SELECT item.*, {relationship_type_expression} AS relationship_type_sort,
+                        CASE WHEN ? OR item.comparable=0
+                            THEN 'unknown' ELSE item.change END AS effective_change
+                    FROM comparison_items item
+                )
+                SELECT * FROM effective_items WHERE comparison_id=? AND {where}
+                ORDER BY {sort_orders[sort]} {sort_direction}
+                LIMIT ? OFFSET ?""",
+            (pruned, comparison_id_value, *parameters, limit, offset),
         ).fetchall()
         return {**header, "filtered_item_count": count}, [dict(item) for item in items]
+
+    def comparison_subject_rows(self, comparison_id: str) -> list[dict[str, str]]:
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN")
+            return [
+                {
+                    "scope": row["scope"], "subject_id": row["subject_id"],
+                    "network_id": row["network_id"],
+                }
+                for row in connection.execute(
+                    """SELECT DISTINCT i.scope, i.subject_id, c.network_id
+                       FROM comparison_items i JOIN comparisons c USING (comparison_id)
+                       WHERE i.comparison_id=? AND i.scope IN ('device', 'relationship')""",
+                    (comparison_id,),
+                )
+            ]
 
     def compare_endpoint_pair(
         self, *, network_id: str, dataset_id: str, before_assessment_id: str,
         after_assessment_id: str, limit: int, offset: int, scope: str, result: str,
+        q: str = "", matching_device_ids: list[str] | None = None,
+        sort: str = "subject", direction: str = "ascending",
     ) -> tuple[str, dict, list[dict]] | None:
         policy = ComparisonPolicy()
         with closing(self._connect()) as connection:
@@ -1433,6 +1494,8 @@ class SQLiteHealthStore:
                 page = self._comparison_page_on_connection(
                     connection, comparison_id_value=deterministic_id, limit=limit,
                     offset=offset, scope=scope, result=result,
+                    q=q, matching_device_ids=matching_device_ids,
+                    sort=sort, direction=direction,
                 )
                 if page is not None:
                     return "stored", page[0], page[1]
@@ -1799,7 +1862,9 @@ class SQLiteHealthStore:
 
     def comparison_row(
         self, comparison_id: str, *, limit: int, offset: int,
-        scope: str = "all", result: str = "all",
+        scope: str = "all", result: str = "all", q: str = "",
+        matching_device_ids: list[str] | None = None,
+        sort: str = "subject", direction: str = "ascending",
     ) -> tuple[dict, list[dict]] | None:
         with closing(self._connect()) as connection:
             connection.execute("BEGIN")
@@ -1810,6 +1875,10 @@ class SQLiteHealthStore:
                 offset=offset,
                 scope=scope,
                 result=result,
+                q=q,
+                matching_device_ids=matching_device_ids,
+                sort=sort,
+                direction=direction,
             )
 
     def _auto_compare(

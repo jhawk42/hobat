@@ -459,7 +459,7 @@ observations advance the last-known projection; a repeated device file with an
 unchanged source timestamp does not refresh its facts. The projection is separate
 from the operator-managed `expected_devices` roster and does not infer device
 identity from labels, EUI-64, RLOC16, or IPv6 addresses. Read-only
-`GET /api/health/roster?network=extpan:...&limit=25&offset=0` pages canonical
+`GET /api/health/roster?network=extpan:...&limit=100&offset=0` pages canonical
 devices; `GET /api/health/roster/extaddr:...?network=extpan:...` shows each
 approved field, including absent and stale fields. Health Insights shows the
 same projection under Observed devices.
@@ -470,7 +470,9 @@ Pinned roster list rows add a `fields` map for the table facts
 `vendorName`, `vendorModel`, and `vendorSwVersion`. Each entry uses the same
 value and evidence-metadata envelope as the device detail response; the dotted
 partition key is literal. Missing or null values display as `Absent`, while
-`false` and `0` remain visible values. The roster sort keys include those
+`false` and `0` remain visible values. The dashboard offers page sizes 25, 50, and 100, defaulting to 100. Its table
+leads with Device, Presence, Roster designation, and Last observed; the Device
+column remains pinned during horizontal scrolling. The roster sort keys include those
 thirteen field names as well as `label`, `presence`, `rosterState`,
 `lastObserved`, and `quality`. Booleans and partition IDs sort by type, OMR
 IPv6 addresses sort numerically, and inventory/version strings sort
@@ -673,8 +675,10 @@ and actual elapsed time; expandable Details exposes comparison metadata.
 **Reset comparison** resets only Comparison: it restores 1D/latest-After
 intent, Changed results, All scopes, first history/result pages, collapsed
 Custom and Details, and zero table scroll. It stays on Comparison and preserves
-Findings and Device Roster state. Findings Reset retains its existing
-whole-workflow behavior and selects Findings.
+Findings and Device Roster state. Findings can be ordered by priority or a
+visible table field; **Reset Findings** resets only Findings filters, order,
+and selection. **Reset Roster** resets only its search, filters, sort, page,
+and selection. Each reset preserves the other tabs' state.
 
 Comparison remains discoverable while its capability and history are loading
 or unavailable. Unsupported comparison reads, insufficient retained history,
@@ -692,9 +696,13 @@ and scope combine across the entire comparison on the server before paging.
 Result follows Comparison scope in the filter controls. The UI shows the
 visible row range, full combined-filter match count, and unfiltered comparison
 count separately; for example, `1–25 of 482 matching rows` and `1,626 total
-rows`. First/Previous/direct page selection/Next/Last navigate the matching
-rows in 25-row pages; the footer remains outside the internally scrolling
-table. Filters and valid endpoints remain selected when changing pairs, pages,
+rows`. Subject search matches current device names and canonical IDs globally,
+including relationship endpoints, while names remain annotations rather than
+historical evidence. Subject, Evidence, and effective Result ordering apply
+before paging. First/Previous/direct page selection/Next/Last navigate the
+matching rows; Rows Per Page offers 25, 50, and 100, defaulting to 100. The
+footer remains outside the internally scrolling table. Filters and valid
+endpoints remain selected when changing pairs, pages,
 or drilling down and returning; dataset/network identity changes, Reset
 comparison, and reload restore Changed and All scopes. Changing a filter
 restarts item paging at the first matching row. This view does not create pairs or infer deltas from roster

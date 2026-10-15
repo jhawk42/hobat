@@ -6,14 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>hobat: thread mesh network dashboard</title>
 
-  <script src="js/depend/sortable.min.js"></script>
   <script src="js/depend/vis-network.min.js"></script>
 
   <!--
   Served from local js/depend/ for offline use and to ensure stability.
   Can be switched to serve from CDN: 
   vis:      https://unpkg.com/vis-network/standalone/umd/vis-network.min.js
-  sortable: https://cdn.jsdelivr.net/gh/tofsjonas/sortable@latest/sortable.min.js
   -->
 
   <link rel="stylesheet" href="tdash.css" />
@@ -295,7 +293,7 @@
         <div id="view-table" class="workspace-view" role="tabpanel" aria-labelledby="btn-table" hidden>
           <div class="table-layout">
             <div class="table-wrap">
-              <table id="data-table" class="sortable">
+              <table id="data-table">
                 <thead></thead>
                 <tbody></tbody>
               </table>
@@ -353,7 +351,19 @@
                     <option value="active-probe">Active probe</option>
                   </select>
                 </label>
-                <button id="btn-health-reset" type="button" title="Clear health filters and navigation state">Reset</button>
+                <label title="Choose the order for finding groups. Column headings can also change the sort.">Sort by
+                  <select id="health-findings-sort">
+                    <option value="priority">Priority</option>
+                    <option value="status">Status</option>
+                    <option value="title">Finding</option>
+                    <option value="affected">Affected</option>
+                    <option value="scope">Scope</option>
+                    <option value="confidence">Confidence</option>
+                    <option value="evidence">Evidence</option>
+                  </select>
+                </label>
+                <button id="btn-health-reset" type="button"
+                  title="Reset Findings filters, sort, and selection only. Comparison and Roster are unchanged.">Reset Findings</button>
                 <button id="btn-health-export" type="button" title="Download the pinned health assessment">Export JSON</button>
               </div>
               <div id="health-insights-evidence"></div>
@@ -367,13 +377,16 @@
             </section>
             <section id="health-panel-comparison" role="tabpanel" aria-labelledby="health-tab-comparison" hidden>
               <div class="health-comparison-panel-actions">
-                <button id="btn-health-comparison-reset" type="button">Reset comparison</button>
+                <button id="btn-health-comparison-reset" type="button"
+                  title="Reset comparison selection, filters, and paging only. Findings and Roster are unchanged.">Reset comparison</button>
               </div>
               <section id="health-comparison" aria-label="Stored comparison"></section>
             </section>
             <section id="health-panel-roster" role="tabpanel" aria-labelledby="health-tab-roster" hidden>
               <div class="health-roster-controls">
-                <label>Search devices <input id="health-roster-search" type="search" maxlength="120" autocomplete="off"></label>
+                <label for="health-roster-search">Search name or canonical device ID
+                  <input id="health-roster-search" type="search" maxlength="120" autocomplete="off">
+                </label>
                 <label>Presence <select id="health-roster-presence" title="Presence in the selected assessment, not network health">
                   <option value="observed">Observed</option><option value="missing">Missing</option>
                   <option value="offline">Offline</option><option value="not-assessed">Not assessed</option>
@@ -385,6 +398,8 @@
                   <option value="intermittent">Intermittent</option><option value="retired">Retired</option>
                   <option value="untracked">Untracked</option>
                 </select></label>
+                <button id="btn-health-roster-reset" type="button"
+                  title="Reset Roster search, filters, sort, page, and selection only. Findings and Comparison are unchanged.">Reset Roster</button>
               </div>
               <section id="health-roster" aria-label="Device roster"></section>
             </section>

@@ -176,6 +176,7 @@ class HealthApiTests(unittest.IsolatedAsyncioTestCase):
             payload = json.loads(response.text)
             self.assertEqual(response.headers["Cache-Control"], "no-store")
             self.assertEqual(payload["schemaVersion"], 2)
+            self.assertEqual(payload["limit"], 100)
             self.assertEqual(payload["devices"][0]["presenceState"], "observed")
             self.assertEqual(tuple(payload["devices"][0]["fields"]), ROSTER_TABLE_FIELDS)
             for sort in ROSTER_TABLE_FIELDS:
@@ -814,6 +815,23 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selected_pair.status, 200)
         selected = await selected_pair.json()
         self.assertEqual((selected["origin"], selected["createdAt"] is not None), ("stored", True))
+        default_pair = await self.client.get(
+            "/api/health/comparison?network=extpan:78b9775b001c1cbe"
+            "&dataset=otbr_cli_networkdiag_fetch_all&before=assessment-1&after=assessment-2"
+        )
+        self.assertEqual((await default_pair.json())["limit"], 100)
+        for query in (
+            "q=" + "x" * 121,
+            "sort=delta",
+            "direction=sideways",
+            "limit=101",
+        ):
+            invalid_pair = await self.client.get(
+                "/api/health/comparison?network=extpan:78b9775b001c1cbe"
+                "&dataset=otbr_cli_networkdiag_fetch_all&before=assessment-1&after=assessment-2"
+                f"&{query}"
+            )
+            self.assertEqual(invalid_pair.status, 400, query)
         detail = await self.client.get(f"/api/health/comparisons/{comparison_id}?limit=1&offset=0")
         self.assertEqual(detail.status, 200)
         pinned = await detail.json()
@@ -826,6 +844,8 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(changed.status, 200)
         self.assertLessEqual((await changed.json())["filteredItemCount"], pinned["itemCount"])
+        default_detail = await self.client.get(f"/api/health/comparisons/{comparison_id}")
+        self.assertEqual((await default_detail.json())["limit"], 100)
         for query in ("scope=invalid", "result=improved"):
             invalid_filter = await self.client.get(
                 f"/api/health/comparisons/{comparison_id}?{query}"

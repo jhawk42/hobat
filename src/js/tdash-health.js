@@ -69,6 +69,18 @@ function appendText(parent, tagName, text, className = "") {
   return element;
 }
 
+function appendReadableValue(parent, text, className = "") {
+  if (text.length <= 120) {
+    appendText(parent, "span", text, className);
+    return;
+  }
+  const preview = `${text.slice(0, 117)}…`;
+  const disclosure = appendText(parent, "details", "", "health-value-disclosure");
+  const summary = appendText(disclosure, "summary", `${preview} (show full value)`, className);
+  summary.setAttribute("aria-label", `Show full value: ${preview}`);
+  appendText(disclosure, "pre", text, "health-full-value");
+}
+
 async function healthRequest(path, signal) {
   const response = await trackedFetch(path, { headers: { Accept: "application/json" }, signal });
   if (!response.ok) {
@@ -121,7 +133,7 @@ export function fetchHealthDevice(assessmentId, deviceId, signal) {
 
 export function fetchHealthRoster(networkId, assessmentId, view, signal) {
   const query = new URLSearchParams({ network: networkId, assessment: assessmentId,
-    limit: "25", offset: String(view.offset), q: view.search, presence: view.presence,
+    limit: String(view.limit ?? 100), offset: String(view.offset), q: view.search, presence: view.presence,
     rosterState: view.rosterState, sort: view.sort.column, direction: view.sort.direction });
   return healthRequest(`api/health/roster?${query}`, signal);
 }
@@ -188,10 +200,13 @@ export function fetchHealthComparisons(networkId, datasetId, offset = 0, signal)
 
 export function fetchHealthComparison(comparisonId, offset = 0, signal, filters = {}) {
   const query = new URLSearchParams({
-    limit: "25",
+    limit: String(filters.limit ?? 100),
     offset: String(offset),
     scope: filters.scope || "all",
     result: filters.result || "changed",
+    q: filters.q || "",
+    sort: filters.sort || "subject",
+    direction: filters.direction || "ascending",
   });
   return healthRequest(`api/health/comparisons/${encodeURIComponent(comparisonId)}?${query}`, signal);
 }
@@ -217,10 +232,13 @@ export function fetchHealthComparisonPair(query, offset = 0, signal) {
     dataset: query.datasetId,
     before: query.beforeAssessmentId,
     after: query.afterAssessmentId,
-    limit: "25",
+    limit: String(query.limit ?? 100),
     offset: String(offset),
     scope: query.scope || "all",
     result: query.result || "changed",
+    q: query.q || "",
+    sort: query.sort || "subject",
+    direction: query.direction || "ascending",
   });
   return healthRequest(`api/health/comparison?${parameters}`, signal);
 }
@@ -287,13 +305,17 @@ export function isHealthComparisonPairForQuery(comparison, query) {
     && comparison.afterAssessmentId === query.afterAssessmentId
     && comparison.comparisonPolicyDigest === query.comparisonPolicyDigest
     && comparison.comparisonVersion === query.comparisonVersion
+    && comparison.search === (query.q || "").trim()
+    && comparison.sort === (query.sort || "subject")
+    && comparison.direction === (query.direction || "ascending")
     && ["stored", "derived"].includes(comparison.origin)
     && (comparison.origin !== "derived" || comparison.createdAt === null)
     && Number.isInteger(comparison.itemCount) && comparison.itemCount >= 0
     && Number.isInteger(comparison.filteredItemCount)
     && comparison.filteredItemCount >= 0
     && comparison.filteredItemCount <= comparison.itemCount
-    && Number.isInteger(comparison.limit) && comparison.limit === 25
+    && Number.isInteger(comparison.limit)
+    && comparison.limit === (query.limit ?? comparison.limit)
     && Number.isInteger(comparison.offset) && comparison.offset === query.offset
     && Array.isArray(comparison.items) && comparison.items.length <= comparison.limit
     && (comparison.items.length === 0
@@ -310,11 +332,15 @@ export function isHealthComparisonDetailForQuery(comparison, query) {
     && comparison.comparisonId === query.comparisonId
     && comparison.networkId === query.networkId
     && comparison.datasetId === query.datasetId
+    && comparison.search === (query.q || "").trim()
+    && comparison.sort === (query.sort || "subject")
+    && comparison.direction === (query.direction || "ascending")
     && Number.isInteger(comparison.itemCount) && comparison.itemCount >= 0
     && Number.isInteger(comparison.filteredItemCount)
     && comparison.filteredItemCount >= 0
     && comparison.filteredItemCount <= comparison.itemCount
-    && Number.isInteger(comparison.limit) && comparison.limit > 0
+    && Number.isInteger(comparison.limit)
+    && comparison.limit === (query.limit ?? comparison.limit)
     && Number.isInteger(comparison.offset) && comparison.offset === query.offset
     && comparison.offset >= 0
     && Array.isArray(comparison.items)
@@ -336,6 +362,17 @@ export function isComparisonPageForAssessment(page, assessment, offset) {
     && page.items.every((item) => item?.networkId === assessment.networkId
       && item.datasetId === assessment.datasetId && typeof item.comparisonId === "string"
       && item.comparisonId.length > 0);
+}
+
+export function isHealthRosterPageForQuery(page, assessmentId, offset, limit) {
+  return page?.schemaVersion === 2 && page.assessmentId === assessmentId
+    && Array.isArray(page.devices)
+    && Number.isInteger(page.total) && page.total >= 0
+    && Number.isInteger(page.filteredTotal) && page.filteredTotal >= 0
+    && Number.isInteger(page.limit) && page.limit === limit
+    && Number.isInteger(page.offset) && page.offset === offset
+    && page.devices.length <= limit
+    && offset + page.devices.length <= page.filteredTotal;
 }
 
 const COMPARISON_HEADER_FIELDS = [
@@ -362,7 +399,10 @@ function comparisonHeaderSnapshot(header) {
 function sameComparisonQuery(left, right) {
   return Boolean(left && right && left.networkId === right.networkId &&
     left.datasetId === right.datasetId && left.comparisonId === right.comparisonId &&
-    left.scope === right.scope && left.result === right.result && left.offset === right.offset);
+    left.scope === right.scope && left.result === right.result &&
+    left.q === right.q && left.sort === right.sort &&
+    left.direction === right.direction && left.limit === right.limit
+    && left.offset === right.offset);
 }
 
 export function createHealthComparisonDetailController({
@@ -383,6 +423,10 @@ export function createHealthComparisonDetailController({
       comparisonId: selection.comparisonId,
       scope: selection.scope,
       result: selection.result,
+      q: selection.q || "",
+      sort: selection.sort || "subject",
+      direction: selection.direction || "ascending",
+      limit: selection.limit || 100,
       offset,
     };
   }
@@ -395,7 +439,11 @@ export function createHealthComparisonDetailController({
       assessment?.datasetId === query.datasetId &&
       selection.comparisonId === query.comparisonId &&
       selection.scope === query.scope &&
-      selection.result === query.result;
+      selection.result === query.result &&
+      (selection.q || "") === query.q &&
+      (selection.sort || "subject") === query.sort &&
+      (selection.direction || "ascending") === query.direction &&
+      (selection.limit || 100) === query.limit;
   }
 
   async function select(comparisonId, offset = 0, headerRetries = 0) {
@@ -434,6 +482,10 @@ export function createHealthComparisonDetailController({
       const comparison = await fetchDetail(comparisonId, offset, undefined, {
         scope: query.scope,
         result: query.result,
+        q: query.q,
+        sort: query.sort,
+        direction: query.direction,
+        limit: query.limit,
       });
       if (!isCurrent(query, version)) return;
       if (!isHealthComparisonDetailForQuery(comparison, query)) {
@@ -650,32 +702,35 @@ function formatComparisonCount(value) {
 
 function appendComparisonRowPagination(container, comparison, loading, actions) {
   const pageCount = Math.ceil(comparison.filteredItemCount / comparison.limit);
-  if (pageCount < 1) return;
-  const currentPage = Math.floor(comparison.offset / comparison.limit) + 1;
+  const currentPage = pageCount ? Math.floor(comparison.offset / comparison.limit) + 1 : 0;
   const navigation = appendText(container, "nav", "", "health-comparison-row-pagination");
   navigation.setAttribute("aria-label", "Comparison result pages");
-  const appendPageButton = (label, action, offset, disabled) => {
+  const appendPageButton = (label, action, accessibleName, offset, disabled) => {
     const button = appendText(navigation, "button", label);
     button.type = "button";
     button.disabled = loading || disabled;
     button.setAttribute("data-comparison-page-action", action);
+    button.setAttribute("aria-label", accessibleName);
+    button.title = accessibleName;
     button.addEventListener("click", () => actions.items?.(offset, action));
     return button;
   };
-  appendPageButton("First", "first", 0, currentPage === 1);
-  appendPageButton("Previous", "previous", Math.max(0, comparison.offset - comparison.limit),
-    currentPage === 1);
+  appendPageButton("«", "first", "First page", 0, currentPage === 1);
+  appendPageButton("‹", "previous", "Previous page",
+    Math.max(0, comparison.offset - comparison.limit), currentPage === 1);
   const pagePicker = document.createElement("select");
   pagePicker.setAttribute("aria-label", "Comparison result page");
   pagePicker.setAttribute("data-comparison-page-action", "page");
-  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+  for (let pageNumber = 1; pageNumber <= Math.max(1, pageCount); pageNumber += 1) {
     const option = document.createElement("option");
     option.value = String(pageNumber);
-    option.textContent = `Page ${formatComparisonCount(pageNumber)} of ${formatComparisonCount(pageCount)}`;
+    option.textContent = pageCount
+      ? `Page ${formatComparisonCount(pageNumber)} of ${formatComparisonCount(pageCount)}`
+      : "Page 0 of 0";
     pagePicker.appendChild(option);
   }
-  pagePicker.value = String(currentPage);
-  pagePicker.disabled = loading || pageCount === 1;
+  pagePicker.value = String(pageCount ? currentPage : 1);
+  pagePicker.disabled = loading || pageCount <= 1;
   pagePicker.addEventListener("change", () => {
     const selectedPage = Number(pagePicker.value);
     if (Number.isInteger(selectedPage) && selectedPage >= 1 && selectedPage <= pageCount) {
@@ -683,16 +738,32 @@ function appendComparisonRowPagination(container, comparison, loading, actions) 
     }
   });
   navigation.appendChild(pagePicker);
-  appendPageButton("Next", "next", comparison.offset + comparison.limit,
+  appendPageButton("›", "next", "Next page", comparison.offset + comparison.limit,
     currentPage >= pageCount);
-  appendPageButton("Last", "last", (pageCount - 1) * comparison.limit,
+  appendPageButton("»", "last", "Last page", Math.max(0, (pageCount - 1) * comparison.limit),
     currentPage >= pageCount);
+  const sizeLabel = appendText(navigation, "label", "Rows Per Page:");
+  sizeLabel.htmlFor = "comparison-rows-per-page";
+  const sizeSelect = document.createElement("select");
+  sizeSelect.id = "comparison-rows-per-page";
+  sizeSelect.setAttribute("data-comparison-page-action", "page-size");
+  for (const size of [25, 50, 100]) {
+    const option = document.createElement("option");
+    option.value = String(size);
+    option.textContent = String(size);
+    sizeSelect.appendChild(option);
+  }
+  sizeSelect.value = String(comparison.limit);
+  sizeSelect.disabled = loading;
+  sizeSelect.addEventListener("change", () => actions.pageSize?.(Number(sizeSelect.value)));
+  navigation.appendChild(sizeSelect);
 }
 
 export function renderHealthComparison(container, page, comparison, viewState = {}, actions = {}) {
   if (!container) return;
   const focusedDisclosureId = document.activeElement?.getAttribute?.("aria-controls");
   const focusedPageAction = document.activeElement?.getAttribute?.("data-comparison-page-action");
+  const focusedControl = document.activeElement?.getAttribute?.("data-comparison-control");
   const appendError = (message) => {
     const error = appendText(container, "p", message, "error");
     error.setAttribute("role", "alert");
@@ -727,6 +798,15 @@ export function renderHealthComparison(container, page, comparison, viewState = 
         (control) => control.getAttribute("data-comparison-page-action") === focusedPageAction,
       );
       replacement?.focus?.({ preventScroll: true });
+    }
+    const controlTarget = viewState.controlFocusTarget || focusedControl;
+    if (controlTarget) {
+      const controls = Array.from(container.querySelectorAll("[data-comparison-control]"));
+      const replacement = controls.find(
+        (control) => control.getAttribute("data-comparison-control") === controlTarget,
+      );
+      replacement?.focus?.({ preventScroll: true });
+      if (replacement && viewState.controlFocusTarget) actions.controlFocusRestored?.();
     }
   };
   const endpointSelection = viewState.endpointSelection === true;
@@ -1022,8 +1102,20 @@ function renderSelectedHealthComparison(
     }
   }
   const filterRow = appendText(container, "div", "", "health-comparison-filter-row");
+  const searchLabel = appendText(filterRow, "label", "Subject");
+  const search = document.createElement("input");
+  search.type = "search";
+  search.maxLength = 120;
+  search.autocomplete = "off";
+  search.placeholder = "Name or canonical ID";
+  search.setAttribute("aria-label", "Search comparison subjects");
+  search.setAttribute("data-comparison-control", "search");
+  search.value = viewState.search || "";
+  search.addEventListener("input", () => actions.search?.(search.value));
+  searchLabel.appendChild(search);
   const filter = document.createElement("select");
   filter.setAttribute("aria-label", "Comparison scope");
+  filter.setAttribute("data-comparison-control", "scope");
   ["all", "network", "device", "relationship"].forEach((scope) => {
     const option = document.createElement("option");
     option.value = scope;
@@ -1035,6 +1127,7 @@ function renderSelectedHealthComparison(
   filterRow.appendChild(filter);
   const resultFilter = document.createElement("select");
   resultFilter.setAttribute("aria-label", "Result");
+  resultFilter.setAttribute("data-comparison-control", "result");
   [
     ["changed", "Changed"],
     ["unchanged", "Unchanged"],
@@ -1052,6 +1145,29 @@ function renderSelectedHealthComparison(
     : !selectedComparisonId;
   resultFilter.addEventListener("change", () => actions.result?.(resultFilter.value));
   filterRow.appendChild(resultFilter);
+  const orderLabel = appendText(filterRow, "label", "Order");
+  const order = document.createElement("select");
+  order.setAttribute("aria-label", "Comparison order");
+  order.setAttribute("data-comparison-control", "order");
+  [
+    ["subject:ascending", "Subject ID (A to Z)"],
+    ["subject:descending", "Subject ID (Z to A)"],
+    ["evidence:ascending", "Evidence (A to Z)"],
+    ["evidence:descending", "Evidence (Z to A)"],
+    ["result:ascending", "Result (Changed first)"],
+    ["result:descending", "Result (Unknown first)"],
+  ].forEach(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    order.appendChild(option);
+  });
+  order.value = `${viewState.sort || "subject"}:${viewState.direction || "ascending"}`;
+  order.addEventListener("change", () => {
+    const [sort, direction] = order.value.split(":");
+    actions.order?.(sort, direction);
+  });
+  orderLabel.appendChild(order);
   const count = appendText(
     filterRow, "span",
     comparison.filteredItemCount === 0
@@ -1069,7 +1185,22 @@ function renderSelectedHealthComparison(
     "health-comparison-total-count",
   );
   if (!comparison.items?.length) {
-    appendText(container, "p", "No rows match the selected comparison filters.");
+    if (comparison.comparable === false
+        && (!viewState.result || viewState.result === "changed")
+        && comparison.filteredItemCount === 0) {
+      const status = appendText(
+        container,
+        "p",
+        "No comparable changes; this pair has unknown results.",
+        "health-comparison-incomparable-empty",
+      );
+      status.setAttribute("role", "status");
+      const showUnknown = appendText(container, "button", "Show Unknown results");
+      showUnknown.type = "button";
+      showUnknown.addEventListener("click", () => actions.result?.("unknown"));
+    } else {
+      appendText(container, "p", "No rows match the selected comparison filters.");
+    }
   } else {
     appendText(
       container, "p",
@@ -1079,7 +1210,11 @@ function renderSelectedHealthComparison(
     const wrap = appendText(container, "div", "", "health-comparison-table-wrap");
     const table = document.createElement("table");
     const header = document.createElement("tr");
-    ["Subject", "Evidence", "Before", "After", "Delta", "Result", "Source / reset"].forEach((label) => appendText(header, "th", label));
+    ["Subject", "Evidence", "Before", "After", "Delta", "Result", "Source / reset"]
+      .forEach((label) => {
+        const cell = appendText(header, "th", label);
+        cell.scope = "col";
+      });
     const head = document.createElement("thead");
     head.appendChild(header);
     table.appendChild(head);
@@ -1126,7 +1261,7 @@ function renderSelectedHealthComparison(
           inspect.dataset.healthFocusKey = `comparison-device:${item.subjectId}`;
           inspect.addEventListener("click", () => actions.inspect?.(item.subjectId));
         }
-        appendText(row, "td", comparisonEvidence(item));
+        appendReadableValue(row.appendChild(document.createElement("td")), comparisonEvidence(item));
         const appendComparisonValue = (cell, value, label) => {
           if (item.scope === "device" && item.metric === "parent"
               && typeof value === "string" && /^extaddr:[0-9a-f]{16}$/.test(value)
@@ -1134,7 +1269,7 @@ function renderSelectedHealthComparison(
             appendText(cell, "span", label, "health-comparison-device-label");
             appendText(cell, "span", value, "health-comparison-device-id");
           } else {
-            appendText(cell, "span", format(value));
+            appendReadableValue(cell, format(value));
           }
         };
         appendComparisonValue(row.appendChild(document.createElement("td")),
@@ -1146,26 +1281,28 @@ function renderSelectedHealthComparison(
           : item.delta;
         appendText(row, "td", item.delta == null ? "—" : `${delta} ${item.unit || ""}`);
         appendText(row, "td", item.comparable ? `${item.change}${item.direction ? ` · ${item.direction}` : ""}` : `Unknown · ${item.primaryReason || "unqualified"}`);
-        appendText(row, "td", `${item.sourceFiles?.join(", ") || "Unknown"} · ${item.resetState}`);
+        appendReadableValue(
+          row.appendChild(document.createElement("td")),
+          `${item.sourceFiles?.join(", ") || "Unknown"} · ${item.resetState}`,
+        );
         body.appendChild(row);
       });
     table.appendChild(body);
     wrap.appendChild(table);
   }
-  appendText(container, "span", `${comparison.limit} rows per page`, "health-comparison-page-size");
   appendComparisonRowPagination(
     container, comparison, viewState.itemsLoading === true, actions,
   );
 }
 
 const ROSTER_COLUMNS = [
-  {key: "extAddress", title: "extAddress", field: "extAddress"},
-  {key: "rloc16", title: "rloc16", field: "rloc16"},
-  {key: "eui", title: "eui", field: "eui"},
   {key: "label", title: "Device", className: "health-roster-device-column"},
   {key: "presence", title: "Presence", className: "health-roster-presence-column"},
   {key: "rosterState", title: "Roster designation"},
   {key: "lastObserved", title: "Last observed"},
+  {key: "extAddress", title: "extAddress", field: "extAddress"},
+  {key: "rloc16", title: "rloc16", field: "rloc16"},
+  {key: "eui", title: "eui", field: "eui"},
   {key: "quality", title: "Data quality"},
   {key: "omrIpv6Address", title: "omrIpv6Address", field: "omrIpv6Address"},
   {key: "isBorderRouter", title: "isBorderRouter", field: "isBorderRouter"},
@@ -1186,6 +1323,10 @@ function rosterLabel(value) {
 
 export function renderHealthRoster(container, page, view, actions = {}) {
   if (!container) return;
+  const focusedSortColumn = view.sortFocusColumn
+    || document.activeElement?.dataset?.rosterSortColumn;
+  const focusedPageAction = view.pageFocusTarget
+    || document.activeElement?.dataset?.rosterPageAction;
   container.replaceChildren();
   if (view.loading && !page) {
     appendText(container, "p", "Loading device roster…");
@@ -1193,14 +1334,59 @@ export function renderHealthRoster(container, page, view, actions = {}) {
   }
   if (view.error) appendText(container, "p", `Device roster unavailable: ${view.error}`, "error");
   if (!page) return;
-  appendText(container, "p", `${page.filteredTotal} of ${page.total} devices · ${page.devices.length
-    ? `${page.offset + 1}–${page.offset + page.devices.length}` : "no rows on this page"}`,
+  const range = page.devices.length
+    ? `${page.offset + 1}–${page.offset + page.devices.length}`
+    : "no rows";
+  const results = appendText(container, "p",
+    `Showing ${range} of ${page.filteredTotal} matching devices (${page.total} total roster devices).`,
   "health-roster-results");
+  results.setAttribute("role", "status");
+  results.setAttribute("aria-live", "polite");
   if (!page.activeExpectedTotal) appendText(container, "p", "No active expected roster is configured.");
+  const appendNavigation = () => {
+    const pageCount = Math.ceil(page.filteredTotal / page.limit);
+    const currentPage = pageCount ? Math.floor(page.offset / page.limit) + 1 : 0;
+    const navigation = appendText(container, "nav", "", "health-roster-navigation");
+    navigation.setAttribute("aria-label", "Device roster pages");
+    const addButton = (text, action, accessibleName, offset, disabled) => {
+      const button = appendText(navigation, "button", text);
+      button.type = "button";
+      button.dataset.rosterPageAction = action;
+      button.setAttribute("aria-label", accessibleName);
+      button.title = accessibleName;
+      button.disabled = view.loading === true || disabled;
+      button.addEventListener("click", () => actions.page?.(offset, action));
+    };
+    addButton("«", "first", "First page", 0, currentPage <= 1);
+    addButton("‹", "previous", "Previous page",
+      Math.max(0, page.offset - page.limit), currentPage <= 1);
+    appendText(navigation, "span", `Page ${currentPage} of ${pageCount}`,
+      "health-roster-page-position");
+    addButton("›", "next", "Next page", page.offset + page.limit,
+      currentPage >= pageCount);
+    addButton("»", "last", "Last page", Math.max(0, (pageCount - 1) * page.limit),
+      currentPage >= pageCount);
+    const sizeLabel = appendText(navigation, "label", "Rows Per Page:");
+    sizeLabel.htmlFor = "roster-rows-per-page";
+    const sizeSelect = document.createElement("select");
+    sizeSelect.id = "roster-rows-per-page";
+    sizeSelect.dataset.rosterPageAction = "page-size";
+    for (const size of [25, 50, 100]) {
+      const option = document.createElement("option");
+      option.value = String(size);
+      option.textContent = String(size);
+      sizeSelect.appendChild(option);
+    }
+    sizeSelect.value = String(page.limit);
+    sizeSelect.disabled = view.loading === true;
+    sizeSelect.addEventListener("change", () => actions.pageSize?.(Number(sizeSelect.value)));
+    navigation.appendChild(sizeSelect);
+  };
   if (!page.filteredTotal) {
     appendText(container, "p", view.presence === "observed" && view.rosterState === "all" && !view.search
       ? "No devices were observed in this assessment; this does not establish network health."
       : "No devices match these roster filters.");
+    appendNavigation();
     return;
   }
   const wrap = appendText(container, "div", "", "health-roster-table-wrap");
@@ -1213,6 +1399,7 @@ export function renderHealthRoster(container, page, view, actions = {}) {
     if (column.className) cell.className = column.className;
     const button = appendText(cell, "button", column.title);
     button.type = "button";
+    button.dataset.rosterSortColumn = column.key;
     button.addEventListener("click", () => actions.sort?.(column.key));
     if (view.sort.column === column.key) {
       cell.setAttribute("aria-sort", view.sort.direction);
@@ -1231,7 +1418,10 @@ export function renderHealthRoster(container, page, view, actions = {}) {
       if (column.className) cell.className = column.className;
       if (column.field) {
         const value = device.fields?.[column.field]?.value;
-        appendText(cell, "span", value == null ? "Absent" : String(value));
+        appendReadableValue(
+          cell, value == null ? "Absent"
+            : typeof value === "string" ? value : JSON.stringify(value),
+        );
       } else if (column.key === "label") {
         const button = appendText(cell, "button", device.displayLabel, "health-roster-device-button");
         button.type = "button";
@@ -1256,15 +1446,21 @@ export function renderHealthRoster(container, page, view, actions = {}) {
     });
   });
   wrap.appendChild(table);
-  const navigation = appendText(container, "div", "", "health-roster-navigation");
-  const previous = appendText(navigation, "button", "Previous");
-  previous.type = "button";
-  previous.disabled = page.offset === 0;
-  previous.addEventListener("click", () => actions.page?.(Math.max(0, page.offset - page.limit)));
-  const next = appendText(navigation, "button", "Next");
-  next.type = "button";
-  next.disabled = page.offset + page.devices.length >= page.filteredTotal;
-  next.addEventListener("click", () => actions.page?.(page.offset + page.limit));
+  if (focusedSortColumn) {
+    const sortButton = Array.from(container.querySelectorAll("button[data-roster-sort-column]"))
+      .find((button) => button.dataset.rosterSortColumn === focusedSortColumn);
+    sortButton?.focus?.({ preventScroll: true });
+    if (sortButton) actions.focusRestored?.();
+  }
+  appendNavigation();
+  if (focusedPageAction) {
+    const replacement = Array.from(container.querySelectorAll("[data-roster-page-action]"))
+      .find((control) => control.dataset.rosterPageAction === focusedPageAction);
+    if (replacement && !replacement.disabled) {
+      replacement.focus?.({ preventScroll: true });
+      actions.focusRestored?.();
+    }
+  }
 }
 
 const ROSTER_ACTION_LABELS = Object.freeze({
@@ -1326,8 +1522,10 @@ export function renderHealthRosterDetail(container, detail, presenceState, actio
     heading.scope = "row";
     heading.textContent = field;
     row.appendChild(heading);
-    appendText(row.insertCell(), "span", fact.freshness === "absent" ? "Absent"
-      : `${JSON.stringify(fact.value)} · ${fact.freshness} · ${fact.confidence} · ${fact.sourceFile || "unknown source"}`);
+    appendReadableValue(
+      row.insertCell(), fact.freshness === "absent" ? "Absent"
+        : `${JSON.stringify(fact.value)} · ${fact.freshness} · ${fact.confidence} · ${fact.sourceFile || "unknown source"}`,
+    );
   });
   container.appendChild(table);
 }
@@ -2005,6 +2203,7 @@ function appendHealthSummaryRow(body, row, viewState, actions) {
 
 export function renderHealthInsights(container, model, viewState = {}, actions = {}) {
   if (!container) return;
+  const focusedSortColumn = document.activeElement?.dataset?.healthSortColumn;
   const summary = container.querySelector("#health-insights-evidence");
   const table = container.querySelector("#health-finding-table");
   const tableWrap = container.querySelector("#health-finding-table-wrap");
@@ -2036,6 +2235,7 @@ export function renderHealthInsights(container, model, viewState = {}, actions =
     heading.className = column.className;
     const button = appendText(heading, "button", column.label, "health-sort-button");
     button.type = "button";
+    button.dataset.healthSortColumn = column.id;
     button.addEventListener("click", () => actions.changeSort?.(nextSort(viewState.sort || {}, column.id)));
     if (viewState.sort?.column === column.id) {
       heading.setAttribute("aria-sort", viewState.sort.direction ?? "ascending");
@@ -2046,15 +2246,24 @@ export function renderHealthInsights(container, model, viewState = {}, actions =
   table.tHead.appendChild(headRow);
   rows.forEach((row) => appendHealthSummaryRow(table.tBodies[0], row, viewState, actions));
   if (rows.length === 0) {
-    appendText(empty, "p", "No findings match the selected health filters.", "network-insights-empty");
+    appendText(empty, "p",
+      "0 finding groups · 0 attributed findings match the selected health filters.",
+      "network-insights-empty");
   } else {
     tableWrap.hidden = false;
-    const sortLabel = viewState.sort?.column === "priority"
-      ? "priority"
-      : `${viewState.sort?.column ?? "priority"} ${viewState.sort?.direction ?? "ascending"}`;
+    const sortLabel = `${viewState.sort?.column ?? "priority"} ${
+      viewState.sort?.direction ?? "ascending"}`;
+    const attributedFindings = rows.reduce((total, row) => total
+      + (Number.isInteger(row.group?.count) ? row.group.count : (row.group?.findings || []).length), 0);
     appendText(empty, "p",
-      `${rows.length} finding group${rows.length === 1 ? "" : "s"} shown · sorted by ${sortLabel}`,
+      `${rows.length} finding group${rows.length === 1 ? "" : "s"} shown · ${
+        attributedFindings} attributed finding${attributedFindings === 1 ? "" : "s"} · sorted by ${sortLabel}`,
       "health-table-footer");
+  }
+  if (focusedSortColumn) {
+    const sortButton = Array.from(table.querySelectorAll("button[data-health-sort-column]"))
+      .find((button) => button.dataset.healthSortColumn === focusedSortColumn);
+    sortButton?.focus?.({ preventScroll: true });
   }
 }
 

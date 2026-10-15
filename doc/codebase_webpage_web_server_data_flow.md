@@ -143,13 +143,18 @@ the unfiltered comparison count. The health read service and SQLite store apply
 both filters before `LIMIT`/`OFFSET` in one read transaction, including the
 effective Unknown classification for non-comparable or baseline-pruned items.
 The dashboard explicitly requests its Changed default; callers that omit the
-filters retain the unfiltered API behavior. See
+filters retain the unfiltered API behavior. Subject search and supported
+ordering operate across effective matches before paging. The table pager
+offers 25, 50, and 100 rows, defaulting to 100; endpoint-history pages remain
+separate. See
 [Thread Network Health](thread_network_health.md#read-api-and-dashboard) for
 route parameters, latest-After preset selection, Custom endpoint selection,
 filter/count semantics, and lifecycle. Findings, Comparison, and Device Roster
 are browser-owned peer tabs; the selected tab, preset intent, disclosure
-state, visible row ranges, and direct 25-row pagination remain in the browser.
-Reset comparison only resets Comparison state. These navigation choices do not
+state, visible row ranges, selected table page sizes, and pagination remain in
+the browser.
+Findings, Comparison, and Roster each have a local reset that preserves the
+other tabs' state. These navigation choices do not
 change the query-only server contract or comparison policy.
 
 ## Device Diagnostics

@@ -35,8 +35,8 @@ const rosterContainer = new Element("section");
 const selectedDevices = [];
 const rosterSorts = [];
 const rosterColumns = [
-  "extAddress", "rloc16", "eui", "label", "presence", "rosterState",
-  "lastObserved", "quality", "omrIpv6Address", "isBorderRouter", "isRouter",
+  "label", "presence", "rosterState", "lastObserved", "extAddress", "rloc16",
+  "eui", "quality", "omrIpv6Address", "isBorderRouter", "isRouter",
   "isLeader", "leaderData.partitionId", "threadVersion", "threadStackVersion",
   "vendorName", "vendorModel", "vendorSwVersion",
 ];
@@ -74,12 +74,17 @@ const rosterHeader = nodes(rosterContainer).find(
 );
 assert.deepEqual(rosterHeader.children.map((cell) => cell.dataset.column), rosterColumns);
 assert.deepEqual(rosterHeader.children.map((cell) => cell.children[0].textContent), [
-  "extAddress", "rloc16", "eui", "Device", "Presence", "Roster designation",
-  "Last observed", "Data quality", "omrIpv6Address", "isBorderRouter", "isRouter",
+  "Device", "Presence", "Roster designation", "Last observed", "extAddress",
+  "rloc16", "eui", "Data quality", "omrIpv6Address", "isBorderRouter", "isRouter",
   "isLeader", "leaderData.partitionId", "threadVersion", "threadStackVersion",
   "vendorName", "vendorModel", "vendorSwVersion",
 ]);
-assert.equal(rosterHeader.children[3].attributes["aria-sort"], "ascending");
+const rosterResults = nodes(rosterContainer).find(
+  (node) => node.className === "health-roster-results",
+);
+assert.equal(rosterResults.attributes.role, "status");
+assert.equal(rosterResults.attributes["aria-live"], "polite");
+assert.equal(rosterHeader.children[0].attributes["aria-sort"], "ascending");
 rosterHeader.children.filter((cell) => cell.dataset.column !== "label"
   && cell.dataset.column !== "presence" && cell.dataset.column !== "rosterState"
   && cell.dataset.column !== "lastObserved" && cell.dataset.column !== "quality")
@@ -89,16 +94,54 @@ assert.deepEqual(rosterSorts, rosterColumns.filter((column) => ![
 ].includes(column)));
 assert.equal(rosterCells.length, 18);
 assert.deepEqual(rosterCells.map((cell) => cell.dataset.column), rosterColumns);
-assert.equal(rosterCells[0].children[0].textContent, "0011223344556677");
-assert.equal(rosterCells[1].children[0].textContent, "0x1234");
-assert.equal(rosterCells[2].children[0].textContent, "Absent");
-assert.equal(rosterCells[9].children[0].textContent, "false");
-assert.equal(rosterCells[12].children[0].textContent, "0");
-assert.equal(rosterCells[3].children[0].className, "health-roster-device-button");
+const rosterCell = (key) => rosterCells.find((cell) => cell.dataset.column === key);
+assert.equal(rosterCell("extAddress").children[0].textContent, "0011223344556677");
+assert.equal(rosterCell("rloc16").children[0].textContent, "0x1234");
+assert.equal(rosterCell("eui").children[0].textContent, "Absent");
+assert.equal(rosterCell("isBorderRouter").children[0].textContent, "false");
+assert.equal(rosterCell("leaderData.partitionId").children[0].textContent, "0");
+assert.equal(rosterCell("label").children[0].className, "health-roster-device-button");
 rosterCells.find((cell) => cell.dataset.column === "presence").click();
 rosterCells.find((cell) => cell.dataset.column === "eui").click();
 rosterCells.find((cell) => cell.dataset.column === "label").children[0].click();
 assert.deepEqual(selectedDevices, Array(3).fill("extaddr:roster"));
+
+const rosterNavigationContainer = new Element("section");
+const rosterNavigationActions = [];
+const rosterNavigationDevices = [{
+  deviceId: "extaddr:paged", displayLabel: "Paged device", presenceState: "observed",
+  rosterState: "expected", lastEndpointPresenceAt: null,
+  fieldCounts: {fresh: 0, stale: 0, conflicted: 0}, fields: {},
+}];
+renderHealthRoster(rosterNavigationContainer, {
+  schemaVersion: 2, assessmentId: "assessment", filteredTotal: 250, total: 250,
+  offset: 100, limit: 100, activeExpectedTotal: 250, devices: rosterNavigationDevices,
+}, {selectedDeviceId: null, loading: false, search: "", presence: "all",
+  rosterState: "all", sort: {column: "label", direction: "ascending"}}, {
+  page: (offset, action) => rosterNavigationActions.push([offset, action]),
+  pageSize: (size) => rosterNavigationActions.push([0, "page-size", size]),
+});
+const rosterNavigation = nodes(rosterNavigationContainer).find(
+  (node) => node.className === "health-roster-navigation",
+);
+const rosterPageButtons = rosterNavigation.children.filter((node) => node.tagName === "button");
+const rosterPageSize = rosterNavigation.children.at(-1);
+rosterPageButtons[3].listeners.click();
+rosterPageSize.value = "50";
+rosterPageSize.listeners.change();
+assert.deepEqual(rosterPageButtons.map((button) => [
+  button.textContent, button.attributes["aria-label"], button.title,
+]), [
+  ["«", "First page", "First page"],
+  ["‹", "Previous page", "Previous page"],
+  ["›", "Next page", "Next page"],
+  ["»", "Last page", "Last page"],
+]);
+assert.equal(rosterNavigation.children[2].textContent, "Page 2 of 3");
+assert.equal(rosterNavigation.children[5].textContent, "Rows Per Page:");
+assert.deepEqual(rosterPageSize.children.map((option) => option.value), ["25", "50", "100"]);
+assert.equal(rosterPageSize.value, "50");
+assert.deepEqual(rosterNavigationActions, [[200, "last"], [0, "page-size", 50]]);
 
 const oldPayloadContainer = new Element("section");
 renderHealthRoster(oldPayloadContainer, {
@@ -113,7 +156,7 @@ renderHealthRoster(oldPayloadContainer, {
 const oldRow = nodes(oldPayloadContainer).find(
   (node) => node.tagName === "tr" && node.listeners.click,
 );
-assert.equal(oldRow.children[0].children[0].textContent, "Absent");
+assert.equal(oldRow.children[0].children[0].textContent, "Older server");
 
 const deviceId = "extaddr:a/b";
 const findingId = "finding:one/two";
@@ -198,4 +241,60 @@ for (const [state, expected, role] of [
   assert.ok(message, expected);
   assert.equal(message.attributes.role, role);
 }
+const longEvidence = "router evidence ".repeat(16);
+const fullValueComparison = {
+  comparisonId: "pair", beforeObservedAt: "2026-10-01T00:00:00Z",
+  afterObservedAt: "2026-10-02T00:00:00Z", elapsedSeconds: 86400,
+  itemCount: 1, filteredItemCount: 1, offset: 0, limit: 100,
+  comparable: true, baselineState: "available", gapState: "within-policy",
+  resetState: "known", reasons: [], origin: "stored",
+  items: [{
+    itemId: "item", scope: "network", subjectId: "network:thread",
+    itemKind: "sample", metric: "sample", sampleCount: 1,
+    beforeValue: longEvidence, afterValue: longEvidence, delta: null, unit: null,
+    comparable: true, change: "unchanged", sourceFiles: [longEvidence],
+    resetState: "known",
+  }],
+};
+renderHealthComparison(container, {total: 1, offset: 0, limit: 25, items: []},
+  fullValueComparison, {comparisonId: "pair", scope: "all", result: "all"});
+const disclosures = nodes(container).filter((node) => node.tagName === "details");
+assert.equal(disclosures.length, 3);
+const comparisonHeader = nodes(container).find(
+  (node) => node.tagName === "tr" && node.children[0]?.tagName === "th",
+);
+assert.ok(comparisonHeader.children.every((cell) => cell.scope === "col"));
+assert.deepEqual(disclosures.map((node) => node.children[1].textContent), [
+  longEvidence, longEvidence,
+  `${longEvidence} · known`,
+]);
+assert.ok(disclosures.every((node) => node.children[0].attributes["aria-label"]
+  .startsWith("Show full value: ")));
+
+const incomparableComparison = {
+  ...fullValueComparison,
+  comparable: false,
+  filteredItemCount: 0,
+  items: [],
+};
+const incomparableContainer = new Element("section");
+const resultActions = [];
+renderHealthComparison(incomparableContainer, {
+  total: 1, offset: 0, limit: 25, items: [{comparisonId: "pair"}],
+}, incomparableComparison, {
+  comparisonId: "pair", result: "changed",
+}, {
+  result: (value) => resultActions.push(value),
+});
+const incomparableStatus = nodes(incomparableContainer).find(
+  (node) => node.className === "health-comparison-incomparable-empty",
+);
+assert.equal(incomparableStatus.textContent,
+  "No comparable changes; this pair has unknown results.");
+assert.equal(incomparableStatus.attributes.role, "status");
+const showUnknown = nodes(incomparableContainer).find(
+  (node) => node.textContent === "Show Unknown results",
+);
+showUnknown.click();
+assert.deepEqual(resultActions, ["unknown"]);
 console.log("Health detail contracts passed");

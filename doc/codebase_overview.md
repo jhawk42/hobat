@@ -37,7 +37,7 @@ reachability probes. Device labels use a separate static-map read/update API.
 | Persistence | Effective data directory | Operator inputs, generated snapshots, and the Hobat-wide `hobat_v1.db` SQLite store |
 
 Runtime dependencies include `aiohttp`, `websockets`, and `zeroconf`. The browser
-uses vendored vis-network and sortable table libraries.
+uses vendored vis-network; dashboard table sorting is application-owned.
 
 ## Python Modules
 
@@ -180,7 +180,7 @@ datasets. It does not contain health thresholds or reclassify evidence.
 | `tdash-topology-utils.js` | Node/edge helpers, indexes, styles, labels, and isolated-node anchors |
 | `tdash-topology-renderer.js` | vis-network lifecycle, rendering, interaction, search highlights, and layout selection |
 | `tdash-layouts.js` | Deterministic tree, ring/star, compact, hub-spoke, and hybrid seed layouts |
-| `tdash-table-renderer.js` | Sortable table, column selection, formatting, and row selection |
+| `tdash-table-renderer.js` | Accessible typed table sorting, column selection, formatting, and row selection |
 | `tdash-filters.js` | Capability discovery and node/link/diagnostic predicates |
 | `tdash-search.js` | Query parsing and record matching |
 | `tdash-view-status.js` | Active-view status ownership and stale-status suppression |

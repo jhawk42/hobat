@@ -22,6 +22,7 @@ from td_health_observation_model import (
     SourceEvidence,
 )
 from td_health_observation_store import HOBAT_DATABASE_FILENAME
+from td_health_comparison import Compatibility
 from td_health_policy import load_health_policy
 from td_health_read import HealthCorruptStoreError, ROSTER_TABLE_FIELDS, TDHealthReadService
 from td_health_roster import RosterFact
@@ -478,9 +479,9 @@ def test_stored_legacy_and_derived_comparisons_annotate_only_returned_page(tmp_p
         )
         if TDHealthReadService._canonical_comparison_extaddr(value)
     ))
-    assert resolver_calls == [{
-        "network_id": before.network_id, "device_ids": full_page_ids,
-    }]
+    assert len(resolver_calls) == 1
+    assert resolver_calls[0]["network_id"] == before.network_id
+    assert set(resolver_calls[0]["device_ids"]) == set(full_page_ids)
 
     legacy = service.comparison(
         comparison_id=stored["comparisonId"], limit=100, offset=0,
@@ -524,19 +525,12 @@ def test_stored_legacy_and_derived_comparisons_annotate_only_returned_page(tmp_p
 
     paged = service.comparison_pair(**{**query, "limit": 1})
     assert paged is not None and len(paged["items"]) == 1
-    page_item = paged["items"][0]
-    page_ids = list(dict.fromkeys(
-        value for value in (
-            page_item["subjectId"],
-            *(page_item[side] for side in ("beforeValue", "afterValue")
-              if page_item["metric"] == "parent"),
-        )
-        if page_item["scope"] == "device"
-        and TDHealthReadService._canonical_comparison_extaddr(value)
-    ))
-    assert resolver_calls[-1] == {
-        "network_id": before.network_id, "device_ids": page_ids,
-    }
+    global_ids = TDHealthReadService._comparison_subject_device_ids([
+        {"scope": item["scope"], "subject_id": item["subjectId"]}
+        for item in derived["items"]
+    ])
+    assert resolver_calls[-1]["network_id"] == before.network_id
+    assert set(resolver_calls[-1]["device_ids"]) == set(global_ids)
 
 
 def test_comparison_relationship_endpoints_use_roster_or_static_device_labels(tmp_path) -> None:
@@ -569,6 +563,291 @@ def test_comparison_relationship_endpoints_use_roster_or_static_device_labels(tm
         roster_device_id: "Hallway sensor",
         static_device_id: "Kitchen sensor",
     }
+
+
+def test_comparison_search_and_order_are_global_for_stored_and_derived_rows(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    before, before_assessment = _result("1")
+    after, after_assessment = _result("2")
+    child_id = before.devices[0].device_id
+    old_parent = "extaddr:0000000000000010"
+    new_parent = "extaddr:0000000000000011"
+    parent_devices = tuple(DeviceSample(
+        device_id, device_id.removeprefix("extaddr:"), "router", None, False,
+        ("snapshot.json",),
+    ) for device_id in (old_parent, new_parent))
+    before = replace(
+        before,
+        devices=before.devices + parent_devices,
+        relationships=(RelationshipSample(
+            "link:old-parent", "parent-child", old_parent, child_id,
+            None, None, None, None, None, None, None, child_id,
+            ("snapshot.json",),
+        ),),
+    )
+    after = replace(
+        after,
+        devices=after.devices + parent_devices,
+        relationships=(RelationshipSample(
+            "link:new-parent", "parent-child", new_parent, child_id,
+            None, None, None, None, None, None, None, child_id,
+            ("snapshot.json",),
+        ),),
+    )
+    store.save_processing_result(before, before_assessment)
+    store.save_processing_result(after, after_assessment)
+    (tmp_path / "td-static-extaddr-device-label.json").write_text("[]", encoding="utf-8")
+    service = TDHealthReadService(tmp_path)
+    device_ids = [f"extaddr:{0x100 + index:016x}" for index in range(125)]
+    late_endpoint = "extaddr:0000000000000200"
+    other_endpoint = "extaddr:0000000000000201"
+    relationship_id = f"link:{late_endpoint}->{other_endpoint}"
+    with sqlite3.connect(store.path) as connection:
+        connection.row_factory = sqlite3.Row
+        comparison_id = connection.execute(
+            "SELECT comparison_id FROM comparisons LIMIT 1"
+        ).fetchone()["comparison_id"]
+        columns = [
+            row["name"] for row in connection.execute(
+                "PRAGMA table_info(comparison_items)"
+            )
+        ]
+        base_device = dict(connection.execute(
+            """SELECT * FROM comparison_items
+               WHERE comparison_id=? AND scope='device' LIMIT 1""",
+            (comparison_id,),
+        ).fetchone())
+        base_relationship = dict(connection.execute(
+            """SELECT * FROM comparison_items
+               WHERE comparison_id=? AND scope='relationship' LIMIT 1""",
+            (comparison_id,),
+        ).fetchone())
+        for index, device_id in enumerate(device_ids):
+            item = dict(base_device)
+            item.update({
+                "item_id": f"item:test-device-{index:02d}",
+                "scope": "device",
+                "subject_id": device_id,
+                "item_kind": "categorical-transition",
+                "metric": "role",
+                "before_json": json.dumps("router"),
+                "after_json": json.dumps("leader"),
+                "delta_json": json.dumps(None),
+                "direction": None,
+                "change": "unknown" if index == 124 else "changed",
+                "comparable": 0 if index == 124 else 1,
+                "primary_reason": "endpoint-incomplete" if index == 124 else None,
+                "reasons_json": json.dumps(
+                    ["endpoint-incomplete"] if index == 124 else []
+                ),
+                "before_device_id": device_id,
+                "after_device_id": device_id,
+            })
+            connection.execute(
+                f"INSERT INTO comparison_items ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' for _ in columns)})",
+                [item[column] for column in columns],
+            )
+        relationship = dict(base_relationship)
+        relationship.update({
+            "item_id": "item:test-late-relationship",
+            "scope": "relationship",
+            "subject_id": relationship_id,
+            "item_kind": "relationship-change",
+            "metric": "parent-child",
+            "before_json": json.dumps(True),
+            "after_json": json.dumps(True),
+            "delta_json": json.dumps(None),
+            "direction": None,
+            "change": "changed",
+            "comparable": 1,
+            "primary_reason": None,
+            "reasons_json": "[]",
+            "sample_count": 2,
+            "before_relationship_id": relationship_id,
+            "after_relationship_id": relationship_id,
+        })
+        if "relationship_type" in columns:
+            relationship["relationship_type"] = "parent-child"
+        connection.execute(
+            f"INSERT INTO comparison_items ({', '.join(columns)}) "
+            f"VALUES ({', '.join('?' for _ in columns)})",
+            [relationship[column] for column in columns],
+        )
+        connection.executemany(
+            """INSERT INTO expected_devices(network_id, device_id, label, roster_state)
+               VALUES (?, ?, ?, 'expected')""",
+            [
+                (before.network_id, device_id, f"Room {124 - index:03d}")
+                for index, device_id in enumerate(device_ids)
+            ] + [
+                (before.network_id, late_endpoint, "Late Search Endpoint"),
+                (before.network_id, other_endpoint, "Other endpoint"),
+            ],
+        )
+        connection.execute(
+            """UPDATE comparisons SET item_count=(
+                   SELECT COUNT(*) FROM comparison_items WHERE comparison_id=?
+               ) WHERE comparison_id=?""",
+            (comparison_id, comparison_id),
+        )
+        connection.commit()
+
+    stored_first = service.comparison(
+        comparison_id=comparison_id, limit=25, offset=0, scope="device",
+        result="all", q="Room", sort="subject", direction="ascending",
+    )
+    stored_second = service.comparison(
+        comparison_id=comparison_id, limit=25, offset=25, scope="device",
+        result="all", q="Room", sort="subject", direction="ascending",
+    )
+    assert stored_first is not None and stored_second is not None
+    assert stored_first["filteredItemCount"] == 125
+    assert [item["subjectId"] for item in stored_first["items"]] == device_ids[:25]
+    assert [item["subjectId"] for item in stored_second["items"]] == device_ids[25:50]
+    canonical_search = service.comparison(
+        comparison_id=comparison_id, limit=25, offset=0, scope="device",
+        result="all", q="000000000000017c",
+    )
+    assert canonical_search is not None
+    assert canonical_search["filteredItemCount"] == 1
+    assert canonical_search["items"][0]["subjectId"] == device_ids[-1]
+    late_name_search = service.comparison(
+        comparison_id=comparison_id, limit=25, offset=0, scope="all",
+        result="all", q="Late Search Endpoint",
+    )
+    assert late_name_search is not None
+    assert late_name_search["filteredItemCount"] == 1
+    assert late_name_search["items"][0]["subjectId"] == relationship_id
+    unknown = service.comparison(
+        comparison_id=comparison_id, limit=25, offset=0, scope="device",
+        result="unknown", q="Room", sort="result",
+    )
+    assert unknown is not None
+    assert unknown["filteredItemCount"] == 1
+    assert unknown["items"][0]["subjectId"] == device_ids[-1]
+
+    expected_subject_ids = device_ids
+    for limit in (25, 50, 100):
+        pages = [
+            service.comparison(
+                comparison_id=comparison_id, limit=limit, offset=offset,
+                scope="device", result="all", q="Room", sort="subject",
+            )
+            for offset in range(0, 125, limit)
+        ]
+        assert all(page is not None and page["filteredItemCount"] == 125 for page in pages)
+        assert all(page["limit"] == limit for page in pages)
+        rows = [item for page in pages for item in page["items"]]
+        assert [item["subjectId"] for item in rows] == expected_subject_ids
+        assert len({item["subjectId"] for item in rows}) == 125
+        assert len(pages[-1]["items"]) == (125 % limit or limit)
+
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "DELETE FROM comparisons WHERE comparison_id=?", (comparison_id,)
+        )
+        connection.commit()
+    derived_record = store.compare_endpoint_pair(
+        network_id=before.network_id, dataset_id=before.dataset_id,
+        before_assessment_id=before_assessment.assessment_id,
+        after_assessment_id=after_assessment.assessment_id,
+        limit=1, offset=0, scope="all", result="all",
+    )
+    assert derived_record is not None and derived_record[0] == "derived"
+    derived_items = derived_record[1]["derived_items"]
+    base_device_item = next(item for item in derived_items if item.scope == "device")
+    base_relationship_item = next(
+        item for item in derived_items if item.scope == "relationship"
+    )
+    derived_clones = []
+    for index, device_id in enumerate(device_ids):
+        comparable = index != 124
+        compatibility = Compatibility(
+            comparable, "changed" if comparable else "unknown", None,
+            None if comparable else "endpoint-incomplete",
+            () if comparable else ("endpoint-incomplete",),
+        )
+        derived_clones.append(replace(
+            base_device_item, item_id=f"item:test-device-{index:02d}",
+            subject_id=device_id, kind="categorical-transition", metric="role",
+            unit=None, denominator_kind=None, before_value="router",
+            after_value="leader", delta=None, direction=None,
+            change=compatibility.change, sample_count=1,
+            compatibility=compatibility,
+        ))
+    derived_clones.append(replace(
+        base_relationship_item, item_id="item:test-late-relationship",
+        subject_id=relationship_id, relationship_type="parent-child",
+    ))
+    original_derive_pair = service.store._derive_pair
+
+    def derive_pair_with_extra_rows(connection, before_endpoint, after_endpoint):
+        interval, items = original_derive_pair(
+            connection, before_endpoint, after_endpoint,
+        )
+        return interval, [*items, *derived_clones]
+
+    service.store._derive_pair = derive_pair_with_extra_rows
+    assert len(service._resolve_comparison_device_labels(
+        network_id=before.network_id, device_ids=device_ids,
+    )) == 125
+    derived_first = service.comparison_pair(
+        network_id=before.network_id, dataset_id=before.dataset_id,
+        before_assessment_id=before_assessment.assessment_id,
+        after_assessment_id=after_assessment.assessment_id,
+        limit=25, offset=0, scope="device", result="all", q="Room",
+        sort="subject", direction="ascending",
+    )
+    derived_second = service.comparison_pair(
+        network_id=before.network_id, dataset_id=before.dataset_id,
+        before_assessment_id=before_assessment.assessment_id,
+        after_assessment_id=after_assessment.assessment_id,
+        limit=25, offset=25, scope="device", result="all", q="Room",
+        sort="subject", direction="ascending",
+    )
+    assert derived_first is not None and derived_first["origin"] == "derived"
+    assert derived_second is not None and derived_second["origin"] == "derived"
+    assert derived_first["filteredItemCount"] == 125
+    assert [item["subjectId"] for item in derived_first["items"]] == device_ids[:25]
+    assert [item["subjectId"] for item in derived_second["items"]] == device_ids[25:50]
+    for limit in (25, 50, 100):
+        pages = [
+            service.comparison_pair(
+                network_id=before.network_id, dataset_id=before.dataset_id,
+                before_assessment_id=before_assessment.assessment_id,
+                after_assessment_id=after_assessment.assessment_id,
+                limit=limit, offset=offset, scope="device", result="all",
+                q="Room", sort="subject",
+            )
+            for offset in range(0, 125, limit)
+        ]
+        assert all(page is not None and page["filteredItemCount"] == 125 for page in pages)
+        assert all(page["limit"] == limit for page in pages)
+        rows = [item for page in pages for item in page["items"]]
+        assert [item["subjectId"] for item in rows] == expected_subject_ids
+        assert len({item["subjectId"] for item in rows}) == 125
+        assert len(pages[-1]["items"]) == (125 % limit or limit)
+    derived_late_search = service.comparison_pair(
+        network_id=before.network_id, dataset_id=before.dataset_id,
+        before_assessment_id=before_assessment.assessment_id,
+        after_assessment_id=after_assessment.assessment_id,
+        limit=25, offset=0, scope="all", result="all",
+        q="Late Search Endpoint", sort="subject", direction="ascending",
+    )
+    assert derived_late_search is not None
+    assert derived_late_search["filteredItemCount"] == 1
+    assert derived_late_search["items"][0]["subjectId"] == relationship_id
+    derived_unknown = service.comparison_pair(
+        network_id=before.network_id, dataset_id=before.dataset_id,
+        before_assessment_id=before_assessment.assessment_id,
+        after_assessment_id=after_assessment.assessment_id,
+        limit=25, offset=0, scope="device", result="unknown", q="Room",
+        sort="result", direction="ascending",
+    )
+    assert derived_unknown is not None
+    assert derived_unknown["filteredItemCount"] == 1
+    assert derived_unknown["items"][0]["subjectId"] == device_ids[-1]
 
 
 def test_legacy_comparison_without_relationship_type_column_stays_read_only(tmp_path) -> None:
@@ -865,6 +1144,44 @@ def test_pinned_roster_sorts_and_filters_complete_population_before_paging(tmp_p
                 assert ordered["devices"][0]["deviceId"] == observation.devices[0].device_id
             if sort == "quality":
                 assert ordered["devices"][0]["deviceId"] == "extaddr:1000000000000000"
+
+
+def test_roster_page_sizes_cover_large_filtered_population_without_gaps(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    observation, assessment = _result()
+    expected_ids = [
+        f"extaddr:{0x2000000000000000 + index:016x}" for index in range(125)
+    ]
+    for index, device_id in enumerate(expected_ids):
+        store.upsert_expected_device(observation.network_id, device_id, f"Room {index:03d}")
+    store.save_processing_result(observation, assessment)
+    (tmp_path / "td-static-extaddr-device-label.json").write_text("[]", encoding="utf-8")
+    service = TDHealthReadService(tmp_path)
+
+    default_page = service.roster(
+        network_id=observation.network_id, assessment_id=assessment.assessment_id,
+        presence="all", roster_state="expected", q="Room",
+    )
+    assert default_page["limit"] == 100
+    assert len(default_page["devices"]) == 100
+    for limit in (25, 50, 100):
+        pages = [
+            service.roster(
+                network_id=observation.network_id,
+                assessment_id=assessment.assessment_id, presence="all",
+                roster_state="expected", q="Room", sort="label", limit=limit,
+                offset=offset,
+            )
+            for offset in range(0, 125, limit)
+        ]
+        assert all(page["filteredTotal"] == 125 for page in pages)
+        assert all(page["limit"] == limit for page in pages)
+        rows = [device for page in pages for device in page["devices"]]
+        assert [device["displayLabel"] for device in rows] == [
+            f"Room {index:03d}" for index in range(125)
+        ]
+        assert [device["deviceId"] for device in rows] == expected_ids
+        assert len(pages[-1]["devices"]) == (125 % limit or limit)
 
 
 def test_pinned_roster_projects_and_sorts_stored_table_facts(tmp_path) -> None:

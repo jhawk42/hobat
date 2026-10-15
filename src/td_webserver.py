@@ -22,6 +22,7 @@ from td_health_manifest import HealthManifestError, load_health_manifest
 from td_dataset_catalog import load_dataset_catalog
 from td_health_read import (
     DEFAULT_PAGE_SIZE,
+    DEFAULT_TABLE_PAGE_SIZE,
     MAX_PAGE_SIZE,
     HealthBusyError,
     HealthCorruptStoreError,
@@ -1339,6 +1340,10 @@ def _health_page_value(raw: str | None, *, name: str, default: int) -> int:
     return value
 
 
+def _health_table_page_value(raw: str | None) -> int:
+    return _health_page_value(raw, name="limit", default=DEFAULT_TABLE_PAGE_SIZE)
+
+
 async def _health_service_call(request: aiohttp.web.Request, method: str, **kwargs):
     data_dir = request.app[TD_DATA_DIR_APP_KEY]
     try:
@@ -1418,19 +1423,25 @@ async def handle_health_comparison_pair_api(
         raise aiohttp.web.HTTPBadRequest(
             reason="network, dataset, before, and after are required"
         )
-    from td_health_read import COMPARISON_RESULTS, COMPARISON_SCOPES
+    from td_health_read import COMPARISON_RESULTS, COMPARISON_SCOPES, COMPARISON_SORTS
 
     scope = request.query.get("scope", "all")
     result_filter = request.query.get("result", "all")
+    search = request.query.get("q", "")
+    sort = request.query.get("sort", "subject")
+    direction = request.query.get("direction", "ascending")
     if (scope not in ("all", *COMPARISON_SCOPES)
-            or result_filter not in ("all", *COMPARISON_RESULTS)):
-        raise aiohttp.web.HTTPBadRequest(reason="Invalid comparison filter")
+            or result_filter not in ("all", *COMPARISON_RESULTS)
+            or len(search) > 120 or sort not in COMPARISON_SORTS
+            or direction not in ("ascending", "descending")):
+        raise aiohttp.web.HTTPBadRequest(reason="Invalid comparison filter or order")
     result = await _health_service_call(
         request, "comparison_pair", network_id=network_id, dataset_id=dataset_id,
         before_assessment_id=before_assessment_id, after_assessment_id=after_assessment_id,
-        limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
+        limit=_health_table_page_value(request.query.get("limit")),
         offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
-        scope=scope, result=result_filter,
+        scope=scope, result=result_filter, q=search, sort=sort,
+        direction=direction,
     )
     if result is None:
         raise aiohttp.web.HTTPNotFound(reason="Assessment endpoint not found")
@@ -1454,7 +1465,7 @@ async def handle_health_roster_api(request: aiohttp.web.Request) -> aiohttp.web.
         raise aiohttp.web.HTTPBadRequest(reason="Invalid roster filter or sort")
     result = await _health_service_call(
         request, "roster", network_id=network_id,
-        limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
+        limit=_health_table_page_value(request.query.get("limit")),
         offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
         assessment_id=request.query.get("assessment"), q=search, presence=presence,
         roster_state=roster_state, sort=sort, direction=direction,
@@ -1605,17 +1616,24 @@ async def handle_health_comparison_api(request: aiohttp.web.Request) -> aiohttp.
     comparison_id = request.match_info.get("comparison_id", "")
     if not comparison_id.startswith("comparison:"):
         raise aiohttp.web.HTTPBadRequest(reason="invalid comparison ID")
-    from td_health_read import COMPARISON_RESULTS, COMPARISON_SCOPES
+    from td_health_read import COMPARISON_RESULTS, COMPARISON_SCOPES, COMPARISON_SORTS
 
     scope = request.query.get("scope", "all")
     result_filter = request.query.get("result", "all")
-    if scope not in ("all", *COMPARISON_SCOPES) or result_filter not in ("all", *COMPARISON_RESULTS):
-        raise aiohttp.web.HTTPBadRequest(reason="Invalid comparison filter")
+    search = request.query.get("q", "")
+    sort = request.query.get("sort", "subject")
+    direction = request.query.get("direction", "ascending")
+    if (scope not in ("all", *COMPARISON_SCOPES)
+            or result_filter not in ("all", *COMPARISON_RESULTS)
+            or len(search) > 120 or sort not in COMPARISON_SORTS
+            or direction not in ("ascending", "descending")):
+        raise aiohttp.web.HTTPBadRequest(reason="Invalid comparison filter or order")
     result = await _health_service_call(
         request, "comparison", comparison_id=comparison_id,
-        limit=_health_page_value(request.query.get("limit"), name="limit", default=DEFAULT_PAGE_SIZE),
+        limit=_health_table_page_value(request.query.get("limit")),
         offset=_health_page_value(request.query.get("offset"), name="offset", default=0),
-        scope=scope, result=result_filter,
+        scope=scope, result=result_filter, q=search, sort=sort,
+        direction=direction,
     )
     if result is None:
         raise aiohttp.web.HTTPNotFound(reason="Comparison not found")

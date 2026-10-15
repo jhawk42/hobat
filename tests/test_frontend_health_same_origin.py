@@ -60,7 +60,12 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
       const controls = container.children.find((item) => item.className === "health-comparison-controls");
       const picker = controls.children[0];
       const filterRow = container.children.find((item) => item.className === "health-comparison-filter-row");
-      const resultFilter = filterRow.children[1];
+      const resultFilter = filterRow.children.find(
+        (item) => item["aria-label"] === "Result",
+      );
+      const orderControl = filterRow.children.find(
+        (item) => item.children?.some((child) => child["aria-label"] === "Comparison order"),
+      ).children.find((item) => item["aria-label"] === "Comparison order");
       const navigation = container.children.find((item) => item.className === "health-comparison-navigation");
       const heading = container.children.find((item) => item.className === "health-comparison-pair-summary");
       const selectedValue = picker.value;
@@ -72,6 +77,7 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
       console.log(JSON.stringify({
         options: picker.children.map(({value, textContent}) => [value, textContent]),
         resultOptions: resultFilter.children.map(({value, textContent}) => [value, textContent]),
+        orderOptions: orderControl.children.map(({value, textContent}) => [value, textContent]),
         selectedValue, selected, resultFilters, paged, heading: heading.textContent,
       headingTitle: heading.title,
       count: filterRow.children.find((item) => item.className === "health-comparison-row-count").textContent,
@@ -98,6 +104,14 @@ def test_health_comparison_dropdown_uses_relative_times_without_changing_selecti
             ["unknown", "Unknown"],
             ["all", "All results"],
         ],
+        "orderOptions": [
+            ["subject:ascending", "Subject ID (A to Z)"],
+            ["subject:descending", "Subject ID (Z to A)"],
+            ["evidence:ascending", "Evidence (A to Z)"],
+            ["evidence:descending", "Evidence (Z to A)"],
+            ["result:ascending", "Result (Changed first)"],
+            ["result:descending", "Result (Unknown first)"],
+        ],
         "selectedValue": "pinned",
         "selected": ["pair-1"],
         "resultFilters": ["unknown"],
@@ -116,6 +130,7 @@ def test_assessment_summary_explains_context_gaps_and_history_replay() -> None:
         constructor(tagName) {
           this.tagName = tagName;
           this.children = [];
+          this.dataset = {};
           this.className = "";
           this.hidden = false;
         }
@@ -177,6 +192,121 @@ def test_assessment_summary_explains_context_gaps_and_history_replay() -> None:
         "health-migration-summary":
             "Replayed from retained history (source old-assessment); migration does not certify network health.",
     }
+
+
+def test_health_finding_sort_buttons_restore_focus_and_count_both_levels() -> None:
+    script = r"""
+      import {renderHealthInsights} from "./src/js/tdash-health.js";
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.dataset = {};
+          this.attributes = {};
+          this.listeners = {};
+          this.className = "";
+        }
+        get textContent() {
+          return (this._textContent || "") + this.children.map((child) => child.textContent).join("");
+        }
+        set textContent(value) { this.replaceChildren(); this._textContent = String(value); }
+        appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
+        replaceChildren() { this.children = []; this._textContent = ""; }
+        setAttribute(name, value) { this.attributes[name] = value; }
+        getAttribute(name) { return this.attributes[name] ?? null; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+        focus() { document.activeElement = this; }
+        click() { document.activeElement = this; this.listeners.click?.(); }
+        querySelectorAll(selector) {
+          const found = [];
+          const visit = (parent) => parent.children.forEach((child) => {
+            if (selector === "button[data-health-sort-column]"
+                && child.dataset.healthSortColumn) found.push(child);
+            visit(child);
+          });
+          visit(this);
+          return found;
+        }
+        get classList() {
+          const update = (name, enabled) => {
+            const classes = new Set(this.className.split(/\s+/).filter(Boolean));
+            if (enabled) classes.add(name); else classes.delete(name);
+            this.className = [...classes].join(" ");
+          };
+          return {
+            add: (name) => update(name, true),
+            remove: (name) => update(name, false),
+            toggle: (name, force) => {
+              update(name, force);
+            },
+          };
+        }
+      }
+      globalThis.document = {activeElement: null, createElement: (tag) => new Element(tag)};
+      const summary = new Element("section");
+      const tableHead = new Element("thead");
+      const tableBody = new Element("tbody");
+      const table = new Element("table");
+      table.tHead = tableHead;
+      table.tBodies = [tableBody];
+      const tableWrap = new Element("div");
+      const empty = new Element("div");
+      const selectors = {
+        "#health-insights-evidence": summary,
+        "#health-finding-table": table,
+        "#health-finding-table-wrap": tableWrap,
+        "#health-insights-empty": empty,
+      };
+      const container = {querySelector: (selector) => selectors[selector]};
+      const findingGroup = {
+        groupId: "group-1", ruleId: "test-rule", status: "poor",
+        title: "Elevated retries", summary: "Retry count increased",
+        scope: "device", confidence: "high", count: 2,
+        deviceIds: ["extaddr:0000000000000001"], relationshipIds: [],
+        findings: [{
+          findingId: "finding-1", status: "poor", evidenceKind: "snapshot",
+          materiality: "high", rank: 2, summary: "Retry count increased",
+          deviceIds: ["extaddr:0000000000000001"],
+        }],
+      };
+      const model = {assessment: {
+        status: "poor", completeness: "complete", confidence: "high",
+        evaluationContextComplete: true, coverage: {deviceCount: 1, pillars: {}, observedPillars: {}},
+        findingGroups: [findingGroup],
+      }};
+      const viewState = {
+        view: "all", filters: {status: "all", scope: "all", evidenceKind: "all"},
+        sort: {column: "priority", direction: "ascending"},
+      };
+      const render = () => renderHealthInsights(container, model, viewState, {
+        changeSort: (sort) => { viewState.sort = sort; render(); },
+      });
+      render();
+      const statusButton = tableHead.querySelectorAll("button[data-health-sort-column]")
+        .find((button) => button.dataset.healthSortColumn === "status");
+      statusButton.click();
+      console.log(JSON.stringify({
+        focusColumn: document.activeElement?.dataset?.healthSortColumn,
+        sortDirection: tableHead.children[0].children.find(
+          (heading) => heading.children[0].dataset.healthSortColumn === "status",
+        ).getAttribute("aria-sort"),
+        footer: empty.children.find((child) => child.className === "health-table-footer")?.textContent,
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+
+    assert result["focusColumn"] == "status"
+    assert result["sortDirection"] == "ascending"
+    assert "1 finding group shown" in result["footer"]
+    assert "2 attributed findings" in result["footer"]
 
 
 def test_comparison_show_in_table_targets_only_the_current_row_device() -> None:
@@ -376,9 +506,11 @@ def test_comparison_evidence_labels_relationship_types_and_preserves_other_rows(
         : element.children.map((child) => find(child, className)).find(Boolean);
       const rows = find(container, "health-comparison-table-wrap").children[0]
         .children[1].children;
+      const textContent = (element) => `${element.textContent || ""}${
+        element.children.map(textContent).join("")}`;
       console.log(JSON.stringify(rows.map((row) => ({
-        evidence: row.children[1].textContent,
-        result: row.children[5].textContent,
+        evidence: textContent(row.children[1]),
+        result: textContent(row.children[5]),
       }))));
     """
     completed = subprocess.run(
@@ -703,7 +835,10 @@ def test_legacy_comparison_detail_retry_reloads_selected_pair() -> None:
         comparisonQueryIdentity: null,
       };
       const assessment = {networkId: "network", datasetId: "dataset"};
-      const selection = {comparisonId: "pair", scope: "all", result: "changed"};
+      const selection = {
+        comparisonId: "pair", scope: "all", result: "changed",
+        q: "", sort: "subject", direction: "ascending",
+      };
       let offset = 0;
       let attempts = 0;
       const controller = createHealthComparisonDetailController({
@@ -719,7 +854,8 @@ def test_legacy_comparison_detail_retry_reloads_selected_pair() -> None:
           if (attempts === 1) throw new Error("offline");
           return {
             schemaVersion: 1, comparisonId, networkId: "network", datasetId: "dataset",
-            itemCount: 1, filteredItemCount: 1, limit: 25, offset: requestedOffset,
+            search: "", sort: "subject", direction: "ascending",
+            itemCount: 1, filteredItemCount: 1, limit: 100, offset: requestedOffset,
             items: [{itemId: "item", scope: "device", subjectId: "device"}],
           };
         },
@@ -761,17 +897,20 @@ def test_comparison_detail_query_and_page_validation() -> None:
         return {ok: true, json: async () => ({})};
       };
       await fetchHealthComparison("comparison:a/b", 25, undefined, {
-        scope: "relationship", result: "unknown",
+        scope: "relationship", result: "unknown", q: "router",
+        sort: "evidence", direction: "descending",
       });
       await fetchHealthComparison("comparison:old-signature", 0);
       const query = {
         comparisonId: "comparison:one", networkId: "extpan:one",
         datasetId: "dataset-one", offset: 0,
+        q: "", sort: "subject", direction: "ascending",
       };
       const row = {itemId: "item:one"};
       const page = {
         schemaVersion: 1, comparisonId: query.comparisonId, networkId: query.networkId,
         datasetId: query.datasetId, offset: 0, limit: 25, itemCount: 30,
+        search: "", sort: "subject", direction: "ascending",
         filteredItemCount: 12, items: [row],
       };
       console.log(JSON.stringify({
@@ -791,8 +930,8 @@ def test_comparison_detail_query_and_page_validation() -> None:
     result = json.loads(completed.stdout)
     assert result == {
         "requested": [
-            "api/health/comparisons/comparison%3Aa%2Fb?limit=25&offset=25&scope=relationship&result=unknown",
-            "api/health/comparisons/comparison%3Aold-signature?limit=25&offset=0&scope=all&result=changed",
+            "api/health/comparisons/comparison%3Aa%2Fb?limit=100&offset=25&scope=relationship&result=unknown&q=router&sort=evidence&direction=descending",
+            "api/health/comparisons/comparison%3Aold-signature?limit=100&offset=0&scope=all&result=changed&q=&sort=subject&direction=ascending",
         ],
         "valid": True,
         "tooManyMatches": False,
@@ -846,6 +985,7 @@ def test_endpoint_selectors_use_pinned_ids_and_pair_read_contract() -> None:
         beforeAssessmentId: "assessment-before", afterAssessmentId: "assessment-after",
         comparisonPolicyDigest: "policy-digest", comparisonVersion: "comparison-v1",
         scope: "all", result: "changed",
+        q: "", sort: "subject", direction: "ascending",
       }, 0);
 
       const endpoint = (assessmentId, observedAt, completeness = "complete") => ({
@@ -881,6 +1021,7 @@ def test_endpoint_selectors_use_pinned_ids_and_pair_read_contract() -> None:
         elapsedSeconds: 86400,
         comparisonPolicyDigest: query.comparisonPolicyDigest,
         comparisonVersion: query.comparisonVersion, origin: "derived", createdAt: null,
+        search: "", sort: "subject", direction: "ascending",
         itemCount: 0, filteredItemCount: 0, limit: 25, offset: 0, items: [],
       };
       const selections = [];
@@ -940,7 +1081,8 @@ def test_endpoint_selectors_use_pinned_ids_and_pair_read_contract() -> None:
           {...query, afterAssessmentId: "assessment-other"}),
         pairValid: isHealthComparisonPairForQuery(comparison, {...query,
           beforeAssessmentId: before.assessmentId, afterAssessmentId: after.assessmentId,
-          scope: "all", result: "changed", offset: 0}),
+          scope: "all", result: "changed", q: "", sort: "subject",
+          direction: "ascending", offset: 0}),
         presetLabels: buttons.map((item) => item.textContent),
         selectedPreset: buttons[0]["aria-pressed"],
         customDisclosure: [controls.children[0].children[4]["aria-expanded"],
@@ -1035,7 +1177,10 @@ def test_health_comparison_row_ranges_and_direct_pagination() -> None:
         const container = new Element("section");
         renderHealthComparison(container, list, comparison, {
           comparisonId: "pair", result: "changed", scope: "all", ...viewState,
-        }, {items: (offset, action) => requested.push([offset, action])});
+        }, {
+          items: (offset, action) => requested.push([offset, action]),
+          pageSize: (size) => requested.push([0, "page-size", size]),
+        });
         return container;
       };
       const first = render(makeComparison(0, 25));
@@ -1043,9 +1188,14 @@ def test_health_comparison_row_ranges_and_direct_pagination() -> None:
       const firstTotal = find(first, "health-comparison-total-count").textContent;
       const firstPager = find(first, "health-comparison-row-pagination");
       const firstPage = firstPager.children[2];
-      const firstActions = firstPager.children.map((control, index) => index === 2
-        ? control.children.find((option) => option.value === control.value).textContent
-        : control.textContent);
+      const firstActions = firstPager.children.slice(0, 5).map((control) =>
+        control.tagName === "select"
+          ? control.children.find((option) => option.value === control.value).textContent
+          : control.textContent);
+      const pageSize = firstPager.children.at(-1);
+      const pageSizeOptions = pageSize.children.map((option) => option.value);
+      pageSize.value = "100";
+      pageSize.listeners.change();
       firstPager.children[4].listeners.click();
       firstPage.value = "8";
       firstPage.listeners.change();
@@ -1057,16 +1207,20 @@ def test_health_comparison_row_ranges_and_direct_pagination() -> None:
       find(last, "health-comparison-row-pagination").children[0].listeners.click();
       const pending = render(makeComparison(0, 25), {itemsLoading: true});
       const pendingDisabled = find(pending, "health-comparison-row-pagination")
-        .children.every((control) => control.disabled);
+        .children.filter((control) => control.tagName === "button"
+          || control.tagName === "select").every((control) => control.disabled);
       const zero = render(makeComparison(0, 0, 0));
       const zeroRange = find(zero, "health-comparison-row-count").textContent;
       const zeroHasPager = Boolean(find(zero, "health-comparison-row-pagination"));
       const single = render(makeComparison(0, 25, 25, 1626));
       const singleDisabled = find(single, "health-comparison-row-pagination")
-        .children.every((control) => control.disabled);
+        .children.slice(0, 5).filter((control) => control.tagName === "button")
+        .every((control) => control.disabled);
       console.log(JSON.stringify({
         firstRange, firstTotal, firstActions, firstPageCount: firstPage.children.length,
         lastRange, lastPage, requested, pendingDisabled, zeroRange, zeroHasPager, singleDisabled,
+        pageSizeLabel: firstPager.children[5].textContent, pageSizeOptions,
+        pageSizeSelected: pageSize.value,
       }));
     """
     completed = subprocess.run(
@@ -1077,15 +1231,18 @@ def test_health_comparison_row_ranges_and_direct_pagination() -> None:
     assert result == {
         "firstRange": "1–25 of 482 matching rows",
         "firstTotal": "1,626 total rows",
-        "firstActions": ["First", "Previous", "Page 1 of 20", "Next", "Last"],
+        "firstActions": ["«", "‹", "Page 1 of 20", "›", "»"],
         "firstPageCount": 20,
         "lastRange": "476–482 of 482 matching rows",
         "lastPage": "20",
-        "requested": [[475, "last"], [175, "page"], [450, "previous"], [0, "first"]],
+        "requested": [[0, "page-size", 100], [475, "last"], [175, "page"], [450, "previous"], [0, "first"]],
         "pendingDisabled": True,
         "zeroRange": "0 matching rows",
-        "zeroHasPager": False,
+        "zeroHasPager": True,
         "singleDisabled": True,
+        "pageSizeLabel": "Rows Per Page:",
+        "pageSizeOptions": ["25", "50", "100"],
+        "pageSizeSelected": "100",
     }
 
 
@@ -1212,7 +1369,8 @@ def test_comparison_presets_stay_latest_anchored_and_disclosures_keep_focus() ->
           Boolean(find(openedCustomControls, "health-comparison-endpoint-control")),
           customFocusRestored],
         requestedPresets,
-        filterOrder: filterRow.children.slice(0, 2).map((select) => select["aria-label"]),
+        filterOrder: filterRow.children.filter((item) => item.tagName === "select")
+          .map((select) => select["aria-label"]),
         summary: find(container, "health-comparison-pair-summary").textContent,
         status: status.textContent,
         detailsExpanded: [expandedDetailsToggle["aria-expanded"], expandedDetails.hidden,
@@ -1349,26 +1507,35 @@ def test_health_requests_resolve_relative_to_direct_and_proxy_dashboard_paths() 
 def test_roster_request_pins_assessment_and_bounded_query() -> None:
     script = r"""
       import {fetchHealthRoster} from "./src/js/tdash-health.js";
-      let url;
+      const urls = [];
       globalThis.fetch = async (path) => {
-        url = path;
+        urls.push(path);
         return {ok: true, json: async () => ({schemaVersion: 2})};
       };
       await fetchHealthRoster("extpan:78b9775b001c1cbe", "assessment-1", {
-        offset: 25, search: "Office Router", presence: "missing", rosterState: "expected",
+        offset: 25, limit: 50, search: "Office Router", presence: "missing", rosterState: "expected",
         sort: {column: "lastObserved", direction: "descending"},
       });
-      console.log(JSON.stringify(Object.fromEntries(new URL(url, "http://localhost/").searchParams)));
+      await fetchHealthRoster("extpan:78b9775b001c1cbe", "assessment-1", {
+        offset: 0, search: "", presence: "observed", rosterState: "all",
+        sort: {column: "label", direction: "ascending"},
+      });
+      console.log(JSON.stringify(urls.map((url) =>
+        Object.fromEntries(new URL(url, "http://localhost/").searchParams))));
     """
     completed = subprocess.run(
         ["node", "--input-type=module", "--eval", script], cwd=ROOT,
         check=True, capture_output=True, text=True,
     )
-    assert json.loads(completed.stdout) == {
+    assert json.loads(completed.stdout) == [{
         "network": "extpan:78b9775b001c1cbe", "assessment": "assessment-1",
-        "limit": "25", "offset": "25", "q": "Office Router", "presence": "missing",
+        "limit": "50", "offset": "25", "q": "Office Router", "presence": "missing",
         "rosterState": "expected", "sort": "lastObserved", "direction": "descending",
-    }
+    }, {
+        "network": "extpan:78b9775b001c1cbe", "assessment": "assessment-1",
+        "limit": "100", "offset": "0", "q": "", "presence": "observed",
+        "rosterState": "all", "sort": "label", "direction": "ascending",
+    }]
 
 
 def test_roster_detail_context_and_patch_use_same_origin_json_api() -> None:

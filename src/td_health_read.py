@@ -14,7 +14,7 @@ from typing import Any
 
 from extaddr_device_label_map import load_extaddr_device_label_map
 from td_health_comparison import (
-    COMPARISON_VERSION, ComparisonPolicy, ComparisonItem, ordered_reasons,
+    COMPARISON_VERSION, ComparisonPolicy, ComparisonItem, comparison_id, ordered_reasons,
 )
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
 from td_health_manifest import ROSTER_FIELDS, load_health_manifest
@@ -28,6 +28,7 @@ from td_health_rules import HEALTH_RULE_CATALOG, HealthRuleCatalogError
 
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 25
+DEFAULT_TABLE_PAGE_SIZE = 100
 ROSTER_PRESENCE = ("observed", "missing", "offline", "not-assessed")
 ROSTER_STATES = ("expected", "intentionally-offline", "intermittent", "retired", "untracked")
 ROSTER_TABLE_FIELDS = (
@@ -41,6 +42,7 @@ ROSTER_SORTS = (
 )
 COMPARISON_SCOPES = ("network", "device", "relationship")
 COMPARISON_RESULTS = ("changed", "unchanged", "unknown")
+COMPARISON_SORTS = ("subject", "evidence", "result")
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
 # Scope-namespaced order bases leave room to insert new rule_ids without renumbering neighbors.
 NETWORK_ORDER_BASE = 1000
@@ -186,6 +188,22 @@ class TDHealthReadService:
         device_ids = re.findall(r"extaddr:[0-9a-f]{16}", subject_id)
         return device_ids if len(device_ids) == 2 else []
 
+    @classmethod
+    def _comparison_subject_device_ids(
+        cls, subject_rows: list[dict[str, str]],
+    ) -> list[str]:
+        device_ids = []
+        for row in subject_rows:
+            if row["scope"] == "device" and cls._canonical_comparison_extaddr(
+                row["subject_id"]
+            ):
+                device_ids.append(row["subject_id"])
+            elif row["scope"] == "relationship":
+                device_ids.extend(
+                    cls._comparison_relationship_device_ids(row["subject_id"])
+                )
+        return list(dict.fromkeys(device_ids))
+
     def _resolve_comparison_device_labels(
         self, *, network_id: str, device_ids: list[str],
     ) -> dict[str, str]:
@@ -219,6 +237,7 @@ class TDHealthReadService:
 
     def _annotate_comparison_items(
         self, items: list[dict[str, Any]], *, network_id: str,
+        labels: dict[str, str] | None = None,
     ) -> None:
         device_ids = []
         for item in items:
@@ -236,15 +255,21 @@ class TDHealthReadService:
                 for value in (item["beforeValue"], item["afterValue"]):
                     if self._canonical_comparison_extaddr(value):
                         device_ids.append(value)
-        labels = self._resolve_comparison_device_labels(
-            network_id=network_id, device_ids=list(dict.fromkeys(device_ids)),
-        )
+        resolved_labels = dict(labels or {})
+        missing_device_ids = [
+            device_id for device_id in dict.fromkeys(device_ids)
+            if device_id not in resolved_labels
+        ]
+        if missing_device_ids:
+            resolved_labels.update(self._resolve_comparison_device_labels(
+                network_id=network_id, device_ids=missing_device_ids,
+            ))
         for item in items:
             if item["scope"] == "relationship":
                 endpoints = self._comparison_relationship_device_ids(item["subjectId"])
                 endpoint_labels = {
-                    device_id: labels[device_id]
-                    for device_id in endpoints if device_id in labels
+                    device_id: resolved_labels[device_id]
+                    for device_id in endpoints if device_id in resolved_labels
                 }
                 if endpoint_labels:
                     item["subjectDeviceDisplayLabels"] = endpoint_labels
@@ -253,7 +278,7 @@ class TDHealthReadService:
                 continue
             subject_id = item["subjectId"]
             label = (
-                labels.get(subject_id)
+                resolved_labels.get(subject_id)
                 if self._canonical_comparison_extaddr(subject_id) else None
             )
             if label:
@@ -263,11 +288,61 @@ class TDHealthReadService:
             for side in ("before", "after"):
                 value = item[f"{side}Value"]
                 label = (
-                    labels.get(value)
+                    resolved_labels.get(value)
                     if self._canonical_comparison_extaddr(value) else None
                 )
                 if label:
                     item[f"{side}DeviceDisplayLabel"] = label
+
+    @staticmethod
+    def _comparison_matching_device_ids(
+        q: str, device_ids: list[str], labels: dict[str, str],
+    ) -> list[str]:
+        needle = q.casefold()
+        return [
+            device_id for device_id in device_ids
+            if needle in device_id.casefold()
+            or needle in labels.get(device_id, "").casefold()
+        ]
+
+    @classmethod
+    def _comparison_item_matches_search(
+        cls, item: dict[str, Any], q: str, labels: dict[str, str],
+    ) -> bool:
+        needle = q.casefold()
+        subject_id = item["subjectId"]
+        if needle in subject_id.casefold():
+            return True
+        if item["scope"] == "device":
+            return needle in labels.get(subject_id, "").casefold()
+        if item["scope"] == "relationship":
+            return any(
+                needle in labels.get(device_id, "").casefold()
+                for device_id in cls._comparison_relationship_device_ids(subject_id)
+            )
+        return False
+
+    @staticmethod
+    def _sort_derived_comparison_items(
+        items: list[dict[str, Any]], *, sort: str, direction: str,
+    ) -> None:
+        def key(item: dict[str, Any]) -> tuple[Any, ...]:
+            subject_id = item["subjectId"]
+            subject_order = subject_id.casefold()
+            ties = (
+                item["scope"], subject_id, item["itemKind"],
+                item["metric"] or "", item["itemId"],
+            )
+            if sort == "subject":
+                return (subject_order, *ties)
+            if sort == "evidence":
+                return (
+                    item["itemKind"], item["relationshipType"] or "",
+                    item["metric"] or "", item["sampleCount"], *ties,
+                )
+            return (item["change"], *ties)
+
+        items.sort(key=key, reverse=direction == "descending")
 
     def _roster_projection(self, data: dict, *, now: datetime, labels: dict[str, str],
                            detailed: bool) -> dict[str, Any]:
@@ -378,7 +453,7 @@ class TDHealthReadService:
                         device["displayLabel"] = f"{label} · {device['deviceId'][-8:]} (duplicate label)"
                         device["labelAmbiguity"] = "duplicate label"
 
-    def roster(self, *, network_id: str, limit: int = DEFAULT_PAGE_SIZE,
+    def roster(self, *, network_id: str, limit: int = DEFAULT_TABLE_PAGE_SIZE,
                offset: int = 0, read_time: datetime | None = None,
                assessment_id: str | None = None, q: str = "", presence: str = "observed",
                roster_state: str = "all", sort: str = "label",
@@ -1003,7 +1078,9 @@ class TDHealthReadService:
 
     def _comparison_detail_projection(
         self, *, origin: str, row: dict[str, Any], item_rows: list[dict[str, Any]],
-        limit: int, offset: int, scope: str, result: str,
+        limit: int, offset: int, scope: str, result: str, q: str,
+        sort: str, direction: str, subject_labels: dict[str, str] | None = None,
+        matching_device_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         header = self._comparison_header(row)
         pruned = header["baselineState"] == "pruned"
@@ -1038,8 +1115,6 @@ class TDHealthReadService:
                 continue
             if derived:
                 filtered_count += 1
-                if not offset <= filtered_count - 1 < offset + limit:
-                    continue
             projected_items.append({
                     "itemId": item["item_id"], "scope": item["scope"],
                     "subjectId": item["subject_id"], "itemKind": item["item_kind"],
@@ -1080,17 +1155,41 @@ class TDHealthReadService:
                 })
         if origin == "derived":
             row["created_at"] = None
-        self._annotate_comparison_items(projected_items, network_id=header["networkId"])
+        labels = dict(subject_labels or {})
+        if derived:
+            candidate_ids = self._comparison_subject_device_ids([
+                {"scope": item["scope"], "subject_id": item["subjectId"]}
+                for item in projected_items
+            ])
+            labels.update(self._resolve_comparison_device_labels(
+                network_id=header["networkId"], device_ids=candidate_ids,
+            ))
+            if q:
+                projected_items = [
+                    item for item in projected_items
+                    if self._comparison_item_matches_search(item, q, labels)
+                ]
+                filtered_count = len(projected_items)
+            self._sort_derived_comparison_items(
+                projected_items, sort=sort, direction=direction,
+            )
+            projected_items = projected_items[offset:offset + limit]
+        else:
+            filtered_count = row["filtered_item_count"]
+        self._annotate_comparison_items(
+            projected_items, network_id=header["networkId"], labels=labels,
+        )
         return {
             **header, "filteredItemCount": filtered_count,
             "limit": limit, "offset": offset, "items": projected_items,
-            "origin": origin,
+            "origin": origin, "search": q, "sort": sort, "direction": direction,
         }
 
     def comparison_pair(
         self, *, network_id: str, dataset_id: str, before_assessment_id: str,
         after_assessment_id: str, limit: int, offset: int,
         scope: str = "all", result: str = "all",
+        q: str = "", sort: str = "subject", direction: str = "ascending",
     ) -> dict[str, Any] | None:
         if not network_id.startswith("extpan:") or len(network_id) != 23 or any(
             character not in "0123456789abcdef" for character in network_id[7:]
@@ -1103,11 +1202,31 @@ class TDHealthReadService:
             raise ValueError("scope must be all, network, device, or relationship")
         if result not in ("all", *COMPARISON_RESULTS):
             raise ValueError("result must be all, changed, unchanged, or unknown")
+        if not isinstance(q, str) or len(q) > 120:
+            raise ValueError("comparison search must be at most 120 characters")
+        q = q.strip()
+        if sort not in COMPARISON_SORTS:
+            raise ValueError("Invalid comparison sort")
+        if direction not in ("ascending", "descending"):
+            raise ValueError("Invalid comparison sort direction")
+        deterministic_id = comparison_id(
+            before_assessment_id, after_assessment_id, ComparisonPolicy(),
+        )
+        subject_rows = self.store.comparison_subject_rows(deterministic_id)
+        device_ids = self._comparison_subject_device_ids(subject_rows)
+        labels = self._resolve_comparison_device_labels(
+            network_id=network_id, device_ids=device_ids,
+        ) if device_ids else {}
+        matching_device_ids = self._comparison_matching_device_ids(
+            q, device_ids, labels,
+        ) if q else []
         record = self.store.compare_endpoint_pair(
             network_id=network_id, dataset_id=dataset_id,
             before_assessment_id=before_assessment_id,
             after_assessment_id=after_assessment_id, limit=limit, offset=offset,
-            scope=scope, result=result,
+            scope=scope, result=result, q=q,
+            matching_device_ids=matching_device_ids,
+            sort=sort, direction=direction,
         )
         if record is None:
             return None
@@ -1116,70 +1235,49 @@ class TDHealthReadService:
             item_rows = row.pop("derived_items")
         return self._comparison_detail_projection(
             origin=origin, row=row, item_rows=item_rows, limit=limit, offset=offset,
-            scope=scope, result=result,
+            scope=scope, result=result, q=q, sort=sort, direction=direction,
+            subject_labels=labels, matching_device_ids=matching_device_ids,
         )
 
     def comparison(
         self, *, comparison_id: str, limit: int, offset: int,
         scope: str = "all", result: str = "all",
+        q: str = "", sort: str = "subject", direction: str = "ascending",
     ) -> dict[str, Any] | None:
         if scope not in ("all", *COMPARISON_SCOPES):
             raise ValueError("scope must be all, network, device, or relationship")
         if result not in ("all", *COMPARISON_RESULTS):
             raise ValueError("result must be all, changed, unchanged, or unknown")
+        if not isinstance(q, str) or len(q) > 120:
+            raise ValueError("comparison search must be at most 120 characters")
+        q = q.strip()
+        if sort not in COMPARISON_SORTS:
+            raise ValueError("Invalid comparison sort")
+        if direction not in ("ascending", "descending"):
+            raise ValueError("Invalid comparison sort direction")
+        subject_rows = self.store.comparison_subject_rows(comparison_id)
+        device_ids = self._comparison_subject_device_ids(subject_rows)
+        network_id = subject_rows[0]["network_id"] if subject_rows else ""
+        labels = self._resolve_comparison_device_labels(
+            network_id=network_id, device_ids=device_ids,
+        ) if device_ids else {}
+        matching_device_ids = self._comparison_matching_device_ids(
+            q, device_ids, labels,
+        ) if q else []
         record = self.store.comparison_row(
             comparison_id, limit=limit, offset=offset, scope=scope, result=result,
+            q=q, matching_device_ids=matching_device_ids,
+            sort=sort, direction=direction,
         )
         if record is None:
             return None
         row, item_rows = record
-        header = self._comparison_header(row)
-        pruned = header["baselineState"] == "pruned"
-        items = []
-        for item in item_rows:
-            relationship_type = self._comparison_relationship_type(item)
-            persisted_reasons = _decode_json(item["reasons_json"], field="item reasons")
-            if not isinstance(persisted_reasons, list) or any(
-                not isinstance(reason, str) for reason in persisted_reasons
-            ):
-                raise HealthCorruptStoreError("Invalid item reasons")
-            try:
-                reasons = list(ordered_reasons(set(persisted_reasons) | ({"baseline-pruned"} if pruned else set())))
-            except ValueError as exc:
-                raise HealthCorruptStoreError("Invalid item reasons") from exc
-            comparable = bool(item["comparable"]) and not pruned
-            items.append({
-                "itemId": item["item_id"], "scope": item["scope"],
-                "subjectId": item["subject_id"], "itemKind": item["item_kind"],
-                "metric": item["metric"], "unit": item["unit"],
-                "relationshipType": relationship_type,
-                "denominatorKind": item["denominator_kind"],
-                "beforeValue": _decode_json(item["before_json"], field="before value"),
-                "afterValue": _decode_json(item["after_json"], field="after value"),
-                "delta": None if pruned else _decode_json(item["delta_json"], field="delta"),
-                "direction": None if pruned else item["direction"],
-                "change": item["change"] if comparable else "unknown",
-                "transition": None if pruned else item["transition_state"],
-                "sampleCount": item["sample_count"],
-                "sourceFiles": _decode_json(item["source_files_json"], field="source files"),
-                "beforeSourceObservedAt": item["before_source_time"],
-                "afterSourceObservedAt": item["after_source_time"],
-                "resetState": item["reset_state"],
-                "resetWitness": _decode_json(item["reset_witness_json"], field="item reset witness"),
-                "beforeDeviceId": item["before_device_id"],
-                "afterDeviceId": item["after_device_id"],
-                "beforeRelationshipId": item["before_relationship_id"],
-                "afterRelationshipId": item["after_relationship_id"],
-                "persistedComparable": bool(item["comparable"]),
-                "persistedReasons": persisted_reasons,
-                "comparable": comparable,
-                "primaryReason": reasons[0] if reasons else None, "reasons": reasons,
-            })
-        self._annotate_comparison_items(items, network_id=header["networkId"])
-        return {
-            **header, "filteredItemCount": row["filtered_item_count"],
-            "limit": limit, "offset": offset, "items": items,
-        }
+        return self._comparison_detail_projection(
+            origin="stored", row=row, item_rows=item_rows, limit=limit,
+            offset=offset, scope=scope, result=result, q=q, sort=sort,
+            direction=direction, subject_labels=labels,
+            matching_device_ids=matching_device_ids,
+        )
 
     def device(self, *, assessment_id: str, device_id: str) -> dict | None:
         row = self.store.device_record(

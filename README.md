@@ -88,6 +88,12 @@ Insights processes the currently loaded cached snapshot with partial input
 allowed. It writes health history in `hobat_v1.db`, but does not collect source
 data, update snapshots, or probe devices.
 
+In Table view, **Health** inserts Health Status, Health Reason, and Health
+Observed immediately after `deviceLabel`, before `eui`, with **More Info**
+either on or off and for each column category. If `deviceLabel` is absent,
+they appear before `eui`, or at the end if neither field is available.
+Turning Health off restores the dataset column order.
+
 ### Troubleshooting Logs
 
 Set `TD_DEBUG_LEVEL` to `DEBUG`, `INFO`, `WARNING`, or `ERROR` (case-insensitive;
@@ -113,6 +119,11 @@ health status control optionally colors topology node borders from the current
 assessment; coloring is off by default, is not persisted, and resets when the
 active dataset changes.
 
+Table View sorting is available from keyboard-operable column buttons. Values
+sort by their underlying type, empty/unknown values stay last in either
+direction, and selecting a device from its identity cell opens the same details
+as selecting its row. Sorting keeps the selected device.
+
 Network Insights opens on **Findings** and offers three peer tabs:
 **Findings**, **Comparison**, and **Device Roster**. Each tab keeps its filters,
 selection, disclosures, pagination, and table position while switching tabs or
@@ -121,6 +132,10 @@ using **Show in table** and **Return**. The assessment summary is labeled
 not an arbitrary comparison pair or necessarily its After endpoint. Its
 observation time uses the comparison tab's UTC date-time format and includes
 the elapsed age of the observation.
+
+Findings can be ordered by priority or a visible table field. **Reset Findings**
+resets only its filters, order, and selection; Comparison and Device Roster
+remain unchanged.
 
 **Device Roster** shows a searchable, sortable, paginated inventory for the
 selected stored assessment. Presence defaults to **Observed** and describes
@@ -134,6 +149,12 @@ facts and their freshness/conflict metadata in the details panel. Table values
 are network-scoped last-known facts and do not necessarily describe the pinned
 assessment or certify freshness; use Data quality and device details for
 evidence quality. Missing values display as **Absent**.
+The Device column and state context lead the horizontally scrollable table;
+the identity column remains visible while moving across wider facts. Rows Per
+Page offers 25, 50, and 100, defaulting to 100. All column headings remain visible
+above scrolling rows, including the frozen Device column.
+**Reset Roster** resets only its search, filters, sort, page, and selection;
+Findings and Comparison remain unchanged.
 
 From Findings or Device Roster, confirmed per-device actions can enroll an
 observed untracked device, mark an expected device intentionally offline, clear
@@ -160,9 +181,13 @@ pages, and collapsed Custom/Details without changing Findings or Device Roster.
 **All scopes** and **Result**
 (default **Changed**) filter the entire comparison before paging. The table
 reports the visible row range and matching-row count separately from the
-unfiltered total, with First, Previous, direct page selection, Next, and Last
-controls. Pages contain 25 rows; the table scrolls independently. Comparison
-is available only when the server exposes comparison reads; unavailable
+unfiltered total. Subject search matches current device names and canonical
+IDs across the full result, including relationship endpoints; current names
+remain annotations, not historical evidence. The Order control supports
+Subject, Evidence, and effective Result. First, Previous, direct page
+selection, Next, and Last controls share a Rows Per Page selector offering
+25, 50, and 100, defaulting to 100. The table scrolls independently.
+Comparison is available only when the server exposes comparison reads; unavailable
 history, insufficient retained history, empty filter results, and failed reads
 are reported separately. Processing stores adjacent and complete-only interval
 pairs in `hobat_v1.db`; reads can also derive an unstored pair without writing.

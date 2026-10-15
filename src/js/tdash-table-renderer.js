@@ -42,6 +42,20 @@ let _tableHealthColumnsEnabled = false;
 const MORE_INFO_CELL_MAX_LINES = 6;
 const MORE_INFO_CELL_MAX_CHARACTERS = 60;
 const HEALTH_COLUMNS = ["Health Status", "Health Reason", "Health Observed"];
+const TABLE_IDENTITY_COLUMN_PRIORITY = [
+  "extAddress", "rloc16", "deviceLabel", "name", "eui", "routerId", "id", "ID",
+];
+const HEALTH_STATUS_SORT_ORDER = Object.freeze({
+  poor: 0,
+  moderate: 1,
+  strong: 2,
+  unknown: 3,
+  "not assessed": 4,
+});
+const TABLE_TEXT_COLLATOR = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
 
 export function setMoreInfoEnabled(val) {
   _moreInfoEnabled = val;
@@ -322,6 +336,16 @@ function renderTdContent(td, value, columnName) {
 
 // ── Column collection ─────────────────────────────────────────────────────────
 
+function insertHealthColumns(columns) {
+  const ordered = [...new Set(columns)].filter((column) => !HEALTH_COLUMNS.includes(column));
+  if (!_tableHealthColumnsEnabled || !_tableHealthAvailable) return ordered;
+  const labelIndex = ordered.indexOf("deviceLabel");
+  const euiIndex = ordered.indexOf("eui");
+  const insertAt = labelIndex >= 0 ? labelIndex + 1 : euiIndex >= 0 ? euiIndex : ordered.length;
+  ordered.splice(insertAt, 0, ...HEALTH_COLUMNS);
+  return ordered;
+}
+
 export function collectColumns(rows) {
   const columns = [];
   const seen = new Set();
@@ -334,14 +358,20 @@ export function collectColumns(rows) {
       }
     });
   });
-  const healthColumns = _tableHealthColumnsEnabled && _tableHealthAvailable
-    ? HEALTH_COLUMNS
-    : [];
+  const primaryIdentityColumn = TABLE_IDENTITY_COLUMN_PRIORITY.find((column) =>
+    columns.includes(column) && rows.some((row) => getDeviceIdentityKeys(row).length > 0
+      && tableCellValue(row, column) !== null
+      && tableCellValue(row, column) !== undefined
+      && String(tableCellValue(row, column)).trim() !== ""));
   const pinned = [...new Set(TABLE_PRIORITY_COLUMNS.map(getPreferredFieldName))].filter(
     (col) => seen.has(col) || rows.some((row) => hasNestedPath(row, col)),
   );
   const remaining = columns.filter((col) => !pinned.includes(col));
-  return [...healthColumns, ...pinned, ...remaining];
+  return insertHealthColumns([
+    ...(primaryIdentityColumn ? [primaryIdentityColumn] : []),
+    ...pinned,
+    ...remaining,
+  ]);
 }
 
 // ── Column width calculation ──────────────────────────────────────────────────
@@ -369,26 +399,180 @@ function getColumnWidthStyle(maxLen) {
   return { width: `${width}px` };
 }
 
+function isMissingSortValue(value, column) {
+  if (value === null || value === undefined) return true;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  if (column === "Health Status" && Object.hasOwn(HEALTH_STATUS_SORT_ORDER, normalized)) {
+    return false;
+  }
+  return normalized === "" || ["unknown", "absent", "n/a", "not assessed", "—", "-"].includes(normalized);
+}
+
+function parseSortableAddress(value, column) {
+  if (typeof value !== "string") return null;
+  let address = value.trim().toLowerCase().replace(/^(?:extaddr|eui|ipv6):/, "");
+  if (!address) return null;
+  if (/^(?:rloc16|eui|extaddress|extendedaddress)$/i.test(column)) {
+    address = address.replace(/^0x/, "").replaceAll(":", "").replaceAll("-", "");
+    if (/^[0-9a-f]{1,32}$/.test(address)) return BigInt(`0x${address}`);
+  }
+  address = address.replace(/^\[|\]$/g, "").split("%", 1)[0].split("/", 1)[0];
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(address)) {
+    const octets = address.split(".").map(Number);
+    if (octets.every((octet) => octet <= 255)) {
+      return octets.reduce((result, octet) => (result << 8n) | BigInt(octet), 0n);
+    }
+    return null;
+  }
+  if (!address.includes(":")) return null;
+  const ipv4Match = address.match(/(?:^|:)(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (ipv4Match) {
+    const octets = ipv4Match[1].split(".").map(Number);
+    if (!octets.every((octet) => octet <= 255)) return null;
+    const ipv4Hex = octets.map((octet) => octet.toString(16).padStart(2, "0")).join("");
+    address = `${address.slice(0, -ipv4Match[1].length)}${ipv4Hex.slice(0, 4)}:${ipv4Hex.slice(4)}`;
+  }
+  if ((address.match(/::/g) || []).length > 1) return null;
+  const halves = address.split("::");
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const missingGroups = 8 - left.length - right.length;
+  if ((halves.length === 1 && missingGroups !== 0) || (halves.length === 2 && missingGroups < 1)) {
+    return null;
+  }
+  const groups = [...left, ...Array(missingGroups).fill("0"), ...right];
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) {
+    return null;
+  }
+  return groups.reduce((result, group) => (result << 16n) | BigInt(`0x${group}`), 0n);
+}
+
+function compareVersionValues(left, right) {
+  const leftParts = String(left).match(/\d+|[^\d]+/g) || [];
+  const rightParts = String(right).match(/\d+|[^\d]+/g) || [];
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    if (leftParts[index] === undefined) return -1;
+    if (rightParts[index] === undefined) return 1;
+    const leftNumber = /^\d+$/.test(leftParts[index]);
+    const rightNumber = /^\d+$/.test(rightParts[index]);
+    const comparison = leftNumber && rightNumber
+      ? (BigInt(leftParts[index]) < BigInt(rightParts[index]) ? -1
+        : BigInt(leftParts[index]) > BigInt(rightParts[index]) ? 1 : 0)
+      : TABLE_TEXT_COLLATOR.compare(leftParts[index], rightParts[index]);
+    if (comparison) return comparison;
+  }
+  return 0;
+}
+
+function compareTableValues(left, right, column) {
+  if (isMissingSortValue(left, column) || isMissingSortValue(right, column)) {
+    return isMissingSortValue(left, column) === isMissingSortValue(right, column)
+      ? 0
+      : isMissingSortValue(left, column) ? 1 : -1;
+  }
+  if (column === "Health Status") {
+    const leftRank = HEALTH_STATUS_SORT_ORDER[String(left).trim().toLowerCase()];
+    const rightRank = HEALTH_STATUS_SORT_ORDER[String(right).trim().toLowerCase()];
+    if (leftRank !== undefined && rightRank !== undefined) return leftRank - rightRank;
+  }
+  if (typeof left === "boolean" && typeof right === "boolean") return Number(left) - Number(right);
+  if (column.toLowerCase().includes("version")) return compareVersionValues(left, right);
+  const normalizedColumn = column.toLowerCase().replaceAll(/[._\s-]/g, "");
+  const addressColumn = /(?:address|ipv6|eui|rloc16|mleid|^ip$)/.test(normalizedColumn);
+  if (addressColumn || (String(left).includes(":") && String(right).includes(":"))) {
+    const leftAddress = parseSortableAddress(String(left), column);
+    const rightAddress = parseSortableAddress(String(right), column);
+    if (leftAddress !== null && rightAddress !== null) {
+      return leftAddress < rightAddress ? -1 : leftAddress > rightAddress ? 1 : 0;
+    }
+  }
+  const timestampColumn = /(?:time|date|observed|updated|created|timestamp)/i.test(column);
+  if (timestampColumn) {
+    const leftTimestamp = typeof left === "number" ? left : Date.parse(String(left));
+    const rightTimestamp = typeof right === "number" ? right : Date.parse(String(right));
+    if (Number.isFinite(leftTimestamp) && Number.isFinite(rightTimestamp)) {
+      return leftTimestamp - rightTimestamp;
+    }
+  }
+  const leftNumber = typeof left === "number" ? left
+    : typeof left === "string" && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(left.trim())
+      ? Number(left) : null;
+  const rightNumber = typeof right === "number" ? right
+    : typeof right === "string" && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(right.trim())
+      ? Number(right) : null;
+  if (leftNumber !== null && rightNumber !== null) return leftNumber - rightNumber;
+  const leftText = typeof left === "object" ? JSON.stringify(left) : String(left);
+  const rightText = typeof right === "object" ? JSON.stringify(right) : String(right);
+  return TABLE_TEXT_COLLATOR.compare(leftText, rightText);
+}
+
+function tableIdentitySortKey(row) {
+  return getDeviceIdentityKeys(row).sort().join("|").toLowerCase();
+}
+
 function sortedTableRows(rows) {
   if (!_tableSort) return rows;
   const { column, direction } = _tableSort;
   const multiplier = direction === "ascending" ? 1 : -1;
   return [...rows].sort((left, right) => {
-    const leftText = formatCellValue(tableCellValue(left, column), column);
-    const rightText = formatCellValue(tableCellValue(right, column), column);
-    const numericDifference = Number(leftText) - Number(rightText);
-    const comparison = Number.isNaN(numericDifference)
-      ? leftText.localeCompare(rightText)
-      : numericDifference;
-    return comparison * multiplier;
+    const leftValue = tableCellValue(left, column);
+    const rightValue = tableCellValue(right, column);
+    const leftMissing = isMissingSortValue(leftValue, column);
+    const rightMissing = isMissingSortValue(rightValue, column);
+    if (leftMissing !== rightMissing) return leftMissing ? 1 : -1;
+    const primary = compareTableValues(leftValue, rightValue, column);
+    if (primary) return primary * multiplier;
+    return TABLE_TEXT_COLLATOR.compare(tableIdentitySortKey(left), tableIdentitySortKey(right));
   });
 }
 
 // ── DOM table builder ─────────────────────────────────────────────────────────
 
+function selectTableRow(row, tableRow) {
+  const tbodyEl = document.querySelector("#data-table tbody");
+  const previous = tbodyEl.querySelector("tr.selected-row");
+  if (previous) previous.classList.remove("selected-row");
+  tableRow.classList.add("selected-row");
+  const summaryListEl = document.getElementById("summary-list");
+  const details = sortDetailsWithPriority(
+    flattenObjectEntries(row).filter(([key]) => !shouldExcludeDetailPath(key, "table")),
+  );
+  if (details.length === 0) {
+    _selectedTableRow = null;
+    publishDeviceSelection(null, { direct: true });
+    if (summaryListEl) summaryListEl.innerHTML = "<li>No details available for selected row.</li>";
+    return;
+  }
+  _selectedTableRow = row;
+  publishDeviceSelection(row, { direct: true });
+  if (summaryListEl) summaryListEl.innerHTML = "";
+  populateNodeDetailsLists(details);
+}
+
+function identityColumnForRow(row, columns) {
+  if (getDeviceIdentityKeys(row).length === 0) return null;
+  const firstColumn = columns[0];
+  if (TABLE_IDENTITY_COLUMN_PRIORITY.includes(firstColumn)
+      && tableCellValue(row, firstColumn) !== null
+      && tableCellValue(row, firstColumn) !== undefined
+      && String(tableCellValue(row, firstColumn)).trim() !== "") {
+    return firstColumn;
+  }
+  return TABLE_IDENTITY_COLUMN_PRIORITY.find((column) => columns.includes(column)
+    && tableCellValue(row, column) !== null && tableCellValue(row, column) !== undefined
+    && String(tableCellValue(row, column)).trim() !== "") ?? null;
+}
+
 function renderTableRows(rows, columns, isSearchActive = false, selectedRow = null) {
   const theadEl = document.querySelector("#data-table thead");
   const tbodyEl = document.querySelector("#data-table tbody");
+  const tableEl = document.querySelector("#data-table");
+  const hasIdentityColumn = TABLE_IDENTITY_COLUMN_PRIORITY.includes(columns[0]);
+  if (tableEl) {
+    if (hasIdentityColumn) tableEl.dataset.identityColumn = columns[0];
+    else delete tableEl.dataset.identityColumn;
+  }
   theadEl.innerHTML = "";
   tbodyEl.innerHTML = "";
 
@@ -403,9 +587,14 @@ function renderTableRows(rows, columns, isSearchActive = false, selectedRow = nu
   const headRow = document.createElement("tr");
   columns.forEach((col) => {
     const th = document.createElement("th");
-    th.textContent = col;
-    if (_tableSort?.column === col) th.setAttribute("aria-sort", _tableSort.direction);
-    th.addEventListener("click", (event) => {
+    th.scope = "col";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "table-sort-button";
+    button.dataset.sortColumn = col;
+    button.textContent = col;
+    button.title = `Sort by ${col}`;
+    button.addEventListener("click", (event) => {
       event.stopPropagation();
       const direction = _tableSort?.column === col && _tableSort.direction === "ascending"
         ? "descending"
@@ -413,6 +602,15 @@ function renderTableRows(rows, columns, isSearchActive = false, selectedRow = nu
       _tableSort = { column: col, direction };
       applyTableFilters({ preserveSelection: true });
     });
+    if (_tableSort?.column === col) {
+      th.setAttribute("aria-sort", _tableSort.direction);
+      const icon = document.createElement("span");
+      icon.className = "table-sort-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = _tableSort.direction === "ascending" ? "▲" : "▼";
+      button.appendChild(icon);
+    }
+    th.appendChild(button);
     Object.assign(th.style, columnWidths.get(col));
     headRow.appendChild(th);
   });
@@ -424,48 +622,38 @@ function renderTableRows(rows, columns, isSearchActive = false, selectedRow = nu
     tr.dataset.rowIndex = idx;
     if (isSearchActive) tr.classList.add("search-match");
     if (row === selectedRow) tr.classList.add("selected-row");
+    const identityColumn = identityColumnForRow(row, columns);
     columns.forEach((col) => {
       const td = document.createElement("td");
-      renderTdContent(td, tableCellValue(row, col), col);
+      const value = tableCellValue(row, col);
+      if (col === identityColumn) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "table-identity-action";
+        button.title = `View details for ${formatCellValue(value, col)}`;
+        button.setAttribute("aria-label", `View details for ${formatCellValue(value, col)}`);
+        renderTdContent(button, value, col);
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          selectTableRow(row, tr);
+        });
+        td.appendChild(button);
+      } else {
+        renderTdContent(td, value, col);
+      }
       if (col === "Health Status") {
-        const statusClass = String(tableCellValue(row, col)).toLowerCase().replaceAll(" ", "-");
+        const statusClass = String(value).toLowerCase().replaceAll(" ", "-");
         td.className = `table-health-status state-${statusClass}`;
       }
       Object.assign(td.style, columnWidths.get(col));
       tr.appendChild(td);
     });
     tr.addEventListener("click", () => {
-      const prev = tbodyEl.querySelector("tr.selected-row");
-      if (prev) prev.classList.remove("selected-row");
-      tr.classList.add("selected-row");
-      const summaryListEl = document.getElementById("summary-list");
-      const rawRow = _lastFilteredRows[idx] ?? row;
-      const details = sortDetailsWithPriority(
-        flattenObjectEntries(rawRow).filter(
-          ([key]) => !shouldExcludeDetailPath(key, "table"),
-        ),
-      );
-      if (details.length === 0) {
-        _selectedTableRow = null;
-        publishDeviceSelection(null, { direct: true });
-        if (summaryListEl)
-          summaryListEl.innerHTML =
-            "<li>No details available for selected row.</li>";
-        return;
-      }
-      _selectedTableRow = rawRow;
-      publishDeviceSelection(rawRow, { direct: true });
-      if (summaryListEl) summaryListEl.innerHTML = "";
-      populateNodeDetailsLists(details);
+      selectTableRow(_lastFilteredRows[idx] ?? row, tr);
     });
     fragment.appendChild(tr);
   });
   tbodyEl.appendChild(fragment);
-
-  // Re-initialise SortableJS after replacing table content
-  if (window.Sortable && typeof window.Sortable.init === "function") {
-    window.Sortable.init();
-  }
 }
 
 // ── Filter + render pipeline ──────────────────────────────────────────────────
@@ -491,11 +679,12 @@ function updateTableStatus(visibleRowCount, columnCount, totalFilteredCount, sea
   if (searchQuery) {
     statusText += ` Search: "${searchQuery}" — ${visibleRowCount} of ${totalFilteredCount} rows match.`;
   }
-  statusText += " Click a header to sort.";
+  statusText += " Activate a column header button to sort; empty values sort last and health status follows severity order.";
   publishViewStatus("table", statusText, _tableDatasetToken);
 }
 
 export function applyTableFilters({ preserveSelection = false } = {}) {
+  const focusedSortColumn = document.activeElement?.dataset?.sortColumn;
   const nodeMode = document.getElementById("node-filter").value;
   const diagMode = document.getElementById("diagnostic-filter").value;
   const searchQuery = parseSearchQuery(
@@ -514,14 +703,12 @@ export function applyTableFilters({ preserveSelection = false } = {}) {
     : null;
   if (preserveSelection && !selectedRow) _selectedTableRow = null;
   if (!preserveSelection) _selectedTableRow = null;
-  const visibleHealthColumns = _tableHealthColumnsEnabled && _tableHealthAvailable
-    ? HEALTH_COLUMNS
-    : [];
   const selectedColumns = _tableColumnCategory === "all"
     ? (_moreInfoEnabled ? _tableColumns : TABLE_PRIORITY_COLUMNS)
     : getTableColumnsForCategory(_tableRows, _tableColumnCategory);
-  const activeColumns = [...new Set([...visibleHealthColumns, ...selectedColumns])]
-    .filter((column) => _tableColumns.includes(column));
+  const activeColumns = insertHealthColumns(
+    selectedColumns.filter((column) => _tableColumns.includes(column)),
+  );
   const detailsListEl = document.getElementById("details-list");
   if (detailsListEl) detailsListEl.innerHTML = "";
   const summaryListEl = document.getElementById("summary-list");
@@ -533,6 +720,12 @@ export function applyTableFilters({ preserveSelection = false } = {}) {
     publishDeviceSelection(null);
   }
   renderTableRows(sortedRows, activeColumns, searchQuery !== "", selectedRow);
+  if (focusedSortColumn) {
+    const activeSortButton = Array.from(
+      document.querySelectorAll("#data-table thead button.table-sort-button"),
+    ).find((button) => button.dataset.sortColumn === focusedSortColumn);
+    activeSortButton?.focus({ preventScroll: true });
+  }
   updateTableStatus(sortedRows.length, activeColumns.length, filtered.length, searchQuery);
 
   if (selectedRow && sortedRows.includes(selectedRow)) {

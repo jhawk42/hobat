@@ -165,6 +165,27 @@ def test_semantic_layout_and_workspace_hierarchy() -> None:
     assert parser.parent_by_id["topology-view"] == "topology-canvas-wrap"
 
 
+def test_table_sorting_and_health_resets_are_application_owned_and_scoped() -> None:
+    html = _read_text(HTML)
+    table_js = (REPO_ROOT / "src" / "js" / "tdash-table-renderer.js").read_text(encoding="utf-8")
+    health_js = (REPO_ROOT / "src" / "js" / "tdash-health.js").read_text(encoding="utf-8")
+    ui_js = _read_text(UI_JS)
+
+    assert "sortable.min.js" not in html
+    assert 'class="sortable"' not in html
+    assert "Sortable.init" not in table_js
+    assert "button.className = \"table-sort-button\"" in table_js
+    assert "tableIdentitySortKey" in table_js
+    assert 'id="health-findings-sort"' in html
+    assert 'id="btn-health-roster-reset"' in html
+    assert '<label for="health-roster-search">Search name or canonical device ID' in html
+    assert 'addEventListener("click", resetHealthFindings)' in ui_js
+    assert 'addEventListener("click", resetHealthRoster)' in ui_js
+    assert "updateSavedFindingNavigationContext();" in ui_js
+    assert "updateSavedRosterNavigationContext();" in ui_js
+    assert "attributed finding" in health_js
+
+
 def test_health_insights_comparison_is_an_ordered_peer_tab() -> None:
     parser = _IdParentParser()
     html = _read_text(HTML)
@@ -419,6 +440,28 @@ def test_vis_navigation_rules_are_not_nested_under_unused_heading() -> None:
     css = _read_text(CSS)
 
     assert re.search(r"h1\s*\{[^}]*div\.vis-network", css, re.DOTALL) is None
+
+
+def test_roster_header_stacks_above_sticky_device_cells() -> None:
+    css = _read_text(CSS)
+    header = re.search(r"\.health-roster-table-wrap thead\s*\{([^}]+)\}", css)
+    device_cells = re.search(
+        r"\.health-roster-table-wrap th:first-child,\s*"
+        r"\.health-roster-table-wrap td:first-child\s*\{([^}]+)\}", css,
+    )
+    assert header is not None
+    assert device_cells is not None
+    header_rules = header.group(1)
+    device_rules = device_cells.group(1)
+    assert "position: sticky;" in header_rules
+    assert "top: 0;" in header_rules
+    assert "position: sticky;" in device_rules
+    assert "left: 0;" in device_rules
+    header_z = re.search(r"z-index:\s*(\d+)", header_rules)
+    device_z = re.search(r"z-index:\s*(\d+)", device_rules)
+    assert header_z is not None
+    assert device_z is not None
+    assert int(header_z.group(1)) > int(device_z.group(1))
 
 
 def test_responsive_dashboard_grid_contract() -> None:
