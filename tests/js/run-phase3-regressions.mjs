@@ -251,8 +251,11 @@ function comparisonDetail(header, query, items = [{}]) {
     ...header,
     networkId: assessment.networkId,
     datasetId: assessment.datasetId,
+    search: query.q ?? "",
+    sort: query.sort ?? "subject",
+    direction: query.direction ?? "ascending",
     filteredItemCount: header.filteredItemCount ?? header.itemCount,
-    limit: 25,
+    limit: query.limit ?? 100,
     offset: query.offset,
     items,
   };

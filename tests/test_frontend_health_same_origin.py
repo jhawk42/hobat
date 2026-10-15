@@ -2320,7 +2320,9 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert 'replace(/^extAddress:/, "extaddr:")' in table_js
     assert 'replace(/^extAddress:/, "extaddr:")' in topology_js
     assert "viewModel.rawByIdForDetails.get(nodeId)" in topology_js
-    assert "visibleHealthColumns" in table_js
+    assert "function insertHealthColumns(columns)" in table_js
+    assert "if (!_tableHealthColumnsEnabled || !_tableHealthAvailable) return ordered;" in table_js
+    assert "ordered.splice(insertAt, 0, ...HEALTH_COLUMNS);" in table_js
     assert "setTableHealthColumnsEnabled" in table_js
     assert '"Dataset Evidence Pillars"' in health_js
     assert "COVERAGE_STATUS_GLYPHS" in health_js

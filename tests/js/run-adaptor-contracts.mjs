@@ -14,7 +14,10 @@ import {
 } from "../../src/js/tdash-adaptor-model.js";
 import { emitThroughAdaptorModel } from "../../src/js/tdash-adaptor-shared.js";
 import { getPreferredFieldPath } from "../../src/js/tdash-device-fields.js";
-import { HA_MATTER_ROLE_POLICY } from "../../src/js/tdash-ha-matter-ws-roles.js";
+import {
+  HA_MATTER_ROLE_POLICY,
+  normalizeHaMatterRoleRecord,
+} from "../../src/js/tdash-ha-matter-ws-roles.js";
 import { buildRoleNodeEmphasis } from "../../src/js/tdash-topology-utils.js";
 
 assert.deepEqual(buildRoleNodeEmphasis({ isBorderRouter: true, isRouter: true }), {
@@ -392,6 +395,11 @@ const haRoleRows = [
   { topologyId: "role:br", extAddress: "aa00000000000001", isBorderRouter: true, isRouter: true },
   { topologyId: "role:router", extAddress: "aa00000000000002", isBorderRouter: false, isRouter: true },
   { topologyId: "role:child", extAddress: "aa00000000000003", isBorderRouter: false, isRouter: false, role: "Child" },
+  normalizeHaMatterRoleRecord({
+    topologyId: "role:reed",
+    extAddress: "aa00000000000005",
+    role: "Reed",
+  }, "commissioned-topology"),
   {
     topologyId: "role:unknown",
     extAddress: "aa00000000000004",
@@ -405,6 +413,7 @@ const haRoleEmphasis = {
   "role:br": { borderWidth: 5, size: 45 },
   "role:router": { borderWidth: 3, size: 45 },
   "role:child": { borderWidth: 1, size: 27 },
+  "role:reed": { borderWidth: 1, size: 27 },
   "role:unknown": { borderWidth: 1, size: 27 },
 };
 const haRoleTopology = runHaMatterRolePolicy(
@@ -418,6 +427,7 @@ assertRoleEmphasis(haRoleTopology, {
   ...haRoleEmphasis,
   "ha-matter-ws:rloc:0x3000": { borderWidth: 1, size: 27 },
 });
+assert.equal(haRoleTopology.nodeData.find((node) => node.id === "role:reed").isRouter, false);
 
 const haNativeRolePayload = {
   topology: {
@@ -644,12 +654,6 @@ assert.ok(cachedHaMatter.nodeData.some((node) => !node.isRouter));
 assert.ok(cachedHaMatter.edgeData.every((edge) =>
   edge.arrows === "to" && cachedHaMatterNodeIds.has(edge.from)
   && cachedHaMatterNodeIds.has(edge.to)));
-assert.equal(
-  cachedHaMatter.nodeData.find(
-    (node) => cachedHaMatter.nodeMap.get(node.id)?.role === "Reed",
-  )?.isRouter,
-  false,
-);
 
   const cachedHaMatterDashboard = JSON.parse(
     fs.readFileSync("data/td-ha-matter-ws-dashboard.json", "utf8"),

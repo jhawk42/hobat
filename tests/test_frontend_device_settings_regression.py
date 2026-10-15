@@ -28,7 +28,8 @@ def test_device_selection_event_is_shared_by_both_renderers() -> None:
     assert "export function publishDeviceSelection(record, { direct = false, resolved = false } = {})" in utils_text
     assert "detail: { record: record ?? null, direct, resolved }" in utils_text
     assert "publishDeviceSelection(mergedDetails, { direct });" in topology_text
-    assert "publishDeviceSelection(rawRow, { direct: true });" in table_text
+    assert "selectTableRow(_lastFilteredRows[idx] ?? row, tr);" in table_text
+    assert "publishDeviceSelection(row, { direct: true });" in table_text
 
 
 def test_direct_selection_resolves_current_dataset_and_reopens_only_when_valid() -> None:
@@ -56,14 +57,18 @@ def test_table_direct_selection_validates_details_and_filtering_clears_hidden_se
     click_start = table_text.index('tr.addEventListener("click", () => {')
     click_end = table_text.index("fragment.appendChild(tr);", click_start)
     click_source = table_text[click_start:click_end]
+    selection_start = table_text.index("function selectTableRow(")
+    selection_end = table_text.index("function identityColumnForRow", selection_start)
+    selection_source = table_text[selection_start:selection_end]
     filters_start = table_text.index("export function applyTableFilters")
     filters_end = table_text.index("export function renderTableForDataset", filters_start)
     filters_source = table_text[filters_start:filters_end]
 
-    assert click_source.index("if (details.length === 0) {") < click_source.index(
-        "publishDeviceSelection(rawRow, { direct: true });"
+    assert "selectTableRow(_lastFilteredRows[idx] ?? row, tr);" in click_source
+    assert selection_source.index("if (details.length === 0) {") < selection_source.index(
+        "publishDeviceSelection(row, { direct: true });"
     )
-    assert "publishDeviceSelection(null, { direct: true });" in click_source
+    assert "publishDeviceSelection(null, { direct: true });" in selection_source
     assert "sortedRows.includes(_selectedTableRow)" in filters_source
     assert "if (preserveSelection && !selectedRow) _selectedTableRow = null;" in filters_source
 
