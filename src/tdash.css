@@ -305,7 +305,9 @@ body {
   gap: 6px;
 }
 
-#search-input {
+#search-input,
+.health-comparison-filter-row input[data-comparison-control="search"],
+#health-roster-search {
   min-width: 0;
   width: 24ch;
   font-size: 14px;
