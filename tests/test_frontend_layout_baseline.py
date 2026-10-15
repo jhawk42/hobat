@@ -23,6 +23,7 @@ BEHAVIOR_IDS = (
     "health-finding-details",
     "panel-home",
     "device-status",
+    "btn-device-status-close",
     "panel-dataset",
     "panel-node-link-filters",
     "panel-view",
@@ -331,6 +332,37 @@ def test_operations_workspace_exposes_activity_and_jobs_tabs() -> None:
     assert "new AbortController()" in ui_text
     assert "jobsViewState.requestVersion" in ui_text
     assert 'window.confirm("Cancel all pending jobs?")' in ui_text
+
+
+def test_device_status_close_button_toggles_functions_panel() -> None:
+    parser = _IdParentParser()
+    html = _read_text(HTML)
+    css = _read_text(CSS)
+    ui_text = _read_text(UI_JS)
+    parser.feed(html)
+
+    assert parser.parent_by_id["btn-device-status-close"] == "device-status"
+    assert parser.parent_by_id["btn-toggle-devices"] == "device-status"
+    assert parser.tag_by_id["btn-device-status-close"] == "button"
+    close_button = parser.attributes_by_id["btn-device-status-close"]
+    assert close_button["type"] == "button"
+    assert close_button["title"] == "Collapse functions panel"
+    assert close_button["aria-label"] == "Collapse functions panel"
+    assert close_button["aria-controls"] == "panel-functions"
+    assert close_button["aria-expanded"] == "true"
+    assert 'class="device-status-close"' in html
+    assert "#device-status > legend" in css
+    assert "justify-content: space-between;" in css
+    assert ".device-status-close" in css
+    assert (
+        'document.getElementById("btn-functions-panel-toggle")?.addEventListener("click", toggleFunctionsPanel);'
+        in ui_text
+    )
+    assert (
+        'document.getElementById("btn-device-status-close")?.addEventListener("click", toggleFunctionsPanel);'
+        in ui_text
+    )
+    assert 'button.setAttribute("aria-expanded", String(!isCollapsed));' in ui_text
 
 
 def test_jobs_workspace_poll_delay_scales_with_longest_running_job() -> None:

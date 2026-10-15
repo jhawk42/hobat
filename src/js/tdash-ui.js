@@ -1395,20 +1395,28 @@ function setFunctionsPanelCollapsed(isCollapsed) {
   const shell = document.querySelector(".dashboard-shell");
   const toggleButton = document.getElementById("btn-functions-panel-toggle");
   shell?.classList.toggle("functions-panel-collapsed", isCollapsed);
+  const closeButton = document.getElementById("btn-device-status-close");
+  const action = isCollapsed ? "Expand" : "Collapse";
+  [toggleButton, closeButton].forEach((button) => {
+    if (button) {
+      button.title = `${action} functions panel`;
+      button.setAttribute("aria-label", `${action} functions panel`);
+      button.setAttribute("aria-expanded", String(!isCollapsed));
+    }
+  });
   if (toggleButton) {
-    const action = isCollapsed ? "Expand" : "Collapse";
-    toggleButton.title = `${action} functions panel`;
-    toggleButton.setAttribute("aria-label", `${action} functions panel`);
-    toggleButton.setAttribute("aria-expanded", String(!isCollapsed));
     toggleButton.textContent = isCollapsed ? "▶" : "◀";
   }
   resizeAndFitTopology();
 }
 
-document.getElementById("btn-functions-panel-toggle")?.addEventListener("click", () => {
+function toggleFunctionsPanel() {
   const shell = document.querySelector(".dashboard-shell");
   setFunctionsPanelCollapsed(!shell?.classList.contains("functions-panel-collapsed"));
-});
+}
+
+document.getElementById("btn-functions-panel-toggle")?.addEventListener("click", toggleFunctionsPanel);
+document.getElementById("btn-device-status-close")?.addEventListener("click", toggleFunctionsPanel);
 
 function setNavigationPanelCollapsed(isCollapsed) {
   const shell = document.querySelector(".dashboard-shell");
