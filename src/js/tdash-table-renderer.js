@@ -43,7 +43,14 @@ const MORE_INFO_CELL_MAX_LINES = 6;
 const MORE_INFO_CELL_MAX_CHARACTERS = 60;
 const HEALTH_COLUMNS = ["Health Status", "Health Reason", "Health Observed"];
 const TABLE_IDENTITY_COLUMN_PRIORITY = [
-  "extAddress", "rloc16", "deviceLabel", "name", "eui", "routerId", "id", "ID",
+  "deviceLabel", 
+  "rloc16", 
+  "extAddress", 
+  "name", 
+  "eui", 
+  "routerId", 
+  "id", 
+  "ID",
 ];
 const HEALTH_STATUS_SORT_ORDER = Object.freeze({
   poor: 0,
