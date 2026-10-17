@@ -850,6 +850,24 @@ class TestDispatchOtherCommands(unittest.TestCase):
         )
         self.assertEqual(rc, 0)
 
+    def test_restapi_child_diagnostics_controls_are_forwarded(self):
+        argv = [
+            "otbr-restapi",
+            "diagnostics",
+            "fetch-all",
+            "--children-fetch-fast-no",
+            "--children-fetch-detail",
+            "--child-task-timeout",
+            "25",
+            "--child-poll-timeout",
+            "30",
+        ]
+        with patch.object(td_cli.otbr_restapi_cli, "main", return_value=0) as m:
+            rc = self._dispatch(argv)
+
+        m.assert_called_once_with(argv[1:])
+        self.assertEqual(rc, 0)
+
     def test_restapi_global_host_forwarded_before_resource(self):
         """Global --host must appear before the resource name in forwarded argv."""
         with patch.object(td_cli.otbr_restapi_cli, "main", return_value=0) as m:

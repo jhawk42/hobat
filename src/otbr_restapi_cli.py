@@ -41,6 +41,7 @@ from otbr_restapi_util import (
     MINIMAL_DIAGNOSTIC_TLVS,
     BASIC_DIAGNOSTIC_TLVS,
     RECOMMENDED_DIAGNOSTIC_TLVS,
+    CHILD_DIAGNOSTIC_TIMING_POLICY,
     DestinationType,
     OTBRActionError,
     OTBRActionFailedError,
@@ -370,6 +371,7 @@ def _add_diagnostics_commands(
         "--task-timeout", type=int, default=CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT,
         help=f"Server-side task timeout per device in seconds (default: {CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT})",
     )
+    _add_child_diagnostic_options(diagnostics_fetch_all)
     diagnostics_fetch_all.add_argument(
         "--destination-type", default=DestinationType.EXTENDED,
         help=f"Destination addressing mode (default: {DestinationType.EXTENDED})",
@@ -387,15 +389,15 @@ def _add_diagnostics_commands(
         "--no-fallback",
         action="store_true",
         default=False,
-        help="Disable per-device TLV fallback retry on failure",
+        help="Disable additional diagnostic actions; known children keep their selected initial TLV sets",
     )
     diagnostics_fetch_all.add_argument(
         "--no-basic-fallback",
         action="store_true",
         default=False,
         help=(
-            "Skip the final basic TLV retry while retaining role-specific initial and medium tiers. "
-            "Applies only to default/recommended progressive fetch-all"
+            "Skip the final basic retry for routers and unknown-mode children; "
+            "does not disable the MTD fast pass or its same-set retry"
         ),
     )
     diagnostics_fetch_all.add_argument(
@@ -419,6 +421,56 @@ def _add_diagnostics_commands(
         action="store_true",
         default=False,
         help="Return raw macCounters values without computed totals and ratios",
+    )
+
+
+def _add_child_diagnostic_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--children-fetch-fast",
+        dest="children_fetch_fast",
+        action="store_true",
+        default=None,
+        help="Enable the MTD fast pass (default: enabled)",
+    )
+    parser.add_argument(
+        "--children-fetch-fast-no",
+        dest="children_fetch_fast",
+        action="store_false",
+        default=None,
+        help="Disable the MTD fast pass",
+    )
+    parser.add_argument(
+        "--children-fetch-detail",
+        dest="children_fetch_detail",
+        action="store_true",
+        default=None,
+        help="Enable the optional MTD detail pass (default: disabled)",
+    )
+    parser.add_argument(
+        "--children-fetch-detail-no",
+        dest="children_fetch_detail",
+        action="store_false",
+        default=None,
+        help="Disable the MTD detail pass",
+    )
+    parser.add_argument(
+        "--child-task-timeout",
+        type=int,
+        default=CHILD_DIAGNOSTIC_TIMING_POLICY.task_timeout,
+        help=(
+            "Server-side timeout in seconds for known and unknown child "
+            f"diagnostic actions (default: {CHILD_DIAGNOSTIC_TIMING_POLICY.task_timeout})"
+        ),
+    )
+    parser.add_argument(
+        "--child-poll-timeout",
+        type=float,
+        default=None,
+        metavar="FLOAT",
+        help=(
+            "Client polling budget for child diagnostic actions "
+            "(default: derived from child task timeout and poll interval)"
+        ),
     )
 
 
@@ -721,6 +773,7 @@ def _add_topology_commands(
         default=CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT,
         help=f"Server-side timeout for diagnostic actions (default: {CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT})",
     )
+    _add_child_diagnostic_options(topo_p)
     topo_p.add_argument(
         "--no-progress",
         action="store_true",
@@ -765,7 +818,7 @@ def _add_topology_commands(
         "--no-fallback",
         action="store_true",
         default=False,
-        help="Disable per-device TLV fallback retry on failure",
+        help="Disable additional diagnostic actions; known children keep their selected initial TLV sets",
     )
     topo_p.add_argument(
         "--fallback-preset",

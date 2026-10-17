@@ -213,6 +213,19 @@ class _MeshDeviceAttempt:
     elapsed: float
 
 
+@dataclass
+class _ModeAwareDiagnosticOutcome:
+    context: dict[str, Any] | None
+    status: str
+    attempted_types: list[list[str | int]]
+    attempt_errors: list[dict[str, Any]]
+    passes: list[dict[str, Any]]
+    selected_pass: str | None
+    selected_types: list[str | int] | None
+    retry_recovered: bool
+    error: OTBRClientError | None
+
+
 def _diagnostic_attempt_error(exc: OTBRClientError) -> dict[str, Any]:
     return {
         "type": type(exc).__name__,
@@ -338,8 +351,13 @@ class OTBRIndeterminateEnqueueError(OTBRClientError):
 
 def _normalize_batch_devices(
     device_ids: Sequence[str | Mapping[str, Any]],
-) -> tuple[list[tuple[str, str | None]], list[dict[str, Any]]]:
-    normalized_devices: list[tuple[str, str | None]] = []
+) -> tuple[
+    list[tuple[str, str | None, object | None]],
+    list[dict[str, Any]],
+]:
+    normalized_devices: list[
+        tuple[str, str | None, object | None]
+    ] = []
     device_results: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
 
@@ -347,9 +365,11 @@ def _normalize_batch_devices(
         if isinstance(device, Mapping):
             device_id = device.get("id") or device.get("extAddress")
             role = device.get("role")
+            mode = device.get("mode")
         else:
             device_id = device
             role = None
+            mode = None
         if not isinstance(device_id, str) or not re.fullmatch(
             r"[0-9a-fA-F]{16}", device_id
         ):
@@ -374,9 +394,46 @@ def _normalize_batch_devices(
             )
             continue
         seen_ids.add(normalized_id)
-        normalized_devices.append((device_id, str(role).lower() if role else None))
+        normalized_devices.append(
+            (
+                device_id,
+                str(role).lower() if role else None,
+                mode,
+            )
+        )
 
     return normalized_devices, device_results
+
+
+def _classify_child_mode(
+    mode: object | None,
+) -> tuple[str, str | None]:
+    if mode is None:
+        return "unknown", "missing"
+    if not isinstance(mode, Mapping):
+        return "unknown", "malformed"
+
+    classifications: list[str] = []
+    full_thread_device = mode.get("fullThreadDevice")
+    if "fullThreadDevice" in mode:
+        if type(full_thread_device) is not bool:
+            return "unknown", "malformed"
+        classifications.append("ftd" if full_thread_device else "mtd")
+
+    device_type = mode.get("device")
+    if "device" in mode:
+        if not isinstance(device_type, str) or device_type.upper() not in {
+            "FTD",
+            "MTD",
+        }:
+            return "unknown", "malformed"
+        classifications.append(device_type.lower())
+
+    if not classifications:
+        return "unknown", "missing"
+    if any(value != classifications[0] for value in classifications[1:]):
+        return "unknown", "conflicting"
+    return classifications[0], None
 
 
 @dataclass(frozen=True)
@@ -1504,8 +1561,15 @@ class OTBRRestApiClient:
         fallback_types: Sequence[str | int] | None = None,
         progressive_fallback: bool = False,
         include_basic_fallback: bool = True,
+        child_collection_policy: str = "legacy",
+        children_fetch_fast: bool = True,
+        children_fetch_detail: bool = False,
+        child_retry_enabled: bool = True,
         on_progress: Callable[[int, int, str, float, str], None] | None = None,
         on_checkpoint: Callable[[list[Any], int, int, str, str], None] | None = None,
+        on_pass_checkpoint: (
+            Callable[[list[Any], int, int, str, str], None] | None
+        ) = None,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -1529,6 +1593,20 @@ class OTBRRestApiClient:
             Failed devices are omitted when skip_on_failure=True.
         """
         raw = self._resolve_raw(raw)
+        if child_collection_policy not in {"legacy", "mode-aware"}:
+            raise OTBRUsageError(
+                "child_collection_policy must be 'legacy' or 'mode-aware'"
+            )
+        ActionTimingPolicy.resolve(
+            task_timeout=task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+        )
+        child_timing = ActionTimingPolicy.resolve(
+            task_timeout=child_task_timeout,
+            poll_interval=poll_interval,
+            poll_timeout=child_poll_timeout,
+        )
         started_at = datetime.now(timezone.utc).isoformat()
         results: list[Any] = []
         normalized_devices, device_results = _normalize_batch_devices(device_ids)
@@ -1537,12 +1615,145 @@ class OTBRRestApiClient:
             self.delete_all_diagnostics()
 
         total = len(normalized_devices)
-        for idx, (device_id, role) in enumerate(normalized_devices, start=1):
+        for idx, (device_id, role, mode) in enumerate(normalized_devices, start=1):
             t_start = time.monotonic()
             status = "completed"
             attempted_types: list[list[str | int]] = []
             attempt_errors: list[dict[str, Any]] = []
+            legacy_mode_metadata: dict[str, Any] = {}
             try:
+                if child_collection_policy == "mode-aware" and role == "child":
+                    mode_classification, mode_warning = _classify_child_mode(mode)
+                    if mode_classification == "unknown":
+                        legacy_mode_metadata = {
+                            "policy": "legacy-unknown-mode",
+                            "modeClassification": mode_classification,
+                            "modeWarning": mode_warning,
+                            "deviceMode": (
+                                dict(mode) if isinstance(mode, Mapping) else mode
+                            ),
+                        }
+                        logging.warning(
+                            "Device %s has %s mode evidence; using the legacy child diagnostic policy",
+                            device_id,
+                            mode_warning,
+                        )
+                    else:
+                        pass_specs: list[tuple[str, Sequence[str | int]]] = []
+                        if mode_classification == "mtd":
+                            if children_fetch_fast:
+                                pass_specs.append(
+                                    ("fast", BASIC_DIAGNOSTIC_TLVS)
+                                )
+                            if children_fetch_detail:
+                                pass_specs.append(
+                                    ("detail", CHILD_MEDIUM_DIAGNOSTIC_TLVS)
+                                )
+                        else:
+                            pass_specs.append(
+                                ("medium", CHILD_MEDIUM_DIAGNOSTIC_TLVS)
+                            )
+                        if mode_classification == "mtd" and not pass_specs:
+                            logging.info(
+                                "Skipping MTD child %s because both diagnostic passes are disabled",
+                                device_id,
+                            )
+                        mode_outcome = self._fetch_mode_aware_diagnostic_attempts(
+                            device_id,
+                            mode_classification,
+                            pass_specs,
+                            idx=idx,
+                            total=total,
+                            destination_type=destination_type,
+                            task_timeout=child_task_timeout,
+                            poll_timeout=child_timing.poll_timeout,
+                            poll_interval=poll_interval,
+                            child_retry_enabled=child_retry_enabled,
+                            raw=raw,
+                            results=results,
+                            on_pass_checkpoint=on_pass_checkpoint,
+                        )
+                        attempted_types = mode_outcome.attempted_types
+                        attempt_errors = mode_outcome.attempt_errors
+                        status = mode_outcome.status
+                        if mode_outcome.context is None:
+                            record = {
+                                "deviceId": device_id,
+                                "role": role,
+                                "deviceMode": (
+                                    dict(mode) if isinstance(mode, Mapping) else mode
+                                ),
+                                "modeClassification": mode_classification,
+                                "policy": "mode-aware",
+                                "status": status,
+                                "attempts": len(attempted_types),
+                                "attemptedTypes": attempted_types,
+                                "successfulTypes": None,
+                                "fallbackRecovered": False,
+                                "retryRecovered": mode_outcome.retry_recovered,
+                                "passes": mode_outcome.passes,
+                                "attemptErrors": attempt_errors,
+                                "elapsed": time.monotonic() - t_start,
+                            }
+                            if mode_outcome.status == "skipped":
+                                record["skipReason"] = (
+                                    "both MTD diagnostic passes are disabled"
+                                )
+                            if mode_outcome.error is not None:
+                                record["error"] = _diagnostic_attempt_error(
+                                    mode_outcome.error
+                                )
+                                if not skip_on_failure:
+                                    raise mode_outcome.error
+                                logging.warning(
+                                    "Skipping device %s: %s",
+                                    device_id,
+                                    mode_outcome.error,
+                                )
+                            device_results.append(record)
+                            continue
+
+                        diagnostic = mode_outcome.context["item"]
+                        device_results.append(
+                            {
+                                "deviceId": device_id,
+                                "role": role,
+                                "deviceMode": (
+                                    dict(mode) if isinstance(mode, Mapping) else mode
+                                ),
+                                "modeClassification": mode_classification,
+                                "policy": "mode-aware",
+                                "status": status,
+                                "diagnosticId": mode_outcome.context["diagnosticId"],
+                                "action": mode_outcome.context["action"],
+                                "attempts": len(attempted_types),
+                                "attemptedTypes": attempted_types,
+                                "successfulTypes": mode_outcome.selected_types,
+                                "fallbackRecovered": False,
+                                "retryRecovered": mode_outcome.retry_recovered,
+                                "selectedPass": mode_outcome.selected_pass,
+                                "passes": mode_outcome.passes,
+                                "attemptErrors": attempt_errors,
+                                "created": (
+                                    diagnostic.get("created")
+                                    if isinstance(diagnostic, dict)
+                                    else None
+                                ),
+                                "error": (
+                                    _diagnostic_attempt_error(mode_outcome.error)
+                                    if mode_outcome.error is not None
+                                    else None
+                                ),
+                                "elapsed": time.monotonic() - t_start,
+                            }
+                        )
+                        if status == "partial":
+                            logging.warning(
+                                "Device %s returned partial mode-aware diagnostics",
+                                device_id,
+                            )
+                        continue
+
                 (
                     context,
                     attempted_types,
@@ -1560,7 +1771,7 @@ class OTBRRestApiClient:
                     task_timeout=task_timeout,
                     poll_timeout=poll_timeout,
                     child_task_timeout=child_task_timeout,
-                    child_poll_timeout=child_poll_timeout,
+                    child_poll_timeout=child_timing.poll_timeout,
                     poll_interval=poll_interval,
                     destination_type=destination_type,
                     raw=raw,
@@ -1593,6 +1804,7 @@ class OTBRRestApiClient:
                             else None
                         ),
                         "elapsed": time.monotonic() - t_start,
+                        **legacy_mode_metadata,
                     }
                 )
             except OTBRClientError as exc:
@@ -1613,6 +1825,7 @@ class OTBRRestApiClient:
                         "fallbackRecovered": False,
                         "attemptErrors": attempt_errors,
                         "elapsed": time.monotonic() - t_start,
+                        **legacy_mode_metadata,
                     }
                 )
                 if not skip_on_failure:
@@ -1634,6 +1847,12 @@ class OTBRRestApiClient:
             "completedAt": datetime.now(timezone.utc).isoformat(),
             "inputCount": len(device_ids),
             "queriedCount": len(normalized_devices),
+            "childCollectionPolicy": child_collection_policy,
+            "childrenFetchFast": children_fetch_fast,
+            "childrenFetchDetail": children_fetch_detail,
+            "childRetryEnabled": child_retry_enabled,
+            "childTaskTimeout": child_task_timeout,
+            "childPollTimeout": child_timing.poll_timeout,
         }
 
     def _fetch_diagnostic_attempts(
@@ -1721,6 +1940,167 @@ class OTBRRestApiClient:
             return None, attempted_types, attempt_errors, exc
         return context, attempted_types, attempt_errors, None
 
+    def _fetch_mode_aware_diagnostic_attempts(
+        self,
+        device_id: str,
+        mode_classification: str,
+        pass_specs: Sequence[tuple[str, Sequence[str | int]]],
+        *,
+        idx: int,
+        total: int,
+        destination_type: str,
+        task_timeout: int,
+        poll_timeout: float | None,
+        poll_interval: float,
+        child_retry_enabled: bool,
+        raw: object,
+        results: list[Any],
+        on_pass_checkpoint: (
+            Callable[[list[Any], int, int, str, str], None] | None
+        ),
+    ) -> _ModeAwareDiagnosticOutcome:
+        attempted_types: list[list[str | int]] = []
+        attempt_errors: list[dict[str, Any]] = []
+        pass_outcomes: list[dict[str, Any]] = []
+        selected_context: dict[str, Any] | None = None
+        selected_pass: str | None = None
+        selected_types: list[str | int] | None = None
+        result_index: int | None = None
+        retry_recovered = False
+        overall_error: OTBRClientError | None = None
+        unsafe_to_continue = False
+
+        for pass_name, requested_types in pass_specs:
+            pass_started = time.monotonic()
+            pass_attempt_errors: list[dict[str, Any]] = []
+            pass_context: dict[str, Any] | None = None
+            pass_error: OTBRClientError | None = None
+            max_attempts = 2 if child_retry_enabled else 1
+            pass_attempt_count = 0
+
+            for attempt_number in range(1, max_attempts + 1):
+                request_types = list(requested_types)
+                attempted_types.append(request_types)
+                pass_attempt_count += 1
+                logging.debug(
+                    "Fetching %s diagnostics for %s device %s (%d/%d), "
+                    "attempt %d/%d, types: %s",
+                    pass_name,
+                    mode_classification,
+                    device_id,
+                    idx,
+                    total,
+                    attempt_number,
+                    max_attempts,
+                    " ".join(map(str, request_types)),
+                )
+                try:
+                    pass_context = self.fetch_device_diagnostics(
+                        device_id,
+                        types=request_types,
+                        destination_type=destination_type,
+                        task_timeout=task_timeout,
+                        poll_interval=poll_interval,
+                        poll_timeout=poll_timeout,
+                        return_context=True,
+                        raw=raw,
+                    )
+                    break
+                except (OTBRActionFailedError, OTBRInvalidResponseError) as exc:
+                    error = _diagnostic_attempt_error(exc)
+                    pass_attempt_errors.append(error)
+                    attempt_errors.append(error)
+                    pass_error = exc
+                    if attempt_number < max_attempts:
+                        logging.warning(
+                            "Device %s %s pass attempt %d returned no usable "
+                            "result; retrying the same TLVs",
+                            device_id,
+                            pass_name,
+                            attempt_number,
+                        )
+                        continue
+                    break
+                except OTBRClientError as exc:
+                    error = _diagnostic_attempt_error(exc)
+                    pass_attempt_errors.append(error)
+                    attempt_errors.append(error)
+                    pass_error = exc
+                    unsafe_to_continue = True
+                    break
+
+            pass_elapsed = time.monotonic() - pass_started
+            if pass_context is not None:
+                pass_error = None
+                selected_context = pass_context
+                selected_pass = pass_name
+                selected_types = list(requested_types)
+                retry_recovered = (
+                    retry_recovered
+                    or (pass_attempt_count > 1 and bool(pass_attempt_errors))
+                )
+                item = pass_context["item"]
+                if result_index is None:
+                    result_index = len(results)
+                    results.append(item)
+                else:
+                    results[result_index] = item
+                if pass_name == "fast" and on_pass_checkpoint is not None:
+                    on_pass_checkpoint(
+                        results, idx, total, device_id, pass_name
+                    )
+
+            pass_status = "completed" if pass_context is not None else "failed"
+            pass_outcomes.append(
+                {
+                    "name": pass_name,
+                    "requestedTypes": list(requested_types),
+                    "status": pass_status,
+                    "attempts": pass_attempt_count,
+                    "retryRecovered": (
+                        pass_context is not None and bool(pass_attempt_errors)
+                    ),
+                    "attemptErrors": pass_attempt_errors,
+                    "diagnosticId": (
+                        pass_context.get("diagnosticId")
+                        if pass_context is not None
+                        else None
+                    ),
+                    "action": (
+                        pass_context.get("action")
+                        if pass_context is not None
+                        else None
+                    ),
+                    "elapsed": pass_elapsed,
+                }
+            )
+
+            if pass_context is None:
+                overall_error = pass_error
+            if unsafe_to_continue:
+                break
+
+        if not pass_specs:
+            status = "skipped"
+        elif all(item["status"] == "completed" for item in pass_outcomes):
+            status = "completed"
+        elif selected_context is not None:
+            status = "partial"
+        else:
+            status = "failed"
+
+        return _ModeAwareDiagnosticOutcome(
+            context=selected_context,
+            status=status,
+            attempted_types=attempted_types,
+            attempt_errors=attempt_errors,
+            passes=pass_outcomes,
+            selected_pass=selected_pass,
+            selected_types=selected_types,
+            retry_recovered=retry_recovered,
+            error=overall_error,
+        )
+
     def fetch_network_diagnostics_all_devices(
         self,
         *,
@@ -1734,6 +2114,10 @@ class OTBRRestApiClient:
         skip_on_failure: bool = True,
         clear_diagnostics: bool = True,
         items_only: bool = False,
+        child_collection_policy: str = "legacy",
+        children_fetch_fast: bool = True,
+        children_fetch_detail: bool = False,
+        child_retry_enabled: bool = True,
         raw: object = _RAW_UNSET,
     ) -> Any:
         """
@@ -1771,6 +2155,10 @@ class OTBRRestApiClient:
             poll_timeout=poll_timeout,
             skip_on_failure=skip_on_failure,
             clear_diagnostics=clear_diagnostics,
+            child_collection_policy=child_collection_policy,
+            children_fetch_fast=children_fetch_fast,
+            children_fetch_detail=children_fetch_detail,
+            child_retry_enabled=child_retry_enabled,
             raw=raw,
         )
 
@@ -2039,7 +2427,9 @@ class OTBRRestApiClient:
 
             total = len(normalized_devices)
             required_types = list(types)
-            for index, (device_id, role) in enumerate(normalized_devices, start=1):
+            for index, (device_id, role, _mode) in enumerate(
+                normalized_devices, start=1
+            ):
                 attempt = self._fetch_mesh_diagnostics_for_device(
                     device_id,
                     required_types,

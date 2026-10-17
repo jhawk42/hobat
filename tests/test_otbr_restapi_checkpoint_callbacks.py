@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -12,6 +13,10 @@ import otbr_cli_meshdiag_routerneighbortable as cli_neighbors
 import otbr_restapi_devices as devices_module
 import otbr_restapi_diagnostics as diagnostics_module
 import otbr_restapi_mesh_diagnostics as mesh_module
+import otbr_restapi_topology as topology_module
+import otbr_restapi_cli as cli_module
+from td_const import OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME
+from otbr_restapi_util import CHILD_MEDIUM_DIAGNOSTIC_TLVS, OTBRRestApiClient
 
 
 def test_devices_fetch_skips_checkpoint_when_output_path_is_resolved_and_complete() -> None:
@@ -55,7 +60,7 @@ def test_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_r
         destination_type="extended",
         task_timeout=8,
         poll_interval=2.0,
-        poll_timeout=8.0,
+        poll_timeout=13.0,
         no_progress=True,
         no_fallback=True,
         preset="recommended",
@@ -93,6 +98,101 @@ def test_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_r
     assert stage == "device"
     final_write.assert_called_once()
     assert final_write.call_args.args[1] == args.resolved_output_path
+
+
+def test_fast_pass_checkpoint_survives_detail_interruption(tmp_path, monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    client.list_devices = lambda **_kwargs: [
+        {
+            "id": "1111111111111111",
+            "role": "child",
+            "mode": {"fullThreadDevice": False},
+        }
+    ]
+    fetch = Mock(
+        side_effect=[
+            {
+                "item": {"id": "diag-fast"},
+                "action": {"id": "action-fast"},
+                "diagnosticId": "diag-fast",
+            },
+            KeyboardInterrupt(),
+        ]
+    )
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+    args = cli_module.build_parser().parse_args(
+        [
+            "diagnostics",
+            "fetch-all",
+            "--no-update-devices",
+            "--preserve-diagnostics",
+            "--children-fetch-detail",
+        ]
+    )
+    output_path = tmp_path / "td-otbr-restapi-diagnostics-fetch-all.json"
+    args.resolved_output_path = str(output_path)
+
+    with pytest.raises(KeyboardInterrupt):
+        diagnostics_module.dispatch_diagnostics(
+            client, args, raw_arg=False, fields=None
+        )
+
+    checkpoint_path = tmp_path / "td-otbr-restapi-diagnostics-fetch-all.partial.json"
+    assert json.loads(checkpoint_path.read_text(encoding="utf-8")) == [
+        {"id": "diag-fast"}
+    ]
+    assert not output_path.exists()
+    assert [call.kwargs["types"] for call in fetch.call_args_list] == [
+        diagnostics_module.BASIC_DIAGNOSTIC_TLVS,
+        CHILD_MEDIUM_DIAGNOSTIC_TLVS,
+    ]
+
+
+def test_topology_wires_fast_pass_checkpoint_to_canonical_snapshot(tmp_path) -> None:
+    args = cli_module.build_parser().parse_args(
+        [
+            "--no-progress",
+            "topology",
+            "--skip-devices",
+            "--no-update-devices",
+            "--skip-mesh-diagnostics",
+        ]
+    )
+    args.td_data_dir = tmp_path
+    client = Mock()
+    client.list_devices.return_value = [
+        {
+            "id": "1111111111111111",
+            "role": "child",
+            "mode": {"device": "MTD"},
+        }
+    ]
+    client.fetch_all_devices_diagnostics.side_effect = lambda *_args, **kwargs: (
+        kwargs["on_pass_checkpoint"](
+            [{"id": "diag-fast"}], 1, 1, "1111111111111111", "fast"
+        )
+        or {
+            "items": [{"id": "diag-fast"}],
+            "deviceResults": [],
+            "partial": False,
+        }
+    )
+
+    with patch.object(
+        topology_module, "_write_checkpoint_best_effort"
+    ) as checkpoint_write, patch.object(
+        topology_module,
+        "emit_rest_payload_output",
+        side_effect=lambda payload, *_args, **_kwargs: payload,
+    ):
+        topology_module.dispatch_topology(client, args, raw_arg=False)
+
+    checkpoint_write.assert_called_once()
+    payload, checkpoint_path, command_name, stage = checkpoint_write.call_args.args
+    assert payload == [{"id": "diag-fast"}]
+    assert checkpoint_path == tmp_path / "td-otbr-restapi-diagnostics-fetch-all.partial.json"
+    assert command_name == "otbr-restapi topology diagnostics"
+    assert stage == "pass:fast"
 
 
 def test_mesh_diagnostics_fetch_all_invokes_checkpoint_callback_when_output_path_is_resolved() -> None:
@@ -201,7 +301,7 @@ def test_rest_fetch_dispatchers_do_not_checkpoint_without_output_path() -> None:
         destination_type="extended",
         task_timeout=8,
         poll_interval=2.0,
-        poll_timeout=8.0,
+        poll_timeout=13.0,
         no_progress=True,
         no_fallback=True,
         preset="recommended",
@@ -276,7 +376,7 @@ def test_rest_fetch_all_refreshes_device_collection_by_default(resource):
             destination_type="extended",
             task_timeout=8,
             poll_interval=2.0,
-            poll_timeout=8.0,
+            poll_timeout=13.0,
             no_progress=True,
             no_fallback=True,
             preset="recommended",

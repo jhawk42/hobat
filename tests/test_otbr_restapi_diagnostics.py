@@ -186,7 +186,7 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
             destination_type="extended",
             task_timeout=8,
             poll_interval=2.0,
-            poll_timeout=8.0,
+            poll_timeout=13.0,
             no_enrich_mac_counters=True,
         )
         payload = {
@@ -218,7 +218,7 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
             destination_type="extended",
             task_timeout=8,
             poll_interval=2.0,
-            poll_timeout=8.0,
+            poll_timeout=13.0,
             no_enrich_mac_counters=False,
         )
         payload = {"ipv6Addresses": ["fdde:ad00:beef::1"]}
@@ -324,7 +324,7 @@ class DiagnosticsListEnrichmentTests(unittest.TestCase):
                 destination_type="extended",
                 task_timeout=8,
                 poll_interval=2.0,
-                poll_timeout=8.0,
+                poll_timeout=13.0,
                 preserve_diagnostics=True,
                 no_progress=True,
                 items_only=False,
@@ -503,7 +503,7 @@ class DiagnosticsFetchAllEnrichmentTests(unittest.TestCase):
             destination_type="extended",
             task_timeout=8,
             poll_interval=2.0,
-            poll_timeout=8.0,
+            poll_timeout=13.0,
             no_progress=True,
             no_fallback=True,
             preset="recommended",

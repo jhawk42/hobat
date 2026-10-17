@@ -372,7 +372,7 @@ def test_diagnostics_fetch_all_checkpoint_and_final_preserve_address_override(tm
         destination_type="extended",
         task_timeout=8,
         poll_interval=2.0,
-        poll_timeout=8.0,
+        poll_timeout=13.0,
         no_progress=True,
         no_fallback=True,
         no_basic_fallback=False,
@@ -400,7 +400,6 @@ def test_diagnostics_fetch_all_checkpoint_and_final_preserve_address_override(tm
 @pytest.mark.parametrize(
     "policy_args",
     [
-        ["--no-fallback"],
         ["--fallback-preset", "medium"],
         ["--types", "extAddress"],
         ["--preset", "minimal"],
@@ -418,9 +417,79 @@ def test_no_basic_fallback_requires_progressive_policy(policy_args):
     )
     client = Mock()
 
-    with pytest.raises(OTBRUsageError, match="requires the default or recommended progressive"):
+    with pytest.raises(OTBRUsageError, match="default/recommended"):
         diagnostics_module.dispatch_diagnostics(client, args, False, None)
 
+    client.list_devices.assert_not_called()
+
+
+def test_no_fallback_and_no_basic_fallback_keep_mode_aware_initial_pass() -> None:
+    client = Mock()
+    client.list_devices.return_value = []
+    client.fetch_all_devices_diagnostics.return_value = {
+        "items": [],
+        "deviceResults": [],
+        "partial": False,
+    }
+    args = cli_module.build_parser().parse_args(
+        [
+            "diagnostics",
+            "fetch-all",
+            "--no-update-devices",
+            "--no-fallback",
+            "--no-basic-fallback",
+        ]
+    )
+
+    with patch.object(
+        diagnostics_module, "emit_rest_command_output", side_effect=lambda value, *_a, **_k: value
+    ):
+        diagnostics_module.dispatch_diagnostics(client, args, False, None)
+
+    options = client.fetch_all_devices_diagnostics.call_args.kwargs
+    assert options["child_collection_policy"] == "mode-aware"
+    assert options["children_fetch_fast"] is True
+    assert options["children_fetch_detail"] is False
+    assert options["child_retry_enabled"] is False
+    assert options["include_basic_fallback"] is False
+
+
+def test_explicit_child_pass_controls_conflict_with_custom_policy_before_discovery() -> None:
+    client = Mock()
+    args = cli_module.build_parser().parse_args(
+        [
+            "diagnostics",
+            "fetch-all",
+            "--preset",
+            "minimal",
+            "--children-fetch-fast-no",
+        ]
+    )
+
+    with pytest.raises(OTBRUsageError, match="Child pass controls"):
+        diagnostics_module.dispatch_diagnostics(client, args, False, None)
+
+    client.fetch_device_collection.assert_not_called()
+    client.list_devices.assert_not_called()
+
+
+def test_invalid_child_timing_fails_before_device_discovery() -> None:
+    client = Mock()
+    args = cli_module.build_parser().parse_args(
+        [
+            "diagnostics",
+            "fetch-all",
+            "--child-task-timeout",
+            "30",
+            "--child-poll-timeout",
+            "30",
+        ]
+    )
+
+    with pytest.raises(OTBRUsageError, match="poll_timeout must be at least"):
+        diagnostics_module.dispatch_diagnostics(client, args, False, None)
+
+    client.fetch_device_collection.assert_not_called()
     client.list_devices.assert_not_called()
 
 

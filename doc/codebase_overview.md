@@ -106,6 +106,14 @@ success, and an all-failed run retains its prior final snapshot.
 | `otbr_restapi_topology.py` | Composite devices, diagnostics, and mesh-diagnostics sweep |
 | `otbr_restapi_download.py` | Fixed endpoint snapshot download |
 
+Batch REST diagnostics retain device mode from the selected roster. The default
+mode-aware policy uses an MTD fast pass, an optional MTD detail pass, and one
+FTD medium pass; it does not affect single-device diagnostics or mesh
+diagnostics. Same-set retries and pass outcomes belong to the diagnostic client,
+while the dispatchers own the canonical output and atomic provisional
+checkpoints. Missing or contradictory child mode remains an explicit legacy
+fallback rather than a guessed classification.
+
 Transport methods do not write files. Resource dispatchers or composite
 workflows own command output because they know the command and resolved path.
 Mutating action POSTs are not retried after an ambiguous response because the

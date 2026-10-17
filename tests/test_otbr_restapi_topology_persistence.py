@@ -141,6 +141,57 @@ def test_topology_skip_devices_keeps_device_inputs_unsaved(tmp_path):
     ]
 
 
+def test_topology_uses_refreshed_roster_mode_for_diagnostics(tmp_path):
+    args = cli_module.build_parser().parse_args(
+        [
+            "--no-progress",
+            "topology",
+            "--skip-devices",
+            "--skip-mesh-diagnostics",
+            "--no-enrich-mac-counters",
+        ]
+    )
+    args.td_data_dir = tmp_path
+    client = MagicMock()
+    client.list_devices.return_value = [
+        {
+            "id": "1111111111111111",
+            "role": "child",
+            "mode": {"fullThreadDevice": True, "device": "FTD"},
+        }
+    ]
+    refreshed_roster = [
+        {
+            "id": "1111111111111111",
+            "role": "child",
+            "mode": {"fullThreadDevice": False, "device": "MTD"},
+        }
+    ]
+    client.fetch_device_collection.return_value = refreshed_roster
+    client.fetch_all_devices_diagnostics.return_value = {
+        "items": [],
+        "deviceResults": [],
+        "partial": False,
+    }
+
+    with patch.object(
+        topology_module,
+        "emit_rest_payload_output",
+        side_effect=lambda _payload, *_args, **_kwargs: None,
+    ):
+        topology_module.dispatch_topology(client, args, raw_arg=False)
+
+    selected_devices = client.fetch_all_devices_diagnostics.call_args.args[0]
+    assert selected_devices == refreshed_roster
+    assert selected_devices[0]["mode"]["device"] == "MTD"
+    assert (
+        client.fetch_all_devices_diagnostics.call_args.kwargs[
+            "child_collection_policy"
+        ]
+        == "mode-aware"
+    )
+
+
 @pytest.mark.parametrize(
     ("skipped_steps", "expected_saved_paths", "diagnostics_calls", "mesh_calls"),
     [

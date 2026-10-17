@@ -1238,6 +1238,80 @@ def test_rest_legacy_outcome_is_degraded_and_explicit_failure_is_partial(tmp_pat
         )
 
 
+def test_mode_aware_completion_does_not_invent_unrequested_child_health_inputs(
+    tmp_path,
+) -> None:
+    _write_rest_seed(
+        tmp_path,
+        {
+            "items": [{"id": "diag-fast"}],
+            "deviceResults": [
+                {
+                    "deviceId": "8672766ae0578187",
+                    "status": "completed",
+                    "policy": "mode-aware",
+                    "modeClassification": "mtd",
+                    "selectedPass": "fast",
+                    "passes": [
+                        {
+                            "name": "fast",
+                            "status": "completed",
+                            "requestedTypes": [0, 1, 2, 8],
+                        }
+                    ],
+                }
+            ],
+            "partial": False,
+            "completedAt": "2026-09-01T00:00:00+00:00",
+        },
+    )
+
+    complete = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
+        policy=load_health_policy(),
+        allow_partial=True,
+    )
+    metric_names = {metric.metric for metric in complete.observation.metrics}
+    assert complete.observation.completeness is Completeness.COMPLETE
+    assert not metric_names.intersection(
+        {"totalMacErrorRatio", "parentChanges", "routerRolePercent"}
+    )
+
+    (tmp_path / "td-otbr-restapi-diagnostics-fetch-all.outcome.json").write_text(
+        json.dumps(
+            {
+                "deviceResults": [
+                    {
+                        "deviceId": "8672766ae0578187",
+                        "status": "partial",
+                        "policy": "mode-aware",
+                        "modeClassification": "mtd",
+                        "selectedPass": "fast",
+                        "passes": [
+                            {"name": "fast", "status": "completed"},
+                            {"name": "detail", "status": "failed"},
+                        ],
+                    }
+                ],
+                "partial": True,
+                "completedAt": "2026-09-01T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    partial = build_processing_result(
+        data_dir=tmp_path,
+        dataset_id="otbr_restapi_devices_fetch_diagnostics_fetch_all",
+        policy=load_health_policy(),
+        allow_partial=True,
+    )
+    assert partial.observation.completeness is Completeness.PARTIAL
+    assert not {
+        metric.metric for metric in partial.observation.metrics
+    }.intersection({"totalMacErrorRatio", "parentChanges", "routerRolePercent"})
+
+
 def test_complete_rest_topology_mdns_profile_reports_border_router_redundancy(tmp_path) -> None:
     dataset_id = "otbr_restapi_topology_mdns_health"
     (tmp_path / "td-otbr-restapi-dataset-active.json").write_text(

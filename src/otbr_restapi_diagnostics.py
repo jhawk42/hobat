@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from otbr_restapi_util import (
+    ActionTimingPolicy,
     BASIC_DIAGNOSTIC_TLVS,
+    CHILD_DIAGNOSTIC_TIMING_POLICY,
+    DIAGNOSTICS_DEFAULT_POLL_INTERVAL,
+    DIAGNOSTICS_DEFAULT_TASK_TIMEOUT,
     FULL_DIAGNOSTIC_TLVS,
     MINIMAL_DIAGNOSTIC_TLVS,
     RECOMMENDED_DIAGNOSTIC_TLVS,
@@ -216,6 +220,56 @@ def use_progressive_fallback(args: argparse.Namespace) -> bool:
         and getattr(args, "types", None) is None
         and getattr(args, "preset", None) in (None, "recommended")
     )
+
+
+def resolve_child_collection_options(args: argparse.Namespace) -> dict[str, Any]:
+    fast_setting = getattr(args, "children_fetch_fast", None)
+    detail_setting = getattr(args, "children_fetch_detail", None)
+    custom_policy = (
+        getattr(args, "types", None) is not None
+        or getattr(args, "preset", None) not in (None, "recommended")
+        or getattr(args, "fallback_preset", None) is not None
+    )
+    if (fast_setting is not None or detail_setting is not None) and custom_policy:
+        raise OTBRUsageError(
+            "Child pass controls apply only to the default/recommended diagnostic policy; "
+            "do not combine them with --types, a non-recommended --preset, or --fallback-preset"
+        )
+    if getattr(args, "no_basic_fallback", False) and custom_policy:
+        raise OTBRUsageError(
+            "--no-basic-fallback applies only to the default/recommended diagnostic policy"
+        )
+
+    task_timeout = getattr(
+        args, "task_timeout", DIAGNOSTICS_DEFAULT_TASK_TIMEOUT
+    )
+    poll_interval = getattr(
+        args, "poll_interval", DIAGNOSTICS_DEFAULT_POLL_INTERVAL
+    )
+    poll_timeout = getattr(args, "poll_timeout", None)
+    ActionTimingPolicy.resolve(
+        task_timeout=task_timeout,
+        poll_interval=poll_interval,
+        poll_timeout=poll_timeout,
+    )
+    child_task_timeout = getattr(
+        args,
+        "child_task_timeout",
+        CHILD_DIAGNOSTIC_TIMING_POLICY.task_timeout,
+    )
+    child_timing = ActionTimingPolicy.resolve(
+        task_timeout=child_task_timeout,
+        poll_interval=poll_interval,
+        poll_timeout=getattr(args, "child_poll_timeout", None),
+    )
+    return {
+        "policy": "legacy" if custom_policy else "mode-aware",
+        "fast": True if fast_setting is None else fast_setting,
+        "detail": False if detail_setting is None else detail_setting,
+        "retry_enabled": not getattr(args, "no_fallback", False),
+        "task_timeout": child_task_timeout,
+        "poll_timeout": child_timing.poll_timeout,
+    }
 
 
 def fetch_device_with_fallback(
@@ -441,13 +495,16 @@ def _dispatch_diagnostics_fetch_all(
     fallback_types = resolve_fallback_types(args)
     progressive_fallback = use_progressive_fallback(args)
     no_basic_fallback = getattr(args, "no_basic_fallback", False)
-    if no_basic_fallback and not progressive_fallback:
-        raise OTBRUsageError(
-            "--no-basic-fallback requires the default or recommended progressive fetch-all policy; "
-            "do not combine it with --types, a non-recommended --preset, --fallback-preset, or --no-fallback"
-        )
+    child_options = resolve_child_collection_options(args)
     do_enrich = not getattr(args, "no_enrich_mac_counters", False)
     do_update = not getattr(args, "no_update_devices", False)
+    logging.info(
+        "Diagnostic child policy=%s, MTD fast=%s, MTD detail=%s, child retry=%s",
+        child_options["policy"],
+        child_options["fast"],
+        child_options["detail"],
+        child_options["retry_enabled"],
+    )
 
     if do_update:
         devices = client.fetch_device_collection(
@@ -481,7 +538,7 @@ def _dispatch_diagnostics_fetch_all(
             output_file.name
         )
 
-    def _on_checkpoint(results, _idx, _total, _device_id, _status):
+    def _write_checkpoint(results, stage):
         if checkpoint_path is None:
             return
         if raw_arg is not True:
@@ -490,9 +547,17 @@ def _dispatch_diagnostics_fetch_all(
             results,
             checkpoint_path,
             "otbr-restapi diagnostics fetch-all",
-            "device",
+            stage,
             raw=raw_arg is True,
         )
+
+    def _on_checkpoint(results, _idx, _total, _device_id, _status):
+        _write_checkpoint(results, "device")
+
+    def _on_pass_checkpoint(
+        results, _idx, _total, _device_id, pass_name
+    ):
+        _write_checkpoint(results, f"pass:{pass_name}")
 
     progress_fn = make_progress_fn(
         len(selected_devices), not getattr(args, "no_progress", False)
@@ -508,9 +573,16 @@ def _dispatch_diagnostics_fetch_all(
         fallback_types=fallback_types,
         progressive_fallback=progressive_fallback,
         include_basic_fallback=not no_basic_fallback,
+        child_collection_policy=child_options["policy"],
+        children_fetch_fast=child_options["fast"],
+        children_fetch_detail=child_options["detail"],
+        child_retry_enabled=child_options["retry_enabled"],
+        child_task_timeout=child_options["task_timeout"],
+        child_poll_timeout=child_options["poll_timeout"],
         raw=raw_arg,
         on_progress=progress_fn,
         on_checkpoint=_on_checkpoint,
+        on_pass_checkpoint=_on_pass_checkpoint,
     )
     diagnostics = outcome["items"]
     if raw_arg is not True:

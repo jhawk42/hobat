@@ -357,6 +357,10 @@ diagnostics fetch --device-id DEVICE_ID
                   [--types TLV ...]
                   [--preset {recommended,full,minimal,basic}]
                   [--task-timeout SECS]
+                  [--child-task-timeout SECS]
+                  [--child-poll-timeout FLOAT]
+                  [--children-fetch-fast | --children-fetch-fast-no]
+                  [--children-fetch-detail | --children-fetch-detail-no]
                   [--destination-type TYPE]
                   [--no-fallback]
                   [--fallback-preset {medium,minimal,basic}]
@@ -416,11 +420,16 @@ diagnostics fetch-all [--device-ids ID ...]
 | `--device-ids` | all devices | Space-separated extAddress IDs to query |
 | `--types` | recommended set | Diagnostic TLV names |
 | `--preset` | — | `recommended`, `full`, `minimal`, or `basic`; overrides `--types` |
-| `--task-timeout` | `15` | Server-side task timeout for router/REED devices; child devices use 30 seconds |
+| `--task-timeout` | `15` | Server-side task timeout for routers and non-children |
+| `--child-task-timeout` | `30` | Server-side task timeout for all child passes and legacy child requests |
+| `--child-poll-timeout` | derived | Independent client polling budget for child actions; must satisfy the derived timing minimum |
+| `--children-fetch-fast` / `--children-fetch-fast-no` | fast enabled | Enable or disable MTD fast TLVs 0, 1, 2, 8 |
+| `--children-fetch-detail` / `--children-fetch-detail-no` | detail disabled | Enable or disable optional MTD detail TLVs 0, 1, 2, 8, 9 |
 | `--destination-type` | `extended` | Destination addressing mode: `extended`, `mleid`, or `rloc` |
 | `--no-update-devices` | off | Skip `updateDeviceCollectionTask`; use the cached device list |
-| `--no-fallback` | off | Compatibility switch; full sweeps already have fallback disabled unless `--fallback-preset` is supplied |
-| `--fallback-preset` | off | Opt in to one retry with `medium`, `minimal`, or `basic` after a known terminal action failure |
+| `--no-fallback` | off | Disable additional diagnostic actions; known children retain their selected initial sets, with one attempt per enabled pass |
+| `--no-basic-fallback` | off | Suppress only the final basic tier for routers and unknown-mode children; does not suppress MTD fast or its same-set retry |
+| `--fallback-preset` | off | Use the legacy/custom policy with one explicit fallback preset after a known terminal failure |
 | `--preserve-diagnostics` | off | Keep the existing diagnostics collection. By default a full sweep clears it once after checking for active diagnostic work |
 | `--items-only` | off | Return only successful diagnostic items instead of the structured sweep outcome |
 | `--no-enrich-mac-counters` | off | Return raw `macCounters` without computed totals and ratios |
@@ -428,6 +437,40 @@ diagnostics fetch-all [--device-ids ID ...]
 > **Note:** `--update-devices` has been replaced by `--no-update-devices`. Device list refresh now runs by default; pass `--no-update-devices` to opt out.
 
 The default result is a structured outcome containing `items`, `deviceResults`, `partial`, clearing state, counts, and timestamps. Results are automatically written to `<datadir>/td-otbr-restapi-diagnostics-fetch-all.json` unless `--no-auto-output` or `--output` is specified.
+
+By default, the roster's `mode.fullThreadDevice` and `mode.device` fields
+classify children. MTD fast requests exactly TLVs 0, 1, 2, 8; optional MTD
+detail and FTD medium each request exactly 0, 1, 2, 8, 9. `mode.device` is
+checked against `fullThreadDevice` when both are present. Missing, malformed,
+or conflicting evidence warns and uses the legacy child request progression.
+`rxOnWhenIdle` is not used to infer MTD versus FTD.
+
+The two-pass model deliberately reduces coverage relative to the old 7-TLV
+child request: fast does not request `macCounters`, and neither pass requests
+`threadStackVersion` or `mleCounters`. Missing evidence stays absent in health
+evaluation. With both MTD passes enabled, fast runs first and detail is still
+requested after a fast success; up to four actions per MTD child are possible.
+Successful fast data is atomically checkpointed before detail begins. If
+detail fails, the fast data remains selected and the outcome is partial.
+Same-set retry recovery is reported separately from smaller-TLV fallback.
+
+`--types`, a non-recommended `--preset`, or `--fallback-preset` selects the
+legacy/custom request policy. Explicit child pass controls cannot be combined
+with those options. `--no-basic-fallback` applies only to the final tier of
+router and unknown-mode legacy progression; `--no-fallback` disables retries
+but does not broaden known-child initial TLVs or disable the fast pass.
+
+Examples:
+
+```bash
+# Detail-only MTD collection; FTD medium collection remains enabled
+PYTHONPATH=src python3 -m td_cli otbr-restapi diagnostics fetch-all \
+    --children-fetch-fast-no --children-fetch-detail
+
+# Skip known MTD children while still collecting FTD medium diagnostics
+PYTHONPATH=src python3 -m td_cli otbr-restapi diagnostics fetch-all \
+    --children-fetch-fast-no --children-fetch-detail-no
+```
 
 **Examples:**
 
@@ -905,6 +948,10 @@ Run the full topology sweep in a single command. Executes three steps in sequenc
 
 ```
 topology [--preset {recommended,full,minimal,basic}]
+         [--child-task-timeout SECS]
+         [--child-poll-timeout FLOAT]
+         [--children-fetch-fast | --children-fetch-fast-no]
+         [--children-fetch-detail | --children-fetch-detail-no]
          [--skip-devices]
          [--skip-diagnostics]
          [--skip-mesh-diagnostics]
@@ -918,16 +965,23 @@ topology [--preset {recommended,full,minimal,basic}]
 | Option | Default | Description |
 |---|---|---|
 | `--preset` | `recommended` | TLV preset for the diagnostics step |
+| `--child-task-timeout` | `30` | Server-side timeout for child diagnostic actions |
+| `--child-poll-timeout` | derived | Independent client polling budget for child actions |
+| `--children-fetch-fast` / `--children-fetch-fast-no` | fast enabled | Enable or disable the MTD fast pass |
+| `--children-fetch-detail` / `--children-fetch-detail-no` | detail disabled | Enable or disable the optional MTD detail pass |
 | `--skip-devices` | off | Skip Step 1 (device refresh); use the current device list for subsequent steps |
 | `--skip-diagnostics` | off | Skip Step 2 (network diagnostics fetch-all) |
 | `--skip-mesh-diagnostics` | off | Skip Step 3 (mesh diagnostics fetch-all) |
 | `--no-update-devices` | off | When `--skip-devices` is set, also skip `updateDeviceCollectionTask` in Steps 2 and 3 |
 | `--no-enrich-mac-counters` | off | Disable MAC counter enrichment on the diagnostics result |
-| `--no-fallback` | off | Disable per-device TLV fallback retry in the diagnostics step |
+| `--no-fallback` | off | Disable additional actions while retaining known-child initial sets |
 | `--fallback-preset` | off | Opt in to one terminal-failure retry for Step 2 with `medium`, `minimal`, or `basic` |
 | `--preserve-diagnostics` | off | Keep existing diagnostics instead of the default one-time clear before Step 2 |
 
 Progress for each step and each device is printed to stderr. Pass `--no-progress` (global flag) to suppress. Compatibility arrays remain in the three primary files. The diagnostic and mesh steps also write `.outcome.json` sidecars with partial/per-device metadata.
+Topology's diagnostics step uses the same mode-aware child policy and pass
+controls documented under [`diagnostics fetch-all`](#diagnostics-fetch-all);
+the mesh step remains independent.
 
 **Examples:**
 

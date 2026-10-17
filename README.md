@@ -309,14 +309,41 @@ evidence separately; a ping reply does not make a failed table collection
 successful. The probe is skipped when a unique, valid mesh-local router target
 cannot be derived.
 
-Default OTBR REST `diagnostics fetch-all` and `topology` sweeps retry known
-terminal or no-result responses with progressively smaller, role-aware TLV
-sets. Mesh sweeps retry failed combined requests as individual mesh TLVs and
-may use a basic diagnostic to record responsiveness. Reduced-TLV recovery stays
-partial when required detailed evidence is absent. Polling timeouts are never
-retried because the original action may still be active. Use `--no-fallback`
-to disable these additional bounded actions, or `--fallback-preset` to replace
-the generic progression with one explicit fallback preset.
+Default OTBR REST `diagnostics fetch-all` and `topology` sweeps preserve the
+roster's `mode.fullThreadDevice` / `mode.device` evidence. Known MTD children
+receive the fast request (TLVs 0, 1, 2, 8); the optional detail pass adds MAC
+counters (0, 1, 2, 8, 9) and is disabled by default. Known FTD children receive
+one medium request (0, 1, 2, 8, 9), independent of the MTD pass controls.
+Each enabled known-child pass may repeat its identical TLV set once after a
+terminal/no-result response. A same-set retry is not a smaller-TLV fallback;
+the first usable result completes that pass. If detail fails after fast
+succeeds, the fast record is retained and the device is reported partial.
+Successful fast results are checkpointed before detail is enqueued.
+
+The reduced child profile intentionally differs from the old 7-TLV detailed
+request: MTD fast does not request MAC counters, while neither new child profile
+requests `threadStackVersion` or `mleCounters`. Missing fields remain unavailable
+to health evaluation, not zero or fresh inherited evidence. Enabling both MTD
+passes can issue up to four actions per MTD child; detail therefore remains
+opt-in. Unknown or contradictory child mode is warned and uses the legacy
+detailed-to-medium progression.
+
+`--no-fallback` prevents additional actions but preserves known-child initial
+sets (and still permits separately enabled MTD detail, with one attempt per
+pass). `--no-basic-fallback` only suppresses the final basic tier for routers
+and unknown-mode children; it does not disable MTD fast or its same-set retry.
+Use `--children-fetch-fast-no --children-fetch-detail` for detail-only MTD
+collection, or disable both paired passes to explicitly skip MTD diagnostics
+while leaving FTD medium collection enabled.
+The child task timeout remains 30 seconds by default, with a derived poll
+budget; neither timeout is shortened by this policy change. Custom `--types`,
+non-recommended presets, and `--fallback-preset` retain the legacy/custom
+request policy and cannot be combined with explicit MTD pass controls.
+
+Mesh sweeps retain their separate split-TLV and basic responsiveness fallback.
+Polling timeouts are never retried because the original action may still be
+active. Shorter timeout experiments and live collection trials require separate
+authorization; the new TLV policy alone does not promise a runtime reduction.
 
 `networkdiag fetch-all --children-ping-fallback` is disabled by default. When
 enabled, it sends one bounded ping to the derived RLOC address of each child

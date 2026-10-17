@@ -376,6 +376,457 @@ def test_progressive_diagnostic_can_skip_basic_fallback(
     assert [call.kwargs["types"] for call in fetch.call_args_list] == expected_type_sets
 
 
+def test_mode_aware_policy_selects_exact_mtd_and_ftd_tlv_sets(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+
+    def fetch(device_id, **kwargs):
+        calls.append((device_id, kwargs))
+        diagnostic_id = f"diag-{device_id[-1]}"
+        return {
+            "item": {"id": diagnostic_id},
+            "action": completed_action(f"action-{device_id[-1]}", diagnostic_id),
+            "diagnosticId": diagnostic_id,
+        }
+
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+    devices = [
+        {
+            "id": "1111111111111111",
+            "role": "child",
+            "mode": {
+                "fullThreadDevice": False,
+                "device": "MTD",
+                "rxOnWhenIdle": False,
+            },
+        },
+        {
+            "id": "2222222222222222",
+            "role": "child",
+            "mode": {"fullThreadDevice": True, "device": "FTD"},
+        },
+    ]
+
+    outcome = client.fetch_all_devices_diagnostics(
+        devices,
+        child_collection_policy="mode-aware",
+        children_fetch_detail=True,
+    )
+
+    assert [kwargs["types"] for _device_id, kwargs in calls] == [
+        BASIC_DIAGNOSTIC_TLVS,
+        CHILD_MEDIUM_DIAGNOSTIC_TLVS,
+        CHILD_MEDIUM_DIAGNOSTIC_TLVS,
+    ]
+    assert [kwargs["task_timeout"] for _device_id, kwargs in calls] == [30, 30, 30]
+    assert [record["modeClassification"] for record in outcome["deviceResults"]] == [
+        "mtd",
+        "ftd",
+    ]
+    assert [record["selectedPass"] for record in outcome["deviceResults"]] == [
+        "detail",
+        "medium",
+    ]
+    assert calls[-1][0] == "2222222222222222"
+    assert all(record["status"] == "completed" for record in outcome["deviceResults"])
+    assert outcome["childCollectionPolicy"] == "mode-aware"
+
+
+def test_mtd_fast_checkpoint_precedes_detail_and_detail_becomes_final_item(
+    monkeypatch,
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    events = []
+
+    def fetch(device_id, **kwargs):
+        pass_name = "fast" if len(events) == 0 else "detail"
+        events.append(("fetch", pass_name, list(kwargs["types"])))
+        diagnostic_id = f"diag-{pass_name}"
+        return {
+            "item": {"id": diagnostic_id},
+            "action": completed_action(f"action-{pass_name}", diagnostic_id),
+            "diagnosticId": diagnostic_id,
+        }
+
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    def checkpoint(results, _index, _total, _device_id, pass_name):
+        events.append(("checkpoint", pass_name, [item["id"] for item in results]))
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {
+                "id": "1111111111111111",
+                "role": "child",
+                "mode": {"device": "MTD"},
+            }
+        ],
+        child_collection_policy="mode-aware",
+        children_fetch_detail=True,
+        on_pass_checkpoint=checkpoint,
+    )
+
+    assert events == [
+        ("fetch", "fast", BASIC_DIAGNOSTIC_TLVS),
+        ("checkpoint", "fast", ["diag-fast"]),
+        ("fetch", "detail", CHILD_MEDIUM_DIAGNOSTIC_TLVS),
+    ]
+    assert outcome["items"] == [{"id": "diag-detail"}]
+    assert outcome["deviceResults"][0]["selectedPass"] == "detail"
+    assert len(outcome["items"]) == 1
+
+
+def test_mode_aware_same_set_recovery_is_completed_not_fallback(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fetch = MagicMock(
+        side_effect=[
+            OTBRInvalidResponseError("completed action has no result"),
+            {
+                "item": {"id": "diag-fast"},
+                "action": completed_action("action-fast", "diag-fast"),
+                "diagnosticId": "diag-fast",
+            },
+        ]
+    )
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {
+                "id": "1111111111111111",
+                "role": "child",
+                "mode": {"fullThreadDevice": False},
+            }
+        ],
+        child_collection_policy="mode-aware",
+    )
+
+    record = outcome["deviceResults"][0]
+    assert outcome["partial"] is False
+    assert record["status"] == "completed"
+    assert record["retryRecovered"] is True
+    assert record["fallbackRecovered"] is False
+    assert record["passes"][0]["attempts"] == 2
+    assert fetch.call_args_list[0].kwargs["types"] == BASIC_DIAGNOSTIC_TLVS
+    assert fetch.call_args_list[1].kwargs["types"] == BASIC_DIAGNOSTIC_TLVS
+
+
+def test_requested_mtd_detail_failure_retains_fast_result_as_partial(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fast_context = {
+        "item": {"id": "diag-fast"},
+        "action": completed_action("action-fast", "diag-fast"),
+        "diagnosticId": "diag-fast",
+    }
+    detail_failure = OTBRActionFailedError(
+        "detail returned no result", action_id="detail-2", status="failed"
+    )
+    fetch = MagicMock(side_effect=[fast_context, detail_failure, detail_failure])
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {
+                "id": "1111111111111111",
+                "role": "child",
+                "mode": {"device": "MTD"},
+            }
+        ],
+        child_collection_policy="mode-aware",
+        children_fetch_detail=True,
+    )
+
+    record = outcome["deviceResults"][0]
+    assert outcome["items"] == [fast_context["item"]]
+    assert outcome["partial"] is True
+    assert record["status"] == "partial"
+    assert record["selectedPass"] == "fast"
+    assert record["passes"][1]["status"] == "failed"
+    assert record["passes"][1]["requestedTypes"] == CHILD_MEDIUM_DIAGNOSTIC_TLVS
+
+
+def test_unsafe_mtd_fast_outcome_stops_before_detail(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    timeout = OTBRActionTimeoutError(
+        "timed out", action_id="action-fast", status="active"
+    )
+    fetch = MagicMock(side_effect=timeout)
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {
+                "id": "1111111111111111",
+                "role": "child",
+                "mode": {"device": "MTD"},
+            }
+        ],
+        child_collection_policy="mode-aware",
+        children_fetch_detail=True,
+    )
+
+    assert outcome["deviceResults"][0]["status"] == "failed"
+    assert outcome["deviceResults"][0]["passes"][0]["attempts"] == 1
+    assert fetch.call_count == 1
+
+
+def test_both_mtd_passes_disabled_is_an_explicit_skip(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fetch = MagicMock()
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {
+                "id": "1111111111111111",
+                "role": "child",
+                "mode": {"device": "MTD"},
+            }
+        ],
+        child_collection_policy="mode-aware",
+        children_fetch_fast=False,
+        children_fetch_detail=False,
+    )
+
+    assert outcome["partial"] is True
+    assert outcome["items"] == []
+    assert outcome["deviceResults"][0]["status"] == "skipped"
+    assert outcome["deviceResults"][0]["skipReason"]
+    fetch.assert_not_called()
+
+
+def test_ftd_medium_pass_is_independent_of_disabled_mtd_passes(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    calls = []
+
+    def fetch(device_id, **kwargs):
+        calls.append((device_id, kwargs["types"]))
+        return {
+            "item": {"id": "diag-ftd"},
+            "action": completed_action("action-ftd", "diag-ftd"),
+            "diagnosticId": "diag-ftd",
+        }
+
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {
+                "id": "1111111111111111",
+                "role": "child",
+                "mode": {"fullThreadDevice": False},
+            },
+            {
+                "id": "2222222222222222",
+                "role": "child",
+                "mode": {"fullThreadDevice": True},
+            },
+        ],
+        child_collection_policy="mode-aware",
+        children_fetch_fast=False,
+        children_fetch_detail=False,
+    )
+
+    assert calls == [("2222222222222222", CHILD_MEDIUM_DIAGNOSTIC_TLVS)]
+    assert [record["status"] for record in outcome["deviceResults"]] == [
+        "skipped",
+        "completed",
+    ]
+
+
+def test_no_fallback_keeps_both_enabled_passes_but_does_not_repeat(
+    monkeypatch,
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fast_failure = OTBRInvalidResponseError("fast result missing")
+    detail_context = {
+        "item": {"id": "diag-detail"},
+        "action": completed_action("action-detail", "diag-detail"),
+        "diagnosticId": "diag-detail",
+    }
+    fetch = MagicMock(side_effect=[fast_failure, detail_context])
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {
+                "id": "1111111111111111",
+                "role": "child",
+                "mode": {"device": "MTD"},
+            }
+        ],
+        child_collection_policy="mode-aware",
+        children_fetch_detail=True,
+        child_retry_enabled=False,
+    )
+
+    record = outcome["deviceResults"][0]
+    assert [call.kwargs["types"] for call in fetch.call_args_list] == [
+        BASIC_DIAGNOSTIC_TLVS,
+        CHILD_MEDIUM_DIAGNOSTIC_TLVS,
+    ]
+    assert [item["attempts"] for item in record["passes"]] == [1, 1]
+    assert record["status"] == "partial"
+    assert record["selectedPass"] == "detail"
+
+
+def test_raw_mesh_reuse_does_not_select_mode_aware_child_fast_pass(
+    monkeypatch,
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fetch = MagicMock(
+        return_value={
+            "item": {"data": {"id": "raw-diagnostic"}},
+            "action": completed_action("action-raw", "raw-diagnostic"),
+            "diagnosticId": "raw-diagnostic",
+        }
+    )
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    outcome = client.fetch_mesh_diagnostics_all_devices(
+        [
+            {
+                "id": "1111111111111111",
+                "role": "child",
+                "mode": {"fullThreadDevice": False, "device": "MTD"},
+            }
+        ],
+        raw=True,
+    )
+
+    assert outcome["items"] == [{"data": {"id": "raw-diagnostic"}}]
+    assert fetch.call_count == 1
+    assert fetch.call_args.kwargs["types"] == (
+        "children",
+        "childIpv6Addresses",
+        "routerNeighbors",
+    )
+
+
+def test_network_diagnostics_wrapper_forwards_selected_child_policy(monkeypatch) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    devices = [
+        {
+            "id": "1111111111111111",
+            "role": "child",
+            "mode": {"device": "MTD"},
+        }
+    ]
+    monkeypatch.setattr(
+        client,
+        "fetch_device_collection",
+        lambda **_kwargs: {"items": devices, "partial": False},
+    )
+    batch_fetch = MagicMock(
+        return_value={"items": [], "deviceResults": [], "partial": False}
+    )
+    monkeypatch.setattr(client, "fetch_all_devices_diagnostics", batch_fetch)
+
+    client.fetch_network_diagnostics_all_devices(
+        child_collection_policy="mode-aware",
+        children_fetch_fast=False,
+        children_fetch_detail=True,
+        child_retry_enabled=False,
+    )
+
+    options = batch_fetch.call_args.kwargs
+    assert options["child_collection_policy"] == "mode-aware"
+    assert options["children_fetch_fast"] is False
+    assert options["children_fetch_detail"] is True
+    assert options["child_retry_enabled"] is False
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_warning"),
+    [
+        (None, "missing"),
+        ({"fullThreadDevice": False, "device": "FTD"}, "conflicting"),
+        ({"fullThreadDevice": "false", "device": "MTD"}, "malformed"),
+        ("MTD", "malformed"),
+    ],
+)
+def test_unknown_child_mode_warns_and_keeps_legacy_progression(
+    monkeypatch, caplog, mode, expected_warning
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fetch = MagicMock(
+        side_effect=[
+            OTBRInvalidResponseError("no result"),
+            {
+                "item": {"id": "diag-medium"},
+                "action": completed_action("action-medium", "diag-medium"),
+                "diagnosticId": "diag-medium",
+            },
+        ]
+    )
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+    device = {"id": "1111111111111111", "role": "child"}
+    if mode is not None:
+        device["mode"] = mode
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [device],
+        child_collection_policy="mode-aware",
+        progressive_fallback=True,
+    )
+
+    record = outcome["deviceResults"][0]
+    assert record["policy"] == "legacy-unknown-mode"
+    assert record["modeClassification"] == "unknown"
+    assert record["modeWarning"] == expected_warning
+    assert record["status"] == "partial"
+    assert fetch.call_args_list[0].kwargs["types"] == CHILD_DETAILED_DIAGNOSTIC_TLVS
+    assert fetch.call_args_list[1].kwargs["types"] == CHILD_MEDIUM_DIAGNOSTIC_TLVS
+    assert "legacy child diagnostic policy" in caplog.text
+
+
+def test_invalid_child_poll_budget_fails_before_diagnostic_clear_or_action(
+    monkeypatch,
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    clear = MagicMock()
+    fetch = MagicMock()
+    monkeypatch.setattr(client, "delete_all_diagnostics", clear)
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+
+    with pytest.raises(OTBRUsageError, match="poll_timeout must be at least"):
+        client.fetch_all_devices_diagnostics(
+            ["1111111111111111"],
+            child_task_timeout=30,
+            child_poll_timeout=30,
+            clear_diagnostics=True,
+        )
+
+    clear.assert_not_called()
+    fetch.assert_not_called()
+
+
+def test_child_pass_cli_options_keep_defaults_and_record_explicit_toggles() -> None:
+    defaults = cli_module.build_parser().parse_args(
+        ["diagnostics", "fetch-all"]
+    )
+    assert defaults.children_fetch_fast is None
+    assert defaults.children_fetch_detail is None
+    assert defaults.child_task_timeout == 30
+    assert defaults.child_poll_timeout is None
+
+    configured = cli_module.build_parser().parse_args(
+        [
+            "diagnostics",
+            "fetch-all",
+            "--children-fetch-fast-no",
+            "--children-fetch-detail",
+            "--child-task-timeout",
+            "25",
+            "--child-poll-timeout",
+            "30",
+        ]
+    )
+    assert configured.children_fetch_fast is False
+    assert configured.children_fetch_detail is True
+    assert configured.child_task_timeout == 25
+    assert configured.child_poll_timeout == 30
+
+
 def test_diagnostic_timeout_never_starts_fallback_action(monkeypatch) -> None:
     client = OTBRRestApiClient(base_url="http://example.test")
     timeout = OTBRActionTimeoutError(
