@@ -2765,6 +2765,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.info("Static files root: %s", static_root)
     logging.info("Data root: %s", td_data_dir)
 
+    # Log data about the hobat database
+    if os.path.exists(td_data_dir):
+        db_files = [f for f in os.listdir(td_data_dir) if f.endswith(".db")]
+        for db_file in db_files:
+            db_path = os.path.join(td_data_dir, db_file)
+            if os.path.isfile(db_path):
+                # Show database file size in megabytes
+                hobat_database_file_size_mb = os.path.getsize(db_path) / (1024 * 1024)  # size in megabytes
+                logging.info("Hobat database file: %s (size: %.1f MB)", db_path, hobat_database_file_size_mb)
+
     aiohttp.web.run_app(
         app,
         host=args.host if args.host else None,
