@@ -1,10 +1,7 @@
 # Python virtual environments
 .venv/
-.venv.bak/
 venv/
-venv.bak/
 env/
-env.bak/
 ENV/
 .env
 .envrc
@@ -105,4 +102,4 @@ script/*
 downloads/
 plan/
 data/
-diag/
+.github/skills
