@@ -1371,9 +1371,9 @@ export function getIsolatedAnchorPresetLabel(name) {
  */
 export const TABLE_PRIORITY_COLUMNS = [
   // === TIER 1: Primary Identity ===
-  "deviceLabel",
   "rloc16",
   "extAddress",
+  "deviceLabel",
   "name",
   "eui",
   "routerId",

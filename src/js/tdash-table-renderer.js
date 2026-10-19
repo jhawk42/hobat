@@ -43,9 +43,9 @@ const MORE_INFO_CELL_MAX_LINES = 6;
 const MORE_INFO_CELL_MAX_CHARACTERS = 60;
 const HEALTH_COLUMNS = ["Health Status", "Health Reason", "Health Observed"];
 const TABLE_IDENTITY_COLUMN_PRIORITY = [
-  "deviceLabel", 
   "rloc16", 
   "extAddress", 
+  "deviceLabel", 
   "name", 
   "eui", 
   "routerId", 
