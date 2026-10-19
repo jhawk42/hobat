@@ -13,12 +13,23 @@ import {
   projectObservedTopologyLinkCounts,
 } from "../../src/js/tdash-adaptor-model.js";
 import { emitThroughAdaptorModel } from "../../src/js/tdash-adaptor-shared.js";
-import { getPreferredFieldPath } from "../../src/js/tdash-device-fields.js";
+import {
+  getPreferredFieldPath,
+  normalizeInputRecord,
+} from "../../src/js/tdash-device-fields.js";
 import {
   HA_MATTER_ROLE_POLICY,
   normalizeHaMatterRoleRecord,
 } from "../../src/js/tdash-ha-matter-ws-roles.js";
-import { buildRoleNodeEmphasis } from "../../src/js/tdash-topology-utils.js";
+import {
+  buildRoleNodeEmphasis,
+  lqStyleFromAvgLqi,
+  lqStyleFromLinkMargin,
+} from "../../src/js/tdash-topology-utils.js";
+import {
+  buildDatasetRows,
+  normalizeDatasetFilePayload,
+} from "../../src/js/tdash-dataset.js";
 
 assert.deepEqual(buildRoleNodeEmphasis({ isBorderRouter: true, isRouter: true }), {
   borderWidth: 5,
@@ -266,6 +277,86 @@ assert.equal(
   threadTools.routerChildByRloc16.get("0x1000").router_child_table.length,
   1,
 );
+
+const nativeRelationshipMetrics = {
+  linkMargin: 30,
+  averageRssi: -63,
+  lastRssi: -64,
+  frameErrorRate: 0,
+  messageErrorRate: 2,
+};
+const threadToolsMetricResult = run("thread-tools-native", ["diagnostics.json"], [{
+  diagnostics: [{
+    macAddr: 0x1000,
+    extMacAddr: "aa00112233445566",
+    mode: { ftd: true },
+    childTable: [{
+      childId: 1,
+      incomingLinkQuality: 0,
+      ...nativeRelationshipMetrics,
+      lastRssi: -65,
+      frameErrorRate: "invalid",
+    }],
+    children: [{
+      macAddr: 0x1002,
+      extAddress: "cc00112233445566",
+      isDeviceTypeMtd: false,
+      linkQuality: 0,
+      ...nativeRelationshipMetrics,
+    }],
+    routerNeighbor: [{
+      macAddr: 0x2000,
+      extMacAddr: "bb00112233445566",
+      linkQualityIn: 0,
+      linkQualityOut: 3,
+      ...nativeRelationshipMetrics,
+    }],
+  }, {
+    macAddr: 0x1002,
+    extMacAddr: "cc00112233445566",
+    mode: { ftd: false },
+  }, {
+    macAddr: 0x2000,
+    extMacAddr: "bb00112233445566",
+    mode: { ftd: true },
+  }],
+}]);
+for (const [to, category] of [
+  ["0x1001", "otbr_child"],
+  ["0x1002", "otbr_child"],
+  ["0x2000", "router_neighbor"],
+]) {
+  const edge = threadToolsMetricResult.edgeData.find((candidate) => (
+    candidate.from === "0x1000" && candidate.to === to
+    && candidate.linkCategories.includes(category)
+  ));
+  assert.ok(edge, `Thread Tools emits ${category} metrics for ${to}`);
+  assert.deepEqual(
+    [
+      edge.linkMargin,
+      edge.averageRssi,
+      edge.lastRssi,
+      edge.frameErrorRate,
+      edge.messageErrorRate,
+    ],
+    to === "0x1001"
+      ? [30, -63, -65, undefined, 2]
+      : [30, -63, -64, 0, 2],
+  );
+  assert.match(edge.title, /Link margin: 30 dB/);
+  assert.match(edge.title, /Average RSSI: -63 dBm/);
+  assert.match(edge.title, /Message error rate: 2%/);
+  if (to === "0x1001") {
+    assert.doesNotMatch(edge.title, /Frame error rate:/);
+    assert.equal(edge.lqLevel, lqStyleFromAvgLqi(0, 3).lqLevel);
+  } else if (to === "0x1002") {
+    assert.match(edge.title, /Frame error rate: 0%/);
+    assert.equal(edge.lqLevel, lqStyleFromLinkMargin(30).lqLevel);
+  } else {
+    assert.match(edge.title, /Frame error rate: 0%/);
+    assert.equal(edge.lqLevel, lqStyleFromLinkMargin(30).lqLevel);
+  }
+}
 
 const merged = run("merged-detailed", ["merged.json"], [[
   { rloc16: "0x1000", role: "router", route: { routeData: [{ routeId: 8 }] } },
@@ -845,6 +936,68 @@ assert.equal(rest.rawByIdForDetails.get("aa00112233445566").basicOnly, true);
 assert.equal(rest.routerNeighborByRloc16.get("0x1000").router_neighbor_table.length, 1);
 assert.equal(rest.routerChildByRloc16.get("0x1000").router_child_table.length, 1);
 
+const restMetricResult = run("otbr-restapi", [
+  "td-otbr-restapi-mesh-diagnostics-fetch-all.json",
+], [[{
+  extAddress: "aa00112233445566",
+  rloc16: "0x1000",
+  role: "router",
+  childTable: [{
+    childId: 1,
+    linkQuality: 0,
+    ...nativeRelationshipMetrics,
+    lastRssi: -65,
+    frameErrorRate: null,
+  }],
+  children: [{
+    extAddress: "cc00112233445566",
+    rloc16: "0x1002",
+    ...nativeRelationshipMetrics,
+  }],
+  routerNeighbors: [{
+    extAddress: "bb00112233445566",
+    rloc16: "0x2000",
+    ...nativeRelationshipMetrics,
+  }],
+}, {
+  extAddress: "bb00112233445566",
+  rloc16: "0x2000",
+  role: "router",
+}]]);
+for (const [to, category] of [
+  ["0x1001", "otbr_child"],
+  ["cc00112233445566", "otbr_child"],
+  ["bb00112233445566", "router_neighbor"],
+]) {
+  const edge = restMetricResult.edgeData.find((candidate) => (
+    candidate.from === "aa00112233445566" && candidate.to === to
+    && candidate.linkCategories.includes(category)
+  ));
+  assert.ok(edge, `REST API emits ${category} metrics for ${to}`);
+  assert.deepEqual(
+    [
+      edge.linkMargin,
+      edge.averageRssi,
+      edge.lastRssi,
+      edge.frameErrorRate,
+      edge.messageErrorRate,
+    ],
+    to === "0x1001"
+      ? [30, -63, -65, undefined, 2]
+      : [30, -63, -64, 0, 2],
+  );
+  assert.match(edge.title, /Link margin: 30 dB/);
+  assert.match(edge.title, /Average RSSI: -63 dBm/);
+  assert.match(edge.title, /Message error rate: 2%/);
+  if (to === "0x1001") {
+    assert.doesNotMatch(edge.title, /Frame error rate:/);
+    assert.equal(edge.lqLevel, lqStyleFromAvgLqi(0, 3).lqLevel);
+  } else {
+    assert.match(edge.title, /Frame error rate: 0%/);
+    assert.equal(edge.lqLevel, lqStyleFromLinkMargin(30).lqLevel);
+  }
+}
+
 const projectedCounts = projectObservedTopologyLinkCounts([
   { extAddress: "aa00112233445566", totalLinks: 99 },
   { extAddress: "bb00112233445566" },
@@ -1049,6 +1202,329 @@ assert.deepEqual(extractOtbrRestApiItems({ extAddress: "AA", attributes: { role:
 const extracted = extractOtbrRestApiSources(new Map(restFiles.map((name, index) => [name, restRawFiles[index]])));
 assert.equal(extracted.diagnostics[0].shared, "mesh");
 assert.equal(extracted.diagnostics[0].basicOnly, true);
+
+function normalizedMetricDataset(adaptor, legacy = false) {
+  const child = legacy
+    ? {
+      rloc16: "0x2019",
+      extaddr: "bb00112233445566",
+      rss_margin: 27,
+      rss_ave: -73,
+      rss_last: -73,
+      err_rate_frame_pct: 0,
+      err_rate_msg_pct: 2,
+      link_quality: 0,
+    }
+    : {
+      rloc16: "0x2019",
+      extAddress: "bb00112233445566",
+      linkMargin: 27,
+      averageRssi: -73,
+      lastRssi: -73,
+      frameErrorRate: 0,
+      messageErrorRate: 2,
+      linkQuality: 0,
+    };
+  const neighbor = legacy
+    ? {
+      rloc16: "0x2100",
+      extaddr: "cc00112233445566",
+      rss_margin: 30,
+      rss_ave: -61,
+      rss_last: -62,
+      err_rate_frame_pct: 4,
+      err_rate_msg_pct: 1,
+    }
+    : {
+      rloc16: "0x2100",
+      extAddress: "cc00112233445566",
+      linkMargin: 30,
+      averageRssi: -61,
+      lastRssi: -62,
+      frameErrorRate: 4,
+      messageErrorRate: 1,
+    };
+  const files = [
+    "td-otbr-cli-meshdiag-topology.json",
+    "td-otbr-cli-meshdiag-router-neighbortables.json",
+    "td-otbr-cli-meshdiag-router-childtables.json",
+  ];
+  const entry = {
+    source: "otbr-cli",
+    adaptor,
+    files,
+    mergeStrategy: "none",
+    rowExtractor: "raw-array",
+  };
+  const rawFiles = [
+    [{
+      rloc16: "0x2000",
+      extAddress: "aa00112233445566",
+      role: "router",
+      children: [{ rloc16: "0x2019", extAddress: "bb00112233445566", linkQuality: 0 }],
+      childTable: [child],
+      routerNeighbors: [neighbor],
+    }],
+    [{
+      rloc16: "0x2000",
+      ...(legacy ? { router_neighbor_table: [neighbor] } : { routerNeighbors: [neighbor] }),
+    }],
+    [{
+      rloc16: "0x2000",
+      ...(legacy ? { router_child_table: [child] } : { childTable: [child] }),
+    }],
+  ];
+  const untouched = JSON.stringify(rawFiles);
+  const normalizedFiles = rawFiles.map((payload, index) => (
+    normalizeDatasetFilePayload(entry, index, payload)
+  ));
+  const assembled = buildDatasetRows(entry, normalizedFiles);
+  const result = runAdaptor({ entry, rawFiles: normalizedFiles, rows: assembled.rows });
+  assert.equal(JSON.stringify(rawFiles), untouched, "dataset normalization must not mutate snapshots");
+  return result;
+}
+
+for (const adaptor of ["meshdiag-networkdiag", "merged-detailed"]) {
+  const canonical = normalizedMetricDataset(adaptor);
+  const legacy = normalizedMetricDataset(adaptor, true);
+  const category = adaptor === "meshdiag-networkdiag" ? "default_children" : "otbr_child";
+  for (const result of [canonical, legacy]) {
+    const childEdge = result.edgeData.find((edge) => (
+      edge.from === "0x2000" && edge.to === "0x2019"
+      && edge.linkCategories.includes(category)
+    ));
+    assert.ok(childEdge, `${adaptor} emits the expected child evidence`);
+    assert.deepEqual(
+      [
+        childEdge.linkMargin,
+        childEdge.averageRssi,
+        childEdge.lastRssi,
+        childEdge.frameErrorRate,
+        childEdge.messageErrorRate,
+        childEdge.lqLevel,
+      ],
+      [27, -73, -73, 0, 2, 1],
+    );
+    assert.match(childEdge.title, /Link margin: 27 dB/);
+    assert.match(childEdge.title, /Average RSSI: -73 dBm/);
+    assert.match(childEdge.title, /Last RSSI: -73 dBm/);
+    assert.match(childEdge.title, /Frame error rate: 0%/);
+    assert.match(childEdge.title, /Message error rate: 2%/);
+    const neighborEdge = result.edgeData.find((edge) => (
+      edge.from === "0x2000" && edge.to === "0x2100"
+      && edge.linkCategories.includes("router_neighbor")
+    ));
+    assert.ok(neighborEdge, `${adaptor} emits the explicit neighbor observation`);
+    assert.deepEqual(
+      [
+        neighborEdge.linkMargin,
+        neighborEdge.averageRssi,
+        neighborEdge.lastRssi,
+        neighborEdge.frameErrorRate,
+        neighborEdge.messageErrorRate,
+      ],
+      [30, -61, -62, 4, 1],
+    );
+    assert.match(neighborEdge.title, /Average RSSI: -61 dBm/);
+    assert.match(neighborEdge.title, /Frame error rate: 4%/);
+  }
+  const canonicalChild = canonical.edgeData.find((edge) => edge.linkCategories.includes(category));
+  const legacyChild = legacy.edgeData.find((edge) => edge.linkCategories.includes(category));
+  assert.deepEqual(
+    [canonicalChild.linkMargin, canonicalChild.averageRssi, canonicalChild.lastRssi],
+    [legacyChild.linkMargin, legacyChild.averageRssi, legacyChild.lastRssi],
+  );
+}
+
+const conflictingMetricInput = {
+  linkMargin: 5,
+  rss_margin: 27,
+};
+assert.equal(
+  normalizeInputRecord(conflictingMetricInput, { canonicalMetrics: true }).linkMargin,
+  5,
+);
+assert.equal(
+  normalizeInputRecord({ rss_last: -73 }, { canonicalMetrics: true }).lastRssi,
+  -73,
+);
+assert.equal(
+  normalizedMetricDataset("merged-detailed").edgeData.find(
+    (edge) => edge.linkCategories.includes("otbr_child"),
+  ).linkMargin,
+  27,
+);
+
+const ambiguousMetricRows = [{
+  rloc16: "0x2000",
+  children: [{ rloc16: "0x2019" }],
+}, {
+  rloc16: "0x2100",
+  children: [{ rloc16: "0x2019" }],
+}];
+const ambiguousMetrics = run(
+  "meshdiag-networkdiag",
+  [
+    "td-otbr-cli-meshdiag-topology.json",
+    "td-otbr-cli-meshdiag-router-childtables.json",
+  ],
+  [
+    ambiguousMetricRows,
+    [{
+      rloc16: "0x2000",
+      router_child_table: [
+        { rloc16: "0x2019", extaddr: "bb00112233445566", rss_margin: 27 },
+        { rloc16: "0x2019", extaddr: "cc00112233445566", rss_ave: -73 },
+      ],
+    }],
+  ],
+);
+assert.equal(
+  ambiguousMetrics.edgeData.find((edge) => edge.from === "0x2000" && edge.to === "0x2019").linkMargin,
+  undefined,
+);
+assert.equal(
+  ambiguousMetrics.edgeData.find((edge) => edge.from === "0x2000" && edge.to === "0x2019").averageRssi,
+  undefined,
+);
+
+const reciprocalNeighborMetrics = run(
+  "meshdiag-networkdiag",
+  [
+    "td-otbr-cli-meshdiag-topology.json",
+    "td-otbr-cli-meshdiag-router-neighbortables.json",
+  ],
+  [
+    [{ rloc16: "0x2000" }, { rloc16: "0x2100" }],
+    [
+      { rloc16: "0x2000", router_neighbor_table: [{ rloc16: "0x2100", rss_ave: -61 }] },
+      { rloc16: "0x2100", router_neighbor_table: [{ rloc16: "0x2000", err_rate_frame_pct: 8 }] },
+    ],
+  ],
+);
+const reciprocalNeighborEdge = reciprocalNeighborMetrics.edgeData.find(
+  (edge) => edge.linkCategories.includes("router_neighbor"),
+);
+assert.equal(reciprocalNeighborEdge.averageRssi, -61);
+assert.equal(reciprocalNeighborEdge.frameErrorRate, undefined);
+
+const duplicateNeighborMetrics = run(
+  "meshdiag-networkdiag",
+  [
+    "td-otbr-cli-meshdiag-topology.json",
+    "td-otbr-cli-meshdiag-router-neighbortables.json",
+  ],
+  [
+    [{ rloc16: "0x2000" }],
+    [{
+      rloc16: "0x2000",
+      router_neighbor_table: [
+        { rloc16: "0x2100", rss_margin: 27 },
+        { rloc16: "0x2100", rss_ave: -73, err_rate_frame_pct: 0 },
+      ],
+    }],
+  ],
+);
+const duplicateNeighborEdge = duplicateNeighborMetrics.edgeData.find(
+  (edge) => edge.linkCategories.includes("router_neighbor"),
+);
+assert.deepEqual(
+  [duplicateNeighborEdge.linkMargin, duplicateNeighborEdge.averageRssi, duplicateNeighborEdge.frameErrorRate],
+  [27, -73, 0],
+);
+assert.match(duplicateNeighborEdge.title, /Average RSSI: -73 dBm/);
+assert.match(duplicateNeighborEdge.title, /Frame error rate: 0%/);
+
+const directChildMetricWins = run(
+  "meshdiag-networkdiag",
+  [
+    "td-otbr-cli-meshdiag-topology.json",
+    "td-otbr-cli-meshdiag-router-childtables.json",
+  ],
+  [
+    [{
+      rloc16: "0x2000",
+      children: [{
+        rloc16: "0x2019",
+        extAddress: "bb00112233445566",
+        linkMargin: 12,
+      }],
+    }],
+    [{
+      rloc16: "0x2000",
+      router_child_table: [{
+        rloc16: "0x2019",
+        extaddr: "bb00112233445566",
+        rss_margin: 27,
+        rss_ave: -73,
+      }],
+    }],
+  ],
+);
+const directChildEdge = directChildMetricWins.edgeData.find(
+  (edge) => edge.from === "0x2000" && edge.to === "0x2019",
+);
+assert.deepEqual([directChildEdge.linkMargin, directChildEdge.averageRssi], [12, -73]);
+
+const parentScopedMetrics = run(
+  "meshdiag-networkdiag",
+  [
+    "td-otbr-cli-meshdiag-topology.json",
+    "td-otbr-cli-meshdiag-router-childtables.json",
+  ],
+  [
+    [
+      { rloc16: "0x2000", children: [{ rloc16: "0x2019", extAddress: "bb00112233445566" }] },
+      { rloc16: "0x2100", children: [{ rloc16: "0x2019", extAddress: "cc00112233445566" }] },
+    ],
+    [
+      {
+        rloc16: "0x2000",
+        router_child_table: [{ rloc16: "0x2019", extaddr: "bb00112233445566", rss_margin: 27 }],
+      },
+      {
+        rloc16: "0x2100",
+        router_child_table: [{ rloc16: "0x2019", extaddr: "cc00112233445566", rss_ave: -73 }],
+      },
+    ],
+  ],
+);
+const scopedEdges = parentScopedMetrics.edgeData.filter((edge) => edge.to === "0x2019");
+assert.deepEqual(
+  scopedEdges.map((edge) => [edge.from, edge.linkMargin, edge.averageRssi]),
+  [["0x2000", 27, undefined], ["0x2100", undefined, -73]],
+);
+
+const unavailableMetrics = run(
+  "meshdiag-networkdiag",
+  [
+    "td-otbr-cli-meshdiag-topology.json",
+    "td-otbr-cli-meshdiag-router-childtables.json",
+  ],
+  [
+    [{ rloc16: "0x2000", children: [{ rloc16: "0x2019" }] }],
+    [{
+      rloc16: "0x2000",
+      router_child_table: [{
+        rloc16: "0x2019",
+        rss_margin: "",
+        rss_ave: "not-a-number",
+        rss_last: null,
+        err_rate_frame_pct: "",
+        err_rate_msg_pct: null,
+      }],
+    }],
+  ],
+);
+const unavailableEdge = unavailableMetrics.edgeData.find(
+  (edge) => edge.from === "0x2000" && edge.to === "0x2019",
+);
+for (const metric of [
+  "linkMargin", "averageRssi", "lastRssi", "frameErrorRate", "messageErrorRate",
+]) {
+  assert.equal(Number.isFinite(unavailableEdge[metric]), false, `${metric} remains unavailable`);
+}
+assert.doesNotMatch(unavailableEdge.title, /Link margin|RSSI|error rate/);
 
 if (process.argv.includes("--write-baseline")) {
   const { writeCachedAdaptorSnapshot } = await import("./run-adaptor-output-snapshot.mjs");

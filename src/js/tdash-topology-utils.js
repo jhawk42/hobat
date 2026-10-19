@@ -259,6 +259,15 @@ export function buildEdgeTitle(edgeStyle) {
   return titleParts.join("\n");
 }
 
+const EDGE_METRIC_DIRECTIONS = new WeakMap();
+const COMPLEMENTARY_EDGE_METRICS = Object.freeze([
+  "linkMargin",
+  "averageRssi",
+  "lastRssi",
+  "frameErrorRate",
+  "messageErrorRate",
+]);
+
 export function addEdge(edgeMap, edgeData, from, to, style) {
   if (!from || !to || from === to) return;
 
@@ -267,6 +276,17 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
   const key = suffix ? `${keyBase}|${suffix}` : keyBase;
   const existing = edgeMap.get(key);
   if (existing) {
+    const direction = EDGE_METRIC_DIRECTIONS.get(existing);
+    if (!direction || (direction.from === from && direction.to === to)) {
+      COMPLEMENTARY_EDGE_METRICS.forEach((field) => {
+        if (
+          Number.isFinite(style[field])
+          && !Number.isFinite(existing[field])
+        ) {
+          existing[field] = style[field];
+        }
+      });
+    }
     if (Number.isFinite(style.width))
       existing.width = Math.max(existing.width || 0, style.width);
     const merged = new Set([
@@ -279,12 +299,6 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
     if (Number.isFinite(style.lqiOut)) existing.lqiOut = style.lqiOut;
     if (toText(style.edgeFromTitle)) existing.edgeFromTitle = toText(style.edgeFromTitle);
     if (toText(style.edgeToTitle)) existing.edgeToTitle = toText(style.edgeToTitle);
-    if (
-      Number.isFinite(style.linkMargin) &&
-      !Number.isFinite(existing.linkMargin)
-    ) {
-      existing.linkMargin = style.linkMargin;
-    }
     if (
       style.lqLevel !== undefined &&
       (existing.lqLevel === undefined || style.lqLevel > existing.lqLevel)
@@ -308,6 +322,7 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
   edge.id = key;
   edge.baseHidden = style.hidden === true;
   edge.linkCategories = normalizeLinkCategories(style.linkCategories);
+  EDGE_METRIC_DIRECTIONS.set(edge, { from, to });
   edgeMap.set(key, edge);
   edgeData.push(edge);
 }

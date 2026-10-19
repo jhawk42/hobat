@@ -34,7 +34,12 @@ import {
   registerRouterNeighborRows,
 } from './tdash-adaptor-model.js';
 
-import { asArray, borderRouterEvidenceFields, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories, mergeBorderRouterEvidence, resolveBorderRouterEvidence } from './tdash-adaptor-shared.js';
+import {
+  asArray, borderRouterEvidenceFields, emitThroughAdaptorModel,
+  buildEdgeEndpointTitles, getOtbrRouteCategories, mergeBorderRouterEvidence,
+  resolveBorderRouterEvidence, projectRelationshipMetrics,
+  getRelationshipLinkQuality,
+} from './tdash-adaptor-shared.js';
 
 
 
@@ -93,7 +98,10 @@ function addThreadToolsChildTableRow(child, ci, fromId, fromNode, {
   routerIdsWithChildren, routerChildByRloc16,
 }) {
   const childRloc16 = buildChildRloc16(toText(fromNode.rloc16), child.childId);
-  const childLq = toFiniteNumber(child.linkQuality ?? child.incomingLinkQuality);
+  const normalizedChildLq = getRelationshipLinkQuality(child);
+  const childLq = Number.isFinite(normalizedChildLq)
+    ? normalizedChildLq : toFiniteNumber(child.incomingLinkQuality);
+  const relationshipMetrics = projectRelationshipMetrics(child);
   const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {};
   const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
     || childRloc16
@@ -113,6 +121,7 @@ function addThreadToolsChildTableRow(child, ci, fromId, fromNode, {
     dashes: false,
     isParentChild: true,
     ...lqStyle,
+    ...relationshipMetrics,
     ...buildEdgeEndpointTitles(fromNode, childNodeEnriched, fromId, childId),
     linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
   });
@@ -166,8 +175,11 @@ function addThreadToolsChild(child, ci, fromId, fromNode, {
     }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
   }
 
-  const linkMargin = toFiniteNumber(childObj.linkMargin);
-  const childLq = toFiniteNumber(childObj.linkQuality ?? childObj.lq ?? childObj.incomingLinkQuality);
+  const relationshipMetrics = projectRelationshipMetrics(childObj);
+  const linkMargin = relationshipMetrics.linkMargin;
+  const normalizedChildLq = getRelationshipLinkQuality(childObj);
+  const childLq = Number.isFinite(normalizedChildLq)
+    ? normalizedChildLq : toFiniteNumber(childObj.incomingLinkQuality);
   const lqStyle = Number.isFinite(linkMargin)
     ? lqStyleFromLinkMargin(linkMargin)
     : (Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {});
@@ -176,7 +188,7 @@ function addThreadToolsChild(child, ci, fromId, fromNode, {
     dashes: false,
     isParentChild: true,
     ...lqStyle,
-    linkMargin,
+    ...relationshipMetrics,
     ...buildEdgeEndpointTitles(fromNode, childNodeEnriched, fromId, childId),
     linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
   });
@@ -224,7 +236,8 @@ function addThreadToolsNeighbor(neighbor, fromId, fromNode, {
     }, { shape: NODE_SHAPES.router, color: NODE_COLORS.router });
   }
 
-  const linkMargin = toFiniteNumber(neighborObj.linkMargin);
+  const relationshipMetrics = projectRelationshipMetrics(neighborObj);
+  const linkMargin = relationshipMetrics.linkMargin;
   const lqi = Math.max(
     toFiniteNumber(neighborObj.linkQualityOut ?? neighborObj.outLinkQuality) || 0,
     toFiniteNumber(neighborObj.linkQualityIn ?? neighborObj.inLinkQuality) || 0,
@@ -233,7 +246,7 @@ function addThreadToolsNeighbor(neighbor, fromId, fromNode, {
   const toNodeEnriched = nodeMap.get(toId);
   addEdge(edgeMap, edgeData, fromId, toId, {
     ...lqStyle,
-    linkMargin,
+    ...relationshipMetrics,
     ...buildEdgeEndpointTitles(fromNode, toNodeEnriched, fromId, toId),
     linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
   });

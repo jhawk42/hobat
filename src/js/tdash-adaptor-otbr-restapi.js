@@ -33,7 +33,12 @@ import {
   registerRouterNeighborRows,
 } from './tdash-adaptor-model.js';
 
-import { asArray, borderRouterEvidenceFields, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories, mergeBorderRouterEvidence, resolveBorderRouterEvidence } from './tdash-adaptor-shared.js';
+import {
+  asArray, borderRouterEvidenceFields, emitThroughAdaptorModel,
+  buildEdgeEndpointTitles, getOtbrRouteCategories, mergeBorderRouterEvidence,
+  resolveBorderRouterEvidence, projectRelationshipMetrics,
+  getRelationshipLinkQuality,
+} from './tdash-adaptor-shared.js';
 
 const FILE_RESTAPI_DEVICES       = 'td-otbr-restapi-devices.json';
 
@@ -175,7 +180,8 @@ function addRestChildTableRow(child, ci, fromId, fromNode, {
   rloc16ToNodeId, nodeMap, upsertOtbrRestApiNode, edgeMap, edgeData, routerIdsWithChildren,
 }) {
   const childRloc16 = buildChildRloc16(toText(fromNode.rloc16), child.childId);
-  const childLq = toFiniteNumber(child.linkQuality);
+  const childLq = getRelationshipLinkQuality(child);
+  const relationshipMetrics = projectRelationshipMetrics(child);
   const lqStyle = Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {};
   const childId = (childRloc16 && rloc16ToNodeId.get(childRloc16.toLowerCase()))
     || childRloc16
@@ -190,6 +196,7 @@ function addRestChildTableRow(child, ci, fromId, fromNode, {
     dashes: false,
     isParentChild: true,
     ...lqStyle,
+    ...relationshipMetrics,
     ...buildEdgeEndpointTitles(
       fromNode,
       childNodeEnriched,
@@ -227,14 +234,15 @@ function addRestMeshChild(child, ci, fromId, fromNode, {
     }, { shape: NODE_SHAPES.child, color: NODE_COLORS.child });
   }
   if (childRloc16) rloc16ToNodeId.set(childRloc16.toLowerCase(), childId);
-  const linkMargin = toFiniteNumber(child.linkMargin);
+  const relationshipMetrics = projectRelationshipMetrics(child);
+  const linkMargin = relationshipMetrics.linkMargin;
   const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
   const childNodeEnriched = nodeMap.get(childId);
   addEdge(edgeMap, edgeData, fromId, childId, {
     dashes: false,
     isParentChild: true,
     ...lqStyle,
-    linkMargin,
+    ...relationshipMetrics,
     ...buildEdgeEndpointTitles(
       fromNode,
       childNodeEnriched,
@@ -279,11 +287,12 @@ function addRestMeshNeighbor(neighbor, fromId, fromNode, {
     if (neighborRloc16) rloc16ToNodeId.set(neighborRloc16, toId);
   }
 
-  const lqStyle = lqStyleFromLinkMargin(neighbor.linkMargin);
+  const relationshipMetrics = projectRelationshipMetrics(neighbor);
+  const lqStyle = lqStyleFromLinkMargin(relationshipMetrics.linkMargin);
   const toNodeEnriched = nodeMap.get(toId);
   addEdge(edgeMap, edgeData, fromId, toId, {
     ...lqStyle,
-    linkMargin: neighbor.linkMargin,
+    ...relationshipMetrics,
     ...buildEdgeEndpointTitles(
       fromNode,
       toNodeEnriched,

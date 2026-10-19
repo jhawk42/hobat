@@ -439,6 +439,18 @@ indexes nodes and relationships and computes visibility without directly
 mutating vis-network objects. The renderer applies the result, manages network
 lifecycle, restores search styling, and publishes device selections.
 
+Relationship metric projection belongs to the browser adaptor/presentation
+boundary, not dataset assembly or row-merge policy. CLI, merged, OTBR REST, and
+Thread Tools adaptors normalize local copies of child and neighbor observations
+with canonical metric aliases enabled, then project finite relationship
+measurements into existing edges and tooltips. Composite child enrichment
+requires the same parent and child RLOC16; when both records have concrete
+extended addresses, they must agree. It does not create unmatched child edges.
+Explicit neighbor-table observations retain the router-neighbor category, and
+duplicate edge calls fill only missing finite metrics from the same endpoint
+direction. Missing measurements remain unavailable; source rows and
+detail/index records are not mutated.
+
 Layout selection supports automatic and manual profiles. Extracted layout
 helpers provide deterministic mesh tree, ring/star, compact, hub-spoke, and
 hybrid seed positions; vis-network physics can then refine the result according

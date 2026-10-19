@@ -41,6 +41,62 @@ import {
 
 export function asArray(value) { return Array.isArray(value) ? value : []; }
 
+const RELATIONSHIP_COLLECTIONS = Object.freeze([
+  "children",
+  "childTable",
+  "routerNeighbors",
+]);
+
+const RELATIONSHIP_METRICS = Object.freeze([
+  "linkMargin",
+  "averageRssi",
+  "lastRssi",
+  "frameErrorRate",
+  "messageErrorRate",
+]);
+
+export function normalizeRelationshipRecord(record) {
+  return normalizeInputRecord(record, { canonicalMetrics: true });
+}
+
+export function normalizeRelationshipOwner(record) {
+  if (!isPlainObject(record)) return record;
+  const result = { ...record };
+  const relationshipFields = [
+    ...RELATIONSHIP_COLLECTIONS,
+    "router_child_table",
+    "router_neighbor_table",
+  ];
+  relationshipFields.forEach((field) => {
+    if (Array.isArray(record[field])) {
+      result[field] = record[field].map(normalizeRelationshipRecord);
+    }
+  });
+  return result;
+}
+
+export function projectRelationshipMetrics(record) {
+  const normalized = normalizeRelationshipRecord(record);
+  const metrics = {};
+  RELATIONSHIP_METRICS.forEach((field) => {
+    const value = toFiniteNumber(normalized?.[field]);
+    if (Number.isFinite(value)) metrics[field] = value;
+  });
+  return metrics;
+}
+
+export function mergeRelationshipMetrics(primary, supplementary) {
+  return {
+    ...projectRelationshipMetrics(supplementary),
+    ...projectRelationshipMetrics(primary),
+  };
+}
+
+export function getRelationshipLinkQuality(record) {
+  const normalized = normalizeRelationshipRecord(record);
+  return toFiniteNumber(normalized?.linkQuality);
+}
+
 const BORDER_ROUTER_CONFLICT_LIMIT = 20;
 
 function borderRouterObservation(record) {

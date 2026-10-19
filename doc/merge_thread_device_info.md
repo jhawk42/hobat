@@ -139,6 +139,17 @@ Equal-priority and unknown sources retain caller order. Domain handlers can
 apply more specific policies for routes, relationships, sequence numbers, and
 mDNS observation recency.
 
+Topology metric display is a later browser-only projection, not a change to
+these merge rules. Dataset assembly retains the relationship observations;
+adaptors canonicalize local copies and carry finite child/neighbor margin, RSSI,
+and error-rate measurements into emitted edges and tooltips. Composite child
+enrichment is parent- and RLOC16-scoped, guarded by concrete extended-address
+agreement, and does not synthesize an unmatched child edge. Explicit neighbor
+observations keep their router-neighbor category. The
+[adaptor projection helpers](../src/js/tdash-adaptor-shared.js) and
+[edge presentation](../src/js/tdash-topology-utils.js) own this boundary; they
+do not change Python persistence, source authority, or browser row merging.
+
 ## Field and Relationship Merge
 
 - Empty incoming values do not replace useful existing values.

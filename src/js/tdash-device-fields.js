@@ -43,6 +43,7 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "frameErrorRate", aliases: ["err_rate_frame_pct"], transform: "relationshipMetric" },
   { path: "messageErrorRate", aliases: ["err_rate_msg_pct"], transform: "relationshipMetric" },
   { path: "averageRssi", aliases: ["rss_ave"], transform: "relationshipMetric" },
+  { path: "lastRssi", aliases: ["rss_last"], transform: "relationshipMetric" },
   { path: "linkMargin", aliases: ["rss_margin"], transform: "relationshipMetric" },
   { path: "queuedMessageCount", aliases: ["q_msg"], transform: "relationshipMetric" },
   { path: "linkQuality", aliases: ["lq", "link_quality"], transform: "relationshipMetric" },

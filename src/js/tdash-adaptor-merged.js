@@ -33,7 +33,18 @@ import {
   registerRouterNeighborRows,
 } from './tdash-adaptor-model.js';
 
-import { asArray, borderRouterEvidenceFields, emitThroughAdaptorModel, buildEdgeEndpointTitles, getOtbrRouteCategories, mergeBorderRouterEvidence, resolveBorderRouterEvidence } from './tdash-adaptor-shared.js';
+import {
+  asArray,
+  borderRouterEvidenceFields,
+  emitThroughAdaptorModel,
+  buildEdgeEndpointTitles,
+  getOtbrRouteCategories,
+  getRelationshipLinkQuality,
+  mergeBorderRouterEvidence,
+  normalizeRelationshipOwner,
+  projectRelationshipMetrics,
+  resolveBorderRouterEvidence,
+} from './tdash-adaptor-shared.js';
 
 
 
@@ -89,13 +100,15 @@ function addMergedLinkFamily(node, fromId, canonical, legacy, { ensureNodeForLin
 function addMergedNeighbor(neighbor, node, fromId, { ensureNodeForLink, nodeMap, edgeMap, edgeData }) {
   const toId = ensureNodeForLink(neighbor, neighbor.rloc16 || neighbor.extAddress || neighbor.id);
   if (!toId) return;
-  const linkMargin = toFiniteNumber(neighbor.rss_margin ?? neighbor.linkMargin);
+  const metrics = projectRelationshipMetrics(neighbor);
+  const linkMargin = metrics.linkMargin;
   const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
   const toNodeEnriched = nodeMap.get(toId);
   addEdge(edgeMap, edgeData, fromId, toId, {
     width: 1.5,
     ...lqStyle,
     linkMargin,
+    ...metrics,
     ...buildEdgeEndpointTitles(node, toNodeEnriched, fromId, toId),
     linkCategories: [EDGE_CATEGORY_ROUTER_NEIGHBOR],
     edgeKeySuffix: 'merged-router-neighbor'
@@ -148,8 +161,10 @@ function addMergedChildTableRow(child, ci, node, fromId, {
     shape: NODE_SHAPES.child,
     color: NODE_COLORS.child,
   });
-  const childLq = toFiniteNumber(child.linkQuality ?? child.incomingLinkQuality ?? child.lq);
-  const linkMargin = toFiniteNumber(child.rss_margin ?? child.linkMargin);
+  const childLq = getRelationshipLinkQuality(child)
+    ?? toFiniteNumber(child.incomingLinkQuality);
+  const metrics = projectRelationshipMetrics(child);
+  const linkMargin = metrics.linkMargin;
   const lqStyle = Number.isFinite(childLq)
     ? lqStyleFromAvgLqi(childLq, 3)
     : (Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {});
@@ -159,10 +174,10 @@ function addMergedChildTableRow(child, ci, node, fromId, {
     isParentChild: true,
     ...lqStyle,
     linkMargin,
-    averageRssi: toFiniteNumber(child.rss_ave ?? child.averageRssi),
-    lastRssi: toFiniteNumber(child.rss_last ?? child.lastRssi),
-    frameErrorRate: toFiniteNumber(child.err_rate_frame_pct ?? child.frameErrorRate),
-    messageErrorRate: toFiniteNumber(child.err_rate_msg_pct ?? child.messageErrorRate),
+    averageRssi: metrics.averageRssi,
+    lastRssi: metrics.lastRssi,
+    frameErrorRate: metrics.frameErrorRate,
+    messageErrorRate: metrics.messageErrorRate,
     ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
     linkCategories: [EDGE_CATEGORY_OTBR_CHILD],
     edgeKeySuffix: 'merged-otbr-child'
@@ -178,8 +193,10 @@ function addMergedChild(child, ci, node, fromId, {
   if (!toText(childNode.rloc16) && !toText(childNode.extaddr)) return; // skip object refs without Thread identity
   const childId = ensureNodeForLink(childNode, `${fromId}-child-${ci + 1}`);
   if (!childId) return;
-  const childLq = toFiniteNumber(childNode.linkQuality ?? childNode.incomingLinkQuality ?? childNode.lq);
-  const linkMargin = toFiniteNumber(childNode.rss_margin ?? childNode.linkMargin);
+  const childLq = getRelationshipLinkQuality(childNode)
+    ?? toFiniteNumber(childNode.incomingLinkQuality);
+  const metrics = projectRelationshipMetrics(childNode);
+  const linkMargin = metrics.linkMargin;
   const lqStyle = Number.isFinite(linkMargin)
     ? lqStyleFromLinkMargin(linkMargin)
     : (Number.isFinite(childLq) ? lqStyleFromAvgLqi(childLq, 3) : {});
@@ -189,10 +206,10 @@ function addMergedChild(child, ci, node, fromId, {
     isParentChild: true,
     ...lqStyle,
     linkMargin,
-    averageRssi: toFiniteNumber(childNode.rss_ave ?? childNode.averageRssi),
-    lastRssi: toFiniteNumber(childNode.rss_last ?? childNode.lastRssi),
-    frameErrorRate: toFiniteNumber(childNode.err_rate_frame_pct ?? childNode.frameErrorRate),
-    messageErrorRate: toFiniteNumber(childNode.err_rate_msg_pct ?? childNode.messageErrorRate),
+    averageRssi: metrics.averageRssi,
+    lastRssi: metrics.lastRssi,
+    frameErrorRate: metrics.frameErrorRate,
+    messageErrorRate: metrics.messageErrorRate,
     ...buildEdgeEndpointTitles(node, childNodeEnriched, fromId, childId),
     linkCategories: [EDGE_CATEGORY_DEFAULT_CHILDREN],
     edgeKeySuffix: 'merged-default-child'
@@ -202,9 +219,10 @@ function addMergedChild(child, ci, node, fromId, {
 
 function addMergedRouterChild(child, ci, node, fromId, {
   upsertMergedNode, rawNodeById, nodeMap, edgeMap, edgeData, routerIdsWithChildren,
-}) {
+}, rawChild = child) {
   const childId = toText(child.rloc16) || `${fromId}-rct-child-${ci + 1}`;
-  const linkMargin = toFiniteNumber(child.rss_margin);
+  const metrics = projectRelationshipMetrics(child);
+  const linkMargin = metrics.linkMargin;
   const lqStyle = Number.isFinite(linkMargin) ? lqStyleFromLinkMargin(linkMargin) : {};
   const childType = toText(child.type).toLowerCase();
   const isChildLikeNode = childType === 'mtd' || child.rx_on === false;
@@ -220,7 +238,7 @@ function addMergedRouterChild(child, ci, node, fromId, {
     shape: isChildLikeNode && !isRouterLikeNode ? NODE_SHAPES.child : NODE_SHAPES.router,
     color: isChildLikeNode && !isRouterLikeNode ? NODE_COLORS.child : NODE_COLORS.eve
   });
-  if (!rawNodeById.has(childId)) rawNodeById.set(childId, child);
+  if (!rawNodeById.has(childId)) rawNodeById.set(childId, rawChild);
   const childNodeEnriched = nodeMap.get(childId);
   addEdge(edgeMap, edgeData, fromId, childId, {
     dashes: false, isParentChild: true,
@@ -235,6 +253,7 @@ function addMergedRouterChild(child, ci, node, fromId, {
 
 export function adaptMergedDetailed(fileMap) {
   const rows = asArray(fileMap.values().next().value);
+  const relationshipRows = rows.map(normalizeRelationshipOwner);
   const nodeMap = new Map();
   const rawNodeById = new Map();
   const edgeMap = new Map();
@@ -385,9 +404,9 @@ export function adaptMergedDetailed(fileMap) {
     ensureNodeForLink, upsertMergedNode, rawNodeById, nodeMap,
     edgeMap, edgeData, routerIdsWithChildren,
   };
-  rows.forEach((node, index) => {
+  relationshipRows.forEach((node, index) => {
     if (isMergedRowEveOnly(node)) return;
-    const fromId = chooseMergedId(node, index);
+    const fromId = chooseMergedId(rows[index], index);
     const routeCategories = getOtbrRouteCategories(node);
     [
       { canonical: 'links3', legacy: '3_links' },
@@ -411,8 +430,18 @@ export function adaptMergedDetailed(fileMap) {
     (Array.isArray(node.children) ? node.children : []).forEach((child, ci) => {
       addMergedChild(child, ci, node, fromId, relationshipContext);
     });
+    const rawRouterChildRows = Array.isArray(rows[index].router_child_table)
+      ? rows[index].router_child_table
+      : [];
     (Array.isArray(node.router_child_table) ? node.router_child_table : []).forEach((child, ci) => {
-      addMergedRouterChild(child, ci, node, fromId, relationshipContext);
+      addMergedRouterChild(
+        child,
+        ci,
+        node,
+        fromId,
+        relationshipContext,
+        rawRouterChildRows[ci] ?? child,
+      );
     });
   });
 
