@@ -208,6 +208,7 @@ def test_diagnostic_sweep_records_roles_duplicates_malformed_and_failures(monkey
     assert outcome["clearedDiagnostics"] is True
     assert outcome["inputCount"] == 5
     assert outcome["queriedCount"] == 3
+    assert outcome["attemptedCount"] == 3
     assert [record["status"] for record in outcome["deviceResults"]] == [
         "skipped",
         "malformed",
@@ -222,6 +223,203 @@ def test_diagnostic_sweep_records_roles_duplicates_malformed_and_failures(monkey
     assert child_call["task_timeout"] == 30
     assert reed_call["task_timeout"] == 15
     delete_all.assert_called_once_with()
+
+
+@pytest.mark.parametrize("policy", ["legacy", "mode-aware"])
+@pytest.mark.parametrize("clear_diagnostics", [True, False])
+def test_zero_iid_extended_sweep_skips_before_actions_and_preserves_callbacks(
+    monkeypatch, policy, clear_diagnostics, caplog
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fetch = MagicMock()
+    mode_aware_fetch = MagicMock()
+    delete_all = MagicMock()
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+    monkeypatch.setattr(
+        client, "_fetch_mode_aware_diagnostic_attempts", mode_aware_fetch
+    )
+    monkeypatch.setattr(client, "delete_all_diagnostics", delete_all)
+    progress = []
+    checkpoints = []
+    pass_checkpoints = []
+    devices = [
+        {
+            "id": "1111111111111111",
+            "role": "child",
+            "mode": {"fullThreadDevice": False},
+            "mlEidIid": "0000000000000000",
+        },
+        {
+            "id": "1111111111111111",
+            "role": "router",
+            "mlEidIid": "1234567890abcdef",
+        },
+        {
+            "id": "2222222222222222",
+            "role": "router",
+            "mode": {"device": "FTD"},
+            "mlEidIid": "0000000000000000",
+        },
+        {
+            "id": "3333333333333333",
+            "role": "reed",
+            "mlEidIid": "0000000000000000",
+        },
+        {
+            "id": "4444444444444444",
+            "mlEidIid": "0000000000000000",
+        },
+        {
+            "id": "5555555555555555",
+            "role": "child",
+            "mode": {"fullThreadDevice": False, "device": "FTD"},
+            "mlEidIid": "0000000000000000",
+        },
+        {"id": "malformed"},
+    ]
+    original_devices = [dict(device) for device in devices]
+
+    outcome = client.fetch_all_devices_diagnostics(
+        devices,
+        child_collection_policy=policy,
+        clear_diagnostics=clear_diagnostics,
+        skip_on_failure=False,
+        on_progress=lambda *args: progress.append(args),
+        on_checkpoint=lambda *args: checkpoints.append(args),
+        on_pass_checkpoint=lambda *args: pass_checkpoints.append(args),
+    )
+
+    fetch.assert_not_called()
+    mode_aware_fetch.assert_not_called()
+    delete_all.assert_not_called()
+    assert devices == original_devices
+    assert outcome["items"] == []
+    assert outcome["partial"] is True
+    assert outcome["clearedDiagnostics"] is False
+    assert outcome["inputCount"] == 7
+    assert outcome["queriedCount"] == 5
+    assert outcome["attemptedCount"] == 0
+    assert [item["status"] for item in outcome["deviceResults"]] == [
+        "skipped",
+        "malformed",
+        "skipped",
+        "skipped",
+        "skipped",
+        "skipped",
+        "skipped",
+    ]
+    skipped = outcome["deviceResults"][-5:]
+    assert [item["skipReasonCode"] for item in skipped] == [
+        "unresolved_mesh_local_iid"
+    ] * 5
+    assert skipped[0]["deviceMode"] == {"fullThreadDevice": False}
+    assert skipped[0]["attempts"] == 0
+    assert skipped[0]["attemptedTypes"] == []
+    assert skipped[0]["passes"] == []
+    assert all(item["elapsed"] >= 0 for item in skipped)
+    assert [event[2] for event in progress] == [
+        "1111111111111111",
+        "2222222222222222",
+        "3333333333333333",
+        "4444444444444444",
+        "5555555555555555",
+    ]
+    assert [event[4] for event in progress] == ["skipped"] * 5
+    assert [event[4] for event in checkpoints] == ["skipped"] * 5
+    assert pass_checkpoints == []
+    assert "unresolved_mesh_local_iid" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("iid", "destination_type"),
+    [
+        ("0000000000000000", "mleid"),
+        ("0000000000000000", "rloc"),
+        ("0000000000000001", "extended"),
+        (None, "extended"),
+        ("NULL", "extended"),
+        ("ID_ONLY", "extended"),
+        ("", "extended"),
+        ("000000000000000", "extended"),
+        (0, "extended"),
+    ],
+)
+def test_zero_iid_guard_only_blocks_canonical_extended_targets(
+    monkeypatch, iid, destination_type
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fetch = MagicMock(
+        return_value={
+            "item": {"id": "diag-1"},
+            "action": completed_action("action-1", "diag-1"),
+            "diagnosticId": "diag-1",
+        }
+    )
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+    device_record: dict[str, object] = {
+        "id": "1111111111111111",
+        "role": "router",
+    }
+    if iid == "ID_ONLY":
+        device: dict[str, object] | str = "1111111111111111"
+    elif iid == "NULL":
+        device_record["mlEidIid"] = None
+        device = device_record
+    else:
+        if iid is not None:
+            device_record["mlEidIid"] = iid
+        device = device_record
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [device],
+        destination_type=destination_type,
+    )
+
+    fetch.assert_called_once()
+    assert outcome["deviceResults"][0]["status"] == "completed"
+    assert "skipReasonCode" not in outcome["deviceResults"][0]
+    assert outcome["attemptedCount"] == 1
+
+
+def test_mixed_zero_and_addressable_targets_clear_and_count_real_attempts(
+    monkeypatch,
+) -> None:
+    client = OTBRRestApiClient(base_url="http://example.test")
+    fetch = MagicMock(
+        return_value={
+            "item": {"id": "diag-2"},
+            "action": completed_action("action-2", "diag-2"),
+            "diagnosticId": "diag-2",
+        }
+    )
+    delete_all = MagicMock()
+    monkeypatch.setattr(client, "fetch_device_diagnostics", fetch)
+    monkeypatch.setattr(client, "delete_all_diagnostics", delete_all)
+
+    outcome = client.fetch_all_devices_diagnostics(
+        [
+            {
+                "id": "1111111111111111",
+                "mlEidIid": "0000000000000000",
+            },
+            {
+                "id": "2222222222222222",
+                "mlEidIid": "1234567890abcdef",
+            },
+        ],
+        clear_diagnostics=True,
+    )
+
+    delete_all.assert_called_once_with()
+    fetch.assert_called_once()
+    assert outcome["partial"] is True
+    assert outcome["clearedDiagnostics"] is True
+    assert outcome["queriedCount"] == 2
+    assert outcome["attemptedCount"] == 1
+    assert [item["status"] for item in outcome["deviceResults"]] == [
+        "skipped",
+        "completed",
+    ]
 
 
 def test_terminal_diagnostic_failure_retries_only_with_explicit_fallback(monkeypatch) -> None:

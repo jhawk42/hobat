@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +14,7 @@ from td_const import (
     OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_FILENAME,
     OTBR_RESTAPI_MESH_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
 )
+from util_data import create_checkpoint_filename, network_scope_path
 
 
 def test_topology_saves_each_enabled_output_before_the_next_collection(tmp_path):
@@ -165,6 +167,7 @@ def test_topology_uses_refreshed_roster_mode_for_diagnostics(tmp_path):
             "id": "1111111111111111",
             "role": "child",
             "mode": {"fullThreadDevice": False, "device": "MTD"},
+            "mlEidIid": "0000000000000000",
         }
     ]
     client.fetch_device_collection.return_value = refreshed_roster
@@ -190,6 +193,87 @@ def test_topology_uses_refreshed_roster_mode_for_diagnostics(tmp_path):
         ]
         == "mode-aware"
     )
+
+
+@pytest.mark.parametrize("existing_dataset", [True, False])
+def test_topology_guard_retains_dataset_and_checkpoint_and_updates_outcome(
+    tmp_path, existing_dataset, caplog
+):
+    caplog.set_level("INFO")
+    args = cli_module.build_parser().parse_args(
+        [
+            "--no-progress",
+            "topology",
+            "--skip-devices",
+            "--no-update-devices",
+            "--skip-mesh-diagnostics",
+            "--no-enrich-mac-counters",
+        ]
+    )
+    args.td_data_dir = tmp_path
+    device = {
+        "id": "1111111111111111",
+        "role": "router",
+        "mlEidIid": "0000000000000000",
+    }
+    diagnostic_path = tmp_path / OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME
+    outcome_path = tmp_path / OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME
+    checkpoint_path = tmp_path / create_checkpoint_filename(diagnostic_path.name)
+    old_dataset = b'[{"id":"previous-diagnostic"}]'
+    old_scope = b'{"previous":"network-scope"}'
+    old_checkpoint = b'[{"id":"previous-checkpoint"}]'
+    old_outcome = b'{"deviceResults":[{"status":"completed"}]}'
+    if existing_dataset:
+        diagnostic_path.write_bytes(old_dataset)
+        network_scope_path(diagnostic_path).write_bytes(old_scope)
+        checkpoint_path.write_bytes(old_checkpoint)
+        outcome_path.write_bytes(old_outcome)
+    outcome = {
+        "items": [],
+        "deviceResults": [
+            {
+                "deviceId": device["id"],
+                "status": "skipped",
+                "skipReasonCode": "unresolved_mesh_local_iid",
+                "mlEidIid": "0000000000000000",
+                "attempts": 0,
+            }
+        ],
+        "partial": True,
+        "clearedDiagnostics": False,
+        "attemptedCount": 0,
+    }
+    client = MagicMock()
+    client.list_devices.return_value = [device]
+
+    def fetch_all(selected, **kwargs):
+        assert selected == [device]
+        kwargs["on_checkpoint"]([], 1, 1, device["id"], "skipped")
+        return outcome
+
+    client.fetch_all_devices_diagnostics.side_effect = fetch_all
+
+    with patch.object(
+        topology_module,
+        "emit_rest_payload_output",
+        side_effect=AssertionError("guarded empty datasets must not be written"),
+    ):
+        topology_module.dispatch_topology(client, args, raw_arg=False)
+
+    if existing_dataset:
+        assert diagnostic_path.read_bytes() == old_dataset
+        assert network_scope_path(diagnostic_path).read_bytes() == old_scope
+        assert checkpoint_path.read_bytes() == old_checkpoint
+    else:
+        assert not diagnostic_path.exists()
+        assert not network_scope_path(diagnostic_path).exists()
+        assert not checkpoint_path.exists()
+    saved_outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
+    assert saved_outcome["deviceResults"][0]["skipReasonCode"] == (
+        "unresolved_mesh_local_iid"
+    )
+    assert saved_outcome["attemptedCount"] == 0
+    assert "no new diagnostic data" in caplog.text
 
 
 @pytest.mark.parametrize(

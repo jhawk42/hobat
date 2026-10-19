@@ -7,6 +7,10 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from td_const import (
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+)
 from otbr_restapi_util import (
     ActionTimingPolicy,
     BASIC_DIAGNOSTIC_TLVS,
@@ -406,6 +410,50 @@ def _write_checkpoint_best_effort(
         )
 
 
+def _has_unresolved_iid_skip(outcome: dict[str, Any]) -> bool:
+    return any(
+        isinstance(result, dict)
+        and result.get("skipReasonCode") == "unresolved_mesh_local_iid"
+        for result in outcome.get("deviceResults", [])
+    )
+
+
+def _diagnostic_outcome_path(output_path: str | Path) -> Path:
+    output_file = Path(output_path)
+    if output_file.name == OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME:
+        return output_file.with_name(OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME)
+    suffix = output_file.suffix
+    stem = output_file.name[: -len(suffix)] if suffix else output_file.name
+    return output_file.with_name(f"{stem}.outcome{suffix}")
+
+
+def _write_guard_affected_outcome(
+    outcome: dict[str, Any],
+    output_path: str | Path,
+    *,
+    raw: bool,
+    command_name: str,
+) -> None:
+    outcome_file = Path(output_path)
+    payload = outcome if raw else convert_keys_to_camel_case(outcome)
+    try:
+        save_json_atomic(payload, outcome_file)
+    except (OSError, TypeError, ValueError) as exc:
+        logging.error(
+            "event=diagnostic_outcome_write_failed command=%s outcome_file=%s error_type=%s error=%s",
+            command_name,
+            outcome_file,
+            type(exc).__name__,
+            exc,
+        )
+        raise
+    logging.info(
+        "event=diagnostic_outcome_write command=%s outcome_file=%s",
+        command_name,
+        outcome_file,
+    )
+
+
 def _dispatch_diagnostics_list(
     client: OTBRRestApiClient,
     args: argparse.Namespace,
@@ -488,7 +536,7 @@ def _dispatch_diagnostics_fetch_all(
     client: OTBRRestApiClient,
     args: argparse.Namespace,
     raw_arg: object,
-    finish: Callable[[Any], Any],
+    finish: Callable[..., Any],
     output_path: str | Path | None,
 ) -> Any:
     resolved_types = resolve_types(args)
@@ -584,6 +632,14 @@ def _dispatch_diagnostics_fetch_all(
         on_checkpoint=_on_checkpoint,
         on_pass_checkpoint=_on_pass_checkpoint,
     )
+    guard_affected = _has_unresolved_iid_skip(outcome)
+    if guard_affected and output_path is not None:
+        _write_guard_affected_outcome(
+            outcome,
+            _diagnostic_outcome_path(output_path),
+            raw=raw_arg is True,
+            command_name="otbr-restapi diagnostics fetch-all",
+        )
     diagnostics = outcome["items"]
     if raw_arg is not True:
         if do_enrich:
@@ -592,12 +648,23 @@ def _dispatch_diagnostics_fetch_all(
         _apply_border_router_enrichment(diagnostics)
     if raw_arg is True:
         if getattr(args, "items_only", False):
-            return finish(diagnostics)
-        return finish(outcome)
-    _apply_role_evidence_normalization(diagnostics)
-    if getattr(args, "items_only", False):
-        return finish(convert_keys_to_camel_case(diagnostics))
-    return finish(convert_keys_to_camel_case(outcome))
+            payload = diagnostics
+        else:
+            payload = outcome
+    else:
+        _apply_role_evidence_normalization(diagnostics)
+        if getattr(args, "items_only", False):
+            payload = convert_keys_to_camel_case(diagnostics)
+        else:
+            payload = convert_keys_to_camel_case(outcome)
+    preserve_prior_dataset = guard_affected and not diagnostics
+    if preserve_prior_dataset:
+        logging.warning(
+            "OTBR REST diagnostics fetch-all produced no diagnostics for an "
+            "unresolved-IID skip; retaining the prior dataset at %s",
+            output_path if output_path is not None else "(no output path resolved)",
+        )
+    return finish(payload, write=not preserve_prior_dataset)
 
 
 def dispatch_diagnostics(
@@ -608,7 +675,9 @@ def dispatch_diagnostics(
 ) -> Any:
     output_path = getattr(args, "resolved_output_path", None)
 
-    def finish(result: Any) -> Any:
+    def finish(result: Any, *, write: bool = True) -> Any:
+        if not write:
+            return result
         if raw_arg is True:
             return emit_rest_command_output(
                 result, output_path, logger=logging.getLogger(__name__), raw=True

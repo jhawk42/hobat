@@ -114,6 +114,14 @@ while the dispatchers own the canonical output and atomic provisional
 checkpoints. Missing or contradictory child mode remains an explicit legacy
 fallback rather than a guessed classification.
 
+For standard extended-address batches, the shared client skips any selected
+record with the explicit canonical-zero `mlEidIid` sentinel, independent of
+role or mode. Missing or noncanonical IID evidence keeps the existing request
+path. Guard skips are unresolved addressability, not offline evidence;
+dispatchers retain an all-guarded empty diagnostic snapshot and persist the
+current skip outcome separately. `queriedCount` includes normalized skips,
+while `attemptedCount` counts only devices with a diagnostic attempt.
+
 Transport methods do not write files. Resource dispatchers or composite
 workflows own command output because they know the command and resolved path.
 Mutating action POSTs are not retried after an ambiguous response because the

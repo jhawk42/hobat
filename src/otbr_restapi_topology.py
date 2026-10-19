@@ -17,6 +17,8 @@ from otbr_restapi_diagnostics import (
     _apply_border_router_enrichment,
     _apply_mac_enrichment,
     _apply_time_stats_enrichment,
+    _has_unresolved_iid_skip,
+    _write_guard_affected_outcome,
     _write_checkpoint_best_effort,
     make_progress_fn,
     resolve_child_collection_options,
@@ -138,21 +140,58 @@ def dispatch_topology(
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
             _apply_border_router_enrichment(diagnostics)
-        emit_rest_payload_output(diagnostics, diagnostic_path, logging.getLogger(__name__))
         outcome_path = data_dir / OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME
-        emit_rest_payload_output(
-            diagnostic_outcome,
-            outcome_path,
-            logging.getLogger(__name__),
+        guard_affected = _has_unresolved_iid_skip(diagnostic_outcome)
+        unresolved_iid_skips = sum(
+            isinstance(result, dict)
+            and result.get("skipReasonCode") == "unresolved_mesh_local_iid"
+            for result in diagnostic_outcome.get("deviceResults", [])
         )
+        preserve_prior_dataset = guard_affected and not diagnostics
+        if preserve_prior_dataset:
+            logging.warning(
+                "Topology diagnostics produced no new records after %d "
+                "unresolved-IID skip(s); retaining the prior dataset at %s",
+                unresolved_iid_skips,
+                diagnostic_path,
+            )
+        else:
+            emit_rest_payload_output(
+                diagnostics, diagnostic_path, logging.getLogger(__name__)
+            )
+        if guard_affected:
+            _write_guard_affected_outcome(
+                diagnostic_outcome,
+                outcome_path,
+                raw=raw_arg is True,
+                command_name="otbr-restapi topology diagnostics",
+            )
+        else:
+            emit_rest_payload_output(
+                diagnostic_outcome,
+                outcome_path,
+                logging.getLogger(__name__),
+            )
         elapsed = time.monotonic() - step_start
-        logging.info(
-            "topology step 2 done: %d device(s), %d diagnostic(s) in %.1fs → %s",
-            len(diag_device_ids),
-            len(diagnostics),
-            elapsed,
-            diagnostic_path,
-        )
+        if guard_affected:
+            logging.info(
+                "topology step 2 done: %d device(s), %d diagnostic(s), "
+                "%d unresolved-IID skip(s)%s in %.1fs → %s",
+                len(diag_device_ids),
+                len(diagnostics),
+                unresolved_iid_skips,
+                ", no new diagnostic data" if preserve_prior_dataset else "",
+                elapsed,
+                diagnostic_path,
+            )
+        else:
+            logging.info(
+                "topology step 2 done: %d device(s), %d diagnostic(s) in %.1fs → %s",
+                len(diag_device_ids),
+                len(diagnostics),
+                elapsed,
+                diagnostic_path,
+            )
     else:
         logging.info("topology step 2 skipped (--skip-diagnostics)")
 

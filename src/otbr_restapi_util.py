@@ -352,12 +352,10 @@ class OTBRIndeterminateEnqueueError(OTBRClientError):
 def _normalize_batch_devices(
     device_ids: Sequence[str | Mapping[str, Any]],
 ) -> tuple[
-    list[tuple[str, str | None, object | None]],
+    list[tuple[str, str | None, object | None, object | None]],
     list[dict[str, Any]],
 ]:
-    normalized_devices: list[
-        tuple[str, str | None, object | None]
-    ] = []
+    normalized_devices: list[tuple[str, str | None, object | None, object | None]] = []
     device_results: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
 
@@ -366,10 +364,12 @@ def _normalize_batch_devices(
             device_id = device.get("id") or device.get("extAddress")
             role = device.get("role")
             mode = device.get("mode")
+            ml_eid_iid = device.get("mlEidIid")
         else:
             device_id = device
             role = None
             mode = None
+            ml_eid_iid = None
         if not isinstance(device_id, str) or not re.fullmatch(
             r"[0-9a-fA-F]{16}", device_id
         ):
@@ -399,10 +399,22 @@ def _normalize_batch_devices(
                 device_id,
                 str(role).lower() if role else None,
                 mode,
+                ml_eid_iid,
             )
         )
 
     return normalized_devices, device_results
+
+
+def _has_unresolved_extended_iid(
+    ml_eid_iid: object | None,
+    destination_type: str,
+) -> bool:
+    return (
+        destination_type == DestinationType.EXTENDED
+        and isinstance(ml_eid_iid, str)
+        and ml_eid_iid == "0000000000000000"
+    )
 
 
 def _classify_child_mode(
@@ -1610,18 +1622,59 @@ class OTBRRestApiClient:
         started_at = datetime.now(timezone.utc).isoformat()
         results: list[Any] = []
         normalized_devices, device_results = _normalize_batch_devices(device_ids)
+        all_targets_guarded = bool(normalized_devices) and all(
+            _has_unresolved_extended_iid(ml_eid_iid, destination_type)
+            for _device_id, _role, _mode, ml_eid_iid in normalized_devices
+        )
+        cleared_diagnostics = clear_diagnostics and not all_targets_guarded
 
-        if clear_diagnostics:
+        if cleared_diagnostics:
             self.delete_all_diagnostics()
 
         total = len(normalized_devices)
-        for idx, (device_id, role, mode) in enumerate(normalized_devices, start=1):
+        for idx, (device_id, role, mode, ml_eid_iid) in enumerate(
+            normalized_devices, start=1
+        ):
             t_start = time.monotonic()
             status = "completed"
             attempted_types: list[list[str | int]] = []
             attempt_errors: list[dict[str, Any]] = []
             legacy_mode_metadata: dict[str, Any] = {}
             try:
+                if _has_unresolved_extended_iid(ml_eid_iid, destination_type):
+                    status = "skipped"
+                    record = {
+                        "deviceId": device_id,
+                        "role": role,
+                        "status": status,
+                        "skipReasonCode": "unresolved_mesh_local_iid",
+                        "skipReason": (
+                            "Saved mlEidIid is zero; extended-address diagnostics "
+                            "cannot resolve this device"
+                        ),
+                        "mlEidIid": ml_eid_iid,
+                        "destinationType": destination_type,
+                        "attempts": 0,
+                        "attemptedTypes": [],
+                        "successfulTypes": None,
+                        "fallbackRecovered": False,
+                        "retryRecovered": False,
+                        "passes": [],
+                        "attemptErrors": [],
+                        "elapsed": time.monotonic() - t_start,
+                    }
+                    if mode is not None:
+                        record["deviceMode"] = (
+                            dict(mode) if isinstance(mode, Mapping) else mode
+                        )
+                    device_results.append(record)
+                    logging.warning(
+                        "Skipping device %s for %s diagnostics: saved mlEidIid is zero "
+                        "(unresolved_mesh_local_iid)",
+                        device_id,
+                        destination_type,
+                    )
+                    continue
                 if child_collection_policy == "mode-aware" and role == "child":
                     mode_classification, mode_warning = _classify_child_mode(mode)
                     if mode_classification == "unknown":
@@ -1842,11 +1895,14 @@ class OTBRRestApiClient:
             "items": results,
             "deviceResults": device_results,
             "partial": any(item["status"] != "completed" for item in device_results),
-            "clearedDiagnostics": clear_diagnostics,
+            "clearedDiagnostics": cleared_diagnostics,
             "startedAt": started_at,
             "completedAt": datetime.now(timezone.utc).isoformat(),
             "inputCount": len(device_ids),
             "queriedCount": len(normalized_devices),
+            "attemptedCount": sum(
+                item.get("attempts", 0) > 0 for item in device_results
+            ),
             "childCollectionPolicy": child_collection_policy,
             "childrenFetchFast": children_fetch_fast,
             "childrenFetchDetail": children_fetch_detail,
@@ -2427,7 +2483,7 @@ class OTBRRestApiClient:
 
             total = len(normalized_devices)
             required_types = list(types)
-            for index, (device_id, role, _mode) in enumerate(
+            for index, (device_id, role, _mode, _ml_eid_iid) in enumerate(
                 normalized_devices, start=1
             ):
                 attempt = self._fetch_mesh_diagnostics_for_device(

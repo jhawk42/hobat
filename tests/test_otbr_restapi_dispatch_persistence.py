@@ -11,7 +11,16 @@ import otbr_restapi_mesh_diagnostics as mesh_module
 import otbr_restapi_node as node_module
 import otbr_restapi_cli as cli_module
 from otbr_restapi_util import OTBRUsageError, emit_rest_command_output
-from util_data import CollectionWriteOutcome, read_network_scope, save_final_json
+from td_const import (
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+    OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+)
+from util_data import (
+    CollectionWriteOutcome,
+    network_scope_path,
+    read_network_scope,
+    save_final_json,
+)
 
 
 def test_node_dispatch_saves_json_before_return():
@@ -312,7 +321,11 @@ def test_diagnostics_dispatch_owns_final_output_after_normalization():
 
 def test_diagnostics_fetch_all_preserves_roles_for_explicit_device_ids():
     devices = [
-        {"id": "1111111111111111", "role": "child"},
+        {
+            "id": "1111111111111111",
+            "role": "child",
+            "mlEidIid": "0000000000000000",
+        },
         {"id": "2222222222222222", "role": "router"},
     ]
     outcome = {"items": [], "deviceResults": [], "partial": False}
@@ -395,6 +408,201 @@ def test_diagnostics_fetch_all_checkpoint_and_final_preserve_address_override(tm
         assert saved["_merge_conflicts"] == [
             {"path": "isBorderRouter", "current": False, "incoming": True}
         ]
+
+
+@pytest.mark.parametrize(
+    ("output_name", "outcome_name"),
+    [
+        (
+            "diagnostics-export.json",
+            "diagnostics-export.outcome.json",
+        ),
+        (
+            OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
+            OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("items_only", "raw"),
+    [(True, False), (False, False), (True, True), (False, True)],
+)
+@pytest.mark.parametrize("existing_dataset", [True, False])
+def test_diagnostics_fetch_all_guard_writes_outcome_but_retains_empty_dataset(
+    tmp_path, output_name, outcome_name, items_only, raw, existing_dataset
+):
+    output_path = tmp_path / output_name
+    old_dataset = b'[{"id":"previous-diagnostic"}]'
+    old_scope = b'{"previous":"network-scope"}'
+    old_checkpoint = b'[{"id":"previous-checkpoint"}]'
+    checkpoint_path = tmp_path / f"{output_path.stem}.partial.json"
+    if existing_dataset:
+        output_path.write_bytes(old_dataset)
+        network_scope_path(output_path).write_bytes(old_scope)
+        checkpoint_path.write_bytes(old_checkpoint)
+    device = {
+        "id": "1111111111111111",
+        "role": "router",
+        "mlEidIid": "0000000000000000",
+    }
+    outcome = {
+        "items": [],
+        "deviceResults": [
+            {
+                "deviceId": device["id"],
+                "role": "router",
+                "status": "skipped",
+                "skipReasonCode": "unresolved_mesh_local_iid",
+                "attempts": 0,
+                "mlEidIid": "0000000000000000",
+            }
+        ],
+        "partial": True,
+        "clearedDiagnostics": False,
+        "inputCount": 1,
+        "queriedCount": 1,
+        "attemptedCount": 0,
+    }
+    client = Mock()
+    client.list_devices.return_value = [device]
+
+    def fetch_all(_selected, **kwargs):
+        kwargs["on_checkpoint"]([], 1, 1, device["id"], "skipped")
+        return outcome
+
+    client.fetch_all_devices_diagnostics.side_effect = fetch_all
+    command_args = ["diagnostics", "fetch-all", "--no-update-devices"]
+    if items_only:
+        command_args.append("--items-only")
+    args = cli_module.build_parser().parse_args(command_args)
+    args.resolved_output_path = str(output_path)
+
+    with patch.object(
+        diagnostics_module,
+        "emit_rest_command_output",
+        side_effect=AssertionError("guarded empty dataset must not be written"),
+    ):
+        result = diagnostics_module.dispatch_diagnostics(
+            client, args, raw_arg=raw, fields=None
+        )
+
+    assert result == ([] if items_only else outcome)
+    if existing_dataset:
+        assert output_path.read_bytes() == old_dataset
+        assert network_scope_path(output_path).read_bytes() == old_scope
+        assert checkpoint_path.read_bytes() == old_checkpoint
+    else:
+        assert not output_path.exists()
+        assert not network_scope_path(output_path).exists()
+        assert not checkpoint_path.exists()
+    saved_outcome = json.loads((tmp_path / outcome_name).read_text(encoding="utf-8"))
+    assert saved_outcome["deviceResults"][0]["skipReasonCode"] == (
+        "unresolved_mesh_local_iid"
+    )
+    assert saved_outcome["attemptedCount"] == 0
+    assert client.fetch_all_devices_diagnostics.call_args.args[0] == [device]
+
+
+def test_diagnostics_fetch_all_guard_without_output_path_creates_no_sidecar():
+    client = Mock()
+    client.list_devices.return_value = [
+        {"id": "1111111111111111", "mlEidIid": "0000000000000000"}
+    ]
+    client.fetch_all_devices_diagnostics.return_value = {
+        "items": [],
+        "deviceResults": [
+            {
+                "skipReasonCode": "unresolved_mesh_local_iid",
+                "status": "skipped",
+            }
+        ],
+        "partial": True,
+    }
+    args = cli_module.build_parser().parse_args(
+        ["diagnostics", "fetch-all", "--no-update-devices", "--items-only"]
+    )
+    args.resolved_output_path = None
+
+    with patch.object(diagnostics_module, "save_json_atomic") as outcome_write:
+        assert (
+            diagnostics_module.dispatch_diagnostics(
+                client, args, raw_arg=False, fields=None
+            )
+            == []
+        )
+    outcome_write.assert_not_called()
+
+
+def test_diagnostics_fetch_all_guarded_partial_run_writes_items_and_full_outcome(
+    tmp_path,
+):
+    output_path = tmp_path / "diagnostics-export.json"
+    client = Mock()
+    client.list_devices.return_value = [
+        {"id": "1111111111111111", "mlEidIid": "0000000000000000"},
+        {"id": "2222222222222222", "mlEidIid": "1234567890abcdef"},
+    ]
+    outcome = {
+        "items": [{"id": "diag-2"}],
+        "deviceResults": [
+            {
+                "deviceId": "1111111111111111",
+                "status": "skipped",
+                "skipReasonCode": "unresolved_mesh_local_iid",
+            },
+            {"deviceId": "2222222222222222", "status": "completed", "attempts": 1},
+        ],
+        "partial": True,
+        "attemptedCount": 1,
+    }
+    client.fetch_all_devices_diagnostics.return_value = outcome
+    args = cli_module.build_parser().parse_args(
+        ["diagnostics", "fetch-all", "--no-update-devices"]
+    )
+    args.resolved_output_path = str(output_path)
+
+    diagnostics_module.dispatch_diagnostics(client, args, raw_arg=False, fields=None)
+
+    assert json.loads(output_path.read_text(encoding="utf-8"))["items"] == [
+        {"id": "diag-2"}
+    ]
+    saved_outcome = json.loads(
+        (tmp_path / "diagnostics-export.outcome.json").read_text(encoding="utf-8")
+    )
+    assert saved_outcome["deviceResults"] == outcome["deviceResults"]
+    assert saved_outcome["attemptedCount"] == 1
+
+
+def test_diagnostics_fetch_all_guard_outcome_write_failure_propagates(tmp_path):
+    output_path = tmp_path / "diagnostics-export.json"
+    client = Mock()
+    client.list_devices.return_value = [
+        {"id": "1111111111111111", "mlEidIid": "0000000000000000"}
+    ]
+    client.fetch_all_devices_diagnostics.return_value = {
+        "items": [],
+        "deviceResults": [
+            {
+                "skipReasonCode": "unresolved_mesh_local_iid",
+                "status": "skipped",
+            }
+        ],
+        "partial": True,
+    }
+    args = cli_module.build_parser().parse_args(
+        ["diagnostics", "fetch-all", "--no-update-devices"]
+    )
+    args.resolved_output_path = str(output_path)
+
+    with patch.object(
+        diagnostics_module,
+        "save_json_atomic",
+        side_effect=OSError("disk full"),
+    ):
+        with pytest.raises(OSError, match="disk full"):
+            diagnostics_module.dispatch_diagnostics(
+                client, args, raw_arg=False, fields=None
+            )
 
 
 @pytest.mark.parametrize(
