@@ -5,7 +5,7 @@ collects data from dataset sources like OTBR `ot-ctl`, the OTBR REST API, Home A
 Server, mDNS, Eve exports, and Thread Tools exports, then presents topology and
 table views in a browser.
 
-[![OTBR CLI topology with a selected device and its details panel alongside the network graph.](https://raw.githubusercontent.com/jhawk42/smarthome/main/hobat/images/hobat-topology-selected-device-thumbnail.png)](https://raw.githubusercontent.com/jhawk42/smarthome/main/hobat/images/hobat-topology-selected-device.png)
+[![OTBR CLI topology with a selected device and its details panel alongside the network graph.](https://raw.githubusercontent.com/jhawk42/smarthome/main/hobat/images/hobat-topology-selected-device-thumbnail.png)](https://github.com/jhawk42/smarthome/blob/main/hobat/screenshots.md)
 
 ## Capabilities
 
@@ -25,7 +25,7 @@ run them deliberately or schedule them (cron) for quiet periods.
 - Editable device labels stored in the configured data directory.
 
 See [Codebase Overview](doc/codebase_overview.md), [Webpage and Server Data
-Flow](doc/codebase_webpage_web_server_data_flow.md), [CLI Reference](doc/help_td_cli.md) and [Screenshots](https://github.com/jhawk42/smarthome/blob/main/hobat/images/image1.jpg)
+Flow](doc/codebase_webpage_web_server_data_flow.md), [CLI Reference](doc/help_td_cli.md) and [Screenshots](https://github.com/jhawk42/smarthome/blob/main/hobat/screenshots.md)
 
 ## Requirements
 
