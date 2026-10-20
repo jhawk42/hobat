@@ -43,6 +43,7 @@ from td_device_fields import (
     is_placeholder_ext_address,
     normalize_input_record,
 )
+from otbr_role_evidence import normalize_otbr_role_record
 from extaddr_device_label_map import load_extaddr_device_label_map
 from otbr_cli_router_table import fetch_and_parse_router_table
 
@@ -656,7 +657,10 @@ def fetch_network_diag_multicast(
                 # Store in result, keyed by rloc16
                 checkpoint_result[rloc16] = record
             save_topology_to_json_file(
-                checkpoint_result, checkpoint_filepath, checkpoint=True
+                checkpoint_result,
+                checkpoint_filepath,
+                checkpoint=True,
+                include_otbr_role_evidence=capture_stage == "multicast-network",
             )
             logging.info(
                 "event=checkpoint_write command=otbr-cli networkdiag multicast checkpoint_file=%s records=%d stage=multicast",
@@ -721,14 +725,21 @@ def fetch_network_diag_topology_multicast_network(
         capture_stage="multicast-network",
     )
     if checkpoint_filepath is not None:
-        save_topology_to_json_file(result, checkpoint_filepath, checkpoint=True)
+        save_topology_to_json_file(
+            result,
+            checkpoint_filepath,
+            checkpoint=True,
+            include_otbr_role_evidence=True,
+        )
         logging.info(
             "event=checkpoint_write command=otbr-cli networkdiag multicast-network checkpoint_file=%s records=%d stage=final",
             checkpoint_filepath,
             len(result),
         )
     if final_output_path is not None:
-        save_topology_to_json_file(result, final_output_path)
+        save_topology_to_json_file(
+            result, final_output_path, include_otbr_role_evidence=True
+        )
     return result
 
 
@@ -1132,7 +1143,10 @@ def fetch_network_diag_topology_router_table(
 
     # Checkpoint to file
     save_topology_to_json_file(
-        network_topology_map, checkpoint_filepath, checkpoint=True
+        network_topology_map,
+        checkpoint_filepath,
+        checkpoint=True,
+        include_otbr_role_evidence=True,
     )
 
     return router_table_data, router_rlocs, router_table_by_router_id
@@ -1197,7 +1211,10 @@ def fetch_network_diag_topology_meshdiag_topology(
 
         # Checkpoint to file
         save_topology_to_json_file(
-            network_topology_map, checkpoint_filepath, checkpoint=True
+            network_topology_map,
+            checkpoint_filepath,
+            checkpoint=True,
+            include_otbr_role_evidence=True,
         )
     else:
         logging.warning(
@@ -1269,7 +1286,10 @@ def fetch_network_diag_topology_multicast(
 
         # Checkpoint thread device data to file after multicast collection before starting direct queries.
         save_topology_to_json_file(
-            network_topology_map, checkpoint_filepath, checkpoint=True
+            network_topology_map,
+            checkpoint_filepath,
+            checkpoint=True,
+            include_otbr_role_evidence=True,
         )
     else:
         logging.warning("Multicast topology map is empty or None")
@@ -1442,7 +1462,10 @@ def fetch_network_diag_topology_detail_routers(
                 )
                 if network_topology_map.get(captured_rloc16) != before:
                     save_topology_to_json_file(
-                        network_topology_map, checkpoint_filepath, checkpoint=True
+                        network_topology_map,
+                        checkpoint_filepath,
+                        checkpoint=True,
+                        include_otbr_role_evidence=True,
                     )
 
         if network_topology_node is None:
@@ -1473,7 +1496,10 @@ def fetch_network_diag_topology_detail_routers(
                 history_changed = True
             if fallback_created or history_changed:
                 save_topology_to_json_file(
-                    network_topology_map, checkpoint_filepath, checkpoint=True
+                    network_topology_map,
+                    checkpoint_filepath,
+                    checkpoint=True,
+                    include_otbr_role_evidence=True,
                 )
         else:
             _merge_tlv_response_history(
@@ -1519,7 +1545,10 @@ def fetch_network_diag_topology_detail_routers(
                 )
             if is_new_record or history_changed:
                 save_topology_to_json_file(
-                    network_topology_map, checkpoint_filepath, checkpoint=True
+                    network_topology_map,
+                    checkpoint_filepath,
+                    checkpoint=True,
+                    include_otbr_role_evidence=True,
                 )
 
 
@@ -1954,12 +1983,18 @@ def fetch_network_diag_topology_expand_children(
                     )
                     if network_topology_map.get(captured_rloc16) != before:
                         save_topology_to_json_file(
-                            network_topology_map, checkpoint_filepath, checkpoint=True
+                            network_topology_map,
+                            checkpoint_filepath,
+                            checkpoint=True,
+                            include_otbr_role_evidence=True,
                         )
             if outcome.terminal_reason == "exhausted":
                 if _refresh_response_histories(network_topology_map, collection_context):
                     save_topology_to_json_file(
-                        network_topology_map, checkpoint_filepath, checkpoint=True
+                        network_topology_map,
+                        checkpoint_filepath,
+                        checkpoint=True,
+                        include_otbr_role_evidence=True,
                     )
                 continue
             mutation = reconcile_child_fetch_outcome(
@@ -2187,7 +2222,11 @@ def fetch_network_diag_topology(
 
     _refresh_response_histories(network_topology_map, collection_context)
     if final_output_path is not None:
-        save_topology_to_json_file(network_topology_map, final_output_path)
+        save_topology_to_json_file(
+            network_topology_map,
+            final_output_path,
+            include_otbr_role_evidence=True,
+        )
 
     return network_topology_map
 
@@ -2268,6 +2307,7 @@ def save_topology_to_json_file(
     filename=OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME,
     *,
     checkpoint: bool = False,
+    include_otbr_role_evidence: bool = False,
 ):
     """Converts dict format to list format and saves to JSON."""
     if filename is None:
@@ -2322,6 +2362,11 @@ def save_topology_to_json_file(
         }
         if data.get("thread_version_decimal") is not None:
             network_node["thread_version_decimal"] = data["thread_version_decimal"]
+        if include_otbr_role_evidence:
+            if "isReed" in data:
+                network_node["isReed"] = data["isReed"]
+            if "_merge_conflicts" in data:
+                network_node["_merge_conflicts"] = data["_merge_conflicts"]
         for evidence_field in (
             "_error",
             "last_attempt_responded",
@@ -2343,7 +2388,15 @@ def save_topology_to_json_file(
         network_map.append(network_node)
 
     payload = [
-        convert_keys_to_camel_case(normalize_input_record(record, source="cli"))
+        convert_keys_to_camel_case(
+            (
+                normalize_otbr_role_record(
+                    normalize_input_record(record, source="cli")
+                )
+                if include_otbr_role_evidence
+                else normalize_input_record(record, source="cli")
+            )
+        )
         for record in network_map
     ]
     has_failures = any(

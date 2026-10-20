@@ -1,4 +1,5 @@
 import { getRowRoleProjection } from "./tdash-filters.js";
+import { buildDeviceProjection } from "./tdash-device-projection.js";
 import { getColumnValue, toText } from "./tdash-utils.js";
 import { resolveNetworkInstance } from "./tdash-view-status.js";
 import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
@@ -262,16 +263,10 @@ function classifyThreadDevice(row) {
   const role = roles.find((value) => value) ?? "";
   const explicitBorderRouter = getColumnValue(row, "isBorderRouter");
   const explicitRouter = getColumnValue(row, "isRouter");
-  const routerEligible = getColumnValue(row, "isRouterEligible") === true
-    || getColumnValue(row, "routerEligible") === true
-    || getColumnValue(row, "mode.routerEligible") === true
-    || getColumnValue(row, "mode.isRouterEligible") === true
-    || role === "reed"
-    || toText(getColumnValue(row, "mode.device")).toUpperCase() === "REED";
 
+  if (isReedDevice(row)) return "reed";
   if (explicitBorderRouter === true) return "borderRouters";
   if (explicitRouter === true) return "routers";
-  if (routerEligible) return "reed";
   if (explicitRouter === false) {
     const deviceMode = toText(getColumnValue(row, "mode.device")).toUpperCase();
     if (END_DEVICE_ROLES.has(role) || deviceMode === "MTD") return "endDevices";
@@ -359,16 +354,7 @@ function summarizeLinks(rows, adaptorResult) {
 }
 
 function isReedDevice(row) {
-  const roles = rowRoleValues(row);
-  const role = roles.find(Boolean) ?? "";
-  const deviceMode = toText(getColumnValue(row, "mode.device")).toUpperCase();
-  return getColumnValue(row, "isRouterEligible") === true
-    || getColumnValue(row, "routerEligible") === true
-    || getColumnValue(row, "mode.routerEligible") === true
-    || getColumnValue(row, "mode.isRouterEligible") === true
-    || role === "reed"
-    || deviceMode === "REED"
-    || (role === "child" && deviceMode === "FTD");
+  return buildDeviceProjection(row).isReed;
 }
 
 function countValue(value) {
@@ -377,23 +363,14 @@ function countValue(value) {
 }
 
 function summarizeDeviceCounts(threadRows, summaryCounts) {
-  if (!summaryCounts) return null;
-  const reedSupported = threadRows.some((row) => {
-    const role = rowRoleValues(row).find(Boolean) ?? "";
-    const deviceMode = toText(getColumnValue(row, "mode.device")).toUpperCase();
-    return typeof getColumnValue(row, "isRouterEligible") === "boolean"
-      || typeof getColumnValue(row, "routerEligible") === "boolean"
-      || typeof getColumnValue(row, "mode.routerEligible") === "boolean"
-      || typeof getColumnValue(row, "mode.isRouterEligible") === "boolean"
-      || role === "reed"
-      || deviceMode === "REED"
-      || (role === "child" && deviceMode === "FTD");
-  });
-  return {
+    if (!summaryCounts) return null;
+    return {
     total: countValue(summaryCounts.devices),
     borderRouters: countValue(summaryCounts.borderRouters),
     routers: countValue(summaryCounts.routers),
-    reed: reedSupported ? threadRows.filter(isReedDevice).length : "n/a",
+    reed: threadRows.length
+      ? threadRows.filter(isReedDevice).length
+      : "n/a",
     endDevices: countValue(summaryCounts.children),
   };
 }
@@ -464,12 +441,16 @@ export function buildThreadNetworkModel(dataset, capabilities, adaptorResult, su
       ? roleClasses.filter((roleClass) => roleClass === "borderRouters").length : "n/a",
     routers: threadRows.length && !hasUnclassified
       ? roleClasses.filter((roleClass) => roleClass === "routers").length : "n/a",
-    reed: threadRows.length && !hasUnclassified
-      ? roleClasses.filter((roleClass) => roleClass === "reed").length : "n/a",
+    reed: threadRows.length
+      ? threadRows.filter(isReedDevice).length
+      : "n/a",
     endDevices: threadRows.length && !hasUnclassified
       ? roleClasses.filter((roleClass) => roleClass === "endDevices").length : "n/a",
   };
-  const deviceCounts = summarizeDeviceCounts(threadRows, summaryCounts) ?? derivedDeviceCounts;
+  const deviceCounts = summarizeDeviceCounts(
+    threadRows,
+    summaryCounts,
+  ) ?? derivedDeviceCounts;
   const links = summarizeStatusLinks(summaryCounts) ?? summarizeLinks(rows, adaptorResult);
   const roleHolders = {
     leaders: rows.filter((row) => row?.isLeader === true).map(roleHolder),

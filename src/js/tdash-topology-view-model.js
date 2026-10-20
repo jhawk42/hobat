@@ -5,7 +5,7 @@ import {
   DIAGNOSTIC_FILTER_OPTIONS,
 } from "./tdash-constants.js";
 import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
-import { projectAdaptorNode } from "./tdash-device-projection.js";
+import { buildDeviceProjection, projectAdaptorNode } from "./tdash-device-projection.js";
 import {
   edgeMatchesLinkFilter,
   isChildLinkQualityDiagnosticMode,
@@ -24,7 +24,6 @@ import {
   expandVisibleRelationship,
 } from "./tdash-topology-utils.js";
 import { getColumnValue, mergeForDisplay, toText } from "./tdash-utils.js";
-import { HA_MATTER_ROLE_POLICY } from "./tdash-ha-matter-ws-roles.js";
 
 const TOPOLOGY_DIAGNOSTIC_FIELDS = Object.freeze([
   ...new Set([
@@ -90,11 +89,7 @@ function getRouterChildRows(viewModel, parentNodeId) {
 export function createTopologyViewModel(
   adaptorResult,
   projections = new Map(),
-  options = {},
 ) {
-  const rolePolicy = options.rolePolicy === HA_MATTER_ROLE_POLICY
-    ? HA_MATTER_ROLE_POLICY
-    : undefined;
   const nodes = (adaptorResult.nodeData || []).map(cloneValue);
   const edges = (adaptorResult.edgeData || []).map(cloneValue);
   const nodeMap = new Map(
@@ -125,7 +120,6 @@ export function createTopologyViewModel(
           projectAdaptorNode(
             projection,
             displayById.get(nodeId) ?? node,
-            rolePolicy,
           ),
         );
         break;
@@ -147,7 +141,6 @@ export function createTopologyViewModel(
         .map(([rloc16, record]) => [rloc16, cloneValue(record)]),
     ),
     sourceNames: [...(adaptorResult.sourceNames || [])],
-    rolePolicy,
     identityToNodeId,
     projectionByNodeId,
     originalNodeStyling: new Map(nodes.map((node) => [node.id, cloneNodeStyle(node)])),
@@ -192,7 +185,6 @@ export function computeTopologyVisibility(viewModel, filterState) {
         node,
         filterState.nodeMode,
         viewModel.projectionByNodeId.get(node.id),
-        viewModel.rolePolicy,
       )
       && isNodeVisibleByDiagnosticFilter(node, filterState.diagnosticMode, viewModel.projectionByNodeId.get(node.id))
     ) visibleNodeIds.add(node.id);
@@ -321,6 +313,23 @@ export function computeSearchHighlight(viewModel, searchState) {
 export function buildTopologyDetails(viewModel, selectedId) {
   const node = viewModel.nodeMap.get(selectedId);
   if (!node) return null;
+  const rawRecord = viewModel.rawByIdForDetails.get(selectedId) ?? {};
+  const deviceProjection = viewModel.projectionByNodeId.get(selectedId)
+    ?? buildDeviceProjection({
+      ...rawRecord,
+      ...node,
+      isReed: typeof rawRecord.isReed === "boolean" ? rawRecord.isReed : node.isReed,
+      isRouter: typeof rawRecord.isRouter === "boolean" ? rawRecord.isRouter : node.isRouter,
+      isBorderRouter: typeof rawRecord.isBorderRouter === "boolean"
+        ? rawRecord.isBorderRouter : node.isBorderRouter,
+      role: getColumnValue(rawRecord, "role") ?? getColumnValue(node, "role"),
+      rloc16: getColumnValue(rawRecord, "rloc16") ?? getColumnValue(node, "rloc16"),
+      mode: {
+        device: getColumnValue(rawRecord, "mode.device")
+          ?? getColumnValue(node, "mode.device")
+          ?? node.mode_device,
+      },
+    });
   const graphLinkCount = viewModel.edges.filter(
     (edge) => edge.from === selectedId || edge.to === selectedId,
   ).length;
@@ -328,14 +337,8 @@ export function buildTopologyDetails(viewModel, selectedId) {
     graph: {
       unifiedId: selectedId,
       graphLinkCount,
-      isRouter: viewModel.rolePolicy === HA_MATTER_ROLE_POLICY
-        ? node.isRouter === true
-        : node.isRouter || node.is_router || (
-          typeof node.rloc16 === "string"
-          && node.rloc16.toLowerCase().startsWith("0x")
-          && node.rloc16.toLowerCase().endsWith("00")
-          && node.rloc16.length === 6
-        ) || toText(node.role).toLowerCase() === "router",
+      isReed: deviceProjection.isReed,
+      isRouter: deviceProjection.isRouter,
       hasChildren: viewModel.nodes.some((candidate) => candidate.id === selectedId && candidate.hasChildren),
     },
   };

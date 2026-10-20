@@ -29,6 +29,7 @@ from otbr_restapi_util import (
 )
 from td_json_key_normalizer import convert_keys_to_camel_case
 from td_device_fields import normalize_input_record
+from otbr_role_evidence import normalize_otbr_role_record
 from td_record_merge import append_merge_conflict
 from util_data import (
     CollectionWriteOutcome,
@@ -162,10 +163,16 @@ def _apply_border_router_enrichment(diagnostics: list[Any]) -> list[Any]:
     return diagnostics
 
 
-def _apply_role_evidence_normalization(diagnostics: list[Any]) -> list[Any]:
+def _apply_role_evidence_normalization(
+    diagnostics: list[Any], *, include_otbr_reed: bool = False
+) -> list[Any]:
     for index, record in enumerate(diagnostics):
         if isinstance(record, dict):
-            diagnostics[index] = normalize_input_record(record, source="rest")
+            normalized = normalize_input_record(record, source="rest")
+            diagnostics[index] = (
+                normalize_otbr_role_record(normalized)
+                if include_otbr_reed else normalized
+            )
     return diagnostics
 
 def make_progress_fn(total: int, enabled: bool):
@@ -590,6 +597,9 @@ def _dispatch_diagnostics_fetch_all(
         if checkpoint_path is None:
             return
         if raw_arg is not True:
+            _apply_role_evidence_normalization(
+                results, include_otbr_reed=True
+            )
             _apply_border_router_enrichment(results)
         _write_checkpoint_best_effort(
             results,
@@ -645,6 +655,9 @@ def _dispatch_diagnostics_fetch_all(
         if do_enrich:
             _apply_mac_enrichment(diagnostics)
             _apply_time_stats_enrichment(diagnostics)
+        _apply_role_evidence_normalization(
+            diagnostics, include_otbr_reed=True
+        )
         _apply_border_router_enrichment(diagnostics)
     if raw_arg is True:
         if getattr(args, "items_only", False):
@@ -652,7 +665,6 @@ def _dispatch_diagnostics_fetch_all(
         else:
             payload = outcome
     else:
-        _apply_role_evidence_normalization(diagnostics)
         if getattr(args, "items_only", False):
             payload = convert_keys_to_camel_case(diagnostics)
         else:

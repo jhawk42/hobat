@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { buildThreadNetworkModel } from "../../src/js/tdash-thread-network.js";
+import { DATASET_REGISTRY } from "../../src/js/tdash-dataset-registry.js";
 
 const filename = "network.json";
 const dataset = {
@@ -123,7 +124,7 @@ const unavailable = buildThreadNetworkModel({
 }, { files: {} }, { edgeData: [], relationshipCapabilities: { datasetWide: new Set(), byDeviceId: new Map() } });
 assert.equal(unavailable.networkFacts[1].value, "n/a");
 assert.equal(unavailable.deviceCounts.total, 1);
-assert.equal(unavailable.deviceCounts.reed, "n/a");
+assert.equal(unavailable.deviceCounts.reed, 1);
 assert.equal(unavailable.links.total, "n/a");
 const missingSidebarCounts = buildThreadNetworkModel(dataset, capabilities, adaptorResult, {
   devices: null, borderRouters: null, routers: null, children: null,
@@ -235,5 +236,52 @@ const notLoaded = buildThreadNetworkModel(null, {}, null);
 assert.equal(notLoaded.loaded, false);
 assert.ok(notLoaded.networkFacts.every(({ value }) => value === "n/a"));
 assert.equal(notLoaded.partitions.state, "unresolved-scope");
+
+const otbrCliEntry = DATASET_REGISTRY.find(
+  (entry) => entry.value === "otbr_cli_networkdiag_fetch_all",
+);
+const otbrRoleRows = [
+  { extAddress: "0011223344556677", role: "child", mode: { device: "FTD" }, isReed: true },
+  { extAddress: "8899aabbccddeeff", role: "child", mode: { device: "FTD" }, isReed: false },
+];
+const otbrThreadDataset = {
+  entry: otbrCliEntry,
+  loadedFiles: [...otbrCliEntry.files],
+  rawFiles: [[]],
+  rows: otbrRoleRows,
+};
+const otbrThreadCounts = buildThreadNetworkModel(
+  otbrThreadDataset,
+  { files: {} },
+  adaptorResult,
+  { devices: 2, borderRouters: 0, routers: 0, children: 2 },
+);
+assert.deepEqual(otbrThreadCounts.deviceCounts, {
+  total: 2, borderRouters: 0, routers: 0, reed: 1, endDevices: 2,
+});
+const otbrLegacyCache = buildThreadNetworkModel(
+  {
+    ...otbrThreadDataset,
+    rows: otbrRoleRows.map(({ isReed, ...row }) => row),
+  },
+  { files: {} },
+  adaptorResult,
+  { devices: 2, borderRouters: 0, routers: 0, children: 2 },
+);
+assert.equal(otbrLegacyCache.deviceCounts.reed, 2);
+const legacyReedHeuristic = buildThreadNetworkModel({
+  entry: { label: "Legacy OTBR", source: "otbr-cli", files: [filename] },
+  loadedFiles: [filename],
+  rawFiles: [[]],
+  rows: [{ role: "child", mode: { device: "FTD" }, isRouterEligible: true }],
+}, { files: {} }, adaptorResult);
+assert.equal(legacyReedHeuristic.deviceCounts.reed, 1);
+const routerEligibilityOnly = buildThreadNetworkModel({
+  entry: { label: "Legacy eligibility only", source: "otbr-cli", files: [filename] },
+  loadedFiles: [filename],
+  rawFiles: [[]],
+  rows: [{ role: "router", mode: { device: "FTD" }, isRouterEligible: true }],
+}, { files: {} }, adaptorResult);
+assert.equal(routerEligibilityOnly.deviceCounts.reed, 0);
 
 console.log(JSON.stringify({ uniqueLinks: model.links.total, threadDevices: model.deviceCounts.total }));

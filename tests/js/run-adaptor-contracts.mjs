@@ -18,10 +18,6 @@ import {
   normalizeInputRecord,
 } from "../../src/js/tdash-device-fields.js";
 import {
-  HA_MATTER_ROLE_POLICY,
-  normalizeHaMatterRoleRecord,
-} from "../../src/js/tdash-ha-matter-ws-roles.js";
-import {
   buildRoleNodeEmphasis,
   lqStyleFromAvgLqi,
   lqStyleFromLinkMargin,
@@ -72,7 +68,7 @@ function run(adaptor, files, rawFiles, rows = []) {
   return runAdaptor({ entry: { adaptor, files }, rawFiles, rows });
 }
 
-function runHaMatterRolePolicy(adaptor, files, rawFiles, rows, entryOptions = {}) {
+function runHaMatter(adaptor, files, rawFiles, rows, entryOptions = {}) {
   return runAdaptor({
     entry: {
       source: "ha-matter-ws",
@@ -83,7 +79,6 @@ function runHaMatterRolePolicy(adaptor, files, rawFiles, rows, entryOptions = {}
     },
     rawFiles,
     rows,
-    rolePolicy: HA_MATTER_ROLE_POLICY,
   });
 }
 
@@ -472,25 +467,32 @@ assert.equal(haMatter.nodeData[0].size, 45);
 assert.equal(haMatter.nodeData[1].borderWidth, 1);
 assert.equal(haMatter.nodeData[1].size, 27);
 
-const haLegacyBorderFlag = run("ha-matter-ws", ["td-ha-matter-ws-topology.json"], [[{
+const haLegacyBorderRow = {
   topologyId: "legacy-border-flag",
   role: "Router",
   isBorderRouter: true,
-}]]);
-assert.equal(haLegacyBorderFlag.nodeData[0].shape, "hexagon");
-assert.equal(haLegacyBorderFlag.nodeData[0].color.background, "#e8f5e9");
-assert.equal(haLegacyBorderFlag.nodeData[0].borderWidth, 3);
+};
+const haLegacyBorderFlag = runHaMatter(
+  "ha-matter-ws",
+  ["td-ha-matter-ws-topology.json"],
+  [{ topology: [haLegacyBorderRow] }],
+  [haLegacyBorderRow],
+  { rowExtractor: "ha-matter-ws-topology" },
+);
+assert.equal(haLegacyBorderFlag.nodeData[0].shape, "square");
+assert.equal(haLegacyBorderFlag.nodeData[0].color.background, "#c8e6c9");
+assert.equal(haLegacyBorderFlag.nodeData[0].borderWidth, 5);
 assert.equal(haLegacyBorderFlag.nodeData[0].size, 45);
 
 const haRoleRows = [
   { topologyId: "role:br", extAddress: "aa00000000000001", isBorderRouter: true, isRouter: true },
   { topologyId: "role:router", extAddress: "aa00000000000002", isBorderRouter: false, isRouter: true },
   { topologyId: "role:child", extAddress: "aa00000000000003", isBorderRouter: false, isRouter: false, role: "Child" },
-  normalizeHaMatterRoleRecord({
+  {
     topologyId: "role:reed",
     extAddress: "aa00000000000005",
     role: "Reed",
-  }, "commissioned-topology"),
+  },
   {
     topologyId: "role:unknown",
     extAddress: "aa00000000000004",
@@ -507,7 +509,7 @@ const haRoleEmphasis = {
   "role:reed": { borderWidth: 1, size: 27 },
   "role:unknown": { borderWidth: 1, size: 27 },
 };
-const haRoleTopology = runHaMatterRolePolicy(
+const haRoleTopology = runHaMatter(
   "ha-matter-ws",
   ["td-ha-matter-ws-topology.json"],
   [{ topology: haRoleRows }],
@@ -519,6 +521,10 @@ assertRoleEmphasis(haRoleTopology, {
   "ha-matter-ws:rloc:0x3000": { borderWidth: 1, size: 27 },
 });
 assert.equal(haRoleTopology.nodeData.find((node) => node.id === "role:reed").isRouter, false);
+assert.equal(Object.hasOwn(
+  haRoleTopology.nodeData.find((node) => node.id === "role:reed"),
+  "isReed",
+), false);
 
 const haNativeRolePayload = {
   topology: {
@@ -537,7 +543,7 @@ const haNativeRoleEmphasis = {
   "native:child": { borderWidth: 1, size: 27 },
   "native:unknown": { borderWidth: 1, size: 27 },
 };
-const haNativeRoleTopology = runHaMatterRolePolicy(
+const haNativeRoleTopology = runHaMatter(
   "ha-matter-ws-network-topology",
   ["td-ha-matter-ws-network-topology.json"],
   [haNativeRolePayload],
@@ -546,7 +552,7 @@ const haNativeRoleTopology = runHaMatterRolePolicy(
 );
 assertRoleEmphasis(haNativeRoleTopology, haNativeRoleEmphasis);
 
-const haMergedRoleTopology = runHaMatterRolePolicy(
+const haMergedRoleTopology = runHaMatter(
   "ha-matter-ws-merge-topology",
   ["td-ha-matter-ws-topology.json", "td-ha-matter-ws-network-topology.json"],
   [{ topology: haRoleRows }, haNativeRolePayload],
@@ -570,7 +576,7 @@ assert.deepEqual(
 );
 assertRoleEmphasis(haMergedRoleTopology, haMergedRoleEmphasis);
 
-const haNativeThreadRole = runHaMatterRolePolicy(
+const haNativeThreadRole = runHaMatter(
   "ha-matter-ws-native-thread",
   ["td-ha-matter-ws-thread-border-routers.json"],
   [{ borderRouters: [] }],

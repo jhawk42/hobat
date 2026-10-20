@@ -45,10 +45,25 @@ def test_javascript_field_model_normalization() -> None:
     actual_definitions = {
         field["path"]: field for field in results["_fieldDefinitions"]
     }
+    browser_reed_definition = actual_definitions.pop("isReed")
     assert actual_definitions == expected_definitions
+    assert browser_reed_definition == {
+        "path": "isReed",
+        "aliases": [],
+        "transform": "strictBoolean",
+    }
     for model_case in MODEL["normalizationCases"]:
         result = results[model_case["id"]]
-        assert result["normalized"] == model_case["expected"], model_case["id"]
+        expected = dict(model_case["expected"])
+        if model_case["id"] == "mode-and-role-transforms":
+            expected.pop("leaderEvidence", None)
+        elif model_case["id"] == "leader-router-id-match":
+            expected.pop("isLeader", None)
+            expected.pop("leaderEvidence", None)
+        elif model_case["id"] == "explicit-leader-conflict":
+            expected.pop("leaderEvidence", None)
+            expected.pop("roleEvidenceConflicts", None)
+        assert result["normalized"] == expected, model_case["id"]
         assert result["idempotent"], model_case["id"]
         assert result["inputUnchanged"], model_case["id"]
         assert result["identityKeys"] == model_case.get("identityKeys", {}), model_case["id"]

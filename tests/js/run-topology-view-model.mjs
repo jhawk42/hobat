@@ -11,7 +11,7 @@ import {
   createTopologyViewModel,
   resolveTopologyNodeId,
 } from "../../src/js/tdash-topology-view-model.js";
-import { HA_MATTER_ROLE_POLICY } from "../../src/js/tdash-ha-matter-ws-roles.js";
+import { buildDeviceProjections } from "../../src/js/tdash-device-projection.js";
 
 const router = {
   id: "router-a",
@@ -124,7 +124,7 @@ const haViewModel = createTopologyViewModel({
   routerNeighborByRloc16: new Map(),
   routerChildByRloc16: new Map(),
   sourceNames: ["ha-matter-ws"],
-}, new Map(), { rolePolicy: HA_MATTER_ROLE_POLICY });
+});
 const haRouterVisibility = computeTopologyVisibility(
   haViewModel,
   createTopologyFilterState("main-routers", "all", "all"),
@@ -146,7 +146,56 @@ const legacyHaLookalike = createTopologyViewModel({
   routerChildByRloc16: new Map(),
   sourceNames: ["fixture.json"],
 });
-assert.equal(buildTopologyDetails(legacyHaLookalike, haNode.id).graph.isRouter, true);
+assert.equal(buildTopologyDetails(legacyHaLookalike, haNode.id).graph.isRouter, false);
+
+const otbrChild = {
+  id: "otbr-child",
+  extAddress: "cccccccccccccccc",
+  rloc16: "0x1001",
+  role: "child",
+  mode_device: "FTD",
+  isReed: false,
+};
+const otbrProjections = buildDeviceProjections([{
+  ...otbrChild,
+  mode: { device: "FTD" },
+}]);
+const otbrViewModel = createTopologyViewModel({
+  nodeData: [otbrChild],
+  edgeData: [],
+  nodeMap: new Map([[otbrChild.id, otbrChild]]),
+  rawByIdForDetails: new Map([[otbrChild.id, otbrChild]]),
+  routerNeighborByRloc16: new Map(),
+  routerChildByRloc16: new Map(),
+}, otbrProjections);
+const otbrReedVisibility = computeTopologyVisibility(
+  otbrViewModel,
+  createTopologyFilterState("reed-devices", "all", "all"),
+);
+assert.equal(otbrReedVisibility.visibleNodeCount, 0);
+assert.equal(buildTopologyDetails(otbrViewModel, otbrChild.id).graph.isReed, false);
+otbrChild.isReed = true;
+const canonicalOtbrChild = { ...otbrChild };
+const canonicalOtbrViewModel = createTopologyViewModel({
+  nodeData: [canonicalOtbrChild],
+  edgeData: [],
+  nodeMap: new Map([[canonicalOtbrChild.id, canonicalOtbrChild]]),
+  rawByIdForDetails: new Map([[canonicalOtbrChild.id, canonicalOtbrChild]]),
+}, buildDeviceProjections([{
+  ...canonicalOtbrChild,
+  mode: { device: "FTD" },
+}]));
+assert.equal(
+  computeTopologyVisibility(
+    canonicalOtbrViewModel,
+    createTopologyFilterState("reed-devices", "all", "all"),
+  ).visibleNodeCount,
+  1,
+);
+assert.equal(
+  buildTopologyDetails(canonicalOtbrViewModel, canonicalOtbrChild.id).graph.isReed,
+  true,
+);
 
 class FakeTarget {
   constructor() {

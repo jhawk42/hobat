@@ -309,8 +309,7 @@ last-write-wins.
 | Browser activity | `tdash-activity.js` | Bounded in-memory activity, route/metadata sanitization, subscriptions, and tracked HTTP requests |
 | Source and catalog capabilities | `tdash-capabilities.js`, `tdash-catalog-fallback.js` | Source/file availability and bundled fallback for catalog loading |
 | Fetch and assembly | `tdash-dataset.js`, `tdash-dataset-registry.js` | Catalog lookup, cache policy, jobs, checkpoints, extractors, and final/partial datasets |
-| Field and merge contract | `tdash-device-fields.js`, `tdash-source-authority.js`, `tdash-merge.js`, `tdash-utils.js` | Preferred fields, aliases, identities, normalization, precedence, conflicts, and provenance |
-| Home Assistant Matter roles | `tdash-ha-matter-ws-roles.js` | Validates supported file/extractor contexts and normalizes role evidence without treating unrelated records as Matter role data |
+| Field and merge contract | `tdash-device-fields.js`, `tdash-source-authority.js`, `tdash-merge.js`, `tdash-utils.js` | Preferred fields, aliases, identities, the shared REED resolver, normalization, precedence, conflicts, and provenance |
 | Adaptation | `tdash-adaptors.js`, `tdash-adaptor-*.js`, `tdash-adaptor-model.js` | Source-specific records to canonical devices, relationships, and details |
 | View model | `tdash-device-projection.js`, `tdash-topology-view-model.js`, `tdash-filters.js`, `tdash-search.js` | Derived device state, indexed visibility, diagnostic matching, and search state |
 | Thread Network view model | `tdash-thread-network.js`, `tdash-ui.js` | Network facts with source attribution, network-instance context, and available device/link/role summaries for the Thread Network workspace |
@@ -375,12 +374,12 @@ Python remains the only verdict owner. The finding view defaults to All for
 each dataset and is held only in browser memory; reloads, dataset changes, and
 Reset restore All.
 
-Home Assistant Matter role normalization is restricted to catalog entries and
-file/extractor combinations recognized by `tdash-ha-matter-ws-roles.js`.
-`tdash-dataset.js` applies the allowed context while normalizing payloads;
-adaptors use the same policy when interpreting topology roles. This keeps
-commissioned-device, diagnostic, native-topology, and border-router-inventory
-role evidence tied to its declared source shape.
+Collector-derived role booleans remain source facts. Browser presentation uses
+explicit `isReed` booleans when present, otherwise a shared FTD/child-or-
+nonrouter fallback independent of source, dataset, adaptor, or filename. The
+resolver does not rewrite payloads or cache files; see
+[Merge Thread Device Information](merge_thread_device_info.md#ftd-and-reed-capability)
+for the decision contract and exclusions.
 
 On Sync, `tdash-dataset.js` `loadDataset()` starts per-file requests concurrently and uses
 `Promise.allSettled` so successful files can still produce a partial result when

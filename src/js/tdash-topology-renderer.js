@@ -473,16 +473,13 @@ export function renderTopologyForDataset(
   assignParallelEdgeCurves(edgeData, nodeData);
   applyProfileEdgeConstraints(nodeData, edgeData, physicsProfileName);
 
-  const capabilities = computeTopologyCapabilities(nodeData, edgeData, {
-    rolePolicy: dataset.rolePolicy,
-  });
+  const capabilities = computeTopologyCapabilities(nodeData, edgeData);
   dataset.capabilities = capabilities;
   updateFilterOptionVisibility(capabilities, "topology");
 
   const viewModel = createTopologyViewModel(
     adaptorResult,
     dataset.deviceProjections,
-    { rolePolicy: dataset.rolePolicy },
   );
   const nodesDataset = new vis.DataSet(viewModel.nodes);
   const edgesDataset = new vis.DataSet(viewModel.edges);

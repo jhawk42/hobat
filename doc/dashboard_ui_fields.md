@@ -70,6 +70,11 @@ Details, Device Settings, and Device Insights consume that shared selection.
 Details sections and field bindings come from `DEVICE_DETAILS_SECTIONS`; section
 containers are declared in `tdash.html`.
 
+Switching between Table and Topology reuses each view's rendered dataset but
+reapplies the current node, diagnostic, and search filters. Filter availability
+is restored from the destination view's capabilities; an unavailable selection
+returns to **All** rather than leaving stale results under the selected label.
+
 ### Thread Device Details
 
 The **Thread** section is immediately before **Matter**. It shows available
@@ -142,18 +147,15 @@ Diagnostic insights evaluate the selected normalized record. They are
 informational and use the same diagnostic predicates as filtering where the
 field shapes overlap.
 
-### HA Matter Thread Roles
+### Thread Role Facts and REED
 
-HA Matter records use the optional canonical `isBorderRouter`, `isRouter`,
-`isLeader`, and `isReed` facts. Recognized Thread roles classify Router, Leader,
-and REED devices; REED devices appear in the existing REED filter and are not
-active Routers. Border Router classification requires Border Router evidence,
-not merely a Router role or label. Explicit boolean values, including `false`,
-are preserved in rows, topology, and details; unsupported or unknown role facts
-remain absent rather than being inferred from RLOC16 or device mode. Older
-caches receive this source-scoped normalization in memory only.
-
-Other sources retain their existing Router RLOC16, REED mode/child, and details
-precedence behavior.
+The browser preserves explicit `isBorderRouter`, `isRouter`, `isLeader`, and
+`isReed` booleans through rows, topology, and details, including explicit
+`false`. It does not convert Thread role enums into those facts. The shared
+REED presentation resolver honors an explicit boolean first; without one, it
+uses the source-independent FTD/child-or-nonrouter fallback documented in
+[Merge Thread Device Information](merge_thread_device_info.md#ftd-and-reed-capability).
+The fallback does not write a fact back to the record or cache, and REED
+classification does not imply active Router state.
 
 See [Webpage, Web Server, and Data Flow](codebase_webpage_web_server_data_flow.md) and [Merge Thread Device Information](merge_thread_device_info.md).

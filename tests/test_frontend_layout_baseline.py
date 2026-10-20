@@ -4,6 +4,7 @@ from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
 import re
+import subprocess
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -329,9 +330,9 @@ def test_workspace_lifecycle_and_activity_contract() -> None:
     dataset_text = _read_text(DATASET_JS)
 
     assert "const lastRenderedDatasetByView = new Map();" in ui_text
-    assert "lastRenderedDatasetByView.get(view) === currentDataset" in ui_text
+    assert "renderedState?.dataset === currentDataset" in ui_text
     activation_index = ui_text.index("activateViewStatus(view, currentDataset);")
-    cache_return_index = ui_text.index("lastRenderedDatasetByView.get(view) === currentDataset")
+    cache_return_index = ui_text.index("renderedState?.dataset === currentDataset")
     assert activation_index < cache_return_index
     assert "supersedeViewStatus(`Loading ${selectedDataset?.label ?? selectedValue}…`);" in ui_text
     assert "rendersDataset: true" in ui_text
@@ -355,6 +356,130 @@ def test_workspace_lifecycle_and_activity_contract() -> None:
     assert '"job-status"' in dataset_text
     assert "response.json()" in dataset_text
     assert "response.headers" not in ui_text[ui_text.index("function renderWorkspaceLogs"):ui_text.index("export function getSearchQuery")]
+
+
+def test_workspace_cached_views_reapply_current_filters() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import fs from "node:fs";
+      import vm from "node:vm";
+
+      const ui = fs.readFileSync("src/js/tdash-ui.js", "utf8");
+      const start = ui.indexOf("function renderCurrentView(");
+      const end = ui.indexOf("\nfunction clearRenderedDatasetViews", start);
+      assert.ok(start >= 0 && end > start);
+      const topologyCapabilities = {view: "topology"};
+      const tableCapabilities = {view: "table"};
+      const renders = [];
+      const calls = [];
+      const context = {
+        currentDataset: {rows: [{isReed: true}, {isReed: false}]},
+        currentView: "topology",
+        threadNetworkModelCache: null,
+        lastRenderedDatasetByView: new Map(),
+        _enhanceEnabled: false,
+        _physicsEnabled: false,
+        _currentSearchQuery: "",
+        _physicsProfileName: "auto",
+        nodeFilter: "all",
+        diagnosticFilter: "all",
+        visibleCount: 0,
+        updateHealthPresentationControls() {},
+        renderNetworkInsights() {},
+        activateViewStatus() {},
+        setPhysics() {},
+        getEffectivePhysicsProfileName() { return "auto"; },
+        getSelectedDatasetEntry() { return {}; },
+        getTopologyDatasetCounts() { return {nodes: 2}; },
+        updateDeviceStatusBar() {},
+        computeRowCounts() { return {nodes: 2}; },
+        runAdaptor() { return {}; },
+        projectObservedTopologyLinkCounts(rows) { return {rows}; },
+        populateTableColumnCategories() {},
+        updateFilterOptionVisibility(capabilities, view) {
+          assert.equal(capabilities.view, view);
+          calls.push(`capabilities:${view}`);
+        },
+        refreshDiagnosticFilterForCurrentSource() {
+          assert.equal(context.currentDataset.capabilities.view, context.currentView);
+          calls.push(`diagnostics:${context.currentView}`);
+        },
+        refreshTopologyFiltersWithRestoredStyling() {
+          context.visibleCount = context.nodeFilter === "reed-devices" ? 1 : 2;
+          calls.push(`topology:${context.nodeFilter}:${context.diagnosticFilter}`);
+        },
+        applyTableFilters() {
+          context.visibleCount = context.nodeFilter === "reed-devices" ? 1 : 2;
+          calls.push(`table:${context.nodeFilter}:${context.diagnosticFilter}`);
+        },
+        applySearch() { calls.push("search"); },
+        renderTopologyForDataset(dataset) {
+          dataset.capabilities = topologyCapabilities;
+          renders.push("topology");
+        },
+        renderTableForDataset(dataset) {
+          dataset.capabilities = tableCapabilities;
+          renders.push("table");
+        },
+      };
+      vm.createContext(context);
+      vm.runInContext(ui.slice(start, end), context);
+      context.renderCurrentView();
+      context.currentView = "table";
+      context.renderCurrentView();
+      assert.deepEqual(renders, ["topology", "table"]);
+      assert.equal(context.currentDataset.capabilities, tableCapabilities);
+      assert.equal(
+        context.lastRenderedDatasetByView.get("topology").capabilities,
+        topologyCapabilities,
+      );
+
+      calls.length = 0;
+      context.currentView = "topology";
+      context.nodeFilter = "reed-devices";
+      context.diagnosticFilter = "example-diagnostic";
+      context._currentSearchQuery = "example";
+      context.renderCurrentView();
+      assert.equal(context.visibleCount, 1);
+      assert.deepEqual(calls, [
+        "capabilities:topology", "diagnostics:topology",
+        "topology:reed-devices:example-diagnostic", "search",
+      ]);
+      assert.equal(context.currentDataset.capabilities, topologyCapabilities);
+
+      calls.length = 0;
+      context.currentView = "table";
+      context.renderCurrentView();
+      assert.equal(context.visibleCount, 1);
+      assert.deepEqual(calls, [
+        "capabilities:table", "diagnostics:table",
+        "table:reed-devices:example-diagnostic",
+      ]);
+      context.nodeFilter = "all";
+      context.diagnosticFilter = "all";
+      context._currentSearchQuery = "";
+      for (const view of ["topology", "table"]) {
+        context.currentView = view;
+        context.renderCurrentView();
+        assert.equal(context.visibleCount, 2);
+      }
+      assert.deepEqual(renders, ["topology", "table"]);
+      context.renderCurrentView({force: true});
+      assert.deepEqual(renders, ["topology", "table", "table"]);
+      context.currentDataset = {rows: []};
+      context.renderCurrentView();
+      assert.deepEqual(renders, ["topology", "table", "table", "table"]);
+      assert.equal(context.currentDataset.capabilities, tableCapabilities);
+      context.renderCurrentView();
+      assert.equal(context.currentDataset.capabilities, tableCapabilities);
+    """
+    subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_operations_workspace_exposes_activity_and_jobs_tabs() -> None:

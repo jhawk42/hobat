@@ -4,7 +4,6 @@ import path from "node:path";
 import { DATASET_REGISTRY } from "../../src/js/tdash-dataset-registry.js";
 import { buildDatasetRows } from "../../src/js/tdash-dataset.js";
 import { runAdaptor } from "../../src/js/tdash-adaptors.js";
-import { HA_MATTER_ROLE_POLICY } from "../../src/js/tdash-ha-matter-ws-roles.js";
 
 const PINNED_INPUT_DIRECTORY = new URL("../fixtures/adaptor_refactor_inputs/", import.meta.url);
 const PINNED_BASELINE = new URL("../fixtures/adaptor_refactor_baseline.json", import.meta.url);
@@ -36,7 +35,6 @@ function runPinnedAdaptor(adaptor, input) {
     rawFiles: files.map((filename) => input.files[filename]),
     rows: input.rows ?? input.mergedRows ?? [],
     adaptorRows: input.adaptorRows,
-    rolePolicy: input.rolePolicy ? HA_MATTER_ROLE_POLICY : undefined,
   });
 }
 
@@ -47,7 +45,7 @@ export function createPinnedAdaptorSnapshot() {
     ["mergedDetailed", "merged-detailed", "merged-detailed.json"],
     ["otbrRestApi", "otbr-restapi", "otbr-restapi.json"],
     ["haMatterWs", "ha-matter-ws", "ha-matter-ws.json"],
-    ["haMatterWsRolePolicy", "ha-matter-ws", "ha-matter-ws-role-policy.json"],
+    ["haMatterWsRoleFacts", "ha-matter-ws", "ha-matter-ws-role-facts.json"],
     ["haMatterWsMeshDiagnostics", "ha-matter-ws", "ha-matter-ws-mesh-diagnostics.json"],
   ];
   return Object.fromEntries(cases.map(([name, adaptor, filename]) => [

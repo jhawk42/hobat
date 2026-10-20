@@ -3,21 +3,14 @@ import {
   getPreferredFieldPath,
   normalizeInputRecord,
 } from "./tdash-device-fields.js";
-import {
-  HA_MATTER_ROLE_POLICY,
-  normalizeHaMatterRoleRecord,
-} from "./tdash-ha-matter-ws-roles.js";
 
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function normalizeAdaptorRecord(model, record, sourceName) {
-  const normalized = normalizeInputRecord(record, { source: sourceName });
-  return model.rolePolicy === HA_MATTER_ROLE_POLICY
-    ? normalizeHaMatterRoleRecord(normalized, "canonical-only")
-    : normalized;
+function normalizeAdaptorRecord(record, sourceName) {
+  return normalizeInputRecord(record, { source: sourceName });
 }
 
 const OBSERVED_TOPOLOGY_LINK_FIELDS = [
@@ -202,7 +195,7 @@ export function registerRelationshipCapability(model, family, deviceId = null) {
 
 export function registerDevice(model, record, options = {}) {
   if (!isPlainObject(record)) throw new Error("Adaptor device record must be an object.");
-  const canonicalRecord = normalizeAdaptorRecord(model, record, options.sourceName);
+  const canonicalRecord = normalizeAdaptorRecord(record, options.sourceName);
   const identityKeys = getDeviceIdentityKeys(canonicalRecord);
   const indexedId = identityKeys
     .map((key) => model.identityToDeviceId.get(key))
@@ -250,7 +243,7 @@ export function registerDetails(model, deviceId, rawRecord, ownership = "replace
     throw new Error(`Cannot register details for unknown device: ${deviceId}`);
   }
   if (!isPlainObject(rawRecord)) return;
-  const canonicalRecord = normalizeAdaptorRecord(model, rawRecord);
+  const canonicalRecord = normalizeAdaptorRecord(rawRecord);
   const existing = model.detailsByDeviceId.get(deviceId) ?? {};
   if (ownership === "replace") {
     model.detailsByDeviceId.set(deviceId, canonicalRecord);
@@ -344,10 +337,10 @@ export function emitAdaptorResult(model) {
   const nodeMap = new Map();
   model.devicesById.forEach((device, deviceId) => {
     nodeData.push(removeDuplicateAliases(
-      normalizeAdaptorRecord(model, { ...device.presentation, id: deviceId }),
+      normalizeAdaptorRecord({ ...device.presentation, id: deviceId }),
     ));
     nodeMap.set(deviceId, removeDuplicateAliases(
-      normalizeAdaptorRecord(model, device.nodeRecord),
+      normalizeAdaptorRecord(device.nodeRecord),
     ));
   });
   const edgeData = model.relationships.map((relationship) => ({
@@ -369,7 +362,6 @@ export function emitAdaptorResult(model) {
     sourceNames: [...model.sourceNames],
     relationshipCapabilities: cloneRelationshipCapabilities(model.relationshipCapabilities),
   };
-  if (model.rolePolicy === HA_MATTER_ROLE_POLICY) result.rolePolicy = model.rolePolicy;
   if (model.includeRouterChildIndex) {
     result.routerChildByRloc16 = new Map(model.routerChildrenByRloc16);
   }
@@ -500,7 +492,6 @@ export function projectObservedTopologyLinkCounts(rows, adaptorResult) {
 
 export function createAdaptorModelFromResult(result) {
   const model = createAdaptorModel(result.sourceNames ?? []);
-  if (result.rolePolicy === HA_MATTER_ROLE_POLICY) model.rolePolicy = result.rolePolicy;
   const nodeDataById = new Map(
     (result.nodeData ?? []).map((node) => [String(node.id), node]),
   );

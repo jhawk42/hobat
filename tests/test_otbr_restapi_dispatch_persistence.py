@@ -280,6 +280,9 @@ def test_devices_dispatch_normalizes_border_router_alias_conflicts(tmp_path):
         "isBorderRouter": False,
         "is_border_router": True,
         "br": False,
+        "type": "child",
+        "mode": {"device": "FTD"},
+        "isReed": False,
     }]
     client = Mock()
     client.list_devices.return_value = payload
@@ -296,10 +299,64 @@ def test_devices_dispatch_normalizes_border_router_alias_conflicts(tmp_path):
     assert "br" not in result[0]
     assert "is_border_router" not in result[0]
     assert result[0]["_merge_conflicts"] == [
-        {"path": "isBorderRouter", "current": False, "incoming": True}
+        {"path": "isBorderRouter", "current": False, "incoming": True},
+        {"path": "isReed", "current": False, "incoming": True},
     ]
+    assert result[0]["isReed"] is False
+    assert result[0]["_merge_conflicts"][-1] == {
+        "path": "isReed", "current": False, "incoming": True
+    }
     [saved] = json.loads(output_path.read_text(encoding="utf-8"))
     assert saved == result[0]
+
+
+def test_devices_fetch_persists_reed_evidence_in_checkpoint_and_final(tmp_path):
+    record = {
+        "id": "dev-1",
+        "role": "child",
+        "mode": {"device": "FTD"},
+    }
+    client = Mock()
+    client.fetch_device_collection.return_value = {
+        "items": [record],
+        "partial": True,
+    }
+    output_path = tmp_path / "devices-fetch.json"
+    args = SimpleNamespace(
+        devices_command="fetch",
+        device_count=255,
+        max_age=None,
+        max_retries=1,
+        task_timeout=8,
+        poll_interval=2.0,
+        poll_timeout=13.0,
+        resolved_output_path=str(output_path),
+        structured_outcome=True,
+    )
+
+    result = devices_module.dispatch_devices(client, args, raw_arg=False, fields=None)
+
+    checkpoint_path = tmp_path / "devices-fetch.partial.json"
+    for path in (checkpoint_path, output_path):
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        assert saved["items"][0]["isReed"] is True
+    assert result["items"][0]["isReed"] is True
+
+
+def test_devices_list_raw_bypasses_reed_enrichment():
+    payload = [{"role": "child", "mode": {"device": "FTD"}}]
+    client = Mock()
+    client.list_devices.return_value = payload
+    args = SimpleNamespace(
+        devices_command="list",
+        with_meta=False,
+        resolved_output_path=None,
+    )
+
+    result = devices_module.dispatch_devices(client, args, raw_arg=True, fields=None)
+
+    assert result is payload
+    assert "isReed" not in result[0]
 
 
 def test_diagnostics_dispatch_owns_final_output_after_normalization():
@@ -364,6 +421,9 @@ def test_diagnostics_fetch_all_checkpoint_and_final_preserve_address_override(tm
         "id": "device-1",
         "isBorderRouter": False,
         "ipv6Addresses": ["fdde:ad00:beef:0:0:ff:fe00:fc11"],
+        "role": "child",
+        "mode": {"device": "FTD"},
+        "isReed": False,
     }
     client = Mock()
     client.list_devices.return_value = [{"id": "device-1"}]
@@ -406,8 +466,10 @@ def test_diagnostics_fetch_all_checkpoint_and_final_preserve_address_override(tm
         assert "br" not in saved
         assert "is_border_router" not in saved
         assert saved["_merge_conflicts"] == [
-            {"path": "isBorderRouter", "current": False, "incoming": True}
+            {"path": "isReed", "current": False, "incoming": True},
+            {"path": "isBorderRouter", "current": False, "incoming": True},
         ]
+        assert saved["isReed"] is False
 
 
 @pytest.mark.parametrize(

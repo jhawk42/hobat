@@ -194,12 +194,26 @@ non-empty values are retained as bounded `_merge_conflicts` entries with
 
 ## FTD and REED Capability
 
-An observed child FTD remains `role: "child"` with
-`mode.fullThreadDevice: true` and derived `mode.device: "FTD"`. The browser
-projection may expose `isReed` as capability evidence while it is attached as
-a child. This does not establish current router state: FTD mode, child RLOC16,
-or either Thread-version field must not fabricate `isRouter` or
-`isBorderRouter`. No `role: "REED"` value is introduced.
+Collectors remain the owners of persisted role facts. Their source-specific
+enrichment and snapshot behavior are unchanged by the browser resolver; cached
+files are not migrated. Generic merging retains ordinary source priority,
+explicit booleans, provenance, and persisted conflicts.
+
+In the browser, [resolveIsReed](../src/js/tdash-device-fields.js) applies one
+source-independent decision to the post-merge record: an explicit boolean
+`isReed` wins. Otherwise, the fallback requires `mode.device` to be `FTD` and
+either a nonempty `role` equal to `child`, or an empty role with effective
+`isRouter` and `isBorderRouter` both false. Missing, null, and non-boolean
+`isReed` values do not count as true. `type`, `routingRole`, `role: "reed"`,
+`mode.device: "REED"`, router-eligibility aliases, filenames, and dataset
+identity do not independently qualify a device.
+
+The fallback is a presentation compatibility heuristic, not a new collector
+fact or proof of network-wide capability. It does not synthesize `isReed` into
+raw payloads, merged rows, details source records, or cached snapshots. Resolved
+values may appear in projections and topology presentation. Neither FTD mode,
+child RLOC16, nor Thread-version fields fabricate `isRouter` or
+`isBorderRouter`.
 
 ## Provenance and Conflicts
 

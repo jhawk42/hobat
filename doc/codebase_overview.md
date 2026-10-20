@@ -181,7 +181,7 @@ datasets. It does not contain health thresholds or reclassify evidence.
 | `tdash-catalog-fallback.js` | Generated bundled fallback catalog used when `/api/catalog` is unavailable or invalid |
 | `tdash-capabilities.js` | Source and file capability loading and availability checks |
 | `tdash-dataset.js` | Fetch sessions, cache controls, jobs, cancellation, checkpoints, and dataset assembly |
-| `tdash-device-fields.js` | Browser field definitions, aliases, identities, transforms, and placeholders |
+| `tdash-device-fields.js` | Browser field definitions, aliases, identities, the shared REED resolver, and placeholders |
 | `tdash-merge.js` | Browser merge strategies, source precedence, conflicts, and provenance |
 | `tdash-utils.js` | Canonical identifiers, field normalization, payload normalization, and formatting |
 | `tdash-adaptors.js` | Dispatch from dataset recipes to source adaptors |
@@ -190,7 +190,6 @@ datasets. It does not contain health thresholds or reclassify evidence.
 | `tdash-source-authority.js` | Browser projection of catalog source authority for merge ordering |
 | `tdash-device-diagnostics.js` | Eligible device targets and supported transient diagnostic actions |
 | `tdash-health.js` | Health API requests and rendering of server-owned assessments, roster, and comparisons |
-| `tdash-ha-matter-ws-roles.js` | File- and extractor-scoped Home Assistant Matter role normalization and evidence handling |
 | `tdash-thread-network.js` | Thread Network facts, device/link counts, role holders, and source evidence derived from the active dataset |
 | `tdash-topology-view-model.js` | Indexed topology state and pure filter/search visibility calculations |
 | `tdash-topology-utils.js` | Node/edge helpers, indexes, styles, labels, and isolated-node anchors |

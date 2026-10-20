@@ -83,6 +83,7 @@ import {
   populateFilterSelects,
   populateDiagnosticFilterBySource,
   populateDiagnosticFilterBySourceWithCapabilities,
+  updateFilterOptionVisibility,
   aggregateNetworkDiagnosticsForRows,
   evaluateDiagnosticsForRecord,
   selectHighestQualifyingDiagnosticEvaluations,
@@ -1198,10 +1199,19 @@ function renderCurrentView({ force = false } = {}) {
     return;
   }
   activateViewStatus(view, currentDataset);
-  if (!force && lastRenderedDatasetByView.get(view) === currentDataset) {
+  const renderedState = lastRenderedDatasetByView.get(view);
+  if (!force && renderedState?.dataset === currentDataset) {
+    currentDataset.capabilities = renderedState.capabilities;
+    updateFilterOptionVisibility(currentDataset.capabilities, view);
+    refreshDiagnosticFilterForCurrentSource();
     if (view === "topology") {
       const counts = getTopologyDatasetCounts();
       if (counts) updateDeviceStatusBar(counts);
+      refreshTopologyFiltersWithRestoredStyling();
+      if (_currentSearchQuery) applySearch();
+    } else {
+      applyTableFilters();
+      updateDeviceStatusBar(computeRowCounts(currentDataset.rows));
     }
     return;
   }
@@ -1234,7 +1244,9 @@ function renderCurrentView({ force = false } = {}) {
       adaptorResult,
     ).rows;
     populateTableColumnCategories(tableRows);
-    renderTableForDataset({ ...effectiveDataset, rows: tableRows }, currentDataset);
+    const tableDataset = { ...effectiveDataset, rows: tableRows };
+    renderTableForDataset(tableDataset, currentDataset);
+    effectiveDataset.capabilities = tableDataset.capabilities;
     updateDeviceStatusBar(computeRowCounts(currentDataset.rows));
   }
 
@@ -1254,7 +1266,10 @@ function renderCurrentView({ force = false } = {}) {
     applySearch();
   }
 
-  lastRenderedDatasetByView.set(view, currentDataset);
+  lastRenderedDatasetByView.set(view, {
+    dataset: currentDataset,
+    capabilities: currentDataset.capabilities,
+  });
 }
 
 function clearRenderedDatasetViews(emptyDataset) {
@@ -3041,7 +3056,6 @@ function getCurrentHealthTopologyViewModel() {
       viewModel: createTopologyViewModel(
         adaptorResult,
         currentDataset.deviceProjections,
-        { rolePolicy: currentDataset.rolePolicy },
       ),
     };
   }

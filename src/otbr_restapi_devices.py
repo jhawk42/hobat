@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from otbr_restapi_util import OTBRRestApiClient, emit_rest_command_output
+from otbr_role_evidence import normalize_otbr_role_record
 from td_device_fields import normalize_input_record
 from td_json_key_normalizer import convert_keys_to_camel_case
 from util_data import (
@@ -16,31 +17,59 @@ from util_data import (
 )
 
 
-def _normalize_device_record(record: Any) -> Any:
+def _normalize_device_record(
+    record: Any, *, include_otbr_role_evidence: bool = False
+) -> Any:
     if not isinstance(record, dict):
         return record
     normalized = normalize_input_record(record, source="rest")
+    if include_otbr_role_evidence:
+        normalized = normalize_otbr_role_record(normalized)
     return record if normalized == record else normalized
 
 
-def _normalize_device_payload(payload: Any) -> Any:
+def _normalize_device_payload(
+    payload: Any, *, include_otbr_role_evidence: bool = False
+) -> Any:
     if isinstance(payload, list):
-        normalized = [_normalize_device_record(record) for record in payload]
+        normalized = [
+            _normalize_device_record(
+                record,
+                include_otbr_role_evidence=include_otbr_role_evidence,
+            )
+            for record in payload
+        ]
         return payload if all(new is old for new, old in zip(normalized, payload)) else normalized
     if not isinstance(payload, dict):
         return payload
     if isinstance(payload.get("items"), list):
-        items = _normalize_device_payload(payload["items"])
+        items = _normalize_device_payload(
+            payload["items"],
+            include_otbr_role_evidence=include_otbr_role_evidence,
+        )
         return payload if items is payload["items"] else {**payload, "items": items}
-    return _normalize_device_record(payload)
+    return _normalize_device_record(
+        payload,
+        include_otbr_role_evidence=include_otbr_role_evidence,
+    )
 
 
 def _write_checkpoint_best_effort(
-    payload: Any, checkpoint_path: Path, *, normalize: bool = True
+    payload: Any,
+    checkpoint_path: Path,
+    *,
+    normalize: bool = True,
+    include_otbr_role_evidence: bool = False,
 ) -> None:
     try:
         records = payload.get("items", []) if isinstance(payload, dict) else payload
-        payload_to_save = _normalize_device_payload(payload) if normalize else payload
+        payload_to_save = (
+            _normalize_device_payload(
+                payload,
+                include_otbr_role_evidence=include_otbr_role_evidence,
+            )
+            if normalize else payload
+        )
         save_checkpoint_json(
             convert_keys_to_camel_case(payload_to_save),
             checkpoint_path,
@@ -69,13 +98,21 @@ def dispatch_devices(
 ) -> Any:
     output_path = getattr(args, "resolved_output_path", None)
 
-    def finish(result: Any) -> Any:
+    def finish(
+        result: Any, *, include_otbr_role_evidence: bool = False
+    ) -> Any:
         if raw_arg is not True:
-            result = _normalize_device_payload(result)
+            result = _normalize_device_payload(
+                result,
+                include_otbr_role_evidence=include_otbr_role_evidence,
+            )
         return emit_rest_command_output(result, output_path, logger=logging.getLogger(__name__))
 
     if args.devices_command == "list":
-        return finish(client.list_devices(fields=fields, raw=raw_arg, with_meta=args.with_meta))
+        return finish(
+            client.list_devices(fields=fields, raw=raw_arg, with_meta=args.with_meta),
+            include_otbr_role_evidence=True,
+        )
     if args.devices_command == "get":
         return finish(client.get_device(args.device_id, fields=fields, raw=raw_arg))
     if args.devices_command == "fetch":
@@ -96,8 +133,11 @@ def dispatch_devices(
                 output_file.name
             )
             _write_checkpoint_best_effort(
-                result, checkpoint_path, normalize=raw_arg is not True
+                result,
+                checkpoint_path,
+                normalize=raw_arg is not True,
+                include_otbr_role_evidence=True,
             )
-        return finish(result)
+        return finish(result, include_otbr_role_evidence=True)
 
     raise ValueError("Unsupported devices command")

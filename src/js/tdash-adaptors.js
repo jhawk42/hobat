@@ -9,10 +9,7 @@ export { adaptMergedDetailed, adaptRawArray };
 import { adaptEve, adaptEveNative } from './tdash-adaptor-eve.js';
 export { adaptEve, adaptEveNative };
 import { adaptThreadToolsNative } from './tdash-adaptor-thread-tools.js';
-import {
-  HA_MATTER_ROLE_POLICY,
-  isHaMatterRolePolicyEligible,
-} from './tdash-ha-matter-ws-roles.js';
+import { getDeviceIdentityKeys } from './tdash-device-fields.js';
 export { adaptThreadToolsNative };
 function buildFileMap(fileNames, rawFiles) {
   const map = new Map();
@@ -34,30 +31,54 @@ export const ADAPTOR_HANDLERS = Object.freeze({
     fileMap,
     rows,
     entry?.rowExtractor,
-    entry?.rolePolicy,
   ),
-  'ha-matter-ws-native-thread': (fileMap, rows, entry) => adaptHaMatterWsNativeThread(fileMap, rows, entry?.rolePolicy),
-  'ha-matter-ws-network-topology': (fileMap, rows, entry) => adaptHaMatterWsNetworkTopology(fileMap, rows, entry?.rolePolicy),
-  'ha-matter-ws-merge-topology': (fileMap, rows, entry) => adaptHaMatterWsMergeTopology(fileMap, rows, entry?.rolePolicy),
+  'ha-matter-ws-native-thread': (fileMap, rows) => adaptHaMatterWsNativeThread(fileMap, rows),
+  'ha-matter-ws-network-topology': (fileMap, rows) => adaptHaMatterWsNetworkTopology(fileMap, rows),
+  'ha-matter-ws-merge-topology': (fileMap, rows) => adaptHaMatterWsMergeTopology(fileMap, rows),
   'raw-array': (fileMap) => adaptRawArray(fileMap),
 });
+
+function canonicalReedRowsByIdentity(rows) {
+  const byIdentity = new Map();
+  rows.forEach((row) => {
+    if (typeof row?.isReed !== 'boolean') return;
+    canonicalReedIdentityKeys(row).forEach((key) => {
+      if (!byIdentity.has(key)) byIdentity.set(key, row);
+    });
+  });
+  return byIdentity;
+}
+
+function canonicalReedIdentityKeys(record) {
+  const keys = getDeviceIdentityKeys(record);
+  const id = typeof record?.id === 'string' ? record.id.trim().toLowerCase() : '';
+  if (/^[0-9a-f]{16}$/.test(id)) keys.push(`extAddress:${id}`);
+  else if (/^0x[0-9a-f]{4}$/.test(id)) keys.push(`rloc16:${id}`);
+  return [...new Set(keys)];
+}
+
+function applyCanonicalReedFacts(result, rows) {
+  const byIdentity = canonicalReedRowsByIdentity(rows);
+  const apply = (record) => {
+    if (!record || typeof record !== 'object') return;
+    const row = canonicalReedIdentityKeys(record)
+      .map((key) => byIdentity.get(key))
+      .find(Boolean);
+    if (row) record.isReed = row.isReed;
+  };
+  result.nodeData?.forEach(apply);
+  result.nodeMap?.forEach(apply);
+  result.rawByIdForDetails?.forEach(apply);
+}
 
 export function runAdaptor(dataset) {
   const { entry, rawFiles, rows } = dataset;
   const fileMap = buildFileMap(entry.files || [], rawFiles);
   const handler = ADAPTOR_HANDLERS[entry.adaptor];
   if (!handler) throw new Error(`Unknown adaptor: ${entry.adaptor}`);
-  const rolePolicy = dataset.rolePolicy === HA_MATTER_ROLE_POLICY
-    && isHaMatterRolePolicyEligible(entry)
-    ? HA_MATTER_ROLE_POLICY
-    : undefined;
-  if (rolePolicy) {
-    const roleEntry = { ...entry, rolePolicy };
-    return handler(
-      fileMap,
-      dataset.adaptorRows ?? rows,
-      roleEntry,
-    );
-  }
-  return handler(fileMap, rows, entry);
+  const adaptorRows = dataset.adaptorRows ?? rows;
+  const handlerRows = entry.adaptor === "ha-matter-ws" ? adaptorRows : rows;
+  const result = handler(fileMap, handlerRows, entry);
+  applyCanonicalReedFacts(result, adaptorRows);
+  return result;
 }

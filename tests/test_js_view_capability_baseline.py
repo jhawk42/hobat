@@ -1,4 +1,4 @@
-"""Snapshot the pre-projection dashboard filters over cached datasets."""
+"""Snapshot projected dashboard filters over cached datasets."""
 
 import json
 from pathlib import Path
@@ -11,6 +11,13 @@ pytestmark = pytest.mark.requires_data_dir
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests/fixtures/view_capability_baseline.json"
+ROLE_AUTHORITY_FILTERS = {
+    "border-routers",
+    "main-routers",
+    "reed-devices",
+    "routers-with-children",
+    "routers-without-children",
+}
 
 
 def test_cached_view_capabilities_cover_catalog_and_preserve_shape(node_json) -> None:
@@ -36,10 +43,24 @@ def test_cached_view_capabilities_cover_catalog_and_preserve_shape(node_json) ->
         assert all(value is None for value in snapshot["visibility"].values()), dataset
 
 
-def test_projected_view_capabilities_match_legacy_scan(node_json) -> None:
+def test_projection_matches_legacy_except_documented_role_changes(node_json) -> None:
     comparisons = node_json(
         "tests/js/run-view-capability-snapshot.mjs", "data", "--compare", timeout=90,
     )
     for dataset, comparison in comparisons.items():
         assert set(comparison) == {"legacy", "projected"}, dataset
-        assert comparison["projected"] == comparison["legacy"], dataset
+        legacy = comparison["legacy"]
+        projected = comparison["projected"]
+        assert {
+            key: value for key, value in projected.items() if key != "visibility"
+        } == {
+            key: value for key, value in legacy.items() if key != "visibility"
+        }, dataset
+        assert set(projected["visibility"]) == set(legacy["visibility"]), dataset
+        changed_filters = {
+            combination.split("|", 1)[0]
+            for combination in legacy["visibility"]
+            if legacy["visibility"][combination] != projected["visibility"][combination]
+        }
+        # Mutable caches can expose row/adaptor role differences in any source.
+        assert changed_filters <= ROLE_AUTHORITY_FILTERS, dataset

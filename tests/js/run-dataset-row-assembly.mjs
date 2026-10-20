@@ -17,10 +17,7 @@ import {
 } from "../../src/js/tdash-dataset.js";
 import { normalizeRows } from "../../src/js/tdash-merge.js";
 import { normalizeDatasetPayload } from "../../src/js/tdash-utils.js";
-import {
-  HA_MATTER_ROLE_POLICY,
-  isHaMatterRolePolicyEligible,
-} from "../../src/js/tdash-ha-matter-ws-roles.js";
+import { buildDeviceProjection } from "../../src/js/tdash-device-projection.js";
 import { ADAPTOR_HANDLERS, runAdaptor } from "../../src/js/tdash-adaptors.js";
 import {
   computeTopologyCapabilities,
@@ -270,7 +267,6 @@ assert.deepEqual(
 const haMatterMergeEntry = DATASET_REGISTRY.find(
   (dataset) => dataset.value === "ha_matter_ws_merge_topology",
 );
-assert.equal(isHaMatterRolePolicyEligible(haMatterMergeEntry), true);
 const haMatterMergeRows = buildDatasetRows(
   haMatterMergeEntry,
   haMatterMergeEntry.files.map((file) => JSON.parse(fs.readFileSync(`data/${file}`, "utf8"))),
@@ -317,25 +313,31 @@ const oldReedRows = buildDatasetRows(haDeviceEntry, [[
     thread: { routingRole: "Reed", rloc16: "0x1001" },
   },
 ]]);
-assert.equal(oldReedRows.rolePolicy, HA_MATTER_ROLE_POLICY);
-assert.equal(oldReedRows.rows[0].isRouter, false);
-assert.equal(oldReedRows.rows[0].isLeader, false);
-assert.equal(oldReedRows.rows[0].isReed, true);
+assert.equal(Object.hasOwn(oldReedRows.rows[0], "isRouter"), false);
+assert.equal(Object.hasOwn(oldReedRows.rows[0], "isLeader"), false);
+assert.equal(Object.hasOwn(oldReedRows.rows[0], "isReed"), false);
 assert.equal(Object.hasOwn(oldReedRows.rows[0], "isBorderRouter"), false);
 const enrichedReedRows = buildDatasetRows(haDeviceEntry, [[
   {
     matter: { nodeId: 1, matterId: "FABRIC-1" },
-    thread: { routingRole: "Reed", rloc16: "0x1001" },
+    thread: {
+      routingRole: "Reed",
+      rloc16: "0x1001",
+      isRouter: true,
+      isLeader: true,
+      isReed: true,
+      isBorderRouter: true,
+    },
     isRouter: false,
     isLeader: false,
-    isReed: true,
+    isReed: false,
+    isBorderRouter: false,
   },
 ]]);
 assert.deepEqual(
-  [oldReedRows.rows[0].isBorderRouter, oldReedRows.rows[0].isRouter,
-    oldReedRows.rows[0].isLeader, oldReedRows.rows[0].isReed],
   [enrichedReedRows.rows[0].isBorderRouter, enrichedReedRows.rows[0].isRouter,
     enrichedReedRows.rows[0].isLeader, enrichedReedRows.rows[0].isReed],
+  [false, false, false, false],
 );
 
 const invalidFetchedDevice = normalizeDatasetFilePayload(
@@ -347,8 +349,8 @@ const invalidFetchedDevice = normalizeDatasetFilePayload(
     isRouter: "true",
   }],
 );
-assert.equal(invalidFetchedDevice[0].isRouter, false);
-assert.equal(invalidFetchedDevice[0].isReed, true);
+assert.equal(invalidFetchedDevice[0].isRouter, true);
+assert.equal(Object.hasOwn(invalidFetchedDevice[0], "isReed"), false);
 assert.notEqual(invalidFetchedDevice[0].leaderEvidence, "leader-router-id-match");
 
 const nestedExplicitDevice = normalizeDatasetFilePayload(
@@ -359,11 +361,241 @@ const nestedExplicitDevice = normalizeDatasetFilePayload(
     thread: { routingRole: "Reed", isRouter: true },
   }],
 );
-assert.equal(nestedExplicitDevice[0].isRouter, true);
-assert.equal(nestedExplicitDevice[0].isReed, true);
-assert.deepEqual(nestedExplicitDevice[0]._merge_conflicts, [
-  { path: "isRouter", current: true, incoming: false },
-]);
+assert.equal(Object.hasOwn(nestedExplicitDevice[0], "isRouter"), false);
+assert.equal(nestedExplicitDevice[0].thread.isRouter, true);
+assert.equal(Object.hasOwn(nestedExplicitDevice[0], "isReed"), false);
+const nestedFactAssembly = buildDatasetRows(haDeviceEntry, [[{
+  matter: { nodeId: 3 },
+  thread: { isRouter: true, isLeader: false, isReed: true, isBorderRouter: false },
+}]]);
+assert.deepEqual(
+  ["isBorderRouter", "isRouter", "isLeader", "isReed"].map((field) =>
+    nestedFactAssembly.rows[0][field]),
+  [false, true, false, true],
+);
+
+const oldOtbrCliEntry = DATASET_REGISTRY.find(
+  (item) => item.value === "otbr_cli_networkdiag_fetch_all",
+);
+const oldOtbrCliRecord = {
+  extAddress: "0011223344556677",
+  role: "router",
+  type: "child",
+  mode: { device: "FTD" },
+};
+const oldOtbrCliSource = structuredClone(oldOtbrCliRecord);
+const oldOtbrPayload = normalizeDatasetFilePayload(
+  oldOtbrCliEntry,
+  0,
+  [oldOtbrCliRecord],
+);
+assert.equal(Object.hasOwn(oldOtbrPayload[0], "isReed"), false);
+assert.deepEqual(oldOtbrCliRecord, oldOtbrCliSource);
+assert.equal(
+  Object.hasOwn(normalizeDatasetFilePayload(oldOtbrCliEntry, 0, oldOtbrPayload)[0], "isReed"),
+  false,
+);
+const oldOtbrAssembly = buildDatasetRows(oldOtbrCliEntry, [[oldOtbrCliRecord]]);
+assert.equal(Object.hasOwn(oldOtbrAssembly.rows[0], "isReed"), false);
+assert.equal(buildDeviceProjection(oldOtbrAssembly.rows[0]).isReed, false);
+const fallbackFtd = { role: "child", mode: { device: "FTD" }, isRouter: false, isBorderRouter: false };
+assert.equal(buildDeviceProjection(fallbackFtd).isReed, true);
+const explicitFalseOtbrPayload = normalizeDatasetFilePayload(
+  oldOtbrCliEntry,
+  0,
+  [{
+    ...oldOtbrCliRecord,
+    isReed: false,
+  }],
+);
+assert.equal(explicitFalseOtbrPayload[0].isReed, false);
+assert.deepEqual(explicitFalseOtbrPayload[0]._merge_conflicts, undefined);
+const explicitFalseOtbrRaw = [{
+  ...oldOtbrCliRecord,
+  isReed: false,
+}];
+const explicitFalseOtbrAssembly = buildDatasetRows(
+  oldOtbrCliEntry,
+  [explicitFalseOtbrRaw],
+);
+const explicitFalseOtbrAdapted = runAdaptor({
+  entry: oldOtbrCliEntry,
+  rawFiles: [explicitFalseOtbrRaw],
+  rows: explicitFalseOtbrAssembly.rows,
+  adaptorRows: explicitFalseOtbrAssembly.adaptorRows,
+});
+const explicitFalseOtbrNode = [...explicitFalseOtbrAdapted.nodeMap.values()][0];
+assert.equal(explicitFalseOtbrNode.isReed, false);
+assert.equal(
+  [...explicitFalseOtbrAdapted.rawByIdForDetails.values()][0].isReed,
+  false,
+);
+
+const legacyOtbrLookingEntry = {
+  ...oldOtbrCliEntry,
+  value: "otbr_cli_networkdiag_other_product",
+};
+const legacyOtbrLookingRows = buildDatasetRows(legacyOtbrLookingEntry, [[
+  { role: "child", mode: { device: "FTD" } },
+]]);
+assert.equal(Object.hasOwn(legacyOtbrLookingRows.rows[0], "isReed"), false);
+
+const otbrMdnsRecipes = [
+  {
+    value: "otbr_cli_topology_mdns_health",
+    eligiblePrefix: "td-otbr-cli-networkdiag-fetch-all.json",
+  },
+  {
+    value: "otbr_restapi_topology_mdns_health",
+    eligiblePrefix: "td-otbr-restapi-devices-fetch.json",
+  },
+  {
+    value: "otbr_cli_meshdiag_topology_networkdiag_multicast_network_router_neighbortables_router_childtables_mdns_scopes_thread",
+    eligiblePrefix: "td-otbr-cli-networkdiag-multicast-network.json",
+  },
+];
+for (const { value, eligiblePrefix } of otbrMdnsRecipes) {
+  const dataset = DATASET_REGISTRY.find((item) => item.value === value);
+  const sourceIndexes = dataset.files
+    .map((filename, index) => filename.startsWith("td-otbr-") ? index : -1)
+    .filter((index) => index >= 0);
+  const eligibleIndex = dataset.files.indexOf(eligiblePrefix);
+  const mdnsIndex = dataset.files.indexOf("td-mdns-scopes-thread.json");
+  const complementaryIndex = dataset.files.findIndex((filename, index) =>
+    filename.startsWith("td-otbr-")
+    && filename !== eligiblePrefix
+    && index !== eligibleIndex
+    && filename !== "td-mdns-scopes-thread.json"
+  );
+  assert.ok(eligibleIndex >= 0, `${value} lacks eligible input`);
+  assert.ok(sourceIndexes.length > 0, `${value} has no OTBR input`);
+  assert.ok(mdnsIndex >= 0, `${value} lacks mDNS input`);
+  assert.ok(complementaryIndex >= 0, `${value} lacks complementary OTBR input`);
+  const inputRows = new Array(dataset.files.length).fill(null);
+  sourceIndexes.forEach((index, eligibleOrdinal) => {
+    inputRows[index] = [{
+      extAddress: eligibleOrdinal === 0
+        ? "0011223344556677"
+        : "3011223344556677",
+      role: "child",
+      mode: { device: "FTD" },
+    }];
+  });
+  inputRows[complementaryIndex].push({
+    extAddress: "1011223344556677",
+    type: "child",
+    mode: { device: "FTD" },
+  });
+  inputRows[mdnsIndex] = [{
+    extAddress: "0011223344556677",
+    serviceInfo: { name: "matched mDNS enrichment" },
+  }, {
+    extAddress: "2011223344556677",
+    role: "child",
+    mode: { device: "FTD" },
+    serviceInfo: { name: "mDNS enrichment" },
+  }];
+  const untouchedInputs = structuredClone(inputRows);
+  const normalizedInputs = inputRows.map((payload, index) =>
+    payload === null
+      ? null
+      : normalizeDatasetFilePayload(dataset, index, payload),
+  );
+  assert.deepEqual(inputRows, untouchedInputs);
+  sourceIndexes.forEach((index) => {
+    assert.equal(Object.hasOwn(normalizedInputs[index][0], "isReed"), false, value);
+  });
+  assert.equal(
+    Object.hasOwn(normalizedInputs[complementaryIndex][0], "isReed"),
+    false,
+    value,
+  );
+  assert.equal(Object.hasOwn(normalizedInputs[mdnsIndex][0], "isReed"), false, value);
+  const assembled = buildDatasetRows(dataset, normalizedInputs);
+  assert.equal(Object.hasOwn(
+    assembled.rows.find((row) => row.extAddress === "0011223344556677"),
+    "isReed",
+  ), false, value);
+  assert.ok(
+    assembled.rows.find((row) => row.extAddress === "0011223344556677")
+      ._source_files.includes("td-mdns-scopes-thread.json"),
+    value,
+  );
+  assert.equal(
+    assembled.rows.find((row) => row.extAddress === "0011223344556677")
+      .serviceInfo?.name,
+    "matched mDNS enrichment",
+    value,
+  );
+  assert.equal(
+    Object.hasOwn(
+      assembled.rows.find((row) => row.extAddress === "1011223344556677"),
+      "isReed",
+    ),
+    false,
+    value,
+  );
+  assert.equal(
+    Object.hasOwn(
+      assembled.rows.find((row) => row.extAddress === "2011223344556677"),
+      "isReed",
+    ),
+    false,
+    value,
+  );
+  for (const order of representativeArrivalOrders(
+    dataset.files.map((_, index) => index),
+  )) {
+    const arriving = new Array(dataset.files.length).fill(null);
+    for (const index of order) {
+      arriving[index] = normalizedInputs[index];
+      const partial = buildDatasetRows(dataset, arriving);
+      if (sourceIndexes.includes(index)) {
+        const reed = partial.rows.find((row) => row.extAddress === "0011223344556677");
+        if (reed) assert.equal(Object.hasOwn(reed, "isReed"), false, value);
+      }
+      if (index === mdnsIndex) {
+        const mdnsOnly = partial.rows.find((row) =>
+          row.extAddress === "2011223344556677");
+        assert.equal(Object.hasOwn(mdnsOnly ?? {}, "isReed"), false, value);
+      }
+    }
+  }
+
+  const conflictRawFiles = structuredClone(normalizedInputs);
+  sourceIndexes.forEach((index) => {
+    const row = conflictRawFiles[index].find(
+      (item) => item.extAddress === "0011223344556677",
+    );
+    if (row) row.isReed = false;
+  });
+  const conflictAssembly = buildDatasetRows(dataset, conflictRawFiles);
+  const conflictRow = conflictAssembly.rows.find(
+    (row) => row.extAddress === "0011223344556677",
+  );
+  assert.equal(conflictRow.isReed, false, value);
+  assert.equal(conflictRow._merge_conflicts?.some((conflict) =>
+    conflict.path === "isReed") ?? false, false, value);
+  const mergeWinnerInputs = structuredClone(normalizedInputs);
+  mergeWinnerInputs[complementaryIndex].push({
+    extAddress: "0011223344556677",
+    role: "child",
+    mode: { device: "FTD" },
+    isReed: false,
+  });
+  const mergeWinnerAssembly = buildDatasetRows(dataset, mergeWinnerInputs);
+  const mergeWinnerRow = mergeWinnerAssembly.rows.find(
+    (row) => row.extAddress === "0011223344556677",
+  );
+  assert.equal(mergeWinnerRow.isReed, false, value);
+  assert.equal(typeof mergeWinnerRow.isReed, "boolean", value);
+  const missingInputs = buildDatasetRows(
+    dataset,
+    new Array(dataset.files.length).fill(null),
+  );
+  assert.deepEqual(missingInputs.loadedFiles, [], value);
+  assert.deepEqual(missingInputs.rows, [], value);
+}
 
 const dashboardDiagnosticsEntry = DATASET_REGISTRY.find(
   (dataset) => dataset.value === "ha_matter_ws_dashboard_diagnostics",
@@ -387,9 +619,7 @@ const fetchedRoleConflicts = normalizeDatasetFilePayload(
   },
 );
 assert.equal(fetchedRoleConflicts.diagnostics[0].isRouter, false);
-assert.deepEqual(fetchedRoleConflicts.diagnostics[0]._merge_conflicts, [
-  { path: "isRouter", current: false, incoming: true },
-]);
+assert.equal(fetchedRoleConflicts.diagnostics[0]._merge_conflicts, undefined);
 assert.equal(Object.hasOwn(fetchedRoleConflicts.diagnostics[1], "isLeader"), false);
 assert.equal(Object.hasOwn(fetchedRoleConflicts.diagnostics[1], "leaderEvidence"), false);
 const inferredLeaderAssembly = buildDatasetRows(dashboardDiagnosticsEntry, [{
@@ -413,7 +643,6 @@ const inferredLeaderAdapted = runAdaptor({
   }],
   rows: inferredLeaderAssembly.rows,
   adaptorRows: inferredLeaderAssembly.adaptorRows,
-  rolePolicy: inferredLeaderAssembly.rolePolicy,
 });
 const inferredLeaderNode = [...inferredLeaderAdapted.nodeMap.values()][0];
 assert.equal(Object.hasOwn(inferredLeaderNode, "isLeader"), false);
@@ -424,7 +653,7 @@ assert.equal(
 assert.equal(
   normalizeDatasetPayload([{ isRouter: "true" }])[0].isRouter,
   true,
-  "generic normalization remains unchanged outside the guarded HA file path",
+  "generic payload normalization remains unchanged",
 );
 
 const roleSource = [{
@@ -437,28 +666,18 @@ const roleSource = [{
 const normalizedRoleRows = normalizeRows(
   roleSource,
   "td-ha-matter-ws-diagnostics-fetch-all.json",
-  {
-    rolePolicy: HA_MATTER_ROLE_POLICY,
-    roleContext: "commissioned-diagnostic",
-  },
 );
 assert.equal(normalizedRoleRows[0].isRouter, false);
-assert.equal(normalizedRoleRows[0].isLeader, true);
-assert.equal(normalizedRoleRows[0].isReed, false);
+assert.equal(Object.hasOwn(normalizedRoleRows[0], "isLeader"), false);
+assert.equal(Object.hasOwn(normalizedRoleRows[0], "isReed"), false);
 assert.equal(normalizedRoleRows[0].isBorderRouter, true);
 assert.equal(Object.hasOwn(normalizedRoleRows[0], "br"), false);
-assert.deepEqual(normalizedRoleRows[0]._merge_conflicts, [
-  { path: "isRouter", current: false, incoming: true },
-]);
+assert.deepEqual(normalizedRoleRows[0]._merge_conflicts, undefined);
 const normalizedRoleRowsAgain = normalizeRows(
   normalizedRoleRows,
   "td-ha-matter-ws-diagnostics-fetch-all.json",
-  {
-    rolePolicy: HA_MATTER_ROLE_POLICY,
-    roleContext: "commissioned-diagnostic",
-  },
 );
-assert.deepEqual(normalizedRoleRowsAgain[0]._merge_conflicts, normalizedRoleRows[0]._merge_conflicts);
+assert.equal(normalizedRoleRowsAgain[0].isRouter, false);
 
 const oldNativeTopology = buildDatasetRows(
   DATASET_REGISTRY.find((dataset) => dataset.value === "ha_matter_ws_network_topology"),
@@ -481,9 +700,9 @@ assert.deepEqual(
     row.isReed,
   ]),
   [
-    [undefined, false, false, true],
     [undefined, undefined, undefined, undefined],
-    [true, true, false, false],
+    [undefined, undefined, undefined, undefined],
+    [undefined, undefined, undefined, undefined],
   ],
 );
 const nativeTopologyEntry = DATASET_REGISTRY.find(
@@ -528,11 +747,10 @@ const nativeTopologyAdapted = runAdaptor({
   rawFiles: nativeTopologyRaw,
   rows: nativeTopologyAssembly.rows,
   adaptorRows: nativeTopologyAssembly.adaptorRows,
-  rolePolicy: nativeTopologyAssembly.rolePolicy,
 });
 assert.equal(nativeTopologyAdapted.nodeMap.get("reed").isRouter, false);
-assert.equal(nativeTopologyAdapted.nodeMap.get("reed").isReed, true);
-assert.equal(Object.hasOwn(nativeTopologyAdapted.nodeMap.get("ap"), "isRouter"), false);
+assert.equal(Object.hasOwn(nativeTopologyAdapted.nodeMap.get("reed"), "isReed"), false);
+assert.equal(nativeTopologyAdapted.nodeMap.get("ap").isRouter, false);
 assert.equal(nativeTopologyAdapted.nodeMap.get("br").isBorderRouter, true);
 assert.equal(nativeTopologyAdapted.nodeMap.get("br").isRouter, false);
 assert.equal(nativeTopologyAdapted.edgeData.length, 1);
@@ -540,21 +758,17 @@ assert.equal(nativeTopologyAdapted.rawByIdForDetails.get("br").isRouter, false);
 const nativeBorderNode = nativeTopologyAdapted.nodeData.find((node) => node.id === "br");
 const nativeReedNode = nativeTopologyAdapted.nodeData.find((node) => node.id === "reed");
 assert.equal(nativeBorderNode.isBorderRouter, true);
-assert.equal(nativeReedNode.isReed, true);
+assert.equal(Object.hasOwn(nativeReedNode, "isReed"), false);
 assert.equal(isRowVisibleByNodeFilter(
   nativeTopologyAssembly.rows.find((row) => row.id === "reed"),
   "reed-devices",
-  nativeTopologyAssembly.rolePolicy,
-), true);
+), false);
 assert.equal(isRowVisibleByNodeFilter(
   nativeTopologyAssembly.rows.find((row) => row.id === "reed"),
   "main-routers",
-  nativeTopologyAssembly.rolePolicy,
 ), false);
 assert.equal(
-  computeTopologyCapabilities(nativeTopologyAdapted.nodeData, [], {
-    rolePolicy: nativeTopologyAssembly.rolePolicy,
-  }).hasBorderRouters,
+  computeTopologyCapabilities(nativeTopologyAdapted.nodeData, []).hasBorderRouters,
   true,
 );
 assert.equal(
@@ -562,9 +776,8 @@ assert.equal(
     nativeReedNode,
     "reed-devices",
     undefined,
-    nativeTopologyAssembly.rolePolicy,
   ),
-  true,
+  false,
 );
 
 const mergeTopologyEntry = DATASET_REGISTRY.find(
@@ -609,10 +822,9 @@ const mergeTopologyAdapted = runAdaptor({
   rawFiles: mergeTopologyRawFiles,
   rows: mergeTopologyAssembly.rows,
   adaptorRows: mergeTopologyAssembly.adaptorRows,
-  rolePolicy: mergeTopologyAssembly.rolePolicy,
 });
-assert.equal(mergeTopologyAdapted.nodeMap.get("merged-reed").isRouter, false);
-assert.equal(mergeTopologyAdapted.nodeMap.get("merged-reed").isReed, true);
+assert.notEqual(mergeTopologyAdapted.nodeMap.get("merged-reed").isRouter, true);
+assert.equal(Object.hasOwn(mergeTopologyAdapted.nodeMap.get("merged-reed"), "isReed"), false);
 assert.equal(mergeTopologyAdapted.nodeMap.get("merged-br").isBorderRouter, true);
 assert.equal(mergeTopologyAdapted.nodeMap.get("merged-br").isRouter, true);
 assert.equal(mergeTopologyAdapted.edgeData.length, 1);
@@ -646,13 +858,10 @@ assert.deepEqual(
     row.isLeader,
     row.isReed,
   ]),
-  mergeTopologyAssembly.rows.map((row) => [
-    row.id,
-    row.isBorderRouter,
-    row.isRouter,
-    row.isLeader,
-    row.isReed,
-  ]),
+  [
+    ["merged-reed", undefined, false, false, true],
+    ["merged-br", true, true, false, false],
+  ],
 );
 
 const oldInventory = buildDatasetRows(
@@ -661,7 +870,7 @@ const oldInventory = buildDatasetRows(
 );
 assert.deepEqual(
   [oldInventory.rows[0].isBorderRouter, oldInventory.rows[0].isRouter],
-  [true, true],
+  [undefined, undefined],
 );
 const inventoryEntry = DATASET_REGISTRY.find(
   (dataset) => dataset.value === "ha_matter_ws_thread_border_routers",
@@ -675,7 +884,6 @@ const inventoryAdapted = runAdaptor({
   rawFiles: inventoryRaw,
   rows: inventoryAssembly.rows,
   adaptorRows: inventoryAssembly.adaptorRows,
-  rolePolicy: inventoryAssembly.rolePolicy,
 });
 const inventoryRecord = [...inventoryAdapted.nodeMap.values()][0];
 assert.equal(inventoryRecord.isBorderRouter, true);
@@ -685,18 +893,15 @@ assert.equal(inventoryAdapted.nodeData[0].isReed, true);
 assert.equal(isRowVisibleByNodeFilter(
   inventoryAssembly.rows[0],
   "reed-devices",
-  inventoryAssembly.rolePolicy,
 ), true);
 assert.equal(
   isNodeVisibleByFilter(
     inventoryAdapted.nodeData[0],
     "reed-devices",
     undefined,
-    inventoryAssembly.rolePolicy,
   ),
   true,
 );
-assert.equal(Object.hasOwn(inventoryRecord, "role"), false);
 assert.equal(Object.hasOwn(inventoryRecord, "isLeader"), false);
 assert.equal(inventoryRecord.isReed, true);
 
@@ -724,29 +929,15 @@ const dashboardMeshAdapted = runAdaptor({
   rawFiles: dashboardMeshRaw,
   rows: dashboardMeshAssembly.rows,
   adaptorRows: dashboardMeshAssembly.adaptorRows,
-  rolePolicy: dashboardMeshAssembly.rolePolicy,
 });
 assert.equal(dashboardMeshAdapted.nodeMap.get("mesh-placeholder").relationshipOnly, true);
 assert.equal(dashboardMeshAdapted.nodeMap.get("mesh-placeholder").isRouter, true);
 assert.equal(dashboardMeshAdapted.nodeMap.get("mesh-placeholder").isLeader, false);
 
-assert.equal(isHaMatterRolePolicyEligible({
-  ...haDeviceEntry,
-  source: "merged",
-}), false);
-assert.equal(isHaMatterRolePolicyEligible({
-  ...haDeviceEntry,
-  adaptor: "raw-array",
-}), false);
-assert.equal(isHaMatterRolePolicyEligible({
-  ...haDeviceEntry,
-  files: [...haDeviceEntry.files, "td-otbr-cli-networkdiag-fetch-all.json"],
-}), false);
 const nonHaLookingRow = buildDatasetRows(entry({
   source: "eve",
   files: ["td-ha-matter-ws-devices-fetch-all.json"],
 }), [[{ role: "Router", isReed: true }]]);
-assert.equal(nonHaLookingRow.rolePolicy, undefined);
 assert.equal(Object.hasOwn(nonHaLookingRow.rows[0], "isRouter"), false);
 assert.equal(nonHaLookingRow.rows[0].isReed, true);
 assert.deepEqual(

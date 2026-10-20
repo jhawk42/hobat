@@ -1,9 +1,4 @@
 import { MERGE_STRATEGIES } from "./tdash-constants.js";
-import {
-  HA_MATTER_ROLE_POLICY,
-  isHaMatterRoleContextAllowed,
-  normalizeHaMatterRoleRecord,
-} from "./tdash-ha-matter-ws-roles.js";
 import { sourceDefaults } from "./tdash-source-authority.js";
 import { getDeviceIdentityKeys, isPlaceholderExtAddress, isPlaceholderDeviceLabel } from "./tdash-device-fields.js";
 import {
@@ -22,27 +17,14 @@ const TLV_SUMMARY_PRIORITY_FIELD = "_tlv_summary_source_priority";
 
 // ── Row normalisation (used by table renderer + merge strategies) ────────────
 
-export function normalizeRows(rawData, sourceName = "", options = {}) {
+export function normalizeRows(rawData, sourceName = "") {
   const fieldSource = fieldSourceForFile(sourceName);
-  const normalizeRow = (row) => {
-    if (
-      options.rolePolicy === HA_MATTER_ROLE_POLICY
-      && isHaMatterRoleContextAllowed(sourceName, options.roleContext)
-    ) return normalizeHaMatterRoleRecord(row, options.roleContext);
-    return row;
-  };
-  const normalizeRelationshipsAndRoles = (row) => {
-    const normalized = normalizeSourceRelationships(
-      normalizeRow(row),
-      sourceName,
-      fieldSource,
-    );
-    return normalizeRow(normalized);
-  };
+  const normalizeRelationships = (row) =>
+    normalizeSourceRelationships(row, sourceName, fieldSource);
   if (Array.isArray(rawData)) {
     return rawData.map((row, index) => {
       if (isPlainObject(row)) {
-        const normalized = normalizeRelationshipsAndRoles(row);
+        const normalized = normalizeRelationships(row);
         delete normalized[TLV_SUMMARY_PRIORITY_FIELD];
         return withRowProvenance(normalized, sourceName);
       }
@@ -54,12 +36,12 @@ export function normalizeRows(rawData, sourceName = "", options = {}) {
       const row = rawData[key];
       if (isPlainObject(row)) {
         const normalized = normalizeRowMergeAliases(
-          normalizeRow({ _row_key: key, ...row }),
+          { _row_key: key, ...row },
           { source: fieldSource },
         );
         delete normalized[TLV_SUMMARY_PRIORITY_FIELD];
         return withRowProvenance(
-          normalizeRow(normalized),
+          normalized,
           sourceName,
         );
       }

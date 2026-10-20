@@ -24,11 +24,6 @@ import {
 } from './tdash-topology-utils.js';
 import { isPlaceholderOmrAddress } from './tdash-device-fields.js';
 import {
-  HA_MATTER_ROLE_FIELDS,
-  HA_MATTER_ROLE_POLICY,
-  normalizeHaMatterRoleRecord,
-} from './tdash-ha-matter-ws-roles.js';
-import {
   createAdaptorModel,
   createAdaptorModelFromResult,
   emitAdaptorResult,
@@ -49,11 +44,14 @@ const MATTER_FIELDS = Object.freeze([
   'vendorHwVersion', 'vendorHwVersionNumber', 'available', 'isBridge',
   'dateCommissioned',
 ]);
+const ROLE_FACT_FIELDS = Object.freeze([
+  'isBorderRouter', 'isRouter', 'isLeader', 'isReed',
+]);
 
-function canonicalRolePresentation(record) {
+function explicitRoleFacts(record) {
   return Object.fromEntries(
-    HA_MATTER_ROLE_FIELDS.flatMap((field) =>
-      typeof record[field] === 'boolean' ? [[field, record[field]]] : []),
+    ROLE_FACT_FIELDS.flatMap((field) =>
+      typeof record?.[field] === 'boolean' ? [[field, record[field]]] : []),
   );
 }
 
@@ -63,7 +61,7 @@ function canonicalRolePresentation(record) {
 // ── Adaptor 7: Home Assistant Matter WebSocket canonical snapshots ──────────
 
 function registerHaMatterRow(row, index, {
-  useHaMatterRoles, model, topologyIdToDeviceId, extAddressToDeviceId,
+  model, topologyIdToDeviceId, extAddressToDeviceId,
   rloc16ToDeviceId, canonicalRowsByDeviceId,
 }) {
   if (!isPlainObject(row)) return;
@@ -81,13 +79,11 @@ function registerHaMatterRow(row, index, {
     ...thread,
     matter,
   };
-  if (useHaMatterRoles) {
-    HA_MATTER_ROLE_FIELDS.forEach((field) => {
-      if (typeof row[field] === 'boolean') canonicalRow[field] = row[field];
-      else if (typeof thread[field] === 'boolean') canonicalRow[field] = thread[field];
-      else delete canonicalRow[field];
-    });
-  }
+  ROLE_FACT_FIELDS.forEach((field) => {
+    if (typeof row[field] === 'boolean') canonicalRow[field] = row[field];
+    else if (typeof thread[field] === 'boolean') canonicalRow[field] = thread[field];
+    else if (typeof matter[field] === 'boolean') canonicalRow[field] = matter[field];
+  });
   const explicitId = toText(canonicalRow.topologyId)
     || toText(canonicalRow.id)
     || toText(canonicalRow.matterId)
@@ -95,34 +91,29 @@ function registerHaMatterRow(row, index, {
   const role = toText(canonicalRow.role || canonicalRow.routingRole).toLowerCase();
   const rloc16 = toText(canonicalRow.rloc16).toLowerCase();
   const isChild = role.includes('child') || role.includes('enddevice');
-  const isRouter = useHaMatterRoles
-    ? canonicalRow.isRouter === true
-    : canonicalRow.isRouter === true
-      || role === 'router'
+  const isRouter = typeof canonicalRow.isRouter === 'boolean'
+    ? canonicalRow.isRouter
+    : role === 'router'
       || role === 'leader'
       || (canonicalRow.relationshipOnly === true && rloc16.endsWith('00'));
-  const isBorderRouter = useHaMatterRoles && canonicalRow.isBorderRouter === true;
-  const isLeader = useHaMatterRoles
-    ? canonicalRow.isLeader === true
-    : canonicalRow.isLeader === true || role === 'leader';
-  const shape = useHaMatterRoles
-    ? isBorderRouter
-      ? NODE_SHAPES.borderRouter
-      : isChild
-        ? NODE_SHAPES.child
-        : isRouter
-          ? NODE_SHAPES.router
-          : NODE_SHAPES.unknown
-    : isChild ? NODE_SHAPES.child : NODE_SHAPES.router;
-  const color = useHaMatterRoles
-    ? isBorderRouter
-      ? NODE_COLORS.borderRouter
-      : isChild
-        ? NODE_COLORS.child
-        : isRouter
-          ? NODE_COLORS.router
-          : NODE_COLORS.unknown
-    : isChild ? NODE_COLORS.child : NODE_COLORS.eve;
+  const isBorderRouter = canonicalRow.isBorderRouter === true;
+  const isLeader = typeof canonicalRow.isLeader === 'boolean'
+    ? canonicalRow.isLeader
+    : role === 'leader';
+  const shape = isBorderRouter
+    ? NODE_SHAPES.borderRouter
+    : isChild
+      ? NODE_SHAPES.child
+      : isRouter
+        ? NODE_SHAPES.router
+        : NODE_SHAPES.unknown;
+  const color = isBorderRouter
+    ? NODE_COLORS.borderRouter
+    : isChild
+      ? NODE_COLORS.child
+      : isRouter
+        ? NODE_COLORS.router
+        : NODE_COLORS.unknown;
   const deviceId = registerDevice(model, canonicalRow, {
     id: explicitId,
     preserveId: true,
@@ -137,10 +128,7 @@ function registerHaMatterRow(row, index, {
       ...buildRoleNodeEmphasis({ isBorderRouter, isRouter }),
       isRouter,
       isLeader,
-      ...(typeof canonicalRow.isReed === 'boolean'
-        ? { isReed: canonicalRow.isReed }
-        : {}),
-      ...(useHaMatterRoles ? canonicalRolePresentation(canonicalRow) : {}),
+      ...explicitRoleFacts(canonicalRow),
       relationshipOnly: canonicalRow.relationshipOnly === true,
     },
   });
@@ -328,29 +316,24 @@ export function adaptHaMatterWs(
   fileMap,
   extractedRows,
   rowExtractor = '',
-  rolePolicy = undefined,
 ) {
-  const useHaMatterRoles = rolePolicy === HA_MATTER_ROLE_POLICY;
   const payload = fileMap.values().next().value;
-  const rows = useHaMatterRoles
-    ? asArray(extractedRows)
-    : rowExtractor
+  const rows = rowExtractor
     ? [
-        ...asArray(extractedRows),
-        ...(rowExtractor === 'ha-matter-ws-mesh-diagnostics'
-          ? asArray(payload?.topology).filter((row) => row?.relationshipOnly === true)
-          : []),
-      ]
+      ...asArray(extractedRows),
+      ...(rowExtractor === 'ha-matter-ws-mesh-diagnostics'
+        ? asArray(payload?.topology).filter((row) => row?.relationshipOnly === true)
+        : []),
+    ]
     : (Array.isArray(payload) ? payload : asArray(payload?.topology));
   const model = createAdaptorModel(['ha-matter-ws']);
-  if (useHaMatterRoles) model.rolePolicy = rolePolicy;
   const topologyIdToDeviceId = new Map();
   const extAddressToDeviceId = new Map();
   const rloc16ToDeviceId = new Map();
   const canonicalRowsByDeviceId = new Map();
   const relationships = new Map();
   const context = {
-    useHaMatterRoles, model, topologyIdToDeviceId, extAddressToDeviceId,
+    model, topologyIdToDeviceId, extAddressToDeviceId,
     rloc16ToDeviceId, canonicalRowsByDeviceId, relationships,
   };
 
@@ -410,18 +393,17 @@ function nativeRloc16(value) {
   return number === undefined ? toText(value).toLowerCase() : `0x${number.toString(16).padStart(4, '0')}`;
 }
 
-function nativeTopologyNodeRecord(node, rolePolicy = undefined) {
-  const useHaMatterRoles = rolePolicy === HA_MATTER_ROLE_POLICY;
+function nativeTopologyNodeRecord(node) {
   const deviceId = toText(node.id);
-  const role = toText(node.role).toLowerCase();
-  const isBorderRouter = useHaMatterRoles
-    ? node.isBorderRouter === true
+  const role = toText(node.role).trim().toLowerCase();
+  const isBorderRouter = typeof node.isBorderRouter === 'boolean'
+    ? node.isBorderRouter
     : node.kind === 'border_router';
   const isChild = role === 'end_device' || role === 'sleepy_end_device';
-  const isRouter = useHaMatterRoles
-    ? node.isRouter === true
-    : isBorderRouter || ['leader', 'router', 'reed', 'ap'].includes(role);
-  const isLeader = useHaMatterRoles ? node.isLeader === true : role === 'leader';
+  const isRouter = typeof node.isRouter === 'boolean'
+    ? node.isRouter
+    : isBorderRouter || ['leader', 'router'].includes(role);
+  const isLeader = typeof node.isLeader === 'boolean' ? node.isLeader : role === 'leader';
   const result = {
     ...node,
     id: deviceId,
@@ -430,22 +412,14 @@ function nativeTopologyNodeRecord(node, rolePolicy = undefined) {
     deviceLabel: node.networkName || node.network_name || node.hostName || node.host_name || node.vendorName || node.vendor_name || deviceId,
     nodeId: node.nodeId || node.node_id,
     isChild,
+    isBorderRouter,
+    isRouter,
+    isLeader,
   };
-  if (useHaMatterRoles) {
-    HA_MATTER_ROLE_FIELDS.forEach((field) => {
-      if (typeof node[field] === 'boolean') result[field] = node[field];
-      else delete result[field];
-    });
-  } else {
-    result.isBorderRouter = isBorderRouter;
-    result.isRouter = isRouter;
-    result.isLeader = isLeader;
-  }
   return result;
 }
 
-function nativeTopologyNodePresentation(node, rolePolicy = undefined) {
-  const useHaMatterRoles = rolePolicy === HA_MATTER_ROLE_POLICY;
+function nativeTopologyNodePresentation(node) {
   return {
     label: buildLabel(node),
     shape: node.isBorderRouter ? NODE_SHAPES.borderRouter : (node.isChild ? NODE_SHAPES.child : (node.isRouter ? NODE_SHAPES.router : NODE_SHAPES.unknown)),
@@ -456,21 +430,17 @@ function nativeTopologyNodePresentation(node, rolePolicy = undefined) {
     }),
     isRouter: node.isRouter,
     isLeader: node.isLeader,
-    ...(typeof node.isReed === 'boolean' ? { isReed: node.isReed } : {}),
-    ...(useHaMatterRoles ? canonicalRolePresentation(node) : {}),
+    ...explicitRoleFacts(node),
   };
 }
 
 export function adaptHaMatterWsNativeThread(
   fileMap,
   extractedRows,
-  rolePolicy = undefined,
 ) {
-  const useHaMatterRoles = rolePolicy === HA_MATTER_ROLE_POLICY;
   const rows = asArray(extractedRows);
   const sourceName = 'ha-matter-ws-thread-border-routers';
   const model = createAdaptorModel([sourceName]);
-  if (useHaMatterRoles) model.rolePolicy = rolePolicy;
 
   rows.forEach((row, index) => {
     if (!isPlainObject(row)) return;
@@ -487,16 +457,12 @@ export function adaptHaMatterWsNativeThread(
         || row.vendorName
         || row.vendorModel
         || fallbackId,
-      ...(useHaMatterRoles ? {} : {
-        role: 'Border Router',
-        isBorderRouter: true,
-        isRouter: true,
-      }),
+      role: row.role ?? 'Border Router',
+      isBorderRouter: typeof row.isBorderRouter === 'boolean' ? row.isBorderRouter : true,
+      isRouter: typeof row.isRouter === 'boolean' ? row.isRouter : true,
     };
-    const isBorderRouter = useHaMatterRoles
-      ? canonicalRow.isBorderRouter === true
-      : true;
-    const isRouter = useHaMatterRoles ? canonicalRow.isRouter === true : true;
+    const isBorderRouter = canonicalRow.isBorderRouter === true;
+    const isRouter = canonicalRow.isRouter === true;
     const deviceId = registerDevice(model, canonicalRow, {
       id: fallbackId,
       preserveId: true,
@@ -504,14 +470,16 @@ export function adaptHaMatterWsNativeThread(
       nodeRecord: canonicalRow,
       presentation: {
         label: buildLabel(canonicalRow),
-        shape: isBorderRouter ? NODE_SHAPES.borderRouter : NODE_SHAPES.router,
-        color: isBorderRouter ? NODE_COLORS.borderRouter : NODE_COLORS.router,
+        shape: isBorderRouter
+          ? NODE_SHAPES.borderRouter
+          : isRouter ? NODE_SHAPES.router : NODE_SHAPES.unknown,
+        color: isBorderRouter
+          ? NODE_COLORS.borderRouter
+          : isRouter ? NODE_COLORS.router : NODE_COLORS.unknown,
         ...buildRoleNodeEmphasis({ isBorderRouter, isRouter }),
         isRouter,
-        ...(useHaMatterRoles ? canonicalRolePresentation(canonicalRow) : {}),
-        ...(typeof canonicalRow.isLeader === 'boolean'
-          ? { isLeader: canonicalRow.isLeader }
-          : {}),
+        isBorderRouter,
+        ...explicitRoleFacts(canonicalRow),
       },
     });
     registerDetails(model, deviceId, canonicalRow, 'replace');
@@ -525,13 +493,10 @@ export function adaptHaMatterWsNativeThread(
 export function adaptHaMatterWsNetworkTopology(
   fileMap,
   extractedRows = [],
-  rolePolicy = undefined,
 ) {
-  const useHaMatterRoles = rolePolicy === HA_MATTER_ROLE_POLICY;
   const wrapper = fileMap.values().next().value;
   const topology = isPlainObject(wrapper?.topology) ? wrapper.topology : {};
   const model = createAdaptorModel(['ha-matter-ws-network-topology']);
-  if (useHaMatterRoles) model.rolePolicy = rolePolicy;
   if (Array.isArray(topology.connections)) {
     registerRelationshipCapability(model, "nativeTopologyConnections");
   }
@@ -543,23 +508,20 @@ export function adaptHaMatterWsNetworkTopology(
   );
   asArray(topology.nodes).forEach((rawNode) => {
     if (!isPlainObject(rawNode)) return;
-    const node = useHaMatterRoles
-      ? normalizedRowsByNativeId.get(toText(rawNode.id))
-        ?? normalizeHaMatterRoleRecord(rawNode, 'native-topology')
-      : rawNode;
-    const canonicalNode = nativeTopologyNodeRecord(node, rolePolicy);
+    const node = normalizedRowsByNativeId.get(toText(rawNode.id)) ?? rawNode;
+    const canonicalNode = nativeTopologyNodeRecord(node);
     if (!canonicalNode.id) return;
     registerDevice(model, canonicalNode, {
       id: canonicalNode.id,
       preserveId: true,
       sourceName: 'ha-matter-ws-network-topology',
       nodeRecord: canonicalNode,
-      presentation: nativeTopologyNodePresentation(canonicalNode, rolePolicy),
+      presentation: nativeTopologyNodePresentation(canonicalNode),
     });
     registerDetails(
       model,
       canonicalNode.id,
-      useHaMatterRoles ? canonicalNode : node,
+      node,
       'replace',
     );
   });
@@ -635,31 +597,42 @@ function findMergedNativeTopologyRow(node, rows) {
     || (rloc16 && getCanonicalRloc16(row) === rloc16));
 }
 
-function resolveNativeTopologyDevice(model, node, rows, rolePolicy) {
-  const useHaMatterRoles = rolePolicy === HA_MATTER_ROLE_POLICY;
-  const roleRecord = useHaMatterRoles
-    ? findMergedNativeTopologyRow(node, rows)
-      ?? normalizeHaMatterRoleRecord(node, 'native-topology')
-    : node;
-  const canonicalNode = nativeTopologyNodeRecord(roleRecord, rolePolicy);
+function resolveNativeTopologyDevice(model, node, rows) {
+  const roleRecord = findMergedNativeTopologyRow(node, rows) ?? node;
+  const canonicalNode = nativeTopologyNodeRecord({
+    ...node,
+    ...roleRecord,
+    id: node.id,
+  });
   const extAddress = getCanonicalExtaddr(canonicalNode);
   const existingId = extAddress
     ? model.identityToDeviceId.get(`extAddress:${extAddress}`)
     : undefined;
-  if (existingId) return existingId;
-  if (canonicalNode.id && model.devicesById.has(canonicalNode.id)) return canonicalNode.id;
   if (!canonicalNode.id) return '';
+  const registeredId = existingId
+    || (model.devicesById.has(canonicalNode.id) ? canonicalNode.id : undefined);
+  if (registeredId) {
+    registerDevice(model, canonicalNode, {
+      id: registeredId,
+      preserveId: true,
+      sourceName: 'ha-matter-ws-network-topology',
+      nodeRecord: canonicalNode,
+      presentation: nativeTopologyNodePresentation(canonicalNode),
+    });
+    registerDetails(model, registeredId, roleRecord, 'preserve');
+    return registeredId;
+  }
   const deviceId = registerDevice(model, canonicalNode, {
     id: canonicalNode.id,
     preserveId: true,
     sourceName: 'ha-matter-ws-network-topology',
     nodeRecord: canonicalNode,
-    presentation: nativeTopologyNodePresentation(canonicalNode, rolePolicy),
+    presentation: nativeTopologyNodePresentation(canonicalNode),
   });
   registerDetails(
     model,
     deviceId,
-    useHaMatterRoles ? canonicalNode : node,
+    roleRecord,
     'preserve',
   );
   return deviceId;
@@ -668,13 +641,11 @@ function resolveNativeTopologyDevice(model, node, rows, rolePolicy) {
 export function adaptHaMatterWsMergeTopology(
   fileMap,
   extractedRows,
-  rolePolicy = undefined,
 ) {
   const baseResult = adaptHaMatterWs(
     fileMap,
     extractedRows,
     'merged-ha-matter-ws',
-    rolePolicy,
   );
   const model = createAdaptorModelFromResult(baseResult);
   const topology = fileMap.get('td-ha-matter-ws-network-topology.json')?.topology;
@@ -690,7 +661,6 @@ export function adaptHaMatterWsMergeTopology(
       model,
       node,
       extractedRows,
-      rolePolicy,
     );
     if (deviceId) nativeIds.set(toText(node.id), deviceId);
   });

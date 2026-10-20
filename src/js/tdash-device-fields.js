@@ -12,6 +12,7 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "isLeader", aliases: ["leader"], transform: "strictBoolean" },
   { path: "isBorderRouter", aliases: ["is_border_router", "br"], transform: "boolean" },
   { path: "isRouter", aliases: ["is_router"], transform: "boolean" },
+  { path: "isReed", aliases: [], transform: "strictBoolean" },
   { path: "isPrimaryBBR", aliases: [], transform: "strictBoolean" },
   { path: "leaderEvidence", aliases: [], transform: "identity" },
   { path: "primaryBBREvidence", aliases: ["primaryBbrEvidence"], transform: "identity" },
@@ -109,6 +110,15 @@ const FIELD_DEFINITIONS_BY_PATH = Object.fromEntries(
   FIELD_DEFINITIONS.map((definition) => [definition.path, definition]),
 );
 const LEGACY_METRIC_ALIAS_FIRST = new Set(["frameErrorRate", "messageErrorRate"]);
+
+export function resolveIsReed(isReed, deviceType, role, isRouter, isBorderRouter) {
+  if (typeof isReed === "boolean") return isReed;
+  const normalizedType = typeof deviceType === "string" ? deviceType.trim().toUpperCase() : "";
+  if (normalizedType !== "FTD") return false;
+  const normalizedRole = typeof role === "string" ? role.trim().toLowerCase() : "";
+  if (normalizedRole) return normalizedRole === "child";
+  return isRouter !== true && isBorderRouter !== true;
+}
 
 export function decodeShortThreadVersion(decimal) {
   return ({ 2: "1.1", 3: "1.2", 4: "1.3", 5: "1.4" })[decimal] ?? "Unknown";
@@ -372,37 +382,15 @@ export function normalizeRouterId(value) {
   return routerId >= 0 && routerId <= 62 ? routerId : null;
 }
 
-function normalizeRoleEvidence(record, source) {
-  ["isLeader", "isPrimaryBBR"].forEach((field) => {
-    if (field in record && typeof record[field] !== "boolean") delete record[field];
-  });
-  if (source === "rest" && record.isPrimaryBBR === true) {
-    record.primaryBBREvidence = "explicit-rest";
-  }
-  const routerId = normalizeRouterId(record.routerId);
-  if (routerId === null) delete record.routerId;
-  else record.routerId = routerId;
+function normalizeLeaderData(record) {
   const leaderData = isPlainObject(record.leaderData) ? record.leaderData : null;
-  const leaderRouterId = leaderData
-    ? normalizeRouterId(leaderData.leaderRouterId ?? leaderData.leader_router_id)
-    : null;
-  if (leaderData) {
-    delete leaderData.leader_router_id;
-    if (leaderRouterId === null) delete leaderData.leaderRouterId;
-    else leaderData.leaderRouterId = leaderRouterId;
-  }
-  const derivedMatch = routerId !== null && routerId === leaderRouterId;
-  if (typeof record.isLeader === "boolean") {
-    if (!(record.isLeader && derivedMatch && record.leaderEvidence === "leader-router-id-match")) {
-      record.leaderEvidence = "explicit";
-    }
-    if (derivedMatch && record.isLeader === false) {
-      record.roleEvidenceConflicts = [{ role: "isLeader", explicit: false, derived: true }];
-    }
-  } else if (derivedMatch) {
-    record.isLeader = true;
-    record.leaderEvidence = "leader-router-id-match";
-  }
+  if (!leaderData) return;
+  const leaderRouterId = normalizeRouterId(
+    leaderData.leaderRouterId ?? leaderData.leader_router_id,
+  );
+  delete leaderData.leader_router_id;
+  if (leaderRouterId === null) delete leaderData.leaderRouterId;
+  else leaderData.leaderRouterId = leaderRouterId;
 }
 
 function normalizeRoute(value) {
@@ -504,7 +492,7 @@ export function normalizeInputRecord(record, options = {}) {
   if (isPlainObject(result.mode) && !("device" in result.mode) && typeof result.mode.fullThreadDevice === "boolean") {
     result.mode.device = result.mode.fullThreadDevice ? "FTD" : "MTD";
   }
-  normalizeRoleEvidence(result, options.source);
+  normalizeLeaderData(result);
   return result;
 }
 

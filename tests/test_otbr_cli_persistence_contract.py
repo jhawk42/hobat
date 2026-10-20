@@ -206,7 +206,11 @@ def test_networkdiag_fetch_all_collector_saves_after_all_stages(monkeypatch, tmp
     events = []
     output_path = tmp_path / OTBR_CLI_NETWORKDIAG_FETCH_ALL_FILENAME
     _stub_fetch_all_stages(monkeypatch, events)
-    monkeypatch.setattr(networkdiag, "save_topology_to_json_file", lambda _data, path: events.append(("save", Path(path))))
+    monkeypatch.setattr(
+        networkdiag,
+        "save_topology_to_json_file",
+        lambda _data, path, **_kwargs: events.append(("save", Path(path))),
+    )
 
     result = networkdiag.fetch_network_diag_topology({}, {}, expand_children=True, final_output_path=output_path)
     events.append("returned")
@@ -265,6 +269,37 @@ def test_networkdiag_checkpoint_writes_canonical_border_router_field(tmp_path):
     assert saved["_merge_conflicts"] == [
         {"path": "isBorderRouter", "current": False, "incoming": True}
     ]
+
+
+def test_multicast_network_persists_reed_evidence_in_final_and_checkpoint(
+    monkeypatch, tmp_path
+):
+    record = {
+        "extaddr": "0011223344556677",
+        "role": "router",
+        "type": "child",
+        "mode": {"device": "FTD"},
+        "isReed": False,
+    }
+    monkeypatch.setattr(
+        networkdiag,
+        "fetch_network_diag_multicast",
+        lambda **_kwargs: {"0x0400": record},
+    )
+    checkpoint = tmp_path / "networkdiag.partial.json"
+    final = tmp_path / "networkdiag.json"
+
+    networkdiag.fetch_network_diag_topology_multicast_network(
+        checkpoint_filepath=str(checkpoint),
+        final_output_path=str(final),
+    )
+
+    for path in (checkpoint, final):
+        [saved] = json.loads(path.read_text(encoding="utf-8"))
+        assert saved["isReed"] is False
+        assert saved["_merge_conflicts"] == [
+            {"path": "isReed", "current": False, "incoming": True}
+        ]
 
 
 def test_networkdiag_final_and_checkpoint_persist_canonical_response_history(tmp_path):

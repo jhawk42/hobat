@@ -156,8 +156,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": true,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x2000",
@@ -312,8 +311,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x3000",
@@ -470,8 +468,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "isolated-unknown-a",
@@ -627,8 +624,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "isolated-unknown-b",
@@ -784,8 +780,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x4000",
@@ -942,8 +937,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x1001",
@@ -1099,8 +1093,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x7000",
@@ -1257,8 +1250,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x2001",
@@ -1414,8 +1406,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x3001",
@@ -1571,8 +1562,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x6000",
@@ -1729,8 +1719,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x5000",
@@ -1887,8 +1876,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x4001",
@@ -2044,8 +2032,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       }
     ],
     "edgeData": [
@@ -2329,8 +2316,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -2410,8 +2396,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -2493,8 +2478,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -2576,8 +2560,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -2659,8 +2642,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -2742,8 +2724,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -2825,8 +2806,7 @@
               "background": "#fff4cc",
               "border": "#d9a400"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -2908,8 +2888,7 @@
               "background": "#e8f5e9",
               "border": "#2e7d32"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -2991,8 +2970,7 @@
               "background": "#fff4cc",
               "border": "#d9a400"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -3074,8 +3052,7 @@
               "background": "#fff4cc",
               "border": "#d9a400"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -3157,8 +3134,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -3240,8 +3216,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -3323,8 +3298,7 @@
               "background": "#fff4cc",
               "border": "#d9a400"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ]
       ]
@@ -3717,8 +3691,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x2000",
@@ -3883,8 +3856,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x1001",
@@ -4048,8 +4020,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "cc00112233445566",
@@ -4213,8 +4184,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "dd00112233445566",
@@ -4379,8 +4349,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       }
     ],
     "edgeData": [
@@ -5220,8 +5189,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x2000",
@@ -5378,8 +5346,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x3000",
@@ -5536,8 +5503,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x1001",
@@ -5697,8 +5663,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x1002",
@@ -5854,8 +5819,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x1003",
@@ -6011,8 +5975,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       }
     ],
     "edgeData": [
@@ -7216,8 +7179,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "bb00112233445566",
@@ -7386,8 +7348,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x3000",
@@ -7552,8 +7513,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "0x1001",
@@ -7721,8 +7681,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "aa00112233445566-child-2",
@@ -7886,8 +7845,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "ee00112233445566",
@@ -8051,8 +8009,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       },
       {
         "id": "dd00112233445566",
@@ -8217,8 +8174,7 @@
         "router_child_has_rss_very_low": false,
         "router_child_has_rss_low": false,
         "router_child_has_rss_margin_low": false,
-        "router_child_has_queued_msgs": false,
-        "leaderEvidence": "explicit"
+        "router_child_has_queued_msgs": false
       }
     ],
     "edgeData": [
@@ -8374,8 +8330,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -8424,8 +8379,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -8472,8 +8426,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -8524,8 +8477,7 @@
               "background": "#fff4cc",
               "border": "#d9a400"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -8572,8 +8524,7 @@
               "background": "#fff4cc",
               "border": "#d9a400"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -8620,8 +8571,7 @@
               "background": "#fff4cc",
               "border": "#d9a400"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -8668,8 +8618,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ]
       ]
@@ -8778,8 +8727,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -8830,8 +8778,7 @@
               "background": "#fff4cc",
               "border": "#d9a400"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -8878,8 +8825,7 @@
               "background": "#fff4cc",
               "border": "#d9a400"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -8926,8 +8872,7 @@
               "background": "#fff4cc",
               "border": "#d9a400"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ],
         [
@@ -8974,8 +8919,7 @@
               "background": "#d9ecff",
               "border": "#1565c0"
             },
-            "isFtdRouter": false,
-            "leaderEvidence": "explicit"
+            "isFtdRouter": false
           }
         ]
       ]
@@ -9052,8 +8996,8 @@
         "title": "Unknown node\nRLOC16: 0x1000",
         "shape": "hexagon",
         "color": {
-          "background": "#e8f5e9",
-          "border": "#2e7d32"
+          "background": "#d9ecff",
+          "border": "#1565c0"
         },
         "font": {
           "size": 19.5,
@@ -9069,8 +9013,7 @@
         "isRouter": true,
         "isLeader": false,
         "relationshipOnly": false,
-        "id": "matter:a",
-        "leaderEvidence": "explicit"
+        "id": "matter:a"
       },
       {
         "label": "found node\n0x1001",
@@ -9093,8 +9036,7 @@
         "isRouter": false,
         "isLeader": false,
         "relationshipOnly": false,
-        "id": "matter:b",
-        "leaderEvidence": "explicit"
+        "id": "matter:b"
       },
       {
         "label": "found node\n0x1002",
@@ -9117,16 +9059,15 @@
         "isRouter": false,
         "isLeader": false,
         "relationshipOnly": false,
-        "id": "matter:c",
-        "leaderEvidence": "explicit"
+        "id": "matter:c"
       },
       {
         "label": "found node\n0x1400",
         "title": "Unknown node\nRLOC16: 0x1400",
         "shape": "hexagon",
         "color": {
-          "background": "#e8f5e9",
-          "border": "#2e7d32"
+          "background": "#d9ecff",
+          "border": "#1565c0"
         },
         "font": {
           "size": 19.5,
@@ -9142,8 +9083,7 @@
         "isRouter": true,
         "isLeader": false,
         "relationshipOnly": false,
-        "id": "matter:d",
-        "leaderEvidence": "explicit"
+        "id": "matter:d"
       },
       {
         "label": "found node\n0x3000",
@@ -9166,8 +9106,7 @@
         "isRouter": false,
         "isLeader": false,
         "relationshipOnly": true,
-        "id": "ha-matter-ws:rloc:0x3000",
-        "leaderEvidence": "explicit"
+        "id": "ha-matter-ws:rloc:0x3000"
       },
       {
         "label": "found node\n0x4000",
@@ -9190,8 +9129,7 @@
         "isRouter": false,
         "isLeader": false,
         "relationshipOnly": true,
-        "id": "ha-matter-ws:ext:dd00112233445566",
-        "leaderEvidence": "explicit"
+        "id": "ha-matter-ws:ext:dd00112233445566"
       }
     ],
     "edgeData": [
@@ -9711,7 +9649,7 @@
       ]
     }
   },
-  "haMatterWsRolePolicy": {
+  "haMatterWsRoleFacts": {
     "nodeData": [
       {
         "label": "found node\n0x1000",
@@ -9734,11 +9672,10 @@
         "size": 45,
         "isRouter": true,
         "isLeader": false,
-        "isReed": false,
         "isBorderRouter": true,
+        "isReed": false,
         "relationshipOnly": false,
-        "id": "role:border-router",
-        "leaderEvidence": "explicit"
+        "id": "role:border-router"
       },
       {
         "label": "found node\n0x1001",
@@ -9760,11 +9697,10 @@
         "size": 27,
         "isRouter": false,
         "isLeader": false,
-        "isReed": true,
         "isBorderRouter": false,
+        "isReed": true,
         "relationshipOnly": false,
-        "id": "role:reed",
-        "leaderEvidence": "explicit"
+        "id": "role:reed"
       }
     ],
     "edgeData": [],
@@ -9781,8 +9717,7 @@
             "isRouter": true,
             "isLeader": false,
             "isReed": false,
-            "matter": {},
-            "leaderEvidence": "explicit"
+            "matter": {}
           }
         ],
         [
@@ -9796,8 +9731,7 @@
             "isRouter": false,
             "isLeader": false,
             "isReed": true,
-            "matter": {},
-            "leaderEvidence": "explicit"
+            "matter": {}
           }
         ]
       ]
@@ -9815,8 +9749,7 @@
             "isRouter": true,
             "isLeader": false,
             "isReed": false,
-            "matter": {},
-            "leaderEvidence": "explicit"
+            "matter": {}
           }
         ],
         [
@@ -9830,8 +9763,7 @@
             "isRouter": false,
             "isLeader": false,
             "isReed": true,
-            "matter": {},
-            "leaderEvidence": "explicit"
+            "matter": {}
           }
         ]
       ]
@@ -9850,7 +9782,6 @@
         "$map": []
       }
     },
-    "rolePolicy": "ha-matter-ws",
     "routerChildByRloc16": {
       "$map": []
     }
@@ -9862,8 +9793,8 @@
         "title": "Unknown node\nRLOC16: 0x2000",
         "shape": "hexagon",
         "color": {
-          "background": "#e8f5e9",
-          "border": "#2e7d32"
+          "background": "#d9ecff",
+          "border": "#1565c0"
         },
         "font": {
           "size": 19.5,
@@ -9879,16 +9810,15 @@
         "isRouter": true,
         "isLeader": false,
         "relationshipOnly": false,
-        "id": "commissioned",
-        "leaderEvidence": "explicit"
+        "id": "commissioned"
       },
       {
         "label": "found node\n0x3000",
         "title": "Unknown node\nRLOC16: 0x3000",
         "shape": "hexagon",
         "color": {
-          "background": "#e8f5e9",
-          "border": "#2e7d32"
+          "background": "#d9ecff",
+          "border": "#1565c0"
         },
         "font": {
           "size": 19.5,
@@ -9904,8 +9834,7 @@
         "isRouter": true,
         "isLeader": false,
         "relationshipOnly": true,
-        "id": "relationship-only",
-        "leaderEvidence": "explicit"
+        "id": "relationship-only"
       }
     ],
     "edgeData": [

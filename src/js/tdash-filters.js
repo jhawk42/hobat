@@ -40,8 +40,7 @@ import {
   getCanonicalExtaddr,
   getCanonicalOmrIpv6Address,
 } from "./tdash-utils.js";
-import { isPlaceholderOmrAddress } from "./tdash-device-fields.js";
-import { HA_MATTER_ROLE_POLICY } from "./tdash-ha-matter-ws-roles.js";
+import { isPlaceholderOmrAddress, resolveIsReed } from "./tdash-device-fields.js";
 
 // ── Link-category normalisation ───────────────────────────────────────────────
 
@@ -149,17 +148,19 @@ export function edgeMatchesLinkFilter(edge, mode) {
 //     hasFieldRouterPct, hasFieldDetachedDisabledPct
 //   }
 
-function isReedDevice(modeDevice, role, isRouter, isBorderRouter) {
-  if (toText(modeDevice).toUpperCase() !== "FTD") return false;
-  const normalizedRole = toText(role).trim().toLowerCase();
-  if (normalizedRole) return normalizedRole === "child";
-  return isRouter !== true && isBorderRouter !== true;
+function isRowReed(row, roleProjection = getRowRoleProjection(row)) {
+  return resolveIsReed(
+    getColumnValue(row, "isReed"),
+    roleProjection.modeDevice,
+    getColumnValue(row, "role"),
+    roleProjection.isRouter,
+    roleProjection.isBorderRouter,
+  );
 }
 
 // Called after runAdaptor() in renderTopologyForDataset.
 // Scans vis-node objects and edge linkCategories.
-export function computeTopologyCapabilities(nodeData, edgeData, options = {}) {
-  const useHaMatterRoles = options.rolePolicy === HA_MATTER_ROLE_POLICY;
+export function computeTopologyCapabilities(nodeData, edgeData) {
   let hasFtdNodes = false;
   let hasMtdNodes = false;
   let hasReedNodes = false;
@@ -192,11 +193,7 @@ export function computeTopologyCapabilities(nodeData, edgeData, options = {}) {
     const md = toText(node.mode_device).toUpperCase();
     if (md === "FTD") hasFtdNodes = true;
     if (md === "MTD") hasMtdNodes = true;
-    if (
-      useHaMatterRoles
-        ? node.isReed === true
-        : isReedDevice(md, node.role, node.isRouter, node.isBorderRouter)
-    )
+    if (resolveIsReed(node.isReed, md, node.role, node.isRouter, node.isBorderRouter))
       hasReedNodes = true;
     if (node.isRouter === true) hasRouters = true;
     if (node.isBorderRouter === true) hasBorderRouters = true;
@@ -325,6 +322,7 @@ function _createTableCapabilitiesAccumulator() {
 
 function _accumulateTableCapabilitiesForRow(capabilities, row) {
   const md = toText(getColumnValue(row, "mode.device")).toUpperCase();
+  const roleProjection = getRowRoleProjection(row, md);
   if (md === "FTD") capabilities.hasFtdNodes = true;
   if (md === "MTD") capabilities.hasMtdNodes = true;
 
@@ -335,7 +333,8 @@ function _accumulateTableCapabilitiesForRow(capabilities, row) {
 
   const isBorderRouter = isExplicitTrue(getColumnValue(row, "isBorderRouter"));
   if (isBorderRouter) capabilities.hasBorderRouters = true;
-  if (isReedDevice(md, getColumnValue(row, "role"), isRouter, isBorderRouter))
+  const hasReed = isRowReed(row, roleProjection);
+  if (hasReed)
     capabilities.hasReedNodes = true;
 
   const totalChildren = toFiniteNumber(getColumnValue(row, "total_children"));
@@ -682,7 +681,7 @@ export function updateFilterOptionVisibility(capabilities, view) {
 
 // ── Node visibility predicates (topology) ─────────────────────────────────────
 
-export function isNodeVisibleByFilter(node, filterMode, projection, rolePolicy = undefined) {
+export function isNodeVisibleByFilter(node, filterMode, projection) {
   if (projection) {
     if (filterMode === "ftd-devices") return projection.deviceType === "FTD";
     if (filterMode === "mtd-devices") return projection.deviceType === "MTD";
@@ -694,31 +693,12 @@ export function isNodeVisibleByFilter(node, filterMode, projection, rolePolicy =
     if (filterMode === "routers-without-children") return projection.isRouter && !hasChildren;
     return true;
   }
-  if (rolePolicy === HA_MATTER_ROLE_POLICY) {
-    if (filterMode === "ftd-devices")
-      return toText(node.mode_device).toUpperCase() === "FTD";
-    if (filterMode === "mtd-devices")
-      return toText(node.mode_device).toUpperCase() === "MTD";
-    if (filterMode === "reed-devices") return node.isReed === true;
-    if (filterMode === "main-routers") return node.isRouter === true;
-    if (filterMode === "border-routers") return node.isBorderRouter === true;
-    if (filterMode === "routers-with-children")
-      return node.isRouter === true && node.hasChildren === true;
-    if (filterMode === "routers-without-children")
-      return node.isRouter === true && node.hasChildren !== true;
-    return true;
-  }
+  if (filterMode === "reed-devices")
+    return resolveIsReed(node.isReed, node.mode_device, node.role, node.isRouter, node.isBorderRouter);
   if (filterMode === "ftd-devices")
     return toText(node.mode_device).toUpperCase() === "FTD";
   if (filterMode === "mtd-devices")
     return toText(node.mode_device).toUpperCase() === "MTD";
-  if (filterMode === "reed-devices")
-    return isReedDevice(
-      node.mode_device,
-      node.role,
-      node.isRouter,
-      node.isBorderRouter,
-    );
   if (filterMode === "main-routers") return node.isRouter === true;
   if (filterMode === "border-routers") return node.isBorderRouter === true;
   if (filterMode === "routers-with-children")
@@ -770,28 +750,37 @@ function normalizeRowRole(value) {
   return toText(value).toLowerCase().replace(/[\s_-]+/g, "");
 }
 
-export function getRowRoleProjection(row) {
-  const modeDevice = toText(getColumnValue(row, "mode.device")).toUpperCase();
+export function getRowRoleProjection(row, modeDevice = undefined) {
+  const resolvedModeDevice = modeDevice
+    ?? toText(getColumnValue(row, "mode.device")).toUpperCase();
   const rloc16 = toText(getColumnValue(row, "rloc16")).toLowerCase();
   const roleValues = [getColumnValue(row, "role"), getColumnValue(row, "type")]
     .map(normalizeRowRole);
-  const isBorderRouter = isExplicitTrue(getColumnValue(row, "isBorderRouter"));
-  const isRouter = isBorderRouter
-    || isExplicitTrue(getColumnValue(row, "isRouter"))
-    || roleValues.includes("router")
-    || roleValues.includes("borderrouter")
-    || roleValues.includes("leader")
-    || (rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6);
+  const isBorderRouter = getColumnValue(row, "isBorderRouter") === true;
+  const role = toText(getColumnValue(row, "role")).trim().toLowerCase();
+  const explicitRouter = getColumnValue(row, "isRouter");
+  const derivedRouter = rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6;
+  const roleRouter = ["router", "leader", "border router", "border_router", "borderrouter"].includes(role);
+  const isRouter = typeof explicitRouter === "boolean"
+    ? explicitRouter
+    : role
+      ? roleRouter
+      : derivedRouter;
   const isChild = roleValues.some((value) =>
     ["child", "sleepychild", "enddevice", "sleepyenddevice", "reed"].includes(value),
   );
-  const isReedRouter = rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6;
   const hasThreadClassification = Boolean(
     rloc16 || getColumnValue(row, "isRouter") != null
     || getColumnValue(row, "isBorderRouter") != null || getColumnValue(row, "type") != null
     || getColumnValue(row, "role") != null,
   );
-  return { modeDevice, isRouter, isBorderRouter, isChild, isReedRouter, hasThreadClassification };
+  return {
+    modeDevice: resolvedModeDevice,
+    isRouter,
+    isBorderRouter,
+    isChild,
+    hasThreadClassification,
+  };
 }
 
 export function computeRowCounts(rows) {
@@ -830,29 +819,10 @@ export function computeRowCounts(rows) {
   };
 }
 
-export function isRowVisibleByNodeFilter(row, filterMode, rolePolicy = undefined) {
+export function isRowVisibleByNodeFilter(row, filterMode) {
   if (filterMode === "all") return true;
-  if (rolePolicy === HA_MATTER_ROLE_POLICY) {
-    const isRouter = getColumnValue(row, "isRouter") === true;
-    const isBorderRouter = getColumnValue(row, "isBorderRouter") === true;
-    const isReed = getColumnValue(row, "isReed") === true;
-    const totalChildren = toFiniteNumber(getColumnValue(row, "totalChildren")
-      ?? getColumnValue(row, "total_children"));
-    const childrenValue = getColumnValue(row, "children");
-    const hasChildren = (Number.isFinite(totalChildren) && totalChildren > 0)
-      || (Array.isArray(childrenValue) && childrenValue.length > 0);
-    if (filterMode === "ftd-devices")
-      return toText(getColumnValue(row, "mode.device")).toUpperCase() === "FTD";
-    if (filterMode === "mtd-devices")
-      return toText(getColumnValue(row, "mode.device")).toUpperCase() === "MTD";
-    if (filterMode === "reed-devices") return isReed;
-    if (filterMode === "main-routers") return isRouter;
-    if (filterMode === "border-routers") return isBorderRouter;
-    if (filterMode === "routers-with-children") return isRouter && hasChildren;
-    if (filterMode === "routers-without-children") return isRouter && !hasChildren;
-    return true;
-  }
-  const { modeDevice, isRouter, isReedRouter, isBorderRouter } = getRowRoleProjection(row);
+  const roleProjection = getRowRoleProjection(row);
+  const { modeDevice, isRouter, isBorderRouter } = roleProjection;
   const totalChildren = toFiniteNumber(getColumnValue(row, "total_children"));
   const childrenValue = getColumnValue(row, "children");
   const childrenCount = Array.isArray(childrenValue)
@@ -864,13 +834,7 @@ export function isRowVisibleByNodeFilter(row, filterMode, rolePolicy = undefined
  
   if (filterMode === "ftd-devices") return modeDevice === "FTD";
   if (filterMode === "mtd-devices") return modeDevice === "MTD";
-  if (filterMode === "reed-devices")
-    return isReedDevice(
-      modeDevice,
-      getColumnValue(row, "role"),
-      isReedRouter,
-      isBorderRouter,
-    );
+  if (filterMode === "reed-devices") return isRowReed(row, roleProjection);
   if (filterMode === "main-routers") return isRouter;
   if (filterMode === "border-routers") return isBorderRouter;
   if (filterMode === "routers-with-children") return isRouter && hasChildren;

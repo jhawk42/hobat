@@ -1,7 +1,6 @@
-import { getDeviceIdentityKeys, normalizeInputRecord } from "./tdash-device-fields.js";
+import { getDeviceIdentityKeys, normalizeInputRecord, resolveIsReed } from "./tdash-device-fields.js";
 import { computeTopologyCapabilities } from "./tdash-filters.js";
 import { getColumnValue, toFiniteNumber, toText } from "./tdash-utils.js";
-import { HA_MATTER_ROLE_POLICY } from "./tdash-ha-matter-ws-roles.js";
 
 const relationshipPaths = ["children", "childTable", "routerNeighbors"];
 const metricPaths = [
@@ -58,21 +57,16 @@ function deriveDiagnostics(row, metrics, deviceType, isRouter, isBorderRouter, i
   };
 }
 
-export function buildDeviceProjection(row, index = 0, options = {}) {
-  const useHaMatterRoles = options.rolePolicy === HA_MATTER_ROLE_POLICY;
+export function buildDeviceProjection(row, index = 0) {
   const deviceId = getDeviceIdentityKeys(row)[0] ?? `row:${index}`;
   const rloc16 = toText(getColumnValue(row, "rloc16")).toLowerCase();
-  const role = toText(getColumnValue(row, "role")).toLowerCase();
+  const role = toText(getColumnValue(row, "role")).trim().toLowerCase();
   const explicitRouter = getColumnValue(row, "isRouter");
-  const roleRouter = ["router", "leader", "border router"].includes(role);
+  const roleRouter = ["router", "leader", "border router", "border_router", "borderrouter"].includes(role);
   const hasRole = typeof explicitRouter === "boolean" || role.length > 0;
   const derivedRouter = rloc16.startsWith("0x") && rloc16.endsWith("00") && rloc16.length === 6;
-  const isRouter = useHaMatterRoles
-    ? explicitRouter === true
-    : typeof explicitRouter === "boolean" ? explicitRouter : hasRole ? roleRouter : derivedRouter;
-  const roleEvidence = useHaMatterRoles
-    ? typeof explicitRouter === "boolean" ? "explicit" : "none"
-    : typeof explicitRouter === "boolean" || role.length > 0
+  const isRouter = typeof explicitRouter === "boolean" ? explicitRouter : hasRole ? roleRouter : derivedRouter;
+  const roleEvidence = typeof explicitRouter === "boolean" || role.length > 0
     ? "explicit" : derivedRouter ? "rloc16-derived" : "none";
   const deviceType = toText(getColumnValue(row, "mode.device")).toUpperCase();
   const relationships = Object.fromEntries(relationshipPaths.map((path) => {
@@ -90,18 +84,20 @@ export function buildDeviceProjection(row, index = 0, options = {}) {
   }));
   const normalizedType = ["FTD", "MTD", "REED"].includes(deviceType) ? deviceType : "unknown";
   const isBorderRouter = getColumnValue(row, "isBorderRouter") === true;
-  const isReed = useHaMatterRoles
-    ? getColumnValue(row, "isReed") === true
-    : deviceType === "FTD" && (role ? role === "child" : !isRouter && !isBorderRouter);
+  const isReed = resolveIsReed(
+    getColumnValue(row, "isReed"),
+    deviceType,
+    role,
+    isRouter,
+    isBorderRouter,
+  );
   const diagnostics = deriveDiagnostics(
     row,
     metrics,
     normalizedType,
-    useHaMatterRoles ? isRouter : derivedRouter,
+    derivedRouter,
     isBorderRouter,
-    useHaMatterRoles
-      ? isReed
-      : deviceType === "FTD" && (role ? role === "child" : !derivedRouter && !isBorderRouter),
+    isReed,
     relationships,
   );
   return {
@@ -111,9 +107,9 @@ export function buildDeviceProjection(row, index = 0, options = {}) {
     omrIpv6Address: toText(getColumnValue(row, "omrIpv6Address")),
     deviceType: normalizedType,
     isRouter,
-    isLeader: useHaMatterRoles
-      ? getColumnValue(row, "isLeader") === true
-      : getColumnValue(row, "isLeader") === true || role === "leader",
+    isLeader: typeof getColumnValue(row, "isLeader") === "boolean"
+      ? getColumnValue(row, "isLeader")
+      : role === "leader",
     isBorderRouter,
     isReed,
     roleEvidence,
@@ -123,53 +119,35 @@ export function buildDeviceProjection(row, index = 0, options = {}) {
   };
 }
 
-export function buildDeviceProjections(rows, options = {}) {
+export function buildDeviceProjections(rows) {
   const projections = new Map();
   rows.forEach((row, index) => {
-    const projection = buildDeviceProjection(row, index, options);
+    const projection = buildDeviceProjection(row, index);
     projections.set(projections.has(projection.deviceId) ? `${projection.deviceId}#${index}` : projection.deviceId, projection);
   });
   return projections;
 }
 
-export function projectAdaptorNode(projection, node, rolePolicy = undefined) {
-  const useHaMatterRoles = rolePolicy === HA_MATTER_ROLE_POLICY;
-  if (useHaMatterRoles) {
-    const isRouter = node.isRouter === true;
-    const isBorderRouter = node.isBorderRouter === true;
-    const isLeader = node.isLeader === true;
-    const isReed = node.isReed === true;
-    const { edgeCategories, ...diagnostics } = computeTopologyCapabilities(
-      [node],
-      [],
-      { rolePolicy },
-    );
-    return {
-      ...projection,
-      isRouter,
-      isBorderRouter,
-      isLeader,
-      isReed,
-      relationships: {
-        ...projection.relationships,
-        children: node.hasChildren === true ? 1 : 0,
-        totalChildren: 0,
-      },
-      roleEvidence: typeof node.isRouter === "boolean" ? "explicit" : "none",
-      diagnostics,
-    };
-  }
+export function projectAdaptorNode(projection, node) {
   const deviceType = toText(node.mode_device).toUpperCase();
-  const isRouter = node.isRouter === true;
-  const isBorderRouter = node.isBorderRouter === true;
-  const role = toText(node.role).trim().toLowerCase();
-  const { edgeCategories, ...diagnostics } = computeTopologyCapabilities([node], []);
+  const isRouter = projection.isRouter;
+  const isBorderRouter = projection.isBorderRouter;
+  const isLeader = projection.isLeader;
+  const isReed = projection.isReed;
+  const { edgeCategories, ...diagnostics } = computeTopologyCapabilities([{
+    ...node,
+    isRouter,
+    isBorderRouter,
+    isLeader,
+    isReed,
+  }], []);
   return {
     ...projection,
     deviceType: ["FTD", "MTD"].includes(deviceType) ? deviceType : "unknown",
     isRouter,
     isBorderRouter,
-    isReed: deviceType === "FTD" && (role ? role === "child" : !isRouter && !isBorderRouter),
+    isLeader,
+    isReed,
     relationships: { ...projection.relationships, children: node.hasChildren === true ? 1 : 0,
       totalChildren: 0 },
     roleEvidence: projection.isRouter === isRouter ? projection.roleEvidence : "adaptor",
