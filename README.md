@@ -221,6 +221,12 @@ text, must be 1-128 characters, and cannot contain control characters. The
 server atomically inserts or updates the record. Concurrent writers in separate
 processes remain last-write-wins.
 
+With **Enhance** enabled, the static label takes precedence over collected
+labels in tables, topology node labels and hover popups, and the **Keys**
+section of Device details, including all Home Assistant Matter datasets.
+Records without a matching static label retain their collected label or
+source-specific display fallback.
+
 The same operation is available through the CLI:
 
 ```bash

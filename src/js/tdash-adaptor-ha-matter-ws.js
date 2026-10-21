@@ -77,6 +77,7 @@ function registerHaMatterRow(row, index, {
     ...row,
     ...matter,
     ...thread,
+    ...(row.deviceLabel != null ? { deviceLabel: row.deviceLabel } : {}),
     matter,
   };
   ROLE_FACT_FIELDS.forEach((field) => {
@@ -409,7 +410,7 @@ function nativeTopologyNodeRecord(node) {
     id: deviceId,
     extAddress: toText(node.extAddress || node.ext_address).toLowerCase(),
     rloc16: nativeRloc16(node.rloc16),
-    deviceLabel: node.networkName || node.network_name || node.hostName || node.host_name || node.vendorName || node.vendor_name || deviceId,
+    deviceLabel: node.deviceLabel || node.device_label || node.networkName || node.network_name || node.hostName || node.host_name || node.vendorName || node.vendor_name || deviceId,
     nodeId: node.nodeId || node.node_id,
     isChild,
     isBorderRouter,
@@ -422,6 +423,7 @@ function nativeTopologyNodeRecord(node) {
 function nativeTopologyNodePresentation(node) {
   return {
     label: buildLabel(node),
+    title: buildNodeHoverLabel(node),
     shape: node.isBorderRouter ? NODE_SHAPES.borderRouter : (node.isChild ? NODE_SHAPES.child : (node.isRouter ? NODE_SHAPES.router : NODE_SHAPES.unknown)),
     color: node.isBorderRouter ? NODE_COLORS.borderRouter : (node.isChild ? NODE_COLORS.child : (node.isRouter ? NODE_COLORS.router : NODE_COLORS.unknown)),
     ...buildRoleNodeEmphasis({
@@ -452,7 +454,9 @@ export function adaptHaMatterWsNativeThread(
       extAddress,
       rloc16,
       networkName: row.networkName,
-      deviceLabel: row.networkName
+      deviceLabel: row.deviceLabel
+        || row.device_label
+        || row.networkName
         || row.hostname
         || row.vendorName
         || row.vendorModel
@@ -470,6 +474,7 @@ export function adaptHaMatterWsNativeThread(
       nodeRecord: canonicalRow,
       presentation: {
         label: buildLabel(canonicalRow),
+        title: buildNodeHoverLabel(canonicalRow),
         shape: isBorderRouter
           ? NODE_SHAPES.borderRouter
           : isRouter ? NODE_SHAPES.router : NODE_SHAPES.unknown,

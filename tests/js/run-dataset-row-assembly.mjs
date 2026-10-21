@@ -14,6 +14,9 @@ import {
   buildDatasetRows,
   getDatasetAuxiliaryFiles,
   normalizeDatasetFilePayload,
+  enrichRawFiles,
+  enrichRows,
+  setStaticDeviceLabel,
 } from "../../src/js/tdash-dataset.js";
 import { normalizeRows } from "../../src/js/tdash-merge.js";
 import { normalizeDatasetPayload } from "../../src/js/tdash-utils.js";
@@ -959,6 +962,41 @@ const nonHaLookingRow = buildDatasetRows(entry({
 }), [[{ role: "Router", isReed: true }]]);
 assert.equal(Object.hasOwn(nonHaLookingRow.rows[0], "isRouter"), false);
 assert.equal(nonHaLookingRow.rows[0].isReed, true);
+
+for (const dataset of DATASET_REGISTRY.filter((item) => item.source === "ha-matter-ws")) {
+  const rawFiles = dataset.files.map((filename) =>
+    JSON.parse(fs.readFileSync(`data/${filename}`, "utf8")));
+  const assembled = buildDatasetRows(dataset, rawFiles);
+  const original = JSON.stringify({ rawFiles, assembled });
+  const labeledRows = assembled.rows.filter((row) => /^[0-9a-f]{16}$/i.test(row.extAddress));
+  assert.ok(labeledRows.length > 0, dataset.value);
+  labeledRows.forEach((row) => {
+    setStaticDeviceLabel(row.extAddress, `Static ${row.extAddress}`);
+  });
+  const enhanced = {
+    entry: dataset,
+    rawFiles: enrichRawFiles(rawFiles),
+    rows: enrichRows(assembled.rows),
+    adaptorRows: enrichRows(assembled.adaptorRows),
+  };
+  const adapted = runAdaptor(enhanced);
+  labeledRows.forEach((row) => {
+    const expected = `Static ${row.extAddress}`;
+    assert.equal(enhanced.rows.find((item) => item.extAddress === row.extAddress).deviceLabel, expected);
+    const matching = [...adapted.nodeMap].filter(([, record]) =>
+      record.extAddress === row.extAddress);
+    assert.ok(matching.length > 0, `${dataset.value}: ${row.extAddress}`);
+    matching.forEach(([id, record]) => {
+      const node = adapted.nodeData.find((item) => item.id === id);
+      assert.equal(record.deviceLabel, expected, `${dataset.value}: ${id}`);
+      assert.equal(node.label.split("\n")[0], expected, `${dataset.value}: ${id}`);
+      assert.equal(node.title.split("\n")[0], expected, `${dataset.value}: ${id}`);
+      assert.equal(adapted.rawByIdForDetails.get(id).deviceLabel, expected, `${dataset.value}: ${id}`);
+    });
+  });
+  assert.equal(JSON.stringify({ rawFiles, assembled }), original);
+}
+
 assert.deepEqual(
   DATASET_REGISTRY
     .filter((entry) => [
