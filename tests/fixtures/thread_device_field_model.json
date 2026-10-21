@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "modelVersion": "1.3.0",
+  "modelVersion": "1.4.0",
   "snapshotFiles": [
     "td-otbr-cli-networkdiag-fetch-all.json",
     "td-otbr-cli-meshdiag-topology.json",
@@ -86,11 +86,17 @@
     {"path":"links3","category":"extension","jsonTypes":["array"],"sources":["cli"],"aliases":["3_links"],"transform":"identity","mergePolicy":"array"},
     {"path":"_source_files","category":"metadata","jsonTypes":["array"],"sources":["rest","cli","mdns","eve"],"aliases":[],"transform":"identity","mergePolicy":"provenance"},
     {"path":"_merge_conflicts","category":"metadata","jsonTypes":["array"],"sources":["rest","cli","mdns","eve"],"aliases":[],"transform":"identity","mergePolicy":"conflict"},
+    {"path":"recordKey","category":"metadata","jsonTypes":["string"],"sources":["mdns"],"aliases":["record_key"],"transform":"identity","mergePolicy":"mdns"},
+    {"path":"capturedAtEpoch","category":"metadata","jsonTypes":["number","null"],"sources":["mdns"],"aliases":["captured_at_epoch"],"transform":"identity","mergePolicy":"mdns"},
+    {"path":"capturedAtIso","category":"metadata","jsonTypes":["string","null"],"sources":["mdns"],"aliases":["captured_at_iso"],"transform":"identity","mergePolicy":"mdns"},
+    {"path":"serviceInfo","category":"extension","jsonTypes":["object"],"sources":["mdns"],"aliases":["service_info"],"transform":"identity","mergePolicy":"mdns"},
+    {"path":"serverKey","category":"metadata","jsonTypes":["string"],"sources":["mdns"],"aliases":["server_key"],"transform":"identity","mergePolicy":"mdns"},
     {"path":"error","category":"error","jsonTypes":["string","object"],"sources":["rest","cli","mdns","eve"],"aliases":["_error"],"transform":"identity","mergePolicy":"scalar"}
   ],
   "ignoredTransportPaths": ["data", "attributes", "relationships", "meta", "links", "included"],
   "sourceOwnedExtensionPaths": ["tlvResponseHistory", "isReed"],
   "normalizationCases": [
+    {"id":"mdns-canonical-envelope-aliases","source":"mdns","input":{"record_key":"_meshcop._udp.local.|one","captured_at_epoch":0,"captured_at_iso":"now","service_info":{"server":"one.local."},"server_key":"one"},"expected":{"recordKey":"_meshcop._udp.local.|one","capturedAtEpoch":0,"capturedAtIso":"now","serviceInfo":{"server":"one.local."},"serverKey":"one"}},
     {"id":"identity-aliases","input":{"extaddr":" AA11BB22CC33DD44 ","omr_ipv6_addr":" FD00::1 ","RLOC16":"0XABCD","eui64":" 0011223344556677 "},"expected":{"extAddress":"aa11bb22cc33dd44","omrIpv6Address":"fd00::1","rloc16":"0xabcd","eui":"0011223344556677"},"identityKeys":{"by-identity":["extAddress:aa11bb22cc33dd44","omrIpv6Address:fd00::1","rloc16:0xabcd"],"by-rloc16":["rloc16:0xabcd"]}},
     {"id":"unspecified-omr-is-not-identity","input":{"extAddress":"AA11BB22CC33DD44","omrIpv6Address":"::"},"expected":{"extAddress":"aa11bb22cc33dd44","omrIpv6Address":"::"},"identityKeys":{"by-identity":["extAddress:aa11bb22cc33dd44"],"by-rloc16":[]}},
     {"id":"expanded-unspecified-omr-is-not-identity","input":{"omr_ipv6_addr":"0:0:0:0:0:0:0:0"},"expected":{"omrIpv6Address":"0:0:0:0:0:0:0:0"},"identityKeys":{"by-identity":[],"by-rloc16":[]}},

@@ -298,7 +298,7 @@ def test_build_merge_output_loads_each_passthrough_source_once(
     assert loaded_paths == [tmp_path / "first.json", tmp_path / "second.json"]
 
 
-def test_merge_output_records_are_stable_under_reordered_includes(tmp_path: Path) -> None:
+def test_merge_output_records_preserve_equal_priority_include_order(tmp_path: Path) -> None:
     _write_json(tmp_path / "first.json", [{"rloc16": "0x1234", "name": "a"}])
     _write_json(tmp_path / "second.json", [{"rloc16": "0x5678", "name": "b"}])
 
@@ -311,9 +311,11 @@ def test_merge_output_records_are_stable_under_reordered_includes(tmp_path: Path
         inputs = resolve_merge_command_inputs(args, tmp_path)
         return build_merge_output(inputs, load_merge_supporting_data(inputs))
 
-    assert build(["first.json", "second.json"]).records == build(
-        ["second.json", "first.json"]
-    ).records
+    forward = build(["first.json", "second.json"]).records
+    reverse = build(["second.json", "first.json"]).records
+    assert [record["rloc16"] for record in forward] == ["0x1234", "0x5678"]
+    assert [record["rloc16"] for record in reverse] == ["0x5678", "0x1234"]
+    assert forward == list(reversed(reverse))
 
 
 def test_malformed_support_payload_uses_documented_fallback(tmp_path: Path) -> None:

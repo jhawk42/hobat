@@ -7,6 +7,8 @@ import pytest
 from merge_dataset import build_merged_records
 from merge_contract_support import (
     assert_case_result,
+    canonicalize_result,
+    first_difference,
     load_contract,
     run_python_case,
     validate_contract,
@@ -19,6 +21,22 @@ CASES = CONTRACT["cases"]
 
 def test_device_merge_contract_schema() -> None:
     assert validate_contract(CONTRACT) == []
+
+
+def test_contract_comparator_preserves_order_metadata_and_recursive_types(tmp_path: Path) -> None:
+    assert canonicalize_result([{"rloc16": "z"}, {"rloc16": "a"}]) == [
+        {"rloc16": "z"}, {"rloc16": "a"}
+    ]
+    assert canonicalize_result({"_merge_identity_keys": ["b", "a"]}) == {
+        "_merge_identity_keys": ["b", "a"]
+    }
+    assert first_difference({"a": [True]}, {"a": [1]}) is not None
+    assert first_difference({"a": 1, "b": 2}, {"b": 2, "a": 1}) is None
+    contract = load_contract()
+    contract["cases"][0]["comparison"] = {"unorderedArrays": ["$[*]._merge_identity_keys"]}
+    assert any("must remain ordered" in error for error in validate_contract(contract))
+    with pytest.raises(ValueError, match="Unsupported Python contract strategy"):
+        run_python_case({"operation": "merge", "inputs": {"strategy": "by-rloc16"}}, tmp_path)
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["id"])

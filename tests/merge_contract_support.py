@@ -37,11 +37,8 @@ AREAS = {
 }
 OPERATIONS = {"normalize", "merge", "network-identity", "collector-reconciliation"}
 ENFORCEMENT_STATES = {"baseline", "contract"}
-KNOWN_STRATEGIES = {"by-identity", "by-rloc16"}
+KNOWN_STRATEGIES = {"by-identity"}
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-UNORDERED_PATH_PATTERN = re.compile(
-    r"^\$\[\*\](?:\.[A-Za-z_][A-Za-z0-9_]*)+(?:\[\*\])?$"
-)
 
 
 def load_contract(path: Path = CONTRACT_PATH) -> dict[str, Any]:
@@ -130,11 +127,8 @@ def validate_contract(contract: dict[str, Any]) -> list[str]:
 
         comparison = case.get("comparison", {})
         unordered_paths = comparison.get("unorderedArrays", []) if isinstance(comparison, dict) else []
-        if not isinstance(unordered_paths, list) or any(
-            not isinstance(path, str) or not UNORDERED_PATH_PATTERN.fullmatch(path)
-            for path in unordered_paths
-        ):
-            errors.append(f"{case_id}.comparison.unorderedArrays contains an invalid path")
+        if unordered_paths:
+            errors.append(f"{case_id}: shared contract arrays must remain ordered")
 
     return errors
 
@@ -146,42 +140,13 @@ def project_result(value: Any) -> Any:
         return {
             key: project_result(child)
             for key, child in value.items()
-            if key not in {"_row_key", "_merge_identity_keys"}
+            if key != "_row_key"
         }
     return value
 
 
-def _identity_sort_key(record: dict[str, Any]) -> tuple[str, str, str, str]:
-    extaddr = str(record.get("extAddress") or record.get("extaddr") or "").lower()
-    omr = str(
-        record.get("omrIpv6Address")
-        or record.get("omrIpv6Addr")
-        or record.get("omr_ipv6_addr")
-        or ""
-    ).lower()
-    rloc16 = str(record.get("rloc16") or "").lower()
-    serialized = json.dumps(record, sort_keys=True, separators=(",", ":"))
-    return extaddr, omr, rloc16, serialized
-
-
-def canonicalize_result(value: Any, unordered_paths: list[str] | None = None) -> Any:
-    projected = project_result(deepcopy(value))
-    paths = set(unordered_paths or [])
-
-    def visit(child: Any, path: str) -> Any:
-        if isinstance(child, dict):
-            return {key: visit(item, f"{path}.{key}") for key, item in child.items()}
-        if isinstance(child, list):
-            result = [visit(item, f"{path}[*]") for item in child]
-            if path in paths:
-                return sorted(result, key=lambda item: json.dumps(item, sort_keys=True))
-            return result
-        return child
-
-    canonical = visit(projected, "$[*]" if isinstance(projected, list) else "$")
-    if isinstance(canonical, list) and all(isinstance(item, dict) for item in canonical):
-        canonical.sort(key=_identity_sort_key)
-    return canonical
+def canonicalize_result(value: Any) -> Any:
+    return project_result(deepcopy(value))
 
 
 def first_difference(expected: Any, actual: Any, path: str = "$") -> str | None:
@@ -214,6 +179,8 @@ def first_difference(expected: Any, actual: Any, path: str = "$") -> str | None:
 
 def run_python_case(case: dict[str, Any], work_dir: Path) -> Any:
     inputs = case["inputs"]
+    if case["operation"] == "merge" and inputs.get("strategy") != "by-identity":
+        raise ValueError(f"Unsupported Python contract strategy: {inputs.get('strategy')}")
     if case["operation"] == "network-identity":
         try:
             return {
@@ -295,8 +262,7 @@ def deferred_case_summary(contract: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def assert_case_result(case: dict[str, Any], runtime: str, actual: Any) -> None:
-    paths = case.get("comparison", {}).get("unorderedArrays", [])
-    expected = canonicalize_result(expected_for_runtime(case, runtime), paths)
-    canonical_actual = canonicalize_result(actual, paths)
+    expected = canonicalize_result(expected_for_runtime(case, runtime))
+    canonical_actual = canonicalize_result(actual)
     difference = first_difference(expected, canonical_actual)
     assert difference is None, f"{case['id']} [{runtime}] {difference}"

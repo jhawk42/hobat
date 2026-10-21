@@ -123,7 +123,10 @@ from merge_policy_identity import (
     find_candidate_node_ids,
     add_identifier,
     filter_candidate_ids_for_extaddr_consistency,
+    identities_compatible,
 )
+from td_device_fields import get_device_identity_keys
+from td_record_merge import merge_conflicts
 
 def _field_source_for_filename(filename: str) -> str | None:
     if filename.startswith("td-otbr-cli-"):
@@ -357,6 +360,7 @@ MERGE_FIELD_HANDLERS = {
     "children": _merge_relationship_field,
     "childTable": _merge_relationship_field,
     "childIpv6Addresses": _merge_address_field,
+    "ipv6Addresses": _merge_address_field,
     "routerNeighbors": _merge_neighbor_field,
 }
 
@@ -395,6 +399,11 @@ def deep_merge(
         )
 
     if not path_prefix:
+        if "_merge_conflicts" in base or "_merge_conflicts" in incoming:
+            base["_merge_conflicts"] = merge_conflicts(
+                base.get("_merge_conflicts"), incoming.get("_merge_conflicts"),
+                context.conflict_limit,
+            )
         incoming_has_tlv_summaries = any(
             field in incoming for field in TLV_SUMMARY_FIELDS
         )
@@ -441,14 +450,9 @@ def deep_merge(
         if not path_prefix and key == TLV_SUMMARY_PRIORITY_FIELD:
             continue
         if key == "_merge_conflicts":
-            existing_conflicts = conflict_target.setdefault(
-                "_merge_conflicts", [])
-            if isinstance(existing_conflicts, list) and isinstance(value, list):
-                for conflict in value:
-                    if len(existing_conflicts) >= 20:
-                        break
-                    if conflict not in existing_conflicts:
-                        existing_conflicts.append(deepcopy(conflict))
+            continue
+        if key == "_merge_identity_keys":
+            base[key] = merge_unique_strings(base.get(key, []), value)
             continue
 
         if key == "_source_files":
@@ -511,26 +515,11 @@ def nested_get(record: dict[str, Any], dotted_key: str) -> Any:
 
 
 def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
-    identities: dict[str, str] = {}
-
-    extaddr = get_canonical_extaddr(record)
-    if extaddr:
-        identities["extAddress"] = extaddr
-
-    omr = get_canonical_omr(record)
-    if omr and not is_placeholder_omr_address(omr):
-        identities["omrIpv6Address"] = omr
-
-    rloc16 = normalize_identifier_text(
-        record.get(MERGE_IDENTITY_FIELDS["rloc16"]))
-    if rloc16:
-        identities["rloc16"] = rloc16
-
-    matter_id = get_matter_fabric_node_identity(record)
-    if matter_id:
-        identities["matter_fabric_node"] = matter_id
-
-    return identities
+    return {
+        ("matter_fabric_node" if field == "matterFabricNode" else field): value
+        for key in get_device_identity_keys(record)
+        for field, value in [key.split(":", 1)]
+    }
 
 
 
@@ -538,10 +527,10 @@ def collect_merge_identity_values(record: dict[str, Any]) -> dict[str, str]:
 def index_node_identity_values(
     node: dict[str, Any],
     node_id: int,
-    by_rloc16: dict[str, int],
-    by_extaddr: dict[str, int],
-    by_omr: dict[str, int],
-    by_matter_fabric_node: dict[str, int],
+    by_rloc16: dict[str, set[int]],
+    by_extaddr: dict[str, set[int]],
+    by_omr: dict[str, set[int]],
+    by_matter_fabric_node: dict[str, set[int]],
 ) -> dict[str, str]:
     identity_values = collect_merge_identity_values(node)
 
@@ -622,10 +611,10 @@ def merge_nodes(
     target_id: int,
     source_id: int,
     nodes: dict[int, dict[str, Any]],
-    by_rloc16: dict[str, int],
-    by_extaddr: dict[str, int],
-    by_omr: dict[str, int],
-    by_matter_fabric_node: dict[str, int],
+    by_rloc16: dict[str, set[int]],
+    by_extaddr: dict[str, set[int]],
+    by_omr: dict[str, set[int]],
+    by_matter_fabric_node: dict[str, set[int]],
 ) -> int:
     if target_id == source_id:
         return target_id
@@ -651,8 +640,9 @@ def merge_nodes(
 
     for lookup in (by_rloc16, by_extaddr, by_omr, by_matter_fabric_node):
         for key, value in list(lookup.items()):
-            if value == source_id:
-                lookup[key] = target_id
+            if source_id in value:
+                value.discard(source_id)
+                value.add(target_id)
 
     del nodes[source_id]
     return target_id
@@ -666,6 +656,7 @@ class _MergeRecordOutcome:
     collision_rloc16: str | None = None
     collision_ext_address: str | None = None
     collision_omr_address: str | None = None
+    collision_outcome: str | None = None
 
 
 def _merge_record_into_nodes(
@@ -675,10 +666,10 @@ def _merge_record_into_nodes(
     matter_identity_mode: str,
     device_label_map: dict[str, str],
     nodes: dict[int, dict[str, Any]],
-    by_rloc16: dict[str, int],
-    by_extaddr: dict[str, int],
-    by_omr: dict[str, int],
-    by_matter_fabric_node: dict[str, int],
+    by_rloc16: dict[str, set[int]],
+    by_extaddr: dict[str, set[int]],
+    by_omr: dict[str, set[int]],
+    by_matter_fabric_node: dict[str, set[int]],
     new_node_id: int,
 ) -> _MergeRecordOutcome:
     identity_values = collect_merge_identity_values(record)
@@ -686,30 +677,38 @@ def _merge_record_into_nodes(
     extaddr = identity_values.get("extAddress")
     omr = identity_values.get("omrIpv6Address")
 
+    record["_merge_identity_keys"] = get_device_identity_keys(record)
     candidate_ids = find_candidate_node_ids(
         identity_values,
-        by_rloc16,
+        {},
         by_extaddr,
         by_omr,
         by_matter_fabric_node,
     )
-    if isinstance(extaddr, str) and not is_placeholder_extaddr(extaddr):
-        candidate_ids = filter_candidate_ids_for_extaddr_consistency(
-            candidate_ids,
-            extaddr,
-            nodes,
+    candidate_ids = {
+        node_id for node_id in candidate_ids
+        if identities_compatible(nodes[node_id], record, matter_identity_mode)
+    }
+    if not candidate_ids and rloc16:
+        candidate_ids = {
+            node_id for node_id in by_rloc16.get(rloc16, set())
+            if identities_compatible(nodes[node_id], record, matter_identity_mode)
+        }
+    collision_candidate_ids = tuple(sorted(candidate_ids)) if len(candidate_ids) > 1 else ()
+    ambiguous = any(
+        not identities_compatible(nodes[left], nodes[right], matter_identity_mode)
+        for left in candidate_ids for right in candidate_ids if left < right
+    )
+    if ambiguous:
+        logging.warning("Merge identity ambiguity: retaining incoming row separately; candidates=%s", collision_candidate_ids)
+        append_merge_conflict(
+            record, "_merge_identity_ambiguity",
+            [nodes[node_id]["_merge_identity_keys"] for node_id in sorted(candidate_ids)],
+            record["_merge_identity_keys"],
         )
-    if matter_identity_mode == MATTER_IDENTITY_MERGE_MODES["composite_guard"]:
-        candidate_ids = filter_candidate_ids_for_matter_identity_consistency(
-            candidate_ids,
-            record,
-            nodes,
-        )
+        candidate_ids = set()
 
     created = not candidate_ids
-    collision_candidate_ids = (
-        tuple(sorted(candidate_ids)) if len(candidate_ids) > 1 else ()
-    )
     if created:
         node_id = new_node_id
         nodes[node_id] = deepcopy(record)
@@ -750,6 +749,13 @@ def _merge_record_into_nodes(
             existing_sources.append(filename)
 
     active = nodes[node_id]
+    for key in record["_merge_identity_keys"]:
+        field, value = key.split(":", 1)
+        lookup = {
+            "extAddress": by_extaddr, "omrIpv6Address": by_omr,
+            "matterFabricNode": by_matter_fabric_node, "rloc16": by_rloc16,
+        }[field]
+        add_identifier(lookup, value, node_id)
     active_identity_values = index_node_identity_values(
         active,
         node_id,
@@ -771,6 +777,7 @@ def _merge_record_into_nodes(
         collision_rloc16=rloc16 if collision_candidate_ids else None,
         collision_ext_address=extaddr if collision_candidate_ids else None,
         collision_omr_address=omr if collision_candidate_ids else None,
+        collision_outcome="retained-ambiguous" if ambiguous else "coalesced" if collision_candidate_ids else None,
     )
 
 
@@ -784,10 +791,10 @@ def build_merged_records(
     input_data: Mapping[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     nodes: dict[int, dict[str, Any]] = {}
-    by_rloc16: dict[str, int] = {}
-    by_extaddr: dict[str, int] = {}
-    by_omr: dict[str, int] = {}
-    by_matter_fabric_node: dict[str, int] = {}
+    by_rloc16: dict[str, set[int]] = {}
+    by_extaddr: dict[str, set[int]] = {}
+    by_omr: dict[str, set[int]] = {}
+    by_matter_fabric_node: dict[str, set[int]] = {}
     next_id = 1
 
     records_read_by_source: dict[str, int] = {}
@@ -838,6 +845,9 @@ def build_merged_records(
                 raw_record, omr_prefix, source=_field_source_for_filename(filename)
             )
             record.pop(TLV_SUMMARY_PRIORITY_FIELD, None)
+            record.pop("_merge_identity_keys", None)
+            if "_merge_conflicts" in record:
+                record["_merge_conflicts"] = merge_conflicts(record["_merge_conflicts"], [])
 
             record_extaddr = record.get("extAddress")
             if isinstance(record_extaddr, str):
@@ -868,37 +878,24 @@ def build_merged_records(
                 new_nodes_by_source[filename] += 1
             else:
                 matched_existing_by_source[filename] += 1
-                if outcome.collision_candidate_ids:
-                    identity_collision_count += 1
-                    if len(identity_collision_examples) < 10:
-                        identity_collision_examples.append(
-                            {
-                                "source_file": filename,
-                                "candidate_node_ids": list(outcome.collision_candidate_ids),
-                                "rloc16": outcome.collision_rloc16,
-                                "extAddress": outcome.collision_ext_address,
-                                "omrIpv6Address": outcome.collision_omr_address,
-                            }
-                        )
+            if outcome.collision_candidate_ids:
+                identity_collision_count += 1
+                if len(identity_collision_examples) < 10:
+                    identity_collision_examples.append(
+                        {
+                            "source_file": filename,
+                            "candidate_node_ids": list(outcome.collision_candidate_ids),
+                            "rloc16": outcome.collision_rloc16,
+                            "extAddress": outcome.collision_ext_address,
+                            "omrIpv6Address": outcome.collision_omr_address,
+                            "outcome": outcome.collision_outcome,
+                        }
+                    )
 
     merged_records: list[dict[str, Any]] = []
-    for _, node in sorted(
-        nodes.items(), key=lambda x: (x[1].get("rloc16") or "", x[0])
-    ):
+    for node in nodes.values():
         node.pop(TLV_SUMMARY_PRIORITY_FIELD, None)
         source_files = node.get("_source_files")
-
-        # Build _merge_identity_keys (mirrors JS mergeRowsByStrategy output).
-        identity_key_parts: list[str] = []
-        iv = collect_merge_identity_values(node)
-        if iv.get("extAddress"):
-            identity_key_parts.append(f"extAddress:{iv['extAddress']}")
-        if iv.get("rloc16"):
-            identity_key_parts.append(f"rloc16:{iv['rloc16']}")
-        if iv.get("omrIpv6Address"):
-            identity_key_parts.append(f"omrIpv6Address:{iv['omrIpv6Address']}")
-        if identity_key_parts:
-            node["_merge_identity_keys"] = identity_key_parts
 
         ordered: dict[str, Any] = {}
 

@@ -6,11 +6,30 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import pytest
 from copy import deepcopy
 from pathlib import Path
 
 # Add src directory to path
 from merge_dataset import build_merged_records, deep_merge
+from merge_policy_relationship import compare_sequences, is_sequence_newer
+
+
+@pytest.mark.parametrize(("base", "incoming"), [(100, 228), (228, 100)])
+def test_half_range_is_not_newer_in_either_direction(base: int, incoming: int) -> None:
+    assert not is_sequence_newer(base, incoming)
+    assert not is_sequence_newer(incoming, base)
+    assert compare_sequences(base, incoming) == "ambiguous"
+    merged = deep_merge(
+        {"route": {"idSequence": base, "routeData": [{"routeId": 0, "routeCost": 0}]}},
+        {"route": {"idSequence": incoming, "routeData": [
+            {"routeId": 0, "linkQualityIn": 3}, {"routeId": 1},
+        ]}},
+    )
+    assert merged["route"] == {
+        "idSequence": base,
+        "routeData": [{"routeId": 0, "routeCost": 0, "linkQualityIn": 3}],
+    }
 
 
 def _load_first_route_row() -> dict:

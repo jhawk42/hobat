@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from copy import deepcopy
 from typing import Any
 
-from td_device_fields import normalize_identifier_text
+from td_device_fields import normalize_identifier_text, is_placeholder_ext_address
 from td_device_merge import MergeContext
-from td_record_merge import merge_unique_strings, value_is_empty
+from td_record_merge import (
+    merge_unique_strings, value_is_empty, values_equivalent,
+    append_merge_conflict, merge_lists,
+)
 
 
 def is_sequence_newer(seq_a: int, seq_b: int, bits: int = 8) -> bool:
@@ -23,21 +27,18 @@ def is_sequence_newer(seq_a: int, seq_b: int, bits: int = 8) -> bool:
         250 > 5:   False
         128 > 0:   False (ambiguous, exactly half-max)
     """
-    if seq_a == seq_b:
-        return False
-    
     max_val = 2 ** bits
     half_max = max_val // 2
     
     diff = (seq_a - seq_b) % max_val
-    return diff < half_max
+    return 0 < diff < half_max
 
 
 def compare_sequences(seq_a: int | None, seq_b: int | None) -> str:
     """
     Compare two sequence numbers, handling None values.
     
-    Returns: "a_newer", "b_newer", "equal", or "unknown"
+    Returns: "a_newer", "b_newer", "equal", "unknown", or "ambiguous".
     """
     if seq_a is None and seq_b is None:
         return "unknown"
@@ -46,13 +47,14 @@ def compare_sequences(seq_a: int | None, seq_b: int | None) -> str:
     if seq_b is None:
         return "a_newer"
     
-    if seq_a == seq_b:
+    if seq_a % 256 == seq_b % 256:
         return "equal"
     
     if is_sequence_newer(seq_a, seq_b):
         return "a_newer"
-    else:
+    if is_sequence_newer(seq_b, seq_a):
         return "b_newer"
+    return "ambiguous"
 
 
 def get_partition_id(record: dict[str, Any]) -> str:
@@ -72,6 +74,11 @@ def get_partition_id(record: dict[str, Any]) -> str:
             elif isinstance(partition_id, str):
                 return partition_id.strip().lower()
     
+    partition_id = record.get("partitionId", record.get("partition_id"))
+    if isinstance(partition_id, int):
+        return f"0x{partition_id:08x}"
+    if isinstance(partition_id, str) and partition_id.strip():
+        return partition_id.strip().lower()
     return "unknown"
 
 
@@ -96,8 +103,21 @@ def merge_route_data(
     Returns:
         Merged route dict
     """
-    base = base_route_data
-    incoming = incoming_route_data
+    def eligible(route: Any) -> bool:
+        entry_partition = get_partition_id(route) if isinstance(route, dict) else "unknown"
+        return isinstance(route, dict) and (
+            partition_id == "unknown" or entry_partition == "unknown"
+            or partition_id == entry_partition
+        )
+
+    def filtered(container: dict[str, Any]) -> dict[str, Any]:
+        result = deepcopy(container)
+        if isinstance(result.get("routeData"), list):
+            result["routeData"] = [route for route in result["routeData"] if eligible(route)]
+        return result
+
+    base = filtered(base_route_data)
+    incoming = filtered(incoming_route_data)
     
     # Extract sequence numbers
     base_seq = base.get("idSequence")
@@ -109,12 +129,12 @@ def merge_route_data(
     # If incoming has higher sequence, replace entirely
     if seq_comparison == "b_newer":
         logging.debug(f"Route data: incoming sequence {incoming_seq} > base {base_seq}, using incoming")
-        return deepcopy(incoming_route_data)
+        return incoming
     
     # If base has higher sequence, keep base
     if seq_comparison == "a_newer":
         logging.debug(f"Route data: base sequence {base_seq} > incoming {incoming_seq}, keeping base")
-        return deepcopy(base_route_data)
+        return base
     
     # Sequences equal or both unknown - merge by route identity
     logging.debug(f"Route data: sequences equal ({base_seq}), merging by route identity")
@@ -128,32 +148,43 @@ def merge_route_data(
         incoming_routes = []
     
     # Merge by composite identity: (owner_rloc16, dest_route_id)
-    merged_routes = {}
-    
+    merged_routes: dict[str, dict[str, Any]] = {}
+
+    def route_key(route: dict[str, Any]) -> str:
+        route_id = route.get("routeId", route.get("id"))
+        if type(route_id) is int and route_id >= 0:
+            return f"id:{route_id}"
+        if isinstance(route_id, str):
+            text = route_id.strip().lower()
+            if re.fullmatch(r"(?:0x[0-9a-f]+|\d+)", text):
+                return f"id:{int(text, 16 if text.startswith('0x') else 10)}"
+        source = normalize_identifier_text(route.get("sourceId"))
+        target = normalize_identifier_text(route.get("targetId"))
+        if source and target:
+            return f"endpoints:{source}|{target}"
+        extaddr = normalize_identifier_text(route.get("extAddress"))
+        if extaddr and not is_placeholder_ext_address(extaddr):
+            return f"extAddress:{extaddr}"
+        rloc16 = normalize_identifier_text(route.get("rloc16"))
+        return f"rloc16:{rloc16}" if rloc16 else ""
+
     for route in base_routes:
         if isinstance(route, dict):
-            route_id = route.get("routeId")
-            if route_id is not None:
-                identity = (owner_rloc16, str(route_id))
+            identity = route_key(route)
+            if identity:
                 merged_routes[identity] = deepcopy(route)
-    
     for route in incoming_routes:
         if isinstance(route, dict):
-            route_id = route.get("routeId")
-            if route_id is not None:
-                identity = (owner_rloc16, str(route_id))
-                # If already exists, prefer non-zero link quality values
-                if identity in merged_routes:
-                    existing = merged_routes[identity]
-                    # Merge additional fields
-                    for key, value in route.items():
-                        if key not in existing or value_is_empty(existing.get(key)):
-                            existing[key] = value
-                else:
-                    merged_routes[identity] = deepcopy(route)
+            identity = route_key(route)
+            if identity in merged_routes:
+                _fill_relationship(merged_routes[identity], route, "", None)
+            elif identity and seq_comparison != "ambiguous":
+                merged_routes[identity] = deepcopy(route)
     
     # Reconstruct canonical route object
-    result = deepcopy(base_route_data) if base_route_data else deepcopy(incoming_route_data)
+    result = deepcopy(base)
+    _fill_relationship(result, {key: value for key, value in incoming.items()
+                              if key not in {"routeData", "idSequence"}}, "", None)
     
     # Ensure result has proper structure
     if not isinstance(result, dict):
@@ -176,7 +207,7 @@ def _merge_relationship_records(
     incoming_records: list[Any],
     *,
     parent_rloc16: str | None = None,
-    prefer_incoming_values: bool = False,
+    context: MergeContext | None = None,
 ) -> list[dict[str, Any]]:
     merged: dict[int | str, dict[str, Any]] = {}
     by_extaddr: dict[tuple[str | None, str], int] = {}
@@ -188,6 +219,8 @@ def _merge_relationship_records(
             continue
 
         extaddr = normalize_identifier_text(record.get("extAddress"))
+        if is_placeholder_ext_address(extaddr):
+            extaddr = ""
         rloc16 = normalize_identifier_text(record.get("rloc16"))
         if not extaddr and not rloc16:
             merged[next_id] = deepcopy(record)
@@ -202,8 +235,16 @@ def _merge_relationship_records(
             candidate_id = next(iter(rloc_candidates))
             candidate_extaddr = normalize_identifier_text(
                 merged[candidate_id].get("extAddress"))
+            if is_placeholder_ext_address(candidate_extaddr):
+                candidate_extaddr = ""
             if not extaddr or not candidate_extaddr or candidate_extaddr == extaddr:
                 existing_id = candidate_id
+            elif context and context.conflict_target is not None:
+                append_merge_conflict(
+                    context.conflict_target,
+                    f"{context.field_path}[rloc16:{rloc16}].extAddress",
+                    candidate_extaddr, extaddr, limit=context.conflict_limit,
+                )
 
         if existing_id is None:
             existing_id = next_id
@@ -211,15 +252,9 @@ def _merge_relationship_records(
             merged[existing_id] = deepcopy(record)
         else:
             existing = merged[existing_id]
-            for key, value in record.items():
-                if key not in existing or value_is_empty(existing.get(key)):
-                    existing[key] = value
-                elif (
-                    prefer_incoming_values
-                    and not value_is_empty(value)
-                    and existing.get(key) != value
-                ):
-                    existing[key] = value
+            identity = f"extAddress:{extaddr}" if extaddr else f"rloc16:{rloc16}"
+            path = f"{context.field_path if context else 'relationship'}[{identity}]"
+            _fill_relationship(existing, record, path, context)
 
         if extaddr:
             by_extaddr[extaddr_key] = existing_id
@@ -229,10 +264,34 @@ def _merge_relationship_records(
     return list(merged.values())
 
 
+def _fill_relationship(
+    target: dict[str, Any], source: dict[str, Any], path: str,
+    context: MergeContext | None,
+) -> None:
+    for key, value in source.items():
+        current = target.get(key)
+        if key not in target or value_is_empty(current) or (
+            key == "extAddress" and is_placeholder_ext_address(current)
+            and not is_placeholder_ext_address(value)
+        ):
+            target[key] = deepcopy(value)
+        elif isinstance(current, dict) and isinstance(value, dict):
+            _fill_relationship(current, value, f"{path}.{key}", context)
+        elif isinstance(current, list) and isinstance(value, list):
+            target[key] = merge_lists(current, value)
+        elif not value_is_empty(value) and not values_equivalent(current, value):
+            if context and context.conflict_target is not None:
+                append_merge_conflict(
+                    context.conflict_target, f"{path}.{key}", current, value,
+                    limit=context.conflict_limit,
+                )
+
+
 def merge_children_array(
     parent_rloc16: str,
     base_children: list[Any],
     incoming_children: list[Any],
+    context: MergeContext | None = None,
 ) -> list[dict[str, Any]]:
     """
     Merge children arrays using composite identity: (parent_rloc16, child_extaddr).
@@ -251,13 +310,14 @@ def merge_children_array(
         base_children,
         incoming_children,
         parent_rloc16=normalize_identifier_text(parent_rloc16),
-        prefer_incoming_values=True,
+        context=context,
     )
 
 
 def merge_router_neighbors(
     base_neighbors: list[Any],
     incoming_neighbors: list[Any],
+    context: MergeContext | None = None,
 ) -> list[dict[str, Any]]:
     """
     Merge routerNeighbors arrays by identity (rloc16 or extaddr).
@@ -269,7 +329,7 @@ def merge_router_neighbors(
     Returns:
         Merged routerNeighbors array
     """
-    return _merge_relationship_records(base_neighbors, incoming_neighbors)
+    return _merge_relationship_records(base_neighbors, incoming_neighbors, context=context)
 
 
 def _merge_route_field(
@@ -284,7 +344,7 @@ def _merge_route_field(
     ):
         return deepcopy(current)
     if not isinstance(current, dict):
-        return deepcopy(incoming)
+        current = {}
     return merge_route_data(
         context.owner_rloc16,
         current,
@@ -302,17 +362,19 @@ def _merge_relationship_field(
         context.owner_rloc16,
         current if isinstance(current, list) else [],
         incoming,
+        context,
     )
 
 
 def _merge_neighbor_field(
-    current: Any, incoming: Any, _context: MergeContext
+    current: Any, incoming: Any, context: MergeContext
 ) -> Any:
     if not isinstance(incoming, list):
         return deepcopy(current)
     return merge_router_neighbors(
         current if isinstance(current, list) else [],
         incoming,
+        context,
     )
 
 

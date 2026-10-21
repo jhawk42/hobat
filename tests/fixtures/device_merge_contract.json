@@ -1,7 +1,25 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "2.0.0",
+  "contractVersion": "3.0.0",
   "cases": [
+    {"id":"unidentified-mdns-retains-metadata","area":"mdns","operation":"merge","enforcement":"contract","description":"Unidentified mDNS observations remain separate while retaining the same alias metadata policy.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"scope":"_meshcop._udp.local.","name":"first"}]},{"name":"b.json","records":[{"scope":"_meshcop._udp.local.","name":"second"}]}]},"expected":{"contract":[{"scope":"_meshcop._udp.local.","name":"first","_source_files":["a.json"],"_merge_identity_keys":[],"_mdns_aliases":{"nameAliases":["first"]}},{"scope":"_meshcop._udp.local.","name":"second","_source_files":["b.json"],"_merge_identity_keys":[],"_mdns_aliases":{"nameAliases":["second"]}}]}},
+    {"id":"coalesced-index-owners-remain-live","area":"identity","operation":"merge","enforcement":"contract","description":"A later OMR-only observation finds the surviving owner after compatible bridge coalescing.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"extAddress":"aa11","status":"online"}]},{"name":"b.json","records":[{"omrIpv6Address":"fd00::1","sample":0}]},{"name":"bridge.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::1"}]},{"name":"later.json","records":[{"omrIpv6Address":"fd00::1","verified":false}]}]},"expected":{"contract":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","status":"online","sample":0,"verified":false,"_source_files":["a.json","b.json","bridge.json","later.json"],"_merge_identity_keys":["extAddress:aa11","omrIpv6Address:fd00::1"]}]}},
+    {"id":"mdns-canonical-server-omr-aliases","area":"mdns","operation":"merge","enforcement":"contract","description":"Newer mDNS fields use canonical OMR/server projection, stable aliases and deep legacy service completion without changing unrelated device facts.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"extAddress":"aa11","scope":"_meshcop._udp.local.","name":"first","omr_ipv6_addr":"fd00::1","captured_at_epoch":1,"vendorName":"Acme","service_info":{"server":"old.local.","key":"OLD","properties":{"x":{"deep":{"old":0}}}}}]},{"name":"b.json","records":[{"extAddress":"aa11","scope":"_meshcop._udp.local.","name":"second","omrIpv6Address":"fd00::2","capturedAtEpoch":2,"serviceInfo":{"server":"new.local.","key":"NEW","properties":{"x":{"deep":{"new":false}}}}}]}]},"expected":{"contract":[{"extAddress":"aa11","scope":"_meshcop._udp.local.","name":"second","omrIpv6Address":"fd00::2","capturedAtEpoch":2,"vendorName":"Acme","server":"new.local.","serverKey":"NEW","serviceInfo":{"server":"new.local.","key":"NEW","properties":{"x":{"deep":{"new":false,"old":0}}}},"_source_files":["a.json","b.json"],"_merge_identity_keys":["extAddress:aa11","omrIpv6Address:fd00::1","omrIpv6Address:fd00::2"],"_mdns_aliases":{"nameAliases":["first","second"],"serverAliases":["old.local.","new.local."],"serverKeyAliases":["old","new"]}}]}},
+    {"id":"incompatible-strong-bridge-retained","area":"identity","operation":"merge","enforcement":"contract","description":"An addressless bridge cannot join incompatible concrete owners or bypass ambiguity via RLOC.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","rloc16":"0x1000"},{"extAddress":"bb22","matterId":"000000000000aaaa-0000000000000001"}]},{"name":"bridge.json","records":[{"omrIpv6Address":"fd00::1","matterId":"000000000000aaaa-0000000000000001","rloc16":"0x1000"}]}]},"expected":{"contract":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","rloc16":"0x1000","_source_files":["a.json"],"_merge_identity_keys":["extAddress:aa11","omrIpv6Address:fd00::1","rloc16:0x1000"]},{"extAddress":"bb22","matterId":"000000000000aaaa-0000000000000001","_source_files":["a.json"],"_merge_identity_keys":["extAddress:bb22","matterFabricNode:000000000000aaaa|0000000000000001"]},{"omrIpv6Address":"fd00::1","matterId":"000000000000aaaa-0000000000000001","rloc16":"0x1000","_source_files":["bridge.json"],"_merge_identity_keys":["omrIpv6Address:fd00::1","matterFabricNode:000000000000aaaa|0000000000000001","rloc16:0x1000"],"_merge_conflicts":[{"path":"_merge_identity_ambiguity","current":[["extAddress:aa11","omrIpv6Address:fd00::1","rloc16:0x1000"],["extAddress:bb22","matterFabricNode:000000000000aaaa|0000000000000001"]],"incoming":["omrIpv6Address:fd00::1","matterFabricNode:000000000000aaaa|0000000000000001","rloc16:0x1000"]}]}]}},
+    {"id":"accepted-identity-history","area":"identity","operation":"merge","enforcement":"contract","description":"Earlier accepted OMR and RLOC keys remain eligible after scalar authority picks other observations.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","rloc16":"0x1000"}]},{"name":"b.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::2","rloc16":"0x2000"}]},{"name":"c.json","records":[{"omrIpv6Address":"fd00::2","sample":0}]},{"name":"d.json","records":[{"rloc16":"0x2000","enabled":false}]}]},"expected":{"contract":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","rloc16":"0x1000","sample":0,"enabled":false,"_source_files":["a.json","b.json","c.json","d.json"],"_merge_identity_keys":["extAddress:aa11","omrIpv6Address:fd00::1","rloc16:0x1000","omrIpv6Address:fd00::2","rloc16:0x2000"],"_merge_conflicts":[{"path":"omrIpv6Address","current":"fd00::1","incoming":"fd00::2"},{"path":"rloc16","current":"0x1000","incoming":"0x2000"}]}]}},
+    {"id":"imported-identity-is-not-evidence","area":"identity","operation":"merge","enforcement":"contract","description":"Cached identity metadata cannot create correlation without validated fields.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"extAddress":"aa11"}]},{"name":"b.json","records":[{"_merge_identity_keys":["extAddress:aa11"],"sample":0}]}]},"expected":{"contract":[{"extAddress":"aa11","_source_files":["a.json"],"_merge_identity_keys":["extAddress:aa11"]},{"sample":0,"_source_files":["b.json"],"_merge_identity_keys":[]}]}},
+    {"id":"invalid-matter-not-a-key","area":"matter","operation":"merge","enforcement":"contract","description":"Nonhex Matter components remain data, not keys.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"fabricId":"not-hex","nodeId":"one"}]},{"name":"b.json","records":[{"fabricId":"not-hex","nodeId":"one"}]}]},"expected":{"contract":[{"fabricId":"not-hex","nodeId":"one","_source_files":["a.json"],"_merge_identity_keys":[]},{"fabricId":"not-hex","nodeId":"one","_source_files":["b.json"],"_merge_identity_keys":[]}]}},
+    {"id":"recursive-conflict-import-deduplication","area":"conflict","operation":"merge","enforcement":"contract","description":"Imported conflicts compare JSON types recursively and ignore object key order.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","_merge_conflicts":[{"path":"x","current":{"a":true},"incoming":[true]},{"path":"y","current":{"a":1,"b":2},"incoming":0}]}]},{"name":"b.json","records":[{"rloc16":"0x1000","_merge_conflicts":[{"path":"x","current":{"a":1},"incoming":[1]},{"incoming":0,"current":{"b":2,"a":1},"path":"y"}]}]}]},"expected":{"contract":[{"rloc16":"0x1000","_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"],"_merge_conflicts":[{"path":"x","current":{"a":true},"incoming":[true]},{"path":"y","current":{"a":1,"b":2},"incoming":0},{"path":"x","current":{"a":1},"incoming":[1]}]}]}},
+    {"id":"stable-unsorted-row-order","area":"provenance","operation":"merge","enforcement":"contract","description":"Output preserves creation order, not identity sorting.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0xf000"},{"rloc16":"0x1000"},{"sample":0}]}]},"expected":{"contract":[{"rloc16":"0xf000","_source_files":["a.json"],"_merge_identity_keys":["rloc16:0xf000"]},{"rloc16":"0x1000","_source_files":["a.json"],"_merge_identity_keys":["rloc16:0x1000"]},{"sample":0,"_source_files":["a.json"],"_merge_identity_keys":[]}]}},
+    {"id":"placeholder-child-upgrade","area":"child","operation":"merge","enforcement":"contract","description":"Concrete relationship identity upgrades placeholders without losing anonymous rows.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","children":[{"extAddress":"found-0x1001","rloc16":"0x1001"},{"childId":1}]}]},{"name":"b.json","records":[{"rloc16":"0x1000","children":[{"extAddress":"aa11","rloc16":"0x1001"},{"childId":1}]}]}]},"expected":{"contract":[{"rloc16":"0x1000","children":[{"extAddress":"aa11","rloc16":"0x1001"},{"childId":1},{"childId":1}],"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"typed-boolean-conflict","area":"scalar","operation":"merge","enforcement":"contract","implementationPhase":2,"description":"Boolean disagreement remains typed JSON.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","enabled":true}]},{"name":"b.json","records":[{"rloc16":"0x1000","enabled":false}]}]},"expected":{"contract":[{"rloc16":"0x1000","enabled":true,"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"],"_merge_conflicts":[{"path":"enabled","current":true,"incoming":false}]}]}},
+    {"id":"nested-type-aware-array-union","area":"scalar","operation":"merge","enforcement":"contract","implementationPhase":2,"description":"Recursive JSON equality distinguishes nested booleans and numbers, not object key order.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","values":[{"a":true},[true],{"x":1,"y":2}]}]},{"name":"b.json","records":[{"rloc16":"0x1000","values":[{"a":1},[1],{"y":2,"x":1}]}]}]},"expected":{"contract":[{"rloc16":"0x1000","values":[{"a":true},[true],{"x":1,"y":2},{"a":1},[1]],"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"placeholder-without-identity","area":"identity","operation":"merge","enforcement":"contract","implementationPhase":2,"description":"Generated addresses alone do not correlate.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"extAddress":"found-0x1000"}]},{"name":"b.json","records":[{"extAddress":"found-0x1000"}]}]},"expected":{"contract":[{"extAddress":"found-0x1000","_source_files":["a.json"],"_merge_identity_keys":[]},{"extAddress":"found-0x1000","_source_files":["b.json"],"_merge_identity_keys":[]}]}},
+    {"id":"concrete-address-rloc-safety","area":"identity","operation":"merge","enforcement":"contract","implementationPhase":2,"description":"Concrete addresses sharing RLOC remain separate.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"extAddress":"aa11","rloc16":"0x1000"}]},{"name":"b.json","records":[{"extAddress":"bb22","rloc16":"0x1000"}]}]},"expected":{"contract":[{"extAddress":"aa11","rloc16":"0x1000","_source_files":["a.json"],"_merge_identity_keys":["extAddress:aa11","rloc16:0x1000"]},{"extAddress":"bb22","rloc16":"0x1000","_source_files":["b.json"],"_merge_identity_keys":["extAddress:bb22","rloc16:0x1000"]}]}},
+    {"id":"matter-id-only","area":"matter","operation":"merge","enforcement":"contract","implementationPhase":2,"description":"Validated explicit Matter composites correlate without address keys.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"matterId":"000000000000aaaa-0000000000000001","a":1}]},{"name":"b.json","records":[{"matterId":"000000000000aaaa-0000000000000001","b":2}]}]},"expected":{"contract":[{"matterId":"000000000000aaaa-0000000000000001","a":1,"b":2,"_source_files":["a.json","b.json"],"_merge_identity_keys":["matterFabricNode:000000000000aaaa|0000000000000001"]}]}},
+    {"id":"child-metric-authority","area":"child","operation":"merge","enforcement":"contract","implementationPhase":2,"description":"Child metrics retain first authority and report typed disagreement.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","children":[{"rloc16":"0x1001","averageRssi":-70}]}]},{"name":"b.json","records":[{"rloc16":"0x1000","children":[{"rloc16":"0x1001","averageRssi":-80,"linkMargin":0}]}]}]},"expected":{"contract":[{"rloc16":"0x1000","children":[{"rloc16":"0x1001","averageRssi":-70,"linkMargin":0}],"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"],"_merge_conflicts":[{"path":"children[rloc16:0x1001].averageRssi","current":-70,"incoming":-80}]}]}},
+    {"id":"route-equal-enrichment","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Equal sequence route entries fill complementary metrics.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[{"routeId":0,"routeCost":0}]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[{"routeId":0,"linkQualityIn":3}]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[{"routeId":0,"routeCost":0,"linkQualityIn":3}]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"route-newer-empty-replaces","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Newer empty tables cannot inherit stale routes or container fields.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","route":{"idSequence":250,"oldOnly":true,"routeData":[{"routeId":1}]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
     {"id":"network-id-hex","area":"networkIdentity","operation":"network-identity","enforcement":"contract","description":"Canonical hex and prefixed representations resolve to one instance.","inputs":{"value":"0x78B9775B001C1CBE"},"expected":{"contract":{"extPanId":"78b9775b001c1cbe","networkId":"extpan:78b9775b001c1cbe"}}},
     {"id":"network-id-uppercase","area":"networkIdentity","operation":"network-identity","enforcement":"contract","description":"Bare uppercase hex resolves to the canonical value.","inputs":{"value":"78B9775B001C1CBE"},"expected":{"contract":{"extPanId":"78b9775b001c1cbe","networkId":"extpan:78b9775b001c1cbe"}}},
     {"id":"network-id-colon-separated","area":"networkIdentity","operation":"network-identity","enforcement":"contract","description":"Byte-separated hex resolves to the canonical value.","inputs":{"value":"78:b9:77:5b:00:1c:1c:be"},"expected":{"contract":{"extPanId":"78b9775b001c1cbe","networkId":"extpan:78b9775b001c1cbe"}}},
@@ -73,7 +91,7 @@
       "enforcement": "contract",
       "description": "A non-empty scalar fills an empty value and source provenance is retained in order.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {
             "name": "alpha.json",
@@ -102,7 +120,7 @@
             "rloc16": "0xabcd",
             "status": "online",
             "sample": 21,
-            "_source_files": ["alpha.json", "beta.json"]
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["rloc16:0xabcd"]
           }
         ]
       }
@@ -120,7 +138,7 @@
         ]
       },
       "expected": {
-        "contract": [{"status": "detached", "_source_files": ["unknown.json"]}]
+        "contract": [{"status": "detached", "_source_files": ["unknown.json"], "_merge_identity_keys":[]}]
       }
     },
     {
@@ -130,7 +148,7 @@
       "enforcement": "contract",
       "description": "An empty incoming scalar does not replace an existing value.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {"name": "alpha.json", "records": [{"rloc16": "0xabcd", "status": "online"}]},
           {"name": "beta.json", "records": [{"rloc16": "0xabcd", "status": ""}]}
@@ -141,7 +159,7 @@
           {
             "rloc16": "0xabcd",
             "status": "online",
-            "_source_files": ["alpha.json", "beta.json"]
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["rloc16:0xabcd"]
           }
         ]
       }
@@ -153,7 +171,7 @@
       "enforcement": "contract",
       "description": "Equal non-empty scalar values merge without a conflict.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {"name": "alpha.json", "records": [{"rloc16": "0xabcd", "status": "online"}]},
           {"name": "beta.json", "records": [{"rloc16": "0xabcd", "status": "online"}]}
@@ -164,7 +182,7 @@
           {
             "rloc16": "0xabcd",
             "status": "online",
-            "_source_files": ["alpha.json", "beta.json"]
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["rloc16:0xabcd"]
           }
         ]
       }
@@ -176,7 +194,7 @@
       "enforcement": "contract",
       "description": "A null response summary remains paired with its request instead of borrowing another collection's response.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {"name": "alpha.json", "records": [{"rloc16": "0xabcd", "tlvRequestValues": "0, 1", "tlvResponseValues": null}]},
           {"name": "beta.json", "records": [{"rloc16": "0xabcd", "tlvRequestValues": "0, 2", "tlvResponseValues": "4, 5"}]}
@@ -188,7 +206,7 @@
             "rloc16": "0xabcd",
             "tlvRequestValues": "0, 1",
             "tlvResponseValues": null,
-            "_source_files": ["alpha.json", "beta.json"],
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["rloc16:0xabcd"],
             "_merge_conflicts": [
               {"path": "tlvRequestValues", "current": "0, 1", "incoming": "0, 2"},
               {"path": "tlvResponseValues", "current": null, "incoming": "4, 5"}
@@ -204,7 +222,7 @@
       "enforcement": "contract",
       "description": "A known-empty response summary remains distinct from a populated response from another collection.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {"name": "alpha.json", "records": [{"rloc16": "0xabcd", "tlvRequestValues": "0, 1", "tlvResponseValues": ""}]},
           {"name": "beta.json", "records": [{"rloc16": "0xabcd", "tlvRequestValues": "0, 2", "tlvResponseValues": "4, 5"}]}
@@ -216,7 +234,7 @@
             "rloc16": "0xabcd",
             "tlvRequestValues": "0, 1",
             "tlvResponseValues": "",
-            "_source_files": ["alpha.json", "beta.json"],
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["rloc16:0xabcd"],
             "_merge_conflicts": [
               {"path": "tlvRequestValues", "current": "0, 1", "incoming": "0, 2"},
               {"path": "tlvResponseValues", "current": "", "incoming": "4, 5"}
@@ -232,7 +250,7 @@
       "enforcement": "contract",
       "description": "A legacy request-only summary is normalized without borrowing a response from another collection.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {"name": "alpha.json", "records": [{"rloc16": "0xabcd", "tlvValues": "0, 1"}]},
           {"name": "beta.json", "records": [{"rloc16": "0xabcd", "tlvRequestValues": "0, 2", "tlvResponseValues": "4, 5"}]}
@@ -243,7 +261,7 @@
           {
             "rloc16": "0xabcd",
             "tlvRequestValues": "0, 1",
-            "_source_files": ["alpha.json", "beta.json"],
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["rloc16:0xabcd"],
             "_merge_conflicts": [
               {"path": "tlvRequestValues", "current": "0, 1", "incoming": "0, 2"}
             ]
@@ -251,42 +269,7 @@
         ]
       }
     },
-    {
-      "id": "tlv-summary-source-priority-identity-bridge",
-      "area": "tlvSummary",
-      "operation": "merge",
-      "enforcement": "contract",
-      "description": "A higher-priority fetch-all summary remains authoritative when an identity bridge joins rows after a lower-priority multicast summary was merged.",
-      "inputs": {
-        "strategy": "by-identity",
-        "sources": [
-          {"name": "td-static-extaddr-device-label.json", "records": [{"extAddress": "aa11bb22cc33dd44", "deviceLabel": "Router A"}]},
-          {"name": "td-otbr-cli-networkdiag-fetch-all.json", "records": [{"rloc16": "0x1234", "tlvRequestValues": "0 1 2", "tlvResponseValues": "0 1"}]},
-          {"name": "td-otbr-cli-networkdiag-multicast-network.json", "records": [{"extAddress": "aa11bb22cc33dd44", "tlvValues": "0"}]},
-          {"name": "td-otbr-cli-meshdiag-topology.json", "records": [{"extAddress": "aa11bb22cc33dd44", "rloc16": "0x1234"}]}
-        ]
-      },
-      "expected": {
-        "contract": [
-          {
-            "extAddress": "aa11bb22cc33dd44",
-            "rloc16": "0x1234",
-            "deviceLabel": "Router A",
-            "tlvRequestValues": "0 1 2",
-            "tlvResponseValues": "0 1",
-            "_source_files": [
-              "td-static-extaddr-device-label.json",
-              "td-otbr-cli-networkdiag-multicast-network.json",
-              "td-otbr-cli-networkdiag-fetch-all.json",
-              "td-otbr-cli-meshdiag-topology.json"
-            ],
-            "_merge_conflicts": [
-              {"path": "tlvRequestValues", "current": "0", "incoming": "0 1 2"}
-            ]
-          }
-        ]
-      }
-    },
+    {"id":"tlv-summary-source-priority-identity-bridge","area":"tlvSummary","operation":"merge","enforcement":"contract","description":"A strong match does not absorb a separate RLOC-only row or borrow its atomic TLV pair.","inputs":{"strategy":"by-identity","sources":[{"name":"td-static-extaddr-device-label.json","records":[{"extAddress":"aa11bb22cc33dd44","deviceLabel":"Router A"}]},{"name":"td-otbr-cli-networkdiag-fetch-all.json","records":[{"rloc16":"0x1234","tlvRequestValues":"0 1 2","tlvResponseValues":"0 1"}]},{"name":"td-otbr-cli-networkdiag-multicast-network.json","records":[{"extAddress":"aa11bb22cc33dd44","tlvValues":"0"}]},{"name":"td-otbr-cli-meshdiag-topology.json","records":[{"extAddress":"aa11bb22cc33dd44","rloc16":"0x1234"}]}]},"expected":{"contract":[{"extAddress":"aa11bb22cc33dd44","deviceLabel":"Router A","rloc16":"0x1234","tlvRequestValues":"0","_source_files":["td-static-extaddr-device-label.json","td-otbr-cli-networkdiag-multicast-network.json","td-otbr-cli-meshdiag-topology.json"],"_merge_identity_keys":["extAddress:aa11bb22cc33dd44","rloc16:0x1234"]},{"rloc16":"0x1234","tlvRequestValues":"0 1 2","tlvResponseValues":"0 1","_source_files":["td-otbr-cli-networkdiag-fetch-all.json"],"_merge_identity_keys":["rloc16:0x1234"]}]}},
     {
       "id": "scalar-source-priority-reversed-input",
       "area": "precedence",
@@ -294,7 +277,7 @@
       "enforcement": "contract",
       "description": "Configured source priority wins regardless of input order.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {
             "name": "td-otbr-restapi-diagnostics.json",
@@ -314,7 +297,7 @@
             "_source_files": [
               "td-otbr-cli-networkdiag-fetch-all.json",
               "td-otbr-restapi-diagnostics.json"
-            ],
+            ], "_merge_identity_keys":["rloc16:0xabcd"],
             "_merge_conflicts": [
               {"path": "status", "current": "high", "incoming": "low"}
             ]
@@ -329,7 +312,7 @@
       "enforcement": "contract",
       "description": "Unknown sources use stable input order for equal default priority.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {"name": "unknown-a.json", "records": [{"rloc16": "0xabcd", "status": "first"}]},
           {"name": "unknown-b.json", "records": [{"rloc16": "0xabcd", "status": "second"}]}
@@ -340,7 +323,7 @@
           {
             "rloc16": "0xabcd",
             "status": "first",
-            "_source_files": ["unknown-a.json", "unknown-b.json"],
+            "_source_files": ["unknown-a.json", "unknown-b.json"], "_merge_identity_keys":["rloc16:0xabcd"],
             "_merge_conflicts": [
               {"path": "status", "current": "first", "incoming": "second"}
             ]
@@ -355,7 +338,7 @@
       "enforcement": "contract",
       "description": "Child observations with the same RLOC16 merge within one parent.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {
             "name": "alpha.json",
@@ -376,7 +359,7 @@
           {
             "rloc16": "0x1000",
             "children": [{"rloc16": "0x1001", "status": "online", "sample": 21}],
-            "_source_files": ["alpha.json", "beta.json"]
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["rloc16:0x1000"]
           }
         ]
       }
@@ -388,7 +371,7 @@
       "enforcement": "contract",
       "description": "Topology children and diagnostic childTable remain distinct collections.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {
             "name": "alpha.json",
@@ -406,7 +389,7 @@
             "rloc16": "0x1000",
             "children": [{"rloc16": "0x1001"}],
             "childTable": [{"rloc16": "0x1002"}],
-            "_source_files": ["alpha.json", "beta.json"]
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["rloc16:0x1000"]
           }
         ]
       }
@@ -418,7 +401,7 @@
       "enforcement": "contract",
       "description": "Router neighbor observations merge by RLOC16 and retain complementary metrics.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {
             "name": "alpha.json",
@@ -439,7 +422,7 @@
           {
             "rloc16": "0x1000",
             "routerNeighbors": [{"rloc16": "0x2000", "lqIn": 3, "lqOut": 2}],
-            "_source_files": ["alpha.json", "beta.json"]
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["rloc16:0x1000"]
           }
         ]
       }
@@ -451,7 +434,7 @@
       "enforcement": "contract",
       "description": "Repeated child and neighbor observations reconcile across source files without crossing parent scope.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {
             "name": "alpha.json",
@@ -494,13 +477,13 @@
             "extAddress": "aa00112233445566",
             "children": [{"rloc16": "0x1001", "extAddress": "cc00112233445566", "childId": 1, "linkMargin": 20, "averageRssi": -70}],
             "routerNeighbors": [{"rloc16": "0x2000", "extAddress": "dd00112233445566", "linkQualityIn": 3, "linkQualityOut": 2}],
-            "_source_files": ["alpha.json", "beta.json"]
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["extAddress:aa00112233445566","rloc16:0x1000"]
           },
           {
             "rloc16": "0x3000",
             "extAddress": "bb00112233445566",
             "children": [{"rloc16": "0x3001", "extAddress": "ee00112233445566", "childId": 1, "linkMargin": 18, "averageRssi": -68}],
-            "_source_files": ["alpha.json", "beta.json"]
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["extAddress:bb00112233445566","rloc16:0x3000"]
           }
         ]
       }
@@ -512,7 +495,7 @@
       "enforcement": "contract",
       "description": "RFC 1982 sequence comparison treats 5 as newer than 250.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {
             "name": "alpha.json",
@@ -539,7 +522,7 @@
           {
             "rloc16": "0x1000",
             "route": {"idSequence": 5, "routeData": [{"routeId": 1, "routeCost": 2}]},
-            "_source_files": ["alpha.json", "beta.json"]
+            "_source_files": ["alpha.json", "beta.json"], "_merge_identity_keys":["rloc16:0x1000"]
           }
         ]
       }
@@ -551,7 +534,7 @@
       "enforcement": "contract",
       "description": "Route observations from different known partitions do not merge.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {
             "name": "alpha.json",
@@ -568,7 +551,7 @@
           "rloc16":"0x1000",
           "leaderData":{"partitionId":"0x00000001"},
           "route":{"idSequence":1,"routeData":[{"routeId":1,"routeCost":5}]},
-          "_source_files":["alpha.json","beta.json"],
+          "_source_files":["alpha.json","beta.json"], "_merge_identity_keys":["rloc16:0x1000"],
           "_merge_conflicts":[{"path":"leaderData.partitionId","current":"0x00000001","incoming":"0x00000002"}]
         }]
       }
@@ -580,7 +563,7 @@
       "enforcement": "contract",
       "description": "Repeated identical conflicts are recorded once with raw values.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {"name":"alpha.json","records":[{"rloc16":"0x1000","status":"online"}]},
           {"name":"beta.json","records":[{"rloc16":"0x1000","status":"offline"}]},
@@ -591,7 +574,7 @@
         "contract": [{
           "rloc16":"0x1000",
           "status":"online",
-          "_source_files":["alpha.json","beta.json","gamma.json"],
+          "_source_files":["alpha.json","beta.json","gamma.json"], "_merge_identity_keys":["rloc16:0x1000"],
           "_merge_conflicts":[{"path":"status","current":"online","incoming":"offline"}]
         }]
       }
@@ -618,7 +601,7 @@
           "sample":21,
           "role":"router",
           "mode.device":"FTD",
-          "_source_files":["alpha.json","beta.json","bridge.json"]
+          "_source_files":["alpha.json","beta.json","bridge.json"], "_merge_identity_keys":["extAddress:aa11","omrIpv6Address:fd00::1"]
         }]
       }
     },
@@ -629,7 +612,7 @@
       "enforcement": "contract",
       "description": "A newer mDNS observation wins and fills missing service fields from the older record.",
       "inputs": {
-        "strategy": "by-rloc16",
+        "strategy": "by-identity",
         "sources": [
           {"name":"alpha.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","recordKey":"first","event":"add","capturedAtEpoch":1,"serviceInfo":{"port":1,"oldOnly":true}}]},
           {"name":"beta.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","recordKey":"second","event":"update","capturedAtEpoch":2,"serviceInfo":{"port":2,"newOnly":true}}]}
@@ -643,7 +626,7 @@
           "event":"update",
           "capturedAtEpoch":2,
           "serviceInfo":{"port":2,"newOnly":true,"oldOnly":true},
-          "_source_files":["alpha.json","beta.json"],
+          "_source_files":["alpha.json","beta.json"], "_merge_identity_keys":["rloc16:0x1000"],
           "_mdns_aliases":{}
         }]
       }
@@ -663,8 +646,8 @@
       },
       "expected": {
         "contract": [
-          {"extAddress":"0011223344556677","omrIpv6Address":"::","name":"alpha","_source_files":["alpha.json"]},
-          {"extAddress":"8899aabbccddeeff","omrIpv6Address":"0:0:0:0:0:0:0:0","name":"beta","_source_files":["beta.json"]}
+          {"extAddress":"0011223344556677","omrIpv6Address":"::","name":"alpha","_source_files":["alpha.json"], "_merge_identity_keys":["extAddress:0011223344556677"]},
+          {"extAddress":"8899aabbccddeeff","omrIpv6Address":"0:0:0:0:0:0:0:0","name":"beta","_source_files":["beta.json"], "_merge_identity_keys":["extAddress:8899aabbccddeeff"]}
         ]
       }
     },
@@ -684,10 +667,35 @@
       },
       "expected": {
         "contract": [
-          {"omrIpv6Address":"fd00::1","scope":"_matter._tcp.local.","serviceInfo":{"properties":{"fabricIdCompressed":{"decoded":"aaaa"},"nodeId":{"decoded":"0001"}}},"_source_files":["alpha.json"],"_mdns_aliases":{"fabricIdCompressedAliases":["aaaa"],"nodeIdAliases":["0001"],"matterFabricNodeAliases":["aaaa|0001"]}},
-          {"omrIpv6Address":"fd00::1","scope":"_matter._tcp.local.","serviceInfo":{"properties":{"fabricIdCompressed":{"decoded":"bbbb"},"nodeId":{"decoded":"0002"}}},"_source_files":["beta.json"],"_mdns_aliases":{"fabricIdCompressedAliases":["bbbb"],"nodeIdAliases":["0002"],"matterFabricNodeAliases":["bbbb|0002"]}}
+          {"omrIpv6Address":"fd00::1","scope":"_matter._tcp.local.","serviceInfo":{"properties":{"fabricIdCompressed":{"decoded":"aaaa"},"nodeId":{"decoded":"0001"}}},"_source_files":["alpha.json"], "_merge_identity_keys":["omrIpv6Address:fd00::1","matterFabricNode:000000000000aaaa|0000000000000001"],"_mdns_aliases":{"fabricIdCompressedAliases":["aaaa"],"nodeIdAliases":["0001"],"matterFabricNodeAliases":["000000000000aaaa|0000000000000001"]}},
+          {"omrIpv6Address":"fd00::1","scope":"_matter._tcp.local.","serviceInfo":{"properties":{"fabricIdCompressed":{"decoded":"bbbb"},"nodeId":{"decoded":"0002"}}},"_source_files":["beta.json"], "_merge_identity_keys":["omrIpv6Address:fd00::1","matterFabricNode:000000000000bbbb|0000000000000002"],"_mdns_aliases":{"fabricIdCompressedAliases":["bbbb"],"nodeIdAliases":["0002"],"matterFabricNodeAliases":["000000000000bbbb|0000000000000002"]}}
         ]
       }
-    }
+    },
+    {"id":"route-half-range-100-228","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Half-range ambiguity keeps base sequence and route set, filling only matching entries.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","route":{"idSequence":100,"routeData":[{"routeId":0,"routeCost":0}]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"idSequence":228,"routeData":[{"routeId":0,"linkQualityIn":3},{"routeId":1}]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","route":{"idSequence":100,"routeData":[{"routeId":0,"routeCost":0,"linkQualityIn":3}]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"route-half-range-228-100","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Half-range ambiguity keeps base sequence and route set, filling only matching entries.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","route":{"idSequence":228,"routeData":[{"routeId":0,"routeCost":0}]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"idSequence":100,"routeData":[{"routeId":0,"linkQualityIn":3},{"routeId":1}]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","route":{"idSequence":228,"routeData":[{"routeId":0,"routeCost":0,"linkQualityIn":3}]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"route-known-then-missing","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Owner-scoped routing identity and sequence authority preserve the canonical container.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[{"routeId":0}]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"routeData":[{"routeId":0,"linkQualityIn":3},{"routeId":1}]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[{"routeId":0}]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"route-missing-then-known","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Owner-scoped routing identity and sequence authority preserve the canonical container.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","route":{"routeData":[{"routeId":0,"linkQualityIn":3},{"routeId":1}]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[{"routeId":0}]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[{"routeId":0}]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"route-older-wraparound","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Owner-scoped routing identity and sequence authority preserve the canonical container.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[{"routeId":0}]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"idSequence":250,"routeData":[{"routeId":1}]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","route":{"idSequence":5,"routeData":[{"routeId":0}]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"route-both-missing","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Owner-scoped routing identity and sequence authority preserve the canonical container.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","route":{"routeData":[{"routeId":0,"routeCost":0}]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"routeData":[{"routeId":0,"linkQualityIn":3}]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","route":{"routeData":[{"routeId":0,"routeCost":0,"linkQualityIn":3}]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"route-fallback-identities","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Owner-scoped routing identity and sequence authority preserve the canonical container.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","route":{"idSequence":1,"routeData":[{"sourceId":"a","targetId":"b"},{"extAddress":"aa11"},{"rloc16":"0x2000"}]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"idSequence":1,"routeData":[{"sourceId":"a","targetId":"b","routeCost":0},{"extAddress":"aa11","linkQualityIn":3},{"rloc16":"0x2000","routeCost":2}]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","route":{"idSequence":1,"routeData":[{"sourceId":"a","targetId":"b","routeCost":0},{"extAddress":"aa11","linkQualityIn":3},{"rloc16":"0x2000","routeCost":2}]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"route-known-owner-unknown-incoming-partition","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Unknown partition is not a fabricated mismatch.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","leaderData":{"partitionId":1},"route":{"idSequence":1,"routeData":[{"routeId":0}]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"idSequence":2,"routeData":[]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","leaderData":{"partitionId":1},"route":{"idSequence":2,"routeData":[]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"route-entry-partition-guard","area":"route","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Known conflicting entry partitions are rejected before whole-container replacement.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","leaderData":{"partitionId":1},"route":{"idSequence":1,"routeData":[]}}]},{"name":"b.json","records":[{"rloc16":"0x1000","route":{"idSequence":2,"routeData":[{"routeId":0,"partitionId":2},{"routeId":1}]}}]}]},"expected":{"contract":[{"rloc16":"0x1000","leaderData":{"partitionId":1},"route":{"idSequence":2,"routeData":[{"routeId":1}]},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"mdns-deep-completion-event-tie","area":"mdns","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"Event tie-break chooses add and service completion recurses to every depth.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","event":"remove","capturedAtEpoch":5,"serviceInfo":{"properties":{"x":{"deep":{"old":0,"value":1}}}}}]},{"name":"b.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","event":"add","capturedAtEpoch":5,"serviceInfo":{"properties":{"x":{"deep":{"new":false,"value":2}}}}}]}]},"expected":{"contract":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","event":"add","capturedAtEpoch":5,"serviceInfo":{"properties":{"x":{"deep":{"new":false,"value":2,"old":0}}}},"_mdns_aliases":{},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"imported-conflict-limit","area":"conflict","operation":"merge","enforcement":"contract","implementationPhase":3,"description":"The shared twenty-entry bound includes preexisting conflicts.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","_merge_conflicts":[{"path":"p0","current":true,"incoming":false},{"path":"p1","current":true,"incoming":false},{"path":"p2","current":true,"incoming":false},{"path":"p3","current":true,"incoming":false},{"path":"p4","current":true,"incoming":false},{"path":"p5","current":true,"incoming":false},{"path":"p6","current":true,"incoming":false},{"path":"p7","current":true,"incoming":false},{"path":"p8","current":true,"incoming":false},{"path":"p9","current":true,"incoming":false},{"path":"p10","current":true,"incoming":false},{"path":"p11","current":true,"incoming":false},{"path":"p12","current":true,"incoming":false},{"path":"p13","current":true,"incoming":false},{"path":"p14","current":true,"incoming":false},{"path":"p15","current":true,"incoming":false},{"path":"p16","current":true,"incoming":false},{"path":"p17","current":true,"incoming":false},{"path":"p18","current":true,"incoming":false},{"path":"p19","current":true,"incoming":false},{"path":"p20","current":true,"incoming":false},{"path":"p21","current":true,"incoming":false},{"path":"p22","current":true,"incoming":false},{"path":"p23","current":true,"incoming":false},{"path":"p24","current":true,"incoming":false}]}]},{"name":"b.json","records":[{"rloc16":"0x1000","status":"online"}]}]},"expected":{"contract":[{"rloc16":"0x1000","status":"online","_merge_conflicts":[{"path":"p0","current":true,"incoming":false},{"path":"p1","current":true,"incoming":false},{"path":"p2","current":true,"incoming":false},{"path":"p3","current":true,"incoming":false},{"path":"p4","current":true,"incoming":false},{"path":"p5","current":true,"incoming":false},{"path":"p6","current":true,"incoming":false},{"path":"p7","current":true,"incoming":false},{"path":"p8","current":true,"incoming":false},{"path":"p9","current":true,"incoming":false},{"path":"p10","current":true,"incoming":false},{"path":"p11","current":true,"incoming":false},{"path":"p12","current":true,"incoming":false},{"path":"p13","current":true,"incoming":false},{"path":"p14","current":true,"incoming":false},{"path":"p15","current":true,"incoming":false},{"path":"p16","current":true,"incoming":false},{"path":"p17","current":true,"incoming":false},{"path":"p18","current":true,"incoming":false},{"path":"p19","current":true,"incoming":false}],"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"positive-multi-fabric-strict-omr","area":"matter","operation":"merge","enforcement":"contract","description":"Positive multi fabric strict omr.","inputs":{"strategy":"by-identity","sources":[{"name":"0.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","matterId":"000000000000aaaa-0000000000000001"}]},{"name":"1.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::2","matterId":"000000000000bbbb-0000000000000002"}]}],"options":{"matterIdentityMode":"strict-omr"}},"expected":{"contract":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","matterId":"000000000000aaaa-0000000000000001","_source_files":["0.json","1.json"],"_merge_identity_keys":["extAddress:aa11","omrIpv6Address:fd00::1","matterFabricNode:000000000000aaaa|0000000000000001","omrIpv6Address:fd00::2","matterFabricNode:000000000000bbbb|0000000000000002"],"_merge_conflicts":[{"path":"omrIpv6Address","current":"fd00::1","incoming":"fd00::2"},{"path":"matterId","current":"000000000000aaaa-0000000000000001","incoming":"000000000000bbbb-0000000000000002"}]}]}},
+    {"id":"positive-multi-fabric-composite-guard","area":"matter","operation":"merge","enforcement":"contract","description":"Positive multi fabric composite guard.","inputs":{"strategy":"by-identity","sources":[{"name":"0.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","matterId":"000000000000aaaa-0000000000000001"}]},{"name":"1.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::2","matterId":"000000000000bbbb-0000000000000002"}]}],"options":{"matterIdentityMode":"composite-guard"}},"expected":{"contract":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","matterId":"000000000000aaaa-0000000000000001","_source_files":["0.json","1.json"],"_merge_identity_keys":["extAddress:aa11","omrIpv6Address:fd00::1","matterFabricNode:000000000000aaaa|0000000000000001","omrIpv6Address:fd00::2","matterFabricNode:000000000000bbbb|0000000000000002"],"_merge_conflicts":[{"path":"omrIpv6Address","current":"fd00::1","incoming":"fd00::2"},{"path":"matterId","current":"000000000000aaaa-0000000000000001","incoming":"000000000000bbbb-0000000000000002"}]}]}},
+    {"id":"matter-full-width-hex-text","area":"matter","operation":"merge","enforcement":"contract","description":"Matter full width hex text.","inputs":{"strategy":"by-identity","sources":[{"name":"0.json","records":[{"compressedFabricId":"ffffffffffffffff","nodeId":"fffffffffffffffe"}]},{"name":"1.json","records":[{"compressedFabricId":"ffffffffffffffff","nodeId":"fffffffffffffffe"}]}]},"expected":{"contract":[{"compressedFabricId":"ffffffffffffffff","nodeId":"fffffffffffffffe","_source_files":["0.json","1.json"],"_merge_identity_keys":["matterFabricNode:ffffffffffffffff|fffffffffffffffe"]}]}},
+    {"id":"zero-placeholder-upgrade","area":"identity","operation":"merge","enforcement":"contract","description":"Zero placeholder upgrade.","inputs":{"strategy":"by-identity","sources":[{"name":"0.json","records":[{"extAddress":"0000000000000000","rloc16":"0x1000","deviceLabel":"found-0x1000"}]},{"name":"1.json","records":[{"extAddress":"aa11","rloc16":"0x1000","deviceLabel":"Kitchen"}]}]},"expected":{"contract":[{"extAddress":"aa11","rloc16":"0x1000","deviceLabel":"Kitchen","_source_files":["0.json","1.json"],"_merge_identity_keys":["rloc16:0x1000","extAddress:aa11"]}]}},
+    {"id":"scalar-types-survive-union","area":"scalar","operation":"merge","enforcement":"contract","description":"Scalar types survive union.","inputs":{"strategy":"by-identity","sources":[{"name":"0.json","records":[{"rloc16":"0x1000","values":[0,false,null,"0",{},[]]}]},{"name":"1.json","records":[{"rloc16":"0x1000","values":[false,0,"0",null,[],{}]}]}]},"expected":{"contract":[{"rloc16":"0x1000","values":[0,false,null,"0",{},[]],"_source_files":["0.json","1.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"address-arrays-reject-nonstrings","area":"scalar","operation":"merge","enforcement":"contract","description":"Address arrays reject nonstrings.","inputs":{"strategy":"by-identity","options":{"omrPrefix":"fd99:"},"sources":[{"name":"0.json","records":[{"rloc16":"0x1000","ipv6Addresses":[" fd00::1 ",1,"",false]}]},{"name":"1.json","records":[{"rloc16":"0x1000","ipv6Addresses":["fd00::2","fd00::1",null]}]}]},"expected":{"contract":[{"rloc16":"0x1000","ipv6Addresses":["fd00::1","fd00::2"],"_source_files":["0.json","1.json"],"_merge_identity_keys":["rloc16:0x1000"]}]}},
+    {"id":"relationship-concrete-safety-children","area":"child","operation":"merge","enforcement":"contract","description":"Relationship concrete safety children.","inputs":{"strategy":"by-identity","sources":[{"name":"0.json","records":[{"rloc16":"0x1000","children":[{"extAddress":"aa11","rloc16":"0x1001"}]}]},{"name":"1.json","records":[{"rloc16":"0x1000","children":[{"extAddress":"bb22","rloc16":"0x1001"}]}]}]},"expected":{"contract":[{"rloc16":"0x1000","children":[{"extAddress":"aa11","rloc16":"0x1001"},{"extAddress":"bb22","rloc16":"0x1001"}],"_source_files":["0.json","1.json"],"_merge_identity_keys":["rloc16:0x1000"],"_merge_conflicts":[{"path":"children[rloc16:0x1001].extAddress","current":"aa11","incoming":"bb22"}]}]}},
+    {"id":"relationship-concrete-safety-routerneighbors","area":"neighbor","operation":"merge","enforcement":"contract","description":"Relationship concrete safety routerneighbors.","inputs":{"strategy":"by-identity","sources":[{"name":"0.json","records":[{"rloc16":"0x1000","routerNeighbors":[{"extAddress":"aa11","rloc16":"0x1001"}]}]},{"name":"1.json","records":[{"rloc16":"0x1000","routerNeighbors":[{"extAddress":"bb22","rloc16":"0x1001"}]}]}]},"expected":{"contract":[{"rloc16":"0x1000","routerNeighbors":[{"extAddress":"aa11","rloc16":"0x1001"},{"extAddress":"bb22","rloc16":"0x1001"}],"_source_files":["0.json","1.json"],"_merge_identity_keys":["rloc16:0x1000"],"_merge_conflicts":[{"path":"routerNeighbors[rloc16:0x1001].extAddress","current":"aa11","incoming":"bb22"}]}]}},
+    {"id":"ambiguity-then-concrete-disambiguation","area":"identity","operation":"merge","enforcement":"contract","description":"Multi-owner indexes retain all candidates and a concrete observation disambiguates without absorbing the other owner.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","rloc16":"0x1000"},{"extAddress":"bb22","matterId":"000000000000aaaa-0000000000000001"}]},{"name":"bridge.json","records":[{"omrIpv6Address":"fd00::1","matterId":"000000000000aaaa-0000000000000001","rloc16":"0x1000"}]},{"name":"resolve.json","records":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","resolved":true}]}]},"expected":{"contract":[{"extAddress":"aa11","omrIpv6Address":"fd00::1","rloc16":"0x1000","_source_files":["a.json","bridge.json","resolve.json"],"_merge_identity_keys":["extAddress:aa11","omrIpv6Address:fd00::1","rloc16:0x1000","matterFabricNode:000000000000aaaa|0000000000000001"],"matterId":"000000000000aaaa-0000000000000001","resolved":true,"_merge_conflicts":[{"path":"_merge_identity_ambiguity","current":[["extAddress:aa11","omrIpv6Address:fd00::1","rloc16:0x1000"],["extAddress:bb22","matterFabricNode:000000000000aaaa|0000000000000001"]],"incoming":["omrIpv6Address:fd00::1","matterFabricNode:000000000000aaaa|0000000000000001","rloc16:0x1000"]}]},{"extAddress":"bb22","matterId":"000000000000aaaa-0000000000000001","_source_files":["a.json"],"_merge_identity_keys":["extAddress:bb22","matterFabricNode:000000000000aaaa|0000000000000001"]}]}},
+    {"id":"mdns-timestamp-both-missing","area":"mdns","operation":"merge","enforcement":"contract","description":"Missing mDNS timestamps do not prevent recursive service completion.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","serviceInfo":{"properties":{"x":{"a":0}}}}]},{"name":"b.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","serviceInfo":{"properties":{"x":{"b":false}}}}]}]},"expected":{"contract":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","serviceInfo":{"properties":{"x":{"a":0,"b":false}}},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"],"_mdns_aliases":{}}]}},
+    {"id":"mdns-timestamp-known-then-missing","area":"mdns","operation":"merge","enforcement":"contract","description":"Missing mDNS timestamps do not prevent recursive service completion.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","serviceInfo":{"properties":{"x":{"a":0}}},"capturedAtEpoch":10}]},{"name":"b.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","serviceInfo":{"properties":{"x":{"b":false}}}}]}]},"expected":{"contract":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","serviceInfo":{"properties":{"x":{"a":0,"b":false}}},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"],"_mdns_aliases":{},"capturedAtEpoch":10}]}},
+    {"id":"mdns-timestamp-null-then-known","area":"mdns","operation":"merge","enforcement":"contract","description":"Missing mDNS timestamps do not prevent recursive service completion.","inputs":{"strategy":"by-identity","sources":[{"name":"a.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","serviceInfo":{"properties":{"x":{"a":0}}},"capturedAtEpoch":null}]},{"name":"b.json","records":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","serviceInfo":{"properties":{"x":{"b":false}}},"capturedAtEpoch":10}]}]},"expected":{"contract":[{"rloc16":"0x1000","scope":"_meshcop._udp.local.","serviceInfo":{"properties":{"x":{"a":0,"b":false}}},"_source_files":["a.json","b.json"],"_merge_identity_keys":["rloc16:0x1000"],"_mdns_aliases":{},"capturedAtEpoch":10}]}},
+    {"id":"child-source-priority-forward","area":"child","operation":"merge","enforcement":"contract","implementationPhase":2,"description":"Child metric source authority is independent of input-file order.","inputs":{"strategy":"by-identity","sources":[{"name":"td-otbr-cli-networkdiag-fetch-all.json","records":[{"rloc16":"0x1000","children":[{"rloc16":"0x1001","averageRssi":-70}]}]},{"name":"td-otbr-restapi-diagnostics.json","records":[{"rloc16":"0x1000","children":[{"rloc16":"0x1001","averageRssi":-80,"linkMargin":0}]}]}]},"expected":{"contract":[{"rloc16":"0x1000","children":[{"rloc16":"0x1001","averageRssi":-70,"linkMargin":0}],"_source_files":["td-otbr-cli-networkdiag-fetch-all.json","td-otbr-restapi-diagnostics.json"],"_merge_identity_keys":["rloc16:0x1000"],"_merge_conflicts":[{"path":"children[rloc16:0x1001].averageRssi","current":-70,"incoming":-80}]}]}},
+    {"id":"child-source-priority-reversed","area":"child","operation":"merge","enforcement":"contract","implementationPhase":2,"description":"Child metric source authority is independent of input-file order.","inputs":{"strategy":"by-identity","sources":[{"name":"td-otbr-restapi-diagnostics.json","records":[{"rloc16":"0x1000","children":[{"rloc16":"0x1001","averageRssi":-80,"linkMargin":0}]}]},{"name":"td-otbr-cli-networkdiag-fetch-all.json","records":[{"rloc16":"0x1000","children":[{"rloc16":"0x1001","averageRssi":-70}]}]}]},"expected":{"contract":[{"rloc16":"0x1000","children":[{"rloc16":"0x1001","averageRssi":-70,"linkMargin":0}],"_source_files":["td-otbr-cli-networkdiag-fetch-all.json","td-otbr-restapi-diagnostics.json"],"_merge_identity_keys":["rloc16:0x1000"],"_merge_conflicts":[{"path":"children[rloc16:0x1001].averageRssi","current":-70,"incoming":-80}]}]}}
   ]
 }

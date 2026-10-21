@@ -1,10 +1,23 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-import { mergeRowsByStrategy, normalizeRows } from "../../src/js/tdash-merge.js";
+import {
+  mergeRowsByStrategy, normalizeRows, compareSequences, isSequenceNewer,
+  mergeRouteData,
+} from "../../src/js/tdash-merge.js";
 import { canonicalExtPanId, normalizeInputRecord } from "../../src/js/tdash-device-fields.js";
+import { buildDatasetRows } from "../../src/js/tdash-dataset.js";
 
 assert.throws(() => canonicalExtPanId(8699115387970395326), /represented exactly/);
+for (const [base, incoming] of [[100, 228], [228, 100]]) {
+  assert.equal(isSequenceNewer(base, incoming), false);
+  assert.equal(isSequenceNewer(incoming, base), false);
+  assert.equal(compareSequences(base, incoming), 0);
+}
+const routeInput = [{ routeId: 0, routeCost: 0 }];
+assert.deepEqual(mergeRouteData("", routeInput, [{ routeId: 0, linkQualityIn: 3 }]),
+  [{ routeId: 0, routeCost: 0, linkQualityIn: 3 }]);
+assert.deepEqual(routeInput, [{ routeId: 0, routeCost: 0 }]);
 
 
 function projectResult(value) {
@@ -12,7 +25,7 @@ function projectResult(value) {
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
-        .filter(([key]) => key !== "_row_key" && key !== "_merge_identity_keys")
+        .filter(([key]) => key !== "_row_key")
         .map(([key, child]) => [key, projectResult(child)]),
     );
   }
@@ -46,9 +59,17 @@ function runCase(contractCase) {
     return Object.fromEntries(inputs.fields.filter((field) => field in merged)
       .map((field) => [field, merged[field]]));
   }
-  return projectResult(
+  const result = projectResult(
     mergeRowsByStrategy(rowGroups, inputs.strategy, inputs.options ?? {}),
   );
+  const assembled = buildDatasetRows({
+    files: inputs.sources.map((source) => source.name),
+    mergeStrategy: inputs.strategy,
+    rowExtractor: "raw-array",
+    adaptor: "raw-array",
+  }, inputs.sources.map((source) => source.records), inputs.options ?? {}).rows;
+  assert.deepEqual(projectResult(assembled), result, `${contractCase.id}: dataset assembly`);
+  return result;
 }
 
 

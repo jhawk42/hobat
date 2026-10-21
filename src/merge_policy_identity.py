@@ -8,6 +8,7 @@ from td_device_fields import (
     is_placeholder_ext_address as is_placeholder_extaddr,
     normalize_identifier_text,
     normalize_input_record,
+    get_device_identity_keys,
 )
 
 
@@ -109,10 +110,10 @@ def normalize_identifiers(
 
 def find_candidate_node_ids(
     identity_values: dict[str, str],
-    by_rloc16: dict[str, int],
-    by_extaddr: dict[str, int],
-    by_omr: dict[str, int],
-    by_matter_fabric_node: dict[str, int],
+    by_rloc16: dict[str, set[int]],
+    by_extaddr: dict[str, set[int]],
+    by_omr: dict[str, set[int]],
+    by_matter_fabric_node: dict[str, set[int]],
 ) -> set[int]:
     candidate_ids: set[int] = set()
 
@@ -122,24 +123,45 @@ def find_candidate_node_ids(
     matter_id = identity_values.get("matter_fabric_node")
 
     if isinstance(extaddr, str) and extaddr in by_extaddr:
-        candidate_ids.add(by_extaddr[extaddr])
+        candidate_ids.update(by_extaddr[extaddr])
     if isinstance(omr, str) and omr in by_omr:
-        candidate_ids.add(by_omr[omr])
+        candidate_ids.update(by_omr[omr])
     if isinstance(rloc16, str) and rloc16 in by_rloc16:
-        candidate_ids.add(by_rloc16[rloc16])
+        candidate_ids.update(by_rloc16[rloc16])
     if isinstance(matter_id, str) and matter_id in by_matter_fabric_node:
-        candidate_ids.add(by_matter_fabric_node[matter_id])
+        candidate_ids.update(by_matter_fabric_node[matter_id])
 
     return candidate_ids
 
 
 def add_identifier(
-    index: dict[str, int],
+    index: dict[str, set[int]],
     key: str,
     node_id: int,
 ) -> None:
     if key:
-        index[key] = node_id
+        index.setdefault(key, set()).add(node_id)
+
+
+def identities_compatible(left: dict[str, Any], right: dict[str, Any], mode: str) -> bool:
+    left_keys = left.get("_merge_identity_keys", get_device_identity_keys(left))
+    right_keys = right.get("_merge_identity_keys", get_device_identity_keys(right))
+
+    def values(keys: list[str], prefix: str) -> set[str]:
+        return {key for key in keys if key.startswith(prefix)}
+
+    left_ext = values(left_keys, "extAddress:")
+    right_ext = values(right_keys, "extAddress:")
+    if left_ext and right_ext and left_ext != right_ext:
+        return False
+    if left_ext & right_ext:
+        return True
+    if mode == "composite-guard":
+        left_matter = values(left_keys, "matterFabricNode:")
+        right_matter = values(right_keys, "matterFabricNode:")
+        if left_matter and right_matter and not left_matter & right_matter:
+            return False
+    return True
 
 
 def filter_candidate_ids_for_extaddr_consistency(

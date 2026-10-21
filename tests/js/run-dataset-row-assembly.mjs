@@ -133,6 +133,25 @@ assert.deepEqual(noneResult.loadedFiles, ["td-mdns-scopes-thread.json"]);
 assert.deepEqual(noneResult.loadedFileIndexes, [1]);
 assert.equal(noneResult.rows.length, 1);
 assert.equal(noneResult.rows[0].name, "second");
+const noneBoth = buildDatasetRows(entry(), [rawFirst, rawSecond]);
+assert.deepEqual(noneBoth.rows.map((row) => row.name), ["first"]);
+assert.deepEqual(noneBoth.loadedFileIndexes, [0, 1]);
+assert.deepEqual(noneBoth.rows[0]._source_files, ["td-static-extaddr-device-label.json"]);
+const changedRloc = [
+  [{ extAddress: "aa11", rloc16: "0x1000" }],
+  [{ extAddress: "aa11", rloc16: "0x2000" }],
+];
+assert.equal(buildDatasetRows(entry({ mergeStrategy: "by-rloc16" }), changedRloc).rows.length, 2);
+assert.equal(buildDatasetRows(entry({ mergeStrategy: "by-identity" }), changedRloc).rows.length, 1);
+const collidingRloc = [
+  [{ extAddress: "aa11", rloc16: "0x1000" }],
+  [{ extAddress: "bb22", rloc16: "0x1000" }],
+];
+assert.deepEqual(
+  buildDatasetRows(entry({ mergeStrategy: "by-rloc16" }), collidingRloc).rows
+    .map((row) => [row.extAddress, row._source_files]),
+  [["aa11", ["td-static-extaddr-device-label.json"]], ["bb22", ["td-mdns-scopes-thread.json"]]],
+);
 
 const canonicalResult = buildDatasetRows(entry(), [[{
   extAddress: "AA",

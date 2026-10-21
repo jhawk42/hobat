@@ -6,6 +6,26 @@ from pathlib import Path
 from merge_dataset import build_merged_records
 
 
+def test_ambiguous_candidates_are_reported_without_merged_provenance(tmp_path: Path) -> None:
+    inputs = {
+        "a.json": [
+            {"extAddress": "aa11", "omrIpv6Address": "fd00::1", "rloc16": "0x1000"},
+            {"extAddress": "bb22", "matterId": "000000000000aaaa-0000000000000001"},
+        ],
+        "b.json": [{
+            "omrIpv6Address": "fd00::1", "rloc16": "0x1000",
+            "matterId": "000000000000aaaa-0000000000000001",
+        }],
+    }
+    rows, report = build_merged_records(tmp_path, "", list(inputs), {}, input_data=inputs)
+    assert len(rows) == 3
+    assert [row["_source_files"] for row in rows] == [["a.json"], ["a.json"], ["b.json"]]
+    assert report["identity_collision_count"] == 1
+    assert report["identity_collision_examples"][0]["outcome"] == "retained-ambiguous"
+    assert report["matched_existing_by_source"] == {}
+    assert report["new_nodes_by_source"] == {"a.json": 2, "b.json": 1}
+
+
 class BuildMergedRecordsIdentityTests(unittest.TestCase):
     def write_json(self, base_dir: Path, filename: str, payload: object) -> None:
         (base_dir / filename).write_text(json.dumps(payload), encoding="utf-8")

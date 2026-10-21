@@ -36,8 +36,7 @@ def test_python_javascript_contract_parity(case: dict[str, object], tmp_path: Pa
     case_id = str(case["id"])
     python_result = run_python_case(case, tmp_path)
     javascript_result = run_node_cases([case_id])[case_id]
-    unordered_paths = case.get("comparison", {}).get("unorderedArrays", [])
-    canonical_python = canonicalize_result(python_result, unordered_paths)
-    canonical_javascript = canonicalize_result(javascript_result, unordered_paths)
+    canonical_python = canonicalize_result(python_result)
+    canonical_javascript = canonicalize_result(javascript_result)
     difference = first_difference(canonical_python, canonical_javascript)
     assert difference is None, f"{case_id} parity {difference}"

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import re
 from copy import deepcopy
 from typing import Any
 
 from td_record_merge import value_is_empty
+from td_device_fields import get_matter_fabric_node_identity
 
 
 def merge_mdns_service_info(
@@ -28,38 +28,20 @@ def merge_mdns_service_info(
     Returns:
         Merged service_info
     """
-    # If timestamps available, prefer newer
-    if base_timestamp is not None and incoming_timestamp is not None:
-        if incoming_timestamp > base_timestamp:
-            # Incoming is newer, use it as base
-            result = deepcopy(incoming_service_info)
-            # Merge any additional fields from base
-            for key, value in base_service_info.items():
-                if key not in result or value_is_empty(result.get(key)):
-                    result[key] = deepcopy(value)
-            return result
-        else:
-            # Base is newer or equal, keep it
-            result = deepcopy(base_service_info)
-            # Merge any additional fields from incoming
-            for key, value in incoming_service_info.items():
-                if key not in result or value_is_empty(result.get(key)):
-                    result[key] = deepcopy(value)
-            return result
-    
-    # No timestamp comparison possible, merge deeply
-    result = deepcopy(base_service_info)
-    for key, value in incoming_service_info.items():
-        if key not in result:
+    incoming_first = (
+        base_timestamp is not None and incoming_timestamp is not None
+        and incoming_timestamp > base_timestamp
+    )
+    primary, secondary = (
+        (incoming_service_info, base_service_info) if incoming_first
+        else (base_service_info, incoming_service_info)
+    )
+    result = deepcopy(primary)
+    for key, value in secondary.items():
+        if key not in result or value_is_empty(result[key]):
             result[key] = deepcopy(value)
         elif isinstance(result[key], dict) and isinstance(value, dict):
-            # Merge nested dicts
-            for nested_key, nested_value in value.items():
-                if nested_key not in result[key] or value_is_empty(result[key].get(nested_key)):
-                    result[key][nested_key] = deepcopy(nested_value)
-        elif value_is_empty(result[key]) and not value_is_empty(value):
-            result[key] = deepcopy(value)
-    
+            result[key] = merge_mdns_service_info(result[key], value, None, None)
     return result
 
 
@@ -75,7 +57,7 @@ def get_mdns_event_priority(event: str) -> int:
         "update": 2,
         "remove": 1,
     }
-    return event_priorities.get(event, 0)
+    return event_priorities.get(event.strip().lower(), 0)
 
 
 def merge_mdns_records(
@@ -156,7 +138,8 @@ def is_mdns_record(record: dict[str, Any]) -> bool:
     """Return True when a record appears to be an mDNS capture row."""
     if not isinstance(record, dict):
         return False
-    if isinstance(record.get("record_key"), str) and "|" in record["record_key"]:
+    record_key = record.get("recordKey", record.get("record_key"))
+    if isinstance(record_key, str) and "|" in record_key:
         return True
     scope = record.get("scope")
     if isinstance(scope, str) and scope.startswith("_") and scope.endswith(".local."):
@@ -199,58 +182,14 @@ def _extract_service_info_property_decoded(record: dict[str, Any], key: str) -> 
     props = service_info.get("properties")
     if not isinstance(props, dict):
         return ""
-    prop_obj = props.get(key)
+    preferred_key = {"FabricID_compressed": "fabricIdCompressed", "NodeID": "nodeId"}.get(key, key)
+    prop_obj = props.get(preferred_key, props.get(key))
     if not isinstance(prop_obj, dict):
         return ""
     decoded = prop_obj.get("decoded")
     if isinstance(decoded, str):
         return decoded.strip()
     return ""
-
-
-def get_matter_fabric_node_identity(record: dict[str, Any]) -> str:
-    """Return normalized Matter composite identity from FabricID_compressed + NodeID."""
-    if not isinstance(record, dict):
-        return ""
-
-    matter = record.get("matter")
-    matter_record = matter if isinstance(matter, dict) else record
-    fabric_value = matter_record.get(
-        "compressedFabricId", matter_record.get("fabricId")
-    )
-    node_value = matter_record.get("nodeId")
-
-    def normalize_component(value: Any) -> str:
-        if isinstance(value, bool):
-            return ""
-        if isinstance(value, int):
-            return f"{value:016x}" if 0 <= value < 1 << 64 else ""
-        if not isinstance(value, str):
-            return ""
-        text = value.strip().lower()
-        if not text:
-            return ""
-        if re.fullmatch(r"(?:0x)?[0-9a-f]{1,16}", text):
-            return f"{int(text, 16):016x}"
-        return text
-
-    fabric_id = normalize_component(fabric_value)
-    node_id = normalize_component(node_value)
-    if fabric_id and node_id:
-        return f"{fabric_id}|{node_id}"
-
-    fabric_id = _normalize_alias_text(
-        _extract_service_info_property_decoded(record, "FabricID_compressed"),
-        lower=True,
-    )
-    node_id = _normalize_alias_text(
-        _extract_service_info_property_decoded(record, "NodeID"),
-        lower=True,
-    )
-
-    if not fabric_id or not node_id:
-        return ""
-    return f"{fabric_id}|{node_id}"
 
 
 def update_mdns_aliases(target: dict[str, Any], record: dict[str, Any]) -> None:
@@ -265,14 +204,14 @@ def update_mdns_aliases(target: dict[str, Any], record: dict[str, Any]) -> None:
 
     name_value = _normalize_alias_text(record.get("name"), lower=False)
     server_value = _normalize_alias_text(record.get("server"), lower=False)
-    server_key_value = _normalize_alias_text(record.get("server_key"), lower=True)
+    server_key_value = _normalize_alias_text(record.get("serverKey", record.get("server_key")), lower=True)
 
-    if not server_value:
-        service_info = record.get("serviceInfo", record.get("service_info"))
-        if isinstance(service_info, dict):
+    service_info = record.get("serviceInfo", record.get("service_info"))
+    if isinstance(service_info, dict):
+        if not server_value:
             server_value = _normalize_alias_text(service_info.get("server"), lower=False)
-            if not server_key_value:
-                server_key_value = _normalize_alias_text(service_info.get("key"), lower=True)
+        if not server_key_value:
+            server_key_value = _normalize_alias_text(service_info.get("key"), lower=True)
 
     fabric_id = _normalize_alias_text(
         _extract_service_info_property_decoded(record, "FabricID_compressed"),
@@ -307,7 +246,7 @@ def extract_mdns_merge_view(record: dict[str, Any]) -> dict[str, Any]:
         "scope",
         "name",
         "extAddress",
-        "omrIpv6Addr",
+        "omrIpv6Address",
         "isBorderRouter",
         "role",
         "serviceInfo",
@@ -320,12 +259,12 @@ def extract_mdns_merge_view(record: dict[str, Any]) -> dict[str, Any]:
         if key in record:
             out[key] = deepcopy(record[key])
 
-    service_info = out.get("service_info")
+    service_info = out.get("serviceInfo")
     if isinstance(service_info, dict):
         if "server" not in out and isinstance(service_info.get("server"), str):
             out["server"] = service_info.get("server")
-        if "server_key" not in out and isinstance(service_info.get("key"), str):
-            out["server_key"] = service_info.get("key")
+        if "serverKey" not in out and isinstance(service_info.get("key"), str):
+            out["serverKey"] = service_info.get("key")
 
     return out
 
@@ -343,7 +282,7 @@ def apply_mdns_merge_view(target: dict[str, Any], merged: dict[str, Any]) -> Non
         "scope",
         "name",
         "extAddress",
-        "omrIpv6Addr",
+        "omrIpv6Address",
         "isBorderRouter",
         "role",
         "serviceInfo",

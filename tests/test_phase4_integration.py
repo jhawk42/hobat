@@ -802,12 +802,10 @@ def test_production_flow_mdns_omr_dedup_aliases():
     assert len(merged) == 1, f"Expected 1 merged node, got {len(merged)}"
     node = merged[0]
 
-    # NOTE: Currently source precedence wins over mDNS timestamp precedence.
-    # td-mdns-scopes-thread.json (precedence 50) > td-mdns-scopes-matter.json (precedence 47)
-    # So record_a (timestamp 1000.0) from thread file is used as base.
-    # TODO: Fix merge logic so mDNS timestamp precedence is preserved across deep_merge.
-    assert node.get("capturedAtEpoch") == 1000.0  # thread file wins by source precedence
-    assert node.get("name") == "A._matter._tcp.local."  # from thread file
+    assert node.get("capturedAtEpoch") == 2000.0
+    assert node.get("name") == "B._matter._tcp.local."
+    assert node.get("server") == "56A2B29EC702D2D2-2.local."
+    assert node.get("serviceInfo", {}).get("server") == node["server"]
     assert node.get("omrIpv6Address") == "fd00:abcd::1234"
 
     # Alias rollups should preserve both records' variants.

@@ -10,7 +10,6 @@ import {
   getCanonicalOmrIpv6Address,
   normalizeRowMergeAliases,
   normalizeNestedArrayFields,
-  formatValue,
 } from "./tdash-utils.js";
 
 const TLV_SUMMARY_PRIORITY_FIELD = "_tlv_summary_source_priority";
@@ -84,66 +83,11 @@ export function getRowMergeIdentityKeys(row, strategy) {
   return getDeviceIdentityKeys(row, strategy);
 }
 
-function isMatterOperationalMdnsRow(row) {
-  if (!isPlainObject(row)) return false;
-  const scope = toText(row.scope).toLowerCase();
-  return scope === "_matter._tcp.local.";
-}
-
-function getServiceInfoPropDecodedText(row, key) {
-  const props = row?.serviceInfo?.properties ?? row?.service_info?.properties;
-  if (!isPlainObject(props)) return "";
-  const preferredKey = key === "FabricID_compressed"
-    ? "fabricIdCompressed"
-    : (key === "NodeID" ? "nodeId" : key);
-  const obj = props[key] ?? props[preferredKey];
-  if (!isPlainObject(obj)) return "";
-  const decoded = toText(obj.decoded);
-  return decoded ? decoded.toLowerCase() : "";
-}
-
 function getMatterFabricNodeIdentity(row) {
   const directKeys = getDeviceIdentityKeys(row, "by-identity")
     .find((key) => key.startsWith("matterFabricNode:"));
   if (directKeys) return directKeys.slice("matterFabricNode:".length);
-  if (!isMatterOperationalMdnsRow(row)) return "";
-  const fabricId = getServiceInfoPropDecodedText(row, "FabricID_compressed");
-  const nodeId = getServiceInfoPropDecodedText(row, "NodeID");
-  if (!fabricId || !nodeId) return "";
-  return `${fabricId}|${nodeId}`;
-}
-
-function filterCandidateIdsForMatterIdentityConsistency(candidateIds, incomingRow, mergedRows) {
-  const incomingMatterId = getMatterFabricNodeIdentity(incomingRow);
-  if (!incomingMatterId) return candidateIds;
-
-  const incomingExtaddr = getCanonicalExtaddr(incomingRow);
-  const incomingRloc16 = getCanonicalRloc16(incomingRow);
-
-  const filtered = [];
-  candidateIds.forEach((nodeId) => {
-    const node = mergedRows.get(nodeId);
-    if (!isPlainObject(node)) return;
-
-    const nodeExtaddr = getCanonicalExtaddr(node);
-    if (incomingExtaddr && nodeExtaddr && incomingExtaddr === nodeExtaddr) {
-      filtered.push(nodeId);
-      return;
-    }
-
-    const nodeMatterId = getMatterFabricNodeIdentity(node);
-    if (nodeMatterId) {
-      if (nodeMatterId === incomingMatterId) filtered.push(nodeId);
-      return;
-    }
-
-    const nodeRloc16 = getCanonicalRloc16(node);
-    if (incomingRloc16 && nodeRloc16 && incomingRloc16 === nodeRloc16) {
-      filtered.push(nodeId);
-    }
-  });
-
-  return filtered;
+  return "";
 }
 
 function getMatterIdentityMode(options = {}) {
@@ -160,25 +104,37 @@ export function isEmptyMergeValue(value) {
 
 export function areMergeValuesEquivalent(left, right) {
   if (left === right) return true;
-  if (
-    Array.isArray(left) ||
-    Array.isArray(right) ||
-    isPlainObject(left) ||
-    isPlainObject(right)
-  ) {
-    try {
-      return JSON.stringify(left) === JSON.stringify(right);
-    } catch (_error) {
-      return false;
-    }
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length
+      && left.every((value, index) => areMergeValuesEquivalent(value, right[index]));
+  }
+  if (isPlainObject(left) && isPlainObject(right)) {
+    return Object.keys(left).length === Object.keys(right).length
+      && Object.keys(left).every((key) => Object.hasOwn(right, key)
+        && areMergeValuesEquivalent(left[key], right[key]));
   }
   return false;
+}
+
+function mergeArrays(existing, incoming) {
+  const result = [];
+  [...existing, ...incoming].forEach((value) => {
+    if (!result.some((item) => areMergeValuesEquivalent(item, value))) result.push(structuredClone(value));
+  });
+  return result;
+}
+
+function fillMissingFields(target, source) {
+  Object.entries(source).forEach(([key, value]) => {
+    if (isEmptyMergeValue(target[key])) target[key] = structuredClone(value);
+    else if (isPlainObject(target[key]) && isPlainObject(value)) fillMissingFields(target[key], value);
+  });
 }
 
 export function mergeStringArrays(existingValues, incomingValues) {
   const merged = [];
   [...existingValues, ...incomingValues].forEach((value) => {
-    const text = toText(value);
+    const text = typeof value === "string" ? value.trim() : "";
     if (text && !merged.includes(text)) merged.push(text);
   });
   return merged;
@@ -197,43 +153,26 @@ export function withRowProvenance(row, sourceName) {
 }
 
 export function appendRowConflict(target, path, currentValue, incomingValue, limit = 20) {
-  const conflicts = Array.isArray(target._merge_conflicts)
-    ? [...target._merge_conflicts]
-    : [];
+  const conflicts = mergeArrays(
+    Array.isArray(target._merge_conflicts) ? target._merge_conflicts : [], [],
+  ).slice(0, limit);
   if (conflicts.length >= limit) {
     target._merge_conflicts = conflicts;
     return;
   }
 
-  const currentText = formatValue(currentValue);
-  const incomingText = formatValue(incomingValue);
+  const entry = { path, current: currentValue, incoming: incomingValue };
   const duplicate = conflicts.some(
-    (entry) =>
-      entry &&
-      entry.path === path &&
-      entry.current === currentText &&
-      entry.incoming === incomingText,
+    (existing) => areMergeValuesEquivalent(existing, entry),
   );
   if (!duplicate) {
-    conflicts.push({ path, current: currentText, incoming: incomingText });
+    conflicts.push(structuredClone(entry));
   }
   target._merge_conflicts = conflicts;
 }
 
 function appendTlvSummaryConflict(target, path, currentValue, incomingValue, limit = 20) {
-  const conflicts = Array.isArray(target._merge_conflicts)
-    ? [...target._merge_conflicts]
-    : [];
-  const entry = { path, current: currentValue, incoming: incomingValue };
-  if (conflicts.length < limit && !conflicts.some(
-    (existing) => existing
-      && existing.path === path
-      && existing.current === currentValue
-      && existing.incoming === incomingValue,
-  )) {
-    conflicts.push(entry);
-  }
-  target._merge_conflicts = conflicts;
+  appendRowConflict(target, path, currentValue, incomingValue, limit);
 }
 
 export function mergeRowMetadata(target, source) {
@@ -249,6 +188,15 @@ export function mergeRowMetadata(target, source) {
       ? source._merge_identity_keys
       : [],
   );
+  if (isPlainObject(source._mdns_aliases)) {
+    const aliases = isPlainObject(target._mdns_aliases) ? target._mdns_aliases : {};
+    Object.entries(source._mdns_aliases).forEach(([key, values]) => {
+      if (Array.isArray(values)) aliases[key] = mergeStringArrays(
+        Array.isArray(aliases[key]) ? aliases[key] : [], values,
+      );
+    });
+    target._mdns_aliases = aliases;
+  }
   const existingConflicts = Array.isArray(target._merge_conflicts)
     ? target._merge_conflicts
     : [];
@@ -256,18 +204,16 @@ export function mergeRowMetadata(target, source) {
     ? source._merge_conflicts
     : [];
   if (incomingConflicts.length > 0) {
-    target._merge_conflicts = [
-      ...existingConflicts,
-      ...incomingConflicts,
-    ].slice(0, 20);
+    target._merge_conflicts = mergeArrays(existingConflicts, incomingConflicts).slice(0, 20);
   } else if (existingConflicts.length > 0) {
-    target._merge_conflicts = existingConflicts;
+    target._merge_conflicts = mergeArrays(existingConflicts, []).slice(0, 20);
   }
 }
 
 function isMdnsRecord(row) {
   if (!isPlainObject(row)) return false;
-  if (typeof row.record_key === "string" && row.record_key.includes("|")) return true;
+  if (typeof (row.recordKey ?? row.record_key) === "string"
+    && (row.recordKey ?? row.record_key).includes("|")) return true;
   return (
     typeof row.scope === "string" &&
     row.scope.startsWith("_") &&
@@ -308,8 +254,8 @@ function mergeMdnsServiceInfo(baseServiceInfo, incomingServiceInfo, baseTs, inco
 }
 
 function mergeMdnsRecords(base, incoming) {
-  const baseTs = Number(base?.capturedAtEpoch ?? base?.captured_at_epoch);
-  const incomingTs = Number(incoming?.capturedAtEpoch ?? incoming?.captured_at_epoch);
+  const baseTs = base?.capturedAtEpoch ?? base?.captured_at_epoch;
+  const incomingTs = incoming?.capturedAtEpoch ?? incoming?.captured_at_epoch;
   const hasBaseTs = Number.isFinite(baseTs);
   const hasIncomingTs = Number.isFinite(incomingTs);
 
@@ -488,31 +434,48 @@ export function createMergeContext(existingSource, incomingSource, options = {})
 }
 
 function mergeRouteObjects(existing, incoming, context) {
-  if (!isPlainObject(existing)) return { ...incoming };
+  if (!isPlainObject(existing)) existing = {};
   if (!isPlainObject(incoming)) return { ...existing };
   if (
     context.partitionId !== undefined
     && context.incomingPartitionId !== undefined
     && context.partitionId !== context.incomingPartitionId
   ) return { ...existing };
-  const existingSequence = Number(existing.idSequence ?? existing.id_sequence);
-  const incomingSequence = Number(incoming.idSequence ?? incoming.id_sequence);
-  if (Number.isFinite(existingSequence) && Number.isFinite(incomingSequence)) {
+  const parseSequence = (value) => isEmptyMergeValue(value) ? undefined
+    : (Number.isInteger(Number(value)) ? Number(value) : undefined);
+  const existingSequence = parseSequence(existing.idSequence ?? existing.id_sequence);
+  const incomingSequence = parseSequence(incoming.idSequence ?? incoming.id_sequence);
+  const filterContainer = (container) => {
+    const result = structuredClone(container);
+    if (Array.isArray(result.routeData)) {
+      result.routeData = result.routeData.filter((route) => {
+        const partition = getPartitionId(route);
+        return isPlainObject(route) && (context.partitionId === undefined
+          || partition === undefined || partition === context.partitionId);
+      });
+    }
+    return result;
+  };
+  existing = filterContainer(existing);
+  incoming = filterContainer(incoming);
+  if (existingSequence === undefined && incomingSequence !== undefined) return incoming;
+  if (existingSequence !== undefined && incomingSequence === undefined) return existing;
+  if (existingSequence !== undefined && incomingSequence !== undefined) {
     if (isSequenceNewer(incomingSequence, existingSequence)) {
-      const replacement = { ...incoming };
-      if (
-        Array.isArray(existing.routeData)
-        && existing.routeData.length > 0
-        && (!Array.isArray(incoming.routeData) || incoming.routeData.length === 0)
-      ) {
-        replacement.routeData = [...existing.routeData];
-      }
-      return replacement;
+      return incoming;
     }
     if (isSequenceNewer(existingSequence, incomingSequence)) return { ...existing };
   }
-  const merged = { ...existing };
-  deepMergeObjects(merged, incoming, "route", context.conflictTarget, context);
+  const merged = structuredClone(existing);
+  const ambiguous = existingSequence !== undefined && incomingSequence !== undefined
+    && ((incomingSequence - existingSequence + 256) % 256) === 128;
+  const fields = Object.fromEntries(Object.entries(incoming)
+    .filter(([key]) => !["routeData", "idSequence", "id_sequence"].includes(key)));
+  fillMissingFields(merged, fields);
+  merged.routeData = mergeRouteData(context.ownerRloc16,
+    Array.isArray(existing.routeData) ? existing.routeData : [],
+    Array.isArray(incoming.routeData) ? incoming.routeData : [],
+    { ...context, ambiguousSequence: ambiguous });
   return merged;
 }
 
@@ -580,14 +543,19 @@ export function mergeRowFields(target, source, context = {}) {
       return;
     }
     if (key === "ipv6Addresses" && Array.isArray(sv)) {
-      target[key] = [...new Set([...(Array.isArray(tv) ? tv : []), ...sv])];
+      target[key] = mergeStringArrays(Array.isArray(tv) ? tv : [], sv);
+    } else if (key === "extAddress" && isPlaceholderExtAddress(tv)
+      && !isPlaceholderExtAddress(sv) && !isEmptyMergeValue(sv)) {
+      target[key] = sv;
     } else if (key === "deviceLabel" && isPlaceholderDeviceLabel(tv)
       && !isPlaceholderDeviceLabel(sv) && !isEmptyMergeValue(sv)) {
       target[key] = sv;
     } else if (isEmptyMergeValue(tv) && !isEmptyMergeValue(sv)) {
       target[key] = sv;
     } else if (isPlainObject(tv) && isPlainObject(sv)) {
-      deepMergeObjects(tv, sv, key, target);
+      deepMergeObjects(tv, sv, key, target, context);
+    } else if (Array.isArray(tv) && Array.isArray(sv)) {
+      target[key] = mergeArrays(tv, sv);
     } else if (
       !isEmptyMergeValue(tv) &&
       !isEmptyMergeValue(sv) &&
@@ -619,6 +587,7 @@ export function compareSequences(seqA, seqB) {
   const a = ((seqA % 256) + 256) % 256;
   const b = ((seqB % 256) + 256) % 256;
   if (a === b) return 0;
+  if ((a - b + 256) % 256 === 128) return 0;
   return isSequenceNewer(a, b) ? 1 : -1;
 }
 
@@ -719,6 +688,8 @@ export function deepMergeObjects(target, source, pathPrefix, conflictTarget, ctx
       target[key] = sv;
     } else if (isPlainObject(tv) && isPlainObject(sv)) {
       deepMergeObjects(tv, sv, fieldPath, conflictTarget, ctx);
+    } else if (Array.isArray(tv) && Array.isArray(sv)) {
+      target[key] = mergeArrays(tv, sv);
     } else if (
       !isEmptyMergeValue(tv) &&
       !isEmptyMergeValue(sv) &&
@@ -747,19 +718,21 @@ export function deepMergeObjects(target, source, pathPrefix, conflictTarget, ctx
 export function mergeRouteData(ownerRloc16, baseRoutes, incomingRoutes, ctx = {}) {
   const index = new Map();
   const routeKey = (route) => {
-    const routeId = route.id ?? route.routeId;
-    if (routeId !== undefined) return `id:${routeId}`;
+    const routeId = route.routeId ?? route.id;
+    if ((typeof routeId === "number" && Number.isInteger(routeId) && routeId >= 0)
+      || (typeof routeId === "string" && /^(?:0x[0-9a-f]+|\d+)$/i.test(routeId.trim()))) return `id:${Number(routeId)}`;
     const sourceId = canonicalIdText(route.sourceId);
     const targetId = canonicalIdText(route.targetId);
     if (sourceId && targetId) return `endpoints:${sourceId}|${targetId}`;
     const extAddress = getCanonicalExtaddr(route);
     const rloc16 = getCanonicalRloc16(route);
-    return extAddress ? `extaddr:${extAddress}` : (rloc16 ? `rloc16:${rloc16}` : '');
+    return extAddress && !isPlaceholderExtAddress(extAddress)
+      ? `extaddr:${extAddress}` : (rloc16 ? `rloc16:${rloc16}` : '');
   };
   baseRoutes.forEach((route) => {
     if (!isPlainObject(route)) return;
     const key = routeKey(route);
-    if (key) index.set(key, route);
+    if (key) index.set(key, structuredClone(route));
   });
 
   incomingRoutes.forEach((route) => {
@@ -775,15 +748,18 @@ export function mergeRouteData(ownerRloc16, baseRoutes, incomingRoutes, ctx = {}
 
     const existing = index.get(key);
     if (!existing) {
-      index.set(key, { ...route });
+      if (!ctx.ambiguousSequence) index.set(key, structuredClone(route));
       return;
     }
 
     // Keep whichever entry has the newer id_sequence (RFC 1982)
-    const existingSeq = existing.id_sequence ?? existing.idSequence ?? 0;
-    const incomingSeq = route.id_sequence ?? route.idSequence ?? 0;
-    if (isSequenceNewer(incomingSeq, existingSeq)) {
-      index.set(key, { ...route });
+    const existingSeq = existing.idSequence ?? existing.id_sequence;
+    const incomingSeq = route.idSequence ?? route.id_sequence;
+    if (incomingSeq !== undefined && (existingSeq === undefined || isSequenceNewer(incomingSeq, existingSeq))) {
+      index.set(key, structuredClone(route));
+    } else if (existingSeq === incomingSeq || (existingSeq !== undefined
+      && incomingSeq !== undefined && compareSequences(existingSeq, incomingSeq) === 0)) {
+      fillMissingFields(existing, route);
     }
   });
 
@@ -805,6 +781,10 @@ function mergeRelationshipArrays(baseRecords, incomingRecords, context = {}) {
   const byRloc16 = new Map();
 
   const mergeRecord = (target, source) => {
+    const ext = getCanonicalExtaddr(source);
+    const identity = ext && !isPlaceholderExtAddress(ext)
+      ? `extAddress:${ext}` : `rloc16:${getCanonicalRloc16(source)}`;
+    const path = `${context.fieldPath || "relationship"}[${identity}]`;
     Object.keys(source).forEach((field) => {
       const replacesPlaceholderExtAddress =
         (field === "extAddress" || field === "extaddr")
@@ -812,6 +792,15 @@ function mergeRelationshipArrays(baseRecords, incomingRecords, context = {}) {
         && !isPlaceholderExtAddress(source[field]);
       if ((isEmptyMergeValue(target[field]) || replacesPlaceholderExtAddress) && !isEmptyMergeValue(source[field])) {
         target[field] = source[field];
+      } else if (isPlainObject(target[field]) && isPlainObject(source[field])) {
+        deepMergeObjects(target[field], source[field], `${path}.${field}`,
+          context.conflictTarget ?? target, context);
+      } else if (Array.isArray(target[field]) && Array.isArray(source[field])) {
+        target[field] = mergeArrays(target[field], source[field]);
+      } else if (!isEmptyMergeValue(source[field])
+        && !areMergeValuesEquivalent(target[field], source[field])) {
+        appendRowConflict(context.conflictTarget ?? target, `${path}.${field}`,
+          target[field], source[field], context.conflictLimit ?? 20);
       }
     });
   };
@@ -885,8 +874,7 @@ export function mergeRouterNeighbors(baseNeighbors, incomingNeighbors, context =
 // ── Source precedence sorting (#1) ────────────────────────────────────────────
 
 /**
- * Returns a new array of rowGroups sorted lowest-priority-first so that
- * higher-priority sources are merged last and their values win on conflicts.
+ * Returns rowGroups sorted highest-priority-first, preserving ties.
  *
  * Each element of `rowGroups` is expected to have at least one row with
  * `_source_files[0]` set by `normalizeRows()`.  The priority map defaults to
@@ -912,32 +900,53 @@ export function mergeRowsByStrategy(rowGroups, strategy, options = {}) {
   // mergeRowFields preserves existing non-empty values, this ensures the
   // highest-authority source keeps conflicting scalar fields.
   const sortedGroups = sortRowGroupsByPriority(rowGroups, options.sourcePriorities);
+  const compatible = (left, right) => {
+    const values = (row, prefix) => [...new Set([
+      ...getDeviceIdentityKeys(row, "by-identity"), ...(row._merge_identity_keys ?? []),
+    ])]
+      .filter((key) => key.startsWith(prefix));
+    const leftExt = values(left, "extAddress:");
+    const rightExt = values(right, "extAddress:");
+    if (leftExt.length && rightExt.length) {
+      return leftExt.some((key) => rightExt.includes(key));
+    }
+    if (getMatterIdentityMode(options) === "composite-guard") {
+      const leftMatter = values(left, "matterFabricNode:");
+      const rightMatter = values(right, "matterFabricNode:");
+      if (leftMatter.length && rightMatter.length
+        && !leftMatter.some((key) => rightMatter.includes(key))) return false;
+    }
+    return true;
+  };
 
   sortedGroups.forEach((rows) => {
-    rows.forEach((row) => {
-      const identityKeys = getRowMergeIdentityKeys(row, strategy);
-      if (identityKeys.length === 0) {
-        const standaloneId = nextNodeId;
-        nextNodeId += 1;
-        mergedRows.set(standaloneId, {
-          ...row,
-          _merge_identity_keys: [],
-        });
-        return;
+    rows.forEach((rawRow) => {
+      const row = structuredClone(rawRow);
+      delete row._merge_identity_keys;
+      if (Array.isArray(row._merge_conflicts)) {
+        row._merge_conflicts = mergeArrays(row._merge_conflicts, []).slice(0, 20);
       }
-
-      const candidateIds = [
-        ...new Set(
-          identityKeys
-            .map((identityKey) => identifierToNodeId.get(identityKey))
-            .filter((nodeId) => nodeId !== undefined),
-        ),
-      ].sort((a, b) => a - b);
-
-      const filteredCandidateIds =
-        getMatterIdentityMode(options) === "composite-guard"
-          ? filterCandidateIdsForMatterIdentityConsistency(candidateIds, row, mergedRows)
-          : candidateIds;
+      const identityKeys = getRowMergeIdentityKeys(row, strategy);
+      row._merge_identity_keys = identityKeys;
+      const candidatesFor = (keys) => [...new Set(
+        keys.flatMap((key) => [...(identifierToNodeId.get(key) ?? [])]),
+      )].filter((id) => compatible(mergedRows.get(id), row)).sort((a, b) => a - b);
+      let filteredCandidateIds = candidatesFor(
+        identityKeys.filter((key) => !key.startsWith("rloc16:")),
+      );
+      if (!filteredCandidateIds.length) {
+        filteredCandidateIds = candidatesFor(identityKeys.filter((key) => key.startsWith("rloc16:")));
+      }
+      const ambiguous = filteredCandidateIds.some((left, index) =>
+        filteredCandidateIds.slice(index + 1).some((right) =>
+          !compatible(mergedRows.get(left), mergedRows.get(right))));
+      if (ambiguous) {
+        console.warn("[tdash-merge] identity ambiguity: retaining incoming row separately",
+          { identityKeys, candidateIds: filteredCandidateIds });
+        appendRowConflict(row, "_merge_identity_ambiguity",
+          filteredCandidateIds.map((id) => mergedRows.get(id)._merge_identity_keys), identityKeys);
+        filteredCandidateIds = [];
+      }
 
       let targetId;
       if (filteredCandidateIds.length === 0) {
@@ -978,9 +987,8 @@ export function mergeRowsByStrategy(rowGroups, strategy, options = {}) {
             }),
           );
           mergedRows.delete(sourceId);
-          identifierToNodeId.forEach((mappedId, identityKey) => {
-            if (mappedId === sourceId)
-              identifierToNodeId.set(identityKey, targetId);
+          identifierToNodeId.forEach((owners) => {
+            if (owners.delete(sourceId)) owners.add(targetId);
           });
         });
 
@@ -1005,7 +1013,9 @@ export function mergeRowsByStrategy(rowGroups, strategy, options = {}) {
       }
 
       identityKeys.forEach((identityKey) => {
-        identifierToNodeId.set(identityKey, targetId);
+        const owners = identifierToNodeId.get(identityKey) ?? new Set();
+        owners.add(targetId);
+        identifierToNodeId.set(identityKey, owners);
       });
     });
   });

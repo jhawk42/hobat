@@ -68,11 +68,34 @@ The principal identities are:
 
 1. `extAddress` (`extaddr`, `extMacAddr`, and `Extended MAC` aliases)
 2. `omrIpv6Address` (`omrIpv6Addr` and `omr_ipv6_addr` aliases)
-3. `rloc16` (`RLOC16` alias)
+3. `matterFabricNode` (validated fabric/node composite)
+4. `rloc16` (`RLOC16` alias)
 
-RLOC16 is partition-scoped and can change. Extended address is the preferred
-stable device identity. Merge candidates that connect separate existing
-records are coalesced deterministically and the identity collision is reported.
+Automatic merging first collects eligible extended-address, OMR and Matter
+matches together. Only when that stage has no compatible match does it consider
+RLOC16. A successful stronger match does not absorb an unrelated RLOC-only row.
+RLOC16 is partition-scoped and can change; conflicting concrete extended
+addresses never merge, including under an explicit browser `by-rloc16` recipe.
+
+Candidate consistency is checked against the incoming row and between existing
+candidates. If the remaining candidates are incompatible, all existing rows
+and the incoming row remain separate. `_merge_identity_ambiguity` conflicts and
+collision diagnostics distinguish this outcome from successful coalescing;
+RLOC16 cannot bypass it. Provenance lists only accepted contributions.
+
+Eligible keys are retained in `_merge_identity_keys` in stable first-seen
+order, using extended address/OMR/Matter/RLOC16 order for each contribution.
+Earlier accepted OMR and RLOC observations remain indexed even when source
+authority retains another scalar value. Unidentified merged rows have an
+explicit empty key list. Imported key metadata is not correlation evidence.
+Generated `found-...` addresses, all-zero addresses and unspecified OMR
+addresses remain source data but are not indexed.
+
+Matter identity accepts `matterId` as two 16-digit hex components separated by
+`-`, direct `compressedFabricId`/`fabricId` plus `nodeId` (also under `matter`),
+and operational mDNS service properties. Components must be valid unsigned
+hex values; full-width 64-bit identifiers should be supplied as hex strings,
+not unsafe browser numbers. Invalid identifiers remain visible but are not keys.
 
 Matter operational mDNS records can share an OMR address while representing
 different fabric/node identities:
@@ -80,7 +103,9 @@ different fabric/node identities:
 - `strict-omr` is the default. It merges the shared OMR record and preserves
   distinct observed identities in `_mdns_aliases`.
 - `composite-guard` prevents an OMR-only merge when
-  `FabricID_compressed` plus `NodeID` differ.
+  fabric/node composites conflict. A matching concrete extended address remains
+  the strong-anchor exception for multi-fabric observations. Different OMR
+  observations alone do not make candidates incompatible.
 
 ## Merge Stages
 
@@ -107,7 +132,13 @@ The offline command accepts:
 - `none`: normalize and concatenate selected records without identity matching.
 
 Browser datasets use `none`, `by-rloc16`, or `by-identity`, selected by
-the catalog's dataset recipe. Add or change a recipe only in
+the catalog's dataset recipe. `by-rloc16` does not acquire automatic stronger
+identity matching. Browser `none` uses the first loaded recipe file, whereas
+Python `none` concatenates all selected files. Python command viability and
+reports still use identity-merged rows even when its output is pass-through.
+Source extraction, network-scope exclusions, label-map enrichment, progressive
+fetching and adaptor-only relationship rows remain native wrapper policies.
+Add or change a recipe only in
 [td-dataset-manifest.json](../src/td-dataset-manifest.json); `/api/catalog`
 serves it. Regenerate the bundled browser fallback with
 `python3 script/build_dataset_catalog.py` and restart the server after editing
@@ -217,6 +248,43 @@ child RLOC16, nor Thread-version fields fabricate `isRouter` or
 
 ## Provenance and Conflicts
 
+### Values and domain authority
+
+- Missing, null, empty strings, objects and arrays are empty; false and zero
+  are data. Scalars retain the highest-priority non-empty observation and
+  objects recursively fill missing fields. Concrete device labels and
+  addresses can replace generated placeholders.
+- Generic arrays use stable structural unions. Object-key order is
+  insignificant, array order is significant, and booleans do not equal numbers
+  at any nesting depth. Address arrays accept only trimmed non-empty strings.
+  Atomic TLV request/response pairs are not unioned.
+- Children, child tables and neighbors remain separate, owner-scoped
+  collections. Concrete extended address wins over unique safe RLOC matching;
+  anonymous entries survive. Metrics retain source-priority first-nonempty
+  authority, with bounded typed conflicts for disagreements.
+- Routes use owner-scoped valid route ID (including zero), endpoints, concrete
+  extended address, then RLOC16. Known conflicting owner/entry partitions are
+  rejected; unknown partitions are not fabricated mismatches.
+- A newer 8-bit route sequence replaces the entire container, even when its
+  route list is empty. A known sequence wins over a missing sequence in either
+  arrival direction. Equal or both-missing sequences enrich matching entries
+  and union identifiable routes. Exactly half-range-separated sequences
+  (for example 100/228) are ambiguous in both directions: retain the base
+  sequence and route set, enriching only matching entries. No stale route is
+  attributed to a newer sequence.
+- mDNS fields use timestamp precedence, then add/update/remove event priority
+  for equal known timestamps. Without comparable timestamps, existing
+  non-empty values remain primary. Service-info completion recurses through
+  nested objects; canonical OMR/server fields and stable aliases are preserved
+  without replacing unrelated device facts.
+
+These rules intentionally change older merged views: safe correlation can
+retain more rows; stronger matches can leave RLOC-only information separate;
+newer empty routes can remove older routes; known route sequences reject
+unsequenced enrichment; Python child metrics no longer prefer incoming
+non-empty values; and generic-array differences alone no longer add conflicts.
+Source snapshots remain unchanged.
+
 Merged records retain contributing filenames:
 
 ```json
@@ -228,8 +296,15 @@ Merged records retain contributing filenames:
 }
 ```
 
-Conflicts retain the path and both JSON-compatible values. They are
-deduplicated in stable order and bounded to 20 entries per merged record:
+Sources are processed in descending priority, preserving caller order on ties.
+Output uses first-created surviving-row order, not a global identity sort.
+Relationships, provenance, identity keys and conflicts retain first-seen order.
+
+Conflicts retain the path and both typed JSON-compatible values, including
+browser booleans, numbers and nested structures rather than display strings.
+Consumers format values only at display boundaries. Conflicts use recursive
+type-aware duplicate suppression and are bounded to 20 entries per merged
+record, including imported entries:
 
 ```json
 {
@@ -238,6 +313,12 @@ deduplicated in stable order and bounded to 20 entries per merged record:
   ]
 }
 ```
+
+The [shared fixture](../tests/fixtures/device_merge_contract.json) executes the
+actual automatic strategy in Python and Node, compares canonical rows without
+sorting away array order or removing identity metadata, and also checks browser
+dataset assembly. Explicit recipes and pass-through selection have native
+wrapper tests rather than misleading cross-runtime strategy labels.
 
 ## Offline Merge Command
 

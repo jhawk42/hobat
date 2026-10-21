@@ -80,6 +80,11 @@ export const FIELD_DEFINITIONS = Object.freeze([
   { path: "error", aliases: ["_error"], transform: "identity" },
   { path: "_source_files", aliases: [], transform: "identity" },
   { path: "_merge_conflicts", aliases: [], transform: "identity" },
+  { path: "recordKey", aliases: ["record_key"], transform: "identity" },
+  { path: "capturedAtEpoch", aliases: ["captured_at_epoch"], transform: "identity" },
+  { path: "capturedAtIso", aliases: ["captured_at_iso"], transform: "identity" },
+  { path: "serviceInfo", aliases: ["service_info"], transform: "identity" },
+  { path: "serverKey", aliases: ["server_key"], transform: "identity" },
 ]);
 
 export const EXT_ADDRESS_ALIASES = Object.freeze(["extAddress", "extaddr", "extMacAddr", "extMacAddress", "extAddressHex", "ext_address", "Extended MAC"]);
@@ -520,14 +525,15 @@ function matterCompositeIdentity(record) {
   if (scope !== "_matter._tcp.local.") return "";
   const properties = record?.serviceInfo?.properties ?? record?.service_info?.properties;
   if (!isPlainObject(properties)) return "";
-  const fabric = normalizeIdentifierText(properties.FabricID_compressed?.decoded);
-  const node = normalizeIdentifierText(properties.NodeID?.decoded);
+  const fabric = normalizeMatterComponent((properties.fabricIdCompressed ?? properties.FabricID_compressed)?.decoded);
+  const node = normalizeMatterComponent((properties.nodeId ?? properties.NodeID)?.decoded);
   return fabric && node ? `${fabric}|${node}` : "";
 }
 
 export function getDeviceIdentityKeys(record, strategy = "by-identity", options = {}) {
   void options;
   const keys = [];
+  if (strategy === "none") return keys;
   if (strategy === "by-identity") {
     const extAddress = getCanonicalExtAddress(record);
     if (extAddress && !isPlaceholderExtAddress(extAddress)) keys.push(`extAddress:${extAddress}`);

@@ -25,7 +25,30 @@ def merge_unique_strings(existing: list[Any], incoming: list[Any]) -> list[str]:
 
 
 def values_equivalent(left: Any, right: Any) -> bool:
-    return type(left) is type(right) and left == right
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            values_equivalent(value, right[key]) for key, value in left.items()
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            values_equivalent(a, b) for a, b in zip(left, right)
+        )
+    return left == right
+
+
+def merge_conflicts(existing: Any, incoming: Any, limit: int = CONFLICT_LIMIT) -> list[Any]:
+    result: list[Any] = []
+    for entries in (existing, incoming):
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if len(result) >= limit:
+                break
+            if not any(values_equivalent(entry, item) for item in result):
+                result.append(deepcopy(entry))
+    return result
 
 
 def append_merge_conflict(
@@ -38,16 +61,14 @@ def append_merge_conflict(
 ) -> None:
     if not path:
         return
-    conflicts = target.setdefault("_merge_conflicts", [])
-    if not isinstance(conflicts, list):
-        conflicts = []
-        target["_merge_conflicts"] = conflicts
+    conflicts = merge_conflicts(target.get("_merge_conflicts"), [], limit)
+    target["_merge_conflicts"] = conflicts
     entry = {
         "path": path,
         "current": deepcopy(current),
         "incoming": deepcopy(incoming),
     }
-    if entry not in conflicts and len(conflicts) < limit:
+    if not any(values_equivalent(entry, item) for item in conflicts) and len(conflicts) < limit:
         conflicts.append(entry)
 
 

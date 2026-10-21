@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from copy import deepcopy
 from typing import Any, Mapping
 
@@ -88,6 +89,11 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"path": "error", "aliases": ("_error",), "transform": "identity"},
     {"path": "_source_files", "aliases": (), "transform": "identity"},
     {"path": "_merge_conflicts", "aliases": (), "transform": "identity"},
+    {"path": "recordKey", "aliases": ("record_key",), "transform": "identity"},
+    {"path": "capturedAtEpoch", "aliases": ("captured_at_epoch",), "transform": "identity"},
+    {"path": "capturedAtIso", "aliases": ("captured_at_iso",), "transform": "identity"},
+    {"path": "serviceInfo", "aliases": ("service_info",), "transform": "identity"},
+    {"path": "serverKey", "aliases": ("server_key",), "transform": "identity"},
 )
 
 PREFERRED_FIELD_NAMES: dict[str, str] = {
@@ -503,6 +509,38 @@ def normalize_input_record(
     return result
 
 
+def get_matter_fabric_node_identity(record: Mapping[str, Any]) -> str:
+    matter = record.get("matter")
+    matter = matter if isinstance(matter, dict) else record
+    explicit = normalize_identifier_text(matter.get("matterId"))
+    if re.fullmatch(r"[0-9a-f]{16}-[0-9a-f]{16}", explicit):
+        return explicit.replace("-", "|")
+
+    def component(value: Any) -> str:
+        if type(value) is int:
+            return f"{value:016x}" if 0 <= value <= 2**53 - 1 else ""
+        text = normalize_identifier_text(value) if isinstance(value, str) else ""
+        if re.fullmatch(r"(?:0x)?[0-9a-f]{1,16}", text):
+            return f"{int(text, 16):016x}"
+        return ""
+
+    fabric = component(matter.get("compressedFabricId", matter.get("fabricId")))
+    node = component(matter.get("nodeId"))
+    if fabric and node:
+        return f"{fabric}|{node}"
+    if normalize_identifier_text(record.get("scope")) != "_matter._tcp.local.":
+        return ""
+    service = record.get("serviceInfo", record.get("service_info"))
+    properties = service.get("properties") if isinstance(service, dict) else None
+    if not isinstance(properties, dict):
+        return ""
+    fabric_prop = properties.get("fabricIdCompressed", properties.get("FabricID_compressed"))
+    node_prop = properties.get("nodeId", properties.get("NodeID"))
+    fabric = component(fabric_prop.get("decoded")) if isinstance(fabric_prop, dict) else ""
+    node = component(node_prop.get("decoded")) if isinstance(node_prop, dict) else ""
+    return f"{fabric}|{node}" if fabric and node else ""
+
+
 def get_device_identity_keys(
     record: Mapping[str, Any],
     strategy: str = "by-identity",
@@ -510,6 +548,8 @@ def get_device_identity_keys(
 ) -> list[str]:
     del options
     keys: list[str] = []
+    if strategy == "none":
+        return keys
     if strategy == "by-identity":
         ext_address = get_canonical_ext_address(record)
         if ext_address and not is_placeholder_ext_address(ext_address):
@@ -517,6 +557,9 @@ def get_device_identity_keys(
         omr_address = get_canonical_omr_address(record)
         if omr_address and not is_placeholder_omr_address(omr_address):
             keys.append(f"omrIpv6Address:{omr_address}")
+        matter_identity = get_matter_fabric_node_identity(record)
+        if matter_identity:
+            keys.append(f"matterFabricNode:{matter_identity}")
     rloc16 = get_canonical_rloc16(record)
     if rloc16:
         keys.append(f"rloc16:{rloc16}")
