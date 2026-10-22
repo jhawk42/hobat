@@ -43,6 +43,8 @@ def test_handler_registry_owns_all_special_catalog_paths() -> None:
         "childTable",
         "childIpv6Addresses",
         "routerNeighbors",
+        "powerSources",
+        "matter.endpoints",
         "_source_files",
         "_merge_conflicts",
     }

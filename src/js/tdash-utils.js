@@ -451,29 +451,338 @@ function _createSubList(items) {
   return ul;
 }
 
-function _renderObjectEntries(obj) {
-  return Object.entries(obj).map(([k, v]) => createDetailValueNode(k, v));
+const MATTER_ENUM_LABELS = Object.freeze({
+  status: { 0: "Unspecified", 1: "Active", 2: "Standby", 3: "Unavailable" },
+  batChargeLevel: { 0: "Ok", 1: "Warning", 2: "Critical" },
+  batReplaceability: {
+    0: "Unspecified",
+    1: "Not replaceable",
+    2: "User replaceable",
+    3: "Factory replaceable",
+  },
+  batChargeState: {
+    0: "Unknown",
+    1: "Charging",
+    2: "At full charge",
+    3: "Not charging",
+  },
+  bootReason: {
+    0: "Unspecified",
+    1: "Power-on reboot",
+    2: "Brown-out reset",
+    3: "Software watchdog reset",
+    4: "Hardware watchdog reset",
+    5: "Software update completed",
+    6: "Software reset",
+  },
+  activeBatFaults: { 0: "Unspecified", 1: "Over temperature", 2: "Under temperature" },
+  activeBatChargeFaults: {
+    0: "Unspecified",
+    1: "Ambient too hot",
+    2: "Ambient too cold",
+    3: "Battery too hot",
+    4: "Battery too cold",
+    5: "Battery absent",
+    6: "Battery over voltage",
+    7: "Battery under voltage",
+    8: "Charger over voltage",
+    9: "Charger under voltage",
+    10: "Safety timeout",
+  },
+  activeHardwareFaults: {
+    0: "Unspecified",
+    1: "Radio",
+    2: "Sensor",
+    3: "Resettable over temperature",
+    4: "Non-resettable over temperature",
+    5: "Power source",
+    6: "Visual display fault",
+    7: "Audio output fault",
+    8: "User interface fault",
+    9: "Non-volatile memory error",
+    10: "Tamper detected",
+  },
+  activeRadioFaults: {
+    0: "Unspecified",
+    1: "Wi-Fi fault",
+    2: "Cellular fault",
+    3: "Thread fault",
+    4: "NFC fault",
+    5: "BLE fault",
+    6: "Ethernet fault",
+  },
+  activeNetworkFaults: {
+    0: "Unspecified",
+    1: "Hardware failure",
+    2: "Network jammed",
+    3: "Connection failed",
+  },
+});
+
+const GENERAL_DIAGNOSTICS_LABELS = Object.freeze({
+  rebootCount: "Reported reboot count",
+  upTime: "Reported uptime",
+  totalOperationalHours: "Reported operational hours",
+  bootReason: "Reported boot reason",
+  activeHardwareFaults: "Active hardware faults",
+  activeRadioFaults: "Active radio faults",
+  activeNetworkFaults: "Active network faults",
+});
+
+const POWER_SOURCE_LABELS = Object.freeze({
+  batteryPercent: "Battery remaining",
+  description: "Power source description",
+  status: "Power source status",
+  batPercentRemaining: "Battery remaining (raw half-percent units)",
+  batVoltage: "Battery voltage",
+  batTimeRemaining: "Estimated battery time remaining",
+  batTimeToFullCharge: "Estimated time to full charge",
+  batReplacementNeeded: "Battery replacement needed",
+  batReplacementDescription: "Battery replacement guidance",
+  batFunctionalWhileCharging: "Functional while charging",
+  endpointList: "Powered endpoint scope",
+});
+
+export function matterFieldDisplayLabel(path, fallback) {
+  const leaf = path.split(".").at(-1);
+  if (path === "matter.isBridge") return "Node is a bridge";
+  if (path.startsWith("generalDiagnostics.")) {
+    return GENERAL_DIAGNOSTICS_LABELS[leaf] ?? fallback;
+  }
+  if (path === "powerSources" || path.startsWith("powerSources.")) {
+    return POWER_SOURCE_LABELS[leaf] ?? fallback;
+  }
+  if (path.startsWith("matter.") && leaf === "endpointId") return "Hosting endpoint";
+  return fallback;
 }
 
-export function createDetailValueNode(key, value) {
+function formatMatterEnum(field, value) {
+  const labels = MATTER_ENUM_LABELS[field];
+  if (!labels) return undefined;
+  const formatOne = (item) => {
+    if (item === null) return "null";
+    const label = labels[item];
+    return label ? `${label} (${item})` : `Unknown (${String(item)})`;
+  };
+  return Array.isArray(value) ? value.map(formatOne).join(", ") : formatOne(value);
+}
+
+function formatMatterDuration(value) {
+  if (
+    typeof value !== "string" && !(typeof value === "number" && Number.isSafeInteger(value))
+  ) return undefined;
+  const text = String(value);
+  if (!/^\d+$/.test(text)) return undefined;
+  let remaining;
+  try {
+    remaining = BigInt(text);
+  } catch {
+    return undefined;
+  }
+  const units = [["d", 86400n], ["h", 3600n], ["m", 60n], ["s", 1n]];
+  const parts = [];
+  units.forEach(([label, seconds]) => {
+    const count = remaining / seconds;
+    if (count > 0n) parts.push(`${count}${label}`);
+    remaining %= seconds;
+  });
+  return parts.join(" ") || "0s";
+}
+
+export function formatMatterDisplayValue(path, value) {
+  const leaf = path.split(".").at(-1);
+  if (path.startsWith("powerSources.") && leaf === "endpointList") {
+    if (!Array.isArray(value)) return "Not reported (scope unknown)";
+    if (value.length === 0) return "All endpoints (node-wide)";
+    return `Endpoints ${value.join(", ")}`;
+  }
+  if (value === null) return "n/a";
+  if (path === "generalDiagnostics.upTime") {
+    const duration = formatMatterDuration(value);
+    return duration ? `${String(value)} s (${duration})` : String(value);
+  }
+  if (path === "generalDiagnostics.totalOperationalHours") {
+    return `${String(value)} h`;
+  }
+  if (path === "generalDiagnostics.bootReason") {
+    return formatMatterEnum("bootReason", value);
+  }
+  if (path.startsWith("generalDiagnostics.") && Array.isArray(value)) {
+    const enumText = formatMatterEnum(leaf, value);
+    if (enumText !== undefined) return enumText || "None reported";
+  }
+  if (path.startsWith("powerSources.") || path === "powerSources") {
+    if (leaf === "batteryPercent") return `${String(value)}%`;
+    if (leaf === "batPercentRemaining") return `${String(value)} (0.5% units)`;
+    if (leaf === "batVoltage") return `${String(value)} mV`;
+    if (leaf === "batTimeRemaining" || leaf === "batTimeToFullCharge") {
+      return `${String(value)} s`;
+    }
+    const enumText = formatMatterEnum(leaf, value);
+    if (enumText !== undefined) return enumText;
+  }
+  if (path.startsWith("generalDiagnostics.") && Array.isArray(value)) {
+    return value.length === 0 ? "None reported" : value.map(String).join(", ");
+  }
+  return undefined;
+}
+
+export function matterEndpointArraySummary(path, records) {
+  if (!Array.isArray(records)) return "";
+  return records.map((record, index) => {
+    if (!isPlainObject(record)) return `${index + 1}: ${String(record)}`;
+    const endpoint = Number.isInteger(record.endpointId)
+      ? `Endpoint ${record.endpointId}`
+      : `Unkeyed entry ${index + 1}`;
+    if (path === "powerSources") {
+      const description = record.attributes?.description;
+      const battery = record.batteryPercent;
+      return [
+        `Power source · ${endpoint}`,
+        description ? String(description) : "",
+        battery === undefined ? "" : `${String(battery)}%`,
+      ].filter(Boolean).join(" — ");
+    }
+    const bridged = record.bridgedBasicInformation;
+    const basic = record.basicInformation;
+    const name = bridged?.nodeLabel ?? bridged?.productName
+      ?? basic?.nodeLabel ?? basic?.productName;
+    return name ? `${endpoint} — ${String(name)}` : endpoint;
+  }).join("; ");
+}
+
+function _appendMatterEndpointRecord(path, record, index, parentList) {
+  if (!isPlainObject(record)) {
+    const item = document.createElement("li");
+    item.textContent = record === null ? "null" : String(record);
+    parentList.appendChild(item);
+    return;
+  }
+  const item = document.createElement("li");
+  const details = document.createElement("details");
+  details.className = "detail-value-collapsible matter-endpoint-detail";
+  details.open = path === "powerSources";
+  const summary = document.createElement("summary");
+  summary.textContent = matterEndpointArraySummary(path, [record])
+    || `Unkeyed entry ${index + 1}`;
+  details.appendChild(summary);
+  const values = [];
+  let scopeRendered = false;
+  const appendUnknownScope = () => {
+    scopeRendered = true;
+    values.push(createDetailValueNode(
+      "Powered endpoint scope",
+      null,
+      `powerSources.${index}.attributes.endpointList`,
+    ));
+  };
+  Object.entries(record).forEach(([key, value]) => {
+    if (key === "endpointId") return;
+    if (path === "powerSources" && key === "attributes") {
+      if (!isPlainObject(value)) {
+        appendUnknownScope();
+        return;
+      }
+      Object.entries(value).forEach(([attribute, attributeValue]) => {
+        const attributePath = `powerSources.${index}.attributes.${attribute}`;
+        if (attribute === "endpointList") {
+          scopeRendered = true;
+          values.push(createDetailValueNode(
+            matterFieldDisplayLabel(attributePath, "Powered endpoint scope"),
+            attributeValue,
+            attributePath,
+          ));
+        } else {
+          values.push(createDetailValueNode(
+            matterFieldDisplayLabel(attributePath, attribute),
+            attributeValue,
+            attributePath,
+          ));
+        }
+      });
+      if (!scopeRendered) appendUnknownScope();
+      return;
+    }
+    const fieldPath = `${path}.${index}.${key}`;
+    values.push(createDetailValueNode(
+      matterFieldDisplayLabel(fieldPath, key),
+      value,
+      fieldPath,
+    ));
+  });
+  if (path === "powerSources" && !scopeRendered) appendUnknownScope();
+  details.appendChild(_createSubList(values));
+  item.appendChild(details);
+  parentList.appendChild(item);
+}
+
+function _createMatterEndpointArrayNode(path, records) {
+  const listItem = document.createElement("li");
+  const details = document.createElement("details");
+  details.className = "detail-value-collapsible matter-endpoint-array";
+  details.open = true;
+  const summary = document.createElement("summary");
+  summary.textContent = `${path === "powerSources" ? "Power sources" : "Matter endpoints"} (${records.length})`;
+  details.appendChild(summary);
+  const entries = document.createElement("ul");
+  entries.className = "detail-value-list";
+  if (records.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = path === "powerSources"
+      ? "No power sources reported"
+      : "No Matter endpoints observed";
+    entries.appendChild(empty);
+  }
+  records.forEach((record, index) => _appendMatterEndpointRecord(path, record, index, entries));
+  details.appendChild(entries);
+  listItem.appendChild(details);
+  return listItem;
+}
+
+function _renderObjectEntries(obj, path = "") {
+  return Object.entries(obj).map(([key, value]) => {
+    const fieldPath = path ? `${path}.${key}` : key;
+    return createDetailValueNode(
+      matterFieldDisplayLabel(fieldPath, key),
+      value,
+      fieldPath,
+    );
+  });
+}
+
+export function createDetailValueNode(key, value, fieldPath = key) {
+  if (
+    Array.isArray(value)
+    && (fieldPath === "powerSources" || fieldPath === "matter.endpoints")
+  ) {
+    return _createMatterEndpointArrayNode(fieldPath, value);
+  }
+  const displayLabel = matterFieldDisplayLabel(fieldPath, key);
+  const formattedValue = formatMatterDisplayValue(fieldPath, value);
+  if (formattedValue !== undefined) {
+    return _createKvRow(
+      displayLabel,
+      formattedValue,
+      value === null || (Array.isArray(value) && value.length === 0),
+    );
+  }
   // Scalar (string, number, boolean, null, undefined)
   if (value === null || value === undefined) {
-    return _createKvRow(key, "n/a");
+    return _createKvRow(displayLabel, "n/a");
   }
   if (typeof value !== "object") {
-    const text =
-      typeof value === "boolean" ? (value ? "true" : "false") : String(value);
-    return _createKvRow(key, text);
+    const text = typeof value === "boolean" ? (value ? "true" : "false") : String(value);
+    return _createKvRow(displayLabel, text);
   }
 
   // Empty array
   if (Array.isArray(value) && value.length === 0) {
-    return _createKvRow(key, "empty []", true);
+    return _createKvRow(displayLabel, "empty []", true);
   }
 
   // Empty object
   if (!Array.isArray(value) && Object.keys(value).length === 0) {
-    return _createKvRow(key, "empty {}", true);
+    return _createKvRow(displayLabel, "empty {}", true);
   }
 
   // Array of primitives (no element is an object/array)
@@ -486,7 +795,7 @@ export function createDetailValueNode(key, value) {
     details.className = "detail-value-collapsible";
     details.open = true;
     const summary = document.createElement("summary");
-    summary.textContent = `${key}:`;
+    summary.textContent = `${displayLabel}:`;
     details.appendChild(summary);
     const items = value.map((item) => {
       const subLi = document.createElement("li");
@@ -505,7 +814,7 @@ export function createDetailValueNode(key, value) {
     details.className = "detail-value-collapsible";
     details.open = true;
     const summary = document.createElement("summary");
-    summary.textContent = `${key}:`;
+    summary.textContent = `${displayLabel}:`;
     details.appendChild(summary);
     const items = value.map((item, idx) => {
       const subLi = document.createElement("li");
@@ -517,7 +826,7 @@ export function createDetailValueNode(key, value) {
       idxSpan.className = "detail-array-idx";
       idxSpan.textContent = `[${idx}]`;
       subLi.appendChild(idxSpan);
-      subLi.appendChild(_createSubList(_renderObjectEntries(item)));
+      subLi.appendChild(_createSubList(_renderObjectEntries(item, `${fieldPath}.${idx}`)));
       return subLi;
     });
     details.appendChild(_createSubList(items));
@@ -531,9 +840,9 @@ export function createDetailValueNode(key, value) {
   details.className = "detail-value-collapsible";
   details.open = true;
   const summary = document.createElement("summary");
-  summary.textContent = `${key}:`;
+  summary.textContent = `${displayLabel}:`;
   details.appendChild(summary);
-  details.appendChild(_createSubList(_renderObjectEntries(value)));
+  details.appendChild(_createSubList(_renderObjectEntries(value, fieldPath)));
   li.appendChild(details);
   return li;
 }
@@ -577,7 +886,7 @@ function _createGroupNode(prefix, children) {
   summary.textContent = `${prefix}:`;
   details.appendChild(summary);
   const subItems = children.map(([subkey, value]) =>
-    createDetailValueNode(subkey, value)
+    createDetailValueNode(subkey, value, `${prefix}.${subkey}`)
   );
   details.appendChild(_createSubList(subItems));
   li.appendChild(details);
@@ -776,7 +1085,23 @@ export function flattenObjectEntries(value, path = "", entries = []) {
       return entries;
     }
     keys.forEach((key) => {
-      flattenObjectEntries(value[key], path ? `${path}.${key}` : key, entries);
+      const fieldPath = path ? `${path}.${key}` : key;
+      if (
+        fieldPath === "diagnosticCoverage"
+        && isPlainObject(value[key])
+        && isPlainObject(value[key].powerSources)
+      ) {
+        Object.entries(value[key]).forEach(([coverageKey, coverageValue]) => {
+          const coveragePath = `${fieldPath}.${coverageKey}`;
+          if (coverageKey === "powerSources") {
+            entries.push([coveragePath, coverageValue]);
+          } else {
+            flattenObjectEntries(coverageValue, coveragePath, entries);
+          }
+        });
+      } else {
+        flattenObjectEntries(value[key], fieldPath, entries);
+      }
     });
     return entries;
   }
@@ -1017,6 +1342,18 @@ export function populateNodeDetailsLists(details, listIdPrefix = "") {
       const namedEntries = fieldNames
         .map((f) => [f, detailsMap.get(f)])
         .filter(([, v]) => v !== undefined);
+      if (
+        listId.endsWith("matter-list")
+        && namedEntries.some(([key]) =>
+          key.startsWith("matter.") || key.startsWith("generalDiagnostics.") || key === "powerSources",
+        )
+      ) {
+        const cacheNote = document.createElement("li");
+        cacheNote.className = "detail-cache-note";
+        cacheNote.textContent =
+          "Matter values reflect the server's last-known cache; they are not live reads.";
+        listEl.appendChild(cacheNote);
+      }
       _appendGrouped(namedEntries, listEl);
     }
 

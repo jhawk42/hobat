@@ -7,6 +7,10 @@ import {
   setTableColumnCategory,
   setTableHealthColumnsEnabled,
 } from "../../src/js/tdash-table-renderer.js";
+import {
+  activateViewStatus,
+  configureViewStatusPresenter,
+} from "../../src/js/tdash-view-status.js";
 
 class FakeElement {
   constructor(tagName) {
@@ -131,6 +135,8 @@ const elements = new Map([
   ["summary-list", new FakeElement("ul")],
   ["fetch-status-line-content", new FakeElement("div")],
 ]);
+const publishedTableStatuses = [];
+configureViewStatusPresenter((status) => publishedTableStatuses.push(status));
 globalThis.document = {
   activeElement: null,
   createElement: (tagName) => new FakeElement(tagName),
@@ -278,6 +284,91 @@ for (const moreInfo of [false, true]) {
     }
   }
 }
+
+const matterRecord = {
+  deviceLabel: "Matter sensor",
+  extAddress: "0000000000000005",
+  matter: {
+    endpoints: [{
+      endpointId: 4,
+      bridgedBasicInformation: {productName: "Temperature sensor"},
+    }],
+  },
+  generalDiagnostics: {upTime: "90061", rebootCount: 0},
+  powerSources: [{
+    endpointId: 2,
+    attributes: {
+      description: "Sensor battery",
+      status: 1,
+      batPercentRemaining: 151,
+      endpointList: [],
+    },
+    batteryPercent: 75.5,
+  }, {
+    endpointId: 4,
+  }, {
+    endpointId: 5,
+    attributes: null,
+  }, {
+    endpointId: 6,
+    attributes: {endpointList: null},
+  }],
+};
+const matterDataset = {rows: [matterRecord], loadedFiles: ["fixture.json"]};
+activateViewStatus("table", matterDataset);
+setMoreInfoEnabled(false);
+setTableHealthColumnsEnabled(false);
+renderTableForDataset(matterDataset);
+setTableColumnCategory("matter-list");
+applyTableFilters();
+const matterTableStatus = publishedTableStatuses.at(-1);
+const matterTableStatusMatch = matterTableStatus?.match(
+  /Total: \d+ rows, (\d+) columns\. Showing: \d+ rows, (\d+) columns/,
+);
+assert.ok(matterTableStatusMatch);
+const matterTableStatusColumns = matterTableStatusMatch.slice(1).map(Number);
+assert.ok(matterTableStatusColumns[0] >= matterTableStatusColumns[1]);
+const matterColumnNames = thead.querySelectorAll("button.table-sort-button")
+  .map((button) => button.dataset.sortColumn);
+const matterCellText = (column) => {
+  const index = matterColumnNames.indexOf(column);
+  return index < 0 ? "" : tbody.children[0].children[index].textContent;
+};
+assert.match(matterCellText("powerSources"), /Power source · Endpoint 2 — Sensor battery — 75\.5%/);
+assert.match(matterCellText("powerSources"), /151 \(0\.5% units\)/);
+assert.match(matterCellText("powerSources"), /All endpoints \(node-wide\)/);
+assert.match(
+  matterCellText("powerSources"),
+  /Powered endpoint scope: Not reported \(scope unknown\)/,
+);
+assert.match(matterCellText("matter.endpoints"), /Endpoint 4 — Temperature sensor/);
+assert.match(matterCellText("generalDiagnostics.upTime"), /90061 s \(1d 1h 1m 1s\)/);
+
+const uptimeRecords = [
+  {
+    deviceLabel: "Uptime 99",
+    extAddress: "0000000000000006",
+    generalDiagnostics: {upTime: "99"},
+  },
+  {
+    deviceLabel: "Uptime 100",
+    extAddress: "0000000000000007",
+    generalDiagnostics: {upTime: "100"},
+  },
+  {
+    deviceLabel: "Uptime uint64",
+    extAddress: "0000000000000008",
+    generalDiagnostics: {upTime: "18446744073709551615"},
+  },
+];
+renderTableForDataset({rows: uptimeRecords, loadedFiles: ["fixture.json"]});
+setTableColumnCategory("matter-list");
+applyTableFilters();
+headerButton("generalDiagnostics.upTime").click();
+const ascendingUptime = rowOrder("generalDiagnostics.upTime");
+headerButton("generalDiagnostics.upTime").click();
+const descendingUptime = rowOrder("generalDiagnostics.upTime");
+
 console.log(JSON.stringify({
   healthColumnOrderingCases: orderingCases.length,
   ascendingMetrics,
@@ -287,6 +378,9 @@ console.log(JSON.stringify({
   ascendingVersions,
   ascendingHealthStatus,
   descendingHealthStatus,
+  ascendingUptime,
+  descendingUptime,
+  matterTableStatusColumns,
   ascendingAriaSort: ascendingSortState.getAttribute("aria-sort"),
   descendingAriaSort: descendingSortState.getAttribute("aria-sort"),
   metricFocusColumn,

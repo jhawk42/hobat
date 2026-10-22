@@ -69,19 +69,49 @@ def _collection() -> MatterCollection:
         "threadNetworkDiagnostics": {
             "cluster": "populated",
             "attributes": {"channel": "populated", "partitionId": "null"},
-        }
+        },
+        "powerSources": {
+            "2": {
+                "cluster": "populated",
+                "attributes": {"batPercentRemaining": "populated"},
+            }
+        },
     }
+    matter = {
+        "nodeId": "0x0000000000000001",
+        "matterId": "fixture:1",
+        "vendorName": "Fixture Vendor",
+        "endpoints": [
+            {
+                "endpointId": 2,
+                "bridgedBasicInformation": {"vendorName": "Sensor"},
+            }
+        ],
+    }
+    general_diagnostics = {"rebootCount": 0, "upTime": "18446744073709551615"}
+    power_sources = [
+        {
+            "endpointId": 2,
+            "attributes": {"batPercentRemaining": 151, "endpointList": [2]},
+            "batteryPercent": 75.5,
+        }
+    ]
     device = {
         "id": "matter:fixture:1",
         "type": "threadDevice",
         "deviceLabel": "Fixture",
         "available": True,
-        "matter": {"nodeId": "0x0000000000000001", "endpoints": []},
+        "matter": matter,
+        "generalDiagnostics": general_diagnostics,
+        "powerSources": power_sources,
     }
     diagnostic = {
         "nodeId": 1,
         "matterId": "fixture:1",
+        "matter": matter,
         "extAddress": "1122334455667788",
+        "generalDiagnostics": general_diagnostics,
+        "powerSources": power_sources,
         "diagnosticCoverage": coverage,
         "diagnosticsDetail": {"readErrors": {}},
     }
@@ -952,6 +982,44 @@ def test_fetch_all_wires_collection_progress_to_checkpoint(monkeypatch, tmp_path
     assert writes[0][0]["records"] == list(_collection().devices)
 
 
+def test_dashboard_and_checkpoints_preserve_matter_operational_products(
+    monkeypatch, tmp_path
+) -> None:
+    collection = _collection()
+    writes = {}
+
+    monkeypatch.setattr(
+        ha_matter_ws_cli,
+        "save_json_atomic",
+        lambda payload, path, **kwargs: writes.__setitem__(Path(path).name, payload),
+    )
+    output_paths = {
+        name: tmp_path / f"{name}.json"
+        for name in ("devices", "diagnostics", "mesh_diagnostics", "topology", "dashboard")
+    }
+    callback = ha_matter_ws_cli.make_checkpoint_callback(
+        output_paths, show_progress=False
+    )
+    callback(1, 2, collection)
+    dashboard = build_dashboard_snapshot(collection)
+
+    assert dashboard["devices"][0]["powerSources"] == collection.devices[0]["powerSources"]
+    assert dashboard["diagnostics"][0]["generalDiagnostics"] == collection.diagnostics[0][
+        "generalDiagnostics"
+    ]
+    assert dashboard["diagnostics"][0]["matter"]["endpoints"] == collection.diagnostics[0][
+        "matter"
+    ]["endpoints"]
+    for name in ("devices", "diagnostics", "mesh_diagnostics", "topology"):
+        assert writes[f"{name}.partial.json"]["records"][0]["powerSources"] == list(
+            getattr(collection, name)
+        )[0]["powerSources"]
+    assert writes["dashboard.partial.json"]["devices"] == dashboard["devices"]
+    assert writes["dashboard.partial.json"]["meshDiagnostics"] == dashboard[
+        "meshDiagnostics"
+    ]
+
+
 def test_outcome_counts_extractor_coverage_states() -> None:
     diagnostics = [
         {
@@ -964,7 +1032,17 @@ def test_outcome_counts_extractor_coverage_states() -> None:
                         "neighborTable": "implementedEmpty",
                         "routeTable": "readError",
                     },
-                }
+                },
+                "basicInformation": {
+                    "cluster": "notObserved",
+                    "attributes": {"vendorName": "notObserved"},
+                },
+                "powerSources": {
+                    "2": {
+                        "cluster": "populated",
+                        "attributes": {"batPercentRemaining": "invalidValue"},
+                    }
+                },
             }
         },
         {
@@ -981,7 +1059,11 @@ def test_outcome_counts_extractor_coverage_states() -> None:
 
     assert coverage["clusters"]["readError"] == 1
     assert coverage["clusters"]["clusterUnsupported"] == 1
+    assert coverage["clusters"]["notObserved"] == 1
+    assert coverage["clusters"]["populated"] == 1
     assert coverage["attributes"]["populated"] == 1
+    assert coverage["attributes"]["notObserved"] == 1
+    assert coverage["attributes"]["invalidValue"] == 1
     assert coverage["attributes"]["attributeUnsupported"] == 1
     assert coverage["attributes"]["implementedEmpty"] == 1
     assert coverage["attributes"]["readError"] == 1

@@ -100,8 +100,10 @@ generated matter.js model on 2026-08-30:
 
 - Descriptor cluster `0x001D`, revision 3.
 - Basic Information cluster `0x0028`, revision 6.
+- Power Source cluster `0x002F`, revision 3.
 - General Diagnostics cluster `0x0033`, revision 3.
 - Thread Network Diagnostics cluster `0x0035`, revision 3.
+- Bridged Device Basic Information cluster `0x0039`, revision 6.
 
 The critical Thread paths are:
 
@@ -150,6 +152,31 @@ state per standard attribute. States are `clusterUnsupported`,
 An absent attribute is not converted to zero or an empty table. NeighborTable and
 RouteTable remain directional raw observations; relationship derivation belongs
 to the topology phase.
+
+## Matter Operational and Power Details
+
+Commissioned-node snapshots retain the existing root Matter identity and
+`generalDiagnostics` paths. General Diagnostics uptime is an exact integer or
+decimal string in seconds; operational hours are hours, and `bootReason` plus
+fault arrays retain their reported numeric codes. These are cache observations,
+not a live timer, reboot history, or a health assessment.
+
+Power Source cluster `0x002F` is extracted as an endpoint-keyed top-level
+`powerSources` array. Each entry identifies its hosting endpoint and contains
+only present allowlisted `attributes`; `batteryPercent` is derived from valid
+`batPercentRemaining` values using one half-percent per raw unit. Voltage uses
+millivolts and battery time estimates use seconds. The raw values and numeric
+enum codes remain canonical; display labels do not replace them. Explicit null,
+zero, false, and empty lists remain distinct from missing fields.
+
+`attributes.endpointList=[]` means the power source applies to the whole node.
+A populated list names powered endpoints; a missing list leaves scope unknown
+(including older cluster revisions). Bridged Basic Information `0x0039` remains
+grouped under `matter.endpoints[]`, separate from the root node identity. Power,
+bridged identity, and operational details are read only from the existing
+`start_listening` node snapshot; no extra reads, subscriptions, refreshes, or
+device commands are issued. Missing optional cache values do not imply lack of
+device support or freshness.
 
 ## Topology Relationship Contract
 

@@ -9,7 +9,7 @@ import logging
 
 from collections import defaultdict
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -111,6 +111,7 @@ from merge_policy_relationship import (
     _merge_relationship_field,
     _merge_neighbor_field,
     _merge_address_field,
+    merge_matter_endpoint_arrays,
     is_sequence_newer,
     compare_sequences,
 )
@@ -355,6 +356,12 @@ def extract_records(filename: str, data: Any) -> list[dict[str, Any]]:
 
 
 
+def _merge_matter_endpoint_field(
+    current: Any, incoming: Any, context: MergeContext
+) -> Any:
+    return merge_matter_endpoint_arrays(current, incoming, context)
+
+
 MERGE_FIELD_HANDLERS = {
     "route": _merge_route_field,
     "children": _merge_relationship_field,
@@ -362,10 +369,25 @@ MERGE_FIELD_HANDLERS = {
     "childIpv6Addresses": _merge_address_field,
     "ipv6Addresses": _merge_address_field,
     "routerNeighbors": _merge_neighbor_field,
+    "powerSources": _merge_matter_endpoint_field,
+    "matter.endpoints": _merge_matter_endpoint_field,
 }
 
 TLV_SUMMARY_FIELDS = ("tlvRequestValues", "tlvResponseValues")
 TLV_SUMMARY_PRIORITY_FIELD = "_tlv_summary_source_priority"
+
+
+def _matter_identity_merge_state(
+    existing_record: dict[str, Any], incoming_record: dict[str, Any]
+) -> tuple[str, bool]:
+    existing_identity = get_matter_fabric_node_identity(existing_record)
+    incoming_identity = get_matter_fabric_node_identity(incoming_record)
+    if existing_identity and incoming_identity:
+        return (
+            "match" if existing_identity == incoming_identity else "mismatch",
+            False,
+        )
+    return "absent", bool(not existing_identity and incoming_identity)
 
 
 def deep_merge(
@@ -396,6 +418,15 @@ def deep_merge(
             partition_id=partition_id,
             incoming_partition_id=incoming_partition_id,
             conflict_target=conflict_target,
+        )
+    if context.matter_identity_status == "unknown":
+        identity_status, enrichment_allowed = _matter_identity_merge_state(
+            base, incoming
+        )
+        context = replace(
+            context,
+            matter_identity_status=identity_status,
+            matter_identity_enrichment_allowed=enrichment_allowed,
         )
 
     if not path_prefix:
@@ -468,7 +499,45 @@ def deep_merge(
             continue
 
         current_path = f"{path_prefix}.{key}" if path_prefix else key
-        handler = MERGE_FIELD_HANDLERS.get(key)
+        if (
+            not path_prefix
+            and key == "matter"
+            and context.matter_identity_status == "mismatch"
+        ):
+            if not value_is_empty(value) and not values_equivalent(
+                base.get(key), value
+            ):
+                append_merge_conflict(
+                    conflict_target,
+                    current_path,
+                    base.get(key),
+                    value,
+                    limit=context.conflict_limit,
+                )
+            continue
+        if (
+            path_prefix == "matter"
+            and key in {"matterId", "compressedFabricId", "nodeId"}
+            and context.matter_identity_status == "mismatch"
+        ):
+            continue
+        if current_path in {"powerSources", "matter.endpoints"}:
+            if not (
+                context.matter_identity_status == "match"
+                or context.matter_identity_enrichment_allowed
+            ):
+                if key in base and not value_is_empty(value) and not values_equivalent(
+                    base[key], value
+                ):
+                    append_merge_conflict(
+                        conflict_target,
+                        current_path,
+                        base[key],
+                        value,
+                        limit=context.conflict_limit,
+                    )
+                continue
+        handler = MERGE_FIELD_HANDLERS.get(current_path) or MERGE_FIELD_HANDLERS.get(key)
         if handler is not None:
             base[key] = handler(base.get(key), value, context.for_field(key))
             continue
@@ -621,6 +690,9 @@ def merge_nodes(
 
     target = nodes[target_id]
     source = nodes[source_id]
+    matter_identity_status, matter_identity_enrichment_allowed = (
+        _matter_identity_merge_state(target, source)
+    )
     merge_mdns_record_into_node(target, source)
     existing_source = next(iter(target.get("_source_files", [])), "")
     incoming_source = next(iter(source.get("_source_files", [])), "")
@@ -635,6 +707,8 @@ def merge_nodes(
             partition_id=get_partition_id(target),
             incoming_partition_id=get_partition_id(source),
             conflict_target=target,
+            matter_identity_status=matter_identity_status,
+            matter_identity_enrichment_allowed=matter_identity_enrichment_allowed,
         ),
     )
 
@@ -726,6 +800,9 @@ def _merge_record_into_nodes(
                 by_omr,
                 by_matter_fabric_node,
             )
+        matter_identity_status, matter_identity_enrichment_allowed = (
+            _matter_identity_merge_state(nodes[node_id], record)
+        )
         merge_mdns_record_into_node(nodes[node_id], record)
         existing_source = next(iter(nodes[node_id].get("_source_files", [])), "")
         deep_merge(
@@ -742,6 +819,8 @@ def _merge_record_into_nodes(
                 incoming_network_scope=f"extpan:{output_id or 'unknown'}",
                 conflict_target=nodes[node_id],
                 matter_identity_mode=matter_identity_mode,
+                matter_identity_status=matter_identity_status,
+                matter_identity_enrichment_allowed=matter_identity_enrichment_allowed,
             ),
         )
         existing_sources = nodes[node_id].setdefault("_source_files", [])

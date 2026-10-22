@@ -6,6 +6,12 @@ from pathlib import Path
 import pytest
 
 from ha_matter_ws_contract import (
+    BAT_CHARGE_FAULT_ENUM,
+    BAT_CHARGE_LEVEL_ENUM,
+    BAT_CHARGE_STATE_ENUM,
+    BAT_FAULT_ENUM,
+    BAT_REPLACEABILITY_ENUM,
+    BRIDGED_BASIC_INFORMATION_ATTRIBUTES,
     COLLECTOR_SCHEMA_VERSION,
     GENERAL_DIAGNOSTICS_ATTRIBUTES,
     HA_MATTER_WS_HOST_DEFAULT,
@@ -13,6 +19,8 @@ from ha_matter_ws_contract import (
     MIN_SUPPORTED_SERVER_SCHEMA_VERSION,
     NEIGHBOR_TABLE_FIELDS,
     NETWORK_INTERFACE_FIELDS,
+    POWER_SOURCE_ATTRIBUTES,
+    POWER_SOURCE_STATUS_ENUM,
     ROUTE_TABLE_FIELDS,
     THREAD_NETWORK_DIAGNOSTICS_ATTRIBUTES,
     MatterWsCommandError,
@@ -200,6 +208,53 @@ def test_general_diagnostics_network_interface_contract_separates_ip_versions() 
     assert NETWORK_INTERFACE_FIELDS[5].name == "IPv4Addresses"
     assert NETWORK_INTERFACE_FIELDS[6].name == "IPv6Addresses"
     assert NETWORK_INTERFACE_FIELDS[7].name == "Type"
+
+
+def test_matter_power_and_bridged_identity_contract_matches_model() -> None:
+    assert POWER_SOURCE_ATTRIBUTES[0].name == "Status"
+    assert POWER_SOURCE_ATTRIBUTES[1].data_type == "uint8"
+    assert POWER_SOURCE_ATTRIBUTES[9].data_type == "bool"
+    assert POWER_SOURCE_ATTRIBUTES[0x0B].data_type == "uint32"
+    assert POWER_SOURCE_ATTRIBUTES[0x0C].data_type == "uint8"
+    assert POWER_SOURCE_ATTRIBUTES[0x0D].data_type == "uint32"
+    assert POWER_SOURCE_ATTRIBUTES[0x12].data_type == "list<BatFaultEnum>"
+    assert POWER_SOURCE_ATTRIBUTES[0x1F].data_type == "list<endpoint-no>"
+    assert {
+        field_id
+        for field_id in POWER_SOURCE_ATTRIBUTES
+        if field_id < 0xFFFB
+    } == {
+        0x00, 0x01, 0x02, 0x09, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x19, 0x1A,
+        0x1B, 0x1C, 0x1E, 0x1F,
+    }
+    assert BRIDGED_BASIC_INFORMATION_ATTRIBUTES[0x01].name == "VendorName"
+    assert BRIDGED_BASIC_INFORMATION_ATTRIBUTES[0x03].name == "ProductName"
+    assert BRIDGED_BASIC_INFORMATION_ATTRIBUTES[0x11].name == "Reachable"
+    assert BRIDGED_BASIC_INFORMATION_ATTRIBUTES[0x12].name == "UniqueId"
+    assert BRIDGED_BASIC_INFORMATION_ATTRIBUTES[0x18].name == "ConfigurationVersion"
+    assert attribute_definition("2/47/12").name == "BatPercentRemaining"
+    assert attribute_definition("4/57/17").name == "Reachable"
+    assert attribute_definition("4/57/0") is None
+    assert attribute_definition("4/57/6") is None
+
+
+def test_power_source_enum_codes_are_immutable_presentation_metadata() -> None:
+    assert dict(POWER_SOURCE_STATUS_ENUM) == {
+        0: "Unspecified", 1: "Active", 2: "Standby", 3: "Unavailable"
+    }
+    assert dict(BAT_CHARGE_LEVEL_ENUM) == {0: "Ok", 1: "Warning", 2: "Critical"}
+    assert dict(BAT_REPLACEABILITY_ENUM) == {
+        0: "Unspecified", 1: "NotReplaceable", 2: "UserReplaceable",
+        3: "FactoryReplaceable",
+    }
+    assert dict(BAT_CHARGE_STATE_ENUM) == {
+        0: "Unknown", 1: "IsCharging", 2: "IsAtFullCharge", 3: "IsNotCharging"
+    }
+    assert BAT_FAULT_ENUM[1] == "OverTemp"
+    assert BAT_CHARGE_FAULT_ENUM[10] == "SafetyTimeout"
+    with pytest.raises(TypeError):
+        POWER_SOURCE_STATUS_ENUM[1] = "not active"
 
 
 def test_unknown_or_malformed_paths_are_not_guessed() -> None:

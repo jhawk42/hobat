@@ -199,6 +199,16 @@ Thread telemetry. This source complements OTBR network-wide collection rather
 than replacing it. The dashboard serializes Matter refreshes and serves cached
 snapshots until they are stale or explicitly refreshed.
 
+Matter device details show reported reboot count, uptime, operational hours,
+boot reason, active fault lists, endpoint-scoped bridged identity, and cached
+Power Source values when available. Battery percentage is derived from the
+reported half-percent units; voltage is shown in millivolts and estimated times
+in seconds. Empty `EndpointList` means a node-wide power source; an absent list
+has unknown scope. These values describe the saved snapshot, not a live timer or
+freshness guarantee, and opening the dashboard details does not issue extra
+Matter reads. Firmware is not exposed as a separate field beyond reported
+software-version attributes.
+
 See [CLI Reference](doc/help_td_cli.md), [OTBR REST CLI Reference](doc/help_td_restapi_cli.md), [Thread Network Health](doc/thread_network_health.md), and [Environment Variables](doc/help_env_vars.md).
 
 ## Device Labels

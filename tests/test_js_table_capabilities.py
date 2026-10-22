@@ -15,6 +15,9 @@ def test_table_renderer_sorting_accessibility_and_selection(node_json) -> None:
     assert result["ascendingVersions"] == ["Gamma", "Beta", "Alpha", "Delta"]
     assert result["ascendingHealthStatus"] == ["Beta", "Alpha", "Gamma", "Delta"]
     assert result["descendingHealthStatus"] == ["Delta", "Gamma", "Alpha", "Beta"]
+    assert result["ascendingUptime"] == ["Uptime 99", "Uptime 100", "Uptime uint64"]
+    assert result["descendingUptime"] == ["Uptime uint64", "Uptime 100", "Uptime 99"]
+    assert result["matterTableStatusColumns"][0] >= result["matterTableStatusColumns"][1]
     assert result["ascendingAriaSort"] == "ascending"
     assert result["descendingAriaSort"] == "descending"
     assert result["metricFocusColumn"] == "metric"

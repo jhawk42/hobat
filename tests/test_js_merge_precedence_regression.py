@@ -42,6 +42,7 @@ def test_javascript_policy_metadata_matches_python() -> None:
         "childTable",
         "childIpv6Addresses",
         "routerNeighbors",
+        "powerSources",
     }
     assert result["context"]["existingPriority"] == 10
     assert result["context"]["incomingPriority"] == 0

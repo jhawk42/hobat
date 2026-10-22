@@ -384,3 +384,77 @@ def _merge_address_field(
     if not isinstance(incoming, list):
         return deepcopy(current)
     return merge_unique_strings(current if isinstance(current, list) else [], incoming)
+
+
+def _valid_matter_endpoint_id(record: Any) -> int | None:
+    if not isinstance(record, dict):
+        return None
+    endpoint_id = record.get("endpointId")
+    if type(endpoint_id) is int and 0 <= endpoint_id < 0xFFFF:
+        return endpoint_id
+    return None
+
+
+def _merge_matter_endpoint_record(
+    target: dict[str, Any],
+    source: dict[str, Any],
+    path: str,
+    context: MergeContext | None,
+) -> None:
+    mergeable_arrays = {"deviceTypes", "serverClusters", "partsList"}
+    for key, value in source.items():
+        current = target.get(key)
+        field_path = f"{path}.{key}" if path else key
+        if key not in target:
+            target[key] = deepcopy(value)
+        elif isinstance(current, dict) and isinstance(value, dict):
+            _merge_matter_endpoint_record(target[key], value, field_path, context)
+        elif isinstance(current, list) and isinstance(value, list):
+            if key in mergeable_arrays:
+                target[key] = merge_lists(current, value)
+            elif not values_equivalent(current, value):
+                append_merge_conflict(
+                    (context.conflict_target if context else None) or target,
+                    field_path,
+                    current,
+                    value,
+                    limit=context.conflict_limit if context else 20,
+                )
+        elif not values_equivalent(current, value):
+            append_merge_conflict(
+                (context.conflict_target if context else None) or target,
+                field_path,
+                current,
+                value,
+                limit=context.conflict_limit if context else 20,
+            )
+
+
+def merge_matter_endpoint_arrays(
+    base_records: Any,
+    incoming_records: Any,
+    context: MergeContext,
+) -> list[Any]:
+    """Merge Matter power-source or endpoint arrays by hosting endpoint ID."""
+
+    keyed: dict[int, dict[str, Any]] = {}
+    unkeyed: list[Any] = []
+    for record in [
+        *(base_records if isinstance(base_records, list) else []),
+        *(incoming_records if isinstance(incoming_records, list) else []),
+    ]:
+        endpoint_id = _valid_matter_endpoint_id(record)
+        if endpoint_id is None:
+            unkeyed.append(deepcopy(record))
+            continue
+        existing = keyed.get(endpoint_id)
+        if existing is None:
+            keyed[endpoint_id] = deepcopy(record)
+        else:
+            _merge_matter_endpoint_record(
+                existing,
+                record,
+                f"{context.field_path}[endpointId={endpoint_id}]",
+                context,
+            )
+    return [keyed[endpoint_id] for endpoint_id in sorted(keyed)] + unkeyed

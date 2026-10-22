@@ -102,10 +102,10 @@ when present.
 
 The **Matter** section is immediately before **MDNS**. It is populated from the
 selected HA Matter WebSocket record and does not trigger collection. A field is
-shown only when its source value is present; `null`, missing, and unsupported
-attributes do not create placeholder rows. Selecting another topology node or
-table row replaces the section with that record's available values; clearing the
-selection clears the section.
+shown only when its source value is present; explicit `null` is shown as `n/a`,
+while missing or unsupported attributes do not create placeholder rows.
+Selecting another topology node or table row replaces the section with that
+record's available values; clearing the selection clears the section.
 
 | Source field | Display label | Selection behavior |
 |---|---|---|
@@ -122,10 +122,20 @@ selection clears the section.
 | `deviceTypes` | `deviceTypes` | Endpoint device types and revisions observed for the selected record. |
 | `networkInterfaces` | `networkInterfaces` | Matter General Diagnostics interfaces, including reported IP addresses and MAC addresses. |
 | `generalDiagnostics` | `generalDiagnostics` | Reported Matter General Diagnostics values for the selected record. |
+| `generalDiagnostics.rebootCount`, `generalDiagnostics.upTime`, `generalDiagnostics.totalOperationalHours` | Reported reboot count, reported uptime, reported operational hours | Uptime is displayed as the snapshot's reported seconds plus a readable duration; it is not a live timer. Operational hours use hours. |
+| `generalDiagnostics.bootReason`, `generalDiagnostics.activeHardwareFaults`, `generalDiagnostics.activeRadioFaults`, `generalDiagnostics.activeNetworkFaults` | Reported boot reason and active fault lists | Known enum codes include their labels; unknown codes remain visible. An empty fault list is “None reported”; absence is unknown. |
+| `powerSources[]` | Power sources grouped by hosting endpoint | Shows description, source state, raw half-percent value and derived percentage, voltage in mV, estimated battery times in seconds, replacement/charging information, and explicit or unknown powered-endpoint scope. Every observed source remains inspectable. |
+| `matter.endpoints[]` | Matter endpoints grouped by endpoint ID | Shows endpoint-scoped bridged identity alongside the endpoint's other observed details; it does not replace the root node identity. |
+| `diagnosticCoverage.powerSources` | Power Source coverage by endpoint | Shows whether cached values were populated, null, unsupported, not observed, invalid, or affected by a read error where coverage is available. |
 
 Thread network name, Thread IPv6 addresses, and neighbor RSSI/LQI remain in
 Network and Neighbors because they are Thread Network Diagnostics observations,
 not Matter Basic Information fields.
+
+All values are observations from the current cached snapshot. Opening details,
+changing the Table category, or switching between table and topology does not
+refresh Matter attributes. Sleeping or unavailable nodes may have partial
+diagnostics; absence does not prove that a device lacks the capability.
 
 ## Search
 

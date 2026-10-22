@@ -21,6 +21,8 @@ class MergeContext:
     conflict_limit: int = 20
     matter_identity_mode: str = "strict-omr"
     field_path: str = ""
+    matter_identity_status: str = "unknown"
+    matter_identity_enrichment_allowed: bool = False
 
     def for_field(self, field_name: str) -> "MergeContext":
         path = f"{self.field_path}.{field_name}" if self.field_path else field_name
@@ -33,6 +35,8 @@ FIELD_HANDLER_REGISTRY = {
     "childTable": "relationship",
     "childIpv6Addresses": "address_union",
     "routerNeighbors": "relationship",
+    "powerSources": "matter_endpoint_keyed",
+    "matter.endpoints": "matter_endpoint_keyed",
     "_source_files": "provenance",
     "_merge_conflicts": "conflict",
 }

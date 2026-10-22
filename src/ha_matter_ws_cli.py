@@ -404,25 +404,31 @@ def _coverage_summary(diagnostics: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "readError",
         "implementedEmpty",
         "clusterUnsupported",
+        "notObserved",
+        "invalidValue",
     )
     cluster_counts = {state: 0 for state in states}
     attribute_counts = {state: 0 for state in states if state != "clusterUnsupported"}
-    for diagnostic in diagnostics:
-        coverage = diagnostic.get("diagnosticCoverage")
-        if not isinstance(coverage, Mapping):
-            continue
-        for cluster in coverage.values():
-            if not isinstance(cluster, Mapping):
-                continue
-            cluster_state = cluster.get("cluster")
+
+    def count_coverage(value: Any) -> None:
+        if not isinstance(value, Mapping):
+            return
+        if "cluster" in value and "attributes" in value:
+            cluster_state = value.get("cluster")
             if cluster_state in cluster_counts:
                 cluster_counts[str(cluster_state)] += 1
-            attributes = cluster.get("attributes")
-            if not isinstance(attributes, Mapping):
-                continue
-            for status in attributes.values():
-                if status in attribute_counts:
-                    attribute_counts[str(status)] += 1
+            attributes = value.get("attributes")
+            if isinstance(attributes, Mapping):
+                for status in attributes.values():
+                    if status in attribute_counts:
+                        attribute_counts[str(status)] += 1
+            return
+        for nested in value.values():
+            count_coverage(nested)
+
+    for diagnostic in diagnostics:
+        coverage = diagnostic.get("diagnosticCoverage")
+        count_coverage(coverage)
     return {"clusters": cluster_counts, "attributes": attribute_counts}
 
 

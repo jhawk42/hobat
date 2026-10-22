@@ -41,8 +41,9 @@ const MATTER_FIELDS = Object.freeze([
   'deviceLabel', 'nodeId', 'matterId', 'fabricId', 'compressedFabricId',
   'fabricIndex', 'vendorName', 'vendorId', 'vendorModel', 'productId',
   'productLabel', 'vendorSwVersion', 'vendorSwVersionNumber',
-  'vendorHwVersion', 'vendorHwVersionNumber', 'available', 'isBridge',
-  'dateCommissioned',
+  'vendorHwVersion', 'vendorHwVersionNumber', 'serialNumber',
+  'matterVersion', 'dataModelRevision', 'specificationVersion',
+  'endpoints', 'available', 'isBridge', 'dateCommissioned',
 ]);
 const ROLE_FACT_FIELDS = Object.freeze([
   'isBorderRouter', 'isRouter', 'isLeader', 'isReed',

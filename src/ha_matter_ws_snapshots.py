@@ -133,6 +133,12 @@ def build_diagnostic_snapshot(
         thread = record.get("thread")
         if not isinstance(matter, Mapping) or not isinstance(thread, Mapping):
             continue
+        matter_details = {
+            **matter,
+            "endpoints": record.get("endpoints", []),
+            "deviceTypes": record.get("deviceTypes", []),
+            "serverClusters": record.get("serverClusters", []),
+        }
         role = thread.get("routingRole")
         standard = thread.get("diagnosticsDetail", {}).get(
             "threadNetworkDiagnostics", {}
@@ -140,6 +146,7 @@ def build_diagnostic_snapshot(
         diagnostic = {
             "nodeId": matter.get("nodeId"),
             "matterId": matter.get("matterId"),
+            "matter": matter_details,
             "fabricId": matter.get("fabricId"),
             "compressedFabricId": matter.get("compressedFabricId"),
             "fabricIndex": matter.get("fabricIndex"),
@@ -170,6 +177,8 @@ def build_diagnostic_snapshot(
             "macCounters": thread.get("macCounters", {}),
             "mleCounters": thread.get("mleCounters", {}),
             "networkInterfaces": record.get("networkInterfaces", []),
+            "generalDiagnostics": record.get("generalDiagnostics", {}),
+            "powerSources": record.get("powerSources", []),
             "neighborTable": thread.get("neighborTable", []),
             "routeTable": thread.get("routeTable", []),
             "diagnosticsDetail": thread.get("diagnosticsDetail", {}),

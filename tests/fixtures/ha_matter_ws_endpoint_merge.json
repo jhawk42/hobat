@@ -1,0 +1,100 @@
+{
+  "base": {
+    "matter": {
+      "matterId": "0000000000001234-0000000000000001",
+      "compressedFabricId": 4660,
+      "nodeId": 1,
+      "endpoints": [
+        {
+          "endpointId": 2,
+          "basicInformation": {
+            "productName": "Window Sensor",
+            "configurationVersion": 0
+          },
+          "bridgedBasicInformation": {
+            "reachable": false,
+            "serialNumber": null
+          },
+          "serverClusters": [29, 47]
+        },
+        {"endpointId": 1, "basicInformation": {"productName": "Bridge"}},
+        {"vendorName": "unkeyed"}
+      ]
+    },
+    "powerSources": [
+      {
+        "endpointId": 2,
+        "attributes": {
+          "status": 0,
+          "description": "Sensor battery",
+          "batReplacementNeeded": false,
+          "endpointList": [2]
+        }
+      },
+      {
+        "endpointId": 1,
+        "attributes": {
+          "batPercentRemaining": 151,
+          "endpointList": [],
+          "description": null
+        },
+        "batteryPercent": 75.5
+      },
+      {"endpointId": "2", "attributes": {"description": "unkeyed"}}
+    ],
+    "_source_files": ["high.json"],
+    "_merge_identity_keys": ["matterFabricNode:0000000000001234|0000000000000001"]
+  },
+  "incoming": {
+    "matter": {
+      "matterId": "0000000000001234-0000000000000001",
+      "compressedFabricId": 4660,
+      "nodeId": 1,
+      "endpoints": [
+        {
+          "endpointId": 1,
+          "basicInformation": {"vendorName": "Acme"}
+        },
+        {
+          "endpointId": 2,
+          "basicInformation": {
+            "vendorName": "Acme",
+            "productName": "Conflicting name",
+            "configurationVersion": 9
+          },
+          "bridgedBasicInformation": {
+            "reachable": true,
+            "serialNumber": "BRIDGE-SENSOR-1",
+            "uniqueId": "bridge-node-1"
+          },
+          "serverClusters": [47, 29]
+        },
+        {"vendorName": "unkeyed"}
+      ]
+    },
+    "powerSources": [
+      {
+        "endpointId": 1,
+        "attributes": {
+          "batPercentRemaining": 149,
+          "endpointList": [1],
+          "description": "Backup"
+        },
+        "batteryPercent": 74.5
+      },
+      {
+        "endpointId": 2,
+        "attributes": {
+          "status": 1,
+          "batPercentRemaining": 151,
+          "batReplacementNeeded": false,
+          "endpointList": [2]
+        },
+        "batteryPercent": 75.5
+      },
+      {"endpointId": "2", "attributes": {"description": "unkeyed"}}
+    ],
+    "_source_files": ["low.json"],
+    "_merge_identity_keys": ["matterFabricNode:0000000000001234|0000000000000001"]
+  }
+}

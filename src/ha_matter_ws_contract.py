@@ -26,7 +26,8 @@ PROTOCOL_SOURCE = (
 MATTER_MODEL_SOURCE = (
     "matter-js/matter.js packages/model/src/standard/elements, "
     "Matter cluster revisions Descriptor 3, BasicInformation 6, "
-    "GeneralDiagnostics 3, ThreadNetworkDiagnostics 3, reviewed 2026-08-30"
+    "BridgedDeviceBasicInformation 6, GeneralDiagnostics 3, PowerSource 3, "
+    "ThreadNetworkDiagnostics 3, reviewed 2026-10-22"
 )
 
 
@@ -142,8 +143,10 @@ CLUSTER_IDS = MappingProxyType(
     {
         "Descriptor": 0x001D,
         "BasicInformation": 0x0028,
+        "PowerSource": 0x002F,
         "GeneralDiagnostics": 0x0033,
         "ThreadNetworkDiagnostics": 0x0035,
+        "BridgedDeviceBasicInformation": 0x0039,
     }
 )
 
@@ -151,8 +154,10 @@ CLUSTER_REVISIONS = MappingProxyType(
     {
         0x001D: 3,
         0x0028: 6,
+        0x002F: 3,
         0x0033: 3,
         0x0035: 3,
+        0x0039: 6,
     }
 )
 
@@ -164,6 +169,7 @@ DESCRIPTOR_ATTRIBUTES = _elements(
         0x0003: ("PartsList", "list<endpoint-no>"),
         0x0004: ("TagList", "list<SemanticTagStruct>"),
         0x0005: ("EndpointUniqueId", "string"),
+        0xFFFB: ("AttributeList", "list<attribute-id>"),
         0xFFFC: ("FeatureMap", "FeatureMap"),
         0xFFFD: ("ClusterRevision", "ClusterRevision"),
     }
@@ -195,8 +201,75 @@ BASIC_INFORMATION_ATTRIBUTES = _elements(
         0x0015: ("SpecificationVersion", "uint32"),
         0x0016: ("MaxPathsPerInvoke", "uint16"),
         0x0018: ("ConfigurationVersion", "uint32"),
+        0xFFFB: ("AttributeList", "list<attribute-id>"),
         0xFFFC: ("FeatureMap", "FeatureMap"),
         0xFFFD: ("ClusterRevision", "ClusterRevision"),
+    }
+)
+
+POWER_SOURCE_ATTRIBUTES = _elements(
+    {
+        0x0000: ("Status", "PowerSourceStatusEnum"),
+        0x0001: ("Order", "uint8"),
+        0x0002: ("Description", "string"),
+        0x0009: ("WiredPresent", "bool"),
+        0x000B: ("BatVoltage", "uint32"),
+        0x000C: ("BatPercentRemaining", "uint8"),
+        0x000D: ("BatTimeRemaining", "uint32"),
+        0x000E: ("BatChargeLevel", "BatChargeLevelEnum"),
+        0x000F: ("BatReplacementNeeded", "bool"),
+        0x0010: ("BatReplaceability", "BatReplaceabilityEnum"),
+        0x0011: ("BatPresent", "bool"),
+        0x0012: ("ActiveBatFaults", "list<BatFaultEnum>"),
+        0x0013: ("BatReplacementDescription", "string"),
+        0x0014: ("BatCommonDesignation", "BatCommonDesignationEnum"),
+        0x0015: ("BatAnsiDesignation", "string"),
+        0x0016: ("BatIecDesignation", "string"),
+        0x0019: ("BatQuantity", "uint8"),
+        0x001A: ("BatChargeState", "BatChargeStateEnum"),
+        0x001B: ("BatTimeToFullCharge", "uint32"),
+        0x001C: ("BatFunctionalWhileCharging", "bool"),
+        0x001E: ("ActiveBatChargeFaults", "list<BatChargeFaultEnum>"),
+        0x001F: ("EndpointList", "list<endpoint-no>"),
+        0xFFFB: ("AttributeList", "list<attribute-id>"),
+        0xFFFC: ("FeatureMap", "FeatureMap"),
+        0xFFFD: ("ClusterRevision", "ClusterRevision"),
+    }
+)
+
+POWER_SOURCE_STATUS_ENUM = MappingProxyType(
+    {0: "Unspecified", 1: "Active", 2: "Standby", 3: "Unavailable"}
+)
+BAT_CHARGE_LEVEL_ENUM = MappingProxyType(
+    {0: "Ok", 1: "Warning", 2: "Critical"}
+)
+BAT_REPLACEABILITY_ENUM = MappingProxyType(
+    {
+        0: "Unspecified",
+        1: "NotReplaceable",
+        2: "UserReplaceable",
+        3: "FactoryReplaceable",
+    }
+)
+BAT_CHARGE_STATE_ENUM = MappingProxyType(
+    {0: "Unknown", 1: "IsCharging", 2: "IsAtFullCharge", 3: "IsNotCharging"}
+)
+BAT_FAULT_ENUM = MappingProxyType(
+    {0: "Unspecified", 1: "OverTemp", 2: "UnderTemp"}
+)
+BAT_CHARGE_FAULT_ENUM = MappingProxyType(
+    {
+        0: "Unspecified",
+        1: "AmbientTooHot",
+        2: "AmbientTooCold",
+        3: "BatteryTooHot",
+        4: "BatteryTooCold",
+        5: "BatteryAbsent",
+        6: "BatteryOverVoltage",
+        7: "BatteryUnderVoltage",
+        8: "ChargerOverVoltage",
+        9: "ChargerUnderVoltage",
+        10: "SafetyTimeout",
     }
 )
 
@@ -212,6 +285,32 @@ GENERAL_DIAGNOSTICS_ATTRIBUTES = _elements(
         0x0007: ("ActiveNetworkFaults", "list<NetworkFaultEnum>"),
         0x0008: ("TestEventTriggersEnabled", "bool"),
         0x000A: ("DeviceLoadStatus", "DeviceLoadStruct"),
+        0xFFFB: ("AttributeList", "list<attribute-id>"),
+        0xFFFC: ("FeatureMap", "FeatureMap"),
+        0xFFFD: ("ClusterRevision", "ClusterRevision"),
+    }
+)
+
+BRIDGED_BASIC_INFORMATION_ATTRIBUTES = _elements(
+    {
+        0x0001: ("VendorName", "string"),
+        0x0002: ("VendorId", "vendor-id"),
+        0x0003: ("ProductName", "string"),
+        0x0004: ("ProductId", "uint16"),
+        0x0005: ("NodeLabel", "string"),
+        0x0007: ("HardwareVersion", "uint16"),
+        0x0008: ("HardwareVersionString", "string"),
+        0x0009: ("SoftwareVersion", "uint32"),
+        0x000A: ("SoftwareVersionString", "string"),
+        0x000B: ("ManufacturingDate", "string"),
+        0x000C: ("PartNumber", "string"),
+        0x000D: ("ProductUrl", "string"),
+        0x000E: ("ProductLabel", "string"),
+        0x000F: ("SerialNumber", "string"),
+        0x0011: ("Reachable", "bool"),
+        0x0012: ("UniqueId", "string"),
+        0x0018: ("ConfigurationVersion", "uint32"),
+        0xFFFB: ("AttributeList", "list<attribute-id>"),
         0xFFFC: ("FeatureMap", "FeatureMap"),
         0xFFFD: ("ClusterRevision", "ClusterRevision"),
     }
@@ -356,8 +455,10 @@ CLUSTER_ATTRIBUTES = MappingProxyType(
     {
         0x001D: DESCRIPTOR_ATTRIBUTES,
         0x0028: BASIC_INFORMATION_ATTRIBUTES,
+        0x002F: POWER_SOURCE_ATTRIBUTES,
         0x0033: GENERAL_DIAGNOSTICS_ATTRIBUTES,
         0x0035: THREAD_NETWORK_DIAGNOSTICS_ATTRIBUTES,
+        0x0039: BRIDGED_BASIC_INFORMATION_ATTRIBUTES,
     }
 )
 

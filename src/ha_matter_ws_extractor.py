@@ -14,15 +14,19 @@ from util_network import find_rloc16_in_ipv6_addresses
 
 from ha_matter_ws_contract import (
     BASIC_INFORMATION_ATTRIBUTES,
+    BRIDGED_BASIC_INFORMATION_ATTRIBUTES,
     GENERAL_DIAGNOSTICS_ATTRIBUTES,
     INTERFACE_TYPE_ENUM,
     NEIGHBOR_TABLE_FIELDS,
     NETWORK_INTERFACE_FIELDS,
+    POWER_SOURCE_ATTRIBUTES,
     ROUTE_TABLE_FIELDS,
     ROUTING_ROLE_ENUM,
     THREAD_NETWORK_DIAGNOSTICS_ATTRIBUTES,
     matter_attribute_path,
 )
+
+_INVALID = object()
 
 
 class MatterExtractionError(ValueError):
@@ -109,6 +113,255 @@ def _field_value(entry: Mapping[Any, Any], field_id: int, name: str) -> Any:
 
 def _camel(name: str) -> str:
     return name[:1].lower() + name[1:]
+
+
+def _unsigned(value: Any, bits: int) -> bool:
+    return type(value) is int and 0 <= value < (1 << bits)
+
+
+def _valid_value(value: Any, data_type: str) -> bool:
+    if value is None:
+        return True
+    base_type = data_type.rstrip("?")
+    if base_type.startswith("uint"):
+        try:
+            bits = int(base_type[4:])
+        except ValueError:
+            return False
+        if bits == 64 and isinstance(value, str):
+            if len(value) > 20 or re.fullmatch(r"[0-9]+", value) is None:
+                return False
+            return int(value, 10) < (1 << 64)
+        return _unsigned(value, bits)
+    if base_type in {"FeatureMap"}:
+        return _unsigned(value, 32)
+    if base_type == "ClusterRevision":
+        return _unsigned(value, 16)
+    if base_type == "vendor-id":
+        return _unsigned(value, 16)
+    if base_type.endswith("Enum"):
+        bits = 16 if base_type == "BatCommonDesignationEnum" else 8
+        return _unsigned(value, bits)
+    if base_type == "bool":
+        return type(value) is bool
+    if base_type == "string":
+        return isinstance(value, str)
+    if base_type.startswith("list<") and base_type.endswith(">"):
+        if not isinstance(value, list):
+            return False
+        item_type = base_type[5:-1]
+        if item_type in {"cluster-id", "attribute-id"}:
+            return all(_unsigned(item, 32) for item in value)
+        if item_type == "endpoint-no":
+            return all(_unsigned(item, 16) and item < 0xFFFF for item in value)
+        if item_type in {"BatFaultEnum", "BatChargeFaultEnum"}:
+            return all(_unsigned(item, 8) for item in value)
+        if item_type.endswith("Enum"):
+            return all(_unsigned(item, 8) for item in value)
+        if item_type == "NetworkInterface":
+            return all(isinstance(item, dict) for item in value)
+        return True
+    if base_type.endswith("Struct"):
+        return isinstance(value, dict)
+    return True
+
+
+def _validated(value: Any, definition: Any) -> Any:
+    if not _valid_value(value, definition.data_type):
+        return _INVALID
+    if (
+        definition.name == "BatPercentRemaining"
+        and value is not None
+        and (type(value) is not int or value > 200)
+    ):
+        return _INVALID
+    return _decode_standard_value(value, definition.data_type)
+
+
+def _empty_value(value: Any) -> bool:
+    return value == "" or value == []
+
+
+def _coverage_field_state(
+    value: Any, *, present: bool, valid: bool, read_error: bool
+) -> str:
+    if read_error:
+        return "readError"
+    if not present:
+        return "notObserved"
+    if not valid:
+        return "invalidValue"
+    if value is None:
+        return "null"
+    if _empty_value(value):
+        return "implementedEmpty"
+    return "populated"
+
+
+def _numeric_list(value: Any, bits: int) -> list[int] | None:
+    if not isinstance(value, list) or not all(_unsigned(item, bits) for item in value):
+        return None
+    return value
+
+
+def _cluster_paths(
+    values: Mapping[str, Any], errors: Mapping[str, Any], endpoint_id: int, cluster_id: int
+) -> tuple[set[int], set[int]]:
+    prefix = f"{endpoint_id}/{cluster_id}/"
+    value_ids = {
+        int(path[len(prefix):])
+        for path in values
+        if isinstance(path, str)
+        and path.startswith(prefix)
+        and path[len(prefix):].isdigit()
+    }
+    error_ids = {
+        int(path[len(prefix):])
+        for path in errors
+        if isinstance(path, str)
+        and path.startswith(prefix)
+        and path[len(prefix):].isdigit()
+    }
+    return value_ids, error_ids
+
+
+def _observed_cluster_ids(attributes: Mapping[str, Any], endpoint_id: int) -> set[int]:
+    observed: set[int] = set()
+    for path in attributes:
+        if not isinstance(path, str):
+            continue
+        match = re.fullmatch(rf"{endpoint_id}/(\d+)/\d+", path)
+        if match is not None:
+            observed.add(int(match.group(1)))
+    return observed
+
+
+def _descriptor_server_list(
+    attributes: Mapping[str, Any], endpoint_id: int
+) -> list[int] | None:
+    raw = attributes.get(matter_attribute_path(endpoint_id, 0x001D, 1))
+    values = _numeric_list(raw, 32)
+    if (
+        values is None
+        or len(values) != len(set(values))
+        or 0x001D not in values
+        or not _observed_cluster_ids(attributes, endpoint_id).issubset(values)
+    ):
+        return None
+    return values
+
+
+def _complete_attribute_list(
+    attributes: Mapping[str, Any], endpoint_id: int, cluster_id: int
+) -> list[int] | None:
+    value_path = matter_attribute_path(endpoint_id, cluster_id, 0xFFFB)
+    raw = attributes.get(value_path)
+    values = _numeric_list(raw, 32)
+    revision = attributes.get(matter_attribute_path(endpoint_id, cluster_id, 0xFFFD))
+    if (
+        values is None
+        or len(values) != len(set(values))
+        or not {0xFFFB, 0xFFFC, 0xFFFD}.issubset(values)
+        or not _unsigned(revision, 16)
+        or not _observed_cluster_ids(attributes, endpoint_id)
+        .intersection({cluster_id})
+    ):
+        return None
+    observed_ids, _ = _cluster_paths(attributes, {}, endpoint_id, cluster_id)
+    if not observed_ids.issubset(values):
+        return None
+    return values
+
+
+def _coverage_for_cluster(
+    attributes: Mapping[str, Any],
+    attribute_errors: Mapping[str, Any],
+    endpoint_id: int,
+    cluster_id: int,
+    definitions: Mapping[int, Any],
+) -> dict[str, Any]:
+    server_list = _descriptor_server_list(attributes, endpoint_id)
+    excluded = server_list is not None and cluster_id not in server_list
+    raw_attribute_list = attributes.get(
+        matter_attribute_path(endpoint_id, cluster_id, 0xFFFB)
+    )
+    attribute_list = _complete_attribute_list(attributes, endpoint_id, cluster_id)
+    raw_revision = attributes.get(
+        matter_attribute_path(endpoint_id, cluster_id, 0xFFFD)
+    )
+    revision = raw_revision if _unsigned(raw_revision, 16) else None
+    observed_ids, error_ids = _cluster_paths(
+        attributes, attribute_errors, endpoint_id, cluster_id
+    )
+    observed = bool(observed_ids or error_ids)
+    if observed:
+        if error_ids:
+            cluster_state = "readError"
+        else:
+            cluster_state = "populated"
+    elif excluded:
+        cluster_state = "clusterUnsupported"
+    else:
+        cluster_state = "notObserved"
+
+    states: dict[str, str] = {}
+    invalid_values: dict[str, str] = {}
+    server_path = matter_attribute_path(endpoint_id, 0x001D, 1)
+    if server_path in attributes and server_list is None:
+        invalid_values[server_path] = (
+            "expected complete Descriptor ServerList including observed clusters"
+        )
+    attribute_list_path = matter_attribute_path(endpoint_id, cluster_id, 0xFFFB)
+    if attribute_list_path in attributes and attribute_list is None:
+        invalid_values[attribute_list_path] = (
+            "expected complete AttributeList with global metadata and observed attributes"
+        )
+    for attribute_id, definition in definitions.items():
+        path = matter_attribute_path(endpoint_id, cluster_id, attribute_id)
+        present = path in attributes
+        value = attributes.get(path)
+        valid = _valid_value(value, definition.data_type)
+        if (
+            valid
+            and definition.name == "BatPercentRemaining"
+            and value is not None
+            and value > 200
+        ):
+            valid = False
+        read_error = path in attribute_errors
+        state = _coverage_field_state(
+            value, present=present, valid=valid, read_error=read_error
+        )
+        if (
+            present
+            and attribute_id == 0xFFFB
+            and attribute_list is None
+            and not read_error
+        ):
+            state = "invalidValue"
+        if not present and not read_error:
+            if excluded:
+                state = "attributeUnsupported"
+            elif (
+                attribute_list is not None
+                and revision is not None
+                and attribute_id not in attribute_list
+            ):
+                state = "attributeUnsupported"
+            elif cluster_id == 0x0039 and revision is not None:
+                introduced_revision = {0x0012: 4, 0x0018: 6}.get(attribute_id)
+                if introduced_revision is not None and revision < introduced_revision:
+                    state = "attributeUnsupported"
+        states[_camel(definition.name)] = state
+        if present and not valid and not read_error:
+            expected = definition.data_type
+            if definition.name == "BatPercentRemaining":
+                expected = "uint8 (0..200)"
+            invalid_values[path] = f"expected {expected}"
+    result: dict[str, Any] = {"cluster": cluster_state, "attributes": states}
+    if invalid_values:
+        result["invalidValues"] = invalid_values
+    return result
 
 
 def _decode_bytes(value: Any) -> bytes | None:
@@ -228,7 +481,9 @@ def _basic_information(
     for attribute_id, definition in BASIC_INFORMATION_ATTRIBUTES.items():
         path = matter_attribute_path(endpoint_id, 0x0028, attribute_id)
         if path in attributes:
-            values[definition.name] = attributes[path]
+            value = _validated(attributes[path], definition)
+            if value is not _INVALID:
+                values[definition.name] = value
     return values
 
 
@@ -306,9 +561,13 @@ def _device_types(value: Any) -> list[dict[str, Any]]:
 def extract_endpoints(attributes: Mapping[str, Any]) -> list[dict[str, Any]]:
     endpoint_ids: set[int] = set()
     for path in attributes:
-        match = re.fullmatch(r"(\d+)/(29|40)/\d+", path)
+        if not isinstance(path, str):
+            continue
+        match = re.fullmatch(r"(\d+)/(29|40|47|57)/\d+", path)
         if match is not None:
-            endpoint_ids.add(int(match.group(1)))
+            endpoint_id = int(match.group(1))
+            if endpoint_id < 0xFFFF:
+                endpoint_ids.add(endpoint_id)
 
     endpoints: list[dict[str, Any]] = []
     for endpoint_id in sorted(endpoint_ids):
@@ -342,10 +601,62 @@ def extract_endpoints(attributes: Mapping[str, Any]) -> list[dict[str, Any]]:
             "partsList": parts,
         }
         basic_information = _basic_information(attributes, endpoint_id)
+        basic_information.pop("AttributeList", None)
         if basic_information:
             endpoint["basicInformation"] = basic_information
+        bridged_information = _bridged_basic_information(attributes, endpoint_id)
+        if bridged_information:
+            endpoint["bridgedBasicInformation"] = bridged_information
         endpoints.append(endpoint)
     return endpoints
+
+
+def extract_power_sources(attributes: Mapping[str, Any]) -> list[dict[str, Any]]:
+    source_endpoint_ids: set[int] = set()
+    for path in attributes:
+        if not isinstance(path, str):
+            continue
+        match = re.fullmatch(r"(\d+)/47/(\d+)", path)
+        if match is None:
+            continue
+        endpoint_id, attribute_id = map(int, match.groups())
+        if endpoint_id < 0xFFFF and attribute_id in POWER_SOURCE_ATTRIBUTES:
+            source_endpoint_ids.add(endpoint_id)
+    sources: list[dict[str, Any]] = []
+    for endpoint_id in sorted(source_endpoint_ids):
+        values: dict[str, Any] = {}
+        for attribute_id, definition in POWER_SOURCE_ATTRIBUTES.items():
+            path = matter_attribute_path(endpoint_id, 0x002F, attribute_id)
+            if path not in attributes:
+                continue
+            value = _validated(attributes[path], definition)
+            if value is not _INVALID:
+                values[_camel(definition.name)] = value
+        source: dict[str, Any] = {"endpointId": endpoint_id, "attributes": values}
+        percent = values.get("batPercentRemaining", _INVALID)
+        if percent is None:
+            source["batteryPercent"] = None
+        elif type(percent) is int and 0 <= percent <= 200:
+            source["batteryPercent"] = percent / 2
+        sources.append(source)
+    return sources
+
+
+def _bridged_basic_information(
+    attributes: Mapping[str, Any], endpoint_id: int
+) -> dict[str, Any]:
+    metadata_ids = {0xFFFB, 0xFFFC}
+    values: dict[str, Any] = {}
+    for attribute_id, definition in BRIDGED_BASIC_INFORMATION_ATTRIBUTES.items():
+        if attribute_id in metadata_ids:
+            continue
+        path = matter_attribute_path(endpoint_id, 0x0039, attribute_id)
+        if path not in attributes:
+            continue
+        value = _validated(attributes[path], definition)
+        if value is not _INVALID:
+            values[_camel(definition.name)] = value
+    return values
 
 
 def _known_struct_key(key: Any, definitions: Mapping[int, Any]) -> bool:
@@ -455,15 +766,90 @@ def extract_general_diagnostics(
 ) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {}
     for attribute_id, definition in GENERAL_DIAGNOSTICS_ATTRIBUTES.items():
+        if attribute_id == 0xFFFB:
+            continue
         path = matter_attribute_path(0, 0x0033, attribute_id)
         if path not in attributes:
             continue
-        diagnostics[_camel(definition.name)] = (
-            interfaces
-            if attribute_id == 0
-            else _decode_standard_value(attributes[path], definition.data_type)
-        )
+        value = _validated(attributes[path], definition)
+        if value is _INVALID:
+            continue
+        diagnostics[_camel(definition.name)] = interfaces if attribute_id == 0 else value
     return diagnostics
+
+
+def _coverage_endpoint_ids(
+    attributes: Mapping[str, Any],
+    attribute_errors: Mapping[str, Any],
+    endpoints: list[dict[str, Any]],
+    cluster_id: int,
+) -> list[int]:
+    candidates = {endpoint["endpointId"] for endpoint in endpoints}
+    for paths in (attributes, attribute_errors):
+        for path in paths:
+            if not isinstance(path, str):
+                continue
+            match = re.fullmatch(r"(\d+)/(\d+)/(\d+)", path)
+            if match is not None and int(match.group(2)) == cluster_id:
+                endpoint_id = int(match.group(1))
+                if endpoint_id < 0xFFFF:
+                    candidates.add(endpoint_id)
+    included: list[int] = []
+    for endpoint_id in candidates:
+        server_list = _descriptor_server_list(attributes, endpoint_id)
+        observed_ids, error_ids = _cluster_paths(
+            attributes, attribute_errors, endpoint_id, cluster_id
+        )
+        if (server_list is not None and cluster_id in server_list) or observed_ids or error_ids:
+            included.append(endpoint_id)
+    return sorted(included)
+
+
+def _diagnostic_coverage(
+    attributes: Mapping[str, Any],
+    attribute_errors: Mapping[str, Any],
+    endpoints: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "basicInformation": _coverage_for_cluster(
+            attributes,
+            attribute_errors,
+            0,
+            0x0028,
+            BASIC_INFORMATION_ATTRIBUTES,
+        ),
+        "generalDiagnostics": _coverage_for_cluster(
+            attributes,
+            attribute_errors,
+            0,
+            0x0033,
+            GENERAL_DIAGNOSTICS_ATTRIBUTES,
+        ),
+        "powerSources": {
+            str(endpoint_id): _coverage_for_cluster(
+                attributes,
+                attribute_errors,
+                endpoint_id,
+                0x002F,
+                POWER_SOURCE_ATTRIBUTES,
+            )
+            for endpoint_id in _coverage_endpoint_ids(
+                attributes, attribute_errors, endpoints, 0x002F
+            )
+        },
+        "bridgedBasicInformation": {
+            str(endpoint_id): _coverage_for_cluster(
+                attributes,
+                attribute_errors,
+                endpoint_id,
+                0x0039,
+                BRIDGED_BASIC_INFORMATION_ATTRIBUTES,
+            )
+            for endpoint_id in _coverage_endpoint_ids(
+                attributes, attribute_errors, endpoints, 0x0039
+            )
+        },
+    }
 
 
 def _extract_thread(
@@ -571,6 +957,7 @@ def extract_node_info(
         )
     interfaces = extract_network_interfaces(attributes)
     endpoints = extract_endpoints(attributes)
+    power_sources = extract_power_sources(attributes)
     attribute_errors = node.get("attribute_errors")
     if not isinstance(attribute_errors, dict):
         attribute_errors = {}
@@ -593,10 +980,12 @@ def extract_node_info(
         "networkInterfaces": interfaces,
         "generalDiagnostics": extract_general_diagnostics(attributes, interfaces),
         "diagnosticCoverage": {
+            **_diagnostic_coverage(attributes, attribute_errors, endpoints),
             "threadNetworkDiagnostics": _thread_coverage(
                 attributes, attribute_errors, supported=thread_supported
             )
         },
+        "powerSources": power_sources,
         "thread": _extract_thread(
             attributes, interfaces, endpoints, attribute_errors
         ),

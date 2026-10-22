@@ -489,9 +489,11 @@ export const MERGE_FIELD_HANDLERS = Object.freeze({
     mergeStringArrays(Array.isArray(existing) ? existing : [], incoming),
   routerNeighbors: (existing, incoming, context) =>
     mergeRouterNeighbors(Array.isArray(existing) ? existing : [], incoming, context),
+  powerSources: (existing, incoming, context) => mergePowerSources(existing, incoming, context),
 });
 
 export function mergeRowFields(target, source, context = {}) {
+  const mergeContext = { ...context, ...matterIdentityMergeState(target, source) };
   mergeMdnsRowIntoTarget(target, source);
   mergeRowMetadata(target, source);
   const tlvSummaryFields = ["tlvRequestValues", "tlvResponseValues"];
@@ -532,11 +534,18 @@ export function mergeRowFields(target, source, context = {}) {
     if (tlvSummaryFields.includes(key)) return;
     const sv = source[key];
     const tv = target[key];
+    if (key === "matter" && mergeContext.matterIdentityStatus === "mismatch") {
+      if (!isEmptyMergeValue(sv) && !areMergeValuesEquivalent(tv, sv)) {
+        appendRowConflict(target, key, tv, sv, mergeContext.conflictLimit ?? 20);
+      }
+      return;
+    }
     const handler = MERGE_FIELD_HANDLERS[key];
     if (handler && !isEmptyMergeValue(sv)) {
       target[key] = handler(tv, sv, {
-        ...context,
+        ...mergeContext,
         conflictTarget: target,
+        sourceRecord: source,
         ownerRloc16: context.ownerRloc16 || getCanonicalRloc16(target),
         fieldPath: key,
       });
@@ -553,7 +562,7 @@ export function mergeRowFields(target, source, context = {}) {
     } else if (isEmptyMergeValue(tv) && !isEmptyMergeValue(sv)) {
       target[key] = sv;
     } else if (isPlainObject(tv) && isPlainObject(sv)) {
-      deepMergeObjects(tv, sv, key, target, context);
+      deepMergeObjects(tv, sv, key, target, mergeContext);
     } else if (Array.isArray(tv) && Array.isArray(sv)) {
       target[key] = mergeArrays(tv, sv);
     } else if (
@@ -622,6 +631,15 @@ export function getPartitionId(row) {
  * @param {object} [ctx]          - Optional context: { ownerRloc16, partitionId }
  */
 export function deepMergeObjects(target, source, pathPrefix, conflictTarget, ctx = {}) {
+  const matterIdentityState = ctx.matterIdentityStatus
+    ? {}
+    : pathPrefix
+      ? { matterIdentityStatus: "absent", matterIdentityEnrichmentAllowed: false }
+      : matterIdentityMergeState(target, source);
+  const mergeContext = {
+    ...ctx,
+    ...matterIdentityState,
+  };
   const isRouteContainerPath = pathPrefix === "route" || pathPrefix === "route_data";
   const parseSeqValue = (value) => {
     if (value === undefined || value === null || value === "") return undefined;
@@ -636,6 +654,30 @@ export function deepMergeObjects(target, source, pathPrefix, conflictTarget, ctx
     const sv = source[key];
     const tv = target[key];
     const fieldPath = pathPrefix ? `${pathPrefix}.${key}` : key;
+
+    if (
+      pathPrefix === "matter"
+      && ["matterId", "compressedFabricId", "nodeId"].includes(key)
+      && mergeContext.matterIdentityStatus === "mismatch"
+    ) {
+      return;
+    }
+
+    if (fieldPath === "matter.endpoints" && Array.isArray(sv)) {
+      if (
+        mergeContext.matterIdentityStatus !== "match"
+        && !mergeContext.matterIdentityEnrichmentAllowed
+      ) {
+        appendRowConflict(conflictTarget, fieldPath, tv, sv, ctx.conflictLimit ?? 20);
+        return;
+      }
+      target[key] = mergeMatterEndpointArrays(tv, sv, {
+        ...mergeContext,
+        conflictTarget,
+        fieldPath,
+      });
+      return;
+    }
 
     // Special-case known nested arrays with composite-identity merge
     if ((key === "route_data" || key === "routeData") && Array.isArray(sv)) {
@@ -687,7 +729,7 @@ export function deepMergeObjects(target, source, pathPrefix, conflictTarget, ctx
     if (isEmptyMergeValue(tv) && !isEmptyMergeValue(sv)) {
       target[key] = sv;
     } else if (isPlainObject(tv) && isPlainObject(sv)) {
-      deepMergeObjects(tv, sv, fieldPath, conflictTarget, ctx);
+      deepMergeObjects(tv, sv, fieldPath, conflictTarget, mergeContext);
     } else if (Array.isArray(tv) && Array.isArray(sv)) {
       target[key] = mergeArrays(tv, sv);
     } else if (
@@ -869,6 +911,107 @@ export function mergeChildrenArray(parentRloc16, baseChildren, incomingChildren,
  */
 export function mergeRouterNeighbors(baseNeighbors, incomingNeighbors, context = {}) {
   return mergeRelationshipArrays(baseNeighbors, incomingNeighbors, context);
+}
+
+function matterEndpointId(record) {
+  return isPlainObject(record)
+    && Number.isInteger(record.endpointId)
+    && record.endpointId >= 0
+    && record.endpointId < 0xffff
+    ? record.endpointId
+    : undefined;
+}
+
+function matterIdentityMergeState(left, right) {
+  const leftIdentity = getMatterFabricNodeIdentity(left);
+  const rightIdentity = getMatterFabricNodeIdentity(right);
+  if (leftIdentity && rightIdentity) {
+    return {
+      matterIdentityStatus: leftIdentity === rightIdentity ? "match" : "mismatch",
+      matterIdentityEnrichmentAllowed: false,
+    };
+  }
+  return {
+    matterIdentityStatus: "absent",
+    matterIdentityEnrichmentAllowed: !leftIdentity && Boolean(rightIdentity),
+  };
+}
+
+function mergeMatterEndpointRecord(target, source, path, context) {
+  const setMergeArrays = new Set(["deviceTypes", "serverClusters", "partsList"]);
+  Object.keys(source).forEach((key) => {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") return;
+    const value = source[key];
+    const fieldPath = `${path}.${key}`;
+    if (!Object.prototype.hasOwnProperty.call(target, key)) {
+      target[key] = structuredClone(value);
+    } else if (isPlainObject(target[key]) && isPlainObject(value)) {
+      mergeMatterEndpointRecord(target[key], value, fieldPath, context);
+    } else if (Array.isArray(target[key]) && Array.isArray(value)) {
+      if (setMergeArrays.has(key)) {
+        target[key] = mergeArrays(target[key], value);
+      } else if (!areMergeValuesEquivalent(target[key], value)) {
+        appendRowConflict(
+          context.conflictTarget ?? target,
+          fieldPath,
+          target[key],
+          value,
+          context.conflictLimit ?? 20,
+        );
+      }
+    } else if (!areMergeValuesEquivalent(target[key], value)) {
+      appendRowConflict(
+        context.conflictTarget ?? target,
+        fieldPath,
+        target[key],
+        value,
+        context.conflictLimit ?? 20,
+      );
+    }
+  });
+}
+
+function mergeMatterEndpointArrays(existing, incoming, context = {}) {
+  const keyed = new Map();
+  const unkeyed = [];
+  [...(Array.isArray(existing) ? existing : []), ...(Array.isArray(incoming) ? incoming : [])]
+    .forEach((record) => {
+      const endpointId = matterEndpointId(record);
+      if (endpointId === undefined) {
+        unkeyed.push(structuredClone(record));
+        return;
+      }
+      const target = keyed.get(endpointId);
+      if (!target) {
+        keyed.set(endpointId, structuredClone(record));
+        return;
+      }
+      mergeMatterEndpointRecord(
+        target,
+        record,
+        `${context.fieldPath ?? "matterArray"}[endpointId=${endpointId}]`,
+        context,
+      );
+    });
+  return [...[...keyed.keys()].sort((a, b) => a - b).map((id) => keyed.get(id)), ...unkeyed];
+}
+
+function mergePowerSources(existing, incoming, context) {
+  if (!Array.isArray(incoming)) return structuredClone(existing);
+  if (
+    context.matterIdentityStatus !== "match"
+    && !context.matterIdentityEnrichmentAllowed
+  ) {
+    appendRowConflict(
+      context.conflictTarget,
+      "powerSources",
+      existing,
+      incoming,
+      context.conflictLimit ?? 20,
+    );
+    return Array.isArray(existing) ? structuredClone(existing) : [];
+  }
+  return mergeMatterEndpointArrays(existing, incoming, context);
 }
 
 // ── Source precedence sorting (#1) ────────────────────────────────────────────

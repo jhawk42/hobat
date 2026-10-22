@@ -83,6 +83,271 @@ def test_exact_thread_paths_do_not_invent_child_table_or_local_neighbor_identity
     assert "childTable" not in thread
 
 
+@pytest.mark.parametrize(
+    ("raw_percent", "expected"),
+    [(0, 0), (1, 0.5), (151, 75.5), (200, 100)],
+)
+def test_power_source_converts_valid_half_percent_values(raw_percent, expected) -> None:
+    record = extract_nodes_info(
+        [{"node_id": 20, "attributes": {"4/47/12": raw_percent}}]
+    )[0]
+    source = record["powerSources"][0]
+
+    assert source == {
+        "endpointId": 4,
+        "attributes": {"batPercentRemaining": raw_percent},
+        "batteryPercent": expected,
+    }
+    assert record["endpoints"][0]["endpointId"] == 4
+    assert record["diagnosticCoverage"]["powerSources"]["4"]["attributes"][
+        "batPercentRemaining"
+    ] == "populated"
+
+
+@pytest.mark.parametrize("raw_percent", [-1, 201, 255, "50", 50.0, True])
+def test_invalid_power_percent_is_omitted_and_covered(raw_percent) -> None:
+    record = extract_nodes_info(
+        [{"node_id": 21, "attributes": {"2/47/12": raw_percent}}]
+    )[0]
+    coverage = record["diagnosticCoverage"]["powerSources"]["2"]
+
+    assert record["powerSources"] == [{"endpointId": 2, "attributes": {}}]
+    assert coverage["attributes"]["batPercentRemaining"] == "invalidValue"
+    assert coverage["invalidValues"]["2/47/12"] == "expected uint8 (0..200)"
+
+
+def test_power_percent_null_missing_and_error_only_are_distinct() -> None:
+    explicit_null = extract_nodes_info(
+        [{"node_id": 22, "attributes": {"1/47/12": None}}]
+    )[0]
+    missing = extract_nodes_info(
+        [{"node_id": 23, "attributes": {"1/47/0": 1}}]
+    )[0]
+    error_only = extract_nodes_info(
+        [
+            {
+                "node_id": 24,
+                "attributes": {},
+                "attribute_errors": {"1/47/12": "Timeout"},
+            }
+        ]
+    )[0]
+
+    assert explicit_null["powerSources"][0]["attributes"]["batPercentRemaining"] is None
+    assert explicit_null["powerSources"][0]["batteryPercent"] is None
+    assert explicit_null["diagnosticCoverage"]["powerSources"]["1"]["attributes"][
+        "batPercentRemaining"
+    ] == "null"
+    assert missing["powerSources"][0]["attributes"] == {"status": 1}
+    assert "batteryPercent" not in missing["powerSources"][0]
+    assert missing["diagnosticCoverage"]["powerSources"]["1"]["attributes"][
+        "batPercentRemaining"
+    ] == "notObserved"
+    assert error_only["powerSources"] == []
+    assert error_only["diagnosticCoverage"]["powerSources"]["1"]["attributes"][
+        "batPercentRemaining"
+    ] == "readError"
+    assert error_only["diagnosticCoverage"]["powerSources"]["1"]["cluster"] == "readError"
+
+
+def test_power_source_scope_bridged_identity_and_wired_only_sources_stay_separate() -> None:
+    record = extract_nodes_info(
+        [
+            {
+                "node_id": 25,
+                "attributes": {
+                    "1/57/1": "Bridge sensor vendor",
+                    "1/57/3": "Window sensor",
+                    "1/57/17": False,
+                    "1/57/65533": 6,
+                    "2/47/0": 1,
+                    "2/47/2": "Sensor battery",
+                    "2/47/12": 151,
+                    "2/47/31": [1],
+                    "3/47/0": 1,
+                    "3/47/2": "Backup battery",
+                    "3/47/12": 0,
+                    "3/47/31": [],
+                    "4/47/0": 2,
+                    "4/47/2": "USB power",
+                    "4/47/9": True,
+                    "4/47/31": [4],
+                },
+            }
+        ]
+    )[0]
+    endpoints = {endpoint["endpointId"]: endpoint for endpoint in record["endpoints"]}
+    sources = {source["endpointId"]: source for source in record["powerSources"]}
+
+    assert endpoints[1]["bridgedBasicInformation"] == {
+        "vendorName": "Bridge sensor vendor",
+        "productName": "Window sensor",
+        "reachable": False,
+        "clusterRevision": 6,
+    }
+    assert "vendorName" not in record["matter"] or record["matter"]["vendorName"] is None
+    assert sources[2]["batteryPercent"] == 75.5
+    assert sources[2]["attributes"]["endpointList"] == [1]
+    assert sources[3]["batteryPercent"] == 0
+    assert sources[3]["attributes"]["endpointList"] == []
+    assert sources[4]["attributes"] == {
+        "status": 2,
+        "description": "USB power",
+        "wiredPresent": True,
+        "endpointList": [4],
+    }
+    assert "batteryPercent" not in sources[4]
+    assert record["diagnosticCoverage"]["bridgedBasicInformation"]["1"]["cluster"] == "populated"
+    assert record["diagnosticCoverage"]["powerSources"]["2"]["cluster"] == "populated"
+
+
+def test_power_source_revision_one_unknown_enums_and_malformed_lists_are_retained_safely() -> None:
+    record = extract_nodes_info(
+        [
+            {
+                "node_id": 26,
+                "attributes": {
+                    "5/47/0": 255,
+                    "5/47/12": 200,
+                    "5/47/18": [False, "bad"],
+                    "5/47/31": "not-an-endpoint-list",
+                    "5/47/65533": 1,
+                },
+            }
+        ]
+    )[0]
+    source = record["powerSources"][0]
+    coverage = record["diagnosticCoverage"]["powerSources"]["5"]
+
+    assert source["attributes"]["status"] == 255
+    assert source["attributes"]["batPercentRemaining"] == 200
+    assert source["batteryPercent"] == 100
+    assert source["attributes"]["clusterRevision"] == 1
+    assert "endpointList" not in source["attributes"]
+    assert coverage["attributes"]["endpointList"] == "invalidValue"
+    assert coverage["invalidValues"]["5/47/31"] == "expected list<endpoint-no>"
+    assert coverage["attributes"]["batChargeState"] == "notObserved"
+
+
+def test_coverage_uses_complete_descriptor_and_attribute_lists_without_feature_guesses() -> None:
+    record = extract_nodes_info(
+        [
+            {
+                "node_id": 27,
+                "attributes": {
+                    "0/29/1": [0x001D, 0x0028, 0x002F, 0x0033],
+                    "0/40/65531": [0xFFFB, 0xFFFC, 0xFFFD],
+                    "0/40/65533": 6,
+                    "0/47/65531": [0, 1, 2, 0xFFFB, 0xFFFC, 0xFFFD],
+                    "0/47/65532": 0,
+                    "0/47/65533": 3,
+                    "0/51/65531": [0xFFFB, 0xFFFC, 0xFFFD],
+                    "0/51/65533": 3,
+                    "1/29/1": [0x001D, 0x002F],
+                    "1/47/65532": 0,
+                    "1/47/65533": 3,
+                },
+            }
+        ]
+    )[0]
+    coverage = record["diagnosticCoverage"]
+
+    assert coverage["basicInformation"]["attributes"]["vendorName"] == "attributeUnsupported"
+    assert coverage["generalDiagnostics"]["attributes"]["rebootCount"] == "attributeUnsupported"
+    assert coverage["powerSources"]["0"]["attributes"]["batPercentRemaining"] == "attributeUnsupported"
+    assert coverage["powerSources"]["0"]["cluster"] == "populated"
+    assert coverage["powerSources"]["1"]["attributes"]["batPercentRemaining"] == "notObserved"
+    assert coverage["bridgedBasicInformation"] == {}
+    assert record["powerSources"][0]["attributes"]["featureMap"] == 0
+    assert "batPercentRemaining" not in record["powerSources"][0]["attributes"]
+
+
+def test_observed_values_override_contradictory_metadata_and_malformed_lists_are_unknown() -> None:
+    record = extract_nodes_info(
+        [
+            {
+                "node_id": 28,
+                "attributes": {
+                    "0/29/1": [0x001D],
+                    "0/47/12": 1,
+                    "0/47/65531": ["malformed", 1],
+                    "0/47/65533": 3,
+                },
+                "attribute_errors": {"0/47/12": "StaleReadError"},
+            }
+        ]
+    )[0]
+    coverage = record["diagnosticCoverage"]["powerSources"]["0"]
+
+    assert record["powerSources"][0]["batteryPercent"] == 0.5
+    assert coverage["attributes"]["batPercentRemaining"] == "readError"
+    assert coverage["attributes"]["attributeList"] == "invalidValue"
+    assert coverage["cluster"] == "readError"
+    assert record["diagnosticCoverage"]["basicInformation"]["cluster"] == "notObserved"
+
+
+def test_general_diagnostics_type_checks_values_and_preserves_exact_uint64() -> None:
+    large_uptime = 2**63 + 99
+    record = extract_nodes_info(
+        [
+            {
+                "node_id": 29,
+                "attributes": {
+                    "0/51/2": large_uptime,
+                    "0/51/3": True,
+                    "0/51/5": [0, False],
+                },
+            }
+        ]
+    )[0]
+    diagnostics = record["generalDiagnostics"]
+    coverage = record["diagnosticCoverage"]["generalDiagnostics"]
+
+    assert diagnostics["upTime"] == large_uptime
+    assert type(diagnostics["upTime"]) is int
+    assert "totalOperationalHours" not in diagnostics
+    assert "activeHardwareFaults" not in diagnostics
+    assert coverage["attributes"]["upTime"] == "populated"
+    assert coverage["attributes"]["totalOperationalHours"] == "invalidValue"
+    assert coverage["attributes"]["activeHardwareFaults"] == "invalidValue"
+
+
+@pytest.mark.parametrize(
+    "uptime",
+    ["0", "9223372036854775907", "18446744073709551615"],
+)
+def test_uint64_uptime_decimal_strings_remain_exact(uptime) -> None:
+    record = extract_nodes_info(
+        [{"node_id": 30, "attributes": {"0/51/2": uptime}}]
+    )[0]
+
+    assert record["generalDiagnostics"]["upTime"] == uptime
+    assert record["diagnosticCoverage"]["generalDiagnostics"]["attributes"][
+        "upTime"
+    ] == "populated"
+
+
+@pytest.mark.parametrize(
+    "uptime",
+    [
+        "18446744073709551616",
+        "-1",
+        "1.0",
+        "not-a-number",
+        "9" * 21,
+    ],
+)
+def test_invalid_uint64_uptime_strings_are_not_coerced(uptime) -> None:
+    record = extract_nodes_info(
+        [{"node_id": 31, "attributes": {"0/51/2": uptime}}]
+    )[0]
+
+    assert "upTime" not in record["generalDiagnostics"]
+    assert record["diagnosticCoverage"]["generalDiagnostics"]["attributes"][
+        "upTime"
+    ] == "invalidValue"
+
+
 def test_thread_rloc16_falls_back_to_interface_ipv6_without_overriding_reported_value() -> None:
     rloc_address = base64.b64encode(
         ipaddress.IPv6Address("fd3b:a255:4aa6:5483:0:ff:fe00:1c05").packed

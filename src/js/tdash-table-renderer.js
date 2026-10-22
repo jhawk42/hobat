@@ -11,6 +11,9 @@ import {
   sortDetailsWithPriority,
   populateNodeDetailsLists,
   publishDeviceSelection,
+  formatMatterDisplayValue,
+  matterEndpointArraySummary,
+  matterFieldDisplayLabel,
 } from "./tdash-utils.js";
 import {
   computeTableCapabilities,
@@ -155,6 +158,13 @@ function tableCellValue(row, column) {
 function formatCellValue(value, columnName) {
   if (value === null || value === undefined) return "";
 
+  if (columnName === "powerSources" || columnName === "matter.endpoints") {
+    if (!Array.isArray(value)) return String(value);
+    return value.length > 0 ? matterEndpointArraySummary(columnName, value) : "[]";
+  }
+  const matterValue = formatMatterDisplayValue(columnName, value);
+  if (matterValue !== undefined) return matterValue;
+
   if (columnName === "routes") {
     const routeItems = Array.isArray(value)
       ? value
@@ -222,21 +232,35 @@ function _scalarText(value) {
   return String(value);
 }
 
-function _createTdKvRow(keyText, value, depth) {
+function _createTdKvRow(keyText, value, depth, fieldPath = keyText) {
   const li = document.createElement("li");
+  const displayLabel = matterFieldDisplayLabel(fieldPath, keyText);
+  const formattedValue = formatMatterDisplayValue(fieldPath, value);
+  if (formattedValue !== undefined) {
+    li.className = "td-kv-row";
+    const keySpan = document.createElement("span");
+    keySpan.className = "td-kv-key";
+    keySpan.textContent = displayLabel + ":";
+    li.appendChild(keySpan);
+    const valueSpan = document.createElement("span");
+    valueSpan.className = "td-kv-value";
+    valueSpan.textContent = formattedValue;
+    li.appendChild(valueSpan);
+    return li;
+  }
   // Complex child at depth ≤ 1 gets its own sub-structure
   if (!_isTdScalar(value) && depth <= 1) {
     const keySpan = document.createElement("span");
     keySpan.className = "td-kv-key";
-    keySpan.textContent = keyText + ":";
+    keySpan.textContent = displayLabel + ":";
     li.appendChild(keySpan);
-    const child = _createTdValueNode(value, depth + 1);
+    const child = _createTdValueNode(value, depth + 1, fieldPath);
     if (child) li.appendChild(child);
   } else {
     li.className = "td-kv-row";
     const keySpan = document.createElement("span");
     keySpan.className = "td-kv-key";
-    keySpan.textContent = keyText + ":";
+    keySpan.textContent = displayLabel + ":";
     const valSpan = document.createElement("span");
     valSpan.className = "td-kv-value";
     if (_isTdScalar(value)) {
@@ -261,7 +285,78 @@ function _createTdKvRow(keyText, value, depth) {
   return li;
 }
 
-function _createTdValueNode(value, depth) {
+function _createTdMatterEndpointArrayNode(path, records, depth) {
+  const container = document.createElement("div");
+  container.className = "td-value-array matter-endpoint-array";
+  if (records.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "td-matter-endpoint-empty";
+    empty.textContent = path === "powerSources"
+      ? "No power sources reported"
+      : "No Matter endpoints observed";
+    container.appendChild(empty);
+    return container;
+  }
+  records.forEach((record, index) => {
+    const item = document.createElement("div");
+    item.className = "td-matter-endpoint";
+    const label = document.createElement("span");
+    label.className = "td-array-idx";
+    label.textContent = matterEndpointArraySummary(path, [record])
+      || `Unkeyed entry ${index + 1}`;
+    item.appendChild(label);
+    if (isPlainObject(record)) {
+      const list = document.createElement("ul");
+      list.className = "td-value-list";
+      let scopeRendered = false;
+      const appendUnknownScope = () => {
+        scopeRendered = true;
+        const scope = document.createElement("li");
+        scope.className = "td-kv-row";
+        scope.textContent = "Powered endpoint scope: Not reported (scope unknown)";
+        list.appendChild(scope);
+      };
+      Object.entries(record).forEach(([key, value]) => {
+        if (key === "endpointId") return;
+        if (path === "powerSources" && key === "attributes") {
+          if (!isPlainObject(value)) {
+            appendUnknownScope();
+            return;
+          }
+          Object.entries(value).forEach(([attribute, attributeValue]) => {
+            const attributePath = `powerSources.${index}.attributes.${attribute}`;
+            if (attribute === "endpointList") scopeRendered = true;
+            list.appendChild(_createTdKvRow(
+              matterFieldDisplayLabel(attributePath, attribute),
+              attributeValue,
+              depth,
+              attributePath,
+            ));
+          });
+          if (!scopeRendered) appendUnknownScope();
+          return;
+        }
+        const fieldPath = `${path}.${index}.${key}`;
+        list.appendChild(_createTdKvRow(
+          matterFieldDisplayLabel(fieldPath, key),
+          value,
+          depth,
+          fieldPath,
+        ));
+      });
+      if (path === "powerSources" && !scopeRendered) appendUnknownScope();
+      item.appendChild(list);
+    }
+    container.appendChild(item);
+  });
+  return container;
+}
+
+function _createTdValueNode(value, depth, fieldPath = "") {
+  if (
+    Array.isArray(value)
+    && (fieldPath === "powerSources" || fieldPath === "matter.endpoints")
+  ) return _createTdMatterEndpointArrayNode(fieldPath, value, depth);
   if (_isTdScalar(value)) return null;
 
   // Array of primitives
@@ -292,7 +387,7 @@ function _createTdValueNode(value, depth) {
         const ul = document.createElement("ul");
         ul.className = "td-value-list";
         Object.entries(item).forEach(([k, v]) => {
-          ul.appendChild(_createTdKvRow(k, v, depth));
+          ul.appendChild(_createTdKvRow(k, v, depth, `${fieldPath}.${idx}.${k}`));
         });
         div.appendChild(ul);
       } else {
@@ -308,7 +403,12 @@ function _createTdValueNode(value, depth) {
   const ul = document.createElement("ul");
   ul.className = "td-value-list";
   Object.entries(value).forEach(([k, v]) => {
-    ul.appendChild(_createTdKvRow(k, v, depth));
+    ul.appendChild(_createTdKvRow(
+      k,
+      v,
+      depth,
+      fieldPath ? `${fieldPath}.${k}` : k,
+    ));
   });
   return ul;
 }
@@ -320,8 +420,23 @@ function renderTdContent(td, value, columnName) {
   }
   const content = document.createElement("div");
   content.className = "td-cell-content";
+  const matterValue = formatMatterDisplayValue(columnName, value);
+  if (matterValue !== undefined) {
+    content.textContent = matterValue;
+    td.appendChild(content);
+    return;
+  }
   if (columnName === "routes") {
     content.textContent = formatCellValue(value, columnName);
+    td.appendChild(content);
+    return;
+  }
+  if (
+    Array.isArray(value)
+    && (columnName === "powerSources" || columnName === "matter.endpoints")
+  ) {
+    const node = _createTdValueNode(value, 0, columnName);
+    if (node) content.appendChild(node);
     td.appendChild(content);
     return;
   }
@@ -335,7 +450,7 @@ function renderTdContent(td, value, columnName) {
     td.appendChild(content);
     return;
   }
-  const node = _createTdValueNode(value, 0);
+  const node = _createTdValueNode(value, 0, columnName);
   if (node) content.appendChild(node);
   td.appendChild(content);
 }
@@ -491,6 +606,23 @@ function compareTableValues(left, right, column) {
     const rightAddress = parseSortableAddress(String(right), column);
     if (leftAddress !== null && rightAddress !== null) {
       return leftAddress < rightAddress ? -1 : leftAddress > rightAddress ? 1 : 0;
+    }
+  }
+  if (["generaldiagnosticsuptime", "uptime", "reporteduptime"].includes(normalizedColumn)) {
+    const parseUptime = (value) => {
+      if (typeof value === "number") {
+        return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
+      }
+      if (typeof value === "string" && /^\d{1,20}$/.test(value.trim())) {
+        const parsed = BigInt(value.trim());
+        return parsed <= 18446744073709551615n ? parsed : null;
+      }
+      return null;
+    };
+    const leftUptime = parseUptime(left);
+    const rightUptime = parseUptime(right);
+    if (leftUptime !== null && rightUptime !== null) {
+      return leftUptime < rightUptime ? -1 : leftUptime > rightUptime ? 1 : 0;
     }
   }
   const timestampColumn = /(?:time|date|observed|updated|created|timestamp)/i.test(column);
@@ -679,8 +811,9 @@ function updateTableStatus(visibleRowCount, columnCount, totalFilteredCount, sea
   if (fetchStatusEl && !isFetchStatusPinned) {
     fetchStatusEl.textContent = `Loaded: ${_tableDatasetLabel}`;
   }
+  const totalColumnCount = Math.max(_tableColumns.length, columnCount);
   let statusText =
-    `Total: ${_tableRows.length} rows, ${_tableColumns.length} columns. ` +
+    `Total: ${_tableRows.length} rows, ${totalColumnCount} columns. ` +
     `Showing: ${visibleRowCount} rows, ${columnCount} columns. Node Filter: ${nodeLabel}. Diagnostic Filter: ${diagLabel}.`;
   if (searchQuery) {
     statusText += ` Search: "${searchQuery}" — ${visibleRowCount} of ${totalFilteredCount} rows match.`;
@@ -713,7 +846,9 @@ export function applyTableFilters({ preserveSelection = false } = {}) {
     ? (_moreInfoEnabled ? _tableColumns : TABLE_PRIORITY_COLUMNS)
     : getTableColumnsForCategory(_tableRows, _tableColumnCategory);
   const activeColumns = insertHealthColumns(
-    selectedColumns.filter((column) => _tableColumns.includes(column)),
+    selectedColumns.filter((column) => _tableColumns.includes(column)
+      || (_tableColumnCategory === "matter-list"
+        && _tableRows.some((row) => hasNestedPath(row, column)))),
   );
   const detailsListEl = document.getElementById("details-list");
   if (detailsListEl) detailsListEl.innerHTML = "";

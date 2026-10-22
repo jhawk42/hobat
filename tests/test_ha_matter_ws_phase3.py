@@ -10,7 +10,8 @@ from ha_matter_ws_contract import (
     THREAD_NETWORK_DIAGNOSTICS_ATTRIBUTES,
 )
 from ha_matter_ws_extractor import extract_nodes_info
-from ha_matter_ws_snapshots import build_diagnostic_snapshot
+from ha_matter_ws_snapshots import build_device_snapshot, build_diagnostic_snapshot
+from ha_matter_ws_topology import build_mesh_diagnostic_snapshot, build_topology_snapshot
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ha_matter_ws_phase3_diagnostics.json"
@@ -150,3 +151,70 @@ def test_diagnostic_snapshot_role_facts_match_device_product_and_omit_unknowns()
     assert diagnostics[1]["_merge_conflicts"] == [
         {"path": "isReed", "current": False, "incoming": True}
     ]
+
+
+def test_operational_and_power_fields_survive_commissioned_products() -> None:
+    record = {
+        "matter": {
+            "nodeId": 42,
+            "matterId": "0000000000001234-0000000000000042",
+            "compressedFabricId": 0x1234,
+            "vendorName": "Root Vendor",
+            "serialNumber": "ROOT-SERIAL",
+        },
+        "endpoints": [
+            {
+                "endpointId": 2,
+                "basicInformation": {"productName": "Bridge"},
+                "bridgedBasicInformation": {"vendorName": "Sensor Vendor"},
+            }
+        ],
+        "deviceTypes": [{"endpointId": 2, "deviceType": 22, "revision": 1}],
+        "serverClusters": [0x002F, 0x0039],
+        "generalDiagnostics": {
+            "rebootCount": 0,
+            "upTime": "9223372036854775907",
+            "activeHardwareFaults": [],
+        },
+        "powerSources": [
+            {
+                "endpointId": 2,
+                "attributes": {"batPercentRemaining": 151, "endpointList": [2]},
+                "batteryPercent": 75.5,
+            }
+        ],
+        "diagnosticCoverage": {
+            "powerSources": {
+                "2": {
+                    "cluster": "populated",
+                    "attributes": {"batPercentRemaining": "populated"},
+                }
+            }
+        },
+        "networkInterfaces": [],
+        "thread": {
+            "routingRole": "Router",
+            "extAddress": "1111222233334444",
+            "diagnosticsDetail": {"threadNetworkDiagnostics": {"channel": 15}},
+            "neighborTable": [],
+            "routeTable": [],
+        },
+    }
+
+    devices = build_device_snapshot([record])
+    diagnostics = build_diagnostic_snapshot([record])
+    mesh = build_mesh_diagnostic_snapshot(diagnostics)
+    topology = build_topology_snapshot(diagnostics)
+
+    assert devices[0]["powerSources"] == record["powerSources"]
+    assert devices[0]["generalDiagnostics"] == record["generalDiagnostics"]
+    assert devices[0]["matter"]["endpoints"] == record["endpoints"]
+    assert devices[0]["matter"]["vendorName"] == "Root Vendor"
+    for product in (diagnostics[0], mesh[0], topology[0]):
+        assert product["matter"]["endpoints"] == record["endpoints"]
+        assert product["matter"]["serialNumber"] == "ROOT-SERIAL"
+        assert product["generalDiagnostics"] == record["generalDiagnostics"]
+        assert product["powerSources"] == record["powerSources"]
+        assert product["diagnosticCoverage"]["powerSources"] == record[
+            "diagnosticCoverage"
+        ]["powerSources"]
