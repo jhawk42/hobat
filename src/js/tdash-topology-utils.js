@@ -176,9 +176,10 @@ export function lqStyleFromAvgLqi(avgLqi, scale) {
 export function lqStyleFromLinkMargin(linkMargin) {
   const margin = toFiniteNumber(linkMargin);
   if (!Number.isFinite(margin)) return EDGE_LQ_STYLES.noLqPurple;
-  if (margin >= 40) return EDGE_LQ_STYLES.high;
-  if (margin >= 20) return EDGE_LQ_STYLES.medium;
-  if (margin >= 10) return EDGE_LQ_STYLES.low;
+  if (margin > 25) return EDGE_LQ_STYLES.high;
+  if (margin >= 15 && margin <= 25) return EDGE_LQ_STYLES.high;
+  if (margin >= 10 && margin <= 14) return EDGE_LQ_STYLES.medium;
+  if (margin < 10) return EDGE_LQ_STYLES.low;
   return EDGE_LQ_STYLES.noLqPurple;
 }
 
@@ -252,8 +253,8 @@ export function buildEdgeTitle(edgeStyle) {
       : null,
     Number.isFinite(averageRssi) ? `Average RSSI: ${averageRssi} dBm` : null,
     Number.isFinite(lastRssi) ? `Last RSSI: ${lastRssi} dBm` : null,
-    Number.isFinite(frameErrorRate) ? `Frame error rate: ${frameErrorRate}%` : null,
-    Number.isFinite(messageErrorRate) ? `Message error rate: ${messageErrorRate}%` : null,
+    Number.isFinite(frameErrorRate) ? `Frame error rate: ${frameErrorRate.toFixed(2)}%` : null,
+    Number.isFinite(messageErrorRate) ? `Message error rate: ${messageErrorRate.toFixed(2)}%` : null,
     Number.isFinite(routeCost) ? `Route cost: ${routeCost}` : null,
   ].filter(Boolean);
   return titleParts.join("\n");

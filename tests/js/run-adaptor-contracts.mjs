@@ -18,6 +18,7 @@ import {
   normalizeInputRecord,
 } from "../../src/js/tdash-device-fields.js";
 import {
+  buildEdgeTitle,
   buildRoleNodeEmphasis,
   lqStyleFromAvgLqi,
   lqStyleFromLinkMargin,
@@ -39,6 +40,10 @@ assert.deepEqual(buildRoleNodeEmphasis({ isBorderRouter: false, isRouter: false 
   borderWidth: 1,
   size: 27,
 });
+assert.match(
+  buildEdgeTitle({ frameErrorRate: 1.236, messageErrorRate: 0.004 }),
+  /Frame error rate: 1\.24%\nMessage error rate: 0\.00%/,
+);
 
 if (process.argv.includes("--snapshot") && !process.argv.includes("--write-baseline")) {
   const { createCachedAdaptorSnapshot } = await import("./run-adaptor-output-snapshot.mjs");
@@ -340,15 +345,15 @@ for (const [to, category] of [
   );
   assert.match(edge.title, /Link margin: 30 dB/);
   assert.match(edge.title, /Average RSSI: -63 dBm/);
-  assert.match(edge.title, /Message error rate: 2%/);
+  assert.match(edge.title, /Message error rate: 2\.00%/);
   if (to === "0x1001") {
     assert.doesNotMatch(edge.title, /Frame error rate:/);
     assert.equal(edge.lqLevel, lqStyleFromAvgLqi(0, 3).lqLevel);
   } else if (to === "0x1002") {
-    assert.match(edge.title, /Frame error rate: 0%/);
+    assert.match(edge.title, /Frame error rate: 0\.00%/);
     assert.equal(edge.lqLevel, lqStyleFromLinkMargin(30).lqLevel);
   } else {
-    assert.match(edge.title, /Frame error rate: 0%/);
+    assert.match(edge.title, /Frame error rate: 0\.00%/);
     assert.equal(edge.lqLevel, lqStyleFromLinkMargin(30).lqLevel);
   }
 }
@@ -452,8 +457,8 @@ assert.match(haMatter.edgeData[0].title, /to: 0x1001/);
 assert.match(haMatter.edgeData[0].title, /LQI: 3/);
 assert.match(haMatter.edgeData[0].title, /Average RSSI: -61 dBm/);
 assert.match(haMatter.edgeData[0].title, /Last RSSI: -63 dBm/);
-assert.match(haMatter.edgeData[0].title, /Frame error rate: 4%/);
-assert.match(haMatter.edgeData[0].title, /Message error rate: 1%/);
+assert.match(haMatter.edgeData[0].title, /Frame error rate: 4\.00%/);
+assert.match(haMatter.edgeData[0].title, /Message error rate: 1\.00%/);
 assert.match(haMatter.edgeData[0].title, /Route cost: 1/);
 assert.equal(haMatter.nodeData[0].font.background, "rgba(7, 18, 40, 0.62)");
 assert.equal(haMatter.nodeData[0].font.size, 19.5);
@@ -994,12 +999,12 @@ for (const [to, category] of [
   );
   assert.match(edge.title, /Link margin: 30 dB/);
   assert.match(edge.title, /Average RSSI: -63 dBm/);
-  assert.match(edge.title, /Message error rate: 2%/);
+  assert.match(edge.title, /Message error rate: 2\.00%/);
   if (to === "0x1001") {
     assert.doesNotMatch(edge.title, /Frame error rate:/);
     assert.equal(edge.lqLevel, lqStyleFromAvgLqi(0, 3).lqLevel);
   } else {
-    assert.match(edge.title, /Frame error rate: 0%/);
+    assert.match(edge.title, /Frame error rate: 0\.00%/);
     assert.equal(edge.lqLevel, lqStyleFromLinkMargin(30).lqLevel);
   }
 }
@@ -1314,8 +1319,8 @@ for (const adaptor of ["meshdiag-networkdiag", "merged-detailed"]) {
     assert.match(childEdge.title, /Link margin: 27 dB/);
     assert.match(childEdge.title, /Average RSSI: -73 dBm/);
     assert.match(childEdge.title, /Last RSSI: -73 dBm/);
-    assert.match(childEdge.title, /Frame error rate: 0%/);
-    assert.match(childEdge.title, /Message error rate: 2%/);
+    assert.match(childEdge.title, /Frame error rate: 0\.00%/);
+    assert.match(childEdge.title, /Message error rate: 2\.00%/);
     const neighborEdge = result.edgeData.find((edge) => (
       edge.from === "0x2000" && edge.to === "0x2100"
       && edge.linkCategories.includes("router_neighbor")
@@ -1332,7 +1337,7 @@ for (const adaptor of ["meshdiag-networkdiag", "merged-detailed"]) {
       [30, -61, -62, 4, 1],
     );
     assert.match(neighborEdge.title, /Average RSSI: -61 dBm/);
-    assert.match(neighborEdge.title, /Frame error rate: 4%/);
+    assert.match(neighborEdge.title, /Frame error rate: 4\.00%/);
   }
   const canonicalChild = canonical.edgeData.find((edge) => edge.linkCategories.includes(category));
   const legacyChild = legacy.edgeData.find((edge) => edge.linkCategories.includes(category));
@@ -1439,7 +1444,7 @@ assert.deepEqual(
   [27, -73, 0],
 );
 assert.match(duplicateNeighborEdge.title, /Average RSSI: -73 dBm/);
-assert.match(duplicateNeighborEdge.title, /Frame error rate: 0%/);
+assert.match(duplicateNeighborEdge.title, /Frame error rate: 0\.00%/);
 
 const directChildMetricWins = run(
   "meshdiag-networkdiag",
