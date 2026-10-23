@@ -54,8 +54,34 @@ assert.equal(childTableEdge?.lqLevel, 2);
 assert.equal(childTableEdge?.linkMargin, 19);
 
 const childrenEdge = result.edgeData.find((edge) => edge.linkCategories.includes("default_children"));
-assert.equal(childrenEdge?.color, "#D55E00");
-assert.equal(childrenEdge?.lqLevel, 2);
+assert.equal(childrenEdge?.color, "#008080");
+assert.equal(childrenEdge?.lqLevel, 3);
 assert.equal(childrenEdge?.linkMargin, 31);
+assert.equal(childrenEdge?.averageRssi, -69);
+
+for (const [metrics, color, lqLevel] of [
+  [{ linkMargin: 31, linkQuality: 1 }, "#008080", 3],
+  [{ linkMargin: 12, linkQuality: 3 }, "#D55E00", 2],
+  [{ linkMargin: 5, linkQuality: 3 }, "#c62828", 1],
+  [{ linkQuality: 2 }, "#D55E00", 2],
+]) {
+  const adapted = runAdaptor({
+    entry: { adaptor: "merged-detailed", files: ["td-merged-topology-all.json"] },
+    rawFiles: [[{
+      ...rows[0],
+      children: [{
+        ...rows[0].children[0],
+        ...metrics,
+        linkMargin: metrics.linkMargin,
+      }],
+    }]],
+    rows: [],
+  });
+  const edge = adapted.edgeData.find((edge) => edge.linkCategories.includes("default_children"));
+  assert.equal(edge?.color, color, JSON.stringify(metrics));
+  assert.equal(edge?.lqLevel, lqLevel, JSON.stringify(metrics));
+  assert.equal(edge?.linkMargin, metrics.linkMargin);
+  assert.equal(edge?.averageRssi, -69);
+}
 
 process.stdout.write(`${JSON.stringify({ syntheticRestChildren: 0 })}\n`);
