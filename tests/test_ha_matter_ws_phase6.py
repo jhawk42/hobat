@@ -392,7 +392,7 @@ def test_browser_ha_matter_identity_contract() -> None:
 def test_websockets_dependency_is_packaged_by_both_images() -> None:
     root = Path(__file__).parents[1]
     requirements = (root / "requirements.txt").read_text(encoding="utf-8")
-    assert "websockets>=17.2,<18" in requirements
+    assert "websockets>=17.3,<18" in requirements
 
     for dockerfile in (root / "Dockerfile", root / "addon_hobat" / "Dockerfile"):
         content = dockerfile.read_text(encoding="utf-8")

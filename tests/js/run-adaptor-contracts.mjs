@@ -44,6 +44,11 @@ assert.match(
   buildEdgeTitle({ frameErrorRate: 1.236, messageErrorRate: 0.004 }),
   /Frame error rate: 1\.24%\nMessage error rate: 0\.00%/,
 );
+for (const [margin, expectedLevel] of [
+  [0, 1], [9, 1], [10, 2], [14, 2], [15, 3], [25, 3], [26, 3], [30, 3], [40, 3],
+]) {
+  assert.equal(lqStyleFromLinkMargin(margin).lqLevel, expectedLevel, `link margin ${margin} dB`);
+}
 
 if (process.argv.includes("--snapshot") && !process.argv.includes("--write-baseline")) {
   const { createCachedAdaptorSnapshot } = await import("./run-adaptor-output-snapshot.mjs");
