@@ -58,6 +58,7 @@ uses vendored vis-network; dashboard table sorting is application-owned.
 | `td_device_merge.py` | Shared merge context, source ordering, and domain merge policy |
 | `td_record_merge.py` | Record/object/array merge primitives, conflict and provenance handling |
 | `td_json_key_normalizer.py` | Recursive conversion to preferred field names |
+| `otbr_role_evidence.py` | Positive OTBR child/FTD evidence normalization for REED state |
 
 ### OTBR CLI
 
@@ -191,7 +192,7 @@ datasets. It does not contain health thresholds or reclassify evidence.
 | `tdash-device-diagnostics.js` | Eligible device targets and supported transient diagnostic actions |
 | `tdash-health.js` | Health API requests and rendering of server-owned assessments, roster, and comparisons |
 | `tdash-thread-network.js` | Thread Network facts, device/link counts, role holders, and source evidence derived from the active dataset |
-| `tdash-topology-view-model.js` | Indexed topology state and pure filter/search visibility calculations |
+| `tdash-device-projection.js`, `tdash-topology-view-model.js` | Derived per-device capabilities and diagnostic evidence; indexed topology state and pure filter/search visibility calculations |
 | `tdash-topology-utils.js` | Node/edge helpers, indexes, styles, labels, and isolated-node anchors |
 | `tdash-topology-renderer.js` | vis-network lifecycle, rendering, interaction, search highlights, and layout selection |
 | `tdash-layouts.js` | Deterministic tree, ring/star, compact, hub-spoke, and hybrid seed layouts |

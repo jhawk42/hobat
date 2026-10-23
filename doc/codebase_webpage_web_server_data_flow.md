@@ -321,19 +321,23 @@ last-write-wins.
 
 ## Browser Activity and Jobs
 
-All browser HTTP calls pass through `trackedFetch()`. Ordinary calls record a
-start and one terminal event; polling calls are silent and their owning
-workflow records only job-state transitions. Dynamic URL components are
-replaced with route templates, query values are retained only for an explicit
-allowlist, metadata is recursively bounded, and failures use HTTP, network, or
-abort classifications rather than arbitrary exception text.
+Most browser API requests use `trackedFetch()`. Ordinary tracked calls record
+a start and one terminal event; polling calls can be silent and their owning
+workflow records only job-state transitions. The catalog bootstrap and device
+action capability/action/cancellation requests use direct `fetch()` instead;
+device-action job state is recorded explicitly in the activity log. Dynamic URL
+components in tracked requests are replaced with route templates, query values
+are retained only for an explicit allowlist, metadata is recursively bounded,
+and failures use HTTP, network, or abort classifications rather than arbitrary
+exception text.
 
 The activity ring stores at most 200 entries in browser memory and is cleared
-only by the operator or page lifecycle. The Jobs tab polls `/api/jobs` every
-two seconds only while visible. An abort controller and monotonic request
-version prevent hidden or stale responses from replacing the current table.
-Neither activity entries nor transient server job records are written to
-`data/`.
+only by the operator or page lifecycle. The Jobs tab polls `/api/jobs` only
+while visible: it waits 10 seconds when no jobs are active, otherwise uses an
+elapsed-time-based delay bounded between 2 and 60 seconds. An abort controller
+and monotonic request version prevent hidden or stale responses from replacing
+the current table. Neither activity entries nor transient server job records
+are written to `data/`.
 
 ## Dataset Assembly
 
@@ -374,10 +378,12 @@ Python remains the only verdict owner. The finding view defaults to All for
 each dataset and is held only in browser memory; reloads, dataset changes, and
 Reset restore All.
 
-Collector-derived role booleans remain source facts. Browser presentation uses
-explicit `isReed` booleans when present, otherwise a shared FTD/child-or-
-nonrouter fallback independent of source, dataset, adaptor, or filename. The
-resolver does not rewrite payloads or cache files; see
+Collector-derived role booleans remain source facts. OTBR collectors add
+positive `isReed` evidence when a record identifies a child running in FTD
+mode; the shared Python field layer normalizes role evidence. Browser
+presentation uses explicit `isReed` booleans when present, otherwise a shared
+FTD/child-or-nonrouter fallback independent of source, dataset, adaptor, or
+filename. The browser resolver does not rewrite payloads or cache files; see
 [Merge Thread Device Information](merge_thread_device_info.md#ftd-and-reed-capability)
 for the decision contract and exclusions.
 
