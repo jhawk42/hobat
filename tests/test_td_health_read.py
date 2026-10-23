@@ -235,6 +235,17 @@ def test_comparison_endpoint_pages_and_query_only_pair_projection(tmp_path) -> N
     assert after_page["items"][0]["assessmentId"] == after_assessment.assessment_id
     assert after_page["defaultAfter"]["assessmentId"] == after_assessment.assessment_id
     assert after_page["defaultBefore"]["assessmentId"] == before_assessment.assessment_id
+    assert after_page["navigation"]["selectedAssessmentId"] == after_assessment.assessment_id
+    assert after_page["navigation"]["older"]["assessmentId"] == before_assessment.assessment_id
+    assert after_page["navigation"]["newer"] is None
+    pinned_page = service.comparison_endpoints(
+        network_id=after.network_id, dataset_id=after.dataset_id,
+        side="after", limit=1, offset=0,
+        selected_assessment_id=before_assessment.assessment_id,
+    )
+    assert pinned_page["navigation"]["selectedAssessmentId"] == before_assessment.assessment_id
+    assert pinned_page["navigation"]["newer"]["assessmentId"] == after_assessment.assessment_id
+    assert pinned_page["navigation"]["older"] is None
     before_page = service.comparison_endpoints(
         network_id=after.network_id, dataset_id=after.dataset_id, side="before",
         after_assessment_id=after_assessment.assessment_id, limit=25, offset=0,

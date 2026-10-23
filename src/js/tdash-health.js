@@ -93,8 +93,11 @@ async function healthRequest(path, signal) {
   return response.json();
 }
 
-export function fetchHealthAssessment(datasetId, signal) {
-  return healthRequest(`api/health/summary?dataset=${encodeURIComponent(datasetId)}`, signal);
+export function fetchHealthAssessment(datasetId, signal, options = {}) {
+  const query = new URLSearchParams({ dataset: datasetId });
+  if (options.networkId) query.set("network", options.networkId);
+  if (options.assessmentId) query.set("assessment", options.assessmentId);
+  return healthRequest(`api/health/summary?${query}`, signal);
 }
 
 export async function startHealthProcessing(datasetId, signal) {
@@ -251,6 +254,20 @@ export function isHealthComparisonEndpointPageForQuery(page, query) {
     && typeof endpoint.assessedAt === "string" && Number.isFinite(Date.parse(endpoint.assessedAt))
     && ["complete", "partial"].includes(endpoint.completeness)
   );
+  const validNavigation = !Object.hasOwn(page || {}, "navigation") || (
+    query.side === "after"
+    && page.navigation !== null
+    && typeof page.navigation === "object"
+    && (page.navigation.selectedAssessmentId === null
+      || typeof page.navigation.selectedAssessmentId === "string")
+    && validEndpoint(page.navigation.older)
+    && validEndpoint(page.navigation.newer)
+    && page.navigation.selectedAssessmentId
+      === (query.selectedAssessmentId || page.defaultAfter?.assessmentId || null)
+  );
+  const validSelectedRevision = !Object.hasOwn(page || {}, "selectedAfterIsPreferred")
+    || page.selectedAfterIsPreferred === null
+    || typeof page.selectedAfterIsPreferred === "boolean";
   return page?.schemaVersion === 1 && page.networkId === query.networkId
     && page.datasetId === query.datasetId && page.side === query.side
     && (page.afterAssessmentId || null) === (query.afterAssessmentId || null)
@@ -259,12 +276,14 @@ export function isHealthComparisonEndpointPageForQuery(page, query) {
     && Number.isInteger(page.total) && page.total >= 0
     && page.limit === 25 && page.offset === query.offset
     && Array.isArray(page.items) && page.items.length <= page.limit
-    && page.offset + page.items.length <= page.total
+    && (page.items.length === 0 || page.offset + page.items.length <= page.total)
     && page.items.every((endpoint) => Boolean(endpoint) && validEndpoint(endpoint))
     && validEndpoint(page.selected)
     && validEndpoint(page.defaultAfter)
     && validEndpoint(page.defaultBefore)
     && validEndpoint(page.predecessor)
+    && validNavigation
+    && validSelectedRevision
     && Array.isArray(page.shortcuts)
     && page.shortcuts.every((shortcut) => (
       ["1d", "3d", "1w", "1m"].includes(shortcut?.interval)
@@ -588,6 +607,283 @@ function formatUtcComparisonTimestamp(timestamp) {
   const observedAt = Date.parse(timestamp);
   if (!Number.isFinite(observedAt)) return "unknown";
   return new Date(observedAt).toISOString().slice(0, 19).replace("T", " ");
+}
+
+function formatHealthHistoryTimestamp(timestamp) {
+  if (typeof timestamp !== "string" || !timestamp.trim()) return "Unknown";
+  const instant = Date.parse(timestamp);
+  if (!Number.isFinite(instant)) return "Unknown";
+  return `${new Date(instant).toISOString().slice(0, 19).replace("T", " ")} UTC`;
+}
+
+export function renderHealthAssessmentHistory(container, state, actions = {}) {
+  if (!container) return;
+  const active = document.activeElement;
+  const focusKey = container.contains(active)
+    ? active?.dataset?.healthHistoryFocus
+    : container.dataset.healthHistoryPendingFocus;
+  container.replaceChildren();
+  const toolbar = appendText(container, "div", "", "health-assessment-toolbar");
+  const toolbarLabel = appendText(toolbar, "strong", "Assessment", "health-assessment-label");
+
+  const appendButton = (label, focus, action, disabled = false, ariaLabel = label) => {
+    const button = appendText(toolbar, "button", label);
+    button.type = "button";
+    button.dataset.healthHistoryFocus = focus;
+    button.setAttribute("aria-label", ariaLabel);
+    button.title = ariaLabel;
+    button.disabled = disabled;
+    button.addEventListener("click", action);
+    return button;
+  };
+  const followButton = appendButton(
+    "»", "latest", () => actions.followLatest?.(), false,
+    "Follow latest assessment",
+  );
+  followButton.setAttribute("aria-pressed", String(state.mode === "latest"));
+  const navigation = state.navigation;
+  const navigationMatches = Boolean(
+    navigation && state.assessment
+    && navigation.selectedAssessmentId === state.assessment.assessmentId,
+  );
+  const oldestButton = appendButton(
+    "«", "oldest", () => actions.selectOldest?.(),
+    state.loading || state.pageLoading || !navigationMatches || !navigation.older,
+    "Show oldest retained run",
+  );
+  const olderButton = appendButton(
+    "‹", "older", () => actions.selectAssessment?.(navigation?.older?.assessmentId),
+    state.loading || state.pageLoading || !navigationMatches || !navigation.older,
+    "Show older retained run",
+  );
+  const newerButton = appendButton(
+    "›", "newer", () => actions.selectAssessment?.(navigation?.newer?.assessmentId),
+    state.loading || state.pageLoading || !navigationMatches || !navigation.newer,
+    "Show newer retained run",
+  );
+  if (navigationMatches) {
+    const boundaryReasons = [];
+    if (!navigation.older) {
+      boundaryReasons.push("No older retained runs are available.");
+      olderButton.title = "No older retained runs are available.";
+      olderButton.setAttribute("aria-describedby", "health-assessment-boundary-note");
+      oldestButton.title = "Already showing the oldest retained run.";
+      oldestButton.setAttribute("aria-describedby", "health-assessment-boundary-note");
+    }
+    if (!navigation.newer) {
+      boundaryReasons.push("No newer retained runs are available.");
+      newerButton.title = "No newer retained runs are available.";
+      newerButton.setAttribute("aria-describedby", "health-assessment-boundary-note");
+    }
+    if (boundaryReasons.length) {
+      const boundary = appendText(
+        container,
+        "p",
+        boundaryReasons.join(" "),
+        "health-assessment-history-note visually-hidden",
+      );
+      boundary.id = "health-assessment-boundary-note";
+    }
+  }
+
+  const chooserBody = document.createElement("div");
+  chooserBody.className = "health-assessment-chooser-body";
+  chooserBody.id = "health-assessment-chooser-body";
+  chooserBody.hidden = state.chooserOpen !== true;
+  const chooserButton = appendButton(
+    state.assessment ? formatHealthHistoryTimestamp(state.assessment.observedAt) : "Choose assessment",
+    "chooser",
+    () => {
+      chooserBody.hidden = !chooserBody.hidden;
+      chooserButton.setAttribute("aria-expanded", String(!chooserBody.hidden));
+      actions.chooserToggle?.(!chooserBody.hidden);
+    },
+    false,
+    "Choose retained assessment",
+  );
+  chooserButton.className = "health-assessment-chooser";
+  chooserButton.setAttribute("aria-expanded", String(!chooserBody.hidden));
+  chooserButton.setAttribute("aria-controls", chooserBody.id);
+  toolbar.replaceChildren(
+    toolbarLabel, oldestButton, olderButton, chooserButton, newerButton, followButton,
+  );
+  container.appendChild(chooserBody);
+  const page = state.page;
+  const pickerLabel = appendText(chooserBody, "label", "Retained assessment");
+  const picker = document.createElement("select");
+  picker.dataset.healthHistoryFocus = "run";
+  picker.setAttribute("aria-label", "Choose retained assessment");
+  picker.disabled = state.pageLoading || !page || page.total === 0;
+  const selectedId = state.mode === "pinned"
+    ? state.pinnedAssessmentId
+    : state.assessment?.assessmentId;
+  const items = page?.items || [];
+  const appendOption = (endpoint, selectedRevision = false) => {
+    const option = document.createElement("option");
+    option.value = endpoint.assessmentId;
+    option.textContent = `${formatHealthHistoryTimestamp(endpoint.observedAt)} · `
+      + `${endpoint.completeness === "partial" ? "Partial" : "Complete"}`
+      + ` · ${endpoint.assessmentId.slice(-12)}`
+      + `${selectedRevision ? " · Selected revision" : ""}`;
+    option.title = `Observed ${endpoint.observedAt}; assessed ${endpoint.assessedAt}; `
+      + `assessment ${endpoint.assessmentId}`;
+    picker.appendChild(option);
+  };
+  items.forEach((endpoint) => appendOption(
+    endpoint,
+    endpoint.assessmentId === selectedId && page?.selectedAfterIsPreferred === false,
+  ));
+  const selectedProjection = page?.selected && page.selected.assessmentId === selectedId
+    ? page.selected
+    : null;
+  if (selectedProjection && !items.some(({ assessmentId }) => assessmentId === selectedId)) {
+    appendOption(selectedProjection, page?.selectedAfterIsPreferred === false);
+  }
+  picker.value = selectedId || "";
+  picker.addEventListener("change", () => actions.selectAssessment?.(picker.value));
+  pickerLabel.appendChild(picker);
+
+  const rangeStart = page && page.items.length ? page.offset + 1 : 0;
+  const rangeEnd = page && page.items.length ? page.offset + page.items.length : 0;
+  const pager = appendText(chooserBody, "div", "", "health-assessment-pager");
+  pager.hidden = !page || page.total <= page.limit;
+  appendText(
+    pager,
+    "p",
+    page ? `Runs ${rangeStart}-${rangeEnd} of ${page.total}` : "",
+    "health-assessment-run-range",
+  );
+  const olderPage = appendText(pager, "button", "Older runs");
+  olderPage.type = "button";
+  olderPage.title = "Show older retained runs page";
+  olderPage.dataset.healthHistoryFocus = "older-page";
+  olderPage.disabled = state.pageLoading || !page || page.offset + page.limit >= page.total;
+  olderPage.addEventListener("click", () => actions.page?.(page.offset + page.limit));
+  const newerPage = appendText(pager, "button", "Newer runs");
+  newerPage.type = "button";
+  newerPage.title = "Show newer retained runs page";
+  newerPage.dataset.healthHistoryFocus = "newer-page";
+  newerPage.disabled = state.pageLoading || !page || page.offset <= 0;
+  newerPage.addEventListener("click", () => actions.page?.(Math.max(0, page.offset - page.limit)));
+
+  const context = appendText(container, "div", "", "health-assessment-context");
+  const currentMode = state.mode === "pinned" ? "Pinned assessment" : "Following latest";
+  appendText(
+    context,
+    "p",
+    `${currentMode} · Findings / Roster / health coloring`,
+    "health-assessment-current",
+  );
+  if (state.assessment) {
+    const exactDetails = appendText(
+      context,
+      "details",
+      "",
+      "health-assessment-exact-details",
+    );
+    exactDetails.open = container.dataset.healthHistoryDetailsOpen === "true";
+    exactDetails.addEventListener("toggle", () => {
+      container.dataset.healthHistoryDetailsOpen = String(exactDetails.open);
+    });
+    const detailsSummary = appendText(exactDetails, "summary", "Details");
+    detailsSummary.dataset.healthHistoryFocus = "details";
+    appendText(
+      exactDetails,
+      "p",
+      `Observed ${state.assessment.observedAt}; assessed ${state.assessment.assessedAt}; assessment ID ${state.assessment.assessmentId}`,
+    );
+    appendText(
+      exactDetails, "p",
+      "Findings, roster presence, and health coloring share this assessment; Comparison endpoints are independent.",
+      "health-assessment-scope",
+    );
+    if (state.mode === "pinned") {
+      appendText(
+        exactDetails, "p",
+        "Roster fields/designations are current or last-known. Health coloring overlays the currently loaded topology/table, not a historical layout. Devices unmatched to current data remain uncolored.",
+      );
+    }
+  }
+  if (state.assessment && state.mode === "pinned") {
+    appendText(
+      container,
+      "p",
+      "Historical presence; current roster facts and layout.",
+      "health-assessment-caveat",
+    );
+  }
+  if (state.targetError) {
+    appendText(container, "p", state.targetError, "health-assessment-error");
+    const retryTarget = appendText(
+      container,
+      "button",
+      state.mode === "pinned" ? "Retry selected assessment" : "Retry latest assessment",
+    );
+    retryTarget.type = "button";
+    retryTarget.dataset.healthHistoryFocus = "retry-target";
+    retryTarget.addEventListener("click", () => actions.retryTarget?.());
+  }
+  if (state.error) {
+    appendText(container, "p", state.error, "health-assessment-error");
+    const retry = appendText(container, "button", "Retry run list");
+    retry.type = "button";
+    retry.dataset.healthHistoryFocus = "retry";
+    retry.addEventListener("click", () => actions.retry?.());
+  } else if (state.unsupported) {
+    appendText(
+      container,
+      "p",
+      "Retained assessment history is not supported by this server. Latest findings remain available.",
+      "health-assessment-history-note",
+    );
+  } else if (!state.loading && state.assessment && page?.total === 0) {
+    appendText(container, "p", "No retained assessment runs are available.", "health-assessment-history-note");
+  } else if (!state.loading && page && page.items.length === 0 && page.total > 0) {
+    appendText(
+      container,
+      "p",
+      "No runs are available on this page; retained history may have changed. Choose Newer runs or refresh the list.",
+      "health-assessment-history-note",
+    );
+    const retry = appendText(container, "button", "Refresh run list");
+    retry.type = "button";
+    retry.dataset.healthHistoryFocus = "retry";
+    retry.addEventListener("click", () => actions.retry?.());
+  } else if (!state.navigation && !state.loading && page) {
+    appendText(
+      container,
+      "p",
+      "Adjacent run navigation is unavailable; choose a retained run or follow Latest.",
+      "health-assessment-history-note",
+    );
+  }
+  if (state.loading) {
+    appendText(container, "p", "Loading selected assessment…", "health-assessment-history-note");
+  } else if (state.pageLoading) {
+    appendText(container, "p", "Loading retained run list…", "health-assessment-history-note");
+  }
+  if (focusKey) {
+    const canFocus = (element) => {
+      if (!element || element.disabled) return false;
+      for (let parent = element; parent && parent !== container; parent = parent.parentNode) {
+        if (parent.hidden) return false;
+      }
+      return true;
+    };
+    const target = container.querySelector(`[data-health-history-focus="${focusKey}"]`);
+    if (canFocus(target)) {
+      delete container.dataset.healthHistoryPendingFocus;
+      target.focus({ preventScroll: true });
+    } else if (state.loading || state.pageLoading) {
+      container.dataset.healthHistoryPendingFocus = focusKey;
+    } else {
+      delete container.dataset.healthHistoryPendingFocus;
+      const fallback = ["newer", "older", "oldest", "latest", "chooser", "run", "older-page", "newer-page"]
+        .map((key) => container.querySelector(`[data-health-history-focus="${key}"]`))
+        .find(canFocus);
+      fallback?.focus({ preventScroll: true });
+    }
+  }
 }
 
 function appendEndpointPicker(controls, side, page, selectedId, selected, loading, actions) {

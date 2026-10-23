@@ -630,6 +630,13 @@ to page only assessments strictly earlier than the selected After. The response
 also resolves defaults and shortcut candidates over the full retained history,
 independent of the page; `selected=ASSESSMENT_ID` pins an endpoint outside the
 visible page. Limits cannot exceed 100.
+The `side=after` response also includes additive `navigation` metadata when
+`selected` is supplied: the selected ID and its adjacent older/newer preferred
+run, independent of the requested offset. Navigation skips sibling revisions
+of the same observation; an explicitly selected superseded revision remains
+selected without becoming another stepping stop. This projection is resolved
+in the read transaction and does not change Before filtering, list totals, or
+Comparison selection.
 
 `GET /api/health/comparison?network=...&dataset=...&before=ASSESSMENT_ID&after=ASSESSMENT_ID&limit=25&offset=0`
 reads an arbitrary retained endpoint pair. It uses a matching stored pair when
@@ -663,6 +670,40 @@ roster count is blank and its accessible tab name has no count. Comparison has
 no tab badge; its result count remains local to its panel. Badge text is hidden
 from assistive technology because each counted tab exposes the full count and
 unit in its accessible name.
+
+One **Assessment** toolbar is shared by Findings, Device Roster, and health
+coloring. **Latest** follows the latest stored assessment; choosing a retained
+run or using **Older**/**Newer** pins its exact assessment ID until Latest is
+selected again. The selected observation date opens the inline chooser below
+the navigation row. Its paging controls appear only for multi-page histories;
+paging does not select a run. A compact line identifies Following latest or
+Pinned assessment. Details exposes exact timestamps, assessment ID, and the
+independent Comparison scope; pinned views retain a short visible reminder
+that roster facts and layout are current.
+The navigation buttons use `«` (oldest retained run), `‹` (Older), `›` (Newer),
+and `»` (follow Latest), with descriptive tooltips and accessible names.
+Oldest pins the oldest preferred retained run, using bounded history reads
+without including an explicitly selected superseded revision as a separate stop.
+Adjacent navigation uses the server's preferred assessment per observation,
+skips sibling revisions, and remains independent of the visible chooser page.
+An explicitly selected superseded revision remains pinned and is identified as
+such. If history metadata is unsupported or a selected run is no longer
+available, the dashboard explains the condition and offers recovery rather
+than silently switching assessments.
+
+Assessment selection, history paging, and retry are read-only. They do not
+collect data, process health, or write history. Same-context Sync or explicit
+Refresh Health retains a pin; while following Latest, it advances to the
+latest assessment produced by that existing workflow. Tab changes,
+Show in table/Return, and panel-local resets preserve the shared selection.
+Comparison's Before and After endpoints remain independent of this toolbar;
+Reset comparison does not change the selected Findings/Roster assessment.
+
+Historical Device Roster presence and findings use the selected assessment,
+but roster fields/designations are current or last-known projections.
+Historical health coloring overlays the currently loaded table/topology rather
+than reconstructing historical network layout; devices unmatched to current
+data remain uncolored.
 
 For health-eligible datasets with comparison-read capability, the Comparison
 tab opens with the 1D preset selected and Custom collapsed. The 1D, 3D, and 1W

@@ -636,7 +636,7 @@ def test_dataset_health_refresh_preserves_context_details_visibility() -> None:
     assert "contextDetailsController.setCollapsed" not in dataset_change_source
     assert "contextDetailsController.setCollapsed(true);" in network_change_source
     assert "if (datasetChanged) resetHealthInsightsForDatasetChange();" in refresh_source
-    assessment_read = refresh_source.index("await fetchHealthAssessment(entry.value)")
+    assessment_read = refresh_source.index("const assessment = await fetchHealthAssessment(")
     version_guard = refresh_source.index(
         "if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;",
         assessment_read,

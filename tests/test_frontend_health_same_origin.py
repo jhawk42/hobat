@@ -2370,3 +2370,341 @@ def test_comparison_reset_and_return_preserve_health_tab_context() -> None:
     assert "savedInsights[key] = healthInsightsViewState[key];" in ui_js
     assert "comparisonResetPendingRefresh = healthInsightsState.loading;" in ui_js
     assert "if (resetComparisonDuringRefresh && healthInsightsTab === \"comparison\")" in ui_js
+
+
+def test_health_assessment_context_and_navigation_metadata_are_validated() -> None:
+    script = r"""
+      import {
+        fetchHealthAssessment,
+        isHealthComparisonEndpointPageForQuery,
+      } from "./src/js/tdash-health.js";
+      const requests = [];
+      globalThis.fetch = async (path) => {
+        requests.push(path);
+        return {ok: true, status: 200, json: async () => ({})};
+      };
+      await fetchHealthAssessment("dataset", undefined, {
+        networkId: "extpan:network", assessmentId: "assessment:pinned",
+      });
+      await fetchHealthAssessment("dataset");
+
+      const endpoint = (assessmentId) => ({
+        assessmentId, networkId: "extpan:network", datasetId: "dataset",
+        observationId: `observation:${assessmentId}`,
+        observedAt: "2026-09-01T00:00:00Z",
+        assessedAt: "2026-09-01T00:00:00Z", completeness: "complete",
+      });
+      const latest = endpoint("assessment-latest");
+      const older = endpoint("assessment-older");
+      const query = {
+        networkId: "extpan:network", datasetId: "dataset", side: "after",
+        afterAssessmentId: null, selectedAssessmentId: null,
+        comparisonVersion: "v1", comparisonPolicyDigest: "digest", offset: 0,
+      };
+      const page = {
+        schemaVersion: 1, networkId: query.networkId, datasetId: query.datasetId,
+        side: "after", afterAssessmentId: null,
+        comparisonVersion: query.comparisonVersion,
+        comparisonPolicyDigest: query.comparisonPolicyDigest,
+        total: 1, limit: 25, offset: 0, items: [],
+        selected: null, defaultAfter: latest, defaultBefore: null, predecessor: null,
+        shortcuts: [],
+        navigation: {
+          selectedAssessmentId: latest.assessmentId, older, newer: null,
+        },
+      };
+      const legacyPage = {...page};
+      delete legacyPage.navigation;
+      const invalidPage = {
+        ...page,
+        navigation: {...page.navigation, older: {...older, networkId: "extpan:other"}},
+      };
+      const emptyPrunedPage = {...page, total: 2, offset: 50};
+      console.log(JSON.stringify({
+        requests,
+        validNavigation: isHealthComparisonEndpointPageForQuery(page, query),
+        invalidNavigation: isHealthComparisonEndpointPageForQuery(invalidPage, query),
+        legacyPage: isHealthComparisonEndpointPageForQuery(legacyPage, query),
+        emptyPrunedPage: isHealthComparisonEndpointPageForQuery(emptyPrunedPage,
+          {...query, offset: 50}),
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    assert json.loads(completed.stdout) == {
+        "requests": [
+            "api/health/summary?dataset=dataset&network=extpan%3Anetwork"
+            "&assessment=assessment%3Apinned",
+            "api/health/summary?dataset=dataset",
+        ],
+        "validNavigation": True,
+        "invalidNavigation": False,
+        "legacyPage": True,
+        "emptyPrunedPage": True,
+    }
+
+
+def test_health_assessment_history_renders_bounded_accessible_navigation() -> None:
+    script = r"""
+      import {renderHealthAssessmentHistory} from "./src/js/tdash-health.js";
+      class Element {
+        constructor(tagName) {
+          this.tagName = tagName;
+          this.children = [];
+          this.dataset = {};
+          this.listeners = {};
+          this.parentNode = null;
+          this.className = "";
+          this.textContent = "";
+        }
+        appendChild(child) {
+          this.children.push(child);
+          child.parentNode = this;
+          return child;
+        }
+        replaceChildren(...children) {
+          this.children.forEach((child) => { child.parentNode = null; });
+          this.children = [];
+          children.forEach((child) => this.appendChild(child));
+        }
+        contains(target) {
+          return this === target || this.children.some((child) => child.contains(target));
+        }
+        querySelector(selector) {
+          const match = selector.match(/data-health-history-focus="([^"]+)"/)?.[1];
+          if (!match) return null;
+          return this.children.find((child) => child.dataset?.healthHistoryFocus === match)
+            || this.children.map((child) => child.querySelector(selector)).find(Boolean)
+            || null;
+        }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+        focus() { if (!this.disabled) document.activeElement = this; }
+      }
+      globalThis.document = {
+        activeElement: null,
+        createElement: (tagName) => new Element(tagName),
+      };
+      const endpoint = (id, observedAt) => ({
+        assessmentId: id, observedAt, assessedAt: "2026-10-22T12:30:01.123Z",
+        completeness: "partial", observationId: `observation-${id}`,
+      });
+      const current = endpoint("assessment-current-revision", "2026-10-22T12:00:00.123Z");
+      const page = {
+        items: [endpoint("assessment-newest", "2026-10-23T12:00:00Z")],
+        selected: current, selectedAfterIsPreferred: false, defaultAfter: null,
+        total: 60, offset: 25, limit: 25,
+      };
+      const container = new Element("div");
+      const actions = {selected: [], offsets: [], latest: 0, oldest: 0};
+      const state = {
+        mode: "pinned", pinnedAssessmentId: current.assessmentId,
+        assessment: current, page, navigation: {
+          selectedAssessmentId: current.assessmentId,
+          older: endpoint("assessment-older", "2026-10-20T12:00:00Z"),
+          newer: endpoint("assessment-newer", "2026-10-22T12:30:00Z"),
+        }, chooserOpen: true, loading: false, pageLoading: false,
+        error: "", targetError: "", unsupported: false,
+      };
+      renderHealthAssessmentHistory(container, state, {
+        selectAssessment: (id) => actions.selected.push(id),
+        page: (offset) => actions.offsets.push(offset),
+        followLatest: () => { actions.latest += 1; },
+        selectOldest: () => { actions.oldest += 1; },
+      });
+      let picker = container.querySelector('[data-health-history-focus="run"]');
+      picker.focus();
+      renderHealthAssessmentHistory(container, state, {
+        selectAssessment: (id) => actions.selected.push(id),
+        page: (offset) => actions.offsets.push(offset),
+        followLatest: () => { actions.latest += 1; },
+        selectOldest: () => { actions.oldest += 1; },
+      });
+      picker = container.querySelector('[data-health-history-focus="run"]');
+      const focusRetained = document.activeElement.dataset.healthHistoryFocus === "run";
+      const options = picker.children.map(({value, textContent}) => [value, textContent]);
+      picker.value = "assessment-older";
+      picker.listeners.change();
+      container.querySelector('[data-health-history-focus="older-page"]').listeners.click();
+      container.querySelector('[data-health-history-focus="newer-page"]').listeners.click();
+      container.querySelector('[data-health-history-focus="latest"]').listeners.click();
+      container.querySelector('[data-health-history-focus="oldest"]').listeners.click();
+      const context = container.children.find((child) => child.className === "health-assessment-context");
+      const details = context.children.find((child) => child.className === "health-assessment-exact-details");
+      const currentSummary = context.children.find((child) => child.className === "health-assessment-current");
+      const chooser = container.querySelector('[data-health-history-focus="chooser"]');
+      const chooserBody = container.children.find((child) => child.className === "health-assessment-chooser-body");
+      const compactStructure = {
+        toolbarOrder: container.children[0].children.map((child) => child.dataset.healthHistoryFocus || "label"),
+        chooserIsSeparateRow: chooserBody.parentNode === container,
+        disclosureControls: chooser["aria-controls"] === chooserBody.id,
+        dateLabel: chooser.textContent,
+        modeLabel: currentSummary.textContent,
+      };
+      const navigationLabels = ["oldest", "older", "newer", "latest", "chooser"].map((key) => {
+        const button = container.querySelector(`[data-health-history-focus="${key}"]`);
+        return {key, text: button.textContent, title: button.title, ariaLabel: button["aria-label"]};
+      });
+      chooser.listeners.click();
+      const collapsed = chooserBody.hidden && chooser["aria-expanded"] === "false";
+      chooser.listeners.click();
+      const expanded = !chooserBody.hidden && chooser["aria-expanded"] === "true";
+      details.open = true;
+      details.listeners.toggle();
+      const runRange = container.querySelector('[data-health-history-focus="older-page"]').parentNode
+        .children.find((child) => child.className === "health-assessment-run-range");
+      const navigation = state.navigation;
+      container.querySelector('[data-health-history-focus="older"]').focus();
+      state.loading = true;
+      state.navigation = null;
+      renderHealthAssessmentHistory(container, state);
+      state.loading = false;
+      state.navigation = navigation;
+      renderHealthAssessmentHistory(container, state);
+      const focusRestoredAfterLoading = document.activeElement.dataset.healthHistoryFocus === "older";
+      state.navigation = null;
+      renderHealthAssessmentHistory(container, state);
+      const toolbarButtons = ["older", "newer"].map((key) =>
+        container.querySelector(`[data-health-history-focus="${key}"]`));
+      const explainsUnavailableStepping = container.children.some((child) =>
+        child.textContent.includes("Adjacent run navigation is unavailable"));
+      state.navigation = {
+        selectedAssessmentId: current.assessmentId,
+        older: null, newer: endpoint("assessment-newer", "2026-10-22T12:30:00Z"),
+      };
+      renderHealthAssessmentHistory(container, state);
+      const boundaryButton = container.querySelector('[data-health-history-focus="older"]');
+      const boundaryNote = container.children.find((child) => child.id === "health-assessment-boundary-note");
+      const detailsPreserved = container.querySelector('[data-health-history-focus="details"]').parentNode.open;
+      const multipagePagerVisible = !container.querySelector('[data-health-history-focus="older-page"]').parentNode.hidden;
+      container.querySelector('[data-health-history-focus="older-page"]').focus();
+      state.page = {...page, total: 1, offset: 0};
+      renderHealthAssessmentHistory(container, state);
+      const singlePagePagerHidden = container.querySelector('[data-health-history-focus="older-page"]').parentNode.hidden;
+      const focusEscapedHiddenPager = document.activeElement.dataset.healthHistoryFocus === "newer";
+      console.log(JSON.stringify({
+        options, actions, focusRetained, compactStructure, navigationLabels, collapsed, expanded,
+        detailsPreserved, multipagePagerVisible, singlePagePagerHidden, focusEscapedHiddenPager,
+        chooserOpen: container.querySelector('[data-health-history-focus="chooser"]')["aria-expanded"],
+        exactDetails: details.children.map((child) => child.textContent),
+        currentSummary: currentSummary.textContent,
+        range: runRange.textContent,
+        focusRestoredAfterLoading,
+        disabledAtMissingBoundary: toolbarButtons.map((button) => button.disabled),
+        explainsUnavailableStepping,
+        disabledBoundaryExplained: boundaryButton.title === "No older retained runs are available."
+          && boundaryButton["aria-describedby"] === "health-assessment-boundary-note"
+          && boundaryNote.textContent === "No older retained runs are available.",
+        oldestDisabledAtBoundary: container.querySelector('[data-health-history-focus="oldest"]').disabled,
+      }));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result["options"][0][0] == "assessment-newest"
+    assert result["options"][1][0] == "assessment-current-revision"
+    assert "Selected revision" in result["options"][1][1]
+    assert result["actions"] == {
+        "selected": ["assessment-older"], "offsets": [50, 0], "latest": 1, "oldest": 1,
+    }
+    assert result["focusRetained"] is True
+    assert result["compactStructure"] == {
+        "toolbarOrder": ["label", "oldest", "older", "chooser", "newer", "latest"],
+        "chooserIsSeparateRow": True,
+        "disclosureControls": True,
+        "dateLabel": "2026-10-22 12:00:00 UTC",
+        "modeLabel": "Pinned assessment · Findings / Roster / health coloring",
+    }
+    assert result["navigationLabels"] == [
+        {"key": "oldest", "text": "«", "title": "Show oldest retained run",
+         "ariaLabel": "Show oldest retained run"},
+        {"key": "older", "text": "‹", "title": "Show older retained run",
+         "ariaLabel": "Show older retained run"},
+        {"key": "newer", "text": "›", "title": "Show newer retained run",
+         "ariaLabel": "Show newer retained run"},
+        {"key": "latest", "text": "»", "title": "Follow latest assessment",
+         "ariaLabel": "Follow latest assessment"},
+        {"key": "chooser", "text": "2026-10-22 12:00:00 UTC",
+         "title": "Choose retained assessment", "ariaLabel": "Choose retained assessment"},
+    ]
+    assert result["collapsed"] is True
+    assert result["expanded"] is True
+    assert result["detailsPreserved"] is True
+    assert result["multipagePagerVisible"] is True
+    assert result["singlePagePagerHidden"] is True
+    assert result["focusEscapedHiddenPager"] is True
+    assert result["chooserOpen"] == "true"
+    assert result["range"] == "Runs 26-26 of 60"
+    assert result["focusRestoredAfterLoading"] is True
+    assert "2026-10-22T12:00:00.123Z" in result["exactDetails"][1]
+    assert "assessment-current-revision" in result["exactDetails"][1]
+    assert result["disabledAtMissingBoundary"] == [True, True]
+    assert result["explainsUnavailableStepping"] is True
+    assert result["disabledBoundaryExplained"] is True
+    assert result["oldestDisabledAtBoundary"] is True
+
+
+def test_oldest_assessment_jump_uses_bounded_preferred_history_and_guards_races() -> None:
+    source = (ROOT / "src/js/tdash-ui.js").read_text()
+    start = source.index("async function loadHealthAssessmentHistoryPage(")
+    end = source.index("\nfunction resetHealthInsightsForDatasetChange(", start)
+    script = r"""
+      let healthInsightsState, healthAssessmentHistoryState, currentDataset;
+      let calls, selected, announcements, scenario;
+      const renderNetworkInsights = () => {};
+      const announceHealthInsight = (text) => announcements.push(text);
+      const selectHealthAssessment = (id) => selected.push(id);
+      const isHealthComparisonEndpointPageForQuery = (page, query) =>
+        page.offset === query.offset && query.selectedAssessmentId === null;
+      async function fetchHealthComparisonEndpoints(network, dataset, side, offset, after, options) {
+        calls.push({offset, selected: options.selectedAssessmentId ?? null});
+        if (scenario === "race") healthAssessmentHistoryState.requestVersion += 1;
+        if (scenario === "failure") throw new Error("Store busy");
+        const total = scenario === "single" ? 1 : scenario === "pruned" && offset ? 0 : 60;
+        return {total, offset, limit: 25, items: Array.from(
+          {length: Math.min(25, Math.max(0, total - offset))},
+          (_, i) => ({assessmentId: `preferred-${offset + i}`}),
+        )};
+      }
+    """ + source[start:end] + r"""
+      const results = {};
+      for (const name of ["single", "multiple", "race", "pruned", "failure"]) {
+        scenario = name;
+        calls = []; selected = []; announcements = [];
+        healthInsightsState = {
+          assessment: {networkId: "network", datasetId: "dataset", assessmentId: "superseded"},
+          datasetId: "dataset", assessmentRequestVersion: 1,
+          capabilities: {comparisonEndpointSelection: 1},
+        };
+        healthAssessmentHistoryState = {
+          mode: "pinned", pinnedAssessmentId: "superseded", requestVersion: 0,
+        };
+        currentDataset = {entry: {value: "dataset"}};
+        await loadHealthAssessmentHistoryPage(0, {
+          selectedAssessmentId: null, selectOldest: true, announce: true,
+        });
+        results[name] = {calls, selected, error: healthAssessmentHistoryState.error};
+      }
+      console.log(JSON.stringify(results));
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result["single"]["calls"] == [{"offset": 0, "selected": None}]
+    assert result["single"]["selected"] == ["preferred-0"]
+    assert result["multiple"]["calls"] == [
+        {"offset": 0, "selected": None}, {"offset": 50, "selected": None},
+    ]
+    assert result["multiple"]["selected"] == ["preferred-59"]
+    assert result["race"]["selected"] == []
+    assert len(result["race"]["calls"]) == 1
+    assert result["pruned"]["selected"] == []
+    assert "history may have changed" in result["pruned"]["error"]
+    assert result["failure"]["selected"] == []
+    assert "Store busy" in result["failure"]["error"]

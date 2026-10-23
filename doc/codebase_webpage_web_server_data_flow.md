@@ -60,7 +60,7 @@ it does not trigger a separate live collection.
 | `GET /api/health/findings` | `handle_health_findings_api` | Read filtered or paginated findings for an assessment |
 | `GET /api/health/devices/{device_id}` | `handle_health_device_api` | Read one device's findings and approved health evidence |
 | `GET /api/health/observations` | `handle_health_observations_api` | Read bounded observation history |
-| `GET /api/health/comparison-endpoints` | `handle_health_comparison_endpoints_api` | Page retained Before/After candidates and resolve defaults/shortcuts |
+| `GET /api/health/comparison-endpoints` | `handle_health_comparison_endpoints_api` | Page retained Before/After candidates, resolve defaults/shortcuts, and expose optional adjacent-run metadata |
 | `GET /api/health/comparison` | `handle_health_comparison_pair_api` | Read or derive one arbitrary endpoint pair without writing |
 | `GET /api/health/comparisons` | `handle_health_comparisons_api` | List stored assessment comparisons |
 | `GET /api/health/comparisons/{comparison_id}` | `handle_health_comparison_api` | Read a pinned comparison; apply effective Result/scope filters and counts before paging |
@@ -149,7 +149,11 @@ offers 25, 50, and 100 rows, defaulting to 100; endpoint-history pages remain
 separate. See
 [Thread Network Health](thread_network_health.md#read-api-and-dashboard) for
 route parameters, latest-After preset selection, Custom endpoint selection,
-filter/count semantics, and lifecycle. Findings, Comparison, and Device Roster
+filter/count semantics, and lifecycle. For `side=after`, the endpoint inventory
+also returns optional page-independent `selectedAssessmentId`, `older`, and
+`newer` navigation metadata. Adjacent runs use one preferred assessment per
+observation, skip sibling revisions, and remain query-only; this metadata does
+not alter Comparison endpoint state. Findings, Comparison, and Device Roster
 are browser-owned peer tabs; the selected tab, preset intent, disclosure
 state, visible row ranges, selected table page sizes, and pagination remain in
 the browser.
@@ -377,6 +381,12 @@ grouped findings, bounded history metadata, and device-attributed findings.
 Python remains the only verdict owner. The finding view defaults to All for
 each dataset and is held only in browser memory; reloads, dataset changes, and
 Reset restore All.
+The shared Assessment toolbar starts in Latest mode; choosing or stepping
+selects an exact retained assessment for Findings, Device Roster, and health
+coloring. Latest resumes follow mode. Same-context refresh preserves a pin or
+advances follow mode, while Comparison endpoints and each panel's reset state
+remain independent. Historical reads and retries do not invoke the
+`process-dataset` task.
 
 Collector-derived role booleans remain source facts. OTBR collectors add
 positive `isReed` evidence when a record identifies a child running in FTD

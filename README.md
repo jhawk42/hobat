@@ -181,6 +181,15 @@ historical context from current snapshots. Stop health writers and consult
 For health-eligible datasets, the dashboard reads the current stored assessment
 through bounded, read-only `/api/health/*` routes. Run `health process-dataset`
 after a successful cache collection to refresh the assessment shown by the browser.
+In Health Insights, Latest follows the newest assessment; choosing or stepping
+through retained runs pins the shared Findings/Device Roster assessment and its
+health coloring. History navigation is read-only. Same-context Refresh Health
+processes the current cached files without starting a collector: a pin remains
+selected, while Latest follows the resulting assessment. Comparison endpoints
+remain independent. Historical roster presence and health coloring are shown
+with current/last-known roster facts and the currently loaded topology/table,
+not reconstructed historical layouts. See
+[Thread Network Health](doc/thread_network_health.md).
 
 Health purge commands support dry-run previews and require confirmation unless
 `--yes` is supplied. `system backups create` uses SQLite's backup API and writes

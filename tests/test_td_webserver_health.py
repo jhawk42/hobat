@@ -790,9 +790,32 @@ class SameOriginApiTests(unittest.IsolatedAsyncioTestCase):
             "&dataset=otbr_cli_networkdiag_fetch_all&side=after&limit=1&offset=0"
         )
         self.assertEqual(endpoint_page.status, 200)
+        self.assertEqual(endpoint_page.headers["Cache-Control"], "no-store")
         endpoints = await endpoint_page.json()
         self.assertEqual(endpoints["defaultAfter"]["assessmentId"], "assessment-2")
         self.assertEqual(endpoints["defaultBefore"]["assessmentId"], "assessment-1")
+        self.assertEqual(
+            endpoints["navigation"],
+            {
+                "selectedAssessmentId": "assessment-2",
+                "older": endpoints["defaultBefore"],
+                "newer": None,
+            },
+        )
+        pinned_endpoints = await self.client.get(
+            "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe"
+            "&dataset=otbr_cli_networkdiag_fetch_all&side=after"
+            "&selected=assessment-1&limit=1&offset=0"
+        )
+        pinned_navigation = (await pinned_endpoints.json())["navigation"]
+        self.assertEqual(pinned_navigation["selectedAssessmentId"], "assessment-1")
+        self.assertEqual(pinned_navigation["newer"]["assessmentId"], "assessment-2")
+        self.assertIsNone(pinned_navigation["older"])
+        missing_selected = await self.client.get(
+            "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe"
+            "&dataset=otbr_cli_networkdiag_fetch_all&side=after&selected=assessment-missing"
+        )
+        self.assertEqual(missing_selected.status, 404)
         before_page = await self.client.get(
             "/api/health/comparison-endpoints?network=extpan:78b9775b001c1cbe"
             "&dataset=otbr_cli_networkdiag_fetch_all&side=before&after=assessment-2"

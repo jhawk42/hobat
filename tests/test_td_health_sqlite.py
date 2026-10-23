@@ -684,6 +684,73 @@ def test_schema_seven_endpoint_inventory_deduplicates_revisions(tmp_path) -> Non
     }
 
 
+def test_after_navigation_skips_revisions_and_is_independent_of_page_offset(tmp_path) -> None:
+    store = SQLiteHealthStore(tmp_path / "health.db")
+    runs = {}
+    observed_times = {
+        "1": "2026-09-01T00:00:00+00:00",
+        "2": "2026-09-01T00:00:01+00:00",
+        "3": "2026-09-01T00:00:01+00:00",
+        "4": "2026-09-01T00:00:02+00:00",
+    }
+    for suffix, observed_at in observed_times.items():
+        observation, assessment = _result(suffix)
+        observation = replace(
+            observation, observed_at=observed_at, ingested_at=observed_at
+        )
+        assessment = replace(assessment, assessed_at=observed_at)
+        store.save_processing_result(observation, assessment)
+        runs[suffix] = (observation, assessment)
+
+    observation, assessment = runs["2"]
+    revised_assessment = replace(
+        assessment,
+        assessment_id="assessment-2-revision",
+        assessed_at="2026-10-01T00:00:00+00:00",
+        roster_context_digest="new-roster-context",
+    )
+    store.save_processing_result(observation, revised_assessment)
+
+    with closing(store._connect()) as connection:
+        before = (
+            connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0],
+            connection.execute("SELECT COUNT(*) FROM assessments").fetchone()[0],
+        )
+    pinned = store.assessment_endpoint_page(
+        network_id=runs["2"][0].network_id,
+        dataset_id=runs["2"][0].dataset_id,
+        side="after",
+        limit=1,
+        offset=0,
+        selected_assessment_id=assessment.assessment_id,
+    )
+    latest = store.assessment_endpoint_page(
+        network_id=runs["4"][0].network_id,
+        dataset_id=runs["4"][0].dataset_id,
+        side="after",
+        limit=1,
+        offset=0,
+    )
+    with closing(store._connect()) as connection:
+        after = (
+            connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0],
+            connection.execute("SELECT COUNT(*) FROM assessments").fetchone()[0],
+        )
+
+    assert pinned["items"][0]["assessmentId"] == "assessment-4"
+    assert pinned["total"] == 5
+    assert pinned["selected"]["assessmentId"] == assessment.assessment_id
+    assert pinned["navigation"]["selectedAssessmentId"] == assessment.assessment_id
+    assert pinned["selectedAfterIsPreferred"] is False
+    assert pinned["navigation"]["older"]["assessmentId"] == "assessment-3"
+    assert pinned["navigation"]["newer"]["assessmentId"] == "assessment-4"
+    assert latest["navigation"]["selectedAssessmentId"] == "assessment-4"
+    assert latest["selectedAfterIsPreferred"] is True
+    assert latest["navigation"]["older"]["assessmentId"] == "assessment-2-revision"
+    assert latest["navigation"]["newer"] is None
+    assert after == before == (4, 5)
+
+
 def test_reprocessing_purged_assessment_restores_preference_but_missing_preference_is_corrupt(
     tmp_path,
 ) -> None:

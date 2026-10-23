@@ -1418,6 +1418,80 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   color: var(--muted);
 }
 #health-insights-summary[hidden] { display: none; }
+.health-assessment-toolbar {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, max-content) auto auto;
+  justify-content: start;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-bottom: 4px;
+}
+.health-assessment-label { margin-right: 2px; }
+.health-assessment-toolbar > button,
+.health-assessment-pager > button,
+.health-assessment-exact-details > summary {
+  min-height: 44px;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+}
+.health-assessment-toolbar > button { min-width: 44px; }
+.health-assessment-toolbar button[aria-pressed="true"] { font-weight: 700; }
+.health-assessment-toolbar button:disabled,
+.health-assessment-pager button:disabled { opacity: 0.45; cursor: default; }
+.health-assessment-chooser {
+  min-width: 0;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.health-assessment-chooser::after { content: " ▾"; }
+.health-assessment-chooser-body {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 0;
+}
+.health-assessment-chooser-body label { display: grid; gap: 4px; }
+.health-assessment-chooser-body select { width: 100%; min-width: 0; min-height: 44px; }
+.health-assessment-chooser-body[hidden],
+.health-assessment-pager[hidden] { display: none; }
+.health-assessment-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.health-assessment-pager .health-assessment-run-range { margin-right: auto; }
+.health-assessment-context { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; }
+.health-assessment-exact-details { font-size: 12px; color: var(--muted); }
+.health-assessment-exact-details > summary { width: fit-content; cursor: pointer; }
+.health-assessment-exact-details p { margin: 3px 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .health-assessment-toolbar { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+  .health-assessment-label { grid-column: 1 / 4; grid-row: 1; }
+  .health-assessment-toolbar > [data-health-history-focus="latest"] { grid-column: 4; grid-row: 1; }
+  .health-assessment-toolbar > [data-health-history-focus="oldest"] { grid-column: 1; grid-row: 2; }
+  .health-assessment-toolbar > [data-health-history-focus="older"] { grid-column: 2; grid-row: 2; }
+  .health-assessment-chooser { grid-column: 3; grid-row: 2; }
+  .health-assessment-toolbar > [data-health-history-focus="newer"] { grid-column: 4; grid-row: 2; }
+}
+.health-assessment-scope,
+.health-assessment-current,
+.health-assessment-caveat,
+.health-assessment-error,
+.health-assessment-history-note,
+.health-assessment-run-range {
+  margin: 3px 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.health-assessment-error { color: var(--danger, #b00020); }
+.health-assessment-toolbar button:focus-visible,
+.health-assessment-exact-details > summary:focus-visible,
+.health-assessment-pager button:focus-visible,
+.health-assessment-chooser-body select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 #health-insights-tabs { display: flex; gap: 4px; min-width: 0; }
 #health-insights-tabs button {
   flex: 1 1 0;

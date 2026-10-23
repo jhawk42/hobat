@@ -139,6 +139,7 @@ import {
   renderHealthRoster,
   renderHealthRosterDetail,
   renderHealthComparison,
+  renderHealthAssessmentHistory,
   renderHealthStatus,
   formatHealthAssessmentObservation,
   formatHealthInsightsTabAccessibleName,
@@ -361,6 +362,22 @@ const healthInsightsState = {
   refreshDetail: "",
   refreshOutcome: null,
   refreshedAt: null,
+};
+const healthAssessmentHistoryState = {
+  mode: "latest",
+  pinnedAssessmentId: null,
+  networkId: null,
+  page: null,
+  navigation: null,
+  offset: 0,
+  loading: false,
+  pageLoading: false,
+  error: "",
+  targetError: "",
+  unsupported: false,
+  chooserOpen: false,
+  requestVersion: 0,
+  announceSelection: false,
 };
 const healthInsightsViewState = {
   assessmentId: null,
@@ -2356,6 +2373,32 @@ function renderNetworkInsights() {
   document.getElementById("health-insights-filters")?.toggleAttribute("hidden", !healthEligible);
   healthWorkspaceEl?.toggleAttribute("hidden", !healthEligible);
   contentEl.toggleAttribute("hidden", healthEligible);
+  renderHealthAssessmentHistory(
+    document.getElementById("health-assessment-history"),
+    {
+      ...healthAssessmentHistoryState,
+      assessment: healthInsightsState.assessment,
+      loading: healthInsightsState.loading,
+      selectedAssessmentId: healthAssessmentHistoryState.mode === "pinned"
+        ? healthAssessmentHistoryState.pinnedAssessmentId
+        : healthInsightsState.assessment?.assessmentId ?? null,
+    },
+    {
+      followLatest: followLatestHealthAssessment,
+      selectAssessment: selectHealthAssessment,
+      selectOldest: () => {
+        void loadHealthAssessmentHistoryPage(0, {
+          selectedAssessmentId: null, selectOldest: true, announce: true,
+        });
+      },
+      page: (offset) => {
+        void loadHealthAssessmentHistoryPage(offset, { announce: true });
+      },
+      retry: () => { void retryHealthAssessmentHistory(); },
+      retryTarget: () => { void refreshHealthAssessment(); },
+      chooserToggle: (open) => { healthAssessmentHistoryState.chooserOpen = open; },
+    },
+  );
   if (healthEligible) {
     if (tableWrapEl && !healthWorkspaceEl.hidden) {
       healthInsightsViewState.tableScrollTop = tableWrapEl.scrollTop;
@@ -4590,11 +4633,192 @@ function selectComparison(comparisonId, offset = 0) {
   return healthComparisonDetailController.select(comparisonId, offset);
 }
 
+function resetHealthAssessmentHistory() {
+  healthAssessmentHistoryState.requestVersion += 1;
+  Object.assign(healthAssessmentHistoryState, {
+    mode: "latest",
+    pinnedAssessmentId: null,
+    networkId: null,
+    page: null,
+    navigation: null,
+    offset: 0,
+    loading: false,
+    pageLoading: false,
+    error: "",
+    targetError: "",
+    unsupported: false,
+    chooserOpen: false,
+    announceSelection: false,
+  });
+}
+
+function selectHealthAssessment(assessmentId) {
+  if (typeof assessmentId !== "string" || !assessmentId) return;
+  if (healthAssessmentHistoryState.mode === "pinned"
+      && healthAssessmentHistoryState.pinnedAssessmentId === assessmentId) return;
+  healthAssessmentHistoryState.mode = "pinned";
+  healthAssessmentHistoryState.pinnedAssessmentId = assessmentId;
+  healthAssessmentHistoryState.page = null;
+  healthAssessmentHistoryState.navigation = null;
+  healthAssessmentHistoryState.error = "";
+  healthAssessmentHistoryState.targetError = "";
+  healthAssessmentHistoryState.unsupported = false;
+  healthAssessmentHistoryState.announceSelection = true;
+  void refreshHealthAssessment();
+}
+
+function followLatestHealthAssessment() {
+  healthAssessmentHistoryState.mode = "latest";
+  healthAssessmentHistoryState.pinnedAssessmentId = null;
+  healthAssessmentHistoryState.page = null;
+  healthAssessmentHistoryState.navigation = null;
+  healthAssessmentHistoryState.offset = 0;
+  healthAssessmentHistoryState.chooserOpen = false;
+  healthAssessmentHistoryState.error = "";
+  healthAssessmentHistoryState.targetError = "";
+  healthAssessmentHistoryState.unsupported = false;
+  healthAssessmentHistoryState.announceSelection = true;
+  void refreshHealthAssessment();
+}
+
+function retryHealthAssessmentHistory() {
+  void loadHealthAssessmentHistoryPage(0, {
+    selectedAssessmentId: healthInsightsState.assessment?.assessmentId ?? null,
+    preserveTargetError: true,
+    announce: true,
+  });
+}
+
+async function loadHealthAssessmentHistoryPage(offset, options = {}) {
+  const assessment = healthInsightsState.assessment;
+  const networkId = options.networkId ?? assessment?.networkId
+    ?? healthAssessmentHistoryState.networkId;
+  const datasetId = options.datasetId ?? assessment?.datasetId
+    ?? healthInsightsState.datasetId;
+  const selectedAssessmentId = Object.hasOwn(options, "selectedAssessmentId")
+    ? options.selectedAssessmentId
+    : healthAssessmentHistoryState.mode === "pinned"
+      ? healthAssessmentHistoryState.pinnedAssessmentId
+      : assessment?.assessmentId ?? null;
+  const assessmentRequestVersion = healthInsightsState.assessmentRequestVersion;
+  const mode = healthAssessmentHistoryState.mode;
+  const pinnedAssessmentId = healthAssessmentHistoryState.pinnedAssessmentId;
+  if (!networkId || !datasetId) return;
+  if (healthInsightsState.capabilities?.comparisonEndpointSelection !== 1) {
+    healthAssessmentHistoryState.page = null;
+    healthAssessmentHistoryState.navigation = null;
+    healthAssessmentHistoryState.unsupported = true;
+    healthAssessmentHistoryState.pageLoading = false;
+    healthAssessmentHistoryState.error = "";
+    renderNetworkInsights();
+    return;
+  }
+
+  const requestVersion = ++healthAssessmentHistoryState.requestVersion;
+  const isCurrent = () => requestVersion === healthAssessmentHistoryState.requestVersion
+    && assessmentRequestVersion === healthInsightsState.assessmentRequestVersion
+    && healthAssessmentHistoryState.mode === mode
+    && healthAssessmentHistoryState.pinnedAssessmentId === pinnedAssessmentId
+    && currentDataset?.entry?.value === datasetId
+    && (!selectedAssessmentId
+      || healthInsightsState.assessment?.assessmentId === selectedAssessmentId);
+  healthAssessmentHistoryState.offset = offset;
+  healthAssessmentHistoryState.pageLoading = true;
+  healthAssessmentHistoryState.error = "";
+  if (!options.preserveTargetError) healthAssessmentHistoryState.targetError = "";
+  if (options.announce) announceHealthInsight("Loading retained assessment runs.");
+  renderNetworkInsights();
+  try {
+    const page = await fetchHealthComparisonEndpoints(
+      networkId, datasetId, "after", offset, undefined,
+      { selectedAssessmentId: selectedAssessmentId || undefined },
+    );
+    if (!isCurrent()) return;
+    const query = {
+      networkId,
+      datasetId,
+      side: "after",
+      afterAssessmentId: null,
+      selectedAssessmentId,
+      comparisonVersion: healthInsightsState.capabilities?.comparisonVersion,
+      comparisonPolicyDigest: healthInsightsState.capabilities?.comparisonPolicyDigest,
+      offset,
+    };
+    if (!isHealthComparisonEndpointPageForQuery(page, query)) {
+      throw new Error("Invalid retained assessment page.");
+    }
+    if (options.selectOldest) {
+      const lastOffset = Math.max(0, Math.floor((page.total - 1) / page.limit) * page.limit);
+      if (offset === 0 && lastOffset > 0) {
+        await loadHealthAssessmentHistoryPage(lastOffset, options);
+        return;
+      }
+      if (offset !== lastOffset || page.items.length === 0) {
+        throw new Error("Oldest retained run is unavailable; history may have changed. Retry the run list.");
+      }
+      selectHealthAssessment(page.items.at(-1).assessmentId);
+      return;
+    }
+    healthAssessmentHistoryState.page = page;
+    healthAssessmentHistoryState.navigation = page.navigation ?? null;
+    healthAssessmentHistoryState.networkId = networkId;
+    healthAssessmentHistoryState.unsupported = false;
+    if (page.items.length === 0 && page.total > 0) {
+      announceHealthInsight("No retained runs are available on this page.");
+    } else if (options.announce) {
+      const first = page.total === 0 ? 0 : offset + 1;
+      const last = Math.min(page.total, offset + page.items.length);
+      announceHealthInsight(
+        page.total === 0
+          ? "No retained assessment runs are available."
+          : `Retained assessment runs ${first} through ${last} loaded.`,
+      );
+    }
+  } catch (error) {
+    if (!isCurrent()) return;
+    if (selectedAssessmentId && error.status === 404) {
+      const unavailable = "Selected assessment is no longer retained.";
+      healthAssessmentHistoryState.targetError = unavailable;
+      announceHealthInsight(unavailable);
+      healthAssessmentHistoryState.page = null;
+      healthAssessmentHistoryState.navigation = null;
+      if (healthAssessmentHistoryState.mode === "pinned"
+          && healthAssessmentHistoryState.pinnedAssessmentId === selectedAssessmentId) {
+        healthInsightsState.assessment = null;
+        healthInsightsState.error = unavailable;
+        healthInsightsState.device = null;
+        healthInsightsState.roster = null;
+        healthInsightsState.rosterDetail = null;
+        healthInsightsState.deviceRequestVersion += 1;
+        healthRosterViewState.requestVersion += 1;
+        healthRosterViewState.detailVersion += 1;
+        if (currentDataset?.entry?.value === datasetId) currentDataset.healthAssessment = null;
+        applyHealthAssessmentPresentation(null);
+      }
+      void loadHealthAssessmentHistoryPage(0, {
+        networkId,
+        datasetId,
+        selectedAssessmentId: null,
+        preserveTargetError: true,
+      });
+    } else {
+      healthAssessmentHistoryState.error = `Retained run list unavailable: ${error.message}`;
+      announceHealthInsight(healthAssessmentHistoryState.error);
+    }
+  } finally {
+    if (requestVersion === healthAssessmentHistoryState.requestVersion) {
+      healthAssessmentHistoryState.pageLoading = false;
+      renderNetworkInsights();
+    }
+  }
+}
+
 function resetHealthInsightsForDatasetChange() {
   findingRosterActionEligibility.clear();
   findingRosterActionPending.clear();
   clearRosterMutationRefreshStatus();
   healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;
+  resetHealthAssessmentHistory();
   healthInsightsState.assessment = null;
   healthInsightsViewState.assessmentId = null;
   resetHealthFindingState();
@@ -4612,6 +4836,7 @@ function resetHealthInsightsForDatasetChange() {
 function resetHealthInsightsForNetworkChange() {
   clearRosterMutationRefreshStatus();
   healthInsightsTab = HEALTH_INSIGHTS_TABS[0].id;
+  resetHealthAssessmentHistory();
   resetHealthFindingState();
   resetHealthComparisonState();
   healthInsightsState.capabilities = null;
@@ -4631,20 +4856,57 @@ async function refreshHealthAssessment() {
   const previousNetworkId = healthInsightsState.assessment?.networkId;
   const datasetChanged = healthInsightsState.datasetId !== entry?.value;
   if (datasetChanged) resetHealthInsightsForDatasetChange();
+  const announceSelection = healthAssessmentHistoryState.announceSelection;
+  healthAssessmentHistoryState.announceSelection = false;
+  const requestedAssessmentId = healthAssessmentHistoryState.mode === "pinned"
+    ? healthAssessmentHistoryState.pinnedAssessmentId
+    : null;
+  const requestedNetworkId = requestedAssessmentId
+    ? healthAssessmentHistoryState.networkId
+    : null;
   healthInsightsState.datasetId = entry?.value ?? null;
   healthInsightsState.error = "";
   healthInsightsState.supportError = "";
+  healthInsightsState.assessment = null;
   healthInsightsState.device = null;
   healthInsightsState.deviceError = "";
   healthInsightsState.roster = null;
-  if (datasetChanged) healthInsightsState.rosterDetail = null;
+  healthInsightsState.rosterDetail = null;
+  healthInsightsState.deviceRequestVersion += 1;
   healthInsightsState.rosterError = "";
   healthRosterViewState.requestVersion += 1;
   healthRosterViewState.detailVersion += 1;
+  healthInsightsViewState.selectedGroupId = null;
+  healthInsightsViewState.selectedFindingId = null;
+  healthInsightsViewState.selectedEndpointId = null;
+  healthInsightsViewState.detailsOpen = false;
+  healthInsightsViewState.tableScrollTop = 0;
+  findingDeviceReturnContext = null;
+  document.getElementById("btn-back-to-health-finding")?.setAttribute("hidden", "");
+  document.getElementById("btn-health-return")?.setAttribute("hidden", "");
+  contextDetailsState.finding = { assessmentId: null, groupId: null, findingId: null };
+  setContextDetailsMode("device");
+  contextDetailsController.setCollapsed(true);
+  healthAssessmentHistoryState.loading = true;
+  healthAssessmentHistoryState.pageLoading = false;
+  healthAssessmentHistoryState.requestVersion += 1;
+  healthAssessmentHistoryState.page = null;
+  healthAssessmentHistoryState.navigation = null;
+  healthAssessmentHistoryState.error = "";
+  healthAssessmentHistoryState.targetError = "";
+  healthAssessmentHistoryState.unsupported = false;
+  if (requestedNetworkId) healthAssessmentHistoryState.networkId = requestedNetworkId;
+  if (currentDataset?.entry?.value === entry?.value) currentDataset.healthAssessment = null;
+  if (currentView === "insights") {
+    announceHealthInsight(requestedAssessmentId
+      ? "Loading the selected retained assessment."
+      : "Loading the latest health assessment.");
+  }
   document.getElementById("device-details").classList.remove("roster-selected");
   applyHealthAssessmentPresentation(null);
   if (entry?.healthEligible !== true) {
     healthInsightsState.loading = false;
+    healthAssessmentHistoryState.loading = false;
     renderHealthStatusSummary();
     renderNetworkInsights();
     updateHealthPresentationControls();
@@ -4656,11 +4918,31 @@ async function refreshHealthAssessment() {
   renderHealthStatusSummary();
   renderNetworkInsights();
   try {
-    const assessment = await fetchHealthAssessment(entry.value);
+    const assessment = await fetchHealthAssessment(
+      entry.value,
+      undefined,
+      requestedAssessmentId
+        ? { networkId: requestedNetworkId, assessmentId: requestedAssessmentId }
+        : {},
+    );
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    if (requestedAssessmentId && (
+      assessment.assessmentId !== requestedAssessmentId
+      || assessment.networkId !== requestedNetworkId
+    )) {
+      throw new Error("Selected assessment is no longer retained.");
+    }
     const networkChanged = Boolean(previousNetworkId && previousNetworkId !== assessment.networkId);
     if (networkChanged) resetHealthInsightsForNetworkChange();
     healthInsightsState.assessment = assessment;
+    healthAssessmentHistoryState.networkId = assessment.networkId;
+    if (announceSelection) {
+      announceHealthInsight(requestedAssessmentId
+        ? `Pinned retained assessment ${assessment.assessmentId}.`
+        : "Following the latest retained assessment.");
+    } else if (previousAssessmentId && previousAssessmentId !== assessment.assessmentId) {
+      announceHealthInsight("Following a newer latest assessment.");
+    }
     if (previousAssessmentId !== assessment.assessmentId) {
       findingRosterActionEligibility.clear();
       findingRosterActionPending.clear();
@@ -4691,6 +4973,16 @@ async function refreshHealthAssessment() {
       healthInsightsState.capabilities = support.capabilities;
       healthInsightsState.supportError = "";
       healthInsightsState.observations = support.observations;
+      if (support.capabilities?.comparisonEndpointSelection === 1) {
+        await loadHealthAssessmentHistoryPage(
+          healthAssessmentHistoryState.offset,
+          { selectedAssessmentId: assessment.assessmentId },
+        );
+      } else {
+        healthAssessmentHistoryState.unsupported = true;
+        healthAssessmentHistoryState.page = null;
+        healthAssessmentHistoryState.navigation = null;
+      }
       if (healthInsightsState.rosterDetail) {
         renderRosterDetailPanel(
           healthInsightsState.rosterDetail, healthInsightsState.rosterDetailPresence,
@@ -4732,17 +5024,40 @@ async function refreshHealthAssessment() {
     } catch (error) {
       if (requestVersion === healthInsightsState.assessmentRequestVersion) {
         healthInsightsState.supportError = error.message;
+        healthAssessmentHistoryState.error =
+          `Retained run history unavailable: ${error.message}`;
+        announceHealthInsight(healthAssessmentHistoryState.error);
       }
       console.warn("Health history metadata is unavailable:", error);
     }
   } catch (error) {
     if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
-    healthInsightsState.error = error.message;
+    const selectedUnavailable = Boolean(requestedAssessmentId && error.status === 404);
+    healthInsightsState.error = selectedUnavailable
+      ? "Selected assessment is no longer retained."
+      : error.message;
+    if (currentView === "insights") announceHealthInsight(healthInsightsState.error);
+    if (selectedUnavailable) {
+      healthAssessmentHistoryState.targetError = healthInsightsState.error;
+      healthAssessmentHistoryState.page = null;
+      healthAssessmentHistoryState.navigation = null;
+      void loadHealthAssessmentHistoryPage(0, {
+        networkId: requestedNetworkId,
+        datasetId: entry.value,
+        selectedAssessmentId: null,
+        preserveTargetError: true,
+      });
+    } else if (requestedAssessmentId && error.message === "Selected assessment is no longer retained.") {
+      healthAssessmentHistoryState.targetError = error.message;
+    } else {
+      healthAssessmentHistoryState.targetError = healthInsightsState.error;
+    }
   } finally {
     if (requestVersion === healthInsightsState.assessmentRequestVersion) {
       const resetComparisonDuringRefresh = healthInsightsState.comparisonResetPendingRefresh;
       healthInsightsState.comparisonResetPendingRefresh = false;
       healthInsightsState.loading = false;
+      healthAssessmentHistoryState.loading = false;
       renderHealthStatusSummary();
       renderNetworkInsights();
       updateHealthPresentationControls();

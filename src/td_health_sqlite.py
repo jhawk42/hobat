@@ -1195,6 +1195,9 @@ class SQLiteHealthStore:
             candidate_records = self.preferred_assessments_on_connection(
                 connection, records
             )
+            preferred_assessment_ids = {
+                row["assessment_id"] for row in candidate_records
+            }
             if selected_assessment_id and selected_assessment_id not in by_id:
                 raise KeyError("Selected assessment endpoint not found")
             if side == "before":
@@ -1275,6 +1278,27 @@ class SQLiteHealthStore:
                 by_id.get(after_assessment_id) if side == "before" else
                 by_id.get(selected_assessment_id) if selected_assessment_id else latest_after
             )
+            navigation_candidates = sorted(
+                candidate_records,
+                key=lambda row: (
+                    instants[row["assessment_id"]][0],
+                    row["network_roster_revision"],
+                    instants[row["assessment_id"]][1],
+                    row["assessment_id"],
+                ),
+                reverse=True,
+            )
+            navigation_selected_id = (
+                selected_after["assessment_id"] if selected_after else None
+            )
+            navigation_index = next(
+                (
+                    index for index, row in enumerate(navigation_candidates)
+                    if selected_after
+                    and row["observation_id"] == selected_after["observation_id"]
+                ),
+                None,
+            )
             shortcuts = []
             if selected_after:
                 for interval, duration_seconds in COMPARISON_INTERVALS.items():
@@ -1293,7 +1317,7 @@ class SQLiteHealthStore:
                         "candidate": public(candidate),
                     })
 
-            return {
+            result = {
                 "schemaVersion": 1,
                 "networkId": network_id,
                 "datasetId": dataset_id,
@@ -1310,6 +1334,27 @@ class SQLiteHealthStore:
                 "selectedAfter": public(selected_after),
                 "shortcuts": shortcuts,
             }
+            if side == "after":
+                result["navigation"] = {
+                    "selectedAssessmentId": navigation_selected_id,
+                    "older": (
+                        public(navigation_candidates[navigation_index + 1])
+                        if navigation_index is not None
+                        and navigation_index + 1 < len(navigation_candidates)
+                        else None
+                    ),
+                    "newer": (
+                        public(navigation_candidates[navigation_index - 1])
+                        if navigation_index is not None and navigation_index > 0
+                        else None
+                    ),
+                }
+                result["selectedAfterIsPreferred"] = (
+                    navigation_selected_id in preferred_assessment_ids
+                    if navigation_selected_id is not None
+                    else None
+                )
+            return result
 
     @staticmethod
     def _comparison_page_on_connection(
