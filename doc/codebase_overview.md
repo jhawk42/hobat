@@ -161,6 +161,7 @@ explicitly absent. It does not replace OTBR network-wide collection.
 | `td_health_observation_model.py`, `td_health_policy.py` | Frozen domain contracts and validated health policy |
 | `td_health_observation_store.py`, `td_health_sqlite.py`, `td_health_history.py` | Observation persistence boundary, SQLite transactions, current assessment, and bounded retention |
 | `td_health_migration.py` | Read-only retained-history inventory, replay adapters, backup-first transactional migration, and report generation |
+| `td_health_manifest_history.py`, `td-dataset-manifest-history.json` | Immutable reviewed historical contracts and history-only source/target resolution; no Git or database I/O |
 | `td_health_graph.py`, `td_health_roster.py`, `td_health_roster_mutation.py`, `td_health_comparison.py` | Topology evidence graph, roster projections and lifecycle mutations, and stored-assessment comparisons |
 | `td_health_read.py`, `td_webserver.py` health routes | Query-only SQLite projections, assessment pinning, grouped findings, bounded history, and no-store HTTP responses |
 | `td_system_backups.py`, `td_system_cli.py`, `td_system_database.py`, `td_system_ping.py` | Data-directory backup/restore, SQLite database repacking, and bounded host ping |

@@ -25,14 +25,23 @@ from td_health_evaluator import (
     evaluate_observation,
     evaluation_inputs_from_payload,
 )
-from td_health_manifest import HealthProfile, load_health_manifest
+from td_health_manifest import HealthProfile
+from td_health_manifest_history import (
+    ManifestHistoryError,
+    ManifestHistoryResolver,
+    SourceContractResolution,
+    load_manifest_history,
+    target_contract_digest,
+)
 from td_health_observation_model import (
     EvaluationInputDomain,
     EvaluationInputState,
     EvaluationInputs,
+    Assessment,
     HistoryMigrationEligibility,
     HistoryMigrationInventory,
     HistoryMigrationInventoryItem,
+    Observation,
     device_id_from_ext_address,
 )
 from td_health_observation_store import HOBAT_DATABASE_FILENAME, HealthStoreError
@@ -171,6 +180,14 @@ def _saved_context_inputs(
     if profile_data.get("profileId") != row["profile_id"]:
         raise ValueError("reproduction-profile-mismatch")
     if row["profile_id"] != profile.profile_id:
+        raise LookupError("unsupported-profile")
+    if (
+        profile_data.get("identityFile") != profile.identity_file
+        or profile_data.get("requiredOutcomes") != list(profile.required_outcomes)
+        or profile_data.get("coverage") != dict(profile.coverage)
+        or profile_data.get("topologyAuthority") is not profile.topology_authority
+        or profile_data.get("borderRouterAuthority") is not profile.border_router_authority
+    ):
         raise LookupError("unsupported-profile")
     expected_sample_contract = (
         ROUTE64_SAMPLE_CONTRACT_VERSION
@@ -326,17 +343,6 @@ def _saved_context_inputs(
         )
     ):
         raise ValueError("invalid-policy-or-profile-context")
-    saved_profile = profile_data
-    if (
-        saved_profile.get("profileId") != profile.profile_id
-        or saved_profile.get("identityFile") != profile.identity_file
-        or saved_profile.get("requiredOutcomes") != list(profile.required_outcomes)
-        or saved_profile.get("coverage") != dict(profile.coverage)
-        or saved_profile.get("topologyAuthority") is not profile.topology_authority
-        or saved_profile.get("borderRouterAuthority") is not profile.border_router_authority
-    ):
-        raise LookupError("unsupported-profile")
-
     expected_raw = raw.get("expectedDeviceIds")
     absence_raw = raw.get("priorCompleteAbsences")
     roster = raw.get("rosterContext")
@@ -508,12 +514,128 @@ def _generated_findings(assessment) -> tuple:
     )
 
 
+def _resolved_source_inputs(
+    connection: sqlite3.Connection,
+    row: sqlite3.Row,
+    resolver: ManifestHistoryResolver,
+) -> tuple[SourceContractResolution, Observation, EvaluationInputs, tuple[str, ...]]:
+    if row["evaluator_version"] not in _SUPPORTED_EVALUATORS:
+        raise LookupError("unsupported-evaluator")
+    expected_contract = (
+        ROUTE64_SAMPLE_CONTRACT_VERSION
+        if row["dataset_id"] == "otbr_cli_networkdiag_fetch_all"
+        else "comparison-v1"
+    )
+    if row["sample_contract_version"] != expected_contract:
+        raise LookupError("unsupported-sample-contract")
+    try:
+        context = json.loads(row["reproduction_context_json"])
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid-reproduction-context") from exc
+    if not isinstance(context, dict):
+        raise ValueError("invalid-reproduction-context")
+    revision_id = context.get("manifestRevisionId")
+    if revision_id is not None and (not isinstance(revision_id, str) or not revision_id):
+        raise ValueError("invalid-manifest-revision-identity")
+    candidates = resolver.matching_candidates(
+        row["dataset_id"], row["datasource_id"], row["profile_id"],
+        row["sample_contract_version"], revision_id=revision_id,
+    )
+    if not candidates:
+        raise LookupError(
+            "no-current-health-target"
+            if resolver.current_target(row["dataset_id"]) is None
+            else "unsupported-profile"
+        )
+    matches = []
+    failures = []
+    for candidate in candidates:
+        try:
+            observation = SQLiteHealthStore._retained_observation(
+                connection, row, source_dataset=candidate.dataset,
+            )
+            inputs, reasons = _saved_context_inputs(
+                connection, row=row, observation=observation,
+                profile=candidate.dataset.health_profile,
+            )
+        except (LookupError, ValueError, TypeError, sqlite3.DatabaseError) as exc:
+            failures.append(exc)
+        else:
+            matches.append((candidate, observation, inputs, reasons))
+    if not matches:
+        invalid = next(
+            (exc for exc in failures if not isinstance(exc, LookupError)), None,
+        )
+        if invalid is not None:
+            raise invalid
+        raise LookupError("unsupported-profile")
+    digests = {match[0].replay_contract_digest for match in matches}
+    if len(digests) != 1:
+        raise LookupError("ambiguous-historical-contract")
+    valid_candidates = tuple(match[0] for match in matches)
+    status = (
+        "equivalent-contracts" if len(valid_candidates) > 1
+        else "current-contract" if valid_candidates[0].revision.is_current
+        else "historical-contract"
+    )
+    resolution = SourceContractResolution(
+        status, valid_candidates, next(iter(digests)),
+        tuple(sorted(candidate.revision_id for candidate in valid_candidates)),
+        valid_candidates[0].dataset,
+    )
+    _, observation, inputs, reasons = matches[0]
+    return resolution, observation, inputs, reasons
+
+
+def _existing_upgrade(
+    connection: sqlite3.Connection,
+    *,
+    source_id: str,
+    contract_digest: str,
+    assessment: Assessment,
+    unavailable_domains: tuple[str, ...],
+) -> tuple[sqlite3.Row | None, bool]:
+    edge = connection.execute(
+        """SELECT * FROM health_assessment_upgrades
+           WHERE source_assessment_id=? AND target_contract_digest=?""",
+        (source_id, contract_digest),
+    ).fetchone()
+    legacy = False
+    if edge is None:
+        edge = connection.execute(
+            "SELECT * FROM health_assessment_upgrades WHERE target_assessment_id=?",
+            (assessment.assessment_id,),
+        ).fetchone()
+        legacy = edge is not None
+    if edge is not None:
+        audit = connection.execute(
+            "SELECT committed_at FROM health_history_migrations WHERE migration_id=?",
+            (edge["migration_id"],),
+        ).fetchone()
+        if (
+            edge["source_assessment_id"] != source_id
+            or edge["target_assessment_id"] != assessment.assessment_id
+            or audit is None or not audit["committed_at"]
+            or edge["replay_input_digest"] != assessment.policy_digest
+            or json.loads(edge["unavailable_domains_json"]) != list(unavailable_domains)
+            or not _assessment_matches(connection, assessment)
+        ):
+            raise ValueError("existing-upgrade-target-conflict")
+    elif connection.execute(
+        "SELECT 1 FROM assessments WHERE assessment_id=?",
+        (assessment.assessment_id,),
+    ).fetchone() is not None:
+        raise ValueError("deterministic-target-without-upgrade-lineage")
+    return edge, legacy
+
+
 def inventory_health_history(
     store: SQLiteHealthStore,
     *,
     target_policy: HealthPolicy,
     dataset_ids: tuple[str, ...] | None = None,
     network_id: str | None = None,
+    resolver: ManifestHistoryResolver | None = None,
 ) -> HistoryMigrationInventory:
     """Classify one preferred retained assessment per observation without writes."""
     if not store.read_only:
@@ -523,12 +645,24 @@ def inventory_health_history(
     if not store.path.exists():
         return HistoryMigrationInventory(0, "", _digest([]), ())
 
-    manifest = load_health_manifest()
-    unknown = set(dataset_ids or ()) - set(manifest.datasets)
-    if unknown:
+    resolver = resolver or load_manifest_history()
+    resolver.verify_snapshot()
+    with closing(store._connect()) as discovery:
+        validate_health_schema_connection(discovery)
+        retained_ids = {
+            row[0] for row in discovery.execute(
+                "SELECT DISTINCT dataset_id FROM observations"
+                + (" WHERE network_id=?" if network_id is not None else ""),
+                (network_id,) if network_id is not None else (),
+            )
+        }
+    unknown = set(dataset_ids or ()) - resolver.declared_dataset_ids - retained_ids
+    if unknown or any(not dataset_id.strip() for dataset_id in dataset_ids or ()):
         raise HealthMigrationInventoryError(
-            f"Dataset is not health eligible: {sorted(unknown)[0]}"
+            f"Dataset is not declared or retained in the selected network: {sorted(unknown or {''})[0]}"
         )
+    all_datasets = not dataset_ids
+    dataset_ids = tuple(sorted(dataset_ids or (set(resolver.current.datasets) | retained_ids)))
     where = []
     parameters: list[str] = []
     if dataset_ids:
@@ -538,25 +672,6 @@ def inventory_health_history(
         where.append("o.network_id=?")
         parameters.append(network_id)
     clause = f"WHERE {' AND '.join(where)}" if where else ""
-    target_contract_digest = _digest(
-        {
-            "evaluatorVersion": EVALUATOR_VERSION,
-            "policyVersion": target_policy.version,
-            "policyDigest": target_policy.digest,
-            "manifestSchema": manifest.schema_version,
-            "datasets": {
-                dataset_id: {
-                    "profileId": manifest.dataset(dataset_id).health_profile.profile_id,
-                    "sampleContract": (
-                        ROUTE64_SAMPLE_CONTRACT_VERSION
-                        if dataset_id == "otbr_cli_networkdiag_fetch_all"
-                        else "comparison-v1"
-                    ),
-                }
-                for dataset_id in sorted(manifest.datasets)
-            },
-        }
-    )
     with closing(store._connect()) as connection:
         connection.execute("BEGIN")
         schema_version = validate_health_schema_connection(connection)
@@ -587,7 +702,7 @@ def inventory_health_history(
                 )
             }
         items: list[HistoryMigrationInventoryItem] = []
-        inventory_rows: list[dict[str, str]] = []
+        inventory_rows: list[dict[str, Any]] = []
         for observation_id, assessment_rows in by_observation.items():
             preference = preferences.get(observation_id)
             if schema_version < 8:
@@ -659,33 +774,30 @@ def inventory_health_history(
                     if not lineage_valid:
                         classification = HistoryMigrationEligibility.INVALID
                         reasons = ("invalid-assessment-preference-lineage",)
-            dataset = manifest.datasets.get(source["dataset_id"])
             replay = None
             inputs = None
+            resolution = None
+            item_target_digest = None
+            adapter_id = None
+            legacy_lineage_reused = False
             try:
                 if classification is HistoryMigrationEligibility.INVALID:
                     raise ValueError(reasons[0])
-                if dataset is None or source["datasource_id"] != dataset.datasource_id:
-                    raise LookupError("unsupported-dataset")
-                if source["evaluator_version"] not in _SUPPORTED_EVALUATORS:
-                    raise LookupError("unsupported-evaluator")
-                if source["profile_id"] != dataset.health_profile.profile_id:
-                    raise LookupError("unsupported-profile")
-                expected_contract = (
-                    ROUTE64_SAMPLE_CONTRACT_VERSION
-                    if source["dataset_id"] == "otbr_cli_networkdiag_fetch_all"
-                    else "comparison-v1"
+                resolution, observation, inputs, reasons = _resolved_source_inputs(
+                    connection, source, resolver,
                 )
-                if source["sample_contract_version"] != expected_contract:
-                    raise LookupError("unsupported-sample-contract")
-                observation = SQLiteHealthStore._retained_observation(
-                    connection, source
+                target = resolver.resolve_target(
+                    resolution, source["sample_contract_version"],
                 )
-                inputs, reasons = _saved_context_inputs(
-                    connection,
-                    row=source,
-                    observation=observation,
-                    profile=dataset.health_profile,
+                if target.reason is not None or target.dataset is None:
+                    raise LookupError(target.reason or "no-current-health-target")
+                dataset = target.dataset
+                adapter_id = target.adapter_id
+                item_target_digest = target_contract_digest(
+                    dataset, source["sample_contract_version"],
+                    evaluator_version=EVALUATOR_VERSION,
+                    policy_version=target_policy.version,
+                    policy_digest=target_policy.digest,
                 )
                 replay = evaluate_observation(
                     observation,
@@ -712,36 +824,25 @@ def inventory_health_history(
                 ):
                     classification = HistoryMigrationEligibility.ALREADY_CURRENT
                     reasons = ()
-                existing_upgrade = connection.execute(
-                    """SELECT u.target_assessment_id, u.migration_id,
-                              u.replay_input_digest, u.unavailable_domains_json
-                       FROM health_assessment_upgrades u
-                       WHERE u.source_assessment_id=?
-                         AND u.target_contract_digest=?""",
-                    (source["assessment_id"], target_contract_digest),
-                ).fetchone() if schema_version >= 8 else None
-                if existing_upgrade is not None:
-                    target = connection.execute(
-                        "SELECT * FROM assessments WHERE assessment_id=?",
-                        (existing_upgrade["target_assessment_id"],),
-                    ).fetchone()
-                    if (
-                        existing_upgrade["target_assessment_id"]
-                        != replay.assessment_id
-                        or target is None
-                        or target["observation_id"] != source["observation_id"]
-                        or target["evaluator_version"] != replay.evaluator_version
-                        or target["policy_digest"] != replay.policy_digest
-                        or target["status"] != replay.status.value
-                        or target["confidence"] != replay.confidence.value
-                        or json.loads(target["coverage_json"]) != replay.coverage
-                        or _stored_findings(
-                            connection, existing_upgrade["target_assessment_id"]
-                        ) != _generated_findings(replay)
-                    ):
-                        raise ValueError("existing-upgrade-target-conflict")
-                    classification = HistoryMigrationEligibility.ALREADY_CURRENT
-                    reasons = ()
+                if schema_version >= 8 and replay.assessment_id != source["assessment_id"]:
+                    existing_upgrade, legacy_lineage_reused = _existing_upgrade(
+                        connection, source_id=source["assessment_id"],
+                        contract_digest=item_target_digest, assessment=replay,
+                        unavailable_domains=tuple(
+                            name for name, domain in inputs.domains().items()
+                            if domain.state is EvaluationInputState.UNAVAILABLE
+                        ),
+                    )
+                    if existing_upgrade is not None:
+                        classification = HistoryMigrationEligibility.ALREADY_CURRENT
+                        reasons = ()
+            except ManifestHistoryError as exc:
+                classification = (
+                    HistoryMigrationEligibility.UNSUPPORTED
+                    if exc.reason in {"unsupported-sample-contract", "unsupported-profile"}
+                    else HistoryMigrationEligibility.INVALID
+                )
+                reasons = (exc.reason,)
             except LookupError as exc:
                 classification = HistoryMigrationEligibility.UNSUPPORTED
                 reasons = (str(exc),)
@@ -780,6 +881,22 @@ def inventory_health_history(
                 json.loads(source["coverage_json"]),
                 replay.coverage if replay is not None else None,
                 replay.policy_digest if replay is not None else None,
+                source_resolution=(
+                    resolution.status if resolution is not None
+                    else "ambiguous" if "ambiguous-historical-contract" in reasons
+                    else "unresolved"
+                ),
+                source_contract_digest=resolution.source_contract_digest if resolution else None,
+                source_revision_ids=resolution.source_revision_ids if resolution else (),
+                target_contract_digest=(
+                    item_target_digest
+                    if classification not in {
+                        HistoryMigrationEligibility.UNSUPPORTED,
+                        HistoryMigrationEligibility.INVALID,
+                    } else None
+                ),
+                adapter_id=adapter_id,
+                legacy_lineage_reused=legacy_lineage_reused,
             )
             items.append(item)
             inventory_rows.append(
@@ -792,16 +909,53 @@ def inventory_health_history(
                     "inputDigest": source["policy_digest"],
                     "rosterContextDigest": source["roster_context_digest"],
                     "presenceInputDigest": source["presence_input_digest"],
+                    "sourceContractDigest": item.source_contract_digest,
+                    "sourceRevisionIds": list(item.source_revision_ids),
+                    "targetContractDigest": item.target_contract_digest,
+                    "retainedEvidenceDigest": _digest({
+                        "assessment": dict(source),
+                        "samples": {
+                            table: [
+                                dict(row) for row in connection.execute(
+                                    f"SELECT * FROM {table} WHERE observation_id=? ORDER BY rowid",
+                                    (item.observation_id,),
+                                )
+                            ]
+                            for table in (
+                                "observation_sources", "device_samples",
+                                "relationship_samples", "metric_samples",
+                            )
+                        },
+                    }),
                 }
             )
         connection.rollback()
     return HistoryMigrationInventory(
         schema_version,
-        target_contract_digest,
-        _digest(inventory_rows),
+        _digest({
+            "contractVersion": "health-inventory-v2",
+            "targets": sorted(
+                (item.source_assessment_id, item.target_contract_digest)
+                for item in items
+            ),
+        }),
+        _digest({"contractVersion": "health-source-inventory-v2", "rows": inventory_rows}),
         tuple(items),
-        tuple(sorted(dataset_ids or manifest.datasets)),
+        dataset_ids,
         network_id,
+        resolver_snapshot_digest=resolver.snapshot_digest,
+        target_profile_contracts={
+            dataset_id: {
+                "profileId": dataset.health_profile.profile_id,
+                "sampleContractVersion": (
+                    ROUTE64_SAMPLE_CONTRACT_VERSION
+                    if dataset_id == "otbr_cli_networkdiag_fetch_all" else "comparison-v1"
+                ),
+            }
+            for dataset_id in dataset_ids
+            if (dataset := resolver.current_target(dataset_id)) is not None
+        },
+        all_datasets=all_datasets,
     )
 
 
@@ -825,17 +979,16 @@ def _replay_item(
     connection: sqlite3.Connection,
     item: HistoryMigrationInventoryItem,
     target_policy: HealthPolicy,
+    resolver: ManifestHistoryResolver,
 ):
     row = _assessment_row(connection, item.source_assessment_id)
-    manifest = load_health_manifest()
-    dataset = manifest.dataset(item.dataset_id)
-    observation = SQLiteHealthStore._retained_observation(connection, row)
-    inputs, _ = _saved_context_inputs(
-        connection,
-        row=row,
-        observation=observation,
-        profile=dataset.health_profile,
+    resolution, observation, inputs, _ = _resolved_source_inputs(
+        connection, row, resolver,
     )
+    target = resolver.resolve_target(resolution, row["sample_contract_version"])
+    if target.reason is not None or target.dataset is None:
+        raise ValueError(target.reason or "no-current-health-target")
+    dataset = target.dataset
     assessment = evaluate_observation(
         observation,
         target_policy,
@@ -910,6 +1063,12 @@ def _report_item(item: HistoryMigrationInventoryItem) -> dict[str, Any]:
             "coverage": item.after_coverage,
         },
         "replayInputDigest": item.replay_input_digest,
+        "sourceResolution": item.source_resolution,
+        "sourceContractDigest": item.source_contract_digest,
+        "sourceRevisionIds": list(item.source_revision_ids),
+        "targetContractDigest": item.target_contract_digest,
+        "adapterId": item.adapter_id,
+        "legacyLineageReused": item.legacy_lineage_reused,
     }
 
 
@@ -968,7 +1127,6 @@ def history_migration_report(
         outcome = "dry-run-ready" if dry_run else "complete"
     else:
         outcome = "already-current" if counts["alreadyCurrent"] else "empty-scope"
-    manifest = load_health_manifest()
     cohort_groups: dict[tuple[str, str], list[HistoryMigrationInventoryItem]] = {}
     for item in inventory.items:
         cohort_groups.setdefault((item.network_id, item.dataset_id), []).append(item)
@@ -1021,6 +1179,7 @@ def history_migration_report(
         )
     return {
         "schemaVersion": 1,
+        "contractResolutionVersion": 1,
         "dryRun": dry_run,
         "outcome": outcome,
         "target": {
@@ -1028,17 +1187,7 @@ def history_migration_report(
             "policyVersion": target_policy.version,
             "policyDigest": target_policy.digest,
             "contractDigest": inventory.target_contract_digest,
-            "profileContracts": {
-                dataset_id: {
-                    "profileId": manifest.dataset(dataset_id).health_profile.profile_id,
-                    "sampleContractVersion": (
-                        ROUTE64_SAMPLE_CONTRACT_VERSION
-                        if dataset_id == "otbr_cli_networkdiag_fetch_all"
-                        else "comparison-v1"
-                    ),
-                }
-                for dataset_id in inventory.dataset_ids
-            },
+            "profileContracts": dict(inventory.target_profile_contracts),
         },
         "sourceSchemaVersion": inventory.schema_version,
         "outputSchemaVersion": SCHEMA_VERSION,
@@ -1242,8 +1391,13 @@ def migrate_health_history(
     target_policy: HealthPolicy,
     inventory: HistoryMigrationInventory,
     backup_output: Path,
+    resolver: ManifestHistoryResolver | None = None,
 ) -> dict[str, Any]:
     """Back up, revalidate, and migrate replayable network/dataset cohorts."""
+    resolver = resolver or load_manifest_history()
+    resolver.verify_snapshot()
+    if resolver.snapshot_digest != inventory.resolver_snapshot_digest:
+        raise HealthMigrationError("Manifest/archive changed after preview; rerun the migration")
     report = history_migration_report(
         inventory, dry_run=False, target_policy=target_policy
     )
@@ -1305,6 +1459,7 @@ def migrate_health_history(
                 raise HealthMigrationError(
                     "Health store is busy; stop active writers and retry"
                 ) from exc
+            resolver.verify_snapshot()
             expected_comparison_ids = (
                 existing_comparison_ids | committed_comparison_ids
             )
@@ -1322,20 +1477,24 @@ def migrate_health_history(
             locked_inventory = inventory_health_history(
                 SQLiteHealthStore(store.path, read_only=True),
                 target_policy=target_policy,
-                dataset_ids=inventory.dataset_ids,
+                dataset_ids=None if inventory.all_datasets else inventory.dataset_ids,
                 network_id=inventory.network_id,
+                resolver=resolver,
             )
             if (
                 locked_inventory.target_contract_digest
                 != inventory.target_contract_digest
                 or locked_inventory.source_inventory_digest
                 != inventory.source_inventory_digest
+                or locked_inventory.resolver_snapshot_digest
+                != inventory.resolver_snapshot_digest
             ):
                 raise HealthMigrationError(
                     "Health history changed after preview; rerun the migration"
                 )
 
             if backup_manifest is None:
+                resolver.verify_snapshot()
                 backup_manifest = create_backup(data_dir, backup_output)
                 validated_manifest = validate_backup(backup_output)
                 if validated_manifest != backup_manifest:
@@ -1349,8 +1508,9 @@ def migrate_health_history(
                         read_only=True,
                     ),
                     target_policy=target_policy,
-                    dataset_ids=inventory.dataset_ids,
+                    dataset_ids=None if inventory.all_datasets else inventory.dataset_ids,
                     network_id=inventory.network_id,
+                    resolver=resolver,
                 )
                 if (
                     backup_inventory.source_inventory_digest
@@ -1360,6 +1520,7 @@ def migrate_health_history(
                         "Backup health inventory differs from the locked source"
                     )
 
+            resolver.verify_snapshot()
             current_schema = int(
                 connection.execute(
                     "SELECT MAX(version) FROM schema_migrations"
@@ -1405,39 +1566,25 @@ def migrate_health_history(
                         f"Migration source changed eligibility: {item.observation_id}"
                     )
                 row, observation, inputs, assessment = _replay_item(
-                    connection, fresh_item, target_policy
+                    connection, fresh_item, target_policy, resolver,
                 )
                 if assessment.assessment_id == row["assessment_id"]:
                     plans.append(
                         (fresh_item, row, observation, inputs, assessment, None)
                     )
                     continue
-                existing = connection.execute(
-                    """SELECT target_assessment_id, migration_id
-                       FROM health_assessment_upgrades
-                       WHERE source_assessment_id=? AND target_contract_digest=?""",
-                    (row["assessment_id"], inventory.target_contract_digest),
-                ).fetchone()
+                if fresh_item.target_contract_digest is None:
+                    raise ValueError("replay-target-contract-unavailable")
+                existing, _ = _existing_upgrade(
+                    connection, source_id=row["assessment_id"],
+                    contract_digest=fresh_item.target_contract_digest,
+                    assessment=assessment,
+                    unavailable_domains=fresh_item.unavailable_domains,
+                )
                 if existing is not None:
-                    if existing["target_assessment_id"] != assessment.assessment_id:
-                        raise sqlite3.DatabaseError(
-                            "Existing assessment upgrade conflicts with deterministic target"
-                        )
-                    if not _assessment_matches(connection, assessment):
-                        raise sqlite3.DatabaseError(
-                            "Existing assessment upgrade target is corrupt"
-                        )
                     reused_count += 1
                     migration_id = existing["migration_id"]
                 else:
-                    target_row = connection.execute(
-                        "SELECT 1 FROM assessments WHERE assessment_id=?",
-                        (assessment.assessment_id,),
-                    ).fetchone()
-                    if target_row is not None:
-                        raise sqlite3.DatabaseError(
-                            "Deterministic target assessment exists without its upgrade mapping"
-                        )
                     created_count += 1
                     migration_id = None
                 plans.append(
@@ -1456,6 +1603,22 @@ def migrate_health_history(
                 else None
             )
             now = datetime.now(timezone.utc).isoformat()
+            resolver.verify_snapshot()
+            contract_resolution = {
+                "schemaVersion": 1,
+                "items": [
+                    {
+                        "sourceAssessmentId": item.source_assessment_id,
+                        "sourceReplayContractDigest": item.source_contract_digest,
+                        "sourceRevisionIds": list(item.source_revision_ids),
+                        "targetContractDigest": item.target_contract_digest,
+                        "adapterId": item.adapter_id,
+                    }
+                    for item, *_ in sorted(
+                        plans, key=lambda plan: plan[0].source_assessment_id,
+                    )
+                ],
+            }
             if migration_id is not None:
                 reason_counts: dict[str, int] = {}
                 for item, *_ in plans:
@@ -1473,7 +1636,12 @@ def migrate_health_history(
                         migration_id,
                         network_id,
                         dataset_id,
-                        inventory.target_contract_digest,
+                        _digest({
+                            "contractVersion": "health-cohort-v2",
+                            "targets": sorted(
+                                item.target_contract_digest for item, *_ in plans
+                            ),
+                        }),
                         inventory.source_inventory_digest,
                         current_schema,
                         SCHEMA_VERSION,
@@ -1486,6 +1654,7 @@ def migrate_health_history(
                                 "created": created_count,
                                 "reused": reused_count,
                                 "preferencesChanged": 0,
+                                "contractResolution": contract_resolution,
                             },
                             sort_keys=True,
                         ),
@@ -1559,7 +1728,7 @@ def migrate_health_history(
                            VALUES (?, ?, ?, ?, ?, ?)""",
                         (
                             row["assessment_id"],
-                            inventory.target_contract_digest,
+                            item.target_contract_digest,
                             assessment.assessment_id,
                             edge_migration_id,
                             assessment.policy_digest,
@@ -1606,6 +1775,7 @@ def migrate_health_history(
                         "created": existing_migration_id is None,
                         "reused": existing_migration_id is not None,
                         "unavailableDomains": list(item.unavailable_domains),
+                        "legacyLineageReused": item.legacy_lineage_reused,
                     }
                 )
 
@@ -1680,6 +1850,7 @@ def migrate_health_history(
                                 "preferencesChanged": preference_count,
                                 "comparisonsStored": comparisons_stored,
                                 "comparisonsDeferred": comparisons_deferred,
+                                "contractResolution": contract_resolution,
                             },
                             sort_keys=True,
                         ),

@@ -14,6 +14,7 @@ from typing import Any, Sequence
 
 from td_health_history import import_expected_roster_from_label_map, network_id_for_dataset
 from td_health_manifest import load_health_manifest
+from td_health_manifest_history import load_manifest_history
 from td_health_observation_model import device_id_from_ext_address
 from td_health_observation_store import HOBAT_DATABASE_FILENAME, HealthStoreError
 from td_health_policy import load_health_policy
@@ -96,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument(
         "--dataset",
         required=True,
-        choices=["all", *sorted(load_health_manifest().datasets)],
+        help="Current, archived, or retained dataset ID, or 'all'.",
     )
     migrate.add_argument("--network", dest="network_id")
     migrate.add_argument("--policy-config-dir", type=Path, default=None)
@@ -250,12 +251,13 @@ def _run_history_migration(
         )
         return 4
     dataset_ids = (
-        tuple(sorted(load_health_manifest().datasets))
+        None
         if args.dataset == "all"
         else (args.dataset,)
     )
     config_dir = args.policy_config_dir or Path.cwd() / "config"
     try:
+        resolver = load_manifest_history()
         policy = load_health_policy(config_dir)
         store = SQLiteHealthStore(database_path, read_only=True)
         inventory = inventory_health_history(
@@ -263,6 +265,7 @@ def _run_history_migration(
             target_policy=policy,
             dataset_ids=dataset_ids,
             network_id=args.network_id,
+            resolver=resolver,
         )
     except (OSError, ValueError, HealthStoreError) as exc:
         print(f"Health history preflight failed: {exc}", file=__import__("sys").stderr)
@@ -332,6 +335,7 @@ def _run_history_migration(
                 target_policy=policy,
                 inventory=inventory,
                 backup_output=args.backup_output,
+                resolver=resolver,
             )
         except (OSError, ValueError, HealthMigrationError) as exc:
             print(f"Health-history migration failed: {exc}", file=sys.stderr)

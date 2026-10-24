@@ -117,6 +117,54 @@ duplicate, OMR, or address inputs remain unavailable rather than being
 reconstructed from current state. A context gap can lower confidence or leave
 verdicts Unknown; migration does not certify network health.
 
+### Bundled Historical Contracts
+
+History migration loads the current [dataset manifest](../src/td-dataset-manifest.json)
+and the reviewed [manifest archive](../src/td-dataset-manifest-history.json)
+once during preflight. Runtime lookup requires neither Git nor network access.
+Missing or corrupt archive data is a preflight failure, not a current-only
+fallback. Native processing, schema-only migration, and health reads do not
+depend on the archive.
+
+`--dataset all` includes current eligible datasets and dataset IDs retained in
+the selected network. An explicit archived or retained ID is accepted for
+inventory, even if it has no current target. Unknown IDs absent from both
+declarations and selected history fail preflight. This does not expand
+`process-dataset` eligibility or install dataset aliases.
+
+Only identical retained replay contracts use `retained-equivalent-v1`.
+Supported evaluators remain snapshot-v10, snapshot-v11, and the current
+evaluator; tagged samples must retain their actual per-dataset contract.
+Pre-schema-4 producer snapshots are identification-only. `legacy-unknown`,
+removed/renamed recipes, and changes to coverage, authority, or source recipes
+are not converted. Historical roster policies and source priorities are
+preserved as metadata, never applied to today's roster or retained samples.
+
+Report schema 1 adds `contractResolutionVersion: 1` and per-item
+`sourceResolution`, `sourceContractDigest`, `sourceRevisionIds`,
+`targetContractDigest`, `adapterId`, and `legacyLineageReused`. Equivalent
+source revisions are reported together; they do not prove which manifest was
+deployed. Unsupported items have no target fingerprint. Explicit reasons
+distinguish unsupported evaluator/sample/profile, no current health target,
+ambiguity, and unsupported contract transitions from invalid retained evidence.
+Exit codes are 0 for successful/current/empty, 1 for unsupported/invalid
+history, 2 for preflight/argument failures, and 4 for a missing store.
+
+New cohort audit counters retain additive
+`counts_json.contractResolution` provenance. Validated older upgrade edges
+keep their original digest, migration ID, and audit metadata; a no-op rerun
+does not create a backup merely to enrich provenance. Changing manifest or
+archive bytes during an invocation invalidates its preview before writes.
+Between invocations, presentation changes and unrelated archive additions do
+not change a replay target's identity.
+
+Archive maintenance requires a reviewed inventory and independent fixed
+snapshot/projection digests before adding a displaced supported manifest.
+Never edit an archived snapshot in place or infer sample/evaluator support
+from its date. Update the independent expectations in the
+[archive and resolver fixtures](../tests/test_td_health_manifest_history.py)
+alongside the reviewed inventory and operator documentation.
+
 After migration, refresh a native assessment from cached snapshots before
 normal dashboard use when the report identifies a policy transition or
 context-dependent current coverage:

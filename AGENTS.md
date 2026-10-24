@@ -24,6 +24,7 @@ Use [README.md](README.md) for operator-facing behavior, setup, and runtime expe
 - When asked for a commit message for staged work, inspect only `git diff --cached`, follow the repository's recent commit style, and return a concise message without staging or committing files.
 - When updating documentation or review artifacts, link related repo files instead of duplicating large blocks of existing content.
 - When a task touches both implementation and documentation, update the documentation in the same change if behavior or operator expectations changed.
+- When changing health manifest contracts, archive displaced supported snapshots in [manifest history](src/td-dataset-manifest-history.json) before replacement, keep archived entries immutable, and update the [resolver](src/td_health_manifest_history.py), golden-digest/replay tests, and [operator documentation](doc/thread_network_health.md) together; archive membership must not broaden replay support or weaken lineage, backup/rollback, or rerun guarantees.
 
 ## Validation
 

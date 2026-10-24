@@ -286,6 +286,12 @@ class HistoryMigrationInventoryItem:
     before_coverage: Mapping[str, Any] | None = None
     after_coverage: Mapping[str, Any] | None = None
     replay_input_digest: str | None = None
+    source_resolution: str = "unresolved"
+    source_contract_digest: str | None = None
+    source_revision_ids: tuple[str, ...] = ()
+    target_contract_digest: str | None = None
+    adapter_id: str | None = None
+    legacy_lineage_reused: bool = False
 
 
 @dataclass(frozen=True)
@@ -296,6 +302,9 @@ class HistoryMigrationInventory:
     items: tuple[HistoryMigrationInventoryItem, ...]
     dataset_ids: tuple[str, ...] = ()
     network_id: str | None = None
+    resolver_snapshot_digest: str | None = None
+    target_profile_contracts: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    all_datasets: bool = False
 
 
 def device_id_from_ext_address(value: object) -> str:

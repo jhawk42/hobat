@@ -7,10 +7,15 @@ import json
 import hashlib
 import os
 import sqlite3
+import shutil
+import subprocess
+import sys
 from contextlib import closing, redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 import td_cli
 import td_health_cli
@@ -22,10 +27,20 @@ from td_health_migration import (
     migrate_health_history,
 )
 from td_health_policy import load_health_policy
+from td_health_manifest_history import load_manifest_history
 from td_health_processor import process_health
 from test_td_health_sqlite import _result
 from test_td_health_migrations import _create_schema_fixture
 from td_const import EXTADDR_DEVICE_LABEL_MAP_FILENAME
+
+
+def _history_subprocess(data_dir: Path, *arguments: str) -> subprocess.CompletedProcess:
+    root = Path(__file__).resolve().parents[1]
+    return subprocess.run(
+        [sys.executable, str(root / "src/td_cli.py"), "--datadir", str(data_dir),
+         "health", "migrate-history", *arguments],
+        cwd=root, capture_output=True, text=True, timeout=30, check=False,
+    )
 
 
 def _seed(data_dir) -> None:
@@ -37,6 +52,468 @@ def _seed(data_dir) -> None:
         json.dumps([{"extAddress": "8672766ae0578187", "role": "router"}]),
         encoding="utf-8",
     )
+
+
+def test_history_subprocess_discovery_and_network_scope(tmp_path) -> None:
+    _seed(tmp_path)
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    native = process_health(
+        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(), store=store,
+    )
+    removed = "otbr_restapi_diagnostics_fetch_all"
+    for dataset_id in (removed, "unrecognized-retained-recipe"):
+        with closing(store._connect()) as connection, connection:
+            connection.execute(
+                "UPDATE observations SET dataset_id=? WHERE observation_id=?",
+                (dataset_id, native.observation.observation_id),
+            )
+        result = _history_subprocess(tmp_path, "--dataset", "all", "--dry-run", "--json")
+        assert result.returncode == 1, result.stderr
+        report = json.loads(result.stdout)
+        assert report["contractResolutionVersion"] == 1
+        assert report["target"]["profileContracts"].get(dataset_id) is None
+        assert report["items"][0]["datasetId"] == dataset_id
+        assert report["items"][0]["targetContractDigest"] is None
+        assert report["items"][0]["eligibility"] == "unsupported"
+        explicit = _history_subprocess(
+            tmp_path, "--dataset", dataset_id, "--dry-run", "--json",
+        )
+        assert explicit.returncode == 1, explicit.stderr
+    excluded = _history_subprocess(
+        tmp_path, "--dataset", "all", "--network", "extpan:1111111111111111",
+        "--dry-run", "--json",
+    )
+    assert excluded.returncode == 0, excluded.stderr
+    assert json.loads(excluded.stdout)["items"] == []
+    absent = _history_subprocess(
+        tmp_path, "--dataset", "unrecognized-retained-recipe",
+        "--network", "extpan:1111111111111111", "--dry-run", "--json",
+    )
+    assert absent.returncode == 2
+    assert "preflight failed" in absent.stderr
+    empty = _history_subprocess(
+        tmp_path, "--dataset", removed, "--network", "extpan:1111111111111111",
+        "--dry-run", "--json",
+    )
+    assert empty.returncode == 0, empty.stderr
+    assert json.loads(empty.stdout)["items"] == []
+    native_rejected = subprocess.run(
+        [sys.executable, str(Path(td_cli.__file__)), "--datadir", str(tmp_path),
+         "health", "process-dataset", "--dataset", removed, "--dry-run"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert native_rejected.returncode == 2
+    assert "invalid choice" in native_rejected.stderr
+
+
+def test_history_subprocess_tagged_replay_apply_rerun(tmp_path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _seed(data_dir)
+    store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+    native = process_health(
+        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(), store=store,
+    )
+    # Synthetic context-free evidence exercises replay, not an old schema layout.
+    with closing(store._connect()) as connection, connection:
+        connection.execute(
+            "UPDATE assessments SET evaluator_version='snapshot-v10', "
+            "reproduction_context_json='{}'",
+        )
+        original = {
+            table: [tuple(row) for row in connection.execute(f"SELECT * FROM {table}")]
+            for table in ("observations", "device_samples", "metric_samples", "assessments")
+        }
+    preview = _history_subprocess(data_dir, "--dataset", "all", "--dry-run", "--json")
+    assert preview.returncode == 0, preview.stderr
+    item = json.loads(preview.stdout)["items"][0]
+    assert item["sourceResolution"] == "equivalent-contracts"
+    assert len(item["sourceRevisionIds"]) == 3
+    assert item["adapterId"] == "retained-equivalent-v1"
+    applied = _history_subprocess(
+        data_dir, "--dataset", "otbr_cli_networkdiag_fetch_all",
+        "--backup-output", str(tmp_path / "backup"), "--yes", "--json",
+    )
+    assert applied.returncode == 0, applied.stderr
+    assert json.loads(applied.stdout)["totals"]["created"] == 1
+    rerun = _history_subprocess(data_dir, "--dataset", "all", "--json")
+    assert rerun.returncode == 0, rerun.stderr
+    assert json.loads(rerun.stdout)["outcome"] == "already-current"
+    assert json.loads(rerun.stdout)["backupPath"] is None
+    with closing(store._connect()) as connection:
+        for table in ("observations", "device_samples", "metric_samples"):
+            assert [tuple(row) for row in connection.execute(f"SELECT * FROM {table}")] == original[table]
+        assert tuple(connection.execute(
+            "SELECT * FROM assessments WHERE assessment_id=?",
+            (native.assessment.assessment_id,),
+        ).fetchone()) == original["assessments"][0]
+        assert connection.execute("SELECT COUNT(*) FROM health_assessment_upgrades").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM health_history_migrations").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize(
+    "damage", [None, "missing-audit", "missing-edge", "wrong-input", "wrong-source", "findings"],
+)
+def test_history_legacy_unique_target_lineage(tmp_path, damage) -> None:
+    from dataclasses import replace
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _seed(data_dir)
+    store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+    native = process_health(
+        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(), store=store,
+    )
+    policy = replace(load_health_policy(), digest="test-policy-legacy")
+    readonly = SQLiteHealthStore(store.path, read_only=True)
+    inventory = inventory_health_history(readonly, target_policy=policy)
+    applied = migrate_health_history(
+        readonly, data_dir=data_dir, target_policy=policy, inventory=inventory,
+        backup_output=tmp_path / "first-backup",
+    )
+    assert applied["totals"]["created"] == 1
+    # Model an already committed edge written with the pre-SX-48 aggregate key.
+    with closing(store._connect()) as connection, connection:
+        if damage in {"missing-audit", "wrong-source"}:
+            connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute(
+            "UPDATE health_assessment_upgrades SET target_contract_digest=?",
+            ("legacy-aggregate-digest",),
+        )
+        connection.execute(
+            "UPDATE health_history_migrations SET counts_json=?",
+            ('{"created":1,"reused":0}',),
+        )
+        if damage == "missing-audit":
+            connection.execute("UPDATE health_assessment_upgrades SET migration_id='missing'")
+        elif damage == "missing-edge":
+            connection.execute("DELETE FROM health_assessment_upgrades")
+            connection.execute(
+                "UPDATE health_assessment_preferences SET "
+                "assessment_id=selection_basis_assessment_id, origin='native', migration_id=NULL",
+            )
+        elif damage == "wrong-input":
+            connection.execute("UPDATE health_assessment_upgrades SET replay_input_digest='corrupt'")
+        elif damage == "wrong-source":
+            connection.execute("UPDATE health_assessment_upgrades SET source_assessment_id='other'")
+        elif damage == "findings":
+            connection.execute(
+                "DELETE FROM findings WHERE assessment_id<>?",
+                (native.assessment.assessment_id,),
+            )
+        original_audits = [tuple(row) for row in connection.execute(
+            "SELECT * FROM health_history_migrations",
+        )]
+        original_edges = [tuple(row) for row in connection.execute(
+            "SELECT * FROM health_assessment_upgrades",
+        )]
+    second = inventory_health_history(readonly, target_policy=policy)
+    if damage:
+        assert second.items[0].eligibility.value == "invalid"
+    else:
+        assert second.items[0].eligibility.value == "already-current"
+        assert second.items[0].legacy_lineage_reused
+    report = migrate_health_history(
+        readonly, data_dir=data_dir, target_policy=policy, inventory=second,
+        backup_output=tmp_path / "must-not-exist",
+    )
+    assert report["totals"]["created"] == 0
+    assert not (tmp_path / "must-not-exist").exists()
+    with closing(store._connect()) as connection:
+        assert [tuple(row) for row in connection.execute(
+            "SELECT * FROM health_history_migrations",
+        )] == original_audits
+        assert [tuple(row) for row in connection.execute(
+            "SELECT * FROM health_assessment_upgrades",
+        )] == original_edges
+
+
+@pytest.mark.parametrize("change", ["database", "busy"])
+def test_history_refuses_changed_preview_and_busy_writer(tmp_path, change) -> None:
+    from dataclasses import replace
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _seed(data_dir)
+    store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+    process_health(
+        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(), store=store,
+    )
+    policy = replace(load_health_policy(), digest="test-policy-preview")
+    readonly = SQLiteHealthStore(store.path, read_only=True)
+    inventory = inventory_health_history(readonly, target_policy=policy)
+    with closing(store._connect()) as writer:
+        if change == "database":
+            writer.execute("UPDATE assessments SET policy_digest='changed'")
+            writer.commit()
+        else:
+            writer.execute("BEGIN IMMEDIATE")
+        report = migrate_health_history(
+            readonly, data_dir=data_dir, target_policy=policy, inventory=inventory,
+            backup_output=tmp_path / "must-not-exist",
+        )
+        writer.rollback()
+    assert report["totals"]["created"] == 0
+    assert report["outcome"] == "failed"
+    assert not (tmp_path / "must-not-exist").exists()
+    with closing(store._connect()) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM health_assessment_upgrades").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("archive_contents", [None, '{"schemaVersion":999}'])
+def test_history_archive_preflight_is_isolated_from_native_commands(tmp_path, archive_contents) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    source = Path(td_cli.__file__).parent
+    for path in source.iterdir():
+        if path.is_file() and path.suffix in {".py", ".json"} and path.name != "td-dataset-manifest-history.json":
+            shutil.copy2(path, runtime / path.name)
+    if archive_contents is not None:
+        (runtime / "td-dataset-manifest-history.json").write_text(
+            archive_contents, encoding="utf-8",
+        )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _seed(data_dir)
+    process_health(
+        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(), store=SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME),
+    )
+    command = [sys.executable, str(runtime / "td_cli.py"), "--datadir", str(data_dir), "health"]
+    for arguments in (
+        ["--help"],
+        ["migrate", "--check", "--json"],
+        ["process-dataset", "--dataset", "otbr_cli_networkdiag_fetch_all", "--dry-run", "--json"],
+    ):
+        result = subprocess.run(
+            command + arguments, capture_output=True, text=True, timeout=30, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+    result = subprocess.run(
+        command + ["migrate-history", "--dataset", "all", "--dry-run", "--json"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 2
+    assert "preflight failed" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("evaluator", "sample_contract", "reason"),
+    [
+        ("snapshot-v6", "comparison-v1-route64", "unsupported-evaluator"),
+        ("snapshot-v12", "comparison-v1-route64", "unsupported-evaluator"),
+        ("snapshot-v13", "comparison-v1-route64", "unsupported-evaluator"),
+        ("snapshot-v10", "legacy-unknown", "unsupported-sample-contract"),
+        ("snapshot-v10", "comparison-v1", "unsupported-sample-contract"),
+    ],
+)
+def test_history_subprocess_preserves_unsupported_contracts(
+    tmp_path, evaluator, sample_contract, reason,
+) -> None:
+    _seed(tmp_path)
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    process_health(
+        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(), store=store,
+    )
+    with closing(store._connect()) as connection, connection:
+        connection.execute(
+            "UPDATE assessments SET evaluator_version=?, sample_contract_version=?, "
+            "reproduction_context_json='{}'",
+            (evaluator, sample_contract),
+        )
+    result = _history_subprocess(tmp_path, "--dataset", "all", "--yes", "--json")
+    assert result.returncode == 1, result.stderr
+    item = json.loads(result.stdout)["items"][0]
+    assert item["reasons"] == [reason]
+    assert item["targetContractDigest"] is None
+    with closing(store._connect()) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM assessments").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM health_assessment_upgrades").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT sample_contract_version FROM assessments",
+        ).fetchone()[0] == sample_contract
+
+
+def test_history_real_schema3_upgrade_does_not_invent_sample_contract(tmp_path) -> None:
+    database = tmp_path / HOBAT_DATABASE_FILENAME
+    _create_schema_fixture(database, 3)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE observations SET dataset_id='otbr_cli_networkdiag_fetch_all', "
+            "datasource_id='otbr-cli'",
+        )
+        connection.execute(
+            "UPDATE assessments SET evaluator_version='snapshot-v10', "
+            "profile_id='otbr-cli-networkdiag-v1'",
+        )
+    assert td_health_cli.main([
+        "--datadir", str(tmp_path), "migrate", "--apply", "--json",
+    ]) == 0
+    result = _history_subprocess(
+        tmp_path, "--dataset", "all", "--dry-run", "--json",
+        "--policy-config-dir", str(tmp_path / "config"), "--allow-policy-change",
+    )
+    assert result.returncode == 1, result.stderr
+    item = json.loads(result.stdout)["items"][0]
+    assert item["reasons"] == ["unsupported-sample-contract"]
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT sample_contract_version FROM assessments",
+        ).fetchone()[0] == "legacy-unknown"
+        assert connection.execute("SELECT COUNT(*) FROM health_assessment_upgrades").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("changed_file", ["manifest", "history"])
+def test_history_refuses_changed_contract_file_after_preview(tmp_path, changed_file) -> None:
+    from dataclasses import replace
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _seed(data_dir)
+    store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+    process_health(
+        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(), store=store,
+    )
+    bundled = load_manifest_history()
+    manifest = tmp_path / "manifest.json"
+    history = tmp_path / "history.json"
+    shutil.copy2(bundled.manifest_path, manifest)
+    shutil.copy2(bundled.history_path, history)
+    resolver = load_manifest_history(manifest, history)
+    policy = replace(load_health_policy(), digest="test-policy-stale-file")
+    readonly = SQLiteHealthStore(store.path, read_only=True)
+    inventory = inventory_health_history(readonly, target_policy=policy, resolver=resolver)
+    changed = manifest if changed_file == "manifest" else history
+    changed.write_text(changed.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="[Cc]hanged|snapshot"):
+        migrate_health_history(
+            readonly, data_dir=data_dir, target_policy=policy, inventory=inventory,
+            backup_output=tmp_path / "must-not-exist", resolver=resolver,
+        )
+    assert not (tmp_path / "must-not-exist").exists()
+    # A fresh invocation ignores presentation bytes when deriving target identity.
+    refreshed = inventory_health_history(
+        readonly, target_policy=policy, resolver=load_manifest_history(manifest, history),
+    )
+    assert refreshed.items[0].target_contract_digest == inventory.items[0].target_contract_digest
+    assert refreshed.items[0].target_assessment_id == inventory.items[0].target_assessment_id
+
+
+@pytest.mark.parametrize("saved_context", [True, False])
+def test_history_source_profile_is_distinct_from_changed_target(tmp_path, saved_context) -> None:
+    _seed(tmp_path)
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    process_health(
+        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(), store=store,
+    )
+    if not saved_context:
+        with closing(store._connect()) as connection, connection:
+            connection.execute(
+                "UPDATE assessments SET evaluator_version='snapshot-v10', "
+                "reproduction_context_json='{}'",
+            )
+    bundled = load_manifest_history()
+    manifest = tmp_path / "changed-manifest.json"
+    raw = json.loads(bundled.manifest_path.read_text(encoding="utf-8"))
+    raw["healthProfiles"]["otbr-cli-networkdiag-v1"]["borderRouterAuthority"] = False
+    manifest.write_text(json.dumps(raw), encoding="utf-8")
+    resolver = load_manifest_history(manifest, bundled.history_path)
+    inventory = inventory_health_history(
+        SQLiteHealthStore(store.path, read_only=True),
+        target_policy=load_health_policy(), resolver=resolver,
+    )
+    item = inventory.items[0]
+    assert item.eligibility.value == "unsupported", item.reason_codes
+    assert item.reason_codes == (
+        "unsupported-contract-transition" if saved_context else "ambiguous-historical-contract",
+    )
+    assert item.target_contract_digest is None
+    if saved_context:
+        assert item.source_resolution == "equivalent-contracts"
+        assert len(item.source_revision_ids) == 2
+    else:
+        assert item.source_resolution == "ambiguous"
+
+
+def test_history_explicit_identification_only_revision_cannot_fall_forward(tmp_path) -> None:
+    _seed(tmp_path)
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    process_health(
+        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(), store=store,
+    )
+    with closing(store._connect()) as connection, connection:
+        connection.execute(
+            "UPDATE assessments SET evaluator_version='snapshot-v10', "
+            "reproduction_context_json=?",
+            (json.dumps({
+                "manifestRevisionId": "manifest-sha256:4df64fa0175b516c93ce397a45629896f69d9d91d7ad5fe0345f0451ef745e35",
+            }),),
+        )
+    result = _history_subprocess(tmp_path, "--dataset", "all", "--dry-run", "--json")
+    assert result.returncode == 1, result.stderr
+    report = json.loads(result.stdout)
+    assert report["items"][0]["targetContractDigest"] is None
+    assert report["items"][0]["eligibility"] == "unsupported"
+    assert report["items"][0]["reasons"] == ["unsupported-sample-contract"]
+    assert report["items"][0]["sourceRevisionIds"] == []
+    with closing(store._connect()) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM health_assessment_upgrades").fetchone()[0] == 0
+
+
+def test_history_all_preview_rechecks_new_retained_dataset(tmp_path) -> None:
+    from dataclasses import replace
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _seed(data_dir)
+    store = SQLiteHealthStore(data_dir / HOBAT_DATABASE_FILENAME)
+    process_health(
+        data_dir=data_dir, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=load_health_policy(), store=store,
+    )
+    readonly = SQLiteHealthStore(store.path, read_only=True)
+    policy = replace(load_health_policy(), digest="test-policy-new-dataset")
+    inventory = inventory_health_history(readonly, target_policy=policy)
+    with closing(store._connect()) as connection, connection:
+        connection.execute(
+            """INSERT INTO observations
+               SELECT 'new-observation', datasource_id, 'new-retained-dataset',
+                      network_id, network_name, observed_at, ingested_at,
+                      completeness, source_set_digest FROM observations LIMIT 1"""
+        )
+        connection.execute(
+            """INSERT INTO assessments
+               (assessment_id, observation_id, policy_version, policy_digest,
+                evaluator_version, profile_id, status, confidence, coverage_json,
+                assessed_at, sample_contract_version, health_policy_digest,
+                roster_context_digest, network_roster_revision,
+                presence_input_digest, reproduction_context_json)
+               SELECT 'new-assessment', 'new-observation', policy_version,
+                      policy_digest, evaluator_version, profile_id, status,
+                      confidence, coverage_json, assessed_at, sample_contract_version,
+                      health_policy_digest, roster_context_digest,
+                      network_roster_revision, presence_input_digest,
+                      reproduction_context_json FROM assessments LIMIT 1"""
+        )
+        SQLiteHealthStore.consider_native_preference(
+            connection, "new-assessment", new_observation=True,
+        )
+    result = migrate_health_history(
+        readonly, data_dir=data_dir, target_policy=policy, inventory=inventory,
+        backup_output=tmp_path / "must-not-exist",
+    )
+    assert result["outcome"] == "failed"
+    assert result["totals"]["created"] == 0
+    assert not (tmp_path / "must-not-exist").exists()
 
 
 def test_schema_migration_check_is_read_only_and_apply_is_verified(tmp_path) -> None:
@@ -343,6 +820,20 @@ def test_migrate_history_creates_verified_backup_and_revision(tmp_path) -> None:
         assert target["source_assessment_id"] == source["assessment_id"]
         assert target["selection_basis_assessment_id"] == source["assessment_id"]
         assert target["assessment_id"] != source["assessment_id"]
+        audit = connection.execute(
+            "SELECT counts_json FROM health_history_migrations"
+        ).fetchone()
+        counts = json.loads(audit["counts_json"])
+        provenance = counts["contractResolution"]
+        assert provenance["schemaVersion"] == 1
+        assert provenance["items"] == [{
+            "sourceAssessmentId": source["assessment_id"],
+            "sourceReplayContractDigest": inventory.items[0].source_contract_digest,
+            "sourceRevisionIds": list(inventory.items[0].source_revision_ids),
+            "targetContractDigest": inventory.items[0].target_contract_digest,
+            "adapterId": "retained-equivalent-v1",
+        }]
+        assert counts["created"] == counts["preferencesChanged"] == 1
 
 
 def test_history_replay_accepts_gt_one_mac_ratios_without_rewriting_history(tmp_path) -> None:

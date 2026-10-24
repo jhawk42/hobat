@@ -174,7 +174,10 @@ requires an explicitly imported expected-device roster and two distinct complete
 observations. See [Thread Network Health](doc/thread_network_health.md).
 `health migrate-history` is an explicit, backup-first maintenance operation for
 replaying supported retained history; it does not collect data or infer missing
-historical context from current snapshots. Stop health writers and consult
+historical context from current snapshots. It resolves source contracts from a
+bundled, reviewed manifest archive without Git or network access. Archive
+membership does not enable old evaluators, legacy sample formats, renamed
+datasets, or capability upgrades. Stop health writers and consult
 [Thread Network Health](doc/thread_network_health.md) before using it.
 For health-eligible datasets, the dashboard reads the current stored assessment
 through bounded, read-only `/api/health/*` routes. Run `health process-dataset`

@@ -113,6 +113,16 @@ Dashboard -> POST /api/device-actions -> validate -> source action
 Health processing is cache-only: the server starts a background `td_cli` job
 with `--allow-partial`, which writes health history to `hobat_v1.db` without
 starting a collector, changing a snapshot, or probing a device. Health GET
+routes never load the historical manifest archive. Explicit `health migrate-history`
+preflight alone loads the bundled current/archive resolver, discovers retained
+dataset IDs, and validates historical source contracts separately from current
+targets. Only identical retained replay contracts are adapted; original samples
+and historical roster policies are not reprocessed. Locked replay checks the
+same file snapshot and database inventory before backup and cohort writes.
+New audit JSON retains source-resolution provenance without changing native
+assessment identity or the database schema. See
+[historical contract limits](thread_network_health.md#bundled-historical-contracts).
+Health GET
 routes are query-only and return no-store responses. Device-action results and
 jobs are transient; they are not persisted in snapshots, checkpoints, labels,
 or health data. Roster PATCH is the exception to query-only health reads: it

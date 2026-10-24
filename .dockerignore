@@ -38,6 +38,7 @@ script
 **/td-*.json
 !src/td-health-rules.json
 !src/td-dataset-manifest.json
+!src/td-dataset-manifest-history.json
 !src/data/example.td-static-extaddr-device-label.json
 
 **/thread-*.json

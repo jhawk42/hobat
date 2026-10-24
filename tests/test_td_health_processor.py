@@ -799,6 +799,53 @@ def test_readonly_history_inventory_classifies_context_free_v10_with_gaps(tmp_pa
 
     assert inventory.items[0].eligibility.value == "replayable-with-gaps"
     assert "evaluation-context-unavailable" in inventory.items[0].reason_codes
+    assert inventory.items[0].source_resolution == "equivalent-contracts"
+    assert len(inventory.items[0].source_revision_ids) == 3
+    assert inventory.items[0].source_contract_digest == (
+        "6b4998e26a5827de22d3307fab41e14b08ec0f82a773c9f3d9b99023018d0e33"
+    )
+    assert inventory.items[0].target_contract_digest
+    assert inventory.items[0].adapter_id == "retained-equivalent-v1"
+
+
+@pytest.mark.parametrize("corrupt_digest", [False, True])
+def test_readonly_history_inventory_validates_saved_v1_source_profile(tmp_path, corrupt_digest) -> None:
+    policy = load_health_policy()
+    _write_seed(tmp_path, [{"extaddr": "8672766ae0578187", "role": "router"}])
+    path = tmp_path / HOBAT_DATABASE_FILENAME
+    native = process_health(
+        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=policy, store=SQLiteHealthStore(path),
+    )
+    # A synthetic context-v1 fixture retains its own profile and roster evidence.
+    context = dict(native.assessment.reproduction_context)
+    context["schemaVersion"] = 1
+    context["evaluatorVersion"] = "snapshot-v10"
+    context["presenceInputs"] = {
+        "expectedDeviceIds": context["expectedDeviceIds"],
+        "observedDeviceIds": sorted(device.device_id for device in native.observation.devices),
+        "sampleContractVersion": native.assessment.sample_contract_version,
+        "complete": native.observation.completeness.value == "complete",
+        "priorCompleteAbsences": context["priorCompleteAbsences"],
+    }
+    if corrupt_digest:
+        context["healthPolicy"] = dict(context["healthPolicy"], digest="corrupt")
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE assessments SET evaluator_version='snapshot-v10', reproduction_context_json=?",
+            (json.dumps(context),),
+        )
+    inventory = inventory_health_history(
+        SQLiteHealthStore(path, read_only=True), target_policy=policy,
+    )
+    item = inventory.items[0]
+    if corrupt_digest:
+        assert item.eligibility.value == "invalid"
+        assert item.reason_codes == ("historical-policy-digest-mismatch",)
+    else:
+        assert item.eligibility.value == "replayable-with-gaps", item.reason_codes
+        assert item.source_resolution == "equivalent-contracts"
+        assert len(item.source_revision_ids) == 3
 
 
 def test_readonly_history_inventory_rejects_contradictory_v2_context(tmp_path) -> None:

@@ -139,3 +139,18 @@ def test_browser_registry_health_metadata_matches_shared_manifest() -> None:
         check=True,
         cwd=root,
     )
+
+
+def test_reviewed_current_manifest_projection_and_archive_agree() -> None:
+    from td_health_manifest_history import canonical_digest, health_projection, load_manifest_history
+
+    resolver = load_manifest_history()
+    current = load_health_manifest()
+    assert resolver.current.datasets == current.datasets
+    assert resolver.current.manifest_digest == "50b5a9f2e71c734a9fe5b8615d0fe7ee3e2a22f3965bd616af6bf1a2c3e05598"
+    assert resolver.current.health_contract_digest == "1bc43240ac6373968f9b1886d3a4832dce2cc4496f786e5b3ad32e7eabce3023"
+    assert canonical_digest(health_projection(resolver.current.manifest)) == resolver.current.health_contract_digest
+    assert resolver.current.revision_id not in {revision.revision_id for revision in resolver.revisions}
+    assert resolver.current.manifest["rosterPolicy"]["version"] == current.roster_policy.version
+    assert "eui" in resolver.current.manifest["rosterPolicy"]["fields"]
+    assert "eui64" not in resolver.current.manifest["rosterPolicy"]["fields"]

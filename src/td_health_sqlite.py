@@ -21,7 +21,7 @@ from td_health_comparison import (
     comparison_id, derive_comparison, resolve_interval_candidate, source_roles_for_dataset,
     source_signature,
 )
-from td_health_manifest import load_health_manifest
+from td_health_manifest import HealthDataset, load_health_manifest
 from td_health_observation_model import (
     Assessment, Completeness, Confidence, DeviceSample, HealthStatus, MetricSample,
     EvaluationInputDomain, EvaluationInputState, EvaluationInputs, Finding,
@@ -2295,11 +2295,17 @@ class SQLiteHealthStore:
 
     @staticmethod
     def _retained_observation(
-        connection: sqlite3.Connection, assessment_row: sqlite3.Row
+        connection: sqlite3.Connection, assessment_row: sqlite3.Row,
+        *, source_dataset: HealthDataset | None = None,
     ) -> Observation:
         from td_health_manifest import load_health_manifest
 
-        dataset = load_health_manifest().dataset(assessment_row["dataset_id"])
+        dataset = source_dataset or load_health_manifest().dataset(assessment_row["dataset_id"])
+        if (
+            dataset.dataset_id != assessment_row["dataset_id"]
+            or dataset.datasource_id != assessment_row["datasource_id"]
+        ):
+            raise sqlite3.DatabaseError("Stored observation source/dataset identity mismatch")
         safe_sources = {
             *dataset.files,
             dataset.health_profile.identity_file,
