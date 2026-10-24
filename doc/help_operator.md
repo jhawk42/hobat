@@ -139,6 +139,18 @@ so deployments beyond a trusted network require an authenticated reverse proxy
 or equivalent firewall controls before exposing the server. Diagnostic results
 are transient and are never written to the data directory.
 
+Device Diagnostics are explicit, transient actions, not Sync or health collection.
+Each submission, poll, and cancellation request has a 15-second local limit,
+including response-body decoding. Polling waits 500 ms between requests and stops
+after the submitted action deadline plus 30 seconds, measured from validated
+acceptance. This includes server queue/lock wait, so a local timeout can precede
+server completion. “Result unavailable; server state uncertain” does not mean the
+action failed or was cancelled: use the retained job's Cancel control or Pending
+Jobs to inspect/cancel outstanding work. Cancel while queueing records intent;
+accepted jobs from an old selection receive one cancellation attempt. Failed
+cancellation can be retried explicitly. Diagnostic submissions, especially counter
+resets, are never automatically replayed.
+
 ## Collection and Diagnostic Policies
 
 Detailed
