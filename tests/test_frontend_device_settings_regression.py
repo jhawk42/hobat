@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,14 @@ DIAGNOSTICS_JS = REPO_ROOT / "src" / "js" / "tdash-device-diagnostics.js"
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def test_diagnostic_invocation_and_protocol_execution() -> None:
+    result = subprocess.run(
+        ["node", "tests/js/run-device-diagnostics.mjs", "--ui"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_device_selection_event_is_shared_by_both_renderers() -> None:
@@ -259,8 +268,8 @@ def test_diagnostics_tab_and_lifecycle_are_separate_from_sync() -> None:
     assert 'id="btn-device-diagnostics-cancel"' in html
     assert 'name="device-diagnostics-counters" value="both"' in html
     assert 'fetch("/api/device-actions"' in ui_text
-    assert 'fetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`' in ui_text
-    assert "invocationVersion !== deviceDiagnosticsState.invocationVersion" in ui_text
+    assert '`/api/device-action-jobs/${encodeURIComponent(invocation.jobId)}`' in ui_text
+    assert "invocation.version === deviceDiagnosticsState.invocationVersion" in ui_text
     assert "buildDeviceDiagnosticsModel" in diagnostics_text
     assert 'DEVICE_ACTIONS.MATTER_PING' in diagnostics_text
     assert 'DEVICE_ACTIONS.SYSTEM_PING' in diagnostics_text

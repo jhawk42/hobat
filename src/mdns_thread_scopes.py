@@ -122,6 +122,14 @@ class MDNSDumpListener(ServiceListener):
         self._omr_ipv6addr_prefix = omr_ipv6addr_prefix
         self._checkpoint_output_file = checkpoint_output_file
         self._checkpoint_write_lock = threading.Lock()
+        self._address_warning_categories = set()
+
+    def _warn_address_failure(self, category, exc):
+        with self._lock:
+            if category in self._address_warning_categories:
+                return
+            self._address_warning_categories.add(category)
+        logging.warning("mDNS %s failed (%s)", category, type(exc).__name__)
 
     def _update_last_event_time(self):
         """Record the time of the most recent service event."""
@@ -160,13 +168,17 @@ class MDNSDumpListener(ServiceListener):
         if info and hasattr(info, "parsed_addresses"):
             try:
                 parsed_addresses = info.parsed_addresses()
-                # Enrich node with OMR IPv6 address  using OMR prefix
+            except Exception as exc:
+                # Contain unexpected library failures at the callback boundary.
+                self._warn_address_failure("address-parse", exc)
+            else:
                 if self._omr_ipv6addr_prefix:
-                    omr_ipv6_addr = util_network.find_omr_address_in_list(
-                        parsed_addresses, self._omr_ipv6addr_prefix
-                    )
-            except Exception:
-                parsed_addresses = []
+                    try:
+                        omr_ipv6_addr = util_network.find_omr_address_in_list(
+                            parsed_addresses, self._omr_ipv6addr_prefix
+                        )
+                    except Exception as exc:
+                        self._warn_address_failure("omr-enrichment", exc)
 
         raw_addresses = []
         if info and getattr(info, "addresses", None):
@@ -376,8 +388,8 @@ class MDNSDumpListener(ServiceListener):
         info = zc.get_service_info(type_, name)
         if self._is_matter_tcp_excluded(type_, info):
             return
-        self._upsert_record(
-            self._build_record_from_service_info(type_, name, info, "add"))
+        record = self._build_record_from_service_info(type_, name, info, "add")
+        self._upsert_record(record)
         self._write_checkpoint_snapshot()
         logging.info("Service Added: %s (%s)", name, type_)
         if info:
@@ -395,7 +407,10 @@ class MDNSDumpListener(ServiceListener):
                 info.port,
             )
             if hasattr(info, "parsed_addresses"):
-                logging.debug("  Parsed Addresses: %s", info.parsed_addresses())
+                logging.debug(
+                    "  Parsed Addresses: %s",
+                    record["service_info"]["addresses_parsed"],
+                )
 
             if info.properties:
                 is_thread_br_scope = type_ in [

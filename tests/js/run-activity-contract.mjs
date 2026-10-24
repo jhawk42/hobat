@@ -6,6 +6,7 @@ import {
   normalizeActivityRoute,
   recordActivity,
   sanitizeActivityMetadata,
+  subscribeActivity,
   trackedFetch,
 } from "../../src/js/tdash-activity.js";
 
@@ -63,6 +64,49 @@ try {
   assert.equal(failure.metadata.failureCategory, "network");
   assert.equal(JSON.stringify(failure).includes("secret"), false);
 } finally {
+  globalThis.fetch = originalFetch;
+}
+
+const originalWarn = console.warn;
+const warnings = [];
+const notices = [];
+let fetchCount = 0;
+const unsubscribers = [
+  subscribeActivity(() => { throw new Error("private subscriber details"); }),
+  subscribeActivity((entry) => notices.push(entry)),
+  subscribeActivity(() => { throw new Error("more private details"); }),
+  subscribeActivity((entry) => notices.push(entry)),
+];
+console.warn = (...args) => warnings.push(args);
+try {
+  for (const mode of ["full", "terminal-only", "silent"]) {
+    for (const outcome of ["success", "failure", "abort"]) {
+      clearActivityEntries();
+      notices.length = 0;
+      const response = new Response("{}", {status: 200});
+      const error = outcome === "abort" ? new DOMException("cancelled", "AbortError")
+        : new TypeError("private network detail");
+      globalThis.fetch = async () => {
+        fetchCount += 1;
+        if (outcome !== "success") throw error;
+        return response;
+      };
+      const before = fetchCount;
+      if (outcome === "success") assert.equal(await trackedFetch("/api/jobs", {}, mode), response);
+      else await assert.rejects(trackedFetch("/api/jobs", {}, mode), (actual) => actual === error);
+      assert.equal(fetchCount, before + 1);
+      const entries = mode === "full" ? 2 : mode === "terminal-only" ? 1 : 0;
+      assert.equal(getActivityEntries().length, entries);
+      assert.equal(notices.length, entries * 2);
+    }
+  }
+  clearActivityEntries();
+  assert.deepEqual(notices.slice(-2), [null, null]);
+  assert.ok(warnings.length > 0);
+  assert.equal(JSON.stringify(warnings).includes("private"), false);
+} finally {
+  unsubscribers.forEach((unsubscribe) => unsubscribe());
+  console.warn = originalWarn;
   globalThis.fetch = originalFetch;
 }
 

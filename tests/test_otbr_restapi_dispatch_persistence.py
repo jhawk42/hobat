@@ -11,6 +11,7 @@ import otbr_restapi_mesh_diagnostics as mesh_module
 import otbr_restapi_node as node_module
 import otbr_restapi_cli as cli_module
 from otbr_restapi_util import OTBRUsageError, emit_rest_command_output
+from otbr_restapi_util import _RAW_UNSET
 from td_const import (
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_FILENAME,
     OTBR_RESTAPI_DIAGNOSTICS_FETCH_ALL_OUTCOME_FILENAME,
@@ -21,6 +22,81 @@ from util_data import (
     read_network_scope,
     save_final_json,
 )
+
+
+@pytest.mark.parametrize("rloc", ["0000", "0400", "0800", "f800", "0xF800", 0x0800])
+def test_router_inference_preserves_explicit_roles_and_flags(rloc):
+    record = {"rloc16": rloc, "role": "child", "isRouter": False}
+    diagnostics_module.enrich_border_router(record)
+    assert record["role"] == "child"
+    assert record["isRouter"] is False
+    assert "is_router" not in record
+    assert {"path": "role", "current": "child", "incoming": "router"} in record["_merge_conflicts"]
+    assert {"path": "isRouter", "current": False, "incoming": True} in record["_merge_conflicts"]
+    for role in ("leader", "border router"):
+        explicit = {"rloc16": rloc, "role": role}
+        diagnostics_module.enrich_border_router(explicit)
+        assert explicit["role"] == role
+
+
+@pytest.mark.parametrize("command", ["list", "fetch", "fetch-all"])
+@pytest.mark.parametrize("raw", [False, True])
+def test_role_boundaries_through_dispatch_and_persistence(tmp_path, command, raw):
+    records = [
+        *({"rloc16": value} for value in ("0000", "0400", "0800", "f800", "0xF800", 0x0800)),
+        *({"rloc16": value, "role": "child", "mode": {"device": "FTD"}}
+          for value in ("0401", "04ff", "0500", "05ff")),
+        *({"rloc16": value} for value in (None, "bad-hex", True, "fffe", "ffff", 1024.5)),
+    ]
+    original = json.loads(json.dumps(records))
+    client = Mock()
+    client.list_diagnostics.return_value = records
+    client.fetch_device_collection.return_value = [{"id": "device"}]
+    output = tmp_path / "diagnostics.json"
+    args = SimpleNamespace(
+        diagnostics_command=command, with_meta=False, device_id="device",
+        destination_type="extended", task_timeout=8, poll_interval=0.5,
+        poll_timeout=13, no_progress=True, resolved_output_path=output,
+    )
+    checkpoints = []
+
+    def fetch_all(*_args, **kwargs):
+        kwargs["on_checkpoint"](records, 1, 1, "device", "ok")
+        checkpoints.extend(json.loads((tmp_path / "diagnostics.partial.json").read_text()))
+        return {"items": records}
+
+    client.fetch_all_devices_diagnostics.side_effect = fetch_all
+    # Single-device fetch is checked once per record through its actual dispatcher.
+    inputs = records if command == "fetch" else [records]
+    with patch.object(diagnostics_module, "fetch_device_with_fallback") as fetch:
+        for index, payload in enumerate(inputs):
+            fetch.return_value = payload
+            result = diagnostics_module.dispatch_diagnostics(
+                client, args, True if raw else _RAW_UNSET, None,
+            )
+            saved = json.loads(output.read_text())
+            assert saved == result
+            if raw:
+                assert (result["items"] if command == "fetch-all" else result) is payload
+                assert payload == (original[index] if command == "fetch" else original)
+                continue
+            items = [result] if command == "fetch" else (
+                result["items"] if command == "fetch-all" else result
+            )
+            for item in items:
+                value = item.get("rloc16")
+                if value in ("0000", "0400", "0800", "f800", "0xf800", 0x0800):
+                    assert item["isRouter"] is True
+                    assert item["role"] == "router"
+                else:
+                    assert item.get("isRouter") is not True
+                assert "is_router" not in item
+                if item.get("role") == "child":
+                    assert item.get("isRouter") is not True
+    if command == "fetch-all":
+        assert checkpoints == (original if raw else result["items"])
+        if not raw:
+            assert all(item["isReed"] is True for item in checkpoints if item.get("role") == "child")
 
 
 def test_node_dispatch_saves_json_before_return():

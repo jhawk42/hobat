@@ -10,6 +10,163 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_health_refresh_owns_late_summary_support_and_continuations() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import fs from "node:fs";
+      import vm from "node:vm";
+      const source = fs.readFileSync("src/js/tdash-ui.js", "utf8");
+      const code = source.slice(source.indexOf("async function refreshHealthAssessment()"),
+        source.indexOf("\nfunction invalidateHealthRefresh()"));
+      const deferred = () => {
+        let resolve, reject;
+        const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+        return {promise, resolve, reject};
+      };
+      for (const stage of ["summary", "support", "history", "comparison", "initialize",
+        "endpoints", "pair", "legacy-comparison"]) {
+        for (const failure of [false, true]) {
+          for (const target of ["ineligible", "null", "eligible", "same-id", "same-object",
+            "current", "pinned"]) {
+            const pending = deferred();
+            const newer = deferred();
+            const entered = deferred();
+            const dataset = {entry: {value: "A", healthEligible: true}};
+            const assessment = {assessmentId: "a", datasetId: "A", networkId: "network"};
+            const publications = [];
+            let summaries = 0;
+            const context = {
+              currentDataset: dataset, currentView: "table", healthInsightsTab: "comparison",
+              healthInsightsState: {datasetId: "A", assessmentRequestVersion: 0,
+                deviceRequestVersion: 0, comparisonEndpointRevision: 0,
+                comparisonEndpointDefaultsPending: stage === "initialize"},
+              healthAssessmentHistoryState: {mode: target === "pinned" ? "pinned" : "latest",
+                pinnedAssessmentId: target === "pinned" ? "a" : null,
+                networkId: target === "pinned" ? "network" : null, requestVersion: 0, offset: 0},
+              healthInsightsViewState: {
+                comparisonIntent: ["initialize", "endpoints", "pair"].includes(stage)
+                  ? "custom" : "latest",
+                beforeAssessmentId: "before", afterAssessmentId: "after",
+              },
+              healthRosterViewState: {requestVersion: 0, detailVersion: 0},
+              contextDetailsState: {}, findingDeviceReturnContext: null,
+              findingRosterActionEligibility: new Set(), findingRosterActionPending: new Set(),
+              lastRenderedDatasetByView: new Map(),
+              document: {getElementById: () => ({
+                setAttribute() {}, classList: {add() {}, remove() {}},
+              })},
+              contextDetailsController: {setCollapsed() {}},
+              HEALTH_INSIGHTS_TABS: [{id: "findings"}],
+              clearRosterMutationRefreshStatus() {}, resetHealthFindingState() {},
+              resetHealthComparisonState() {},
+              setContextDetailsMode() {}, renderHealthStatusSummary() {},
+              renderNetworkInsights() {}, updateHealthPresentationControls() {},
+              updateHealthRefreshControls() {}, enableHealthColoringOnFirstInsightsVisit() {},
+              ensureHealthComparisonLoaded() {},
+              applyHealthAssessmentPresentation: (value) => publications.push(value),
+              renderCurrentView: () => publications.push("table"),
+              announceHealthInsight: (value) => publications.push(value),
+              loadRosterPage: () => publications.push("roster"),
+              reconcileHealthInsightsSelection: () => ({}),
+              renderRosterDetailPanel: () => publications.push("detail"),
+              console: {warn() {}},
+              fetchHealthAssessment: () => {
+                if (++summaries > 1) return newer.promise;
+                if (stage === "summary") { entered.resolve(); return pending.promise; }
+                return Promise.resolve(assessment);
+              },
+              fetchHealthSupport: () => {
+                if (stage === "support") { entered.resolve(); return pending.promise; }
+                return Promise.resolve({capabilities: {
+                  comparisonEndpointSelection: stage === "legacy-comparison" ? 0 : 1,
+                  comparisonReadModel: 1,
+                }, observations: ["old"]});
+              },
+              loadHealthAssessmentHistoryPage: () => {
+                if (stage === "history") { entered.resolve(); return pending.promise; }
+                return Promise.resolve();
+              },
+              selectComparisonPreset: () => {
+                publications.push("comparison");
+                if (stage === "comparison") { entered.resolve(); return pending.promise; }
+                return Promise.resolve();
+              },
+              initializeComparisonEndpoints: () => { entered.resolve(); return pending.promise; },
+              requestComparisonEndpointPage: () => {
+                if (stage === "endpoints") { entered.resolve(); return pending.promise; }
+                return Promise.resolve({});
+              },
+              loadComparisonEndpointPair: () => {
+                publications.push("pair");
+                if (stage === "pair") { entered.resolve(); return pending.promise; }
+                return Promise.resolve();
+              },
+              loadComparisonPage: () => { entered.resolve(); return pending.promise; },
+            };
+            vm.createContext(context);
+            vm.runInContext(code, context);
+            for (const [start, end] of [
+              ["function resetHealthAssessmentHistory()", "function selectHealthAssessment("],
+              ["function resetHealthRosterViewState()", "function restoreHealthNavigationContext("],
+              ["function resetHealthInsightsForDatasetChange()", "async function refreshHealthAssessment()"],
+            ]) {
+              vm.runInContext(source.slice(source.indexOf(start), source.indexOf(end)), context);
+            }
+            const old = context.refreshHealthAssessment();
+            await entered.promise;
+            if (target === "current" || target === "pinned") {
+              if (failure) {
+                const error = new Error("current failure");
+                if (target === "pinned" && stage === "summary") error.status = 404;
+                pending.reject(error);
+              } else pending.resolve(stage === "summary" ? assessment : stage === "support"
+                ? {capabilities: {}, observations: ["current"]} : {});
+              await old;
+              assert.equal(context.healthInsightsState.loading, false);
+              if (failure && stage === "summary") {
+                assert.equal(context.healthInsightsState.error, target === "pinned"
+                  ? "Selected assessment is no longer retained." : "current failure");
+              } else {
+                assert.equal(context.healthInsightsState.assessment, assessment);
+                assert.equal(context.currentDataset.healthAssessment, assessment);
+                if (failure) assert.equal(context.healthInsightsState.supportError, "current failure");
+              }
+              continue;
+            }
+            if (target !== "same-object") {
+              context.currentDataset = target === "null" ? null : {entry: {
+                value: target === "same-id" ? "A" : "B", healthEligible: target !== "ineligible",
+              }};
+            }
+            const next = context.refreshHealthAssessment();
+            if (target === "ineligible" || target === "null") await next;
+            const boundary = publications.length;
+            const state = JSON.stringify(context.healthInsightsState);
+            if (failure) pending.reject(new Error("late failure"));
+            else pending.resolve(stage === "summary" ? assessment : stage === "support"
+              ? {capabilities: {}, observations: ["old"]} : {});
+            await old;
+            assert.equal(publications.length, boundary, `${stage}/${target}/late=${failure}`);
+            assert.equal(JSON.stringify(context.healthInsightsState), state);
+            if (target !== "ineligible" && target !== "null") {
+              assert.equal(context.healthInsightsState.loading, true);
+              newer.reject(new Error("current failure"));
+              await next;
+              assert.equal(context.healthInsightsState.error, "current failure");
+              assert.equal(context.healthInsightsState.loading, false);
+            }
+          }
+        }
+      }
+      console.log("health generation contracts passed");
+    """
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        capture_output=True, text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_health_comparison_dropdown_uses_relative_times_without_changing_selection() -> None:
     script = r"""
       import {renderHealthComparison} from "./src/js/tdash-health.js";

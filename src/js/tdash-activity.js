@@ -79,6 +79,16 @@ function failureCategory(error) {
   return "request-failed";
 }
 
+function notifyActivitySubscribers(entry) {
+  activitySubscribers.forEach((subscriber) => {
+    try {
+      subscriber(entry);
+    } catch {
+      console.warn("Activity subscriber notification failed.");
+    }
+  });
+}
+
 export function recordActivity(entry) {
   const normalized = Object.freeze({
     id: entry.id ?? `activity-${++activitySequence}`,
@@ -100,7 +110,7 @@ export function recordActivity(entry) {
   if (activityEntries.length > ACTIVITY_LIMIT) {
     activityEntries.splice(0, activityEntries.length - ACTIVITY_LIMIT);
   }
-  activitySubscribers.forEach((subscriber) => subscriber(normalized));
+  notifyActivitySubscribers(normalized);
   return normalized;
 }
 
@@ -110,7 +120,7 @@ export function getActivityEntries() {
 
 export function clearActivityEntries() {
   activityEntries.length = 0;
-  activitySubscribers.forEach((subscriber) => subscriber(null));
+  notifyActivitySubscribers(null);
 }
 
 export function subscribeActivity(subscriber) {

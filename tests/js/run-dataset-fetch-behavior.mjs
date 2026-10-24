@@ -273,22 +273,45 @@ try {
   for (const redispatch of [false, true]) {
     const dataset = await freshModule();
     let primaryReads = 0;
+    let polls = 0;
+    const events = [];
     const calls = mockFetch(({ url }) => {
-      if (url === "/api/job/job-1") return response({ status: "done" });
+      if (url === "/api/job/job-1") {
+        polls += 1;
+        return response(polls === 1 ? {
+          status: "running", checkpoint_is_newer_than_final: true,
+          checkpoint_last_modified: now / 1000,
+          checkpoint_filename: "fetch-checkpoint.partial.json",
+        } : {status: "done"});
+      }
+      if (url.endsWith("fetch-checkpoint.partial.json")) {
+        events.push("checkpoint");
+        return response(row("checkpoint"));
+      }
       if (url.endsWith(REQUIRED[0])) {
         primaryReads += 1;
         if (primaryReads === 1 || redispatch) {
           return response({ job_id: "job-1", filename: REQUIRED[0] }, {}, 202);
         }
+        events.push("final");
         return response(row("terminal"), { "Cache-Control": "max-age=7",
           "Last-Modified": "Mon, 28 Sep 2026 00:00:00 GMT" });
       }
       return response(row("other"));
     });
     const sessionId = dataset.startFetchSession();
-    const loaded = await finish(dataset.loadDataset(ENTRY.value, { sessionId, forceFresh: true }));
+    const loaded = await finish(dataset.loadDataset(ENTRY.value, {
+      sessionId, forceFresh: true, onFileReady: () => events.push("ready"),
+    }));
     assert.equal(primaryReads, 2);
-    assert.equal(calls.filter((call) => call.url.startsWith("/api/job/")).length, 1);
+    assert.equal(calls.filter((call) => call.url.startsWith("/api/job/")).length, 2);
+    const checkpointIndex = events.indexOf("checkpoint");
+    assert.ok(checkpointIndex >= 0);
+    assert.equal(events[checkpointIndex + 1], "ready");
+    if (!redispatch) {
+      assert.ok(events.indexOf("final") > checkpointIndex);
+      assert.equal(events.at(-1), "ready");
+    }
     const primaryCalls = calls.filter((call) => call.url.endsWith(REQUIRED[0]));
     assert.deepEqual(primaryCalls.map((call) => call.headers), [
       { "Cache-Control": "no-cache" },

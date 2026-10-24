@@ -131,14 +131,22 @@ def enrich_border_router(record: dict[str, Any]) -> None:
     record.clear()
     record.update(normalized)
 
-    # isRouter 
     rloc16 = record.get("rloc16")
     if isinstance(rloc16, str):
-        # check last two bytes of rloc16 for "00" which is a common indicator of routers (including border routers)
-        rloc16 = rloc16.lower()
-        if rloc16.endswith("00"):
+        try:
+            rloc16 = int(rloc16, 16)
+        except ValueError:
+            rloc16 = None
+    if type(rloc16) is int and util_network.is_router(rloc16):
+        if type(record.get("isRouter")) is bool:
+            if record["isRouter"] is False:
+                append_merge_conflict(record, "isRouter", False, True)
+        else:
             record["isRouter"] = True
-            record["is_router"] = True
+        if record.get("role"):
+            if record["role"] != "router":
+                append_merge_conflict(record, "role", record["role"], "router")
+        else:
             record["role"] = "router"
 
     addrs = record.get("ipv6Addresses")

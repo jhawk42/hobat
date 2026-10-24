@@ -3,10 +3,230 @@ from __future__ import annotations
 import tempfile
 import unittest
 import json
+import builtins
+import multiprocessing
+import os
+import queue
+import stat
+import sys
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 import util_data
+
+
+def _atomic_writer_worker(kind, name, filename, staged, release, paths, results, failure):
+    real_open = builtins.open
+    real_replace = os.replace
+    streams = []
+
+    class FailingStream:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def write(self, value):
+            self.stream.write(value[:1])
+            self.stream.flush()
+            paths.put(self.stream.name)
+            staged.set()
+            if not release.wait(10):
+                raise TimeoutError("write release")
+            raise ValueError("injected partial serialization")
+
+    def open_staging(path, mode="r", *args, **kwargs):
+        stream = real_open(path, mode, *args, **kwargs)
+        if mode in ("w", "x"):
+            streams.append(stream)
+            if failure == "write":
+                return FailingStream(stream)
+        return stream
+
+    def replace(source, destination):
+        assert all(stream.closed for stream in streams)
+        paths.put(os.fspath(source))
+        staged.set()
+        if not release.wait(10):
+            raise TimeoutError("replace release")
+        if failure == "replace":
+            raise PermissionError("injected replace failure")
+        real_replace(source, destination)
+
+    try:
+        # Patching the module's open avoids process-global changes between threads.
+        with patch.object(util_data, "open", open_staging, create=True), patch.object(
+            util_data, "os", wraps=os
+        ) as local_os:
+            local_os.replace = replace
+            if kind == "json":
+                util_data.save_json_atomic(
+                    {"writer": name, "payload": name * 4000},
+                    filename, indent=2, add_trailing_newline=True,
+                )
+            else:
+                util_data.save_text_atomic(f"{name}:é\n" * 4000, filename)
+        results.put(None)
+    except Exception as exc:
+        results.put(type(exc).__name__)
+
+
+@pytest.mark.parametrize("backend", ["thread", "process"])
+@pytest.mark.parametrize("kind", ["json", "text"])
+@pytest.mark.parametrize("failure", [None, "write", "replace"])
+def test_atomic_ordered_writers(backend, kind, failure):
+    # Each thread needs its own module globals for the injected I/O schedule.
+    import importlib.util
+
+    with tempfile.TemporaryDirectory(dir=".") as directory:
+        filename = Path(directory).resolve() / f"snapshot.{kind}"
+        sentinel = Path(f"{filename}.tmp")
+        sentinel.write_text("unowned", encoding="utf-8")
+        payload = lambda name: (
+            json.dumps({"writer": name, "payload": name * 4000}, indent=2) + "\n"
+            if kind == "json" else f"{name}:é\n" * 4000
+        )
+        filename.write_text(payload("old"), encoding="utf-8")
+        ctx = multiprocessing.get_context("spawn") if backend == "process" else None
+        event = ctx.Event if ctx else threading.Event
+        channel = ctx.Queue if ctx else queue.Queue
+        stages, releases = [event(), event()], [event(), event()]
+        paths, results = [channel(), channel()], [channel(), channel()]
+        workers = []
+        stage_paths = []
+        for index, name in enumerate(("A", "B")):
+            args = (kind, name, filename, stages[index], releases[index],
+                    paths[index], results[index], failure if index == 0 else None)
+            if ctx:
+                worker = ctx.Process(target=_atomic_writer_worker, args=args)
+            else:
+                spec = importlib.util.spec_from_file_location(
+                    f"_atomic_test_{name}", util_data.__file__
+                )
+                module = importlib.util.module_from_spec(spec)
+                # dataclasses resolves its module through sys.modules.
+                sys.modules[spec.name] = module
+                spec.loader.exec_module(module)
+                worker_fn = type(_atomic_writer_worker)(
+                    _atomic_writer_worker.__code__,
+                    {**globals(), "util_data": module},
+                )
+                worker = threading.Thread(target=worker_fn, args=args, daemon=True)
+            workers.append(worker)
+        try:
+            for index, worker in enumerate(workers):
+                worker.start()
+                assert stages[index].wait(10), f"writer {index} never staged"
+                stage_paths.append(Path(paths[index].get(timeout=2)))
+            assert filename.read_text(encoding="utf-8") == payload("old")
+            releases[0].set()
+            workers[0].join(10)
+            assert not workers[0].is_alive()
+            assert results[0].get(timeout=2) == {
+                None: None, "write": "ValueError", "replace": "PermissionError"
+            }[failure]
+            assert filename.read_text(encoding="utf-8") == payload("A" if failure is None else "old")
+            assert stage_paths[1].exists(), "A cleanup removed B staging"
+            releases[1].set()
+            workers[1].join(10)
+            assert not workers[1].is_alive()
+            assert results[1].get(timeout=2) is None
+            assert filename.read_text(encoding="utf-8") == payload("B")
+            assert stage_paths[0] != stage_paths[1]
+            assert all(path.parent == filename.parent for path in stage_paths)
+            assert sentinel.read_text(encoding="utf-8") == "unowned"
+            assert set(filename.parent.iterdir()) == {filename, sentinel}
+        finally:
+            for release in releases:
+                release.set()
+            for worker in workers:
+                if worker.ident is not None:
+                    worker.join(12)
+                    if ctx and worker.is_alive():
+                        worker.terminate()
+                        worker.join(5)
+            if ctx:
+                for item in paths + results:
+                    item.close()
+                    item.join_thread()
+            else:
+                for name in ("A", "B"):
+                    sys.modules.pop(f"_atomic_test_{name}", None)
+
+
+@pytest.mark.parametrize("kind", ["json", "text"])
+def test_atomic_cleanup_preserves_original_error(kind, caplog):
+    with tempfile.TemporaryDirectory(dir=".") as directory:
+        filename = Path(directory) / "snapshot"
+        original = ValueError("serialization failed")
+        with patch("util_data.os.remove", side_effect=PermissionError("cleanup failed")):
+            with pytest.raises(ValueError) as raised:
+                if kind == "json":
+                    with patch("util_data.json.dump", side_effect=original):
+                        util_data.save_json_atomic({}, filename)
+                else:
+                    with patch("util_data.os.replace", side_effect=original):
+                        util_data.save_text_atomic("text", filename)
+        assert raised.value is original
+        assert "cleanup" in caplog.text.lower()
+
+
+@pytest.mark.parametrize("kind", ["json", "text"])
+def test_atomic_exclusive_collision_does_not_clean_up_unowned_file(kind):
+    from types import SimpleNamespace
+
+    with tempfile.TemporaryDirectory(dir=".") as directory:
+        filename = Path(directory) / "snapshot"
+        staging = Path(f"{filename}.collision.tmp")
+        staging.write_text("other writer", encoding="utf-8")
+        filename.write_text("completed final", encoding="utf-8")
+        with patch("util_data.uuid4", return_value=SimpleNamespace(hex="collision")):
+            with pytest.raises(FileExistsError):
+                if kind == "json":
+                    util_data.save_json_atomic({}, filename)
+                else:
+                    util_data.save_text_atomic("text", filename)
+        assert staging.read_text(encoding="utf-8") == "other writer"
+        assert filename.read_text(encoding="utf-8") == "completed final"
+        assert set(filename.parent.iterdir()) == {filename, staging}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX create/umask semantics")
+@pytest.mark.parametrize("kind", ["json", "text"])
+def test_atomic_umask_and_exclusive_staging(kind):
+    import subprocess
+
+    with tempfile.TemporaryDirectory(dir=".") as directory:
+        filename = Path(directory).resolve() / "snapshot"
+        script = """
+import os, sys
+from unittest.mock import patch
+import util_data
+os.umask(0o027)
+real_open = open
+def exclusive(path, mode, **kwargs):
+    assert mode == 'x'
+    return real_open(path, mode, **kwargs)
+with patch.object(util_data, 'open', exclusive, create=True):
+    if sys.argv[1] == 'json':
+        util_data.save_json_atomic({'unicode': 'é'}, sys.argv[2])
+    else:
+        util_data.save_text_atomic('é', sys.argv[2])
+"""
+        subprocess.run(
+            [sys.executable, "-c", script, kind, str(filename)],
+            env={**os.environ, "PYTHONPATH": str(Path(util_data.__file__).parent)},
+            check=True, timeout=10,
+        )
+        assert stat.S_IMODE(filename.stat().st_mode) == 0o640
+        assert list(filename.parent.iterdir()) == [filename]
 
 
 class ResolveTdDataDirTests(unittest.TestCase):

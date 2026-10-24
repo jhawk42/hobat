@@ -545,8 +545,6 @@ async function fetchJson(url, requestHeaders = {}, sessionId = null, onCheckpoin
       const { data, responseMaxAge, lastModifiedAt } = await pollJobUntilDone(
         job.job_id,
         job.filename,
-        url,
-        requestHeaders,
         sessionId,
         onCheckpointData,
       );
@@ -573,8 +571,6 @@ const _JOB_TIMEOUT_MS = 900_000; // 15 minutes
 async function pollJobUntilDone(
   jobId,
   filename,
-  originalUrl,
-  originalHeaders,
   sessionId = null,
   onCheckpointData = null,
 ) {

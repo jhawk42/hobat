@@ -638,7 +638,7 @@ def test_dataset_health_refresh_preserves_context_details_visibility() -> None:
     assert "if (datasetChanged) resetHealthInsightsForDatasetChange();" in refresh_source
     assessment_read = refresh_source.index("const assessment = await fetchHealthAssessment(")
     version_guard = refresh_source.index(
-        "if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;",
+        "if (!isCurrent()) return;",
         assessment_read,
     )
     assert assessment_read < version_guard < refresh_source.index(

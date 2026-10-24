@@ -43,6 +43,106 @@ def _write_seed(data_dir, devices, *, extpan="78b9775b001c1cbe"):
     )
 
 
+@pytest.mark.parametrize("field", ["children", "childTable", "routerNeighbors"])
+@pytest.mark.parametrize(("preferred", "expected"), [
+    ({}, 2), ({"value": None}, 2), ({"value": 0}, 0),
+    ({"value": 1}, 1), ({"value": False}, None), ({"value": "invalid"}, None),
+])
+def test_relationship_projection_preserves_zero_and_preferred_evidence(field, preferred, expected):
+    dataset = load_health_manifest().dataset("otbr_cli_networkdiag_fetch_all")
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    payloads = {name: [] for name in dataset.files}
+    child = {"extAddress": "2222222222222222", "linkQuality": 2,
+             "linkQualityOut": 3, "q_msg": 2}
+    if "value" in preferred:
+        child.update(linkQualityIn=preferred["value"], queuedMessageCount=preferred["value"])
+    payloads[filename] = [{"extAddress": "1111111111111111", field: [child]}]
+    _, relationships, _, _, _ = _normalize_samples(dataset, payloads)
+    sample = relationships[0]
+    assert (sample.link_quality_in, sample.link_quality_out, sample.queued_message_count) == (
+        expected, 3, expected,
+    )
+    child.pop("linkQuality", None)
+    child.pop("q_msg", None)
+    child.pop("linkQualityIn", None)
+    child.pop("queuedMessageCount", None)
+    _, relationships, _, _, _ = _normalize_samples(dataset, payloads)
+    assert relationships[0].link_quality_in is None
+    assert relationships[0].queued_message_count is None
+
+
+@pytest.mark.parametrize("queue", [0, None])
+def test_corrected_relationship_evidence_roundtrips_without_rewriting_history(tmp_path, queue):
+    filename = "td-otbr-cli-networkdiag-fetch-all.json"
+    store = SQLiteHealthStore(tmp_path / HOBAT_DATABASE_FILENAME)
+    policy = load_health_policy()
+    results = []
+    retained = None
+    schema = None
+    (tmp_path / "td-static-extaddr-device-label.json").write_text("{}", encoding="utf-8")
+    for day, count in ((1, 2), (2, queue)):
+        child = {"extAddress": "2222222222222222", "linkQualityIn": 0,
+                 "linkQualityOut": 3, "linkQuality": 2}
+        if count is not None:
+            child["queuedMessageCount"] = count
+        _write_seed(tmp_path, [{"extAddress": "1111111111111111", "role": "router",
+                              "children": [child]}])
+        stamp = datetime(2026, 9, day, tzinfo=timezone.utc).timestamp()
+        for name in (filename, "td-otbr-cli-thread-network-info.json"):
+            os.utime(tmp_path / name, (stamp, stamp))
+        result = process_health(
+            data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+            policy=policy, store=store,
+            processing_time=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        )
+        results.append(result)
+        with closing(store._connect()) as connection:
+            current_schema = connection.execute(
+                "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+            ).fetchall()
+            current_schema = [tuple(row) for row in current_schema]
+            if schema is None:
+                schema = current_schema
+            assert current_schema == schema
+            old_rows = [
+                tuple(row) for row in connection.execute(
+                    "SELECT * FROM relationship_samples WHERE observation_id=?",
+                    (results[0].observation.observation_id,),
+                )
+            ]
+            if retained is None:
+                retained = old_rows
+            assert old_rows == retained
+            saved = connection.execute(
+                "SELECT link_quality_in, link_quality_out, queued_message_count "
+                "FROM relationship_samples WHERE observation_id=?",
+                (result.observation.observation_id,),
+            ).fetchone()
+            assert tuple(saved) == (0, 3, count)
+        finding = next(item for item in result.assessment.findings
+                       if item.rule_id == "relationship.directional-quality")
+        assert finding.evidence["linkQualityIn"] == 0
+        assert finding.evidence["linkQualityOut"] == 3
+    repeated = process_health(
+        data_dir=tmp_path, dataset_id="otbr_cli_networkdiag_fetch_all",
+        policy=policy, store=store,
+        processing_time=datetime(2026, 9, 3, tzinfo=timezone.utc),
+    )
+    assert not repeated.observation_created
+    assert repeated.observation.observation_id == results[-1].observation.observation_id
+    service = TDHealthReadService(tmp_path)
+    listing = service.comparisons(
+        network_id=results[-1].observation.network_id,
+        dataset_id="otbr_cli_networkdiag_fetch_all", limit=25, offset=0,
+    )
+    assert listing["total"] > 0
+    comparison = service.comparison(
+        comparison_id=listing["items"][0]["comparisonId"], limit=100, offset=0,
+    )
+    item = next(item for item in comparison["items"] if item["itemKind"] == "queue-persistence")
+    assert item["transition"] == ("cleared" if queue == 0 else None)
+    assert item["change"] == ("changed" if queue == 0 else "unknown")
+
 def test_roster_extracts_only_explicit_valid_source_facts() -> None:
     manifest = load_health_manifest()
     dataset = manifest.dataset("otbr_restapi_devices_fetch_diagnostics_fetch_all")

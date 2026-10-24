@@ -74,17 +74,7 @@ def _rloc16_value(rloc16):
 
 
 def is_router(rloc16):
-    """
-    Determines if a given rloc16 value corresponds to a router based on its hexadecimal suffix.
-
-    In Thread networks, devices with rloc16 values ending in "00" are typically routers, while those with other suffixes are usually end devices (children). This function checks the last two characters of the rloc16 value to determine if it is a router.
-
-    Args:
-        rloc16: The rloc16 value as a string (e.g., "0x5000")
-
-    Returns:
-        True if the rloc16 value indicates a router (ends with "00"), False otherwise.
-    """
+    """Return whether a valid RLOC16 has a zero lower-ten-bit Child ID."""
     value = _rloc16_value(rloc16)
     return value is not None and value & 0x03FF == 0
 

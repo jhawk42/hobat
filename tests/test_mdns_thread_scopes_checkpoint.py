@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 import tempfile
 import unittest
@@ -14,7 +15,7 @@ import util_network
 
 class TestMDNSCheckpointSnapshots(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(dir=".")
         self.data_dir = Path(self._tmp.name)
 
     def tearDown(self) -> None:
@@ -186,6 +187,110 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
         self.assertEqual(written_payload[0]["name"], "test.local.")
         self.assertEqual(written_payload[0]["event"], "add")
         self.assertEqual(written_payload[0]["extPanId"], "78b9775b001c1cbe")
+
+    def test_address_failures_preserve_evidence_and_warn_once_per_category(self):
+        checkpoint = self.data_dir / "checkpoint.json"
+        listener = mdns.MDNSDumpListener(
+            omr_ipv6addr_prefix="fd00:",
+            checkpoint_output_file=checkpoint,
+        )
+        parsed = ["fd00::1", "192.0.2.1"]
+        parser = MagicMock(side_effect=ValueError("secret-address-and-service"))
+        info = SimpleNamespace(
+            addresses=[b"\x7f\x00\x00\x01"], parsed_addresses=parser,
+            properties={b"xa": bytes.fromhex("0011223344556677")},
+            port=1234,
+        )
+        zc = MagicMock()
+        zc.get_service_info.return_value = info
+
+        def assert_snapshot(expected, event):
+            record = listener.get_records()[0]
+            self.assertEqual(record["event"], event)
+            self.assertIs(record["service_info"]["addresses_parsed"], expected)
+            self.assertEqual(record["service_info"]["addresses_raw_hex"], ["7f000001"])
+            self.assertEqual(record["scope"], "_meshcop._udp.local.")
+            self.assertEqual(record["extAddress"], "0011223344556677")
+            self.assertNotIn("omrIpv6Address", record)
+            saved = json.loads(checkpoint.read_text(encoding="utf-8"))[0]
+            self.assertEqual(saved["serviceInfo"]["addressesParsed"], expected)
+            self.assertEqual(saved["serviceInfo"]["addressesRawHex"], ["7f000001"])
+            self.assertEqual(saved["event"], event)
+
+        with patch.object(mdns, "print_meshcop_service_info"), patch.object(
+            mdns.util_network, "fetch_omr_prefix"
+        ) as fetch_prefix, patch.object(
+            mdns.util_network, "find_omr_address_in_list",
+            side_effect=RuntimeError("secret-address-and-service"),
+        ) as find_omr, self.assertLogs(level="WARNING") as captured:
+            listener.add_service(zc, "_meshcop._udp.local.", "private.local.")
+            empty = listener.get_records()[0]["service_info"]["addresses_parsed"]
+            assert_snapshot(empty, "add")
+            self.assertEqual(empty, [])
+            listener.update_service(zc, "_meshcop._udp.local.", "private.local.")
+            empty = listener.get_records()[0]["service_info"]["addresses_parsed"]
+            assert_snapshot(empty, "update")
+            self.assertEqual(empty, [])
+            self.assertEqual(find_omr.call_count, 0)
+            parser.side_effect = None
+            parser.return_value = parsed
+            listener.add_service(zc, "_meshcop._udp.local.", "private.local.")
+            assert_snapshot(parsed, "add")
+            listener.update_service(zc, "_meshcop._udp.local.", "private.local.")
+            assert_snapshot(parsed, "update")
+            fetch_prefix.assert_not_called()
+        self.assertEqual(len(captured.records), 2)
+        messages = "\n".join(captured.output)
+        self.assertIn("address-parse", messages)
+        self.assertIn("ValueError", messages)
+        self.assertIn("omr-enrichment", messages)
+        self.assertIn("RuntimeError", messages)
+        self.assertNotIn("secret-address", messages)
+        self.assertNotIn("private.local", messages)
+        self.assertNotIn("fd00", messages)
+
+    def test_address_enrichment_success_and_no_prefix_are_quiet(self):
+        parsed = ["fd00::1"]
+        info = SimpleNamespace(
+            addresses=[b"\x7f\x00\x00\x01"], properties={},
+            parsed_addresses=lambda: parsed,
+        )
+        for prefix in (None, "fd00:"):
+            with self.subTest(prefix=prefix):
+                listener = mdns.MDNSDumpListener(omr_ipv6addr_prefix=prefix)
+                with patch.object(
+                    mdns.util_network, "find_omr_address_in_list", return_value="fd00::1"
+                ) as find_omr, patch.object(
+                    mdns.util_network, "fetch_omr_prefix"
+                ) as fetch_prefix, self.assertNoLogs(level="WARNING"):
+                    record = listener._build_record_from_service_info(
+                        "_meshcop._udp.local.", "test.local.", info, "add"
+                    )
+                self.assertIs(record["service_info"]["addresses_parsed"], parsed)
+                if prefix:
+                    self.assertEqual(record["omrIpv6Address"], "fd00::1")
+                    find_omr.assert_called_once_with(parsed, prefix)
+                else:
+                    self.assertNotIn("omrIpv6Address", record)
+                    find_omr.assert_not_called()
+                fetch_prefix.assert_not_called()
+
+    def test_post_parse_enrichment_failure_retains_exact_address_list(self):
+        parsed = ["fd00::1", "192.0.2.1"]
+        info = SimpleNamespace(
+            addresses=[b"\x7f\x00\x00\x01"], properties={},
+            parsed_addresses=lambda: parsed,
+        )
+        listener = mdns.MDNSDumpListener(omr_ipv6addr_prefix="fd00:")
+        with patch.object(
+            mdns.util_network, "find_omr_address_in_list",
+            side_effect=ValueError("private-address"),
+        ):
+            record = listener._build_record_from_service_info(
+                "_meshcop._udp.local.", "test.local.", info, "add"
+            )
+        self.assertIs(record["service_info"]["addresses_parsed"], parsed)
+        self.assertNotIn("omrIpv6Address", record)
 
     def test_add_service_handles_packed_address_variants(self) -> None:
         address_cases = {

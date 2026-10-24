@@ -538,7 +538,10 @@ def _project_sample_evidence(
                         ),
                         from_device_id=reporter_id,
                         to_device_id=child_id,
-                        link_quality_in=_integer(child.get("linkQualityIn") or child.get("linkQuality")),
+                        link_quality_in=_integer(
+                            child.get("linkQuality")
+                            if child.get("linkQualityIn") is None else child["linkQualityIn"]
+                        ),
                         link_quality_out=_integer(child.get("linkQualityOut")),
                         average_rssi=_number(child.get("averageRssi")),
                         last_rssi=_number(child.get("lastRssi")),
@@ -548,7 +551,8 @@ def _project_sample_evidence(
                         reporter_device_id=reporter_id,
                         source_files=(filename,),
                         queued_message_count=_number(
-                            child.get("queuedMessageCount") or child.get("q_msg")
+                            child.get("q_msg")
+                            if child.get("queuedMessageCount") is None else child["queuedMessageCount"]
                         ),
                     )
     return _SampleProjection(

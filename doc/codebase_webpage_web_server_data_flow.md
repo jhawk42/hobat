@@ -129,6 +129,13 @@ processing path stores the adjacent comparison and unique complete-only
 1/3/7/30-day interval pairs in the same SQLite transaction, subject to the
 existing 2,000-pair cap.
 
+Newly processed relationship evidence preserves incoming link quality and
+queued-message counts of zero. Preferred fields fall back to aliases only
+when absent or null, not when zero or invalid. A positive queue followed by
+zero can therefore be reported as cleared; missing evidence remains unknown.
+This correction does not rewrite retained observations or change the schema,
+health thresholds, or historical evidence.
+
 The Device Roster list projection combines presence from the pinned assessment
 with network-scoped last-known fields from SQLite; list reads do not fetch
 individual device details. See [Thread Network Health](thread_network_health.md#read-api-and-dashboard)
@@ -171,6 +178,18 @@ environment override is false. The parent disable removes Reset Counters as
 well. Each POST revalidates the cached record, selected target, source, and
 action capability before dispatch; action results and jobs remain transient and
 are never written to snapshots, checkpoints, labels, or health data.
+
+The browser owns each submission independently of the selected device. A
+selection change or Cancel during submission retains cancellation intent and
+disposes of a later accepted job without attaching it to the new selection.
+It validates job/result identities and states, bounds each POST/GET/DELETE
+including body consumption to 15 seconds, and polls every 500 ms for at most
+the submitted deadline plus 30 seconds after validated acceptance. That local
+budget includes source-lock queue wait; the server subprocess deadline starts
+only after acquiring the lock. Local timeout, transport failure, or invalid
+protocol means the result is unavailable and server state uncertain, not
+proven action failure or cancellation. Known job references remain available
+for Cancel/Pending Jobs; POST is never automatically replayed.
 
 Same-origin routing does not authenticate these mutation routes. Default-on
 operation requires a trusted network or authenticated reverse proxy/firewall

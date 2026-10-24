@@ -1899,6 +1899,7 @@ const deviceDiagnosticsState = {
   record: null,
   model: null,
   invocationVersion: 0,
+  invocation: null,
   jobId: null,
   startedAt: null,
 };
@@ -1922,6 +1923,7 @@ function clearDeviceDiagnosticsResult() {
 }
 
 function setDeviceDiagnosticsPending(pending, cancelling = false) {
+  pending = pending || deviceDiagnosticsState.invocation?.active === true;
   const model = deviceDiagnosticsState.model;
   document.getElementById("device-diagnostics-target").disabled = pending;
   document.getElementById("device-diagnostics-attempts").disabled = pending;
@@ -1939,7 +1941,7 @@ function setDeviceDiagnosticsPending(pending, cancelling = false) {
     !selectedDiagnosticTarget() ||
     !document.querySelector('input[name="device-diagnostics-counters"]:checked');
   const cancelEl = document.getElementById("btn-device-diagnostics-cancel");
-  cancelEl.hidden = !pending;
+  cancelEl.hidden = !pending && !deviceDiagnosticsState.jobId;
   cancelEl.disabled = cancelling;
 }
 
@@ -2009,7 +2011,7 @@ function renderDeviceDiagnosticsSelection() {
 }
 
 function selectDeviceDiagnosticsRecord(record) {
-  const oldJobId = deviceDiagnosticsState.jobId;
+  invalidateDeviceDiagnostic();
   deviceDiagnosticsState.invocationVersion += 1;
   deviceDiagnosticsState.jobId = null;
   deviceDiagnosticsState.record = record;
@@ -2020,12 +2022,200 @@ function selectDeviceDiagnosticsRecord(record) {
   );
   clearDeviceDiagnosticsResult();
   renderDeviceDiagnosticsSelection();
-  if (oldJobId) {
-    void trackedFetch(`/api/device-action-jobs/${encodeURIComponent(oldJobId)}`, {
-      method: "DELETE",
-      cache: "no-store",
+}
+
+function isCurrentDiagnostic(invocation) {
+  return deviceDiagnosticsState.invocation === invocation &&
+    invocation.version === deviceDiagnosticsState.invocationVersion;
+}
+
+function diagnosticActivity(invocation, phase,
+    message = "Device diagnostic server state uncertain; check Pending Jobs") {
+  try {
+    recordActivity({
+      category: "job", phase,
+      message,
+      jobId: invocation.jobId,
+      metadata: { action: invocation.action, status: invocation.status },
     });
+  } catch {
+    console.warn("Device diagnostic activity unavailable");
   }
+}
+
+function invalidateDeviceDiagnostic() {
+  const invocation = deviceDiagnosticsState.invocation;
+  deviceDiagnosticsState.invocation = null;
+  if (!invocation) return;
+  invocation.cancelIntent = true;
+  invocation.readController.abort();
+  if (invocation.jobId) void cancelDeviceDiagnostic(invocation, true);
+}
+
+function diagnosticProtocolError() {
+  return new Error("Diagnostic protocol error: invalid server response.");
+}
+
+function validateDiagnosticEnvelope(payload, invocation) {
+  const object = payload && typeof payload === "object" && !Array.isArray(payload);
+  if (!object || payload.job_id !== invocation.jobId ||
+      payload.action !== invocation.action || payload.invocationId !== invocation.id ||
+      !["running", "cancelling", "done", "error", "cancelled"].includes(payload.status)) {
+    throw diagnosticProtocolError();
+  }
+  const result = payload.result;
+  const resultStatuses = [
+    "success", "partial-success", "no-response", "no-addresses", "timed-out",
+    "unsupported", "protocol-error", "transport-failure", "deadline-exceeded",
+    "local-dispatch-failure", "accepted-for-transmission", "failed", "cancelled",
+  ];
+  if ((payload.status === "done" || result !== undefined) &&
+      (!result || typeof result !== "object" || Array.isArray(result) ||
+       result.action !== invocation.action || !resultStatuses.includes(result.status))) {
+    throw diagnosticProtocolError();
+  }
+  return payload;
+}
+
+async function diagnosticRequest(invocation, url, options, signal = null, bound = 15000) {
+  const controller = new AbortController();
+  const startedAt = performance.now();
+  let timer;
+  let onAbort;
+  const stopped = new Promise((_, reject) => {
+    onAbort = () => {
+      reject(new DOMException("Diagnostic read stopped locally.", "AbortError"));
+      controller.abort();
+    };
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+    timer = setTimeout(() => {
+      reject(new Error("Diagnostic local timeout."));
+      controller.abort();
+    }, bound);
+    invocation.timers.add(timer);
+  });
+  const request = (async () => {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      if (response.ok) throw diagnosticProtocolError();
+    }
+    let terminalConflict = false;
+    if (response.status === 409 && options.method === "DELETE") {
+      try {
+        validateDiagnosticEnvelope(payload, invocation);
+        terminalConflict = ["done", "error", "cancelled"].includes(payload.status);
+      } catch {
+        terminalConflict = false;
+      }
+    }
+    if (!response.ok && !terminalConflict) {
+      const detail = typeof payload?.error === "string" ? ` ${payload.error.slice(0, 512)}` : "";
+      throw new Error(`Diagnostic HTTP ${response.status}.${detail}` +
+        (response.status === 404 ? " Job no longer discoverable; cancellation not proven." : ""));
+    }
+    return { response, payload };
+  })();
+  try {
+    const result = await Promise.race([request, stopped]);
+    if (performance.now() - startedAt >= bound) {
+      controller.abort();
+      throw new Error("Diagnostic local timeout.");
+    }
+    return result;
+  } finally {
+    clearTimeout(timer);
+    invocation.timers.delete(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+function diagnosticFailure(invocation, error) {
+  invocation.active = false;
+  invocation.readController.abort();
+  if (!isCurrentDiagnostic(invocation) || invocation.terminal) {
+    if (!invocation.terminal) diagnosticActivity(invocation, "failed");
+    return;
+  }
+  setDeviceDiagnosticsStatus(
+    `${error.message} Result unavailable; server state uncertain. ` +
+    `${invocation.jobId ? `Job ${invocation.jobId}: Cancel or check Pending Jobs.` : "Check Pending Jobs."}`,
+    true,
+  );
+  setDeviceDiagnosticsPending(false);
+}
+
+function finishDeviceDiagnostic(invocation, payload) {
+  invocation.terminal = true;
+  invocation.active = false;
+  invocation.readController.abort();
+  if (!isCurrentDiagnostic(invocation)) return;
+  deviceDiagnosticsState.jobId = null;
+  if (payload.result) renderDeviceDiagnosticResult(payload.result, payload.detail || "");
+  setDeviceDiagnosticsStatus(
+    payload.result ? deviceActionStatusLabel(payload.result.status)
+      : `Server diagnostic ${payload.status}${payload.detail ? `: ${payload.detail}` : "."}`,
+    payload.status === "error" || payload.result?.status === "failed",
+  );
+  setDeviceDiagnosticsPending(false);
+}
+
+async function cancelDeviceDiagnostic(invocation = deviceDiagnosticsState.invocation, automatic = false) {
+  if (!invocation || invocation.terminal) return;
+  invocation.cancelIntent = true;
+  if (invocation.cancelPromise) return invocation.cancelPromise;
+  if (!invocation.jobId) {
+    if (isCurrentDiagnostic(invocation)) {
+      setDeviceDiagnosticsStatus("Cancellation requested; awaiting submission acceptance.");
+      setDeviceDiagnosticsPending(true, true);
+    }
+    return;
+  }
+  if (automatic && invocation.disposalAttempted) return;
+  if (automatic) invocation.disposalAttempted = true;
+  invocation.cancelPromise = (async () => {
+    try {
+      if (isCurrentDiagnostic(invocation)) {
+        setDeviceDiagnosticsStatus("Cancellation requested; server state not yet confirmed.");
+        setDeviceDiagnosticsPending(invocation.active, true);
+      }
+      const { response, payload } = await diagnosticRequest(invocation,
+        `/api/device-action-jobs/${encodeURIComponent(invocation.jobId)}`,
+        { method: "DELETE", cache: "no-store" });
+      validateDiagnosticEnvelope(payload, invocation);
+      if (response.status === 409 && !["done", "error", "cancelled"].includes(payload.status)) {
+        throw diagnosticProtocolError();
+      }
+      if (["done", "error", "cancelled"].includes(payload.status)) {
+        finishDeviceDiagnostic(invocation, payload);
+      } else if (isCurrentDiagnostic(invocation) && !invocation.active &&
+          invocation.acceptedAt !== null) {
+        diagnosticPollRemaining(invocation);
+        invocation.readController = new AbortController();
+        invocation.active = true;
+        setDeviceDiagnosticsPending(true, true);
+        try {
+          await pollDeviceActionJob(invocation);
+        } catch (error) {
+          diagnosticFailure(invocation, error);
+        }
+      }
+    } catch (error) {
+      if (isCurrentDiagnostic(invocation)) {
+        setDeviceDiagnosticsStatus(
+          `Cancellation unconfirmed (${error.message}); server state uncertain. ` +
+          `Job ${invocation.jobId}: retry Cancel or check Pending Jobs.`, true,
+        );
+      } else diagnosticActivity(invocation, "failed");
+    } finally {
+      invocation.cancelPromise = null;
+      if (isCurrentDiagnostic(invocation)) setDeviceDiagnosticsPending(invocation.active);
+    }
+  })();
+  return invocation.cancelPromise;
 }
 
 function appendDiagnosticResultRow(listEl, label, value) {
@@ -2109,54 +2299,66 @@ function renderDeviceDiagnosticResult(result, detail = "") {
   }
 }
 
-async function pollDeviceActionJob(jobId, invocationVersion) {
-  let lastStatus = "running";
-  while (invocationVersion === deviceDiagnosticsState.invocationVersion) {
-    const response = await trackedFetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`, {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    }, "silent");
-    const payload = await response.json().catch(() => ({}));
-    if (invocationVersion !== deviceDiagnosticsState.invocationVersion) return;
-    if (!response.ok) throw new Error(payload.error || `Action polling failed (HTTP ${response.status}).`);
-    if (payload.status !== lastStatus) {
-      lastStatus = payload.status;
-      recordActivity({
-        category: "job",
-        phase: "changed",
-        message: "Device action job status changed",
-        jobId,
-        metadata: { status: payload.status, action: payload.action },
-      });
+function diagnosticPollRemaining(invocation) {
+  const remaining = invocation.deadlineSeconds * 1000 + 30000 -
+    (performance.now() - invocation.acceptedAt);
+  if (remaining <= 0) throw new Error("Diagnostic local polling timeout.");
+  return remaining;
+}
+
+async function diagnosticPollDelay(invocation) {
+  const remaining = diagnosticPollRemaining(invocation);
+  const signal = invocation.readController.signal;
+  let timer;
+  let onAbort;
+  try {
+    await new Promise((resolve, reject) => {
+      onAbort = () => reject(new DOMException("Diagnostic read stopped locally.", "AbortError"));
+      if (signal.aborted) return onAbort();
+      signal.addEventListener("abort", onAbort, { once: true });
+      timer = setTimeout(resolve, Math.min(500, remaining));
+      invocation.timers.add(timer);
+    });
+  } finally {
+    clearTimeout(timer);
+    invocation.timers.delete(timer);
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
+async function pollDeviceActionJob(invocation) {
+  while (isCurrentDiagnostic(invocation) && !invocation.terminal) {
+    const { response, payload } = await diagnosticRequest(invocation,
+      `/api/device-action-jobs/${encodeURIComponent(invocation.jobId)}`, {
+        headers: { Accept: "application/json" }, cache: "no-store",
+      }, invocation.readController.signal, Math.min(15000, diagnosticPollRemaining(invocation)));
+    if (!isCurrentDiagnostic(invocation) || invocation.terminal) return;
+    diagnosticPollRemaining(invocation);
+    if (response.status !== 200) throw diagnosticProtocolError();
+    validateDiagnosticEnvelope(payload, invocation);
+    if (payload.status !== invocation.status) {
+      invocation.status = payload.status;
+      diagnosticActivity(invocation, "changed", "Device action job status changed");
     }
     if (["running", "cancelling"].includes(payload.status)) {
-      const elapsed = deviceDiagnosticsState.startedAt
-        ? formatDuration(Date.now() - deviceDiagnosticsState.startedAt)
-        : "";
       setDeviceDiagnosticsStatus(
         payload.status === "cancelling"
-          ? "Cancelling diagnostic action..."
-          : `Diagnostic running${elapsed ? ` (${elapsed})` : ""}...`,
+          ? "Server cancellation pending..."
+          : invocation.cancelIntent ? "Cancellation requested; server diagnostic still running."
+            : `Diagnostic running (${formatDuration(performance.now() - invocation.acceptedAt)})...`,
       );
-      setDeviceDiagnosticsPending(true, payload.status === "cancelling");
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      setDeviceDiagnosticsPending(true, Boolean(invocation.cancelPromise));
+      await diagnosticPollDelay(invocation);
       continue;
     }
-    const result = payload.result || {
-      action: payload.action,
-      status: payload.status === "cancelled" ? "cancelled" : "failed",
-    };
-    renderDeviceDiagnosticResult(result, payload.detail || "");
-    setDeviceDiagnosticsStatus(deviceActionStatusLabel(result.status), result.status === "failed");
-    deviceDiagnosticsState.jobId = null;
-    setDeviceDiagnosticsPending(false);
+    finishDeviceDiagnostic(invocation, payload);
     return;
   }
 }
 
 async function invokeDeviceDiagnostic(action) {
   const model = deviceDiagnosticsState.model;
-  if (!model || deviceDiagnosticsState.jobId) return;
+  if (!model || deviceDiagnosticsState.invocation?.active) return;
   const target = selectedDiagnosticTarget();
   if (action !== DEVICE_ACTIONS.MATTER_PING && !target) return;
   const invocationVersion = ++deviceDiagnosticsState.invocationVersion;
@@ -2177,6 +2379,17 @@ async function invokeDeviceDiagnostic(action) {
     timeoutSeconds,
     deadlineSeconds: Math.min(600, Math.max(30, attempts * timeoutSeconds + 5)),
   };
+  invalidateDeviceDiagnostic();
+  const invocation = {
+    version: invocationVersion, id: invocationId,
+    targetIdentity: `${model.deviceId}:${target?.address ?? model.nodeId}`,
+    action, submissionStart: performance.now(), deadlineSeconds: payload.deadlineSeconds,
+    jobId: null, acceptedAt: null, active: true, terminal: false,
+    cancelIntent: false, cancelPromise: null, disposalAttempted: false,
+    readController: new AbortController(), timers: new Set(),
+  };
+  deviceDiagnosticsState.invocation = invocation;
+  deviceDiagnosticsState.jobId = null;
   if (action === DEVICE_ACTIONS.MATTER_PING) {
     payload.nodeId = model.nodeId;
   } else {
@@ -2193,30 +2406,45 @@ async function invokeDeviceDiagnostic(action) {
     payload.confirmed = true;
   }
   try {
-    const response = await fetch("/api/device-actions", {
+    const { response, payload: responsePayload } = await diagnosticRequest(invocation, "/api/device-actions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       cache: "no-store",
       body: JSON.stringify(payload),
     });
-    const responsePayload = await response.json().catch(() => ({}));
-    if (invocationVersion !== deviceDiagnosticsState.invocationVersion) return;
-    if (!response.ok) throw new Error(responsePayload.error || `Action failed (HTTP ${response.status}).`);
-    deviceDiagnosticsState.jobId = responsePayload.job_id;
-    recordActivity({
-      category: "job",
-      phase: "started",
-      message: "Device action job started",
-      jobId: responsePayload.job_id,
-      metadata: { action },
-    });
-    await pollDeviceActionJob(responsePayload.job_id, invocationVersion);
+    if (typeof responsePayload?.job_id === "string" && responsePayload.job_id.trim()) {
+      invocation.jobId = responsePayload.job_id;
+      if (isCurrentDiagnostic(invocation)) deviceDiagnosticsState.jobId = invocation.jobId;
+    }
+    try {
+      if (response.status !== 202 || !invocation.jobId) throw diagnosticProtocolError();
+      validateDiagnosticEnvelope(responsePayload, invocation);
+    } catch (error) {
+      if (invocation.jobId && (invocation.cancelIntent || !isCurrentDiagnostic(invocation))) {
+        await cancelDeviceDiagnostic(invocation, true);
+      }
+      throw error;
+    }
+    invocation.acceptedAt = performance.now();
+    invocation.status = responsePayload.status;
+    if (isCurrentDiagnostic(invocation)) {
+      diagnosticActivity(invocation, "started", "Device action job started");
+    }
+    if (invocation.cancelIntent || !isCurrentDiagnostic(invocation)) {
+      const cancellation = cancelDeviceDiagnostic(invocation, !isCurrentDiagnostic(invocation));
+      if (!isCurrentDiagnostic(invocation)) {
+        await cancellation;
+        invocation.active = false;
+        return;
+      }
+    }
+    if (["done", "error", "cancelled"].includes(responsePayload.status)) {
+      finishDeviceDiagnostic(invocation, responsePayload);
+      return;
+    }
+    await pollDeviceActionJob(invocation);
   } catch (error) {
-    if (invocationVersion !== deviceDiagnosticsState.invocationVersion) return;
-    deviceDiagnosticsState.jobId = null;
-    renderDeviceDiagnosticResult({ action, status: "failed" }, error.message);
-    setDeviceDiagnosticsStatus("Diagnostic action failed.", true);
-    setDeviceDiagnosticsPending(false);
+    diagnosticFailure(invocation, error);
   }
 }
 
@@ -2240,6 +2468,9 @@ function initDeviceDiagnostics() {
     selectDeviceDiagnosticsRecord(event.detail?.record ?? null);
   });
   document.getElementById("device-diagnostics-target").addEventListener("change", () => {
+    invalidateDeviceDiagnostic();
+    deviceDiagnosticsState.invocationVersion += 1;
+    deviceDiagnosticsState.jobId = null;
     clearDeviceDiagnosticsResult();
     document.getElementById("device-diagnostics-allow-sed").checked = false;
     document.querySelectorAll('input[name="device-diagnostics-counters"]').forEach((input) => {
@@ -2268,15 +2499,8 @@ function initDeviceDiagnostics() {
       `Reset ${counters.toUpperCase()} counters for ${model.title} at ${target.address}?`,
     )) void invokeDeviceDiagnostic(DEVICE_ACTIONS.OTBR_RESET);
   });
-  document.getElementById("btn-device-diagnostics-cancel").addEventListener("click", async () => {
-    const jobId = deviceDiagnosticsState.jobId;
-    if (!jobId) return;
-    setDeviceDiagnosticsStatus("Cancelling diagnostic action...");
-    setDeviceDiagnosticsPending(true, true);
-    await fetch(`/api/device-action-jobs/${encodeURIComponent(jobId)}`, {
-      method: "DELETE",
-      cache: "no-store",
-    });
+  document.getElementById("btn-device-diagnostics-cancel").addEventListener("click", () => {
+    void cancelDeviceDiagnostic();
   });
   void loadDeviceActionCapabilities();
 }
@@ -4851,7 +5075,13 @@ function resetHealthInsightsForNetworkChange() {
 }
 
 async function refreshHealthAssessment() {
+  const requestVersion = ++healthInsightsState.assessmentRequestVersion;
+  const dataset = currentDataset;
   const entry = currentDataset?.entry;
+  const datasetId = entry?.value;
+  const isCurrent = () => requestVersion === healthInsightsState.assessmentRequestVersion
+    && currentDataset === dataset
+    && currentDataset?.entry?.value === datasetId;
   const previousAssessmentId = healthInsightsState.assessment?.assessmentId;
   const previousNetworkId = healthInsightsState.assessment?.networkId;
   const datasetChanged = healthInsightsState.datasetId !== entry?.value;
@@ -4896,7 +5126,7 @@ async function refreshHealthAssessment() {
   healthAssessmentHistoryState.targetError = "";
   healthAssessmentHistoryState.unsupported = false;
   if (requestedNetworkId) healthAssessmentHistoryState.networkId = requestedNetworkId;
-  if (currentDataset?.entry?.value === entry?.value) currentDataset.healthAssessment = null;
+  if (currentDataset) currentDataset.healthAssessment = null;
   if (currentView === "insights") {
     announceHealthInsight(requestedAssessmentId
       ? "Loading the selected retained assessment."
@@ -4913,7 +5143,6 @@ async function refreshHealthAssessment() {
     return;
   }
 
-  const requestVersion = ++healthInsightsState.assessmentRequestVersion;
   healthInsightsState.loading = true;
   renderHealthStatusSummary();
   renderNetworkInsights();
@@ -4925,7 +5154,7 @@ async function refreshHealthAssessment() {
         ? { networkId: requestedNetworkId, assessmentId: requestedAssessmentId }
         : {},
     );
-    if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    if (!isCurrent()) return;
     if (requestedAssessmentId && (
       assessment.assessmentId !== requestedAssessmentId
       || assessment.networkId !== requestedNetworkId
@@ -4969,7 +5198,7 @@ async function refreshHealthAssessment() {
     if (currentView === "table") renderCurrentView({ force: true });
     try {
       const support = await fetchHealthSupport(assessment.networkId);
-      if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+      if (!isCurrent()) return;
       healthInsightsState.capabilities = support.capabilities;
       healthInsightsState.supportError = "";
       healthInsightsState.observations = support.observations;
@@ -4978,6 +5207,7 @@ async function refreshHealthAssessment() {
           healthAssessmentHistoryState.offset,
           { selectedAssessmentId: assessment.assessmentId },
         );
+        if (!isCurrent()) return;
       } else {
         healthAssessmentHistoryState.unsupported = true;
         healthAssessmentHistoryState.page = null;
@@ -4995,9 +5225,11 @@ async function refreshHealthAssessment() {
               healthInsightsViewState.comparisonIntent,
               { preserveOffset: true, preserveDisclosure: true },
             );
+            if (!isCurrent()) return;
           } else if (healthInsightsState.comparisonEndpointDefaultsPending
               && !healthInsightsState.comparisonEndpointUnavailable) {
             await initializeComparisonEndpoints();
+            if (!isCurrent()) return;
           } else if (!healthInsightsState.comparisonEndpointUnavailable) {
             const endpointRevision = ++healthInsightsState.comparisonEndpointRevision;
             const [afterPage, beforePage] = await Promise.all([
@@ -5011,27 +5243,29 @@ async function refreshHealthAssessment() {
                 })
                 : Promise.resolve(null),
             ]);
+            if (!isCurrent()) return;
             if (afterPage && (beforePage || !healthInsightsViewState.beforeAssessmentId)
                 && endpointRevision === healthInsightsState.comparisonEndpointRevision
                 && !healthInsightsState.comparisonEndpointUnavailable) {
               await loadComparisonEndpointPair(healthInsightsViewState.comparisonItemOffset);
+              if (!isCurrent()) return;
             }
           }
         } else {
           await loadComparisonPage(healthInsightsViewState.comparisonOffset);
+          if (!isCurrent()) return;
         }
       }
     } catch (error) {
-      if (requestVersion === healthInsightsState.assessmentRequestVersion) {
-        healthInsightsState.supportError = error.message;
-        healthAssessmentHistoryState.error =
-          `Retained run history unavailable: ${error.message}`;
-        announceHealthInsight(healthAssessmentHistoryState.error);
-      }
+      if (!isCurrent()) return;
+      healthInsightsState.supportError = error.message;
+      healthAssessmentHistoryState.error =
+        `Retained run history unavailable: ${error.message}`;
+      announceHealthInsight(healthAssessmentHistoryState.error);
       console.warn("Health history metadata is unavailable:", error);
     }
   } catch (error) {
-    if (requestVersion !== healthInsightsState.assessmentRequestVersion) return;
+    if (!isCurrent()) return;
     const selectedUnavailable = Boolean(requestedAssessmentId && error.status === 404);
     healthInsightsState.error = selectedUnavailable
       ? "Selected assessment is no longer retained."
@@ -5053,7 +5287,7 @@ async function refreshHealthAssessment() {
       healthAssessmentHistoryState.targetError = healthInsightsState.error;
     }
   } finally {
-    if (requestVersion === healthInsightsState.assessmentRequestVersion) {
+    if (isCurrent()) {
       const resetComparisonDuringRefresh = healthInsightsState.comparisonResetPendingRefresh;
       healthInsightsState.comparisonResetPendingRefresh = false;
       healthInsightsState.loading = false;

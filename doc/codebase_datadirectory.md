@@ -48,8 +48,13 @@ before the REST subcommand.
   Review and clean up recovery copies explicitly after a schema upgrade is
   verified.
 
-Atomic replacement protects readers from partial files. It does not serialize
-independent writer processes; concurrent external writes remain last-write-wins.
+JSON and text writers use invocation-unique, exclusively created staging files
+in the destination directory, with normal create/umask permissions. Each writer
+closes its staging file before atomic replacement and cleans up only its own
+staging on handled failure. Readers see a complete old or new file; concurrent
+writers follow last-successful-replace-wins semantics, without serializing
+independent processes. This isolates individual writes, not a snapshot/sidecar
+transaction, crash-durable fsync, or cross-host locking.
 
 For `td-<source>-<name>.json`, the sidecar is
 `td-<source>-<name>.network.json`. `util_data.save_final_json()` writes it

@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TypeVar
+from uuid import uuid4
 
 from td_const import (
     TD_DATA_DIR_DOCKER_DEFAULT,
@@ -401,10 +403,31 @@ def create_checkpoint_filename(filename: str) -> str:
     return base_name + TD_CHECKPOINT_FILENAME_SUFFIX
 
 
+@contextmanager
+def _atomic_text_file(filename: str | os.PathLike):
+    staging = f"{os.fspath(filename)}.{uuid4().hex}.tmp"
+    owned = False
+    try:
+        with open(staging, "x", encoding="utf-8") as stream:
+            owned = True
+            yield stream
+        os.replace(staging, filename)
+    except Exception as exc:
+        if owned:
+            try:
+                os.remove(staging)
+            except FileNotFoundError:
+                pass
+            except OSError as cleanup_exc:
+                logging.warning("Failed to clean up staging file %s: %s", staging, cleanup_exc)
+        logging.error("Failed to save %s: %s", filename, exc)
+        raise
+
+
 def save_json_atomic(data, filename: str | os.PathLike, indent: int = 4, add_trailing_newline: bool = False) -> None:
     """Save JSON data to file atomically using temporary file + rename.
     
-    Writes to a temporary .tmp file first, then uses os.replace() to atomically
+    Writes to an exclusive unique sibling first, then uses os.replace() to atomically
     swap it into place. This prevents incomplete JSON from being read by concurrent
     processes if the write is interrupted.
     
@@ -417,21 +440,10 @@ def save_json_atomic(data, filename: str | os.PathLike, indent: int = 4, add_tra
     Raises:
         IOError, json.JSONEncodeError, OSError: On write failure
     """
-    tmp_file = os.fspath(filename) + ".tmp"
-    try:
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=indent)
-            if add_trailing_newline:
-                f.write("\n")
-        os.replace(tmp_file, filename)
-    except Exception as e:
-        # Clean up temporary file if it exists
-        try:
-            os.remove(tmp_file)
-        except FileNotFoundError:
-            pass
-        logging.error(f"Failed to save {filename}: {e}")
-        raise
+    with _atomic_text_file(filename) as stream:
+        json.dump(data, stream, indent=indent)
+        if add_trailing_newline:
+            stream.write("\n")
 
 
 def network_scope_path(filename: str | os.PathLike) -> Path:
@@ -554,16 +566,6 @@ def save_checkpoint_json(
 
 
 def save_text_atomic(text: str, filename: str | os.PathLike) -> None:
-    """Save text atomically using a temporary file and replace."""
-    tmp_file = os.fspath(filename) + ".tmp"
-    try:
-        with open(tmp_file, "w", encoding="utf-8") as file:
-            file.write(text)
-        os.replace(tmp_file, filename)
-    except Exception as exc:
-        try:
-            os.remove(tmp_file)
-        except FileNotFoundError:
-            pass
-        logging.error("Failed to save %s: %s", filename, exc)
-        raise
+    """Save UTF-8 text using exclusive sibling staging and atomic replacement."""
+    with _atomic_text_file(filename) as stream:
+        stream.write(text)

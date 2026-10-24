@@ -4,7 +4,6 @@ import argparse
 import json
 import sys
 import logging
-import time
 import io
 
 from pathlib import Path
@@ -36,20 +35,12 @@ from otbr_restapi_util import (
     DIAG_TLV_CHILDREN,
     DIAG_TLV_CHILD_IPV6_ADDRS,
     DIAG_TLV_ROUTER_NEIGHBORS,
-    FULL_DIAGNOSTIC_TLVS,
-    MESH_DIAGNOSTIC_TLVS,
-    MINIMAL_DIAGNOSTIC_TLVS,
-    BASIC_DIAGNOSTIC_TLVS,
-    RECOMMENDED_DIAGNOSTIC_TLVS,
     CHILD_DIAGNOSTIC_TIMING_POLICY,
     DestinationType,
     OTBRActionError,
-    OTBRActionFailedError,
-    OTBRActionTimeoutError,
     OTBRClientError,
     OTBRConnectionError,
     OTBRHTTPError,
-    OTBRInvalidResponseError,
     OTBRRestApiClient,
     OTBRUsageError,
     redact_sensitive_payload,
@@ -85,11 +76,6 @@ CLI_DEVICE_TASK_TIMEOUT_DEFAULT = 30
 CLI_DIAGNOSTICS_TASK_TIMEOUT_DEFAULT = 15
 CLI_MESH_TASK_TIMEOUT_DEFAULT = 15
 CLI_UPDATE_DEVICE_COLLECTION_TIMEOUT_DEFAULT = 30
-
-# Router-only selection mask/value
-ROUTER_RLOC16_MASK = 0x03FF
-ROUTER_RLOC16_VALUE = 0
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -834,14 +820,6 @@ def _add_topology_commands(
 
 
 # ---------------------------------------------------------------------------
-# Medium TLV preset: RECOMMENDED minus threadStackVersion and mleCounters
-# ---------------------------------------------------------------------------
-_MEDIUM_DIAGNOSTIC_TLVS: list[str] = [
-    t for t in RECOMMENDED_DIAGNOSTIC_TLVS
-    if t not in {"threadStackVersion", "mleCounters"}
-]
-
-# ---------------------------------------------------------------------------
 # MAC Counter Enrichment
 # REST API macCounters keys are camelCase (ifInErrors, ifInUcastPkts, …).
 # Derived fields are emitted in canonical camelCase.
@@ -895,28 +873,6 @@ def _apply_mac_enrichment(diagnostics: list[Any]) -> list[Any]:
 
 
 # ---------------------------------------------------------------------------
-# Progress Reporting
-# ---------------------------------------------------------------------------
-
-def _make_progress_fn(total: int, enabled: bool):
-    """Return a progress callback for fetch_all_devices_* client methods.
-
-    When enabled=True, prints one line per device to stderr:
-        [3/12] aabbccddeeff0011 → completed (2.4s)
-    When enabled=False or total==0, returns None.
-    """
-    if not enabled or total == 0:
-        return None
-
-    def _cb(count: int, total_: int, device_id: str, elapsed: float, status: str) -> None:
-        print(
-            f"[{count}/{total_}] {device_id} \u2192 {status} ({elapsed:.1f}s)",
-            file=sys.stderr,
-        )
-    return _cb
-
-
-# ---------------------------------------------------------------------------
 # Auto-output naming
 # ---------------------------------------------------------------------------
 
@@ -966,133 +922,6 @@ def _auto_output_path(args: argparse.Namespace, data_dir: Path) -> str | None:
     if filename is None:
         return None
     return str(data_dir / filename)
-
-
-# ---------------------------------------------------------------------------
-# Router-only device filter
-# ---------------------------------------------------------------------------
-
-def _filter_router_device_ids(devices: list[Any], device_ids: list[str]) -> list[str]:
-    """Return device IDs whose rloc16 lower-10-bits are zero (router devices).
-
-    Devices whose rloc16 is missing or un-parseable are kept (safe default).
-    """
-    rloc16_by_id: dict[str, int] = {}
-    for d in devices:
-        if not isinstance(d, dict):
-            continue
-        dev_id = d.get("id")
-        rloc16_raw = d.get("rloc16")
-        if dev_id is None or rloc16_raw is None:
-            continue
-        try:
-            rloc16_by_id[dev_id] = (
-                int(rloc16_raw, 16) if isinstance(rloc16_raw, str) else int(rloc16_raw)
-            )
-        except (ValueError, TypeError):
-            pass
-
-    result = []
-    for dev_id in device_ids:
-        rloc16 = rloc16_by_id.get(dev_id)
-        if rloc16 is None or (rloc16 & ROUTER_RLOC16_MASK) == ROUTER_RLOC16_VALUE:
-            result.append(dev_id)
-    return result
-
-
-# ---------------------------------------------------------------------------
-# TLV fallback helpers
-# ---------------------------------------------------------------------------
-
-def _resolve_fallback_types(args: argparse.Namespace) -> list[str | int] | None:
-    """Return the fallback TLV list, or None when --no-fallback is set."""
-    if getattr(args, "no_fallback", False):
-        return None
-    preset = getattr(args, "fallback_preset", "minimal")
-    if preset == "medium":
-        return list(_MEDIUM_DIAGNOSTIC_TLVS)
-    if preset == "basic":
-        return list(BASIC_DIAGNOSTIC_TLVS)
-    return list(MINIMAL_DIAGNOSTIC_TLVS)  # default: minimal
-
-
-def _fetch_device_with_fallback(
-    client: OTBRRestApiClient,
-    device_id: str,
-    primary_types: list[str | int],
-    fallback_types: list[str | int] | None,
-    *,
-    destination_type: str,
-    task_timeout: int,
-    poll_interval: float,
-    poll_timeout: float,
-    raw: object,
-) -> Any:
-    """Fetch diagnostics for one device, retrying with fallback_types on failure."""
-    try:
-        return client.fetch_device_diagnostics(
-            device_id,
-            types=primary_types,
-            destination_type=destination_type,
-            task_timeout=task_timeout,
-            poll_interval=poll_interval,
-            poll_timeout=poll_timeout,
-            raw=raw,
-        )
-    except (OTBRActionFailedError, OTBRActionTimeoutError):
-        if not fallback_types:
-            raise
-        logging.warning(
-            "Device %s failed with primary TLVs; retrying with fallback preset",
-            device_id,
-        )
-        return client.fetch_device_diagnostics(
-            device_id,
-            types=fallback_types,
-            destination_type=destination_type,
-            task_timeout=task_timeout,
-            poll_interval=poll_interval,
-            poll_timeout=poll_timeout,
-            raw=raw,
-        )
-
-
-def _fetch_all_with_fallback(
-    client: OTBRRestApiClient,
-    device_ids: list[str],
-    primary_types: list[str | int],
-    fallback_types: list[str | int] | None,
-    *,
-    destination_type: str,
-    task_timeout: int,
-    poll_interval: float,
-    poll_timeout: float,
-    raw: object,
-    on_progress=None,
-) -> list[Any]:
-    """Fetch diagnostics for all devices with per-device TLV fallback and progress."""
-    results: list[Any] = []
-    total = len(device_ids)
-    for idx, device_id in enumerate(device_ids, start=1):
-        t_start = time.monotonic()
-        status = "completed"
-        try:
-            diag = _fetch_device_with_fallback(
-                client, device_id, primary_types, fallback_types,
-                destination_type=destination_type,
-                task_timeout=task_timeout,
-                poll_interval=poll_interval,
-                poll_timeout=poll_timeout,
-                raw=raw,
-            )
-            results.append(diag)
-        except (OTBRActionFailedError, OTBRActionTimeoutError, OTBRInvalidResponseError) as exc:
-            status = "skipped"
-            logging.warning("Skipping device %s: %s", device_id, exc)
-        elapsed = time.monotonic() - t_start
-        if on_progress is not None:
-            on_progress(idx, total, device_id, elapsed, status)
-    return results
 
 
 def build_client(args: argparse.Namespace) -> OTBRRestApiClient:
@@ -1295,43 +1124,6 @@ def dispatch(client: OTBRRestApiClient, args: argparse.Namespace) -> Any:
         return dispatch_topology(client, args, raw_arg)
 
     raise ValueError("Unsupported CLI command")
-
-
-def _resolve_types(args: argparse.Namespace) -> list[str | int]:
-    """Resolve TLV type list from --preset or --types args. Returns RECOMMENDED_DIAGNOSTIC_TLVS if neither given."""
-    preset = getattr(args, "preset", None)
-    if preset == "recommended":
-        return list(RECOMMENDED_DIAGNOSTIC_TLVS)
-    if preset == "full":
-        return list(FULL_DIAGNOSTIC_TLVS)
-    if preset == "minimal":
-        return list(MINIMAL_DIAGNOSTIC_TLVS)
-    if preset == "basic":
-        return list(BASIC_DIAGNOSTIC_TLVS)
-    types_raw = getattr(args, "types", None)
-    if types_raw:
-        return _parse_typed_values(types_raw)
-    return list(RECOMMENDED_DIAGNOSTIC_TLVS)
-
-
-def _parse_mesh_diag_types(types: list[str]) -> list[str]:
-    """Validate and return mesh-diagnostic TLV names, raising OTBRUsageError for unknown values."""
-    invalid = [t for t in types if t not in MESH_DIAGNOSTIC_TLVS]
-    if invalid:
-        raise OTBRUsageError(
-            f"Invalid mesh-diagnostic TLV(s): {invalid!r}. "
-            f"Allowed: {sorted(MESH_DIAGNOSTIC_TLVS)!r}"
-        )
-    if not types:
-        raise OTBRUsageError(
-            "At least one mesh-diagnostic TLV must be specified")
-    return types
-
-
-def _get_all_device_ids(client: OTBRRestApiClient) -> list[str]:
-    """Retrieve all device IDs from /api/devices."""
-    devices = client.list_devices(raw=False)
-    return [d["id"] for d in devices if isinstance(d, dict) and d.get("id")]
 
 
 def _parse_dataset_input(args: argparse.Namespace) -> dict[str, Any] | str:
