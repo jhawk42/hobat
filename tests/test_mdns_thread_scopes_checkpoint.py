@@ -83,7 +83,7 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
         listener_class.assert_called_once_with(
             include_matter_tcp_supported=True,
             omr_ipv6addr_prefix=None,
-            checkpoint_output_file=self.data_dir / "td-mdns-scopes-thread.partial.json",
+            checkpoint_output_file=self.data_dir.resolve() / "td-mdns-scopes-thread.partial.json",
         )
         browsed_types = [call.args[1] for call in service_browser.call_args_list]
         self.assertEqual(
@@ -132,6 +132,25 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
             {mdns.MDNS_SCOPE_FILENAMES[name] for name in ("thread", "br", "hap", "matter")},
         )
         self.assertTrue(all(call.args[0] == [] for call in save_final_json.call_args_list))
+
+    def test_thread_browse_resolves_relative_and_absolute_data_dirs(self) -> None:
+        absolute_dir = self.data_dir.resolve()
+        relative_dir = Path(os.path.relpath(absolute_dir))
+        for data_dir in (relative_dir, absolute_dir):
+            with self.subTest(data_dir=data_dir), patch.object(self, "data_dir", data_dir):
+                listener_class, _, save_final_json = self._run_mocked_thread_browse(
+                    ["thread"], []
+                )
+
+                self.assertEqual(
+                    listener_class.call_args.kwargs["checkpoint_output_file"],
+                    absolute_dir / "td-mdns-scopes-thread.partial.json",
+                )
+                save_final_json.assert_called_once()
+                self.assertEqual(
+                    Path(save_final_json.call_args.args[1]),
+                    absolute_dir / "td-mdns-scopes-thread.json",
+                )
 
     def test_matter_tcp_support_filter_is_preserved(self) -> None:
         info = SimpleNamespace(properties={b"T": b"1"})
@@ -353,7 +372,7 @@ class TestMDNSCheckpointSnapshots(unittest.TestCase):
         listener_class.assert_called_once_with(
             include_matter_tcp_supported=False,
             omr_ipv6addr_prefix=None,
-            checkpoint_output_file=self.data_dir / "td-mdns-scopes-thread.partial.json",
+            checkpoint_output_file=self.data_dir.resolve() / "td-mdns-scopes-thread.partial.json",
         )
         save_final_json.assert_called_once()
 
