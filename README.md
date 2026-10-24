@@ -1,26 +1,31 @@
 # Hobat - Thread mesh dashboard and tools
 
-Hobat is a Thread network dashboard and command-line toolkit that takes a  cache-first approach for collecting, visualizing, monitoring and troubleshooting. It collects data from dataset sources like OTBR `ot-ctl`, the OTBR REST API, Home Assistant Matter Server, mDNS, Eve exports, and Thread Tools exports. It provides visualizing with the Topology view that shows the Thread network in a number of layout options and the Table view in easy to navigate list. The Health view provides useful insights for Thread network health for eligible datasets.
+Hobat is a Thread network dashboard and command-line toolkit for collecting, visualizing, monitoring, and troubleshooting network data using a cache-first approach. It collects data from OTBR `ot-ctl`, the OTBR REST API, Home Assistant Matter Server, mDNS, Eve exports, and Thread Tools exports. The Topology view displays the network in compact, ring, tree, and hub-and-spoke layouts, while the Table view supports sorting and filtering. The Health view summarizes Thread network health and highlights issues.
 
 [![OTBR CLI topology with a selected device and its details panel alongside the network graph.](https://raw.githubusercontent.com/jhawk42/smarthome/main/hobat/images/hobat-topology-selected-device-thumbnail.png)](https://github.com/jhawk42/smarthome/blob/main/hobat/screenshots.md)
 
 ## Capabilities
 
-- Collector Dataset sources: OTBR CLI, OTBR REST, Home Assistant Matter, mDNS, Eve, Thread Tools and merged datasets.
-- Interactive topology and sortable table views.
-- Multiple visualization for topology layout: mesh compact, mesh ring, mesh tree horizontal, mesh tree vertical and hub spoke.
-- Cache-first model keeps routine analysis off the live mesh. Long diagnostic
-collections can consume time and battery, especially on sleepy end devices, so
-run them deliberately or schedule them (cron) for quiet periods.
-- Canonical identity (rloc16, extAddress) and field normalization across source formats.
-- Atomic snapshot writes and source-level collection serialization.
+- Data sources: OTBR CLI, OTBR REST API, Home Assistant Matter Server, mDNS,
+  Eve exports, and Thread Tools exports, with support for merged datasets.
+- Interactive Topology and sortable, filterable Table views.
+- Topology layouts: compact mesh, ring mesh, horizontal tree, vertical tree,
+  and hub-and-spoke.
+- Search and dataset-dependent filters for nodes, links, and diagnostics.
+- Health view that summarizes network health and highlights issues for
+  supported datasets.
+- Editable device labels saved in the configured data directory.
+- Cache-first operation that keeps routine analysis off the live mesh.
+  Long diagnostic collections can take time and consume device battery,
+  especially on sleepy end devices; run them deliberately or schedule them
+  with cron during quiet periods.
+- Cache-only, Direct-Refresh, and Auto browser modes.
+- Cancellable background collection jobs with a unified pending-jobs view.
 - Progressive rendering from `.partial.json` checkpoints during long jobs.
-- Cache-only, Direct-Refresh and Auto browser modes.
-- Cancellable background collection jobs.
-- Bounded in-memory browser activity logs and a unified pending-jobs view.
-- Search and capability-driven node, link, and diagnostic filters.
-- Health view summarizes network health and highlights issues in eligible datasets.
-- Editable device labels stored in the configured data directory.
+- Bounded in-memory browser activity logs.
+- Consistent device identity (`rloc16`, `extAddress`) and normalized fields
+  across source formats.
+- Atomic snapshot writes and serialized collection jobs per source.
 
 See [Codebase Overview](doc/codebase_overview.md), [Webpage and Server Data
 Flow](doc/codebase_webpage_web_server_data_flow.md), [CLI Reference](doc/help_td_cli.md) and [Screenshots](https://github.com/jhawk42/smarthome/blob/main/hobat/screenshots.md)
