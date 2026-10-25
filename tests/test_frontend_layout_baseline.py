@@ -189,6 +189,28 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
     light = tokens(":root")
     dark = tokens(':root[data-theme="dark"]')
     assert tokens(":root:not([data-theme])") == dark
+    approved_roles = {
+        "router": ("#dcecf8", "#175a9c", "#18354f", "#79b8f3"),
+        "border-router": ("#f8e3cf", "#8b4700", "#442d1b", "#f3b56c"),
+        "child": ("#fff0c2", "#806000", "#3c3218", "#e8c766"),
+        "eve": ("#ddf2ef", "#006b6b", "#143d3d", "#6acaca"),
+        "unknown": ("#e7ebf0", "#5d6672", "#303844", "#b4becc"),
+    }
+    for role, expected in approved_roles.items():
+        assert (
+            light[f"--node-{role}-bg"], light[f"--node-{role}-border"],
+            dark[f"--node-{role}-bg"], dark[f"--node-{role}-border"],
+        ) == expected
+    approved_edges = {
+        "high": ("#00649b", "#70b7ed"),
+        "medium": ("#30343b", "#e5ad55"),
+        "low": ("#b43b24", "#f18e79"),
+        "none": ("#626c7a", "#adb7c5"),
+        "parent-child": ("#934e86", "#d69cc9"),
+        "otbr": ("#00766a", "#65c9b8"),
+    }
+    for quality, expected in approved_edges.items():
+        assert (light[f"--lq-{quality}"], dark[f"--lq-{quality}"]) == expected
 
     def luminance(value: str) -> float:
         rgb = [int(value[index:index + 2], 16) / 255 for index in (1, 3, 5)]

@@ -11,11 +11,11 @@ compatibility colors for pure adaptor consumers, not a second live palette.
 
 | Role | Light background / border | Dark background / border | Shape |
 |---|---|---|---|
-| Border router | `#c8e6c9` / `#287a35` | `#183b2a` / `#79df91` | square |
-| Router | `#d9ecff` / `#1565c0` | `#1e3a5f` / `#4a90d9` | hexagon |
-| FTD/MTD child | `#fff4cc` / `#947000` | `#3d3000` / `#f0c040` | dot |
-| Eve fallback | `#e8f5e9` / `#2e7d32` | `#1a3a1a` / `#66bb6a` | adaptor-selected |
-| Unknown | `#f2f2f2` / `#808080` | `#2a2a2a` / `#9e9e9e` | dot |
+| Border router | `#f8e3cf` / `#8b4700` | `#442d1b` / `#f3b56c` | square |
+| Router | `#dcecf8` / `#175a9c` | `#18354f` / `#79b8f3` | hexagon |
+| FTD/MTD child | `#fff0c2` / `#806000` | `#3c3218` / `#e8c766` | dot |
+| Eve fallback | `#ddf2ef` / `#006b6b` | `#143d3d` / `#6acaca` | adaptor-selected |
+| Unknown | `#e7ebf0` / `#5d6672` | `#303844` / `#b4becc` | dot |
 
 All topology adaptors share the same role emphasis: border routers use
 `borderWidth: 5` and `size: 45`, routers use `borderWidth: 3` and `size: 45`,
@@ -28,12 +28,21 @@ source data.
 
 | Relationship | Light / dark color | Width | Pattern |
 |---|---|---:|---|
-| LQ3/high | `#007873` / `#55c9c0` | 12 | solid |
-| LQ2/medium | `#a74700` / `#ffb36b` | 8 | dashed |
-| LQ1/low | `#c62828` / `#ff6b6b` | 4 | dashed |
-| No LQ | `#68717d` / `#a0a0a0` | 4 | solid |
-| Parent-child | `#a53d80` / `#f084d7` | 8 | solid |
-| OTBR/router-neighbor | `#087c53` / `#4ade80` | 4 | solid |
+| LQ3/high | `#00649b` / `#70b7ed` | 12 | solid |
+| LQ2/medium | `#30343b` / `#e5ad55` | 8 | dashed |
+| LQ1/low | `#b43b24` / `#f18e79` | 4 | dashed |
+| No LQ | `#626c7a` / `#adb7c5` | 4 | solid |
+| Parent-child | `#934e86` / `#d69cc9` | 8 | solid |
+| OTBR/router-neighbor | `#00766a` / `#65c9b8` | 4 | solid |
+
+The approved Light quality sequence is blue / charcoal / rust. Medium is
+intentionally charcoal in Light and amber in Dark. Border-router orange is role
+identity, not Moderate health. This colors-only revision preserves existing
+shapes, widths, dashes, opacity and interaction/health/search treatments.
+Colors alone do not certify red-green color-blind accessibility: Medium and
+Low still share a dash pattern, Medium and No LQ share neutral hues, thin
+fit-zoom strokes can be hard to trace, and hover can replace quality colors.
+Distinct patterns and separate role-preserving state cues remain follow-up work.
 
 Adaptors attach relationship categories and an `lqLevel`; filters use those
 semantic values rather than inspecting colors. Presentation-only `themeRole`

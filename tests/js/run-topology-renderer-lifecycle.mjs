@@ -1,18 +1,30 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   createTopologyEventBindings,
   createTopologyRenderOwner,
+  createTopologyViewModel,
+  projectTopologyTheme,
 } from "../../src/js/tdash-topology-view-model.js";
 import { decorateTopologyNavigation, isSecondaryRouterRouteEdge, readThemePalette } from "../../src/js/tdash-topology-renderer.js";
 
 const root = { dataset: { theme: "light" } };
 globalThis.document = { documentElement: root };
+const css = readFileSync(new URL("../../src/tdash.css", import.meta.url), "utf8");
+function cssTokens(selector) {
+  const start = css.indexOf(`${selector} {`);
+  assert.ok(start >= 0);
+  const block = css.slice(start, css.indexOf("}", start));
+  return Object.fromEntries([...block.matchAll(/(--[\w-]+):\s*(#[0-9a-f]{6})/g)]
+    .map((match) => [match[1], match[2]]));
+}
+const tokens = { light: cssTokens(":root"), dark: cssTokens(':root[data-theme="dark"]') };
 let paletteReads = 0;
 let missingToken = null;
 globalThis.getComputedStyle = () => {
   paletteReads += 1;
-  return { getPropertyValue: (token) => token === missingToken ? "" : "#123456" };
+  return { getPropertyValue: (token) => token === missingToken ? "" : tokens[root.dataset.theme][token] };
 };
 globalThis.CSS = { supports: (_property, value) => /^#[0-9a-f]{6}$/.test(value) };
 const lightPalette = readThemePalette();
@@ -26,6 +38,56 @@ missingToken = null;
 const darkPalette = readThemePalette();
 assert.notEqual(darkPalette, lightPalette);
 assert.equal(readThemePalette(), darkPalette);
+
+const roleTokens = {
+  router: "--node-router", borderRouter: "--node-border-router", child: "--node-child",
+  eve: "--node-eve", unknown: "--node-unknown",
+};
+const edgeTokens = {
+  lqHigh: "--lq-high", lqMedium: "--lq-medium", lqLow: "--lq-low", lqNone: "--lq-none",
+  lqParentChild: "--lq-parent-child", lqOtbr: "--lq-otbr",
+};
+const colorFixture = createTopologyViewModel({
+  nodeData: Object.keys(roleTokens).map((role) => ({
+    id: role, themeRole: role, shape: role === "router" ? "hexagon" : "dot",
+    x: 12, y: 34, size: 27, physics: false, borderWidth: 3,
+    font: { size: 13, face: "monospace" },
+  })),
+  edgeData: Object.keys(edgeTokens).map((key) => ({
+    id: key, themeColorKey: key, from: "router", to: "child",
+    width: key === "lqHigh" ? 12 : 4, dashes: key === "lqMedium" || key === "lqLow" ? [5, 5] : false,
+    color: { opacity: 0.6 }, physics: false,
+  })),
+});
+const originalFixture = JSON.stringify([colorFixture.nodes, colorFixture.edges]);
+let currentFixture = colorFixture;
+for (const [theme, palette] of [["light", lightPalette], ["dark", darkPalette], ["light", lightPalette]]) {
+  const projection = projectTopologyTheme(currentFixture, palette, "canonical", null);
+  for (const [role, token] of Object.entries(roleTokens)) {
+    const patch = projection.nodeUpdates.find((node) => node.id === role);
+    assert.equal(palette[`${role}Bg`], tokens[theme][`${token}-bg`]);
+    assert.equal(patch.color.background, tokens[theme][`${token}-bg`]);
+    assert.equal(patch.color.border, tokens[theme][`${token}-border`]);
+    assert.equal(patch.color.highlight.border, palette.selectedBorder);
+    assert.equal(patch.color.hover.border, palette.hoverBorder);
+    assert.equal(patch.font.size, 13);
+    assert.equal(patch.borderWidth, 3);
+    assert.deepEqual(Object.keys(patch).sort(), ["borderWidth", "color", "font", "id"]);
+  }
+  for (const [key, token] of Object.entries(edgeTokens)) {
+    const patch = projection.edgeUpdates.find((edge) => edge.id === key);
+    assert.equal(palette[key], tokens[theme][token]);
+    assert.equal(patch.color.color, tokens[theme][token]);
+    assert.equal(patch.color.opacity, 0.6);
+    assert.equal(patch.color.highlight, palette.selectedBorder);
+    assert.equal(patch.color.hover, palette.hoverBorder);
+    assert.deepEqual(Object.keys(patch).sort(), ["color", "id"]);
+  }
+  assert.equal(projection.viewModel.nodes, colorFixture.nodes);
+  assert.equal(projection.viewModel.edges, colorFixture.edges);
+  assert.equal(JSON.stringify([projection.viewModel.nodes, projection.viewModel.edges]), originalFixture);
+  currentFixture = projection.viewModel;
+}
 
 const navigationControls = new Map();
 const navBindings = createTopologyEventBindings();
