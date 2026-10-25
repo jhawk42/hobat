@@ -190,7 +190,7 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
     dark = tokens(':root[data-theme="dark"]')
     assert tokens(":root:not([data-theme])") == dark
     approved_roles = {
-        "router": ("#dcecf8", "#175a9c", "#18354f", "#79b8f3"),
+        "router": ("#dcecf8", "#4b4237", "#18354f", "#f2ede3"),
         "border-router": ("#f8e3cf", "#8b4700", "#442d1b", "#f3b56c"),
         "child": ("#fff0c2", "#806000", "#3c3218", "#e8c766"),
         "eve": ("#ddf2ef", "#006b6b", "#143d3d", "#6acaca"),
@@ -629,7 +629,10 @@ def test_device_status_close_button_toggles_functions_panel() -> None:
     assert 'class="device-status-close"' in html
     assert "#device-status > legend" in css
     assert "justify-content: space-between;" in css
-    assert ".device-status-close" in css
+    header = re.search(r"#device-status > legend\s*\{([^}]+)\}", css)
+    assert header is not None
+    assert "padding: 10px;" in header[1]
+    assert re.search(r"\.device-status-close\s*\{", css) is None
     assert (
         'document.getElementById("btn-functions-panel-toggle")?.addEventListener("click", toggleFunctionsPanel);'
         in ui_text
@@ -691,7 +694,9 @@ def test_device_details_heading_close_uses_shared_cleanup_and_restores_focus() -
 
     ui_text = _read_text(UI_JS)
     assert "closeDeviceDetailsPanel({ restoreFocus: true })" in ui_text
-    assert 'document.getElementById("btn-device-details-close")?.addEventListener("click", () => {' in ui_text
+    assert "btn-device-details-close" not in _read_text(HTML)
+    assert "btn-device-details-close" not in ui_text
+    assert 'id="btn-back-to-health-finding"' in _read_text(HTML)
     close_action_start = ui_text.index("function closeDeviceDetailsPanel")
     close_action_end = ui_text.index("\n}\n", close_action_start)
     close_action_source = ui_text[close_action_start:close_action_end]
@@ -705,9 +710,6 @@ def test_device_details_heading_close_uses_shared_cleanup_and_restores_focus() -
     assert invalidation < selected_device_clear < roster_detail_clear < selection_class_clear < collapse
     assert collapse < restore_focus
     assert 'document.getElementById("btn-details-panel-toggle")?.focus()' in close_action_source
-    assert "closeDeviceDetailsPanel();" in ui_text[ui_text.index(
-        'document.getElementById("btn-device-details-close")?.addEventListener("click", () => {'
-    ):]
 
 
 def test_insights_activation_collapses_context_details_panel() -> None:

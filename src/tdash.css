@@ -22,7 +22,7 @@
 
   /* Topology node colors */
   --node-router-bg: #dcecf8;
-  --node-router-border: #175a9c;
+  --node-router-border: #4b4237;
   --node-border-router-bg: #f8e3cf;
   --node-border-router-border: #8b4700;
   --node-child-bg: #fff0c2;
@@ -81,7 +81,7 @@
   --lq-otbr: #65c9b8;
   --lq-none: #adb7c5;
   --node-router-bg: #18354f;
-  --node-router-border: #79b8f3;
+  --node-router-border: #f2ede3;
   --node-border-router-bg: #442d1b;
   --node-border-router-border: #f3b56c;
   --node-child-bg: #3c3218;
@@ -503,6 +503,7 @@ body {
 }
 
 #device-status > legend {
+  padding: 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -526,13 +527,6 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-}
-
-.device-status-close {
-  padding: 2px 7px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.2;
 }
 
 #panel-dataset-inner {
@@ -3493,7 +3487,7 @@ td:last-child {
 
     /* Topology node colors — lighter fills on dark bg */
     --node-router-bg: #18354f;
-    --node-router-border: #79b8f3;
+    --node-router-border: #f2ede3;
     --node-border-router-bg: #442d1b;
     --node-border-router-border: #f3b56c;
     --node-child-bg: #3c3218;

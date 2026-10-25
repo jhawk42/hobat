@@ -12,7 +12,7 @@ compatibility colors for pure adaptor consumers, not a second live palette.
 | Role | Light background / border | Dark background / border | Shape |
 |---|---|---|---|
 | Border router | `#f8e3cf` / `#8b4700` | `#442d1b` / `#f3b56c` | square |
-| Router | `#dcecf8` / `#175a9c` | `#18354f` / `#79b8f3` | hexagon |
+| Router | `#dcecf8` / `#4b4237` | `#18354f` / `#f2ede3` | hexagon |
 | FTD/MTD child | `#fff0c2` / `#806000` | `#3c3218` / `#e8c766` | dot |
 | Eve fallback | `#ddf2ef` / `#006b6b` | `#143d3d` / `#6acaca` | adaptor-selected |
 | Unknown | `#e7ebf0` / `#5d6672` | `#303844` / `#b4becc` | dot |
@@ -23,6 +23,10 @@ and child or unknown nodes use `borderWidth: 1` and `size: 27`. This includes
 ha-matter-ws commissioned, native, and merged topology nodes. Adaptors may
 still select different labels, fonts, and role classifications based on their
 source data.
+
+Router outlines use warm graphite in Light and warm white in Dark to separate
+hexagons from dense blue High-LQ links. Fills, geometry and interaction colors
+are unchanged; border-to-fill contrast is 8.15:1 in Light and 10.84:1 in Dark.
 
 ## Edge Styles
 

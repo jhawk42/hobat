@@ -5901,10 +5901,6 @@ function closeDeviceDetailsPanel({ restoreFocus = false } = {}) {
   }
 }
 
-document.getElementById("btn-device-details-close")?.addEventListener("click", () => {
-  closeDeviceDetailsPanel();
-});
-
 // Cache checkbox helper: make checkboxes mutually exclusive
 function updateCacheCheckboxes(changedCheckbox) {
   const chkAutoFetch = document.getElementById("chk-auto-fetch");

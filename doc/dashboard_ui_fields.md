@@ -26,6 +26,17 @@ Settings mirrors the notice without a duplicate announcement.
 If the bootstrap cannot load, controls stay disabled and the stylesheet
 continues to follow system appearance.
 
+## Panel Close Controls
+
+Device details has one close button in its heading, separate from the device
+view tabs and Settings. Closing retains the shared selection cleanup and
+returns keyboard focus to the details-panel reopen toggle. **Back to finding**
+remains a separate navigation action.
+
+The Devices header close button collapses the Functions panel, not Device
+details. It uses the same standard button styling as the details heading close
+button and a 10 px header inset.
+
 ## Field Authority
 
 `src/js/tdash-device-fields.js` owns the browser's maintained field definitions,
