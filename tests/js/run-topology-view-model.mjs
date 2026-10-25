@@ -10,8 +10,19 @@ import {
   createTopologySearchState,
   createTopologyViewModel,
   resolveTopologyNodeId,
+  projectTopologyTheme,
 } from "../../src/js/tdash-topology-view-model.js";
 import { buildDeviceProjections } from "../../src/js/tdash-device-projection.js";
+import { addEdge } from "../../src/js/tdash-topology-utils.js";
+import { EDGE_LQ_STYLES } from "../../src/js/tdash-constants.js";
+
+const mergeEdges = [];
+const mergeMap = new Map();
+addEdge(mergeMap, mergeEdges, "a", "b", { ...EDGE_LQ_STYLES.low, linkCategories: ["otbr_child"] });
+addEdge(mergeMap, mergeEdges, "a", "b", { ...EDGE_LQ_STYLES.high, linkCategories: ["router_neighbor"] });
+assert.equal(mergeEdges[0].themeColorKey, "lqHigh");
+addEdge(mergeMap, mergeEdges, "a", "b", { ...EDGE_LQ_STYLES.high, themeColorKey: "lqOtbr" });
+assert.equal(mergeEdges[0].themeColorKey, "lqHigh");
 
 const router = {
   id: "router-a",
@@ -93,6 +104,65 @@ const searchState = createTopologySearchState("desk", false, viewModel);
 const highlight = computeSearchHighlight(viewModel, searchState);
 assert.equal(highlight.focusTarget, child.id);
 assert.equal(highlight.nodeUpdates.find((update) => update.id === child.id).borderWidth, 4);
+
+const palette = Object.fromEntries(
+  ["router", "borderRouter", "child", "eve", "unknown"].flatMap((role) => [
+    [`${role}Bg`, "#ffffff"], [`${role}Border`, "#333333"],
+  ]),
+);
+Object.assign(palette, {
+  labelText: "#111111", labelBg: "#eeeeee", selectedBorder: "#800080", hoverBorder: "#000000",
+  searchMatch: "#995500", searchDimBg: "#cccccc", searchDimBorder: "#777777", searchDimText: "#444444",
+  healthPoor: "#990000", healthPoorBg: "#ffeeee", lqParentChild: "#aa2288", lqNone: "#666666",
+});
+const health = new Map([["extaddr:bbbbbbbbbbbbbbbb", "poor"]]);
+const beforeTheme = JSON.stringify(viewModel.nodes);
+const canonicalTheme = projectTopologyTheme(viewModel, palette, "canonical", searchState, health);
+assert.ok(Object.isFrozen(canonicalTheme.viewModel));
+assert.equal(canonicalTheme.viewModel.nodes, viewModel.nodes);
+assert.equal(canonicalTheme.viewModel.edgeIndexes, viewModel.edgeIndexes);
+assert.equal(canonicalTheme.viewModel.rawByIdForDetails, viewModel.rawByIdForDetails);
+assert.equal(canonicalTheme.nodeUpdates.find((node) => node.id === child.id).color.border, palette.healthPoor);
+assert.equal(canonicalTheme.edgeUpdates[0].color.color, palette.lqParentChild);
+assert.equal(canonicalTheme.nodeUpdates[0].font.color, palette.labelText);
+assert.equal(JSON.stringify(viewModel.nodes), beforeTheme);
+const searchTheme = projectTopologyTheme(canonicalTheme.viewModel, palette, "search", searchState, health);
+assert.equal(searchTheme.nodeUpdates.find((node) => node.id === child.id).color.border, palette.searchMatch);
+assert.equal(searchTheme.nodeUpdates.find((node) => node.id === router.id).color.background, palette.searchDimBg);
+const restored = projectTopologyTheme(searchTheme.viewModel, palette, "canonical", searchState, health);
+assert.deepEqual(restored.nodeUpdates, canonicalTheme.nodeUpdates);
+const alternate = Object.fromEntries(Object.entries(palette).map(([key]) => [key, "#123456"]));
+const cycled = projectTopologyTheme(
+  projectTopologyTheme(canonicalTheme.viewModel, alternate, "canonical", searchState, health).viewModel,
+  palette, "canonical", searchState, health,
+);
+assert.deepEqual(cycled.nodeUpdates, canonicalTheme.nodeUpdates);
+assert.deepEqual(cycled.edgeUpdates, canonicalTheme.edgeUpdates);
+assert.equal(Object.keys(canonicalTheme.nodeUpdates[0]).some((key) => ["hidden", "physics", "x", "y", "label"].includes(key)), false);
+const profileViewModel = createTopologyViewModel({
+  nodeData: [{
+    id: "font-metrics", themeRole: "eve",
+    font: { size: 19.5, face: "monospace", multi: "md", vadjust: -8 },
+  }],
+  edgeData: [
+    { id: "quality-child", isParentChild: true, themeColorKey: "lqHigh", color: { color: "#000000", opacity: 0.16 }, width: 0.45, physics: false },
+    { id: "anchor", baseHidden: true, color: { opacity: 0 }, hidden: true, physics: true },
+    { id: "unclassified" },
+    { id: "category-child", linkCategories: ["eve_child"] },
+  ],
+});
+const projectedProfile = projectTopologyTheme(profileViewModel, { ...palette, lqHigh: "#008080" }, "canonical", null);
+assert.equal(projectedProfile.edgeUpdates.length, 3);
+assert.equal(projectedProfile.edgeUpdates[0].color.color, "#008080");
+assert.equal(projectedProfile.edgeUpdates[0].color.opacity, 0.16);
+assert.equal(projectedProfile.edgeUpdates[1].color.color, palette.lqNone);
+assert.equal(projectedProfile.edgeUpdates[2].color.color, palette.lqParentChild);
+assert.deepEqual(projectedProfile.viewModel.originalEdgeStyling.get("anchor"), { color: { opacity: 0 } });
+assert.equal(projectedProfile.nodeUpdates[0].font.size, 19.5);
+assert.equal(projectedProfile.nodeUpdates[0].font.face, "monospace");
+assert.equal(projectedProfile.nodeUpdates[0].font.multi, "md");
+assert.equal(projectedProfile.nodeUpdates[0].font.vadjust, -8);
+assert.deepEqual(Object.keys(projectedProfile.edgeUpdates[0]).sort(), ["color", "id"]);
 
 const details = buildTopologyDetails(viewModel, router.id);
 assert.equal(details.isFtdRouter, true);

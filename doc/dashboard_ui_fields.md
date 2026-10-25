@@ -4,6 +4,28 @@ The dashboard accepts source-specific records from OTBR CLI, OTBR REST, mDNS,
 Eve, Thread Tools, and merged snapshots. Field availability depends on the
 selected dataset.
 
+## Appearance Controls
+
+The **Theme** cycle buttons in the header (`theme-toggle`) and
+**Settings > Appearance** (`settings-theme-toggle`) share one browser-local
+preference. Click, Enter, or Space cycles **System (◑) -> Light (☼) -> Dark (☾)
+-> System**. The monochrome icon shows the current policy and inherits the
+button's text color. System follows the OS/browser and is the default.
+The buttons are icon-only, without a persistent "Theme" text label. Each
+button's native hover tooltip and accessible name report the current and next mode;
+System also includes the effective light/dark mode.
+Explicit modes ignore OS changes. Both controls update immediately without
+moving focus, changing views, or refreshing evidence.
+
+The early [appearance controller](../src/js/tdash-theme.js) stores only the
+policy in `tdash.themePreference`. Same-origin storage changes synchronize tabs;
+removing that key restores System without affecting other preferences.
+An invalid stored value recovers to System with a warning; unavailable storage
+keeps a page-only choice. The header `theme-status` is the sole live announcer;
+Settings mirrors the notice without a duplicate announcement.
+If the bootstrap cannot load, controls stay disabled and the stylesheet
+continues to follow system appearance.
+
 ## Field Authority
 
 `src/js/tdash-device-fields.js` owns the browser's maintained field definitions,

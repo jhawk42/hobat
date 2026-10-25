@@ -152,6 +152,82 @@ def test_approved_target_layout_panel_ids_are_present() -> None:
         assert f'id="{panel_id}"' in html
 
 
+def test_appearance_bootstrap_and_controls() -> None:
+    html = _read_text(HTML)
+    parser = _IdParentParser()
+    parser.feed(html)
+    assert html.index('src="js/tdash-theme.js"') < html.index('src="js/depend/vis-network.min.js"')
+    assert html.index('src="js/tdash-theme.js"') < html.index('href="tdash.css"')
+    assert parser.parent_by_id["header-appearance"] == "panel-title"
+    for control in ("theme-toggle", "settings-theme-toggle"):
+        assert parser.tag_by_id[control] == "button"
+        assert parser.attributes_by_id[control]["type"] == "button"
+        assert "disabled" in parser.attributes_by_id[control]
+        assert parser.attributes_by_id[control]["aria-label"] == "Theme: System"
+        assert parser.attributes_by_id[control]["title"] == "Theme: System (follows device appearance)"
+        assert "aria-pressed" not in parser.attributes_by_id[control]
+    assert "<span>Theme</span>" not in html
+    assert html.count('class="theme-toggle-icon" aria-hidden="true">&#9681;') == 2
+    assert 'id="theme-select"' not in html
+    assert 'id="settings-theme-select"' not in html
+    assert parser.attributes_by_id["theme-status"]["role"] == "status"
+    assert "role" not in parser.attributes_by_id["settings-theme-status"]
+    css = _read_text(CSS)
+    assert ':root[data-theme="dark"]' in css
+    assert ':root:not([data-theme])' in css
+    assert ".appearance-controls" in css
+
+
+def test_appearance_palette_contrast_and_fallback_parity() -> None:
+    css = _read_text(CSS)
+
+    def tokens(selector: str) -> dict[str, str]:
+        block = re.search(re.escape(selector) + r"\s*\{([^}]+)\}", css)
+        assert block is not None
+        return dict(re.findall(r"(--[\w-]+):\s*(#[0-9a-fA-F]{6})\s*;", block[1]))
+
+    light = tokens(":root")
+    dark = tokens(':root[data-theme="dark"]')
+    assert tokens(":root:not([data-theme])") == dark
+
+    def luminance(value: str) -> float:
+        rgb = [int(value[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+        linear = [
+            channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+            for channel in rgb
+        ]
+        return sum(channel * weight for channel, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+    for palette in (light, light | dark):
+        pairs = [
+            ("--text", "--surface", 4.5),
+            ("--muted", "--surface-stripe", 4.5),
+            ("--action-text", "--action-bg", 4.5),
+            ("--action-bg", "--surface", 3),
+            ("--text-on-selected", "--surface-selected", 4.5),
+            ("--text-heading", "--accent-soft", 4.5),
+            ("--topology-label-text", "--topology-label-bg", 4.5),
+            ("--topology-search-dim-text", "--topology-search-dim-bg", 4.5),
+            ("--control-border", "--surface", 3),
+            ("--focus-ring", "--surface", 3),
+        ]
+        for role in ("router", "border-router", "child", "eve", "unknown"):
+            pairs.append((f"--node-{role}-border", f"--node-{role}-bg", 3))
+            pairs.append((f"--node-{role}-border", "--surface", 3))
+        for quality in ("high", "medium", "low", "none", "parent-child", "otbr"):
+            pairs.append((f"--lq-{quality}", "--surface", 4.5))
+        for status in ("poor", "moderate", "strong", "unknown"):
+            pairs.append((f"--health-{status}", f"--health-{status}-bg", 4.5))
+            pairs.append((f"--health-{status}", "--surface", 4.5))
+        for foreground, background, threshold in pairs:
+            values = sorted((luminance(palette[foreground]), luminance(palette[background])))
+            assert (values[1] + 0.05) / (values[0] + 0.05) >= threshold, (foreground, background)
+    assert "transition: background" not in css
+    thread_headers = re.search(r"\.thread-network-table th\s*\{([^}]+)\}", css)
+    assert thread_headers is not None
+    assert "color:" not in thread_headers[1]
+
+
 def test_semantic_layout_and_workspace_hierarchy() -> None:
     parser = _IdParentParser()
     parser.feed(_read_text(HTML))

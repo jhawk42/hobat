@@ -126,6 +126,7 @@ function registerHaMatterRow(row, index, {
       title: buildNodeHoverLabel(canonicalRow),
       shape,
       color,
+      themeRole: isBorderRouter ? "borderRouter" : isChild ? "child" : isRouter ? "router" : "unknown",
       font: buildNodeLabelFont({ fontSize: isRouter ? 19.5 : 13, isRouter }),
       ...buildRoleNodeEmphasis({ isBorderRouter, isRouter }),
       isRouter,
@@ -179,6 +180,7 @@ function resolveRawRelationshipTarget(ownerId, entry, {
       title: buildNodeHoverLabel(target),
       shape: NODE_SHAPES.router,
       color: NODE_COLORS.eve,
+      themeRole: "eve",
       font: buildNodeLabelFont({ fontSize: 13, isRouter: false }),
       ...buildRoleNodeEmphasis({ isBorderRouter: false, isRouter: false }),
       isRouter: false,
@@ -383,10 +385,10 @@ export function adaptHaMatterWs(
 
 function nativeStrengthStyle(strength) {
   switch (toText(strength).toLowerCase()) {
-    case 'strong': return { width: 12, color: PALETTE.lqHigh, dashes: false, lqLevel: 3 };
-    case 'medium': return { width: 8, color: PALETTE.lqMedium, dashes: true, lqLevel: 2 };
-    case 'weak': return { width: 4, color: PALETTE.lqLow, dashes: true, lqLevel: 1 };
-    default: return { width: 4, color: PALETTE.lqNone, dashes: strength === 'unknown', lqLevel: 0 };
+    case 'strong': return { width: 12, color: PALETTE.lqHigh, themeColorKey: "lqHigh", dashes: false, lqLevel: 3 };
+    case 'medium': return { width: 8, color: PALETTE.lqMedium, themeColorKey: "lqMedium", dashes: true, lqLevel: 2 };
+    case 'weak': return { width: 4, color: PALETTE.lqLow, themeColorKey: "lqLow", dashes: true, lqLevel: 1 };
+    default: return { width: 4, color: PALETTE.lqNone, themeColorKey: "lqNone", dashes: strength === 'unknown', lqLevel: 0 };
   }
 }
 
@@ -423,6 +425,7 @@ function nativeTopologyNodeRecord(node) {
 
 function nativeTopologyNodePresentation(node) {
   return {
+    themeRole: node.isBorderRouter ? "borderRouter" : node.isChild ? "child" : node.isRouter ? "router" : "unknown",
     label: buildLabel(node),
     title: buildNodeHoverLabel(node),
     shape: node.isBorderRouter ? NODE_SHAPES.borderRouter : (node.isChild ? NODE_SHAPES.child : (node.isRouter ? NODE_SHAPES.router : NODE_SHAPES.unknown)),
@@ -474,6 +477,7 @@ export function adaptHaMatterWsNativeThread(
       sourceName,
       nodeRecord: canonicalRow,
       presentation: {
+        themeRole: isBorderRouter ? "borderRouter" : isRouter ? "router" : "unknown",
         label: buildLabel(canonicalRow),
         title: buildNodeHoverLabel(canonicalRow),
         shape: isBorderRouter

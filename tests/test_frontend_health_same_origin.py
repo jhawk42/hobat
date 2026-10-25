@@ -2439,8 +2439,10 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert "setTopologyHealthFindings(findings, healthTopologyColoringEnabled && matchingAssessment !== null)" in ui_js
     assert "applyHealthAssessmentPresentation(assessment)" in ui_js
     assert "applyHealthAssessmentPresentation(null)" in ui_js
-    assert "HEALTH_BACKGROUND_COLORS" in topology_js
-    assert "background: HEALTH_BACKGROUND_COLORS[status]" in topology_js
+    view_model_js = (ROOT / "src/js/tdash-topology-view-model.js").read_text(encoding="utf-8")
+    assert "projectTopologyTheme(viewModel, palette, styleMode, currentSearchState, _healthStatusByDeviceId)" in topology_js
+    assert 'background: palette[`health${status[0].toUpperCase()}${status.slice(1)}Bg`]' in view_model_js
+    assert "--health-poor-bg" in css
     view_toolbar = html.split('<div class="view-toggle-bar">', 1)[1].split(
       '<div id="view-status-line-panel"', 1,
     )[0]
@@ -2475,8 +2477,8 @@ def test_health_workflow_controls_and_navigation_contract_are_present() -> None:
     assert "setTopologyHealthFindings" in ui_js
     assert "setTableHealthFindings" in ui_js
     assert 'replace(/^extAddress:/, "extaddr:")' in table_js
-    assert 'replace(/^extAddress:/, "extaddr:")' in topology_js
-    assert "viewModel.rawByIdForDetails.get(nodeId)" in topology_js
+    assert 'replace(/^extAddress:/, "extaddr:")' in view_model_js
+    assert "viewModel.rawByIdForDetails.get(patch.id)" in view_model_js
     assert "function insertHealthColumns(columns)" in table_js
     assert "if (!_tableHealthColumnsEnabled || !_tableHealthAvailable) return ordered;" in table_js
     assert "ordered.splice(insertAt, 0, ...HEALTH_COLUMNS);" in table_js

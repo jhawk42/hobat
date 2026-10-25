@@ -1,6 +1,8 @@
 import {
   EDGE_CATEGORY_DEFAULT_CHILDREN,
   EDGE_CATEGORY_OTBR_CHILD,
+  EDGE_CATEGORY_EVE_CHILD,
+  EDGE_CATEGORY_EVE_NATIVE_CHILD,
   EDGE_CATEGORY_ROUTER_NEIGHBOR,
   DIAGNOSTIC_FILTER_OPTIONS,
 } from "./tdash-constants.js";
@@ -144,6 +146,7 @@ export function createTopologyViewModel(
     identityToNodeId,
     projectionByNodeId,
     originalNodeStyling: new Map(nodes.map((node) => [node.id, cloneNodeStyle(node)])),
+    originalEdgeStyling: new Map(edges.map((edge) => [edge.id, Object.freeze({ color: cloneValue(edge.color) })])),
     edgeIndexes: buildTopologyEdgeIndexes(edges),
     datasetCounts: computeDatasetCounts(nodes, edges),
   });
@@ -286,28 +289,95 @@ export function createTopologySearchState(query, advancedMode, viewModel) {
   return Object.freeze({ query, advancedMode, matchingNodeIds });
 }
 
-export function computeSearchHighlight(viewModel, searchState) {
+export function computeSearchHighlight(viewModel, searchState, palette = viewModel.themePalette) {
   const nodeUpdates = [...viewModel.originalNodeStyling.entries()].map(([nodeId, originalStyle]) => {
     if (!searchState.query) return { id: nodeId, ...cloneNodeStyle(originalStyle) };
     if (searchState.matchingNodeIds.has(nodeId)) {
       return {
         id: nodeId,
-        color: { background: originalStyle.color?.background, border: "#d97706" },
+        color: {
+          ...originalStyle.color,
+          background: originalStyle.color?.background,
+          border: palette?.searchMatch ?? "#d97706",
+        },
         borderWidth: Math.max(originalStyle.borderWidth ?? 2, 4),
         font: originalStyle.font ? { ...originalStyle.font } : originalStyle.font,
       };
     }
     return {
       id: nodeId,
-      color: { background: "#e8e8e8", border: "#c0c0c0" },
+      color: {
+        ...originalStyle.color,
+        background: palette?.searchDimBg ?? "#e8e8e8",
+        border: palette?.searchDimBorder ?? "#c0c0c0",
+      },
       borderWidth: 1,
-      font: { ...originalStyle.font, color: "#aaaaaa" },
+      font: { ...originalStyle.font, color: palette?.searchDimText ?? "#aaaaaa" },
     };
   });
   const focusTarget = searchState.matchingNodeIds.size === 1
     ? [...searchState.matchingNodeIds][0]
     : null;
   return Object.freeze({ nodeUpdates, focusTarget });
+}
+
+export function projectTopologyTheme(viewModel, palette, styleMode, searchState, healthStatuses = new Map()) {
+  const originalNodeStyling = new Map(viewModel.nodes.map((node) => {
+    const role = node.themeRole ?? (node.isBorderRouter ? "borderRouter" : node.isRouter ? "router" : "unknown");
+    const base = viewModel.originalNodeStyling.get(node.id);
+    const color = {
+      background: palette[`${role}Bg`],
+      border: palette[`${role}Border`],
+      highlight: { background: palette[`${role}Bg`], border: palette.selectedBorder },
+      hover: { background: palette[`${role}Bg`], border: palette.hoverBorder },
+    };
+    return [node.id, Object.freeze({
+      ...base,
+      color,
+      font: { ...base.font, color: palette.labelText, background: palette.labelBg },
+    })];
+  }));
+  const edgeUpdates = viewModel.edges.filter((edge) => !edge.baseHidden).map((edge) => {
+    const parentChild = edge.isParentChild || edge.linkCategories?.some((category) => [
+      EDGE_CATEGORY_DEFAULT_CHILDREN, EDGE_CATEGORY_OTBR_CHILD,
+      EDGE_CATEGORY_EVE_CHILD, EDGE_CATEGORY_EVE_NATIVE_CHILD,
+    ].includes(category));
+    const key = edge.themeColorKey ?? (parentChild ? "lqParentChild" : "lqNone");
+    return {
+      id: edge.id,
+      color: {
+        ...(typeof edge.color === "object" ? edge.color : {}),
+        color: palette[key],
+        highlight: palette.selectedBorder,
+        hover: palette.hoverBorder,
+      },
+    };
+  });
+  const originalEdgeStyling = new Map([
+    ...viewModel.originalEdgeStyling,
+    ...edgeUpdates.map(({ id, ...style }) => [id, Object.freeze(style)]),
+  ]);
+  const next = Object.freeze({ ...viewModel, originalNodeStyling, originalEdgeStyling, themePalette: palette });
+  const nodeUpdates = computeSearchHighlight(
+    next,
+    styleMode === "search" ? searchState : { query: "", matchingNodeIds: new Set() },
+    palette,
+  ).nodeUpdates;
+  if (styleMode !== "search") {
+    nodeUpdates.forEach((patch) => {
+      const record = viewModel.rawByIdForDetails.get(patch.id);
+      const identity = getDeviceIdentityKeys(record).find((key) => key.startsWith("extAddress:"));
+      const status = healthStatuses.get(identity?.replace(/^extAddress:/, "extaddr:"));
+      if (!status) return;
+      patch.borderWidth = status === "poor" ? 5 : 4;
+      patch.color = {
+        ...patch.color,
+        background: palette[`health${status[0].toUpperCase()}${status.slice(1)}Bg`],
+        border: palette[`health${status[0].toUpperCase()}${status.slice(1)}`],
+      };
+    });
+  }
+  return Object.freeze({ viewModel: next, nodeUpdates, edgeUpdates });
 }
 
 export function buildTopologyDetails(viewModel, selectedId) {

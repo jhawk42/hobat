@@ -4,7 +4,63 @@ import {
   createTopologyEventBindings,
   createTopologyRenderOwner,
 } from "../../src/js/tdash-topology-view-model.js";
-import { isSecondaryRouterRouteEdge } from "../../src/js/tdash-topology-renderer.js";
+import { decorateTopologyNavigation, isSecondaryRouterRouteEdge, readThemePalette } from "../../src/js/tdash-topology-renderer.js";
+
+const root = { dataset: { theme: "light" } };
+globalThis.document = { documentElement: root };
+let paletteReads = 0;
+let missingToken = null;
+globalThis.getComputedStyle = () => {
+  paletteReads += 1;
+  return { getPropertyValue: (token) => token === missingToken ? "" : "#123456" };
+};
+globalThis.CSS = { supports: (_property, value) => /^#[0-9a-f]{6}$/.test(value) };
+const lightPalette = readThemePalette();
+assert.ok(Object.isFrozen(lightPalette));
+assert.equal(readThemePalette(), lightPalette);
+assert.equal(paletteReads, 1);
+root.dataset.theme = "dark";
+missingToken = "--topology-label-bg";
+assert.throws(() => readThemePalette(), /--topology-label-bg/);
+missingToken = null;
+const darkPalette = readThemePalette();
+assert.notEqual(darkPalette, lightPalette);
+assert.equal(readThemePalette(), darkPalette);
+
+const navigationControls = new Map();
+const navBindings = createTopologyEventBindings();
+let navActivations = 0;
+const fakeNetwork = {
+  getScale: () => 1,
+  getViewPosition: () => ({ x: 0, y: 0 }),
+  moveTo: () => { navActivations += 1; },
+  fit: () => { navActivations += 1; },
+};
+for (const name of ["up", "down", "left", "right", "zoomIn", "zoomOut", "zoomExtends"]) {
+  const handlers = new Map();
+  navigationControls.set(`.vis-navigation .vis-${name}`, {
+    attrs: {},
+    handlers,
+    setAttribute(key, value) { this.attrs[key] = value; },
+    addEventListener(name, fn) { handlers.set(name, fn); },
+    removeEventListener(name) { handlers.delete(name); },
+  });
+}
+decorateTopologyNavigation({ querySelector: (selector) => navigationControls.get(selector) }, fakeNetwork, navBindings);
+for (const control of navigationControls.values()) {
+  assert.equal(control.attrs.role, "button");
+  assert.ok(control.attrs["aria-label"]);
+  assert.equal(control.tabIndex, 0);
+  for (const key of ["Enter", " "]) {
+    const before = navActivations;
+    control.handlers.get("keydown")({ key, repeat: false, preventDefault() {} });
+    control.handlers.get("keydown")({ key, repeat: true, preventDefault() {} });
+    assert.equal(navActivations, before + 1);
+  }
+}
+navBindings.dispose();
+assert.equal(navActivations, 14);
+assert.ok([...navigationControls.values()].every((control) => control.handlers.size === 0));
 
 assert.equal(isSecondaryRouterRouteEdge(["otbr_route"]), false);
 assert.equal(isSecondaryRouterRouteEdge(["router_neighbor", "otbr_route"]), false);

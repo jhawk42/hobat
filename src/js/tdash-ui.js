@@ -29,6 +29,7 @@ import {
 } from "./tdash-dataset.js";
 import {
   renderTopologyForDataset,
+  readThemePalette,
   getVisNetwork,
   getTopologyFilterHandlers,
   getTopologyNodeData,
@@ -5772,6 +5773,62 @@ document.getElementById("diagnostic-source-filter").addEventListener("change", (
 });
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
+
+function initAppearanceControls() {
+  const controller = globalThis.tdashTheme;
+  if (!controller) return;
+  const buttons = ["theme-toggle", "settings-theme-toggle"].map((id) => document.getElementById(id));
+  const modes = [
+    { preference: "system", label: "System", symbol: "\u25d1" },
+    { preference: "light", label: "Light", symbol: "\u263c" },
+    { preference: "dark", label: "Dark", symbol: "\u263e" },
+  ];
+  let paletteError = "";
+  function applyAppearance() {
+    try {
+      const palette = readThemePalette();
+      getTopologyFilterHandlers()?.applyTheme(palette);
+      paletteError = "";
+    } catch (error) {
+      console.error("Unable to apply appearance palette.", error);
+      paletteError = "Appearance palette unavailable; topology could not be updated.";
+    }
+  }
+  function synchronize(state) {
+    const index = modes.findIndex((mode) => mode.preference === state.preference);
+    const mode = modes[index];
+    const label = mode.preference === "system" ? `${mode.label} (${state.resolvedTheme})` : mode.label;
+    const description = `Theme: ${label}. Switch to ${modes[(index + 1) % modes.length].label}.`;
+    for (const button of buttons) {
+      button.disabled = false;
+      button.dataset.themePreference = state.preference;
+      button.querySelector(".theme-toggle-icon").textContent = mode.symbol;
+      button.setAttribute("aria-label", description);
+      button.title = description;
+    }
+    const message = paletteError || (state.persistenceStatus === "unavailable"
+      ? "Theme applies to this page only. Browser storage is unavailable."
+      : state.persistenceStatus === "invalid-value"
+        ? "Saved theme was not recognized. Using System; choose a theme to save it."
+        : "");
+    for (const id of ["theme-status", "settings-theme-status"]) {
+      document.getElementById(id).textContent = message;
+    }
+  }
+  function cyclePreference() {
+    const index = modes.findIndex((mode) => mode.preference === controller.getState().preference);
+    controller.setPreference(modes[(index + 1) % modes.length].preference);
+  }
+  buttons.forEach((button) => button.addEventListener("click", cyclePreference));
+  document.addEventListener("tdash:theme-changed", (event) => {
+    applyAppearance();
+    synchronize(event.detail);
+  });
+  applyAppearance();
+  synchronize(controller.getState());
+}
+
+initAppearanceControls();
 
 // Register callback to sync physics button state when auto-disabled after stabilization
 setOnPhysicsDisabledCallback(() => setPhysics(false));

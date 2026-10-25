@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="js/tdash-theme.js"></script>
   <title>hobat: thread mesh network dashboard</title>
 
   <script src="js/depend/vis-network.min.js"></script>
@@ -30,6 +31,14 @@
             </div>
           </div>
         </div>
+      </div>
+      <div id="header-appearance" class="appearance-controls">
+        <button id="theme-toggle" class="theme-toggle" type="button"
+          aria-label="Theme: System" title="Theme: System (follows device appearance)"
+          aria-describedby="theme-status" disabled>
+          <span class="theme-toggle-icon" aria-hidden="true">&#9681;</span>
+        </button>
+        <span id="theme-status" class="appearance-status" role="status">Appearance control unavailable; following system appearance</span>
       </div>
     </header>
 
@@ -427,7 +436,18 @@
               <label title="Automatically switch to the view specified by the dataset">
                 <input type="checkbox" id="chk-auto-view" checked />Switch to dataset default view after Sync
               </label>
-            </fieldset>          </section>
+            </fieldset>
+            <fieldset class="view-options">
+              <legend>Appearance</legend>
+              <button id="settings-theme-toggle" class="theme-toggle" type="button"
+                aria-label="Theme: System" title="Theme: System (follows device appearance)"
+                aria-describedby="settings-theme-help settings-theme-status" disabled>
+                <span class="theme-toggle-icon" aria-hidden="true">&#9681;</span>
+              </button>
+              <p id="settings-theme-help">Applies to this browser for this Hobat address. System follows your device appearance.</p>
+              <p id="settings-theme-status" class="appearance-status">Appearance control unavailable; following system appearance</p>
+            </fieldset>
+          </section>
         </div>
 
         <div id="view-operations" class="workspace-view workspace-placeholder" role="tabpanel"

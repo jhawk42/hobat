@@ -27,7 +27,6 @@ import {
   normalizeLinkCategories,
 } from "./tdash-filters.js";
 import { runAdaptor } from "./tdash-adaptors.js";
-import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
 import {
   applyTopologyTransition,
   buildTopologyDetails,
@@ -39,6 +38,7 @@ import {
   createTopologyRenderOwner,
   createTopologySearchState,
   createTopologyViewModel,
+  projectTopologyTheme,
 } from "./tdash-topology-view-model.js";
 import {
   applyMeshLabHybridSeedLayout as applyExtractedMeshLabHybridSeedLayout,
@@ -63,18 +63,77 @@ let _onPhysicsDisabledCallback = null;  // Callback invoked when physics is auto
 let _topologyRenderOwner = null;
 let _healthStatusByDeviceId = new Map();
 
-const HEALTH_BORDER_COLORS = Object.freeze({
-  poor: "#b42318",
-  moderate: "#a15c00",
-  strong: "#067647",
-  unknown: "#667085",
+const THEME_TOKENS = Object.freeze({
+  ...Object.fromEntries(["router", "borderRouter", "child", "eve", "unknown"].flatMap((role) => {
+    const cssRole = role === "borderRouter" ? "border-router" : role;
+    return [[`${role}Bg`, `--node-${cssRole}-bg`], [`${role}Border`, `--node-${cssRole}-border`]];
+  })),
+  ...Object.fromEntries(["High", "Medium", "Low", "None", "ParentChild", "Otbr"].map((quality) => [
+    `lq${quality}`, `--lq-${quality.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()}`,
+  ])),
+  ...Object.fromEntries(["poor", "moderate", "strong", "unknown"].flatMap((status) => {
+    const name = status[0].toUpperCase() + status.slice(1);
+    return [[`health${name}`, `--health-${status}`], [`health${name}Bg`, `--health-${status}-bg`]];
+  })),
+  labelText: "--topology-label-text",
+  labelBg: "--topology-label-bg",
+  selectedBorder: "--topology-selected-border",
+  hoverBorder: "--topology-hover-border",
+  searchMatch: "--topology-search-match",
+  searchDimBg: "--topology-search-dim-bg",
+  searchDimBorder: "--topology-search-dim-border",
+  searchDimText: "--topology-search-dim-text",
 });
-const HEALTH_BACKGROUND_COLORS = Object.freeze({
-  poor: "#fee4e2",
-  moderate: "#fef0c7",
-  strong: "#d1fadf",
-  unknown: "#eaecf0",
-});
+let activeThemePalette = null;
+let activePaletteTheme = null;
+
+export function readThemePalette() {
+  const root = document.documentElement;
+  const theme = root.dataset.theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  if (activeThemePalette && activePaletteTheme === theme) return activeThemePalette;
+  const style = getComputedStyle(root);
+  const palette = {};
+  for (const [key, token] of Object.entries(THEME_TOKENS)) {
+    const value = style.getPropertyValue(token).trim();
+    if (!value || !CSS.supports("color", value)) {
+      throw new Error(`Appearance palette is missing a valid ${token}.`);
+    }
+    palette[key] = value;
+  }
+  activeThemePalette = Object.freeze(palette);
+  activePaletteTheme = theme;
+  return activeThemePalette;
+}
+
+export function decorateTopologyNavigation(container, network, bindings) {
+  const actions = {
+    up: ["Pan up", () => pan(0, -60)],
+    down: ["Pan down", () => pan(0, 60)],
+    left: ["Pan left", () => pan(-60, 0)],
+    right: ["Pan right", () => pan(60, 0)],
+    zoomIn: ["Zoom in", () => network.moveTo({ scale: network.getScale() * 1.2 })],
+    zoomOut: ["Zoom out", () => network.moveTo({ scale: network.getScale() / 1.2 })],
+    zoomExtends: ["Fit network", () => network.fit({ animation: false })],
+  };
+  function pan(x, y) {
+    const position = network.getViewPosition();
+    const scale = network.getScale();
+    network.moveTo({ position: { x: position.x + x / scale, y: position.y + y / scale } });
+  }
+  for (const [name, [label, action]] of Object.entries(actions)) {
+    const control = container.querySelector(`.vis-navigation .vis-${name}`);
+    if (!control) continue;
+    control.setAttribute("role", "button");
+    control.setAttribute("aria-label", label);
+    control.setAttribute("title", label);
+    control.tabIndex = 0;
+    bindings.listen(control, "keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      if (!event.repeat) action();
+    });
+  }
+}
 
 const MESH_COMPACT_LAYOUT = Object.freeze({
   ftdMinEdgeLength: 280,
@@ -477,12 +536,24 @@ export function renderTopologyForDataset(
   dataset.capabilities = capabilities;
   updateFilterOptionVisibility(capabilities, "topology");
 
-  const viewModel = createTopologyViewModel(
+  let viewModel = createTopologyViewModel(
     adaptorResult,
     dataset.deviceProjections,
   );
-  const nodesDataset = new vis.DataSet(viewModel.nodes);
-  const edgesDataset = new vis.DataSet(viewModel.edges);
+  let palette;
+  try {
+    palette = readThemePalette();
+  } catch (error) {
+    console.error("Unable to resolve topology appearance.", error);
+    publishViewStatus("topology", `Topology error: ${error.message}`, statusDatasetToken);
+    return;
+  }
+  const themed = projectTopologyTheme(viewModel, palette, "canonical", null, _healthStatusByDeviceId);
+  viewModel = themed.viewModel;
+  const nodeStyles = new Map(themed.nodeUpdates.map((patch) => [patch.id, patch]));
+  const edgeStyles = new Map(themed.edgeUpdates.map((patch) => [patch.id, patch]));
+  const nodesDataset = new vis.DataSet(viewModel.nodes.map((node) => ({ ...node, ...nodeStyles.get(node.id) })));
+  const edgesDataset = new vis.DataSet(viewModel.edges.map((edge) => ({ ...edge, ...edgeStyles.get(edge.id) })));
   const optionsWithProfile = Object.assign({}, VIS_OPTIONS, {
     physics: Object.assign({}, VIS_OPTIONS.physics, {
       barnesHut: Object.assign({}, VIS_OPTIONS.physics?.barnesHut, physicsProfile.barnesHut),
@@ -501,7 +572,9 @@ export function renderTopologyForDataset(
     effectiveOptions,
   );
   const bindings = createTopologyEventBindings();
+  decorateTopologyNavigation(container, network, bindings);
   let currentSearchState = createTopologySearchState("", false, viewModel);
+  let styleMode = "canonical";
 
   // ── applyFilters ───────────────────────────────────────────────────────
 
@@ -517,28 +590,11 @@ export function renderTopologyForDataset(
 
   // Shared canonical restore path for node visual styles.
   function restoreOriginalNodeStyling() {
-    const restore = computeSearchHighlight(
-      viewModel,
-      createTopologySearchState("", false, viewModel),
-    );
+    styleMode = "canonical";
+    const restore = projectTopologyTheme(viewModel, palette, styleMode, currentSearchState, _healthStatusByDeviceId);
+    viewModel = restore.viewModel;
+    _originalNodeStyling = viewModel.originalNodeStyling;
     nodesDataset.update(restore.nodeUpdates);
-    const healthUpdates = [];
-    viewModel.nodeMap.forEach((_node, nodeId) => {
-      const record = viewModel.rawByIdForDetails.get(nodeId);
-      const identityKey = getDeviceIdentityKeys(record).find((key) => key.startsWith("extAddress:"));
-      const deviceId = identityKey?.replace(/^extAddress:/, "extaddr:");
-      const status = _healthStatusByDeviceId.get(deviceId);
-      if (!status) return;
-      healthUpdates.push({
-        id: nodeId,
-        borderWidth: status === "poor" ? 5 : 4,
-        color: {
-          background: HEALTH_BACKGROUND_COLORS[status],
-          border: HEALTH_BORDER_COLORS[status],
-        },
-      });
-    });
-    if (healthUpdates.length > 0) nodesDataset.update(healthUpdates);
   }
 
   // ── Search highlight ─────────────────────────────────────────────────────
@@ -550,6 +606,7 @@ export function renderTopologyForDataset(
       diagnosticFilterEl.value,
     );
     currentSearchState = createTopologySearchState(searchQuery, advancedMode, viewModel);
+    styleMode = "search";
     const highlight = computeSearchHighlight(viewModel, currentSearchState);
     nodesDataset.update(highlight.nodeUpdates);
     updateStatus(baseCounts);
@@ -682,6 +739,16 @@ export function renderTopologyForDataset(
   });
 
   const handlers = {
+    applyTheme(nextPalette) {
+      if (!owner.isActive() || palette === nextPalette) return;
+      const projection = projectTopologyTheme(viewModel, nextPalette, styleMode, currentSearchState, _healthStatusByDeviceId);
+      palette = nextPalette;
+      viewModel = projection.viewModel;
+      _originalNodeStyling = viewModel.originalNodeStyling;
+      nodesDataset.update(projection.nodeUpdates);
+      edgesDataset.update(projection.edgeUpdates);
+      network.redraw();
+    },
     applyFilters: (...args) => owner.isActive() ? applyFilters(...args) : null,
     applySearchHighlight: (...args) => owner.isActive() ? applySearchHighlight(...args) : null,
     restoreOriginalNodeStyling: () => {

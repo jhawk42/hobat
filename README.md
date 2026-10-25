@@ -9,6 +9,7 @@ Hobat is a Thread network dashboard and command-line toolkit for collecting, vis
 - Data sources: OTBR CLI, OTBR REST API, Home Assistant Matter Server, mDNS,
   Eve exports, and Thread Tools exports, with support for merged datasets.
 - Interactive Topology and sortable, filterable Table views.
+- System, Light, and Dark appearance preferences shared by dashboard and topology.
 - Topology layouts: compact mesh, ring mesh, horizontal tree, vertical tree,
   and hub-and-spoke.
 - Search and dataset-dependent filters for nodes, links, and diagnostics.
@@ -80,6 +81,18 @@ PYTHONPATH=src python3 -m td_webserver --host 0.0.0.0 --port 9165 --datadir ./da
 Open `http://localhost:9165/`. The root redirects to `/tdash.html`.
 
 On startup the dashboard does not fetch a dataset until **Sync** is selected. Default is **Auto**. Enable **Cache Only** before Sync to not trigger live collection. **Force Refresh** requests regeneration. Long actions return a background job that the browser polls and can cancel.
+
+Click the **Theme** toggle in the header or **Settings > Appearance** to cycle
+**System (◑) -> Light (☼) -> Dark (☾) -> System**. The icon shows the current
+policy; its tooltip and accessible name include the current and next mode.
+**System** is the
+default and follows device appearance; **Light** and **Dark** override it.
+The choice applies to this browser for this Hobat address and survives reload
+when browser storage is available. Cycle back to **System** to reset the preference.
+Other same-origin tabs follow changes automatically. If storage is unavailable,
+an appearance-specific notice explains that the choice applies only to the
+current page. Appearance changes do not Sync, refresh health, run diagnostics,
+or reset topology position, selection, camera, or paused physics.
 
 **Operations > Thread Network** includes source-backed partition identifiers
 and counts of uniquely identified devices in the currently loaded observation.

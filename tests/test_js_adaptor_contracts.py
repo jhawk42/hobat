@@ -52,7 +52,22 @@ def test_pinned_adaptor_outputs_match_exact_baseline(node_executable: str) -> No
         timeout=60,
     )
     baseline = REPO_ROOT / "tests" / "fixtures" / "adaptor_refactor_baseline.json"
-    assert completed.stdout == baseline.read_text(encoding="utf-8")
+    actual = json.loads(completed.stdout)
+    expected = json.loads(baseline.read_text(encoding="utf-8"))
+    roles = {"router", "borderRouter", "child", "eve", "unknown"}
+    colors = {"lqHigh", "lqMedium", "lqLow", "lqNone", "lqParentChild", "lqOtbr"}
+    for result in actual.values():
+        for node in result["nodeData"]:
+            assert node.pop("themeRole") in roles
+        for edge in result["edgeData"]:
+            if isinstance(edge.get("lqLevel"), (int, float)) and edge["lqLevel"] > 0:
+                assert edge.get("themeColorKey") in colors
+            if "themeColorKey" in edge:
+                assert edge.pop("themeColorKey") in colors
+        for key in ("rawByIdForDetails", "nodeMap"):
+            assert "themeRole" not in json.dumps(result[key])
+            assert "themeColorKey" not in json.dumps(result[key])
+    assert actual == expected
 
 
 def test_source_adaptors_emit_through_shared_model() -> None:

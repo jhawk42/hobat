@@ -64,8 +64,7 @@ export const EDGE_CATEGORY_LABELS = Object.freeze({
 
 // ── Color palette — unified design system ────────────────────────────────────
 //
-// Single source of truth for all theme colors. Keeps CSS tokens, JS constants,
-// and canvas colors in sync. Updated for dark mode at runtime via theme system.
+// Compatibility defaults for pure adaptors. Live canvas colors resolve CSS tokens.
 //
 export const PALETTE = Object.freeze({
   // Link Quality colors
@@ -115,12 +114,12 @@ export const NODE_SHAPES = Object.freeze({
 
 // ── Link Quality edge style constants ─────────────────────────────────────────
 export const EDGE_LQ_STYLES = Object.freeze({
-  high: { width: 12, color: PALETTE.lqHigh, dashes: false, lqLevel: 3 }, // LQ3 bold blue  (.lq-high)
-  medium: { width: 8, color: PALETTE.lqMedium, dashes: true, lqLevel: 2 }, // LQ2 light blue (.lq-medium)
-  low: { width: 4, color: PALETTE.lqLow, dashes: true, lqLevel: 1 }, // LQ1 red dashed (.lq-low)
-  none: { width: 4, color: PALETTE.lqNone, dashes: false, lqLevel: 0 }, // fallback (no LQ data)
-  parentChild: { width: 8, color: PALETTE.lqParentChild, dashes: false, lqLevel: 0 }, // parent–child pink/mauve (.lq-parent-child)
-  noLqPurple: { width: 4, color: PALETTE.lqOtbr, dashes: false, lqLevel: 0 }, // OTBR / router-neighbor green (.lq-otbr)
+  high: { width: 12, color: PALETTE.lqHigh, themeColorKey: "lqHigh", dashes: false, lqLevel: 3 },
+  medium: { width: 8, color: PALETTE.lqMedium, themeColorKey: "lqMedium", dashes: true, lqLevel: 2 },
+  low: { width: 4, color: PALETTE.lqLow, themeColorKey: "lqLow", dashes: true, lqLevel: 1 },
+  none: { width: 4, color: PALETTE.lqNone, themeColorKey: "lqNone", dashes: false, lqLevel: 0 },
+  parentChild: { width: 8, color: PALETTE.lqParentChild, themeColorKey: "lqParentChild", dashes: false, lqLevel: 0 },
+  noLqPurple: { width: 4, color: PALETTE.lqOtbr, themeColorKey: "lqOtbr", dashes: false, lqLevel: 0 },
 });
 
 // ── Filter option metadata registries ────────────────────────────────────────

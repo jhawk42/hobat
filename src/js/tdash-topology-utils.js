@@ -306,6 +306,7 @@ export function addEdge(edgeMap, edgeData, from, to, style) {
     ) {
       existing.lqLevel = style.lqLevel;
       existing.color = style.color;
+      existing.themeColorKey = style.themeColorKey;
       existing.dashes = style.dashes;
     }
     existing.title = buildEdgeTitle(existing);
@@ -559,6 +560,9 @@ export function buildVisNodeData(
       shape: effectiveShape,
       size,
       color: effectiveColor ? { ...effectiveColor } : effectiveColor,
+      themeRole: unknown
+        ? (node.color === NODE_COLORS.eve ? "eve" : "unknown")
+        : (isBorderRouter ? "borderRouter" : (isRouter ? "router" : "child")),
       font,
       heightConstraint,
       widthConstraint,

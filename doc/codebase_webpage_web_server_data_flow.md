@@ -35,6 +35,26 @@ separate bounded probe path in the Python web server, not a collector refresh.
 See the [data-flow ownership table](merge_thread_device_info.md#ownership) for
 the field, identity, authority, and projection owners in both runtimes.
 
+### Browser-only Appearance
+
+[tdash-theme.js](../src/js/tdash-theme.js) is a blocking classic script loaded
+before styles and vis-network. It resolves `tdash.themePreference` to root
+`data-theme`/`data-theme-preference` attributes and native `color-scheme` before
+paint. It owns guarded storage, System resolution and cross-tab events, not
+controls or computed CSS. A frozen `globalThis.tdashTheme` controller exposes
+`getState()`/`setPreference()` and publishes immutable `tdash:theme-changed`
+snapshots. Bootstrap failure leaves system-driven CSS as the fallback.
+
+[tdash-ui.js](../src/js/tdash-ui.js) binds both appearance cycle buttons and one
+document listener, including when Topology is hidden. The renderer's
+`readThemePalette()` validates/caches CSS colors per resolved theme;
+`projectTopologyTheme()` builds frozen replacement style maps and presentation
+patches. The active render owner's `applyTheme()` updates existing DataSets
+without publishing selection, rebuilding views, or touching camera/physics.
+Adaptor `themeRole`/`themeColorKey` metadata is browser presentation only;
+it does not enter normalized rows, details, cache files or exports.
+There is no appearance API, server flag, collector or database setting.
+
 The dashboard also uses API paths and views outside snapshot assembly. Health
 processing consumes approved cached files and writes assessments to
 `hobat_v1.db`; health GET routes read stored projections from that database.
