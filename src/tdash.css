@@ -146,6 +146,18 @@
   line-height: 1;
 }
 
+#theme-toggle {
+  min-width: 0;
+  min-height: 0;
+  width: 36px;
+  height: 30px;
+  padding: 0;
+}
+
+#theme-toggle .theme-toggle-icon {
+  font-size: 14px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -3274,7 +3286,7 @@ td:last-child {
   }
 
   .dashboard-shell.navigation-panel-collapsed {
-    --navigation-panel-width: 58px;
+    --navigation-panel-width: 50px;
   }
 
   #panel-navigation {
@@ -3283,6 +3295,12 @@ td:last-child {
 
   #panel-navigation .workspace-navigation-controls {
     margin-bottom: 6px;
+  }
+
+  #panel-navigation .workspace-navigation-controls button {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 4px;
   }
 
   #panel-navigation,
@@ -3306,8 +3324,8 @@ td:last-child {
 
   #panel-navigation .workspace-navigation-tabs button {
     width: 100%;
-    min-height: 44px;
-    padding: 6px 4px;
+    min-height: 36px;
+    padding: 4px;
     overflow-wrap: anywhere;
   }
 

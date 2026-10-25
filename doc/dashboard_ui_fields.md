@@ -17,6 +17,10 @@ System also includes the effective light/dark mode.
 Explicit modes ignore OS changes. Both controls update immediately without
 moving focus, changing views, or refreshing evidence.
 
+The header theme button uses a compact 36 x 30 px footprint to match the
+Device details close control. The Settings theme button retains its larger
+44 px minimum target.
+
 The early [appearance controller](../src/js/tdash-theme.js) stores only the
 policy in `tdash.themePreference`. Same-origin storage changes synchronize tabs;
 removing that key restores System without affecting other preferences.
@@ -25,6 +29,13 @@ keeps a page-only choice. The header `theme-status` is the sole live announcer;
 Settings mirrors the notice without a duplicate announcement.
 If the bootstrap cannot load, controls stay disabled and the stylesheet
 continues to follow system appearance.
+
+## Workspace Navigation
+
+At desktop widths (1124 px and above), navigation buttons use a compact 36 px
+minimum height and 4 px padding. The icon-only rail is 50 px wide; expanding it
+retains labels and the 132 px rail. Mobile and intermediate layouts retain
+44 px navigation targets.
 
 ## Panel Close Controls
 

@@ -178,6 +178,21 @@ def test_appearance_bootstrap_and_controls() -> None:
     assert ".appearance-controls" in css
 
 
+def test_header_theme_toggle_matches_compact_panel_close_size() -> None:
+    css = _read_text(CSS)
+    header = re.search(r"#theme-toggle\s*\{([^}]+)\}", css)
+    assert header is not None
+    for declaration in ("min-width: 0;", "min-height: 0;", "width: 36px;", "height: 30px;", "padding: 0;"):
+        assert declaration in header[1]
+    icon = re.search(r"#theme-toggle \.theme-toggle-icon\s*\{([^}]+)\}", css)
+    assert icon is not None
+    assert "font-size: 14px;" in icon[1]
+    shared = re.search(r"\.theme-toggle\s*\{([^}]+)\}", css)
+    assert shared is not None
+    assert "min-width: 44px;" in shared[1]
+    assert "min-height: 44px;" in shared[1]
+
+
 def test_appearance_palette_contrast_and_fallback_parity() -> None:
     css = _read_text(CSS)
 
@@ -808,10 +823,30 @@ def test_navigation_panel_supports_expanded_and_icon_only_states() -> None:
     assert "setNavigationPanelCollapsed" in ui_text
     assert '"navigation-panel-collapsed"' in ui_text
     assert "--navigation-panel-width: 132px;" in css
-    assert "--navigation-panel-width: 58px;" in css
+    assert "--navigation-panel-width: 50px;" in css
     assert ".workspace-navigation-tab-label" in css
     assert "grid-template-columns: 44px minmax(0, 1fr);" in css
     assert "grid-template-columns: repeat(5, 44px);" in css
     assert "overflow-x: auto;" in css
     assert "scrollbar-width: none;" in css
     assert "width: 240px;" not in css
+
+
+def test_desktop_navigation_is_compact_without_shrinking_mobile_targets() -> None:
+    css = _read_text(CSS)
+    desktop_start = css.index("@media (min-width: 1124px)")
+    desktop_end = css.index("@media (min-width: 721px) and (max-height: 600px)", desktop_start)
+    desktop = css[desktop_start:desktop_end]
+    for selector in (
+        "#panel-navigation .workspace-navigation-controls button",
+        "#panel-navigation .workspace-navigation-tabs button",
+    ):
+        rules = re.search(re.escape(selector) + r"\s*\{([^}]+)\}", desktop)
+        assert rules is not None
+        assert "min-height: 36px;" in rules[1]
+        assert "padding: 4px;" in rules[1]
+    assert "min-width: 36px;" in desktop
+    assert "--navigation-panel-width: 50px;" in desktop
+    mobile = css[css.index("@media (max-width: 720px)"):]
+    assert "min-height: 44px;" in mobile
+    assert "grid-template-columns: repeat(5, 44px);" in mobile
