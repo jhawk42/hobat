@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import errno
 import os
+import socket
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +12,83 @@ from unittest.mock import patch
 
 import td_webserver
 from aiohttp.test_utils import TestClient, TestServer
+
+
+class WebServerStartupTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.argv = ["--datadir", self._tmpdir.name, "--port", "9165"]
+
+    def test_occupied_port_returns_error_without_retry(self) -> None:
+        for port, alternative in ((9165, 9166), (65535, 65534)):
+            with self.subTest(port=port):
+                with (
+                    patch.object(td_webserver, "configure_logging"),
+                    patch.object(
+                        td_webserver.aiohttp.web,
+                        "run_app",
+                        side_effect=OSError(errno.EADDRINUSE, "Address already in use"),
+                    ) as run_app,
+                    self.assertLogs(level="INFO") as logs,
+                ):
+                    rc = td_webserver.main([
+                        "--datadir", self._tmpdir.name,
+                        "--host", "0.0.0.0", "--port", str(port),
+                    ])
+
+                self.assertEqual(rc, 1)
+                run_app.assert_called_once()
+                output = "\n".join(logs.output)
+                self.assertIn(f"Port {port} is already in use", output)
+                self.assertIn("0.0.0.0", output)
+                self.assertIn(f"--port {alternative}", output)
+                self.assertNotIn("Serving at", output)
+
+    def test_other_os_errors_are_not_hidden(self) -> None:
+        error = OSError(errno.EACCES, "Permission denied")
+        with (
+            patch.object(td_webserver, "configure_logging"),
+            patch.object(td_webserver.aiohttp.web, "run_app", side_effect=error),
+            self.assertRaises(OSError) as raised,
+        ):
+            td_webserver.main(self.argv)
+
+        self.assertIs(raised.exception, error)
+
+    def test_normal_shutdown_returns_success(self) -> None:
+        with (
+            patch.object(td_webserver, "configure_logging"),
+            patch.object(td_webserver.aiohttp.web, "run_app") as run_app,
+        ):
+            self.assertEqual(td_webserver.main(self.argv), 0)
+
+        run_app.assert_called_once()
+        self.assertEqual(run_app.call_args.kwargs["port"], 9165)
+
+    def test_cli_occupied_port_exits_without_traceback(self) -> None:
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(Path(td_webserver.__file__).parent)
+            env["TD_DEBUG_LEVEL"] = "INFO"
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "td_webserver",
+                    "--host", "127.0.0.1", "--port", str(port),
+                    "--datadir", self._tmpdir.name,
+                ],
+                capture_output=True, text=True, timeout=30, env=env,
+            )
+
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 1, output)
+        self.assertIn(f"Port {port} is already in use", output)
+        self.assertIn("different --port", output)
+        self.assertNotIn("Traceback", output)
+        self.assertNotIn("Serving at", output)
 
 
 class WebServerRouteTests(unittest.IsolatedAsyncioTestCase):

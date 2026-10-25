@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 import datetime
 import email.utils
+import errno
 import json
 import mimetypes
 import os
@@ -2758,7 +2759,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logging.info("Starting tdash webserver dashboard (aiohttp)...")
     logging.info(
-        "Serving at http://%s:%s (/ redirects to /tdash.html)",
+        "Binding to http://%s:%s (/ redirects to /tdash.html)",
         args.host or "localhost",
         args.port,
     )
@@ -2775,12 +2776,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 hobat_database_file_size_mb = os.path.getsize(db_path) / (1024 * 1024)  # size in megabytes
                 logging.info("Hobat database file: %s (size: %.1f MB)", db_path, hobat_database_file_size_mb)
 
-    aiohttp.web.run_app(
-        app,
-        host=args.host if args.host else None,
-        port=args.port,
-        access_log=logging.getLogger("aiohttp.access"),
-    )
+    try:
+        aiohttp.web.run_app(
+            app,
+            host=args.host if args.host else None,
+            port=args.port,
+            access_log=logging.getLogger("aiohttp.access"),
+        )
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        alternative_port = args.port + 1 if args.port < 65535 else 65534
+        logging.error(
+            "Port %s is already in use on host %s. "
+            "Stop the process using that port or rerun with a different --port "
+            "(for example, --port %s). No alternate port was tried.",
+            args.port,
+            args.host or "all interfaces",
+            alternative_port,
+        )
+        return 1
     return 0
 
 

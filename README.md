@@ -80,6 +80,11 @@ PYTHONPATH=src python3 -m td_webserver --host 0.0.0.0 --port 9165 --datadir ./da
 
 Open `http://localhost:9165/`. The root redirects to `/tdash.html`.
 
+If the port is already in use, the server logs a clear error and exits with
+status 1 without a traceback. Stop the process using that port, or rerun with
+another port, such as `--port 9166`, and open `http://localhost:9166/` instead.
+The server does not automatically try another port.
+
 On startup the dashboard does not fetch a dataset until **Sync** is selected. Default is **Auto**. Enable **Cache Only** before Sync to not trigger live collection. **Force Refresh** requests regeneration. Long actions return a background job that the browser polls and can cancel.
 
 Click the **Theme** toggle in the header or **Settings > Appearance** to cycle

@@ -8,6 +8,13 @@ usage: python3 -m td_webserver [-h] [--verbose] [--debug]
 
 Start the Thread Network Topology Dashboard web server.
 
+If the requested port is already in use, startup logs an error naming the host
+and port, suggests a different `--port`, and exits with status 1 without a
+traceback. Stop the conflicting process or rerun with an unused port (for
+example, `--port 9166`) and use that port in the browser URL. The suggested port
+is only an example; it is not checked for availability. No automatic retry or
+interactive prompt occurs. Other unexpected OS errors are still raised.
+
 When the webserver regenerates data files by invoking `td_cli`, it surfaces the underlying command return codes instead of normalizing them away. That matters for empty- or partial-data-directory runs, where missing local inputs now distinguish rc `4` from runtime rc `3` and invalid-payload rc `5`.
 
 The root route redirects to `/tdash.html`. Data requests use the allowlisted
