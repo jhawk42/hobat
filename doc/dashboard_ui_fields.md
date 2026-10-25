@@ -30,6 +30,22 @@ Settings mirrors the notice without a duplicate announcement.
 If the bootstrap cannot load, controls stay disabled and the stylesheet
 continues to follow system appearance.
 
+### Dark surfaces
+
+Dark mode uses layered charcoal backgrounds instead of blue-gray surfaces:
+
+| Surface | Color |
+|---|---|
+| Page and topology canvas | `#121416` |
+| Panel backgrounds | `#181b1e` |
+| Controls and standard surfaces | `#1c2024` |
+| Alternating table rows | `#22272b` |
+| Topology label backplates | `#171a1d` |
+| Search-dimmed node fills | `#252a2f` |
+
+Light mode is unchanged. Selection, focus, health and relationship colors
+retain their semantic meaning. System-mode CSS fallback uses the same palette.
+
 ## Workspace Navigation
 
 At desktop widths (1124 px and above), navigation buttons use a compact 36 px

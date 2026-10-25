@@ -32,12 +32,17 @@ are unchanged; border-to-fill contrast is 8.15:1 in Light and 10.84:1 in Dark.
 
 | Relationship | Light / dark color | Width | Pattern |
 |---|---|---:|---|
-| LQ3/high | `#00649b` / `#70b7ed` | 12 | solid |
+| LQ3/high | `#4e8afa` / `#4e8afa` | 12 | solid |
 | LQ2/medium | `#30343b` / `#e5ad55` | 8 | dashed |
 | LQ1/low | `#b43b24` / `#f18e79` | 4 | dashed |
 | No LQ | `#626c7a` / `#adb7c5` | 4 | solid |
 | Parent-child | `#934e86` / `#d69cc9` | 8 | solid |
 | OTBR/router-neighbor | `#00766a` / `#65c9b8` | 4 | solid |
+
+High uses the connector blue sampled from the user-supplied reference image
+in both themes. Its edges and legend swatch target at least 3:1 graphical
+contrast against the canvas; the High legend text uses the normal text color
+to retain 4.5:1 text contrast. Other relationship colors are unchanged.
 
 The approved Light quality sequence is blue / charcoal / rust. Medium is
 intentionally charcoal in Light and amber in Dark. Border-router orange is role
@@ -69,6 +74,12 @@ Selection styling applied by vis-network is temporary and does not change the
 role classification or stored source record.
 
 ## Theme and CSS
+
+The topology canvas has its own `--topology-canvas-bg` token: white `#ffffff`
+in Light and near-black charcoal `#121416` in Dark (including the system CSS
+fallback). Other dashboard surfaces use the
+[layered charcoal palette](dashboard_ui_fields.md#dark-surfaces); semantic
+node roles, relationships, selection and health colors are unchanged.
 
 DOM controls, legends and canvas share CSS tokens, including label backplates,
 selected/hovered states, search emphasis and health overlays. Health status

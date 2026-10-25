@@ -204,6 +204,22 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
     light = tokens(":root")
     dark = tokens(':root[data-theme="dark"]')
     assert tokens(":root:not([data-theme])") == dark
+    assert light["--topology-canvas-bg"] == "#ffffff"
+    assert dark["--topology-canvas-bg"] == "#121416"
+    assert {key: dark[key] for key in (
+        "--bg", "--surface", "--surface-raised", "--surface-stripe",
+        "--topology-label-bg", "--topology-search-dim-bg",
+    )} == {
+        "--bg": "#121416",
+        "--surface": "#1c2024",
+        "--surface-raised": "#181b1e",
+        "--surface-stripe": "#22272b",
+        "--topology-label-bg": "#171a1d",
+        "--topology-search-dim-bg": "#252a2f",
+    }
+    canvas_rules = re.search(r"#topology-view\s*\{([^}]+)\}", css)
+    assert canvas_rules is not None
+    assert "background: var(--topology-canvas-bg);" in canvas_rules[1]
     approved_roles = {
         "router": ("#dcecf8", "#4b4237", "#18354f", "#f2ede3"),
         "border-router": ("#f8e3cf", "#8b4700", "#442d1b", "#f3b56c"),
@@ -217,7 +233,7 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
             dark[f"--node-{role}-bg"], dark[f"--node-{role}-border"],
         ) == expected
     approved_edges = {
-        "high": ("#00649b", "#70b7ed"),
+        "high": ("#4e8afa", "#4e8afa"),
         "medium": ("#30343b", "#e5ad55"),
         "low": ("#b43b24", "#f18e79"),
         "none": ("#626c7a", "#adb7c5"),
@@ -248,11 +264,19 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
             ("--control-border", "--surface", 3),
             ("--focus-ring", "--surface", 3),
         ]
+        for background in ("--bg", "--surface", "--surface-raised", "--surface-stripe"):
+            pairs.append(("--text", background, 4.5))
+            pairs.append(("--muted", background, 4.5))
+            pairs.append(("--control-border", background, 3))
         for role in ("router", "border-router", "child", "eve", "unknown"):
             pairs.append((f"--node-{role}-border", f"--node-{role}-bg", 3))
             pairs.append((f"--node-{role}-border", "--surface", 3))
-        for quality in ("high", "medium", "low", "none", "parent-child", "otbr"):
+            pairs.append((f"--node-{role}-border", "--topology-canvas-bg", 3))
+        pairs.append(("--lq-high", "--surface", 3))
+        pairs.append(("--lq-high", "--topology-canvas-bg", 3))
+        for quality in ("medium", "low", "none", "parent-child", "otbr"):
             pairs.append((f"--lq-{quality}", "--surface", 4.5))
+            pairs.append((f"--lq-{quality}", "--topology-canvas-bg", 4.5))
         for status in ("poor", "moderate", "strong", "unknown"):
             pairs.append((f"--health-{status}", f"--health-{status}-bg", 4.5))
             pairs.append((f"--health-{status}", "--surface", 4.5))
@@ -260,6 +284,9 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
             values = sorted((luminance(palette[foreground]), luminance(palette[background])))
             assert (values[1] + 0.05) / (values[0] + 0.05) >= threshold, (foreground, background)
     assert "transition: background" not in css
+    high_label = re.search(r"\.lq-high\s*\{([^}]+)\}", css)
+    assert high_label is not None
+    assert "color: var(--text);" in high_label[1]
     thread_headers = re.search(r"\.thread-network-table th\s*\{([^}]+)\}", css)
     assert thread_headers is not None
     assert "color:" not in thread_headers[1]
