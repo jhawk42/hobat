@@ -719,11 +719,15 @@ no tab badge; its result count remains local to its panel. Badge text is hidden
 from assistive technology because each counted tab exposes the full count and
 unit in its accessible name.
 
-One **Assessment** toolbar is shared by Findings, Device Roster, and health
-coloring. **Latest** follows the latest stored assessment; choosing a retained
+One **Time** toolbar is shared by Findings, Device Roster, and health
+coloring. Its label and date-button tooltips explain that the time is the
+observation time (UTC), not when the health assessment was processed; the date
+button also exposes this explanation to assistive technology.
+**Latest** follows the latest stored assessment; choosing a retained
 run or using **Older**/**Newer** pins its exact assessment ID until Latest is
 selected again. The selected observation date opens the inline chooser below
-the navigation row. Its paging controls appear only for multi-page histories;
+the navigation row. The dropdown fits its option text, capped at the available
+width on narrow screens. Its paging controls appear only for multi-page histories;
 paging does not select a run. A compact line identifies Following latest or
 Pinned assessment. Details exposes exact timestamps, assessment ID, and the
 independent Comparison scope; pinned views retain a short visible reminder

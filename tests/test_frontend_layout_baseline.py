@@ -434,7 +434,7 @@ def test_topology_controls_use_container_layout_and_native_legend_disclosure() -
     assert 'aria-label="Physics simulation"' in html
     assert "container: topology / inline-size;" in css
     assert "@container topology (max-width: 420px)" in css
-    assert "grid-template-columns: max-content minmax(0, max-content) 40px;" in css
+    assert "grid-template-columns: max-content minmax(0, max-content) 34px;" in css
     assert "display: contents;" in css
     assert "padding: 4px 22px 4px 6px;" in css
     assert "background-size: 16px 16px;" in css
@@ -443,8 +443,26 @@ def test_topology_controls_use_container_layout_and_native_legend_disclosure() -
     assert 'btn.setAttribute("aria-pressed", String(enabled));' in ui_text
     assert 'btn.title = "Pause physics simulation";' in ui_text
     assert 'btn.title = "Resume physics simulation";' in ui_text
+    assert "flex: 0 0 34px;" in css
+    for suffix in ("", "::before", ":hover", ":focus-visible"):
+        assert (
+            f"div.vis-network div.vis-navigation div.vis-button{suffix},\n"
+            f"#btn-physics{suffix} {{"
+        ) in css
+    assert '#btn-physics[aria-pressed="true"] {' in css
     assert "min-height: 400px;" in css
     assert "min-height: 240px;" in css
+
+
+def test_health_assessment_picker_fits_contents_with_mobile_width_cap() -> None:
+    css = _read_text(CSS)
+    picker = re.search(r"\.health-assessment-chooser-body select \{([^}]+)\}", css)
+    assert picker is not None
+    for declaration in (
+        "justify-self: start;", "width: auto;", "max-width: 100%;",
+        "min-width: 0;", "min-height: 44px;",
+    ):
+        assert declaration in picker.group(1)
 
 
 def test_workspace_switch_registry_owns_all_five_views() -> None:

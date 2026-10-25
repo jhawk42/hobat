@@ -2696,6 +2696,9 @@ def test_health_assessment_history_renders_bounded_accessible_navigation() -> No
       const chooser = container.querySelector('[data-health-history-focus="chooser"]');
       const chooserBody = container.children.find((child) => child.className === "health-assessment-chooser-body");
       const compactStructure = {
+        label: container.children[0].children[0].textContent,
+        tooltip: container.children[0].children[0].title,
+        accessibleTooltip: chooser["aria-description"],
         toolbarOrder: container.children[0].children.map((child) => child.dataset.healthHistoryFocus || "label"),
         chooserIsSeparateRow: chooserBody.parentNode === container,
         disclosureControls: chooser["aria-controls"] === chooserBody.id,
@@ -2772,6 +2775,11 @@ def test_health_assessment_history_renders_bounded_accessible_navigation() -> No
     }
     assert result["focusRetained"] is True
     assert result["compactStructure"] == {
+        "label": "Time",
+        "tooltip": "Choose a retained health assessment by observation time (UTC), "
+        "not the time the assessment was processed. Applies to Findings, Device Roster, and health coloring.",
+        "accessibleTooltip": "Choose a retained health assessment by observation time (UTC), "
+        "not the time the assessment was processed. Applies to Findings, Device Roster, and health coloring.",
         "toolbarOrder": ["label", "oldest", "older", "chooser", "newer", "latest"],
         "chooserIsSeparateRow": True,
         "disclosureControls": True,
@@ -2788,7 +2796,7 @@ def test_health_assessment_history_renders_bounded_accessible_navigation() -> No
         {"key": "latest", "text": "»", "title": "Follow latest assessment",
          "ariaLabel": "Follow latest assessment"},
         {"key": "chooser", "text": "2026-10-22 12:00:00 UTC",
-         "title": "Choose retained assessment", "ariaLabel": "Choose retained assessment"},
+         "title": result["compactStructure"]["tooltip"], "ariaLabel": "Choose retained assessment"},
     ]
     assert result["collapsed"] is True
     assert result["expanded"] is True

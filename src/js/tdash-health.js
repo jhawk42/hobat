@@ -624,7 +624,9 @@ export function renderHealthAssessmentHistory(container, state, actions = {}) {
     : container.dataset.healthHistoryPendingFocus;
   container.replaceChildren();
   const toolbar = appendText(container, "div", "", "health-assessment-toolbar");
-  const toolbarLabel = appendText(toolbar, "strong", "Assessment", "health-assessment-label");
+  const toolbarLabel = appendText(toolbar, "strong", "Time", "health-assessment-label");
+  toolbarLabel.title = "Choose a retained health assessment by observation time (UTC), "
+    + "not the time the assessment was processed. Applies to Findings, Device Roster, and health coloring.";
 
   const appendButton = (label, focus, action, disabled = false, ariaLabel = label) => {
     const button = appendText(toolbar, "button", label);
@@ -702,6 +704,8 @@ export function renderHealthAssessmentHistory(container, state, actions = {}) {
     "Choose retained assessment",
   );
   chooserButton.className = "health-assessment-chooser";
+  chooserButton.title = toolbarLabel.title;
+  chooserButton.setAttribute("aria-description", toolbarLabel.title);
   chooserButton.setAttribute("aria-expanded", String(!chooserBody.hidden));
   chooserButton.setAttribute("aria-controls", chooserBody.id);
   toolbar.replaceChildren(

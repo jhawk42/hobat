@@ -99,6 +99,9 @@ an appearance-specific notice explains that the choice applies only to the
 current page. Appearance changes do not Sync, refresh health, run diagnostics,
 or reset topology position, selection, camera, or paused physics.
 
+The topology physics pause/resume toggle uses the same compact, theme-aware
+styling as the navigation buttons; its icon and tooltip show the available action.
+
 **Operations > Thread Network** includes source-backed partition identifiers
 and counts of uniquely identified devices in the currently loaded observation.
 Partial or conflicting membership is called out, and the counts are not a

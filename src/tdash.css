@@ -980,14 +980,19 @@ button.active {
 }
 
 #btn-physics {
-  font-size: 16px;
-  height: 40px;
-  min-width: 40px;
-  padding-top: 0;
-  padding-bottom: 0;
+  --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m7 3 14 9-14 9z'/%3E%3C/svg%3E");
+  font-size: 0;
+  height: 34px;
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+#btn-physics[aria-pressed="true"] {
+  --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 3h4v18H6zm8 0h4v18h-4z'/%3E%3C/svg%3E");
 }
 
 /* ── View toggle bar ──────────────────────────────────────── */
@@ -1167,7 +1172,8 @@ div.vis-network div.vis-navigation div.vis-button.vis-down {
   left: auto;
 }
 
-div.vis-network div.vis-navigation div.vis-button {
+div.vis-network div.vis-navigation div.vis-button,
+#btn-physics {
   background-image: none !important;
   background-color: var(--surface-raised);
   color: var(--text);
@@ -1176,7 +1182,8 @@ div.vis-network div.vis-navigation div.vis-button {
   box-shadow: none;
 }
 
-div.vis-network div.vis-navigation div.vis-button::before {
+div.vis-network div.vis-navigation div.vis-button::before,
+#btn-physics::before {
   content: "";
   display: block;
   width: 20px;
@@ -1187,13 +1194,15 @@ div.vis-network div.vis-navigation div.vis-button::before {
   -webkit-mask: var(--nav-icon) center / contain no-repeat;
 }
 
-div.vis-network div.vis-navigation div.vis-button:hover {
+div.vis-network div.vis-navigation div.vis-button:hover,
+#btn-physics:hover {
   background-color: var(--surface-selected);
   color: var(--text-on-selected);
   box-shadow: none;
 }
 
-div.vis-network div.vis-navigation div.vis-button:focus-visible {
+div.vis-network div.vis-navigation div.vis-button:focus-visible,
+#btn-physics:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -1207,7 +1216,8 @@ div.vis-network div.vis-navigation div.vis-button:focus-visible {
 .vis-button.vis-zoomExtends { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 3h7v3H6v4H3zm11 0h7v7h-3V6h-4zM3 14h3v4h4v3H3zm15 0h3v7h-7v-3h4z'/%3E%3C/svg%3E"); }
 
 @media (forced-colors: active) {
-  div.vis-network div.vis-navigation div.vis-button::before { background-color: ButtonText; }
+  div.vis-network div.vis-navigation div.vis-button::before,
+  #btn-physics::before { background-color: ButtonText; }
 }
 
 .node-details-panel {
@@ -1631,8 +1641,14 @@ div.vis-network div.vis-navigation div.vis-button:focus-visible {
   min-width: 0;
   padding: 6px 0;
 }
-.health-assessment-chooser-body label { display: grid; gap: 4px; }
-.health-assessment-chooser-body select { width: 100%; min-width: 0; min-height: 44px; }
+.health-assessment-chooser-body label { display: grid; gap: 4px; min-width: 0; }
+.health-assessment-chooser-body select {
+  justify-self: start;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 44px;
+}
 .health-assessment-chooser-body[hidden],
 .health-assessment-pager[hidden] { display: none; }
 .health-assessment-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -2933,7 +2949,7 @@ td .td-array-idx {
 }
 
 #topology-controls #btn-physics {
-  flex: 0 0 40px;
+  flex: 0 0 34px;
 }
 
 #btn-health-coloring:disabled,
@@ -2951,7 +2967,7 @@ td .td-array-idx {
 @container topology (max-width: 420px) {
   .topology-canvas-wrap .topology-toolbar-row {
     display: grid;
-    grid-template-columns: max-content minmax(0, max-content) 40px;
+    grid-template-columns: max-content minmax(0, max-content) 34px;
     align-items: center;
     width: 100%;
     min-width: 0;
