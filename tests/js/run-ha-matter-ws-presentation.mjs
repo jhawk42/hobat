@@ -48,6 +48,19 @@ const allText = (node) => [
  ...node.children.flatMap(allText),
 ].filter(Boolean).join(" ");
 
+for (const field of ["rloc16", "deviceLabel"]) {
+  const identity = createDetailValueNode("Unrelated display label", "identity value", field);
+  assert.equal(identity.children[1].className, "detail-kv-value detail-identity-value");
+  assert.equal(identity.children[1].textContent, "identity value");
+  for (const value of [null, undefined]) {
+    const missing = createDetailValueNode(field, value, field);
+    assert.equal(missing.children[1].className, "detail-value-empty detail-kv-value");
+    assert.equal(missing.children[1].textContent, "n/a");
+  }
+}
+assert.equal(createDetailValueNode("rloc16", false, "isRouter").children[1].className, "detail-kv-value");
+assert.equal(createDetailValueNode("deviceLabel", "", "deviceLabel").children[1].className, "detail-kv-value");
+
 assert.equal(
   formatMatterDisplayValue("generalDiagnostics.upTime", "90061"),
   "90061 s (1d 1h 1m 1s)",

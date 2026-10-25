@@ -114,7 +114,7 @@ export const NODE_SHAPES = Object.freeze({
 
 // ── Link Quality edge style constants ─────────────────────────────────────────
 export const EDGE_LQ_STYLES = Object.freeze({
-  high: { width: 12, color: PALETTE.lqHigh, themeColorKey: "lqHigh", dashes: false, lqLevel: 3 },
+  high: { width: 10, color: PALETTE.lqHigh, themeColorKey: "lqHigh", dashes: false, lqLevel: 3 },
   medium: { width: 8, color: PALETTE.lqMedium, themeColorKey: "lqMedium", dashes: true, lqLevel: 2 },
   low: { width: 4, color: PALETTE.lqLow, themeColorKey: "lqLow", dashes: true, lqLevel: 1 },
   none: { width: 4, color: PALETTE.lqNone, themeColorKey: "lqNone", dashes: false, lqLevel: 0 },

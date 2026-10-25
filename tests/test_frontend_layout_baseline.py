@@ -204,6 +204,18 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
     light = tokens(":root")
     dark = tokens(':root[data-theme="dark"]')
     assert tokens(":root:not([data-theme])") == dark
+    assert {key: dark[key] for key in (
+        "--dashboard-panel-bg", "--dashboard-group-divider",
+        "--dashboard-canvas-border", "--dashboard-supporting-text",
+    )} == {
+        "--dashboard-panel-bg": "#171a1d",
+        "--dashboard-group-divider": "#2a3036",
+        "--dashboard-canvas-border": "#252b31",
+        "--dashboard-supporting-text": "#adb7c5",
+    }
+    assert css.count("--dashboard-panel-border: transparent;") == 2
+    assert "--dashboard-panel-bg: var(--surface-raised);" in css
+    assert "--dashboard-panel-border: var(--line);" in css
     assert light["--topology-canvas-bg"] == "#ffffff"
     assert dark["--topology-canvas-bg"] == "#121416"
     assert {key: dark[key] for key in (
@@ -222,7 +234,10 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
     assert "background: var(--topology-canvas-bg);" in canvas_rules[1]
     approved_roles = {
         "router": ("#dcecf8", "#4b4237", "#18354f", "#f2ede3"),
-        "border-router": ("#f8e3cf", "#8b4700", "#442d1b", "#f3b56c"),
+        "border-router": ("#e4f3e7", "#28723a", "#153923", "#70c982"),
+        "reed": ("#c2d9fa", "#24559a", "#24559a", "#91baff"),
+        "med": ("#c8f0f5", "#006b80", "#104655", "#62d6ed"),
+        "sed": ("#ffffff", "#006b80", "#121416", "#62d6ed"),
         "child": ("#fff0c2", "#806000", "#3c3218", "#e8c766"),
         "eve": ("#ddf2ef", "#006b6b", "#143d3d", "#6acaca"),
         "unknown": ("#e7ebf0", "#5d6672", "#303844", "#b4becc"),
@@ -268,7 +283,7 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
             pairs.append(("--text", background, 4.5))
             pairs.append(("--muted", background, 4.5))
             pairs.append(("--control-border", background, 3))
-        for role in ("router", "border-router", "child", "eve", "unknown"):
+        for role in approved_roles:
             pairs.append((f"--node-{role}-border", f"--node-{role}-bg", 3))
             pairs.append((f"--node-{role}-border", "--surface", 3))
             pairs.append((f"--node-{role}-border", "--topology-canvas-bg", 3))
@@ -280,6 +295,13 @@ def test_appearance_palette_contrast_and_fallback_parity() -> None:
         for status in ("poor", "moderate", "strong", "unknown"):
             pairs.append((f"--health-{status}", f"--health-{status}-bg", 4.5))
             pairs.append((f"--health-{status}", "--surface", 4.5))
+        if "--dashboard-panel-bg" in palette:
+            pairs.extend([
+                ("--dashboard-supporting-text", "--dashboard-panel-bg", 4.5),
+                ("--text", "--dashboard-panel-bg", 4.5),
+                ("--control-border", "--dashboard-panel-bg", 3),
+                ("--focus-ring", "--dashboard-panel-bg", 3),
+            ])
         for foreground, background, threshold in pairs:
             values = sorted((luminance(palette[foreground]), luminance(palette[background])))
             assert (values[1] + 0.05) / (values[0] + 0.05) >= threshold, (foreground, background)
@@ -430,7 +452,11 @@ def test_topology_controls_use_container_layout_and_native_legend_disclosure() -
     assert "open" not in parser.attributes_by_id["lq-legend"]
     assert html.index('id="lq-legend"') < html.index('id="topology-controls"')
     assert html.index('id="topology-controls"') < html.index('id="topology-view"')
-    assert "<summary>Link quality</summary>" in html
+    assert "<summary>Legend</summary>" in html
+    assert parser.parent_by_id["node-role-legend"] == "lq-legend"
+    for role in ("border-router", "router", "reed", "med", "sed", "child", "unknown", "eve"):
+        assert f"node-role-symbol node-role-{role}" in html
+    assert "MTD alone does not mean sleepy" in html
     assert 'aria-label="Physics simulation"' in html
     assert "container: topology / inline-size;" in css
     assert "@container topology (max-width: 420px)" in css
@@ -879,7 +905,7 @@ def test_navigation_panel_supports_expanded_and_icon_only_states() -> None:
 
 def test_desktop_navigation_is_compact_without_shrinking_mobile_targets() -> None:
     css = _read_text(CSS)
-    desktop_start = css.index("@media (min-width: 1124px)")
+    desktop_start = css.index("@media (min-width: 721px) {\n  .dashboard-shell")
     desktop_end = css.index("@media (min-width: 721px) and (max-height: 600px)", desktop_start)
     desktop = css[desktop_start:desktop_end]
     for selector in (
@@ -888,10 +914,47 @@ def test_desktop_navigation_is_compact_without_shrinking_mobile_targets() -> Non
     ):
         rules = re.search(re.escape(selector) + r"\s*\{([^}]+)\}", desktop)
         assert rules is not None
-        assert "min-height: 36px;" in rules[1]
-        assert "padding: 4px;" in rules[1]
-    assert "min-width: 36px;" in desktop
+        assert "height: 32px;" in rules[1]
+        assert "min-height: 32px;" in rules[1]
+    assert "min-width: 32px;" in desktop
+    assert "grid-template-columns: repeat(5, 32px);" in desktop
+    assert "width: auto;" in desktop
+    assert "align-items: flex-start;" in desktop
     assert "--navigation-panel-width: 50px;" in desktop
     mobile = css[css.index("@media (max-width: 720px)"):]
     assert "min-height: 44px;" in mobile
     assert "grid-template-columns: repeat(5, 44px);" in mobile
+
+
+def test_detail_disclosures_use_heading_text_hierarchy() -> None:
+    css = _read_text(CSS)
+    toggle = re.search(r"\.node-details-panel \.detail-section-toggle \{([^}]+)\}", css)
+    assert toggle is not None
+    assert "font-weight: 650;" in toggle[1]
+    assert "color: var(--text);" in toggle[1]
+    assert "padding: 0;" in toggle[1]
+
+
+def test_compact_controls_are_scoped_to_desktop_actions() -> None:
+    css = _read_text(CSS)
+    desktop = css[
+        css.index("@media (min-width: 721px) {\n  .dashboard-shell"):
+        css.index("@media (min-width: 1124px)")
+    ]
+    controls = re.search(r"#panel-functions select,\s*#panel-functions #search-input \{([^}]+)\}", desktop)
+    assert controls is not None
+    for declaration in ("box-sizing: border-box;", "height: 30px;", "padding-block: 4px;"):
+        assert declaration in controls[1]
+    labels = re.search(r"#panel-functions #panel-dataset \.control-pair \{([^}]+)\}", desktop)
+    assert labels is not None
+    assert "grid-template-columns: 56px minmax(0, 1fr);" in labels[1]
+    actions = re.search(r"#btn-fetch,\s*(.*?)#device-details-nav-bar-left button \{([^}]+)\}", desktop, re.S)
+    assert actions is not None
+    for declaration in ("height: 32px;", "min-height: 32px;", "padding: 4px 8px;"):
+        assert declaration in actions[2]
+    for excluded in ("legend-toggle-btn", "detail-section-toggle", "btn-physics", "theme-toggle"):
+        assert excluded not in actions[1]
+    icons = re.search(r"#btn-functions-panel-toggle,\s*#btn-details-panel-toggle,\s*#device-details-nav-bar-left button \{([^}]+)\}", desktop)
+    assert icons is not None
+    assert "width: 32px;" in icons[1]
+    assert "padding: 4px;" in icons[1]

@@ -6,7 +6,12 @@ import {
   EDGE_CATEGORY_ROUTER_NEIGHBOR,
   DIAGNOSTIC_FILTER_OPTIONS,
 } from "./tdash-constants.js";
-import { getDeviceIdentityKeys } from "./tdash-device-fields.js";
+import {
+  getDeviceIdentityKeys,
+  getPreferredFieldPath,
+  normalizeInputRecord,
+  resolveIsReed,
+} from "./tdash-device-fields.js";
 import { buildDeviceProjection, projectAdaptorNode } from "./tdash-device-projection.js";
 import {
   edgeMatchesLinkFilter,
@@ -49,7 +54,53 @@ function cloneNodeStyle(node) {
     color: node?.color && typeof node.color === "object" ? { ...node.color } : node?.color,
     borderWidth: node?.borderWidth,
     font: node?.font && typeof node.font === "object" ? { ...node.font } : node?.font,
+    shapeProperties: cloneValue(node?.shapeProperties),
   });
+}
+
+const CHILD_ROLES = new Set(["child", "reed", "enddevice", "sleepychild", "sleepyenddevice"]);
+const CHILD_MODE_FIELDS = new Set(["isReed", "mode.device", "mode.fullThreadDevice", "mode.rxOnWhenIdle"]);
+
+function resolveNodeThemeRole(node, records, isRelationshipChild) {
+  if (node.isBorderRouter === true || node.themeRole === "borderRouter") return "borderRouter";
+  if (node.isRouter === true || node.themeRole === "router") return "router";
+  const evidence = records.filter(Boolean).map((record) => normalizeInputRecord(record));
+  const child = isRelationshipChild || evidence.some((record) => (
+    CHILD_ROLES.has(toText(record.role || record.type).toLowerCase().replace(/[\s_-]/g, ""))
+  ));
+  if (!child) return node.themeRole === "eve" ? "eve" : "unknown";
+
+  const types = new Set();
+  const receiverModes = new Set();
+  const reedModes = new Set();
+  for (const record of evidence) {
+    if (Array.isArray(record._merge_conflicts)
+        && record._merge_conflicts.some((conflict) => CHILD_MODE_FIELDS.has(getPreferredFieldPath(conflict?.path)))) {
+      return "child";
+    }
+    const device = toText(getColumnValue(record, "mode.device")).toUpperCase();
+    for (const fullThreadDevice of [
+      getColumnValue(record, "mode.fullThreadDevice"), record.fullThreadDevice, record.deviceTypeFTD,
+    ]) {
+      if (typeof fullThreadDevice === "boolean") types.add(fullThreadDevice ? "FTD" : "MTD");
+    }
+    if (["FTD", "MTD"].includes(device)) types.add(device);
+    for (const receiver of [getColumnValue(record, "mode.rxOnWhenIdle"), record.rxOnWhenIdle]) {
+      if (typeof receiver === "boolean") receiverModes.add(receiver);
+    }
+    if (typeof record.isReed === "boolean") reedModes.add(record.isReed);
+    if (toText(record.role).trim().toLowerCase() === "reed" || device === "REED") reedModes.add(true);
+  }
+  // Contradictory observations must not turn uncertainty into a confirmed subtype.
+  if (types.size > 1 || receiverModes.size > 1 || reedModes.size > 1) return "child";
+  const [deviceType] = types;
+  const [isReed] = reedModes;
+  if (isReed === true && deviceType === "MTD") return "child";
+  if (resolveIsReed(isReed, deviceType, "child", false, false)) return "reed";
+  if (deviceType === "MTD" && receiverModes.size === 1) {
+    return receiverModes.has(true) ? "med" : "sed";
+  }
+  return "child";
 }
 
 function identityKeysForRecord(record) {
@@ -106,6 +157,42 @@ export function createTopologyViewModel(
 
   nodeMap.forEach((node, nodeId) => indexIdentity(identityToNodeId, node, nodeId));
   rawByIdForDetails.forEach((row, nodeId) => indexIdentity(identityToNodeId, row, nodeId));
+
+  const childNodeIds = new Set(edges.filter((edge) => edge.isParentChild === true
+    || edge.linkCategories?.some((category) => [
+      EDGE_CATEGORY_DEFAULT_CHILDREN, EDGE_CATEGORY_OTBR_CHILD,
+      EDGE_CATEGORY_EVE_CHILD, EDGE_CATEGORY_EVE_NATIVE_CHILD,
+    ].includes(category))).map((edge) => edge.to));
+  const childEvidenceById = new Map();
+  const owners = [
+    ...nodeMap.values(), ...rawByIdForDetails.values(),
+    ...(adaptorResult.routerChildByRloc16?.values() ?? []),
+  ];
+  owners.forEach((owner) => {
+    for (const field of ["children", "childTable"]) {
+      const children = getColumnValue(owner, field);
+      if (!Array.isArray(children)) continue;
+      children.forEach((record) => {
+        const nodeId = identityKeysForRecord(record).map((key) => identityToNodeId.get(key)).find((id) => id !== undefined);
+        if (nodeId === undefined) return;
+        const address = getDeviceIdentityKeys(record).find((key) => key.startsWith("extAddress:"));
+        const nodeAddress = getDeviceIdentityKeys(rawByIdForDetails.get(nodeId))
+          .find((key) => key.startsWith("extAddress:"))
+          ?? getDeviceIdentityKeys(nodeMap.get(nodeId)).find((key) => key.startsWith("extAddress:"));
+        if (address && nodeAddress && address !== nodeAddress) return;
+        childNodeIds.add(nodeId);
+        const records = childEvidenceById.get(nodeId) ?? [];
+        records.push(record);
+        childEvidenceById.set(nodeId, records);
+      });
+    }
+  });
+  nodes.forEach((node) => {
+    node.themeRole = resolveNodeThemeRole(node, [
+      rawByIdForDetails.get(node.id), nodeMap.get(node.id),
+      ...(childEvidenceById.get(node.id) ?? []),
+    ], childNodeIds.has(node.id));
+  });
 
   const projectionByIdentity = new Map();
   projections.forEach((projection) => {
@@ -334,6 +421,7 @@ export function projectTopologyTheme(viewModel, palette, styleMode, searchState,
     return [node.id, Object.freeze({
       ...base,
       color,
+      shapeProperties: { ...base.shapeProperties, borderDashes: role === "unknown" ? [5, 3] : false },
       font: { ...base.font, color: palette.labelText, background: palette.labelBg },
     })];
   }));
@@ -378,6 +466,41 @@ export function projectTopologyTheme(viewModel, palette, styleMode, searchState,
     });
   }
   return Object.freeze({ viewModel: next, nodeUpdates, edgeUpdates });
+}
+
+const NEIGHBORHOOD_CONTEXT_OPACITY = 0.42;
+const DEFAULT_EDGE_SELECTION_WIDTH = 1.5;
+
+export function projectTopologySelection(viewModel, {
+  selectedNodeIds = [],
+  visibility,
+  searchQuery = "",
+  healthTarget = false,
+} = {}) {
+  const visibleNodes = visibility?.visibleNodeIds ?? new Set();
+  const visibleEdges = visibility?.visibleEdgeIds ?? new Set();
+  const selectedId = selectedNodeIds.length === 1 && visibleNodes.has(selectedNodeIds[0])
+    ? selectedNodeIds[0] : null;
+  const incidentIds = new Set(viewModel.edges.filter((edge) =>
+    !edge.baseHidden && visibleEdges.has(edge.id)
+    && visibleNodes.has(edge.from) && visibleNodes.has(edge.to)
+    && edge.from !== edge.to && (edge.from === selectedId || edge.to === selectedId),
+  ).map((edge) => edge.id));
+  const active = selectedId !== null && incidentIds.size > 0 && !searchQuery && !healthTarget;
+  return viewModel.edges.filter((edge) => !edge.baseHidden).map((edge) => {
+    const base = viewModel.originalEdgeStyling.get(edge.id);
+    const color = base.color && typeof base.color === "object" ? cloneValue(base.color) : { color: base.color };
+    const opacity = color.opacity ?? 1;
+    color.opacity = active && opacity === 1 && visibleEdges.has(edge.id) && !incidentIds.has(edge.id)
+      ? opacity * NEIGHBORHOOD_CONTEXT_OPACITY : opacity;
+    const incident = active && incidentIds.has(edge.id);
+    if (incident) color.highlight = color.color;
+    return {
+      id: edge.id,
+      color,
+      selectionWidth: incident ? 0 : (edge.selectionWidth ?? DEFAULT_EDGE_SELECTION_WIDTH),
+    };
+  });
 }
 
 export function buildTopologyDetails(viewModel, selectedId) {

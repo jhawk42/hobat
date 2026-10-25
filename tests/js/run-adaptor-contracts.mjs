@@ -139,7 +139,7 @@ assertResult(networkdiag, {
   sourceNames: ["networkdiagnostic"],
   hasChildIndex: true,
 });
-assert.equal(networkdiag.edgeData[0].width, 12);
+assert.equal(networkdiag.edgeData[0].width, 10);
 
 const meshdiagRoutes = run(
   "meshdiag-networkdiag",

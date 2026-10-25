@@ -53,6 +53,12 @@ patches. The active render owner's `applyTheme()` updates existing DataSets
 without publishing selection, rebuilding views, or touching camera/physics.
 Adaptor `themeRole`/`themeColorKey` metadata is browser presentation only;
 it does not enter normalized rows, details, cache files or exports.
+The topology view model refines child presentation roles from canonical node
+and identity-matched child-table evidence before theme projection. Confirmed
+REED, MED, and SED styles remain separate from unconfirmed child and unknown
+fallbacks; filter classifications and counts do not change. Canvas-matched
+SED fills and unknown-role border dashes participate in theme/search/health
+restoration. The collapsible topology legend uses the same CSS role tokens.
 There is no appearance API, server flag, collector or database setting.
 
 The dashboard also uses API paths and views outside snapshot assembly. Health
@@ -502,6 +508,18 @@ categories, details ownership, and result validation. The topology view model
 indexes nodes and relationships and computes visibility without directly
 mutating vis-network objects. The renderer applies the result, manages network
 lifecycle, restores search styling, and publishes device selections.
+
+`projectTopologySelection()` derives presentation-only edge patches from
+theme-resolved, profile-constrained base styles, visible relationships, and
+current selection intent. Ordinary single-node inspection retains incident LQ
+styles and dims fully opaque context edges to 0.42; already-translucent edges
+retain their base opacity. Search and explicit health-target navigation
+suppress this effect. No source/adaptor records, visibility, or geometry change.
+The render owner recomposes after native select/deselect/click, filter,
+search, health-color, and theme transitions. Programmatic search selection
+refreshes explicitly; `selectTopologyHealthTargets()` signals health intent
+after `setSelection`, preserving its existing target fit and explicit edges.
+Disposable, owner-guarded handlers cannot patch a replacement network.
 
 Relationship metric projection belongs to the browser adaptor/presentation
 boundary, not dataset assembly or row-merge policy. CLI, merged, OTBR REST, and

@@ -5,6 +5,7 @@ import {
   createTopologyEventBindings,
   createTopologyRenderOwner,
   createTopologyViewModel,
+  projectTopologySelection,
   projectTopologyTheme,
 } from "../../src/js/tdash-topology-view-model.js";
 import { decorateTopologyNavigation, isSecondaryRouterRouteEdge, readThemePalette } from "../../src/js/tdash-topology-renderer.js";
@@ -41,6 +42,7 @@ assert.equal(readThemePalette(), darkPalette);
 
 const roleTokens = {
   router: "--node-router", borderRouter: "--node-border-router", child: "--node-child",
+  reed: "--node-reed", med: "--node-med", sed: "--node-sed",
   eve: "--node-eve", unknown: "--node-unknown",
 };
 const edgeTokens = {
@@ -53,6 +55,12 @@ const colorFixture = createTopologyViewModel({
     x: 12, y: 34, size: 27, physics: false, borderWidth: 3,
     font: { size: 13, face: "monospace" },
   })),
+  rawByIdForDetails: new Map([
+    ["child", { role: "child" }],
+    ["reed", { role: "child", isReed: true }],
+    ["med", { role: "child", mode: { device: "MTD", rxOnWhenIdle: true } }],
+    ["sed", { extAddress: "1111111111111111", role: "child", mode: { device: "MTD", rxOnWhenIdle: false } }],
+  ]),
   edgeData: Object.keys(edgeTokens).map((key) => ({
     id: key, themeColorKey: key, from: "router", to: "child",
     width: key === "lqHigh" ? 12 : 4, dashes: key === "lqMedium" || key === "lqLow" ? [5, 5] : false,
@@ -72,7 +80,8 @@ for (const [theme, palette] of [["light", lightPalette], ["dark", darkPalette], 
     assert.equal(patch.color.hover.border, palette.hoverBorder);
     assert.equal(patch.font.size, 13);
     assert.equal(patch.borderWidth, 3);
-    assert.deepEqual(Object.keys(patch).sort(), ["borderWidth", "color", "font", "id"]);
+    assert.deepEqual(patch.shapeProperties.borderDashes, role === "unknown" ? [5, 3] : false);
+    assert.deepEqual(Object.keys(patch).sort(), ["borderWidth", "color", "font", "id", "shapeProperties"]);
   }
   for (const [key, token] of Object.entries(edgeTokens)) {
     const patch = projection.edgeUpdates.find((edge) => edge.id === key);
@@ -88,6 +97,22 @@ for (const [theme, palette] of [["light", lightPalette], ["dark", darkPalette], 
   assert.equal(JSON.stringify([projection.viewModel.nodes, projection.viewModel.edges]), originalFixture);
   currentFixture = projection.viewModel;
 }
+assert.equal(lightPalette.sedBg, tokens.light["--topology-canvas-bg"]);
+assert.equal(darkPalette.sedBg, tokens.dark["--topology-canvas-bg"]);
+const searchFixture = { query: "sleepy", matchingNodeIds: new Set(["sed"]) };
+const baselineDark = projectTopologyTheme(colorFixture, darkPalette, "canonical", null);
+const sedHealth = new Map([["extaddr:1111111111111111", "poor"]]);
+const healthDark = projectTopologyTheme(baselineDark.viewModel, darkPalette, "canonical", null, sedHealth);
+assert.equal(healthDark.nodeUpdates.find((node) => node.id === "sed").color.background, darkPalette.healthPoorBg);
+const searchedDark = projectTopologyTheme(healthDark.viewModel, darkPalette, "search", searchFixture, sedHealth);
+assert.equal(searchedDark.nodeUpdates.find((node) => node.id === "sed").color.background, darkPalette.sedBg);
+assert.equal(searchedDark.nodeUpdates.find((node) => node.id === "sed").color.border, darkPalette.searchMatch);
+const themedSearch = projectTopologyTheme(searchedDark.viewModel, lightPalette, "search", searchFixture, sedHealth);
+assert.equal(themedSearch.nodeUpdates.find((node) => node.id === "sed").color.background, lightPalette.sedBg);
+const healthRestored = projectTopologyTheme(themedSearch.viewModel, darkPalette, "canonical", null, sedHealth);
+assert.deepEqual(healthRestored.nodeUpdates, healthDark.nodeUpdates);
+const roleRestored = projectTopologyTheme(healthRestored.viewModel, darkPalette, "canonical", null);
+assert.deepEqual(roleRestored.nodeUpdates, baselineDark.nodeUpdates);
 
 const navigationControls = new Map();
 const navBindings = createTopologyEventBindings();
@@ -157,12 +182,14 @@ const target = new FakeEventTarget();
 const networks = [];
 let currentOwner = null;
 let responseCount = 0;
+let selectionResponseCount = 0;
 const retainedCallbacks = [];
 
 for (let renderIndex = 0; renderIndex < 5; renderIndex += 1) {
   currentOwner?.dispose();
   const network = {
     destroyed: false,
+    selectedNodeIds: [],
     destroy() {
       this.destroyed = true;
     },
@@ -171,11 +198,25 @@ for (let renderIndex = 0; renderIndex < 5; renderIndex += 1) {
   bindings.on(target, "change", () => {
     responseCount += 1;
   });
-  retainedCallbacks.push(() => {
-    if (currentOwner.isActive()) responseCount += 100;
-  });
   bindings.once(target, "ready", () => {});
-  currentOwner = createTopologyRenderOwner(network, bindings);
+  const owner = createTopologyRenderOwner(network, bindings);
+  currentOwner = owner;
+  const palette = renderIndex % 2 ? darkPalette : lightPalette;
+  const model = projectTopologyTheme(colorFixture, palette, "canonical", null).viewModel;
+  const refreshSelection = () => {
+    if (!owner.isActive()) return;
+    selectionResponseCount += 1;
+    return projectTopologySelection(model, {
+      selectedNodeIds: network.selectedNodeIds,
+      visibility: {
+        visibleNodeIds: new Set(model.nodes.map((node) => node.id)),
+        visibleEdgeIds: new Set(model.edges.map((edge) => edge.id)),
+      },
+    });
+  };
+  bindings.on(target, "selectNode", refreshSelection);
+  bindings.on(target, "deselectNode", refreshSelection);
+  retainedCallbacks.push(refreshSelection);
   networks.push(network);
 
   assert.equal(target.count("change"), 1);
@@ -183,15 +224,30 @@ for (let renderIndex = 0; renderIndex < 5; renderIndex += 1) {
   target.emit("change");
   target.emit("ready");
   assert.equal(target.count("ready"), 0);
+  assert.equal(target.count("selectNode"), 1);
+  assert.equal(target.count("deselectNode"), 1);
+  network.selectedNodeIds = ["router"];
+  target.emit("selectNode");
+  const selected = refreshSelection().find((edge) => edge.id === "lqHigh");
+  assert.equal(selected.color.highlight, palette.lqHigh);
+  assert.equal(selected.selectionWidth, 0);
+  network.selectedNodeIds = [];
+  target.emit("deselectNode");
+  assert.deepEqual(refreshSelection(), projectTopologySelection(model));
 }
 
 assert.equal(responseCount, 5);
+retainedCallbacks.slice(0, -1).forEach((callback) => callback());
+assert.equal(selectionResponseCount, 20);
 assert.equal(networks.slice(0, -1).every((network) => network.destroyed), true);
 assert.equal(networks.at(-1).destroyed, false);
 currentOwner.dispose();
 currentOwner.dispose();
 retainedCallbacks.at(-1)();
+assert.equal(selectionResponseCount, 20);
 assert.equal(target.count("change"), 0);
+assert.equal(target.count("selectNode"), 0);
+assert.equal(target.count("deselectNode"), 0);
 assert.equal(networks.at(-1).destroyed, true);
 
 console.log(JSON.stringify({

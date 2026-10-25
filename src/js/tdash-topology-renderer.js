@@ -39,6 +39,7 @@ import {
   createTopologySearchState,
   createTopologyViewModel,
   projectTopologyTheme,
+  projectTopologySelection,
 } from "./tdash-topology-view-model.js";
 import {
   applyMeshLabHybridSeedLayout as applyExtractedMeshLabHybridSeedLayout,
@@ -64,7 +65,7 @@ let _topologyRenderOwner = null;
 let _healthStatusByDeviceId = new Map();
 
 const THEME_TOKENS = Object.freeze({
-  ...Object.fromEntries(["router", "borderRouter", "child", "eve", "unknown"].flatMap((role) => {
+  ...Object.fromEntries(["router", "borderRouter", "reed", "med", "sed", "child", "eve", "unknown"].flatMap((role) => {
     const cssRole = role === "borderRouter" ? "border-router" : role;
     return [[`${role}Bg`, `--node-${cssRole}-bg`], [`${role}Border`, `--node-${cssRole}-border`]];
   })),
@@ -575,6 +576,17 @@ export function renderTopologyForDataset(
   decorateTopologyNavigation(container, network, bindings);
   let currentSearchState = createTopologySearchState("", false, viewModel);
   let styleMode = "canonical";
+  let currentVisibility = null;
+  let healthTargetSelection = false;
+
+  function applySelectionPresentation() {
+    edgesDataset.update(projectTopologySelection(viewModel, {
+      selectedNodeIds: network.getSelectedNodes(),
+      visibility: currentVisibility,
+      searchQuery: currentSearchState.query,
+      healthTarget: healthTargetSelection,
+    }));
+  }
 
   // ── applyFilters ───────────────────────────────────────────────────────
 
@@ -584,17 +596,20 @@ export function renderTopologyForDataset(
       viewModel,
       createTopologyFilterState(nodeFilterMode, linkFilterMode, diagnosticFilterMode),
     );
+    currentVisibility = visibility;
     applyTopologyTransition(nodesDataset, edgesDataset, { viewModel, visibility });
+    applySelectionPresentation();
     return visibility;
   }
 
-  // Shared canonical restore path for node visual styles.
+  // Recompose from theme bases so overlays never become restoration defaults.
   function restoreOriginalNodeStyling() {
-    styleMode = "canonical";
+    styleMode = currentSearchState.query ? "search" : "canonical";
     const restore = projectTopologyTheme(viewModel, palette, styleMode, currentSearchState, _healthStatusByDeviceId);
     viewModel = restore.viewModel;
     _originalNodeStyling = viewModel.originalNodeStyling;
     nodesDataset.update(restore.nodeUpdates);
+    applySelectionPresentation();
   }
 
   // ── Search highlight ─────────────────────────────────────────────────────
@@ -606,9 +621,9 @@ export function renderTopologyForDataset(
       diagnosticFilterEl.value,
     );
     currentSearchState = createTopologySearchState(searchQuery, advancedMode, viewModel);
-    styleMode = "search";
+    if (currentSearchState.query) healthTargetSelection = false;
     const highlight = computeSearchHighlight(viewModel, currentSearchState);
-    nodesDataset.update(highlight.nodeUpdates);
+    restoreOriginalNodeStyling();
     updateStatus(baseCounts);
 
     if (highlight.focusTarget) {
@@ -623,6 +638,7 @@ export function renderTopologyForDataset(
         offset: { x: 0, y: yOffset },
       });
     }
+    applySelectionPresentation();
   }
 
   // ── Status line ────────────────────────────────────────────────────────
@@ -645,7 +661,16 @@ export function renderTopologyForDataset(
 
   // ── Node detail click handler ──────────────────────────────────────────
 
+  function onNativeSelection() {
+    if (!owner.isActive()) return;
+    healthTargetSelection = false;
+    applySelectionPresentation();
+  }
+  bindings.on(network, "selectNode", onNativeSelection);
+  bindings.on(network, "deselectNode", onNativeSelection);
+
   bindings.on(network, "click", (params) => {
+    onNativeSelection();
     if (params.nodes.length === 0) {
       publishDeviceSelection(null);
       document.getElementById("summary-list").innerHTML =
@@ -746,8 +771,12 @@ export function renderTopologyForDataset(
       viewModel = projection.viewModel;
       _originalNodeStyling = viewModel.originalNodeStyling;
       nodesDataset.update(projection.nodeUpdates);
-      edgesDataset.update(projection.edgeUpdates);
-      network.redraw();
+      applySelectionPresentation();
+    },
+    applySelectionPresentation: ({ healthTarget = false } = {}) => {
+      if (!owner.isActive()) return;
+      healthTargetSelection = healthTarget;
+      applySelectionPresentation();
     },
     applyFilters: (...args) => owner.isActive() ? applyFilters(...args) : null,
     applySearchHighlight: (...args) => owner.isActive() ? applySearchHighlight(...args) : null,

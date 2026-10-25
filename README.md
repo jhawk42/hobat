@@ -102,6 +102,11 @@ or reset topology position, selection, camera, or paused physics.
 The topology physics pause/resume toggle uses the same compact, theme-aware
 styling as the navigation buttons; its icon and tooltip show the available action.
 
+Select a topology device to emphasize its immediate links while keeping the
+rest of the mesh visible. Clearing selection restores the current base styles,
+without moving the camera or restarting physics. Active search and health-target
+navigation retain their own highlighting. See [topology styling and selection](doc/dashboard_vis_node_colors.md#search-and-selection).
+
 **Operations > Thread Network** includes source-backed partition identifiers
 and counts of uniquely identified devices in the currently loaded observation.
 Partial or conflicting membership is called out, and the counts are not a

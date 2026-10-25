@@ -428,7 +428,7 @@ export function formatDuration(ms) {
 
 // ── Detail-panel structured value renderer ────────────────────────────────────
 
-function _createKvRow(keyText, valueText, isEmpty = false) {
+function _createKvRow(keyText, valueText, isEmpty = false, fieldPath = "") {
   const li = document.createElement("li");
   li.className = "detail-kv-row";
   const keySpan = document.createElement("span");
@@ -438,6 +438,9 @@ function _createKvRow(keyText, valueText, isEmpty = false) {
   valSpan.className = isEmpty
     ? "detail-value-empty detail-kv-value"
     : "detail-kv-value";
+  if (!isEmpty && valueText !== "" && (fieldPath === "rloc16" || fieldPath === "deviceLabel")) {
+    valSpan.className += " detail-identity-value";
+  }
   valSpan.textContent = valueText;
   li.appendChild(keySpan);
   li.appendChild(valSpan);
@@ -764,25 +767,26 @@ export function createDetailValueNode(key, value, fieldPath = key) {
       displayLabel,
       formattedValue,
       value === null || (Array.isArray(value) && value.length === 0),
+      fieldPath,
     );
   }
   // Scalar (string, number, boolean, null, undefined)
   if (value === null || value === undefined) {
-    return _createKvRow(displayLabel, "n/a");
+    return _createKvRow(displayLabel, "n/a", true, fieldPath);
   }
   if (typeof value !== "object") {
     const text = typeof value === "boolean" ? (value ? "true" : "false") : String(value);
-    return _createKvRow(displayLabel, text);
+    return _createKvRow(displayLabel, text, false, fieldPath);
   }
 
   // Empty array
   if (Array.isArray(value) && value.length === 0) {
-    return _createKvRow(displayLabel, "empty []", true);
+    return _createKvRow(displayLabel, "empty []", true, fieldPath);
   }
 
   // Empty object
   if (!Array.isArray(value) && Object.keys(value).length === 0) {
-    return _createKvRow(displayLabel, "empty {}", true);
+    return _createKvRow(displayLabel, "empty {}", true, fieldPath);
   }
 
   // Array of primitives (no element is an object/array)

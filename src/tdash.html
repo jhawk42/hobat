@@ -267,7 +267,9 @@
             <div id="topology-canvas-wrap" class="topology-canvas-wrap">
               <div id="topology-toolbar-row" class="topology-toolbar-row">
                 <details id="lq-legend" class="lq-legend">
-                  <summary>Link quality</summary>
+                  <summary>Legend</summary>
+                  <div class="topology-legend-content" role="region" aria-label="Topology legend entries" tabindex="0">
+                  <h3 class="topology-legend-heading">Link quality</h3>
                   <div class="lq-legend-items">
                     <span class="lq-legend-item lq-high">
                       <span class="lq-legend-line lq-legend-line-high" aria-hidden="true"></span>
@@ -281,6 +283,43 @@
                       <span class="lq-legend-line lq-legend-line-low" aria-hidden="true"></span>
                       <span>Low (LQ1)</span>
                     </span>
+                  </div>
+                  <div id="node-role-legend" class="node-role-legend">
+                    <h3 class="topology-legend-heading">Node roles</h3>
+                    <span class="node-role-legend-item">
+                      <svg class="node-role-symbol node-role-border-router" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18"/></svg>
+                      <span>Border router (square)</span>
+                    </span>
+                    <span class="node-role-legend-item">
+                      <svg class="node-role-symbol node-role-router" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12 7 3 17 3 22 12 17 21 7 21Z"/></svg>
+                      <span>Router (hexagon)</span>
+                    </span>
+                    <span class="node-role-legend-item">
+                      <svg class="node-role-symbol node-role-reed" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>
+                      <span>REED: router-eligible child</span>
+                    </span>
+                    <span class="node-role-legend-item">
+                      <svg class="node-role-symbol node-role-med" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>
+                      <span>MED: minimal, receiver on when idle</span>
+                    </span>
+                    <span class="node-role-legend-item">
+                      <svg class="node-role-symbol node-role-sed" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>
+                      <span>SED: sleepy (hollow-looking)</span>
+                    </span>
+                    <span class="node-role-legend-item">
+                      <svg class="node-role-symbol node-role-child" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>
+                      <span>Child: subtype unconfirmed</span>
+                    </span>
+                    <span class="node-role-legend-item">
+                      <svg class="node-role-symbol node-role-unknown" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>
+                      <span>Unknown role (dashed outline)</span>
+                    </span>
+                    <span class="node-role-legend-item">
+                      <svg class="node-role-symbol node-role-eve" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>
+                      <span>Source-only fallback: unclassified</span>
+                    </span>
+                  </div>
+                  <p class="topology-legend-note">Colors identify roles, not health. MED and SED require confirmed minimal-device and receiver-mode evidence; MTD alone does not mean sleepy. Dashed outlines mean unknown role, not disconnection.</p>
                   </div>
                 </details>
                 <div id="topology-controls" class="topology-controls">

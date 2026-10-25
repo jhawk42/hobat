@@ -37,21 +37,36 @@ Dark mode uses layered charcoal backgrounds instead of blue-gray surfaces:
 | Surface | Color |
 |---|---|
 | Page and topology canvas | `#121416` |
-| Panel backgrounds | `#181b1e` |
+| Dashboard panels and topology label backplates | `#171a1d` |
+| Other raised surfaces | `#181b1e` |
 | Controls and standard surfaces | `#1c2024` |
 | Alternating table rows | `#22272b` |
-| Topology label backplates | `#171a1d` |
 | Search-dimmed node fills | `#252a2f` |
 
 Light mode is unchanged. Selection, focus, health and relationship colors
 retain their semantic meaning. System-mode CSS fallback uses the same palette.
+Dashboard decorative frames are subdued in Dark; Functions groups retain
+subtle separators. Interactive boundaries and keyboard focus remain distinct.
+Supporting dashboard text uses `#adb7c5`, while headings and current values
+retain the theme's brighter text colors.
+
+Structured detail rows use normal-weight keys and medium-weight values.
+Nonempty canonical `rloc16` and `deviceLabel` values are bold, independently
+of their display labels. Missing, empty, and explicit `n/a` states remain
+visually distinct; this emphasis does not change evidence or field authority.
 
 ## Workspace Navigation
 
-At desktop widths (1124 px and above), navigation buttons use a compact 36 px
-minimum height and 4 px padding. The icon-only rail is 50 px wide; expanding it
-retains labels and the 132 px rail. Mobile and intermediate layouts retain
-44 px navigation targets.
+Above 720 CSS px, navigation and related dashboard action/detail-tab buttons
+are 32 px high. Icon-only navigation is 32 px square; expanded labels retain
+their intrinsic width. Functions selects and Search are 30 px high, with a
+shared 56 px Source/Dataset label column. Diagnostic labels are not constrained
+to that column. Disclosures retain their own sizing.
+
+At 1124 px and above, the icon-only rail remains 50 px wide; expanding it
+retains labels and the 132 px rail. At 720 px and below, navigation retains
+44 px targets. The header theme button remains 36 x 30 px; canvas controls
+remain 34 px with 20 px glyphs.
 
 ## Panel Close Controls
 
@@ -206,6 +221,14 @@ versions, network state, status, and vendor name. Dot paths such as
 
 Advanced search checks every top-level field and one level of nested object
 values. Object and array values are stringified for substring matching.
+
+Ordinary selection of one visible topology device emphasizes its visible
+incident links without hiding the surrounding mesh. Fully opaque unrelated
+links use opacity 0.42; already-translucent profile/source links retain their
+existing opacity. Clear selection restores the current theme's base styles.
+Active search and explicit health-target navigation suppress this neighborhood
+effect; isolated, hidden, or multiple selected nodes do not dim the whole graph.
+See [topology interaction details](dashboard_vis_node_colors.md#search-and-selection).
 
 ## Filters and Insights
 

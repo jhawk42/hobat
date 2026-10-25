@@ -11,6 +11,7 @@ import {
   createTopologyViewModel,
   resolveTopologyNodeId,
   projectTopologyTheme,
+  projectTopologySelection,
 } from "../../src/js/tdash-topology-view-model.js";
 import { buildDeviceProjections } from "../../src/js/tdash-device-projection.js";
 import { addEdge } from "../../src/js/tdash-topology-utils.js";
@@ -106,10 +107,78 @@ assert.equal(highlight.focusTarget, child.id);
 assert.equal(highlight.nodeUpdates.find((update) => update.id === child.id).borderWidth, 4);
 
 const palette = Object.fromEntries(
-  ["router", "borderRouter", "child", "eve", "unknown"].flatMap((role) => [
+  ["router", "borderRouter", "reed", "med", "sed", "child", "eve", "unknown"].flatMap((role) => [
     [`${role}Bg`, "#ffffff"], [`${role}Border`, "#333333"],
   ]),
 );
+const subtypeCases = [
+  ["reed", { role: "child", mode: { device: "FTD" } }, "reed"],
+  ["reed-flag", { role: "child", isReed: true }, "reed"],
+  ["reed-role", { role: "REED" }, "reed"],
+  ["reed-mode", { role: "child", mode: { device: "REED" } }, "reed"],
+  ["reed-veto", { role: "child", isReed: false, mode: { device: "FTD" } }, "child"],
+  ["ftd-alone", { mode: { device: "FTD" } }, "unknown"],
+  ["named-sleepy", { deviceLabel: "Sleepy Sensor", role: "child" }, "child"],
+  ["mtd-only", { role: "child", mode: { device: "MTD" } }, "child"],
+  ["rx-only", { role: "child", mode: { rxOnWhenIdle: false } }, "child"],
+  ["med", { role: "child", mode: { fullThreadDevice: false, rxOnWhenIdle: true } }, "med"],
+  ["sed", { role: "child", mode: { fullThreadDevice: false, rxOnWhenIdle: false } }, "sed"],
+  ["alias-sed", { role: "child", mode: { deviceTypeFTD: false, rx_on_when_idle: false } }, "sed"],
+  ["flat-med", { role: "child", "mode.device": "MTD", "mode.rxOnWhenIdle": true }, "med"],
+  ["invalid-rx", { role: "child", mode: { device: "MTD", rxOnWhenIdle: "invalid" } }, "child"],
+  ["contradictory-mode", { role: "child", mode: { device: "MTD", fullThreadDevice: true, rxOnWhenIdle: false } }, "child"],
+  ["contradictory-root-mode", { role: "child", fullThreadDevice: true,
+    mode: { fullThreadDevice: false, rxOnWhenIdle: false } }, "child"],
+  ["contradictory-root-rx", { role: "child", rxOnWhenIdle: true,
+    mode: { fullThreadDevice: false, rxOnWhenIdle: false } }, "child"],
+  ["contradictory-reed", { role: "child", isReed: true, mode: { device: "MTD", rxOnWhenIdle: false } }, "child"],
+  ["conflicted-rx", { role: "child", mode: { device: "MTD", rxOnWhenIdle: false },
+    _merge_conflicts: [{ path: "mode.rxOnWhenIdle", current: false, incoming: true }] }, "child"],
+  ["router", { role: "router", mode: { device: "FTD" } }, "router"],
+  ["borderRouter", { role: "border router", isReed: true }, "borderRouter"],
+];
+const subtypeFixture = {
+  nodeData: subtypeCases.map(([id]) => ({
+    id, themeRole: id === "router" || id === "borderRouter" ? id : "unknown",
+    shape: id === "router" ? "hexagon" : id === "borderRouter" ? "square" : "dot",
+    borderWidth: 1, size: 27,
+  })),
+  edgeData: [],
+  rawByIdForDetails: new Map(subtypeCases.map(([id, record]) => [id, record])),
+};
+const subtypeBefore = JSON.stringify([...subtypeFixture.rawByIdForDetails]);
+const subtypes = createTopologyViewModel(subtypeFixture);
+for (const [id, , expected] of subtypeCases) {
+  assert.equal(subtypes.nodes.find((node) => node.id === id).themeRole, expected, id);
+}
+assert.equal(JSON.stringify([...subtypeFixture.rawByIdForDetails]), subtypeBefore);
+const relationshipSubtypes = createTopologyViewModel({
+  nodeData: [
+    { id: "parent", isRouter: true },
+    { id: "related-sed", extAddress: "1111111111111111", themeRole: "unknown" },
+    { id: "related-conflict", extAddress: "2222222222222222", themeRole: "unknown" },
+    { id: "related-reed", extAddress: "3333333333333333", themeRole: "unknown" },
+    { id: "reused-rloc", extAddress: "4444444444444444", rloc16: "0x1005", themeRole: "unknown" },
+    { id: "source-fallback", themeRole: "eve" },
+  ],
+  edgeData: [{ id: "reed-link", from: "parent", to: "related-reed", isParentChild: true }],
+  rawByIdForDetails: new Map([
+    ["parent", { childTable: [
+      { extAddress: "1111111111111111", mode: { device: "MTD", rxOnWhenIdle: false } },
+      { extAddress: "2222222222222222", fullThreadDevice: false, rxOnWhenIdle: false },
+      { extAddress: "5555555555555555", rloc16: "0x1005", mode: { device: "MTD", rxOnWhenIdle: false } },
+    ] }],
+    ["related-reed", { mode: { fullThreadDevice: true } }],
+  ]),
+  routerChildByRloc16: new Map([["0x1000", { childTable: [
+    { extAddress: "2222222222222222", fullThreadDevice: false, rxOnWhenIdle: true },
+  ] }]]),
+});
+assert.equal(relationshipSubtypes.nodes.find((node) => node.id === "related-sed").themeRole, "sed");
+assert.equal(relationshipSubtypes.nodes.find((node) => node.id === "related-conflict").themeRole, "child");
+assert.equal(relationshipSubtypes.nodes.find((node) => node.id === "related-reed").themeRole, "reed");
+assert.equal(relationshipSubtypes.nodes.find((node) => node.id === "reused-rloc").themeRole, "unknown");
+assert.equal(relationshipSubtypes.nodes.find((node) => node.id === "source-fallback").themeRole, "eve");
 Object.assign(palette, {
   labelText: "#111111", labelBg: "#eeeeee", selectedBorder: "#800080", hoverBorder: "#000000",
   searchMatch: "#995500", searchDimBg: "#cccccc", searchDimBorder: "#777777", searchDimText: "#444444",
@@ -163,6 +232,77 @@ assert.equal(projectedProfile.nodeUpdates[0].font.face, "monospace");
 assert.equal(projectedProfile.nodeUpdates[0].font.multi, "md");
 assert.equal(projectedProfile.nodeUpdates[0].font.vadjust, -8);
 assert.deepEqual(Object.keys(projectedProfile.edgeUpdates[0]).sort(), ["color", "id"]);
+
+const selectionInput = {
+  nodeData: ["a", "b", "c", "d", "isolated"].map((id) => ({ id, themeRole: "router" })),
+  edgeData: [
+    { id: "ab", from: "a", to: "b", width: 10, themeColorKey: "lqHigh", dashes: false },
+    { id: "ba", from: "b", to: "a", width: 0.45, selectionWidth: 3, color: { opacity: 0.16 } },
+    { id: "parallel", from: "a", to: "b", width: 4, dashes: [5, 3] },
+    { id: "context", from: "c", to: "d", width: 8, color: { opacity: 0.6 } },
+    { id: "opaque-context", from: "c", to: "d", width: 4 },
+    { id: "zero", from: "c", to: "d", color: { opacity: 0 } },
+    { id: "self-loop", from: "isolated", to: "isolated" },
+    { id: "hidden", from: "a", to: "c", hidden: true, color: { opacity: 0.8 } },
+    { id: "anchor", from: "a", to: "d", baseHidden: true, hidden: true, physics: true },
+  ],
+};
+const selectionSnapshot = JSON.stringify(selectionInput);
+const selectionView = createTopologyViewModel(selectionInput);
+const selectionVisibility = {
+  visibleNodeIds: new Set(["a", "b", "c", "d", "isolated"]),
+  visibleEdgeIds: new Set(["ab", "ba", "parallel", "context", "opaque-context", "zero", "self-loop"]),
+};
+for (const selectionPalette of [palette, { ...palette, lqHigh: "#123456", lqNone: "#abcdef" }]) {
+  const themedSelection = projectTopologyTheme(selectionView, selectionPalette, "canonical", null).viewModel;
+  const baseEdges = JSON.stringify([...themedSelection.originalEdgeStyling]);
+  const canonical = projectTopologySelection(themedSelection);
+  const selected = () => projectTopologySelection(themedSelection, {
+    selectedNodeIds: ["a"], visibility: selectionVisibility,
+  });
+  const patches = selected();
+  const patch = (id) => patches.find((edge) => edge.id === id);
+  assert.equal(patches.length, 8);
+  assert.equal(patch("anchor"), undefined);
+  assert.equal(patch("ab").selectionWidth, 0);
+  assert.equal(patch("ab").color.highlight, selectionPalette.lqHigh);
+  assert.equal(patch("ab").color.hover, selectionPalette.hoverBorder);
+  assert.equal(patch("ab").color.opacity, 1);
+  assert.equal(patch("ba").color.opacity, 0.16);
+  assert.equal(patch("context").color.opacity, 0.6);
+  assert.equal(patch("opaque-context").color.opacity, 0.42);
+  const selectedOther = projectTopologySelection(themedSelection, {
+    selectedNodeIds: ["c"], visibility: selectionVisibility,
+  });
+  assert.equal(selectedOther.find((edge) => edge.id === "ba").color.opacity, 0.16);
+  assert.equal(selectedOther.find((edge) => edge.id === "ba").selectionWidth, 3);
+  assert.equal(patch("zero").color.opacity, 0);
+  assert.equal(patch("hidden").color.opacity, 0.8);
+  assert.equal(patch("context").selectionWidth, 1.5);
+  assert.deepEqual(Object.keys(patch("ab")).sort(), ["color", "id", "selectionWidth"]);
+  for (const options of [
+    { selectedNodeIds: [] },
+    { selectedNodeIds: ["missing"] },
+    { selectedNodeIds: ["isolated"] },
+    { selectedNodeIds: ["a", "b"] },
+    { selectedNodeIds: ["a"], searchQuery: "router" },
+    { selectedNodeIds: ["a"], healthTarget: true },
+    { selectedNodeIds: ["a"], visibility: { ...selectionVisibility, visibleEdgeIds: new Set() } },
+    { selectedNodeIds: ["a"], visibility: { ...selectionVisibility, visibleNodeIds: new Set(["b", "c"]) } },
+  ]) {
+    const restoredSelection = projectTopologySelection(themedSelection, {
+      visibility: selectionVisibility, ...options,
+    });
+    assert.deepEqual(restoredSelection, canonical);
+    assert.equal(restoredSelection.find((edge) => edge.id === "ba").selectionWidth, 3);
+  }
+  for (let repeat = 0; repeat < 20; repeat += 1) {
+    assert.deepEqual(selected(), patches);
+    assert.deepEqual(projectTopologySelection(themedSelection), canonical);
+  }
+  assert.equal(JSON.stringify([...themedSelection.originalEdgeStyling]), baseEdges);
+}
+assert.equal(JSON.stringify(selectionInput), selectionSnapshot);
 
 const details = buildTopologyDetails(viewModel, router.id);
 assert.equal(details.isFtdRouter, true);

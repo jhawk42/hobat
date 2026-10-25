@@ -3315,6 +3315,7 @@ function selectTopologyHealthTargets(deviceIds) {
     )
     : [];
   network.setSelection({ nodes: nodeIds, edges }, { highlightEdges: false });
+  getTopologyFilterHandlers()?.applySelectionPresentation({ healthTarget: true });
   network.fit({ nodes: nodeIds, animation: { duration: 300, easingFunction: "easeInOutQuad" } });
 }
 
