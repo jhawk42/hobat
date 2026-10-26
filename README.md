@@ -2,7 +2,7 @@
 
 Hobat is a Thread network dashboard and command-line toolkit for collecting, visualizing, monitoring, and troubleshooting network data using a cache-first approach. It collects data from OTBR `ot-ctl`, the OTBR REST API, Home Assistant Matter Server, mDNS, Eve exports, and Thread Tools exports. The Topology view displays the network in compact, ring, tree, and hub-and-spoke layouts, while the Table view supports sorting and filtering. The Health view summarizes Thread network health and highlights issues.
 
-[![OTBR CLI topology with a selected device and its details panel alongside the network graph.](https://raw.githubusercontent.com/jhawk42/smarthome/main/hobat/images/hobat-topology-selected-device-thumbnail.png)](https://github.com/jhawk42/smarthome/blob/main/hobat/screenshots.md)
+[![OTBR CLI topology with a selected device and its details panel alongside the network graph.](https://raw.githubusercontent.com/jhawk42/smarthome/main/hobat/images/hobat-topology-selected-device-1600x900-optimized-2026-10-26-thumbnail.png)](https://github.com/jhawk42/smarthome/blob/main/hobat/screenshots.md)
 
 ## Capabilities
 
