@@ -178,6 +178,161 @@ def test_appearance_bootstrap_and_controls() -> None:
     assert ".appearance-controls" in css
 
 
+def test_dashboard_control_icons_are_theme_aware_and_decorative() -> None:
+    html = _read_text(HTML)
+    parser = _IdParentParser()
+    parser.feed(html)
+    for button_id, icon_class in (
+        ("btn-topology", "topology-icon"),
+        ("btn-insights", "insights-icon"),
+        ("btn-device-details-insights", "insights-icon"),
+        ("btn-device-details-properties", "properties-icon"),
+        ("btn-operations", "operations-icon"),
+        ("btn-fetch-toggle-status-chk-cache", "disclosure-icon"),
+        ("btn-toggle-node-diag-filters", "disclosure-icon"),
+    ):
+        button = re.search(rf'<button id="{button_id}".*?</button>', html, re.DOTALL)
+        assert button is not None
+        assert icon_class in button[0]
+        assert 'stroke="currentColor"' in button[0]
+        assert 'aria-hidden="true" focusable="false"' in button[0]
+        assert all(emoji not in button[0] for emoji in ("🌐", "💡", "⧨", "🔭", "📋"))
+        if icon_class == "topology-icon":
+            assert 'width="20" height="20"' in button[0]
+            assert 'fill="none" stroke="currentColor" stroke-width="1.8"' in button[0]
+            assert button[0].count("<circle ") == 6
+            assert 'M12 3v18"' in button[0]
+            assert 'M20 7.5l-16 9' in button[0]
+            assert 'Zm-8 4.5 16 9' in button[0]
+            assert 'fill="currentColor" stroke="none"' in button[0]
+        if icon_class in ("properties-icon", "operations-icon"):
+            assert 'width="20" height="20"' in button[0]
+            assert 'fill="none" stroke="currentColor" stroke-width="1.8"' in button[0]
+            assert button[0].count("<rect ") == (1 if icon_class == "properties-icon" else 2)
+    for button_id, label in (
+        ("btn-topology", "Topology view"),
+        ("btn-device-details-properties", "Show device properties"),
+        ("btn-operations", "Operations view"),
+    ):
+        assert parser.attributes_by_id[button_id]["aria-label"] == label
+        assert parser.attributes_by_id[button_id]["title"] == label
+    for button_id, targets in (
+        ("btn-fetch-toggle-status-chk-cache", "fieldset-cache"),
+        ("btn-toggle-node-diag-filters", "fieldset-node-link-filters fieldset-diag-filters"),
+    ):
+        attributes = parser.attributes_by_id[button_id]
+        assert attributes["type"] == "button"
+        assert attributes["aria-expanded"] == "false"
+        assert attributes["aria-controls"] == targets
+        assert attributes["aria-label"].startswith("Show ")
+    assert 'button[aria-expanded="true"] > .disclosure-icon' in _read_text(CSS)
+
+
+def test_links_status_uses_decorative_signal_bars_and_preserves_count() -> None:
+    html = _read_text(HTML)
+    parser = _IdParentParser()
+    parser.feed(html)
+    assert parser.tag_by_id["device-status-links"] == "span"
+    assert parser.parent_by_id["link-count"] == "device-status-links"
+    assert "role" not in parser.attributes_by_id["device-status-links"]
+    icon = re.search(r'<svg class="links-signal-icon".*?</svg>', html, re.DOTALL)
+    assert icon is not None
+    for attribute in (
+        'width="18" height="18"', 'fill="currentColor"',
+        'aria-hidden="true" focusable="false"',
+    ):
+        assert attribute in icon[0]
+    assert re.findall(r'<rect .*?height="(\d+)" rx="1"', icon[0]) == ["5", "9", "14", "18"]
+    assert '<span>Links: <span id="link-count">0</span></span>' in html
+    for quality in ("lq3", "lq2", "lq1"):
+        assert parser.parent_by_id[f"{quality}-count"] == f"device-status-{quality}"
+
+
+def test_fieldset_disclosures_follow_individual_and_grouped_visibility() -> None:
+    script = r"""
+      import assert from "node:assert/strict";
+      import fs from "node:fs";
+      import vm from "node:vm";
+      const elements = new Map();
+      const containers = {
+        "btn-toggle-cache": "fieldset-cache",
+        "btn-toggle-node-link-filters": "fieldset-node-link-filters",
+        "btn-toggle-diag-filters": "fieldset-diag-filters",
+      };
+      function element(id) {
+        if (!elements.has(id)) {
+          const classes = new Set();
+          const attrs = new Map([["aria-expanded", "false"]]);
+          const listeners = new Map();
+          elements.set(id, {
+            hidden: id.startsWith("fieldset-"),
+            classList: {
+              contains: name => classes.has(name),
+              add: name => classes.add(name),
+              remove: name => classes.delete(name),
+              toggle: name => classes.has(name) ? classes.delete(name) : classes.add(name),
+            },
+            setAttribute: (key, value) => attrs.set(key, value),
+            getAttribute: key => attrs.get(key),
+            closest: () => element(containers[id]),
+            addEventListener: (name, callback) => listeners.set(name, callback),
+            click: () => listeners.get("click")(),
+          });
+        }
+        return elements.get(id);
+      }
+      const ui = fs.readFileSync("src/js/tdash-ui.js", "utf8");
+      const start = ui.indexOf("const COLLAPSE_CONTAINER_BY_BUTTON_ID");
+      const end = ui.indexOf("// ── Collapsible Filters Panel", start);
+      assert.ok(start >= 0 && end > start);
+      vm.runInNewContext(ui.slice(start, end), {document: {getElementById: element}});
+      const cache = element("btn-fetch-toggle-status-chk-cache");
+      const filters = element("btn-toggle-node-diag-filters");
+      const expanded = (button, expected, label) => {
+        assert.equal(button.getAttribute("aria-expanded"), String(expected));
+        assert.equal(button.getAttribute("aria-label"), `${expected ? "Hide" : "Show"} ${label}`);
+        assert.equal(button.title, button.getAttribute("aria-label"));
+      };
+      expanded(cache, false, "cache options");
+      expanded(filters, false, "node, link and diagnostic filters");
+      cache.click();
+      expanded(cache, true, "cache options");
+      assert.equal(element("fieldset-cache").hidden, false);
+      element("btn-toggle-cache").click();
+      expanded(cache, false, "cache options");
+      cache.click();
+      expanded(cache, true, "cache options");
+      assert.equal(element("fieldset-cache").classList.contains("collapsed"), false);
+      cache.click();
+      expanded(cache, false, "cache options");
+      assert.equal(element("fieldset-cache").hidden, true);
+      filters.click();
+      expanded(filters, true, "node, link and diagnostic filters");
+      for (const header of ["btn-toggle-node-link-filters", "btn-toggle-diag-filters"]) {
+        element(header).click();
+        expanded(filters, false, "node, link and diagnostic filters");
+        filters.click();
+        expanded(filters, true, "node, link and diagnostic filters");
+        assert.equal(element(containers[header]).classList.contains("collapsed"), false);
+      }
+      element("btn-toggle-diag-filters").click();
+      element("btn-toggle-diag-filters").click();
+      expanded(filters, true, "node, link and diagnostic filters");
+      filters.click();
+      expanded(filters, false, "node, link and diagnostic filters");
+      assert.equal(element("fieldset-node-link-filters").hidden, true);
+      assert.equal(element("fieldset-diag-filters").hidden, true);
+      expanded(cache, false, "cache options");
+    """
+    subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_header_theme_toggle_matches_compact_panel_close_size() -> None:
     css = _read_text(CSS)
     header = re.search(r"#theme-toggle\s*\{([^}]+)\}", css)
@@ -428,10 +583,19 @@ def test_health_insights_header_is_common_and_preserves_panel_ownership() -> Non
     assert parser.attributes_by_id["health-roster-count"]["aria-hidden"] == "true"
     assert re.search(
         r'<div class="health-insights-heading-row">\s*'
-        r'<h2>Insights: Health</h2>\s*'
+        r'<h2>Insights: Health\s*'
+        r'(<svg class="control-icon health-pulse-icon"[^>]*>\s*'
+        r'<path d="M2 13h4l3-8 5 14 3-8 2 2h3"/>\s*</svg>)\s*</h2>\s*'
         r'<div id="health-insights-summary" hidden></div>\s*</div>',
         html,
     )
+    pulse = re.search(r'<svg class="control-icon health-pulse-icon"[^>]*>', html)
+    assert pulse is not None
+    for attribute in (
+        'width="20" height="20"', 'stroke="currentColor" stroke-width="1.8"',
+        'aria-hidden="true" focusable="false"',
+    ):
+        assert attribute in pulse[0]
     assert "#health-insights-summary[hidden] { display: none; }" in css
     assert "min-height: 44px;" in css[css.index("#health-insights-tabs button {"):]
 

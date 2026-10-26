@@ -6356,6 +6356,34 @@ const COLLAPSE_CONTAINER_BY_BUTTON_ID = {
   "btn-toggle-filters": "panel-node-link-filters",
 };
 
+const FIELDSET_DISCLOSURES = [
+  {
+    buttonId: "btn-fetch-toggle-status-chk-cache",
+    fieldsetIds: ["fieldset-cache"],
+    label: "cache options",
+  },
+  {
+    buttonId: "btn-toggle-node-diag-filters",
+    fieldsetIds: ["fieldset-node-link-filters", "fieldset-diag-filters"],
+    label: "node, link and diagnostic filters",
+  },
+];
+
+function isFieldsetExpanded(id) {
+  const fieldset = document.getElementById(id);
+  return !fieldset.hidden && !fieldset.classList.contains("collapsed");
+}
+
+function syncFieldsetDisclosures() {
+  for (const { buttonId, fieldsetIds, label } of FIELDSET_DISCLOSURES) {
+    const button = document.getElementById(buttonId);
+    const expanded = fieldsetIds.every(isFieldsetExpanded);
+    button.setAttribute("aria-expanded", String(expanded));
+    button.setAttribute("aria-label", `${expanded ? "Hide" : "Show"} ${label}`);
+    button.title = button.getAttribute("aria-label");
+  }
+}
+
 ["btn-toggle-cache", "btn-toggle-status", "btn-toggle-devices", "btn-toggle-panel-dataset", "btn-toggle-filters", "btn-toggle-node-link-filters", "btn-toggle-diag-filters"].forEach((id) => {
   document.getElementById(id)?.addEventListener("click", () => {
     const btn = document.getElementById(id);
@@ -6366,6 +6394,7 @@ const COLLAPSE_CONTAINER_BY_BUTTON_ID = {
     const isExpanded = btn.getAttribute("aria-expanded") === "true";
     btn.setAttribute("aria-expanded", String(!isExpanded));
     if (container) container.classList.toggle("collapsed");
+    syncFieldsetDisclosures();
   });
 });
 
@@ -6377,7 +6406,7 @@ document.getElementById("btn-toggle-node-diag-filters")?.addEventListener("click
 
   if (!nodeLinkFieldset || !diagFieldset) return;
 
-  const shouldShow = nodeLinkFieldset.hidden || diagFieldset.hidden;
+  const shouldShow = !["fieldset-node-link-filters", "fieldset-diag-filters"].every(isFieldsetExpanded);
 
   nodeLinkFieldset.hidden = !shouldShow;
   diagFieldset.hidden = !shouldShow;
@@ -6389,6 +6418,7 @@ document.getElementById("btn-toggle-node-diag-filters")?.addEventListener("click
 
   nodeLinkToggleBtn?.setAttribute("aria-expanded", String(shouldShow));
   diagToggleBtn?.setAttribute("aria-expanded", String(shouldShow));
+  syncFieldsetDisclosures();
 });
 
 {
@@ -6406,7 +6436,7 @@ document.getElementById("btn-fetch-toggle-status-chk-cache")?.addEventListener("
   const cacheLegendBtn = document.getElementById("btn-toggle-cache");
   if (!cacheFieldset) return;
 
-  const shouldShow = cacheFieldset.hidden;
+  const shouldShow = !isFieldsetExpanded("fieldset-cache");
   cacheFieldset.hidden = !shouldShow;
 
   // When revealed via the fetch/status toggle, show cache controls immediately.
@@ -6417,7 +6447,10 @@ document.getElementById("btn-fetch-toggle-status-chk-cache")?.addEventListener("
     cacheFieldset.classList.add("collapsed");
     cacheLegendBtn?.setAttribute("aria-expanded", "false");
   }
+  syncFieldsetDisclosures();
 });
+
+syncFieldsetDisclosures();
 
 // ── Collapsible Filters Panel ────────────────────────────────────────────────
 // (Handled by unified collapse logic above)

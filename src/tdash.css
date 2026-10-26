@@ -332,10 +332,19 @@ body {
 /* ── Home link ────────────────────────────────────────────── */
 
 .home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 18px;
   font-weight: 600;
   color: var(--text);
   text-decoration: none;
+}
+
+.home-link-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 @media (hover: hover) {
@@ -563,6 +572,19 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+#device-status-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.links-signal-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 #panel-dataset-inner {
@@ -1538,6 +1560,18 @@ div.vis-network div.vis-navigation div.vis-button:focus-visible,
   min-height: 44px;
 }
 
+.control-icon {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+button[aria-expanded="true"] > .disclosure-icon {
+  transform: rotate(180deg);
+}
+
 .workspace-navigation-tab-icon {
   display: inline-block;
   min-width: 1.4em;
@@ -1628,6 +1662,9 @@ div.vis-network div.vis-navigation div.vis-button:focus-visible,
   margin-bottom: 4px;
 }
 .health-insights-heading-row h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   flex: 0 0 auto;
   margin: 0;
   font-size: 18px;

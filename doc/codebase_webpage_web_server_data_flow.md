@@ -61,6 +61,32 @@ SED fills and unknown-role border dashes participate in theme/search/health
 restoration. The collapsible topology legend uses the same CSS role tokens.
 There is no appearance API, server flag, collector or database setting.
 
+The header home link uses a decorative inline SVG with `currentColor`, so its
+solid home symbol follows the link's light/dark text and hover colors. The
+visible `hobat` label, navigation target, and keyboard focus style are retained.
+
+Workspace and device Insights share a monochrome outline-bulb SVG. The cache
+options and grouped filter disclosures use down/up chevrons with `aria-controls`,
+visibility-derived `aria-expanded`, and Show/Hide accessible names. Their state
+also follows the individual section headers; activating a disclosure with any
+controlled section hidden or collapsed opens all its sections.
+
+Device properties use an outline properties-sheet SVG; Operations uses a
+distinct two-stage workflow SVG for its Thread Network, Logs, and Jobs workspace.
+Both inherit the existing tab text and selected-state colors, without changing
+navigation, accessible names, or keyboard behavior.
+
+Topology uses a six-node hexagonal mesh SVG with three opposite-node cross-links,
+including the top-to-bottom link. Its non-directional links and round nodes
+distinguish it from Operations; it is a decorative symbol, not a live node count.
+
+The Insights: Health heading ends with a decorative Activity Pulse SVG in the
+heading text color; it is a static section marker, not a live status indicator.
+
+The Links status label uses a fixed, decorative signal-bars SVG in the current
+text color. It still reports a link count, not a measured signal-strength
+reading; the separate LQ3/LQ2/LQ1 counts are unchanged.
+
 The dashboard also uses API paths and views outside snapshot assembly. Health
 processing consumes approved cached files and writes assessments to
 `hobat_v1.db`; health GET routes read stored projections from that database.
