@@ -309,6 +309,28 @@ assert.equal(details.isFtdRouter, true);
 assert.equal(details.graph.graphLinkCount, 1);
 assert.equal(details.graph.hasChildren, true);
 
+const enrichedNode = {
+  id: "0x2000", rloc16: "0x2000", deviceLabel: "Dining Room HomePod",
+  role: "border router",
+};
+const enrichedDetails = {
+  ...enrichedNode, deviceLabel: "Collected label", vendorName: "Apple", vendorModel: "Default",
+};
+const enrichedInput = {
+  nodeData: [{ ...enrichedNode, title: "Stale tooltip" }],
+  nodeMap: new Map([[enrichedNode.id, enrichedNode]]),
+  rawByIdForDetails: new Map([[enrichedNode.id, enrichedDetails]]),
+};
+const enrichedView = createTopologyViewModel(enrichedInput);
+const enrichedHover = enrichedView.nodes[0].title;
+assert.equal(enrichedHover.split("\n")[0], enrichedNode.deviceLabel);
+assert.match(enrichedHover, /\nRole: border router\nVendor: Apple\nModel: Default$/);
+assert.equal(buildTopologyDetails(enrichedView, enrichedNode.id).vendorName, "Apple");
+assert.equal(buildTopologyDetails(enrichedView, enrichedNode.id).vendorModel, "Default");
+assert.equal(enrichedInput.nodeData[0].title, "Stale tooltip");
+assert.equal(enrichedNode.vendorName, undefined);
+assert.equal(createTopologyViewModel(enrichedInput).nodes[0].title, enrichedHover);
+
 const status = buildTopologyStatus(viewModel, visibility, searchState, 1.234, {
   diagnosticMode: "router-child-err-rate-frame-high",
   physicsProfileLabel: "Fixture",

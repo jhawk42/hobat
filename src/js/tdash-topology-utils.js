@@ -133,13 +133,22 @@ export function buildNodeHoverLabel(node) {
   const label = rawLabel.replace(/\s+/g, " ").trim();
   const boundedLabel = label.length > 80 ? `${label.slice(0, 77)}...` : label;
   const rloc16 = toText(node?.rloc16);
-  if (rloc16) return `${boundedLabel}\nRLOC16: ${rloc16}`;
-
   const extAddress = getCanonicalExtaddr(node);
-  if (extAddress && !isPlaceholderExtAddress(extAddress)) {
-    return `${boundedLabel}\nExtAddr: ${extAddress}`;
+  const identifier = rloc16
+    ? `Rloc16: ${rloc16}`
+    : (extAddress && !isPlaceholderExtAddress(extAddress)
+      ? `ExtAddr: ${extAddress}`
+      : "Identifier: unavailable");
+  const lines = [boundedLabel, identifier];
+  for (const [heading, candidates] of [
+    ["Role", [node?.role]],
+    ["Vendor", [node?.vendorName, node?.vendor, node?.vendor_name]],
+    ["Model", [node?.vendorModel, node?.model, node?.vendor_model]],
+  ]) {
+    const value = candidates.map(toText).find(Boolean);
+    if (value) lines.push(`${heading}: ${value.replace(/\s+/g, " ").trim()}`);
   }
-  return `${boundedLabel}\nIdentifier: unavailable`;
+  return lines.join("\n");
 }
 
 export function isUnknownNodeName(nodeName) {

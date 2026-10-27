@@ -26,6 +26,7 @@ import {
 } from "./tdash-filters.js";
 import { rowMatchesSearch } from "./tdash-search.js";
 import {
+  buildNodeHoverLabel,
   buildTopologyEdgeIndexes,
   computeDatasetCounts,
   expandVisibleRelationship,
@@ -188,6 +189,10 @@ export function createTopologyViewModel(
     }
   });
   nodes.forEach((node) => {
+    node.title = buildNodeHoverLabel(mergeForDisplay(
+      rawByIdForDetails.get(node.id) ?? {},
+      nodeMap.get(node.id) ?? node,
+    ));
     node.themeRole = resolveNodeThemeRole(node, [
       rawByIdForDetails.get(node.id), nodeMap.get(node.id),
       ...(childEvidenceById.get(node.id) ?? []),

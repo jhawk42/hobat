@@ -278,6 +278,13 @@ section of Device details, including all Home Assistant Matter datasets.
 Records without a matching static label retain their collected label or
 source-specific display fallback.
 
+Topology node hover popups show the device label and RLOC16 (or extended
+address when RLOC16 is unavailable), followed by **Role**, **Vendor**, and
+**Model** when present in the device record. Vendor and model accept
+`vendorName`/`vendorModel` or `vendor`/`model`; absent values are omitted.
+Popups include supplementary metadata merged into Device details, such as
+mDNS vendor and model information for OTBR topology nodes.
+
 The same operation is available through the CLI:
 
 ```bash

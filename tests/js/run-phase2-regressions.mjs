@@ -52,7 +52,7 @@ assert.deepEqual(
 );
 assert.equal(
   buildNodeHoverLabel({ rloc16: "0x1000", deviceLabel: "Preferred", name: "Ignored", hostname: "Ignored" }),
-  "Preferred\nRLOC16: 0x1000",
+  "Preferred\nRloc16: 0x1000",
 );
 assert.equal(
   buildNodeHoverLabel({ extAddress: "AA:00:11:22:33:44:55:66", hostname: "\nHost\tName " }),
@@ -63,12 +63,50 @@ assert.equal(
   "Fallback host\nIdentifier: unavailable",
 );
 assert.equal(buildNodeHoverLabel({}), "Unknown node\nIdentifier: unavailable");
+assert.equal(
+  buildNodeHoverLabel({
+    device_label: "Office Sensor", rloc16: "0x1001", role: "child",
+    vendorName: "Eve", vendorModel: "Room",
+  }),
+  "Office Sensor\nRloc16: 0x1001\nRole: child\nVendor: Eve\nModel: Room",
+);
+assert.equal(
+  buildNodeHoverLabel({ name: "Router", role: "border router", vendor: "Acme", model: "Hub" }),
+  "Router\nIdentifier: unavailable\nRole: border router\nVendor: Acme\nModel: Hub",
+);
+assert.equal(
+  buildNodeHoverLabel({
+    name: "Sensor", role: " REED ", vendorName: " \n ", vendor: "\tAcme\nLabs ",
+    vendorModel: null, model: "", vendor_model: " Sensor\tOne ",
+  }),
+  "Sensor\nIdentifier: unavailable\nRole: REED\nVendor: Acme Labs\nModel: Sensor One",
+);
+assert.equal(
+  buildNodeHoverLabel({
+    name: "Sensor", extAddress: "aaaaaaaaaaaaaaaa", role: null,
+    vendorName: "Preferred vendor", vendor: "Ignored", vendor_name: "Ignored",
+    vendorModel: "Preferred model", model: "Ignored", vendor_model: "Ignored",
+  }),
+  "Sensor\nExtAddr: aaaaaaaaaaaaaaaa\nVendor: Preferred vendor\nModel: Preferred model",
+);
+assert.equal(
+  buildNodeHoverLabel({ name: "Sensor", role: "", vendor: null, model: " \t " }),
+  "Sensor\nIdentifier: unavailable",
+);
+const hoverRecord = {
+  id: "hover-node", deviceLabel: "Router", rloc16: "0x1000",
+  role: "router", vendor_name: "Acme", vendor_model: "Hub",
+};
+const hoverVisNodes = buildVisNodeData(
+  new Map([[hoverRecord.id, hoverRecord]]), new Set(), new Map(), () => "Router", new Map(),
+);
+assert.equal(hoverVisNodes[0].title, "Router\nRloc16: 0x1000\nRole: router\nVendor: Acme\nModel: Hub");
 const longHoverLabel = buildNodeHoverLabel({
   name: "x".repeat(81),
   rloc16: "0x2000",
 });
 assert.equal(longHoverLabel.split("\n")[0].length, 80);
-assert.match(longHoverLabel, /\.\.\.\nRLOC16: 0x2000$/);
+assert.match(longHoverLabel, /\.\.\.\nRloc16: 0x2000$/);
 assert.equal(visNodes[0].title, "Unknown node\nIdentifier: unavailable");
 
 process.stdout.write("phase2 regressions passed\n");
